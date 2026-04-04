@@ -486,8 +486,8 @@ def main():
     pos_weight = torch.tensor([n_neg_train / max(n_pos_train, 1)], dtype=torch.float32)
     criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-4)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=400)
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.0005, weight_decay=1e-4)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=800)
 
     X_train_t = torch.tensor(X_train, dtype=torch.float32).to(device)
     y_train_t = torch.tensor(y_train, dtype=torch.float32).unsqueeze(1).to(device)
@@ -495,8 +495,8 @@ def main():
     best_f1 = 0
     best_state = None
     batch_size = 128
-    n_epochs = 400
-    patience = 80
+    n_epochs = 800
+    patience = 120
     no_improve = 0
 
     for epoch in range(n_epochs):

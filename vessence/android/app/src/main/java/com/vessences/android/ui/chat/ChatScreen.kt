@@ -26,8 +26,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.VolumeOff
-import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material3.AlertDialog
@@ -185,8 +184,8 @@ fun ChatScreen(
             isWakeListening = alwaysListeningRunning || state.voice.isWakeListening,
             ttsEnabled = state.ttsEnabled,
             isSpeaking = state.isSpeaking,
-            onToggleTts = { viewModel.toggleTts() },
-            onStopSpeaking = { viewModel.stopSpeaking() },
+            isSending = state.isSending,
+            onStopThinking = { viewModel.cancelCurrentResponse() },
             onVoiceSettings = { showVoicePicker = true },
         )
 
@@ -335,8 +334,8 @@ private fun ChatHeader(
     isWakeListening: Boolean = false,
     ttsEnabled: Boolean = false,
     isSpeaking: Boolean = false,
-    onToggleTts: (() -> Unit)? = null,
-    onStopSpeaking: (() -> Unit)? = null,
+    isSending: Boolean = false,
+    onStopThinking: (() -> Unit)? = null,
     onVoiceSettings: (() -> Unit)? = null,
 ) {
     Row(
@@ -374,13 +373,13 @@ private fun ChatHeader(
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        // TTS toggle — always visible
-        if (onToggleTts != null) {
-            IconButton(onClick = onToggleTts) {
+        // Stop Jane thinking — only visible while a response is streaming
+        if (isSending && onStopThinking != null) {
+            IconButton(onClick = onStopThinking) {
                 Icon(
-                    imageVector = if (ttsEnabled) Icons.Default.VolumeUp else Icons.Default.VolumeOff,
-                    contentDescription = if (ttsEnabled) "Disable read aloud" else "Enable read aloud",
-                    tint = if (ttsEnabled) Color(0xFF38BDF8) else SlateMuted,
+                    imageVector = Icons.Default.Stop,
+                    contentDescription = "Stop Jane",
+                    tint = Color(0xFFEF4444),
                 )
             }
         }

@@ -1,5 +1,10 @@
 # Vessence Changelog
 
+## v0.1.66 (2026-04-04)
+- **Stop Jane button:** Replaces the old speaker button in chat header. Visible only while Jane is thinking — tap to interrupt the current response (like pressing Esc in the terminal).
+- **Wake word v6 model:** Trained on 10K LibriSpeech negatives, F1=0.9089, FPR=0.78%, 0 false positives on held-out speech commands.
+- **Repo cleanup:** Stripped 9GB of old debug APKs, installer zips, and Flutter build artifacts from git history.
+
 ## v0.1.64 (2026-04-04)
 - **Fix gemma4 delegate ack:** Gemma4's contextual ack was being discarded on delegate path. Now properly extracted and spoken.
 - **Remove Python ack fallback:** If gemma4 has no ack, Claude handles it via [ACK] block instead of generic random phrases.
