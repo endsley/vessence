@@ -1,3 +1,4 @@
+from jane.config import get_chroma_client
 #!/usr/bin/env python3
 """
 essence_loader.py — Loads, unloads, and manages Vessence essences.
@@ -121,7 +122,7 @@ def load_essence(essence_path: str) -> EssenceState:
     if os.path.isdir(chromadb_path):
         try:
             import chromadb
-            chromadb_client = chromadb.PersistentClient(path=chromadb_path)
+            chromadb_client = get_chroma_client(path=chromadb_path)
         except ImportError:
             pass  # chromadb not installed — skip
         except Exception:

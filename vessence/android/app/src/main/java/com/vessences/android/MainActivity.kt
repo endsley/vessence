@@ -27,21 +27,54 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         ChatNotificationManager.isAppInForeground = true
+        // Start wake word listening only if not in an active voice conversation
+        // (STT popup returning triggers onResume — don't restart listening mid-conversation)
+        val voiceSettings = com.vessences.android.data.repository.VoiceSettingsRepository(this)
+        if (voiceSettings.isAlwaysListeningEnabled() && !com.vessences.android.voice.WakeWordBridge.sttActive) {
+            com.vessences.android.voice.AlwaysListeningService.start(this)
+        }
     }
 
     override fun onPause() {
         super.onPause()
         ChatNotificationManager.isAppInForeground = false
+        // Stop wake word listening when app goes to background
+        com.vessences.android.voice.AlwaysListeningService.stop(this)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Draw behind system bars (status bar + navigation bar) — removes white bar
+        androidx.core.view.WindowCompat.setDecorFitsSystemWindows(window, false)
+        window.statusBarColor = android.graphics.Color.TRANSPARENT
+        window.navigationBarColor = android.graphics.Color.TRANSPARENT
+        handleWakeWordIntent(intent)
         CrashReporter.install(applicationContext)
+        DiagnosticReporter.init(applicationContext)
         ApiClient.init(applicationContext)
         try { ChatNotificationManager(applicationContext).ensureChannels() } catch (_: Exception) {}
+        // Auto-start wake word service if always-listen was enabled
+        // BUT skip if this is a wake word intent — service just stopped itself on purpose
+        val isWakeWordLaunch = intent?.getBooleanExtra("wake_word", false) == true
+        if (!isWakeWordLaunch) {
+            try {
+                val voicePrefs = com.vessences.android.data.repository.VoiceSettingsRepository(applicationContext)
+                if (voicePrefs.isAlwaysListeningEnabled()) {
+                    com.vessences.android.voice.AlwaysListeningService.start(applicationContext)
+                }
+            } catch (_: Exception) {}
+        }
         try { ThemePreferences.init(applicationContext) } catch (_: Exception) {}
+        // Apply "keep screen on" if enabled
+        try {
+            val prefs = getSharedPreferences(com.vessences.android.util.Constants.PREFS_NAME, MODE_PRIVATE)
+            if (prefs.getBoolean(com.vessences.android.util.Constants.PREF_KEEP_SCREEN_ON, true)) {
+                window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            }
+        } catch (_: Exception) {}
         requestNotificationPermissionIfNeeded()
         handleIncomingShareIntent(intent)
+        handleNotificationIntent(intent)
 
         setContent {
             VessenceTheme {
@@ -57,7 +90,41 @@ class MainActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        handleWakeWordIntent(intent)
         handleIncomingShareIntent(intent)
+        handleNotificationIntent(intent)
+    }
+
+    private fun handleWakeWordIntent(intent: Intent?) {
+        if (intent?.getBooleanExtra("wake_word", false) == true) {
+            // Screen-off wake word disabled for now (v0.1.36+).
+            // Lock screen bypass code removed to avoid Android security warnings.
+            // When re-enabling screen-off wake word, add back setShowWhenLocked/setTurnScreenOn
+            // and USE_FULL_SCREEN_INTENT permission.
+            /*
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+                setShowWhenLocked(true)
+                setTurnScreenOn(true)
+            } else {
+                @Suppress("DEPRECATION")
+                window.addFlags(
+                    android.view.WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED
+                        or android.view.WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
+                )
+            }
+            // Dismiss keyguard so STT can run
+            val keyguardManager = getSystemService(android.app.KeyguardManager::class.java)
+            keyguardManager?.requestDismissKeyguard(this, null)
+            */
+        }
+    }
+
+    private fun handleNotificationIntent(intent: Intent?) {
+        val openChat = intent?.getStringExtra("open_chat")
+        if (openChat != null) {
+            // Signal the app to navigate to the chat screen
+            NotificationNavigationState.pendingChatTarget = openChat
+        }
     }
 
     private fun handleIncomingShareIntent(intent: Intent?) {

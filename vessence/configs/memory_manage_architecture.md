@@ -1,6 +1,6 @@
 # Memory & Context Architecture
 
-This document describes the "Tiered Memory Architecture" used by both Jane and Amber to ensure long-term knowledge retention and prevent context window overflow.
+This document describes the "Tiered Memory Architecture" used by Jane to ensure long-term knowledge retention and prevent context window overflow.
 
 ---
 
@@ -31,7 +31,7 @@ When processing a prompt, context is assembled from four tiers:
 
 1.  **Active Context Window:** The immediate, live conversation history, including summaries of older parts of the conversation.
 2.  **Short-Term Memory DB:** Shared, persistent ChromaDB at `$VESSENCE_DATA_HOME/vector_db/short_term_memory/`. Stores compact retrieval-oriented summaries of recent conversation turns AND explicitly added time-limited facts. All entries carry a `timestamp` and `expires_at` (default 14-day TTL). Replaces both the old per-session `session_memory` and the separate `forgettable_knowledge` DB. Purged nightly by the Janitor.
-3.  **Long-Term Memory DB:** Curated, permanent facts. Two stores: `user_memories` (shared Amber+Jane, `memory_type: "long_term"` or `"permanent"`) and `long_term_knowledge` (Jane's conversation archivist output at `vector_db/long_term_memory/`). No TTL — janitor may consolidate/deduplicate but never auto-expires.
+3.  **Long-Term Memory DB:** Curated, permanent facts. Two stores: `user_memories` (Jane's shared long-term store, `memory_type: "long_term"` or `"permanent"`) and `long_term_knowledge` (Jane's conversation archivist output at `vector_db/long_term_memory/`). No TTL — janitor may consolidate/deduplicate but never auto-expires.
 4.  **File Index Memory DB:** Dedicated ChromaDB collection at `$VESSENCE_DATA_HOME/vector_db/file_index_memory/` named `file_index_memories`. Stores file path, MIME/type, and concise descriptions of vault files. For formats the agent can read, the description must be based on the file contents rather than filename/path only. Queried only for file/vault lookup prompts.
 4.  **Permanent Memory (Startup):** Foundational knowledge loaded at the start of a session from architecture files, identity essays, and registries.
 
@@ -43,7 +43,7 @@ When processing a prompt, context is assembled from four tiers:
 
 | Collection | Path | What goes here | TTL |
 |-----------|------|----------------|-----|
-| `user_memories` | `$VESSENCE_DATA_HOME/vector_db/` | Permanent + long-term facts shared by Jane and Amber (`memory_type: "permanent"` or `"long_term"`) | None |
+| `user_memories` | `$VESSENCE_DATA_HOME/vector_db/` | Permanent + long-term facts for Jane (`memory_type: "permanent"` or `"long_term"`) | None |
 | `long_term_knowledge` | `$VESSENCE_DATA_HOME/vector_db/long_term_memory/` | Jane's conversation archivist output (curated, high-signal facts promoted from short-term) | None |
 | `short_term_memory` | `$VESSENCE_DATA_HOME/vector_db/short_term_memory/` | Compact summaries of conversation turns + explicitly added time-limited facts. Shared/persistent across sessions. | 14 days |
 | `file_index_memories` | `$VESSENCE_DATA_HOME/vector_db/file_index_memory/` | Vault file index records: path, file name, MIME/type, content-derived description when readable, tags | None |
@@ -89,7 +89,7 @@ Short-term memory is the **"working notepad"** tier: highest-priority during ret
 **Schema (ChromaDB metadata per entry):**
 ```
 memory_type : "short_term"
-author      : "jane" | "amber" | "system" | "conversation_archivist" | …
+author      : "jane" | "system" | "conversation_archivist" | "legacy_amber" | …
 topic       : str  (default "General")
 subtopic    : str  (default "")
 timestamp   : ISO UTC datetime string  ← always present
@@ -115,7 +115,7 @@ summary_style : "concise_turn_memory_v1" | "code_change_turn_memory_v1"
 **Adding short-term memories explicitly:**
 - CLI: `agent_skills/add_forgettable_memory.py "fact text" [--days N] [--topic T] [--subtopic S] [--author A]`
 - Python: `from agent_skills.add_forgettable_memory import add_forgettable_memory; add_forgettable_memory(fact, ...)`
-- Amber: call `add_forgettable_memory.py` directly (Amber bypasses ADK's built-in memory service; all memory writes go via subprocess to `add_fact.py` or `add_forgettable_memory.py`).
+- Legacy compatibility: older runtime paths may still call `add_forgettable_memory.py` directly. New architecture should treat those writes as Jane memory writes unless explicitly marked as historical.
 
 **Expiry & purge:** The nightly Memory Janitor calls `purge_expired_short_term()` which deletes entries where `expires_at < utcnow()` from `short_term_memory`.
 
@@ -268,13 +268,13 @@ To prevent the Long-Term Memory DB from becoming bloated with redundant or outda
 ### 5.1 Provider Strategy (One Subscription)
 Vessence requires only one AI subscription. Setting `JANE_BRAIN` in `.env` configures the entire system:
 
-| Provider | Smart Model (Jane/Amber) | Cheap Model (Background) | CLI Binary |
+| Provider | Smart Model (Jane) | Cheap Model (Background) | CLI Binary |
 |---|---|---|---|
 | `claude` | claude-sonnet-4-6 | claude-haiku-4-5-20251001 | `claude` |
 | `openai` | gpt-4o | gpt-4o-mini | `codex` |
 | `gemini` | gemini-2.5-pro | gemini-2.5-flash | `gemini` |
 
-**Smart model:** user-facing tasks (Jane, Amber, essence interactions).
+**Smart model:** user-facing tasks (Jane and essence interactions).
 **Cheap model:** background tasks (archivist, janitor, summarization) via `agent_skills/claude_cli_llm.py`.
 
 All calls go through the provider's CLI binary using the user's existing subscription auth. No separate API keys required. Override with `SMART_MODEL` and `CHEAP_MODEL` env vars if needed.

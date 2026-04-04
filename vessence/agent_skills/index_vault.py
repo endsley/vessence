@@ -47,6 +47,7 @@ import uuid
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from jane.config import (
+    get_chroma_client,
     CHROMA_COLLECTION_FILE_INDEX,
     ENV_FILE_PATH,
     LOCAL_LLM_MODEL,
@@ -76,7 +77,7 @@ MAX_EXTRACT_CHARS = 12000
 
 def get_collection():
     with _silence():
-        client = chromadb.PersistentClient(path=VECTOR_DB_FILE_INDEX)
+        client = get_chroma_client(path=VECTOR_DB_FILE_INDEX)
         return client.get_or_create_collection(
             name=CHROMA_COLLECTION_FILE_INDEX,
             metadata={"hnsw:space": "cosine"}

@@ -62,14 +62,21 @@ CREDENTIALS_DIR = f"{VESSENCE_DATA_HOME}/credentials"
 ENV_FILE_PATH   = f"{VESSENCE_DATA_HOME}/.env"
 
 # ── Vector DB paths ───────────────────────────────────────────────────────────
-# NOTE (Docker dual-access risk): In Docker, CHROMA_HOST=chromadb and
-# CHROMA_PORT=8000 are set so Jane SHOULD use chromadb.HttpClient() to talk to
-# the chromadb container over the network, rather than PersistentClient on the
-# shared volume. Currently all agent_skills/ code uses PersistentClient, which
-# causes dual-access to the same SQLite files. TODO: when CHROMA_HOST is set,
-# agent_skills should switch to HttpClient(host=CHROMA_HOST, port=CHROMA_PORT).
 CHROMA_HOST = os.environ.get("CHROMA_HOST", "")
 CHROMA_PORT = int(os.environ.get("CHROMA_PORT", "8000"))
+
+def get_chroma_client(path: str):
+    """
+    Returns the appropriate ChromaDB client.
+    If CHROMA_HOST is set (e.g. running in Docker), it uses the HttpClient to avoid
+    dual-access SQLite corruption. Otherwise, it uses PersistentClient on the local path.
+    Note: When using HttpClient, 'path' is ignored by the server, so collections must be uniquely named.
+    """
+    import chromadb
+    if CHROMA_HOST:
+        return chromadb.HttpClient(host=CHROMA_HOST, port=CHROMA_PORT)
+    return chromadb.PersistentClient(path=path)
+
 VECTOR_DB_DIR        = f"{VESSENCE_DATA_HOME}/vector_db"
 VECTOR_DB_USER_MEMORIES = VECTOR_DB_DIR                          # main shared ChromaDB
 VECTOR_DB_SHORT_TERM = f"{VECTOR_DB_DIR}/short_term_memory"
@@ -155,6 +162,7 @@ IDLE_TIMEOUT_SECS      = 60       # inactivity before triggering archival in Con
 
 # ── Memory TTLs ───────────────────────────────────────────────────────────────
 SHORT_TERM_TTL_DAYS    = 14   # short-term memories expire after this many days
+SHORT_TERM_MAX_THEMES  = 20   # rolling theme slots per session in short-term memory
 FORGETTABLE_MAX_AGE_DAYS = 14 # hard age cap enforced by nightly janitor
 
 # ── HTTP timeouts (seconds) ───────────────────────────────────────────────────
@@ -170,13 +178,14 @@ JANE_WRAPPER_LOG_FLUSH_INTERVAL = float(os.getenv("JANE_WRAPPER_LOG_FLUSH_INTERV
 JANE_WRAPPER_LOG_BATCH_BYTES = int(os.getenv("JANE_WRAPPER_LOG_BATCH_BYTES", "8192"))
 
 # ── ChromaDB search limits ────────────────────────────────────────────────────
-CHROMA_SEARCH_LIMIT      = 10   # semantic search top-N from user_memories (was 30 — too noisy)
+CHROMA_SEARCH_LIMIT      = 15   # semantic search top-N from user_memories (was 30 — too noisy)
 CHROMA_SHORT_TERM_LIMIT  = 4    # top-N from short_term_memory (was 8)
 CHROMA_LONG_TERM_LIMIT   = 5    # top-N from Jane's long-term archive (was 15)
-CHROMA_USER_MAX_DISTANCE = float(os.getenv("CHROMA_USER_MAX_DISTANCE", "0.55"))
-CHROMA_SHORT_TERM_MAX_DISTANCE = float(os.getenv("CHROMA_SHORT_TERM_MAX_DISTANCE", "0.60"))
+CHROMA_USER_MAX_DISTANCE = float(os.getenv("CHROMA_USER_MAX_DISTANCE", "0.50"))
+CHROMA_PERMANENT_MAX_DISTANCE = float(os.getenv("CHROMA_PERMANENT_MAX_DISTANCE", "1.0"))  # always inject permanent rules
+CHROMA_SHORT_TERM_MAX_DISTANCE = float(os.getenv("CHROMA_SHORT_TERM_MAX_DISTANCE", "0.58"))
 CHROMA_FILE_INDEX_MAX_DISTANCE = float(os.getenv("CHROMA_FILE_INDEX_MAX_DISTANCE", "0.76"))
-CHROMA_LONG_TERM_MAX_DISTANCE = float(os.getenv("CHROMA_LONG_TERM_MAX_DISTANCE", "0.65"))
+CHROMA_LONG_TERM_MAX_DISTANCE = float(os.getenv("CHROMA_LONG_TERM_MAX_DISTANCE", "0.50"))
 MEMORY_SUMMARY_CACHE_TTL_SECS = int(os.getenv("MEMORY_SUMMARY_CACHE_TTL_SECS", "300"))
 MEMORY_SUMMARY_CACHE_SIMILARITY = float(os.getenv("MEMORY_SUMMARY_CACHE_SIMILARITY", "0.92"))
 MEMORY_SUMMARY_CACHE_MAX_ENTRIES = int(os.getenv("MEMORY_SUMMARY_CACHE_MAX_ENTRIES", "3"))
@@ -231,10 +240,12 @@ WEB_CHAT_MODEL = os.environ.get("JANE_BRAIN_WEB_MODEL", SMART_MODEL)
 
 # Legacy aliases (backward compat)
 OLLAMA_BASE_URL       = os.getenv("LOCAL_LLM_BASE_URL", "http://localhost:11434")
-LOCAL_LLM_MODEL       = os.getenv("LOCAL_LLM_MODEL", CHEAP_MODEL)
+# Local LLM tasks (summarizer, librarian, archivist triage) use Ollama.
+# These must default to an actual Ollama model, NOT the provider's cheap model.
+_DEFAULT_LOCAL_MODEL = "gemma4:e4b"
+LOCAL_LLM_MODEL       = os.getenv("LOCAL_LLM_MODEL", _DEFAULT_LOCAL_MODEL)
 LOCAL_LLM_MODEL_LITELLM = f"ollama/{LOCAL_LLM_MODEL}" if "/" not in LOCAL_LLM_MODEL else LOCAL_LLM_MODEL
-LIBRARIAN_MODEL       = os.getenv("LIBRARIAN_MODEL", CHEAP_MODEL)
-ARCHIVIST_MODEL       = os.getenv("ARCHIVIST_MODEL", CHEAP_MODEL)
+ARCHIVIST_MODEL       = os.getenv("ARCHIVIST_MODEL", _DEFAULT_LOCAL_MODEL)
 ARCHIVIST_MODEL_LITELLM = f"ollama/{ARCHIVIST_MODEL}" if "/" not in ARCHIVIST_MODEL else ARCHIVIST_MODEL
 ARCHIVIST_SMART_MODEL = os.getenv("ARCHIVIST_SMART_MODEL", CHEAP_MODEL)
 ARCHIVIST_SMART_MODEL_LITELLM = f"ollama/{ARCHIVIST_SMART_MODEL}" if "/" not in ARCHIVIST_SMART_MODEL else ARCHIVIST_SMART_MODEL

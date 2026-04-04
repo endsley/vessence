@@ -1,5 +1,6 @@
 from fastapi.testclient import TestClient
 import asyncio
+import json
 import types
 
 from jane_web.main import app, require_auth
@@ -7,8 +8,15 @@ from jane_web import jane_proxy
 from jane.context_builder import JaneRequestContext
 
 
-async def _fake_stream_message(user_id: str, session_id: str, message: str, file_context: str = None):
-    del user_id, session_id, message, file_context
+async def _fake_stream_message(
+    user_id: str,
+    session_id: str,
+    message: str,
+    file_context: str = None,
+    platform: str = None,
+    tts_enabled: bool = False,
+):
+    del user_id, session_id, message, file_context, platform, tts_enabled
     yield '{"type": "start", "data": null}\n'
     yield '{"type": "delta", "data": "Hello"}\n'
     yield '{"type": "delta", "data": " world"}\n'
@@ -171,6 +179,103 @@ def test_stream_message_emits_error_when_brain_task_is_cancelled(monkeypatch):
     assert "interrupted before completion" in body.lower()
 
 
+def test_stream_message_flushes_status_before_context_build_finishes(monkeypatch):
+    jane_proxy._sessions.clear()
+
+    async def slow_build_context(*args, **kwargs):
+        await asyncio.sleep(0.05)
+        return JaneRequestContext(
+            system_prompt="system",
+            transcript="User: hi\nJane:",
+            retrieved_memory_summary="",
+        )
+
+    async def fake_execute_stream(*args, **kwargs):
+        emit = args[-1]
+        emit("delta", "Hello")
+        return "Hello"
+
+    async def collect_first_events():
+        gen = jane_proxy.stream_message("user", "session-1", "first turn")
+        chunks = []
+        for _ in range(2):
+            chunks.append(await asyncio.wait_for(gen.__anext__(), timeout=0.02))
+        await gen.aclose()
+        return chunks
+
+    monkeypatch.setattr(jane_proxy, "build_jane_context_async", slow_build_context)
+    monkeypatch.setattr(jane_proxy, "_execute_brain_stream", fake_execute_stream)
+    monkeypatch.setattr(jane_proxy, "_log_stage", lambda *args, **kwargs: None)
+    monkeypatch.setattr(jane_proxy, "_log_start", lambda *args, **kwargs: None)
+    monkeypatch.setattr(jane_proxy, "_dump_prompt", lambda *args, **kwargs: None)
+    monkeypatch.setattr(jane_proxy, "_await_prewarm_if_running", lambda *args, **kwargs: asyncio.sleep(0))
+    monkeypatch.setattr(
+        jane_proxy,
+        "get_brain_adapter",
+        lambda *args, **kwargs: types.SimpleNamespace(label="stub"),
+    )
+
+    import jane.standing_brain as standing_brain
+    monkeypatch.setattr(
+        standing_brain,
+        "get_standing_brain_manager",
+        lambda: types.SimpleNamespace(_started=False, brain=None),
+    )
+
+    chunks = asyncio.run(collect_first_events())
+    events = [json.loads(chunk) for chunk in chunks]
+
+    assert events[0]["type"] == "start"
+    assert events[1]["type"] == "status"
+    assert "reviewing the current thread" in (events[1]["data"] or "").lower()
+    assert events[1]["type"] == "status"
+
+
+def test_stream_message_emits_error_when_brain_returns_empty_response(monkeypatch):
+    jane_proxy._sessions.clear()
+
+    async def fake_build_context(*args, **kwargs):
+        return JaneRequestContext(
+            system_prompt="system",
+            transcript="User: hi\nJane:",
+            retrieved_memory_summary="",
+        )
+
+    async def empty_execute(*args, **kwargs):
+        return ""
+
+    async def collect_events():
+        chunks = []
+        async for chunk in jane_proxy.stream_message("user", "session-1", "first turn"):
+            chunks.append(chunk)
+        return chunks
+
+    monkeypatch.setattr(jane_proxy, "build_jane_context_async", fake_build_context)
+    monkeypatch.setattr(jane_proxy, "_execute_brain_stream", empty_execute)
+    monkeypatch.setattr(jane_proxy, "_log_stage", lambda *args, **kwargs: None)
+    monkeypatch.setattr(jane_proxy, "_log_start", lambda *args, **kwargs: None)
+    monkeypatch.setattr(jane_proxy, "_dump_prompt", lambda *args, **kwargs: None)
+    monkeypatch.setattr(jane_proxy, "_await_prewarm_if_running", lambda *args, **kwargs: asyncio.sleep(0))
+    monkeypatch.setattr(
+        jane_proxy,
+        "get_brain_adapter",
+        lambda *args, **kwargs: types.SimpleNamespace(label="stub"),
+    )
+
+    import jane.standing_brain as standing_brain
+    monkeypatch.setattr(
+        standing_brain,
+        "get_standing_brain_manager",
+        lambda: types.SimpleNamespace(_started=False, brain=None),
+    )
+
+    chunks = asyncio.run(collect_events())
+    body = "".join(chunks)
+
+    assert '"type": "error"' in body
+    assert "empty response" in body.lower()
+
+
 def test_get_execution_profile_uses_provider_defaults(monkeypatch):
     monkeypatch.delenv("JANE_TIMEOUT_SECONDS", raising=False)
     monkeypatch.delenv("JANE_TIMEOUT_SECONDS_CODEX", raising=False)
@@ -178,7 +283,7 @@ def test_get_execution_profile_uses_provider_defaults(monkeypatch):
 
     assert jane_proxy._get_execution_profile("codex").timeout_seconds == 600
     assert jane_proxy._get_execution_profile("openai").timeout_seconds == 600
-    assert jane_proxy._get_execution_profile("gemini").timeout_seconds == 180
+    assert jane_proxy._get_execution_profile("gemini").timeout_seconds == 300
 
 
 def test_get_execution_profile_prefers_provider_override(monkeypatch):
@@ -186,7 +291,7 @@ def test_get_execution_profile_prefers_provider_override(monkeypatch):
     monkeypatch.setenv("JANE_TIMEOUT_SECONDS_CODEX", "900")
 
     assert jane_proxy._get_execution_profile("codex").timeout_seconds == 900
-    assert jane_proxy._get_execution_profile("gemini").timeout_seconds == 240
+    assert jane_proxy._get_execution_profile("gemini").timeout_seconds == 300
 
 
 def test_get_execution_profile_applies_codex_floor_over_shared_override(monkeypatch):
@@ -195,4 +300,4 @@ def test_get_execution_profile_applies_codex_floor_over_shared_override(monkeypa
 
     assert jane_proxy._get_execution_profile("codex").timeout_seconds == 600
     assert jane_proxy._get_execution_profile("openai").timeout_seconds == 600
-    assert jane_proxy._get_execution_profile("gemini").timeout_seconds == 180
+    assert jane_proxy._get_execution_profile("gemini").timeout_seconds == 300

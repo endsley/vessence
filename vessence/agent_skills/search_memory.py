@@ -10,21 +10,12 @@ if os.path.exists(_REQUIRED_PYTHON) and sys.executable != _REQUIRED_PYTHON:
     os.execv(_REQUIRED_PYTHON, [_REQUIRED_PYTHON] + sys.argv)
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from agent_skills.memory_retrieval import get_memory_summary as shared_get_memory_summary
-
-
-def get_memory_summary(query: str, conversation_summary: str = "", session_id: str = "", essence_chromadb_path: str | None = None) -> str:
-    return shared_get_memory_summary(
-        query,
-        conversation_summary=conversation_summary,
-        assistant_name="Jane",
-        session_id=session_id,
-        essence_chromadb_path=essence_chromadb_path,
-    )
+from agent_skills.memory_retrieval import build_memory_sections
 
 
 def search_memory(query):
-    print(get_memory_summary(query))
+    sections = build_memory_sections(query, assistant_name="Jane")
+    print("\n\n".join(sections) if sections else "No relevant context found.")
 
 if __name__ == "__main__":
     query = " ".join(sys.argv[1:]) if len(sys.argv) > 1 else "recent updates and current status"

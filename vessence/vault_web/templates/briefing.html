@@ -172,6 +172,16 @@
             x-text="cat">
           </button>
         </template>
+        <!-- Saved articles -->
+        <button @click="toggleSavedView()"
+          :class="viewingSaved ? 'bg-amber-600 text-white' : 'bg-slate-800 text-amber-400 hover:text-amber-300 hover:bg-slate-700 border border-slate-700'"
+          class="px-3 py-1 rounded-full text-xs font-medium transition flex items-center gap-1">
+          <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"/>
+          </svg>
+          Saved
+        </button>
+
         <!-- Show/Hide dismissed toggle -->
         <button @click="showDismissed = !showDismissed"
           :class="showDismissed ? 'bg-slate-700 text-slate-300' : 'bg-slate-800 text-slate-500 border border-slate-700'"
@@ -190,7 +200,7 @@
   <main class="max-w-7xl mx-auto px-4 py-6 pb-24">
 
     <!-- Loading skeleton -->
-    <div x-show="loading" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+    <div x-show="loading && !viewingSaved" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
       <template x-for="i in 6">
         <div class="bg-slate-900 rounded-2xl border border-slate-800 overflow-hidden animate-pulse">
           <div class="aspect-video bg-slate-800"></div>
@@ -207,7 +217,7 @@
     </div>
 
     <!-- Empty state -->
-    <div x-show="!loading && displayArticles.length === 0" class="flex flex-col items-center justify-center py-20 text-center">
+    <div x-show="!loading && !viewingSaved && displayArticles.length === 0" class="flex flex-col items-center justify-center py-20 text-center">
       <svg class="w-16 h-16 text-slate-700 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10a2 2 0 012 2v1m2 13a2 2 0 01-2-2V7m2 13a2 2 0 002-2V9a2 2 0 00-2-2h-2m-4-3H9M7 16h6M7 8h6v4H7V8z"/>
       </svg>
@@ -218,8 +228,103 @@
       </button>
     </div>
 
+    <!-- ── Saved Articles View ──────────────────────────────────────────── -->
+    <div x-show="viewingSaved" x-cloak>
+      <!-- Saved category filter -->
+      <div x-show="savedArticleCategories.length > 0" class="flex flex-wrap gap-2 mb-5">
+        <button @click="savedFilterCategory = null; loadSavedArticles()"
+          class="px-3 py-1 rounded-full text-xs font-medium transition"
+          :class="!savedFilterCategory ? 'bg-amber-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700 border border-slate-700'">
+          All Saved
+        </button>
+        <template x-for="cat in savedArticleCategories" :key="cat">
+          <button @click="savedFilterCategory = cat; loadSavedArticles(cat)"
+            class="px-3 py-1 rounded-full text-xs font-medium transition"
+            :class="savedFilterCategory === cat ? 'bg-amber-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700 border border-slate-700'"
+            x-text="cat">
+          </button>
+        </template>
+      </div>
+
+      <!-- Empty saved state -->
+      <div x-show="savedArticlesList.length === 0" class="flex flex-col items-center justify-center py-20 text-center">
+        <svg class="w-16 h-16 text-slate-700 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"/>
+        </svg>
+        <h3 class="text-lg font-semibold text-slate-400 mb-1">No saved articles</h3>
+        <p class="text-sm text-slate-500">Save articles from the audio player to keep them permanently.</p>
+      </div>
+
+      <!-- Saved articles grid -->
+      <div x-show="savedArticlesList.length > 0" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+        <template x-for="saved in savedArticlesList" :key="saved.article_id">
+          <div class="bg-slate-900 rounded-2xl border border-amber-800/30 overflow-hidden card-hover flex flex-col">
+            <div class="p-4 flex flex-col flex-1">
+              <!-- Category + saved date -->
+              <div class="flex items-center gap-2 mb-2">
+                <span class="px-2 py-0.5 rounded-full text-[10px] font-semibold text-amber-300 bg-amber-600/20 border border-amber-600/30"
+                  x-text="saved.category"></span>
+                <span class="text-[10px] text-slate-600" x-text="timeAgo(saved.saved_at)"></span>
+              </div>
+
+              <!-- Title -->
+              <h3 class="text-white font-semibold leading-snug line-clamp-2 mb-1.5"
+                x-text="saved.article?.title || saved.article_id"></h3>
+
+              <!-- Source + topic -->
+              <p class="text-xs text-slate-500 mb-2">
+                <span x-text="saved.article?.source || ''"></span>
+                <template x-if="saved.article?.topic">
+                  <span>
+                    <span class="mx-1">&middot;</span>
+                    <span class="text-violet-400" x-text="saved.article.topic"></span>
+                  </span>
+                </template>
+              </p>
+
+              <!-- Summary -->
+              <p class="text-sm text-slate-400 leading-relaxed flex-1 mb-3 line-clamp-3"
+                x-text="saved.article?.brief_summary || saved.article?.summary || ''"></p>
+
+              <!-- Actions -->
+              <div class="flex items-center gap-2 pt-2 border-t border-slate-800">
+                <!-- Read full article -->
+                <a :href="saved.article?.url" target="_blank" rel="noopener"
+                  x-show="saved.article?.url"
+                  class="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-violet-400 hover:text-violet-300 hover:bg-violet-600/10 transition">
+                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
+                  </svg>
+                  Read
+                </a>
+
+                <!-- Play audio -->
+                <button @click="playSavedArticleAudio(saved, 'brief')"
+                  class="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-400 hover:text-violet-400 hover:bg-violet-600/10 transition">
+                  Brief ▶
+                </button>
+                <button @click="playSavedArticleAudio(saved, 'full')"
+                  class="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-400 hover:text-violet-400 hover:bg-violet-600/10 transition">
+                  Full ▶
+                </button>
+
+                <!-- Remove from saved -->
+                <button @click="unsaveArticle(saved.article_id)"
+                  class="ml-auto flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-500 hover:text-red-400 hover:bg-red-600/10 transition"
+                  title="Remove from saved">
+                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                  </svg>
+                </button>
+              </div>
+            </div>
+          </div>
+        </template>
+      </div>
+    </div>
+
     <!-- Article card grid -->
-    <div x-show="!loading && displayArticles.length > 0" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+    <div x-show="!loading && !viewingSaved && displayArticles.length > 0" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
       <template x-for="article in displayArticles" :key="article.id">
         <div class="bg-slate-900 rounded-2xl border border-slate-800 overflow-hidden card-hover flex flex-col"
           :class="article.dismissed ? 'card-dismissed' : ''"
@@ -297,8 +402,39 @@
                 <span x-text="article.dismissed ? 'Heard' : 'Heard'"></span>
               </button>
 
+              <!-- Save -->
+              <div class="relative ml-auto" x-data="{ showCardSave: false }" @click.outside="showCardSave = false">
+                <button @click="showCardSave = !showCardSave"
+                  class="p-1.5 rounded-lg text-xs transition"
+                  :class="article._saved
+                    ? 'text-amber-400 hover:bg-amber-600/10'
+                    : 'text-slate-500 hover:text-amber-400 hover:bg-amber-600/10'"
+                  :title="article._saved ? 'Saved' : 'Save article'">
+                  <svg class="w-3.5 h-3.5" :fill="article._saved ? 'currentColor' : 'none'" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"/>
+                  </svg>
+                </button>
+                <div x-show="showCardSave" x-cloak x-transition
+                  class="absolute right-0 bottom-full mb-1 w-48 rounded-xl border border-slate-700 bg-slate-900 shadow-2xl overflow-hidden z-50">
+                  <p class="px-3 py-1.5 text-[10px] text-slate-500 uppercase tracking-wider font-semibold border-b border-slate-800">Save to</p>
+                  <template x-for="cat in savedCategories" :key="cat">
+                    <button @click="audioPlayerArticle = article; saveArticleToCategory(cat); showCardSave = false"
+                      class="w-full text-left px-3 py-1.5 text-xs text-slate-300 hover:text-white hover:bg-slate-800 transition">
+                      <span x-text="cat"></span>
+                    </button>
+                  </template>
+                  <div class="border-t border-slate-800 px-2 py-1.5 flex gap-1">
+                    <input type="text" x-model="newSaveCategory" placeholder="New..."
+                      @keydown.enter="if(newSaveCategory.trim()) { audioPlayerArticle = article; saveArticleToCategory(newSaveCategory.trim()); showCardSave = false; }"
+                      class="flex-1 bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-violet-500">
+                    <button @click="if(newSaveCategory.trim()) { audioPlayerArticle = article; saveArticleToCategory(newSaveCategory.trim()); showCardSave = false; }"
+                      class="px-2 py-1 rounded bg-amber-600 text-white text-xs font-medium hover:bg-amber-500">+</button>
+                  </div>
+                </div>
+              </div>
+
               <!-- TTS: Brief -->
-              <button @click="playArticleAudio(article.id, 'brief', article.summary)" class="ml-auto p-1.5 rounded-lg text-slate-500 hover:text-violet-400 hover:bg-violet-600/10 transition text-xs" title="Listen (brief)">
+              <button @click="playArticleAudio(article.id, 'brief', article.summary)" class="p-1.5 rounded-lg text-slate-500 hover:text-violet-400 hover:bg-violet-600/10 transition text-xs" title="Listen (brief)">
                 Brief ▶
               </button>
               <!-- TTS: Full -->
@@ -312,8 +448,135 @@
     </div>
   </main>
 
+  <!-- ── Audio Player View ─────────────────────────────────────────────── -->
+  <div x-show="audioPlayerActive" x-cloak x-transition:enter="transition ease-out duration-200" x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100"
+    x-transition:leave="transition ease-in duration-150" x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0"
+    class="fixed inset-0 z-50 bg-slate-950 flex flex-col">
+
+    <!-- Player header -->
+    <div class="flex items-center gap-3 px-4 py-4 border-b border-slate-800">
+      <button @click="closeAudioPlayer()" class="flex items-center gap-1.5 px-3 py-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+        <span class="text-sm font-medium">Back</span>
+      </button>
+
+      <!-- Brief / Full toggle -->
+      <div class="flex bg-slate-800 rounded-lg p-0.5 border border-slate-700">
+        <button @click="switchAudioType('brief')"
+          class="px-3 py-1.5 rounded-md text-xs font-semibold transition"
+          :class="audioPlayerType === 'brief' ? 'bg-violet-600 text-white' : 'text-slate-400 hover:text-white'">
+          Brief
+        </button>
+        <button @click="switchAudioType('full')"
+          class="px-3 py-1.5 rounded-md text-xs font-semibold transition"
+          :class="audioPlayerType === 'full' ? 'bg-violet-600 text-white' : 'text-slate-400 hover:text-white'">
+          Full
+        </button>
+      </div>
+
+      <div class="ml-auto flex items-center gap-2">
+        <!-- Read full article -->
+        <a :href="audioPlayerArticle?.url" target="_blank" rel="noopener"
+          x-show="audioPlayerArticle?.url"
+          class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-violet-400 hover:text-violet-300 hover:bg-violet-600/10 border border-violet-600/30 transition">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
+          </svg>
+          Read Article
+        </a>
+
+        <!-- Save article -->
+        <div class="relative" x-data="{ showSaveMenu: false }" @click.outside="showSaveMenu = false">
+          <button @click="showSaveMenu = !showSaveMenu"
+            class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition border"
+            :class="audioPlayerArticle?._saved
+              ? 'text-amber-400 border-amber-600/30 bg-amber-600/10'
+              : 'text-slate-400 hover:text-amber-400 border-slate-700 hover:border-amber-600/30 hover:bg-amber-600/10'">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"/>
+            </svg>
+            <span x-text="audioPlayerArticle?._saved ? 'Saved' : 'Save'"></span>
+          </button>
+          <!-- Category dropdown -->
+          <div x-show="showSaveMenu" x-cloak x-transition
+            class="absolute right-0 top-full mt-1 w-56 rounded-xl border border-slate-700 bg-slate-900 shadow-2xl overflow-hidden z-50">
+            <p class="px-3 py-2 text-[10px] text-slate-500 uppercase tracking-wider font-semibold border-b border-slate-800">Save to category</p>
+            <template x-for="cat in savedCategories" :key="cat">
+              <button @click="saveArticleToCategory(cat); showSaveMenu = false"
+                class="w-full text-left px-3 py-2 text-xs text-slate-300 hover:text-white hover:bg-slate-800 transition flex items-center gap-2">
+                <svg class="w-3 h-3 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
+                </svg>
+                <span x-text="cat"></span>
+              </button>
+            </template>
+            <!-- Custom category input -->
+            <div class="border-t border-slate-800 px-3 py-2 flex gap-2">
+              <input type="text" x-model="newSaveCategory" placeholder="New category..."
+                @keydown.enter="if(newSaveCategory.trim()) { saveArticleToCategory(newSaveCategory.trim()); showSaveMenu = false; }"
+                class="flex-1 px-2 py-1.5 bg-slate-800 border border-slate-700 rounded-lg text-xs text-white placeholder-slate-500 focus:outline-none focus:border-violet-500"/>
+              <button @click="if(newSaveCategory.trim()) { saveArticleToCategory(newSaveCategory.trim()); showSaveMenu = false; }"
+                class="px-2 py-1.5 bg-violet-600 hover:bg-violet-500 text-white text-xs rounded-lg transition">
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Player body -->
+    <div class="flex-1 flex flex-col items-center justify-center px-6 text-center">
+      <!-- Topic badge -->
+      <span class="px-3 py-1 rounded-full text-xs font-semibold text-white uppercase tracking-wider mb-4"
+        :style="'background:' + topicColor(audioPlayerArticle?.topic)"
+        x-text="audioPlayerArticle?.topic"></span>
+
+      <!-- Article title -->
+      <h2 class="text-xl sm:text-2xl font-bold text-white leading-snug mb-2 max-w-2xl"
+        x-text="audioPlayerArticle?.title"></h2>
+
+      <!-- Source -->
+      <p class="text-sm text-slate-500 mb-2" x-text="audioPlayerArticle?.source || ''"></p>
+
+      <!-- Saved category indicator -->
+      <p x-show="audioPlayerArticle?._saved" class="text-xs text-amber-400 mb-8">
+        Saved to: <span x-text="audioPlayerArticle?._savedCategory" class="font-semibold"></span>
+      </p>
+      <div x-show="!audioPlayerArticle?._saved" class="mb-8"></div>
+
+      <!-- Playback visualization -->
+      <div class="mb-8">
+        <div class="w-24 h-24 rounded-full flex items-center justify-center transition-all duration-300"
+          :class="audioPlayerPlaying ? 'bg-violet-600 shadow-lg shadow-violet-600/30 scale-110' : 'bg-slate-800'">
+          <svg x-show="audioPlayerPlaying" class="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"/>
+          </svg>
+          <svg x-show="!audioPlayerPlaying" class="w-10 h-10 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2"/>
+          </svg>
+        </div>
+      </div>
+
+      <!-- Play/Pause button -->
+      <button @click="toggleAudioPlayback()"
+        class="flex items-center gap-3 px-8 py-4 rounded-2xl text-lg font-semibold transition-all duration-200"
+        :class="audioPlayerPlaying
+          ? 'bg-slate-800 hover:bg-slate-700 text-white'
+          : 'bg-violet-600 hover:bg-violet-500 text-white shadow-lg shadow-violet-600/30'">
+        <svg x-show="!audioPlayerPlaying" class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
+          <path d="M8 5v14l11-7z"/>
+        </svg>
+        <svg x-show="audioPlayerPlaying" class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
+          <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/>
+        </svg>
+        <span x-text="audioPlayerPlaying ? 'Pause' : 'Play'"></span>
+      </button>
+    </div>
+  </div>
+
   <!-- ── "Read All" FAB ──────────────────────────────────────────────────── -->
-  <div class="fixed bottom-6 right-6 z-50 flex flex-col items-end gap-2">
+  <div x-show="!audioPlayerActive" class="fixed bottom-6 right-6 z-50 flex flex-col items-end gap-2">
     <!-- Stop button (shown while speaking) -->
     <button x-show="isSpeaking" @click="stopSpeaking()" x-transition
       class="flex items-center gap-2 px-4 py-3 bg-red-600 hover:bg-red-500 text-white font-medium rounded-2xl shadow-2xl transition">
@@ -324,14 +587,23 @@
       Stop Reading
     </button>
 
-    <!-- Read All button -->
-    <button x-show="!isSpeaking && displayArticles.length > 0" @click="readAllSummaries()" x-transition
-      class="flex items-center gap-2 px-4 py-3 bg-violet-600 hover:bg-violet-500 text-white font-medium rounded-2xl shadow-2xl transition fab-pulse">
-      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"/>
-      </svg>
-      Read All
-    </button>
+    <!-- Read All buttons -->
+    <div x-show="!isSpeaking && displayArticles.length > 0" x-transition class="flex gap-2">
+      <button @click="readAllSummaries('brief')"
+        class="flex items-center gap-2 px-4 py-3 bg-slate-700 hover:bg-slate-600 text-slate-200 font-medium rounded-2xl shadow-2xl transition">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"/>
+        </svg>
+        Brief
+      </button>
+      <button @click="readAllSummaries('full')"
+        class="flex items-center gap-2 px-4 py-3 bg-violet-600 hover:bg-violet-500 text-white font-medium rounded-2xl shadow-2xl transition fab-pulse">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"/>
+        </svg>
+        Full
+      </button>
+    </div>
   </div>
 
   <!-- ── Topic Management Modal ──────────────────────────────────────────── -->
@@ -443,6 +715,18 @@
         showDismissed: false,
         _readAllIndex: 0,
         _readAllStop: false,
+        // Audio player view
+        audioPlayerActive: false,
+        audioPlayerArticle: null,
+        audioPlayerType: 'brief',
+        audioPlayerPlaying: false,
+        // Saved articles
+        savedCategories: ['Research', 'Read Later', 'Important', 'Reference'],
+        newSaveCategory: '',
+        viewingSaved: false,
+        savedArticlesList: [],
+        savedArticleCategories: [],
+        savedFilterCategory: null,
 
         // Computed-like getter for display articles
         get displayArticles() {
@@ -469,7 +753,7 @@
         },
 
         async init() {
-          await Promise.all([this.loadTopics(), this.loadArticles()]);
+          await Promise.all([this.loadTopics(), this.loadArticles(), this.loadSavedCategories()]);
           this.loading = false;
         },
 
@@ -477,12 +761,27 @@
           try {
             const params = new URLSearchParams();
             if (this.activeCategory && this.activeCategory !== 'All') params.set('category', this.activeCategory);
-            const r = await fetch('/api/briefing/articles?' + params.toString());
-            if (r.ok) {
-              const data = await r.json();
+            const [articlesRes, savedRes] = await Promise.all([
+              fetch('/api/briefing/articles?' + params.toString()),
+              fetch('/api/briefing/saved'),
+            ]);
+            if (articlesRes.ok) {
+              const data = await articlesRes.json();
               this.articles = data.cards || data.articles || [];
               this.categories = data.categories || [];
               if (data.last_updated) this.lastUpdated = data.last_updated;
+            }
+            // Mark saved articles
+            if (savedRes.ok) {
+              const savedData = await savedRes.json();
+              const savedMap = {};
+              (savedData.articles || []).forEach(s => { savedMap[s.article_id] = s.category; });
+              this.articles.forEach(a => {
+                if (savedMap[a.id]) {
+                  a._saved = true;
+                  a._savedCategory = savedMap[a.id];
+                }
+              });
             }
           } catch (e) {
             console.error('Failed to load articles:', e);
@@ -606,30 +905,217 @@
 
         _audioEl: null,
 
-        async playArticleAudio(articleId, summaryType, fallbackText) {
+        playArticleAudio(articleId, summaryType, fallbackText) {
           // Stop any current playback
           this.stopSpeaking();
-          this.isSpeaking = true;
 
-          // Try server-generated audio first
+          // Find the article object for display in the player
+          const article = this.articles.find(a => a.id === articleId);
+
+          // Open the audio player view
+          this.audioPlayerArticle = article || { id: articleId, title: 'Article', topic: '' };
+          this.audioPlayerType = summaryType;
+          this.audioPlayerActive = true;
+          this.audioPlayerPlaying = false;
+          this._audioPlayerFallback = fallbackText;
+
+          // Start playback synchronously — no $nextTick so we stay within
+          // the user gesture window (required for browser TTS fallback).
+          this._startAudioPlayback(articleId, summaryType, fallbackText);
+        },
+
+        _startAudioPlayback(articleId, summaryType, fallbackText) {
+          this.isSpeaking = true;
+          this.audioPlayerPlaying = true;
+
+          // Try loading audio directly — no async HEAD check so we stay
+          // within the user-gesture window for browser TTS fallback.
           const audioUrl = `/api/briefing/audio/${articleId}/${summaryType}`;
-          try {
-            const check = await fetch(audioUrl, { method: 'HEAD' });
-            if (check.ok) {
-              this._audioEl = new Audio(audioUrl);
-              this._audioEl.onended = () => { this.isSpeaking = false; this._audioEl = null; };
-              this._audioEl.onerror = () => {
-                // Server audio failed — fall back to browser TTS
-                this._audioEl = null;
-                this._browserTTS(fallbackText);
-              };
+          const audio = new Audio(audioUrl);
+          audio.oncanplaythrough = () => {
+            this._audioEl = audio;
+            audio.play();
+          };
+          audio.onended = () => {
+            this.isSpeaking = false;
+            this.audioPlayerPlaying = false;
+            this._audioEl = null;
+          };
+          audio.onerror = () => {
+            // Audio file doesn't exist — fall back to browser TTS.
+            // Because we called this synchronously from the click handler,
+            // the browser still honors the user gesture for speechSynthesis.
+            this._audioEl = null;
+            this._browserTTSInPlayer(fallbackText);
+          };
+          audio.load();
+        },
+
+        _browserTTSInPlayer(text) {
+          if (!text || !('speechSynthesis' in window)) {
+            this.isSpeaking = false;
+            this.audioPlayerPlaying = false;
+            return;
+          }
+          window.speechSynthesis.cancel();
+          clearInterval(this._speechKeepAlive);
+          const utter = new SpeechSynthesisUtterance(text);
+          utter.rate = 1.0;
+          utter.pitch = 1.0;
+          utter.onstart = () => {
+            this._speechKeepAlive = setInterval(() => {
+              if (!window.speechSynthesis.speaking) { clearInterval(this._speechKeepAlive); return; }
+              window.speechSynthesis.pause();
+              window.speechSynthesis.resume();
+            }, 10000);
+          };
+          utter.onend = () => {
+            clearInterval(this._speechKeepAlive);
+            this.isSpeaking = false;
+            this.audioPlayerPlaying = false;
+          };
+          utter.onerror = () => {
+            clearInterval(this._speechKeepAlive);
+            this.isSpeaking = false;
+            this.audioPlayerPlaying = false;
+          };
+          if (window.speechSynthesis.getVoices().length === 0) {
+            window.speechSynthesis.onvoiceschanged = () => { window.speechSynthesis.speak(utter); };
+          } else {
+            window.speechSynthesis.speak(utter);
+          }
+        },
+
+        toggleAudioPlayback() {
+          if (this.audioPlayerPlaying) {
+            // Pause
+            if (this._audioEl) {
+              this._audioEl.pause();
+            } else {
+              window.speechSynthesis.pause();
+            }
+            this.audioPlayerPlaying = false;
+          } else {
+            // Resume or restart
+            if (this._audioEl) {
               this._audioEl.play();
-              return;
+              this.audioPlayerPlaying = true;
+            } else if (window.speechSynthesis.paused) {
+              window.speechSynthesis.resume();
+              this.audioPlayerPlaying = true;
+            } else {
+              // Restart playback from scratch
+              this._startAudioPlayback(
+                this.audioPlayerArticle.id,
+                this.audioPlayerType,
+                this._audioPlayerFallback
+              );
+            }
+          }
+        },
+
+        closeAudioPlayer() {
+          this.stopSpeaking();
+          this.audioPlayerActive = false;
+          this.audioPlayerArticle = null;
+          this.audioPlayerPlaying = false;
+        },
+
+        switchAudioType(newType) {
+          if (newType === this.audioPlayerType) return;
+          this.stopSpeaking();
+          this.audioPlayerType = newType;
+          const article = this.audioPlayerArticle;
+          const fallback = newType === 'full'
+            ? (article?.fullSummary || article?.full_summary || article?.summary || '')
+            : (article?.brief_summary || article?.summary || '');
+          this._audioPlayerFallback = fallback;
+          this._startAudioPlayback(article.id, newType, fallback);
+        },
+
+        async saveArticleToCategory(category) {
+          const article = this.audioPlayerArticle;
+          if (!article) return;
+          try {
+            const r = await fetch('/api/briefing/saved', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ article_id: article.id, category: category }),
+            });
+            if (r.ok) {
+              article._saved = true;
+              article._savedCategory = category;
+              // Add category to list if new
+              if (!this.savedCategories.includes(category)) {
+                this.savedCategories.push(category);
+              }
+              this.newSaveCategory = '';
+            }
+          } catch (e) {
+            console.error('Failed to save article:', e);
+          }
+        },
+
+        async loadSavedCategories() {
+          try {
+            const r = await fetch('/api/briefing/saved/categories');
+            if (r.ok) {
+              const data = await r.json();
+              const cats = data.categories || [];
+              // Merge with defaults
+              cats.forEach(c => { if (!this.savedCategories.includes(c)) this.savedCategories.push(c); });
+              this.savedArticleCategories = cats;
             }
           } catch {}
+        },
 
-          // Fallback: browser TTS
-          this._browserTTS(fallbackText);
+        async toggleSavedView() {
+          this.viewingSaved = !this.viewingSaved;
+          if (this.viewingSaved) {
+            await this.loadSavedArticles();
+          }
+        },
+
+        async loadSavedArticles(category) {
+          try {
+            const params = new URLSearchParams();
+            if (category) params.set('category', category);
+            const r = await fetch('/api/briefing/saved?' + params.toString());
+            if (r.ok) {
+              const data = await r.json();
+              this.savedArticlesList = data.articles || [];
+            }
+            // Also refresh categories
+            await this.loadSavedCategories();
+          } catch (e) {
+            console.error('Failed to load saved articles:', e);
+          }
+        },
+
+        playSavedArticleAudio(saved, summaryType) {
+          const article = saved.article || { id: saved.article_id, title: saved.article_id };
+          article.id = article.id || saved.article_id;
+          const fallback = summaryType === 'full'
+            ? (article.full_summary || article.summary || '')
+            : (article.brief_summary || article.summary || '');
+          this.playArticleAudio(article.id, summaryType, fallback);
+        },
+
+        async unsaveArticle(articleId) {
+          try {
+            const r = await fetch('/api/briefing/saved/' + encodeURIComponent(articleId), { method: 'DELETE' });
+            if (r.ok) {
+              this.savedArticlesList = this.savedArticlesList.filter(s => s.article_id !== articleId);
+              // Also update the main articles list
+              const article = this.articles.find(a => a.id === articleId);
+              if (article) {
+                article._saved = false;
+                article._savedCategory = null;
+              }
+            }
+          } catch (e) {
+            console.error('Failed to unsave article:', e);
+          }
         },
 
         _browserTTS(text) {
@@ -655,11 +1141,12 @@
           }
         },
 
-        readAllSummaries() {
+        readAllSummaries(mode = 'brief') {
           const articles = this.displayArticles;
           if (articles.length === 0) return;
           this._readAllIndex = 0;
           this._readAllStop = false;
+          this._readAllMode = mode;
           this.isSpeaking = true;
           this._readNext(articles);
         },
@@ -671,7 +1158,8 @@
             return;
           }
           const a = articles[this._readAllIndex];
-          const text = a.title + '. ' + (a.summary || '');
+          const mode = this._readAllMode || 'brief';
+          const text = a.title + '. ' + (mode === 'full' && a.fullSummary ? a.fullSummary : (a.summary || ''));
           const utter = new SpeechSynthesisUtterance(text);
           utter.rate = 1.0;
           utter.onstart = () => {

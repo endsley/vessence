@@ -6,6 +6,9 @@
 -keep class * implements com.google.gson.TypeAdapterFactory
 -keep class * implements com.google.gson.JsonSerializer
 -keep class * implements com.google.gson.JsonDeserializer
+# Keep TypeToken generic type info (R8 strips it, causing "typeToken must be created with a type argument")
+-keep class com.google.gson.reflect.TypeToken { *; }
+-keep class * extends com.google.gson.reflect.TypeToken
 -keepclassmembers,allowobfuscation class * {
     @com.google.gson.annotations.SerializedName <fields>;
 }
@@ -19,8 +22,14 @@
 -dontwarn okhttp3.**
 -dontwarn okio.**
 
+# ONNX Runtime (OpenWakeWord wake word detection)
+-keep class ai.onnxruntime.** { *; }
+-dontwarn ai.onnxruntime.**
+
 # Vosk speech recognition
 -keep class org.vosk.** { *; }
+-keep class com.sun.jna.** { *; }
+-dontwarn com.sun.jna.**
 
 # Google Credential Manager / Sign-In
 -keep class com.google.android.libraries.identity.** { *; }

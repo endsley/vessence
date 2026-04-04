@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from jane.config import (
+    get_chroma_client,
     ENV_FILE_PATH, VECTOR_DB_USER_MEMORIES, VECTOR_DB_SHORT_TERM,
     CHROMA_COLLECTION_USER_MEMORIES, CHROMA_COLLECTION_SHORT_TERM,
     FORGETTABLE_MAX_AGE_DAYS, JANITOR_REPORT, LOGS_DIR,
@@ -107,7 +108,7 @@ def purge_expired_short_term() -> int:
     # 1. Shared short-term DB
     if os.path.exists(SHORT_TERM_DB_PATH):
         try:
-            st_client = chromadb.PersistentClient(path=SHORT_TERM_DB_PATH)
+            st_client = get_chroma_client(path=SHORT_TERM_DB_PATH)
             st_collection = st_client.get_collection(name="short_term_memory")
             st_all = st_collection.get(include=["metadatas"])
             expired_ids = [
@@ -139,7 +140,7 @@ def purge_old_forgettable_memories(max_age_days: int = 14) -> int:
     if not os.path.exists(SHORT_TERM_DB_PATH):
         return 0
     try:
-        st_client = chromadb.PersistentClient(path=SHORT_TERM_DB_PATH)
+        st_client = get_chroma_client(path=SHORT_TERM_DB_PATH)
         st_collection = st_client.get_collection(name="short_term_memory")
         st_all = st_collection.get(include=["metadatas"])
         cutoff = datetime.datetime.utcnow() - datetime.timedelta(days=max_age_days)
@@ -161,48 +162,187 @@ def purge_old_forgettable_memories(max_age_days: int = 14) -> int:
         return 0
 
 
-def run_janitor():
+def backfill_thematic_archival(max_sessions: int = 2):
+    """
+    Finds sessions in short-term memory that were never archived to long-term
+    and runs the thematic archivist on them. Limits to max_sessions per run.
+
+    Checks both old-format entries (no expires_at) and new thematic entries
+    (memory_type=short_term_theme) that haven't been archived yet.
+    """
+    if not os.path.exists(SHORT_TERM_DB_PATH):
+        return
+    try:
+        from agent_skills.conversation_manager import ConversationManager
+        st_client = get_chroma_client(path=SHORT_TERM_DB_PATH)
+        st_collection = st_client.get_collection(name="short_term_memory")
+
+        all_st = st_collection.get(include=["metadatas"])
+        untriaged_sessions = set()
+        for meta in all_st.get("metadatas", []):
+            if not meta:
+                continue
+            sid = meta.get("session_id")
+            if not sid:
+                continue
+            # Old format: no expires_at means never triaged
+            if not meta.get("expires_at"):
+                untriaged_sessions.add(sid)
+                continue
+            # New thematic format: check if session has themes but was never
+            # long-term archived (no "archived_at" marker)
+            if meta.get("memory_type") == "short_term_theme" and not meta.get("archived_at"):
+                untriaged_sessions.add(sid)
+
+        if not untriaged_sessions:
+            logger.info("No untriaged sessions found for backfill.")
+            return
+
+        target_sessions = list(untriaged_sessions)[:max_sessions]
+        logger.info(f"Backfilling thematic archival for {len(target_sessions)} sessions (out of {len(untriaged_sessions)} pending)...")
+        for sid in target_sessions:
+            try:
+                cm = ConversationManager(session_id=sid)
+                cm._run_archival()
+                cm.close()
+            except Exception as e:
+                logger.warning(f"Failed to backfill session {sid}: {e}")
+
+    except Exception as e:
+        logger.warning(f"Could not run backfill_thematic_archival: {e}")
+
+
+def dedup_cross_session_themes(similarity_threshold: float = 0.10):
+    """Remove near-duplicate theme entries across different sessions.
+
+    When the same topic is discussed in multiple sessions, their theme
+    summaries can overlap significantly.  This function finds themes that
+    are semantically very similar (low ChromaDB distance) across sessions
+    and keeps only the most recently updated one.
+    """
+    if not os.path.exists(SHORT_TERM_DB_PATH):
+        return
+    try:
+        st_client = get_chroma_client(path=SHORT_TERM_DB_PATH)
+        st_collection = st_client.get_collection(name="short_term_memory")
+        all_items = st_collection.get(include=["documents", "metadatas"])
+
+        # Collect only theme entries
+        themes = []
+        for i, meta in enumerate(all_items.get("metadatas", [])):
+            if (meta or {}).get("memory_type") == "short_term_theme":
+                themes.append({
+                    "id": all_items["ids"][i],
+                    "document": all_items["documents"][i],
+                    "session_id": meta.get("session_id", ""),
+                    "last_updated_at": meta.get("last_updated_at", ""),
+                })
+
+        if len(themes) < 2:
+            return
+
+        # For each theme, query its nearest neighbor across ALL sessions
+        ids_to_delete = set()
+        seen_pairs = set()
+        for theme in themes:
+            if theme["id"] in ids_to_delete:
+                continue
+            results = st_collection.query(
+                query_texts=[theme["document"]],
+                n_results=3,
+                include=["metadatas", "distances"],
+            )
+            for j, neighbor_id in enumerate(results["ids"][0]):
+                if neighbor_id == theme["id"] or neighbor_id in ids_to_delete:
+                    continue
+                pair_key = tuple(sorted([theme["id"], neighbor_id]))
+                if pair_key in seen_pairs:
+                    continue
+                seen_pairs.add(pair_key)
+
+                distance = results["distances"][0][j]
+                neighbor_meta = results["metadatas"][0][j] or {}
+                neighbor_session = neighbor_meta.get("session_id", "")
+
+                # Only dedup across different sessions
+                if neighbor_session == theme["session_id"]:
+                    continue
+                if distance > similarity_threshold:
+                    continue
+
+                # Keep the more recently updated one
+                neighbor_updated = neighbor_meta.get("last_updated_at", "")
+                if theme["last_updated_at"] >= neighbor_updated:
+                    ids_to_delete.add(neighbor_id)
+                else:
+                    ids_to_delete.add(theme["id"])
+                    break  # This theme is being deleted, stop checking its neighbors
+
+        if ids_to_delete:
+            st_collection.delete(ids=list(ids_to_delete))
+            logger.info(f"Deduped {len(ids_to_delete)} cross-session theme(s) in short-term memory.")
+        else:
+            logger.info("No cross-session theme duplicates found.")
+
+    except Exception as e:
+        logger.warning(f"Cross-session theme dedup failed: {e}")
+
+
+def run_janitor(max_sessions: int = 2, max_topics: int = 3):
     # Load gate: wait until CPU/memory is acceptable
     try:
         from agent_skills.system_load import wait_until_safe
-        if not wait_until_safe(max_wait_minutes=15):
+        # Shorten wait time for frequent runs
+        if not wait_until_safe(max_wait_minutes=5):
             logger.info("System busy — skipping janitor this cycle.")
             return
     except Exception:
         pass
 
-    client = chromadb.PersistentClient(path=DB_PATH)
+    # Step 0: Backfill any sessions that missed thematic archival (Limited batch)
+    backfill_thematic_archival(max_sessions=max_sessions)
+
+    # Step 0.5: Deduplicate themes across sessions in short-term memory
+    dedup_cross_session_themes()
+
+    client = get_chroma_client(path=DB_PATH)
     try:
         collection = client.get_collection(name="user_memories")
     except Exception:
         logger.info("No user_memories collection found.")
         return
 
-    # Step 0: Purge expired short-term memories + enforce 2-week hard cap
+    # Step 1: Purge expired short-term memories + enforce 2-week hard cap
     expired_purged = purge_expired_short_term()
     old_forgettable_purged = purge_old_forgettable_memories(max_age_days=FORGETTABLE_MAX_AGE_DAYS)
 
-    # 1. Fetch all memories with metadata
+    # 2. Fetch all memories with metadata
     all_mems = collection.get(include=["documents", "metadatas"])
     
     if not all_mems['documents']:
         return
 
-    # 2. Group by Topic (Exclude Permanent)
+    # 3. Group by Topic (Exclude Permanent)
     topic_groups = {} # topic -> list of {id, text, subtopic}
     permanent_count = 0
 
     for i, (doc, meta, id) in enumerate(zip(all_mems['documents'], all_mems['metadatas'], all_mems['ids'])):
-        is_permanent = (
-            meta.get("memory_type") == "permanent" or
-            meta.get("memory_type") in ("forgettable", "short_term") or  # expire naturally, don't merge
+        # Skip entries that should not be consolidated:
+        # - permanent memories (explicitly protected)
+        # - forgettable/short_term (managed by TTL, not consolidation)
+        # - file-anchored entries (vault file metadata)
+        mem_type = meta.get("memory_type", "")
+        skip = (
+            mem_type == "permanent" or
+            mem_type in ("forgettable", "short_term", "short_term_theme") or
             "Saved file '" in doc or
             "Location: " in doc or
             meta.get("file_path") is not None
         )
-        
-        if is_permanent:
-            permanent_count += 1
+
+        if skip:
+            if mem_type == "permanent":
+                permanent_count += 1
             continue
         
         topic = meta.get("topic", "General")
@@ -213,24 +353,28 @@ def run_janitor():
         
         topic_groups[topic].append({"id": id, "text": doc, "subtopic": subtopic})
 
-    if not topic_groups:
-        logger.info(f"No long-term memories to consolidate. (Skipped {permanent_count} permanent memories)")
+    # Filter to topics that actually need merging
+    consolidate_candidates = [t for t, mems in topic_groups.items() if len(mems) >= 3]
+    
+    if not consolidate_candidates:
+        logger.info(f"No topics need consolidation. (Skipped {permanent_count} permanent memories)")
         return
 
-    # 3a. Purge old log files (older than 3 weeks)
-    log_files_purged = purge_old_log_files()
+    # 4. Limit consolidation to a few topics per run to save tokens/time
+    target_topics = consolidate_candidates[:max_topics]
+    logger.info(f"Consolidating {len(target_topics)} topics (out of {len(consolidate_candidates)} needing work)...")
 
-    # 3b. Cluster vault images into subfolders
+    # 5. Purge old logs and cluster images (do this every run, they are cheap)
+    log_files_purged = purge_old_log_files()
     image_cluster_result = cluster_vault_images()
 
     total_reduced = 0
-    merge_log = []  # Track every merge: originals, result, topic
+    merge_log = []
 
-    for topic, memories in topic_groups.items():
-        if len(memories) < 5:
-            continue
-
+    for topic in target_topics:
+        memories = topic_groups[topic]
         logger.info(f"Analyzing topic '{topic}' with {len(memories)} facts...")
+        # ... (rest of logic) ...
 
         prompt = f"""
 You are a careful Memory Curator for a personal AI system. Below is a list of facts for the topic: '{topic}'.
@@ -337,24 +481,37 @@ FACTS FOR TOPIC '{topic}':
 
 LOG_MAX_AGE_DAYS = 21  # 3 weeks
 
+# Logs that should be kept much longer (audit trails, history)
+_PROTECTED_LOG_PATTERNS = {
+    "janitor_consolidation_history",  # append-only merge audit trail
+    "jane_request_timing",            # performance history
+    "jane_writeback_timing",          # writeback performance
+    "job_queue",                      # job execution history
+}
+
 
 def purge_old_log_files(max_age_days: int = LOG_MAX_AGE_DAYS) -> int:
     """
     Recursively scan LOGS_DIR and delete .log files older than max_age_days.
+    Protected logs (audit trails, history) are kept for 90 days instead.
     Returns the count of deleted files.
     """
     if not os.path.isdir(LOGS_DIR):
         logger.info(f"Logs directory does not exist: {LOGS_DIR}")
         return 0
 
-    cutoff_ts = datetime.datetime.utcnow().timestamp() - (max_age_days * 86400)
+    default_cutoff = datetime.datetime.utcnow().timestamp() - (max_age_days * 86400)
+    protected_cutoff = datetime.datetime.utcnow().timestamp() - (90 * 86400)
     deleted = 0
 
     for dirpath, _dirnames, filenames in os.walk(LOGS_DIR):
         for fname in filenames:
-            if not fname.endswith(".log"):
+            if not fname.endswith(".log") and not fname.endswith(".jsonl"):
                 continue
             fpath = os.path.join(dirpath, fname)
+            # Use longer retention for protected logs
+            is_protected = any(pat in fname for pat in _PROTECTED_LOG_PATTERNS)
+            cutoff_ts = protected_cutoff if is_protected else default_cutoff
             try:
                 if os.path.getmtime(fpath) < cutoff_ts:
                     os.remove(fpath)
@@ -398,7 +555,7 @@ def cluster_vault_images() -> dict:
     logger.info(f"Found {len(flat_images)} flat images to cluster: {flat_images}")
 
     # 2. Query ChromaDB for descriptions of each image
-    chroma_client = chromadb.PersistentClient(path=VECTOR_DB_USER_MEMORIES)
+    chroma_client = get_chroma_client(path=VECTOR_DB_USER_MEMORIES)
     try:
         col = chroma_client.get_collection(name=CHROMA_COLLECTION_USER_MEMORIES)
     except Exception:

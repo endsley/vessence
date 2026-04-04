@@ -18,6 +18,8 @@ import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
@@ -37,6 +39,7 @@ import androidx.core.content.FileProvider
 import java.io.File
 
 private val SlateCard = Color(0xFF1E293B)
+private val SlateMuted = Color(0xFF94A3B8)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -45,6 +48,7 @@ fun AttachmentSheet(
     onDismiss: () -> Unit,
     aiColor: Color,
     ttsEnabled: MutableState<Boolean>,
+    autoListenEnabled: MutableState<Boolean>,
     attachedFileUri: MutableState<Uri?>,
     attachedFileName: MutableState<String?>,
     cameraPhotoUri: MutableState<Uri?>,
@@ -193,6 +197,37 @@ fun AttachmentSheet(
                         )
                     }
                 }
+                
+                // Only show auto-listen option if TTS is enabled
+                if (ttsEnabled.value) {
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                autoListenEnabled.value = !autoListenEnabled.value
+                                // Don't dismiss, let them see it change
+                            },
+                        color = Color.Transparent,
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(
+                                if (autoListenEnabled.value) Icons.Default.Mic else Icons.Default.MicOff,
+                                contentDescription = null,
+                                tint = if (autoListenEnabled.value) Color(0xFF22C55E) else SlateMuted,
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text(
+                                text = if (autoListenEnabled.value) "Auto-listen after speaking (on)" else "Auto-listen after speaking (off)",
+                                color = Color.White,
+                                fontSize = 16.sp,
+                            )
+                        }
+                    }
+                }
+                
                 // Cancel response option — only shown while Jane is responding
                 if (isSending && onCancel != null) {
                     Surface(

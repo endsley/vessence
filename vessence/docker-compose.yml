@@ -143,6 +143,10 @@ services:
       - ${VESSENCE_DATA_HOME:-./runtime}:/data
       - ${TOOLS_DIR:-./tools}:/tools
       - ${ESSENCES_DIR:-./essences}:/essences
+      # Persistent CLI credentials (prevents re-login on restart)
+      - ${VESSENCE_DATA_HOME:-./runtime}/credentials/anthropic:/root/.anthropic
+      - ${VESSENCE_DATA_HOME:-./runtime}/credentials/gemini:/root/.config/gemini
+      - ${VESSENCE_DATA_HOME:-./runtime}/credentials/openai:/root/.config/openai
     ports:
       - "8081:8090"
     networks:

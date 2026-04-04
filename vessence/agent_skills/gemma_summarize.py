@@ -26,7 +26,7 @@ import uuid
 
 TRANSCRIPT_DIR   = os.path.join(os.path.expanduser('~'), '.claude', 'projects', f'-home-{os.environ.get("USER", "user")}')
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from jane.config import SHORT_TERM_TTL_DAYS, VECTOR_DB_SHORT_TERM
+from jane.config import get_chroma_client, SHORT_TERM_TTL_DAYS, VECTOR_DB_SHORT_TERM
 
 SHORT_TERM_DB    = VECTOR_DB_SHORT_TERM
 GEMMA_MODEL      = "gemma3:4b"
@@ -130,7 +130,7 @@ def save_to_short_term(summary: str, session_id: str):
 
     old_stderr = silence_stderr()
     try:
-        client = chromadb.PersistentClient(path=SHORT_TERM_DB)
+        client = get_chroma_client(path=SHORT_TERM_DB)
         collection = client.get_or_create_collection(
             name="short_term_memory",
             metadata={"hnsw:space": "cosine"},

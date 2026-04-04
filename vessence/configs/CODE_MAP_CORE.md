@@ -71,102 +71,106 @@ android/      → Native Android app (Kotlin, Jetpack Compose)
 <!-- AUTO-GENERATED BELOW — do not edit below this line -->
 
 # Code Map — Core (Python Backend)
-_Auto-generated on 2026-03-27 08:15 UTC by `generate_code_map.py`_
+_Auto-generated on 2026-04-03 08:15 UTC by `generate_code_map.py`_
 
 ## Priority Files
 
-### jane_web/jane_proxy.py (1075 lines)
-  CODE_MAP_KEYWORDS = ... → L27
-  _maybe_prepend_code_map() → L47-51
-  class JaneSessionState → L55-63
-  _MAX_SESSIONS = ... → L67
-  REQUEST_TIMING_LOG = ... → L68
-  PROMPT_DUMP_LOG = ... → L69
-  SESSION_IDLE_TTL_SECONDS = ... → L70
-  _PREFETCH_CACHE_MAX = ... → L74
-  PREFETCH_TTL = ... → L75
-  run_prefetch_memory() → L78-114
-  get_prefetch_result() → L117-122
-  _get_brain_name() → L125-126
-  _session_log_id() → L129-130
-  _get_timeout_seconds() → L133-134
-  _get_execution_profile() → L137-138
-  _use_persistent_gemini() → L141-142
-  _use_persistent_claude() → L145-146
-  _prune_stale_sessions() → L149-162
-  _execute_brain_sync() → L165-201
-  _execute_brain_stream() → L204-246
-  _get_session() → L249-265
-  _FOLLOWUP_FILE_MARKERS = ... → L268
-  _resolve_file_context() → L290-299
-  _message_for_persistence() → L302-306
-  prewarm_session() → L309-363
-  _await_prewarm_if_running() → L366-383
-  end_session() → L386-420
-  _progress_snapshot() → L423-437
-  _LOG_MAX_BYTES = ... → L440
-  _truncate_log_if_needed() → L443-450
-  _log_stage() → L453-464
-  _log_start() → L467-475
-  _dump_prompt() → L478-510
-  _persist_turns_async() → L513-551
-  send_message() → L559-693
-  stream_message() → L696-1058
-  _log_chat_to_work_log() → L1061-1063
-  get_active_brain() → L1066-1068
-  get_tunnel_url() → L1071-1075
+### jane_web/jane_proxy.py (1569 lines)
+  CODE_MAP_KEYWORDS = ... → L26
+  _maybe_prepend_code_map() → L69-73
+  class JaneSessionState → L77-85
+  _MAX_SESSIONS = ... → L89
+  REQUEST_TIMING_LOG = ... → L90
+  PROMPT_DUMP_LOG = ... → L91
+  SESSION_IDLE_TTL_SECONDS = ... → L92
+  _PREFETCH_CACHE_MAX = ... → L96
+  PREFETCH_TTL = ... → L97
+  run_prefetch_memory() → L100-136
+  get_prefetch_result() → L139-144
+  _get_brain_name() → L147-160
+  _session_log_id() → L163-164
+  _get_timeout_seconds() → L167-168
+  _get_execution_profile() → L171-172
+  _use_gemini_api() → L175-177
+  _use_persistent_gemini() → L179-181
+  _use_persistent_claude() → L184-185
+  _use_persistent_codex() → L188-189
+  _get_web_chat_model() → L192-211
+  _prune_stale_sessions() → L214-227
+  _execute_brain_sync() → L230-296
+  _execute_brain_stream() → L299-380
+  _get_session() → L383-399
+  _FOLLOWUP_FILE_MARKERS = ... → L402
+  _resolve_file_context() → L424-433
+  _message_for_persistence() → L436-440
+  prewarm_session() → L443-494
+  _await_prewarm_if_running() → L497-514
+  end_session() → L517-580
+  _progress_snapshot() → L583-597
+  _LOG_MAX_BYTES = ... → L600
+  _truncate_log_if_needed() → L603-610
+  _log_stage() → L613-624
+  _log_start() → L627-635
+  _dump_prompt() → L638-670
+  _persist_turns_async() → L673-721
+  send_message() → L729-863
+  _pick_ack() → L866-1132
+  stream_message() → L1135-1552
+  _log_chat_to_work_log() → L1555-1557
+  get_active_brain() → L1560-1562
+  get_tunnel_url() → L1565-1569
 
-### jane_web/main.py (2677 lines)
-  class ChatMessage → L1581-1586
-  class SessionControl → L1589-1590
-  GET /health → L406
-  GET /sw.js → L412
-  GET /manifest.webmanifest → L417
-  GET / → L526
-  GET /share → L552
-  GET /vault → L557
-  GET /guide → L580
-  GET /architecture → L586
-  GET /chat → L592
-  GET /essences → L615
-  GET /worklog → L619
-  GET /briefing → L623
-  POST /api/crash-report → L628
-  GET /settings/devices → L639
-  GET /downloads/{filename} → L645
-  POST /api/tts/generate → L697
-  GET /api/app/settings → L742
-  PUT /api/app/settings → L748
-  POST /api/app/installed → L758
-  GET /api/app/latest-version → L770
-  GET /auth/google → L782
-  GET /auth/google/callback → L794
-  POST /api/auth/google-token → L822
-  POST /api/auth/verify-share → L859
-  POST /api/auth/verify-otp → L869
-  POST /api/auth/logout → L894
-  GET /api/auth/devices → L906
-  DELETE /api/auth/devices/{device_id} → L911
-  POST /api/auth/check → L917
-  POST /api/auth/is-new-device → L930
-  GET /api/jane/announcements → L936
-  GET /api/settings/models → L962
-  POST /api/settings/models → L979
-  GET /api/jane/live → L1033
-  POST /api/jane/prefetch-memory → L1067
-  GET /api/files → L1097
-  GET /api/files/list/{path:path} → L1107
-  GET /api/files/meta/{path:path} → L1137
-  PATCH /api/files/description/{path:path} → L1142
-  GET /api/files/thumbnail/{path:path} → L1148
-  GET /api/files/serve/{path:path} → L1157
-  GET /api/files/changes → L1206
-  GET /api/files/find → L1211
-  GET /api/files/search → L1237
-  GET /api/files/play/{path:path} → L1324
-  GET /api/files/content/{path:path} → L1341
-  PUT /api/files/content/{path:path} → L1358
-  POST /api/files/upload → L1375
+### jane_web/main.py (3845 lines)
+  class ChatMessage → L1820-1825
+  class SessionControl → L1828-1829
+  class SwitchProviderRequest → L1896-1897
+  GET /health → L434
+  GET /sw.js → L440
+  GET /manifest.webmanifest → L445
+  GET / → L571
+  GET /share → L597
+  GET /vault → L602
+  GET /guide → L625
+  GET /architecture → L631
+  GET /chat → L637
+  GET /essences → L660
+  GET /worklog → L664
+  GET /api/job-queue → L668
+  GET /api/job-queue/completed → L682
+  GET /briefing → L696
+  POST /api/crash-report → L701
+  POST /api/device-diagnostics → L712
+  GET /api/device-diagnostics → L726
+  GET /settings/devices → L745
+  GET /downloads/{filename} → L751
+  POST /api/tts/generate → L841
+  GET /api/app/settings → L925
+  PUT /api/app/settings → L931
+  POST /api/app/installed → L941
+  GET /api/app/latest-version → L953
+  GET /auth/google → L984
+  GET /auth/google/callback → L996
+  POST /api/auth/google-token → L1024
+  POST /api/auth/verify-share → L1062
+  POST /api/auth/verify-otp → L1072
+  POST /api/auth/logout → L1097
+  GET /api/auth/devices → L1109
+  DELETE /api/auth/devices/{device_id} → L1114
+  POST /api/auth/check → L1120
+  POST /api/auth/is-new-device → L1133
+  GET /api/jane/announcements → L1139
+  GET /api/settings/models → L1165
+  POST /api/settings/models → L1198
+  GET /api/jane/live → L1252
+  POST /api/jane/prefetch-memory → L1286
+  GET /api/files → L1316
+  GET /api/files/list/{path:path} → L1326
+  GET /api/files/meta/{path:path} → L1356
+  PATCH /api/files/description/{path:path} → L1361
+  GET /api/files/thumbnail/{path:path} → L1367
+  GET /api/files/serve/{path:path} → L1376
+  GET /api/files/changes → L1425
+  GET /api/files/find → L1430
 
 ### jane_web/broadcast.py (256 lines)
   SUMMARY_INTERVAL_SECONDS = ... → L16
@@ -221,69 +225,83 @@ _Auto-generated on 2026-03-27 08:15 UTC by `generate_code_map.py`_
   _run_task() → L59-189
   _truncate() → L192-195
 
-### jane/brain_adapters.py (428 lines)
-  _kill_pgroup() → L12-22
-  class ExecutionProfile → L26-30
-  PROVIDER_TIMEOUT_DEFAULTS = ... → L33
-  PROVIDER_IDLE_DEFAULTS = ... → L40
-  PROVIDER_WALL_DEFAULTS = ... → L47
-  class BrainAdapterError → L55-56
-  class BrainAdapter → L59-112
-    __init__() → L64-65
-    _missing_env() → L67-68
-    build_command() → L70-71
-    parse_output() → L73-74
-    execute_stream() → L76-79
-    execute() → L81-112
-  class GeminiBrainAdapter → L115-128
-    build_command() → L120-125
-    execute_stream() → L127-128
-  class ClaudeBrainAdapter → L131-153
-    build_command() → L140-146
-    execute() → L148-150
-    execute_stream() → L152-153
-  class OpenAIBrainAdapter → L156-212
-    execute() → L161-212
-  class CodexBrainAdapter → L215-218
-  resolve_timeout_seconds() → L221-237
-  _resolve_idle_timeout() → L240-248
-  _resolve_wall_timeout() → L251-259
-  build_execution_profile() → L262-273
-  get_brain_adapter() → L276-284
-  _execute_subprocess_streaming() → L287-428
+### jane/brain_adapters.py (470 lines)
+  _load_runtime_env_keys() → L12-35
+  _kill_pgroup() → L38-48
+  class ExecutionProfile → L52-56
+  PROVIDER_TIMEOUT_DEFAULTS = ... → L59
+  PROVIDER_IDLE_DEFAULTS = ... → L66
+  PROVIDER_WALL_DEFAULTS = ... → L73
+  class BrainAdapterError → L81-82
+  class BrainAdapter → L85-142
+    __init__() → L90-91
+    _missing_env() → L93-98
+    build_command() → L100-101
+    parse_output() → L103-104
+    execute_stream() → L106-109
+    execute() → L111-142
+  class GeminiBrainAdapter → L145-170
+    _missing_env() → L151-160
+    build_command() → L162-167
+    execute_stream() → L169-170
+  class ClaudeBrainAdapter → L173-195
+    build_command() → L182-188
+    execute() → L190-192
+    execute_stream() → L194-195
+  class OpenAIBrainAdapter → L198-254
+    execute() → L203-254
+  class CodexBrainAdapter → L257-260
+  resolve_timeout_seconds() → L263-279
+  _resolve_idle_timeout() → L282-290
+  _resolve_wall_timeout() → L293-301
+  build_execution_profile() → L304-315
+  get_brain_adapter() → L318-326
+  _execute_subprocess_streaming() → L329-470
 
-### jane/standing_brain.py (568 lines)
-  _PROVIDER = ... → L30
-  _DEFAULT_MODELS = ... → L33
-  _ENV_VAR_FOR_MODEL = ... → L39
-  _get_model() → L46-55
-  RESPONSE_TIMEOUT_SECS = ... → L59
-  MAX_FAILURES = ... → L61
-  MAX_TURNS_BEFORE_REFRESH = ... → L63
-  CPU_THRESHOLD_PERCENT = ... → L65
-  CPU_HOT_DURATION_SECS = ... → L67
-  _log_crash() → L70-76
-  class BrainProcess → L82-113
-    alive() → L94-95
-    idle_seconds() → L98-101
-    cpu_percent() → L104-113
-  class StandingBrainManager → L116-556
-    __init__() → L119-122
-    brain() → L125-127
-    start() → L129-144
-    _build_cmd() → L146-188
-    _spawn() → L190-224
-    send() → L226-313
-    get_model() → L315-317
-    health_check() → L319-331
-    _reap_loop() → L333-366
-    _read_ndjson_line() → L368-385
-    _read_claude_line() → L387-410
-    _read_claude_response() → L412-510
-    _read_text_response() → L512-529
-    _kill() → L531-546
-    shutdown() → L548-556
-  get_standing_brain_manager() → L564-568
+### jane/standing_brain.py (930 lines)
+  ALL_PROVIDERS = ... → L61
+  _provider_uses_standing_process() → L64-66
+  _classify_stderr_line() → L69-78
+  _available_providers() → L81-83
+  _PROVIDER = ... → L88
+  _DEFAULT_MODELS = ... → L91
+  _ENV_VAR_FOR_MODEL = ... → L97
+  _configured_provider() → L104-121
+  _get_model() → L124-133
+  RESPONSE_TIMEOUT_SECS = ... → L138
+  _READ_CHUNK_TIMEOUT = ... → L141
+  MAX_FAILURES = ... → L143
+  MAX_TURNS_BEFORE_REFRESH = ... → L145
+  CPU_THRESHOLD_PERCENT = ... → L147
+  CPU_HOT_DURATION_SECS = ... → L149
+  _log_crash() → L152-158
+  class BrainProcess → L164-197
+    alive() → L178-179
+    idle_seconds() → L182-185
+    cpu_percent() → L188-197
+  class StandingBrainManager → L200-918
+    __init__() → L203-207
+    brain() → L210-212
+    start() → L214-232
+    _build_cmd() → L234-276
+    _spawn() → L278-325
+    _read_stderr() → L327-364
+    set_provider_error_callback() → L366-368
+    get_last_provider_error() → L370-374
+    clear_provider_error() → L376-379
+    switch_provider() → L381-494
+    _update_env_file() → L497-526
+    send() → L528-641
+    get_model() → L643-645
+    health_check() → L647-659
+    _reap_loop() → L661-694
+    _read_ndjson_line() → L696-727
+    _read_claude_line() → L729-761
+    _read_claude_response() → L763-869
+    _read_text_response() → L871-888
+    _kill() → L890-908
+    shutdown() → L910-918
+  get_standing_brain_manager() → L926-930
 
 ### jane/persistent_claude.py (626 lines)
   _MODEL_CONTEXT_LIMITS = ... → L32
@@ -308,37 +326,37 @@ _Auto-generated on 2026-03-27 08:15 UTC by `generate_code_map.py`_
     prune_stale() → L602-615
   get_claude_persistent_manager() → L622-626
 
-### jane/persistent_gemini.py (404 lines)
+### jane/persistent_gemini.py (417 lines)
   ANSI_ESCAPE_RE = ... → L13
   PROMPT_PATTERNS = ... → L14
   NOISE_INDICATORS = ... → L17
   class _PendingTurn → L34-37
   class TurnInterruptedError → L40-43
     __init__() → L41-43
-  class GeminiPersistentSession → L46-329
+  class GeminiPersistentSession → L46-342
     __init__() → L47-62
     ensure_started() → L64-79
-    _spawn_locked() → L81-122
-    _close_locked() → L124-161
-    shutdown() → L163-166
-    run_turn() → L168-185
-    _run_turn_once() → L187-216
-    _clean_text() → L218-220
-    _find_prompt() → L222-227
-    _is_meaningful() → L229-236
-    _emit_safe_delta() → L238-248
-    _finish_turn_if_prompt_seen() → L250-266
-    _read_loop() → L268-329
-  class GeminiPersistentManager → L332-394
-    __init__() → L336-339
-    get() → L341-350
-    shutdown() → L352-356
-    end() → L359-360
-    reap_stale_sessions() → L362-379
-    _evict_oldest_locked() → L381-394
-  get_gemini_persistent_manager() → L400-404
+    _spawn_locked() → L81-128
+    _close_locked() → L130-167
+    shutdown() → L169-172
+    run_turn() → L174-191
+    _run_turn_once() → L193-222
+    _clean_text() → L224-226
+    _find_prompt() → L228-233
+    _is_meaningful() → L235-242
+    _emit_safe_delta() → L244-254
+    _finish_turn_if_prompt_seen() → L256-272
+    _read_loop() → L274-342
+  class GeminiPersistentManager → L345-407
+    __init__() → L349-352
+    get() → L354-363
+    shutdown() → L365-369
+    end() → L372-373
+    reap_stale_sessions() → L375-392
+    _evict_oldest_locked() → L394-407
+  get_gemini_persistent_manager() → L413-417
 
-### jane/context_builder.py (798 lines)
+### jane/context_builder.py (833 lines)
   MAX_DOC_CHARS = ... → L15
   _CACHE_TTL = ... → L19
   _CACHE_MAX_ENTRIES = ... → L20
@@ -372,14 +390,15 @@ _Auto-generated on 2026-03-27 08:15 UTC by `generate_code_map.py`_
   _extract_tool_signatures() → L477-496
   CODE_MAP_CORE_PATH = ... → L499
   _load_code_map() → L502-504
-  _build_system_sections() → L507-557
-  _format_recent_history() → L560-585
-  TTS_SPOKEN_BLOCK_INSTRUCTION = ... → L588
-  build_jane_context() → L607-668
-  build_jane_context_async() → L671-798
+  _build_system_sections() → L507-604
+  _format_recent_history() → L607-632
+  TTS_SPOKEN_BLOCK_INSTRUCTION = ... → L635
+  build_jane_context() → L656-717
+  build_jane_context_async() → L720-833
 
-### jane/config.py (256 lines)
+### jane/config.py (267 lines)
   _resolve_roots() → L16-39
+  get_chroma_client() → L68-78
   HOME_DIR = ... → L48
   USER_NAME = ... → L49
   ESSENCE_TEMPLATE_DIR = ... → L52
@@ -390,45 +409,44 @@ _Auto-generated on 2026-03-27 08:15 UTC by `generate_code_map.py`_
   DATA_DIR = ... → L60
   CREDENTIALS_DIR = ... → L61
   ENV_FILE_PATH = ... → L62
-  CHROMA_HOST = ... → L71
-  CHROMA_PORT = ... → L72
-  VECTOR_DB_DIR = ... → L73
-  VECTOR_DB_USER_MEMORIES = ... → L74
-  VECTOR_DB_SHORT_TERM = ... → L75
-  VECTOR_DB_LONG_TERM = ... → L76
-  VECTOR_DB_FILE_INDEX = ... → L77
-  CHROMA_COLLECTION_USER_MEMORIES = ... → L80
-  CHROMA_COLLECTION_SHORT_TERM = ... → L81
-  CHROMA_COLLECTION_LONG_TERM = ... → L82
-  CHROMA_COLLECTION_FILE_INDEX = ... → L83
-  PROMPT_LIST_PATH = ... → L86
-  ACCOMPLISHED_PATH = ... → L87
-  LEDGER_DB_PATH = ... → L88
-  JANITOR_REPORT = ... → L89
-  _USER_NAME = ... → L92
-  USER_ESSAY = ... → L93
-  JANE_ESSAY = ... → L94
-  AMBER_ESSAY = ... → L95
-  CHIEH_ESSAY = ... → L96
-  USER_STATE_PATH = ... → L99
-  IDLE_STATE_PATH = ... → L100
-  ACTIVE_QUEUE_PATH = ... → L101
-  QUEUE_SESSION_PATH = ... → L102
-  PENDING_UPDATES_PATH = ... → L103
-  CONTEXT_SUMMARY_PATH = ... → L104
-  JANE_SESSIONS_PATH = ... → L105
-  JANE_SESSION_SUMMARY_DIR = ... → L106
-  TASK_SPINE_PATH = ... → L107
-  INTERRUPT_STACK_PATH = ... → L108
-  PROMPT_QUEUE_LOG = ... → L111
-  JOB_QUEUE_LOG = ... → L112
-  JANE_WRAPPER_RAW_LOG = ... → L113
-  AMBIENT_HEARTBEAT_LOG = ... → L114
-  VAULT_TUNNEL_LOG = ... → L115
-  ADK_VENV_PYTHON = ... → L118
-  CLAUDE_BIN = ... → L119
-  CODEX_BIN = ... → L120
-  JANE_BRIDGE_ENV = ... → L121
+  CHROMA_HOST = ... → L65
+  CHROMA_PORT = ... → L66
+  VECTOR_DB_DIR = ... → L80
+  VECTOR_DB_USER_MEMORIES = ... → L81
+  VECTOR_DB_SHORT_TERM = ... → L82
+  VECTOR_DB_LONG_TERM = ... → L83
+  VECTOR_DB_FILE_INDEX = ... → L84
+  CHROMA_COLLECTION_USER_MEMORIES = ... → L87
+  CHROMA_COLLECTION_SHORT_TERM = ... → L88
+  CHROMA_COLLECTION_LONG_TERM = ... → L89
+  CHROMA_COLLECTION_FILE_INDEX = ... → L90
+  PROMPT_LIST_PATH = ... → L93
+  ACCOMPLISHED_PATH = ... → L94
+  LEDGER_DB_PATH = ... → L95
+  JANITOR_REPORT = ... → L96
+  _USER_NAME = ... → L99
+  USER_ESSAY = ... → L100
+  JANE_ESSAY = ... → L101
+  AMBER_ESSAY = ... → L102
+  CHIEH_ESSAY = ... → L103
+  USER_STATE_PATH = ... → L106
+  IDLE_STATE_PATH = ... → L107
+  ACTIVE_QUEUE_PATH = ... → L108
+  QUEUE_SESSION_PATH = ... → L109
+  PENDING_UPDATES_PATH = ... → L110
+  CONTEXT_SUMMARY_PATH = ... → L111
+  JANE_SESSIONS_PATH = ... → L112
+  JANE_SESSION_SUMMARY_DIR = ... → L113
+  TASK_SPINE_PATH = ... → L114
+  INTERRUPT_STACK_PATH = ... → L115
+  PROMPT_QUEUE_LOG = ... → L118
+  JOB_QUEUE_LOG = ... → L119
+  JANE_WRAPPER_RAW_LOG = ... → L120
+  AMBIENT_HEARTBEAT_LOG = ... → L121
+  VAULT_TUNNEL_LOG = ... → L122
+  ADK_VENV_PYTHON = ... → L125
+  CLAUDE_BIN = ... → L126
+  CODEX_BIN = ... → L127
 
 ### jane/session_summary.py (198 lines)
   MAX_TOPICS = ... → L10
@@ -536,90 +554,94 @@ _Auto-generated on 2026-03-27 08:15 UTC by `generate_code_map.py`_
   should_offload_research() → L50-58
   run_research_offload() → L61-84
 
-### agent_skills/conversation_manager.py (743 lines)
+### agent_skills/conversation_manager.py (1117 lines)
   class silence_stderr_fd → L16-29
     __enter__() → L17-22
     __exit__() → L24-29
-  TOKEN_ENCODING_MODEL = ... → L54
-  COMPACTION_THRESHOLD_PERCENT = ... → L55
-  ARCHIVIST_MODEL = ... → L56
-  WRITEBACK_TIMING_LOG = ... → L57
-  get_token_count() → L66-68
-  _append_writeback_log() → L71-77
-  class ConversationManager → L80-743
-    __init__() → L95-136
-    add_message() → L146-169
-    add_messages() → L171-186
-    get_stats() → L188-199
-    close() → L201-233
-    _reset_idle_timer() → L239-246
-    _on_idle() → L248-269
-    _run_archival() → L275-337
-    _should_wait_for_smart_archival() → L339-341
-    _select_archivist_model() → L343-347
-    _triage_memory() → L349-384
-    _promote_to_long_term() → L386-399
-    _compact_context_window_if_needed() → L406-448
-    _generate_summary() → L450-464
-    _init_db() → L470-483
-    _log_to_ledger() → L485-502
-    _write_to_short_term() → L508-561
-    _should_store_short_term_turn() → L564-611
-    _release_short_term_handles() → L613-619
-    _looks_like_code_edit() → L622-646
-    _summarize_for_short_term() → L649-714
-    _normalize_short_term_summary() → L717-743
+  TOKEN_ENCODING_MODEL = ... → L55
+  COMPACTION_THRESHOLD_PERCENT = ... → L56
+  ARCHIVIST_MODEL = ... → L57
+  WRITEBACK_TIMING_LOG = ... → L58
+  get_token_count() → L67-69
+  _append_writeback_log() → L72-78
+  class ConversationManager → L81-1117
+    __init__() → L96-138
+    add_message() → L148-167
+    add_messages() → L169-180
+    get_stats() → L182-193
+    close() → L195-227
+    _fetch_session_transcript() → L229-247
+    _thematic_archival() → L249-299
+    _reset_idle_timer() → L305-312
+    _on_idle() → L314-335
+    _run_archival() → L341-406
+    _should_wait_for_smart_archival() → L408-410
+    _select_archivist_model() → L412-416
+    _triage_memory() → L418-461
+    _promote_to_long_term() → L463-539
+    _compact_context_window_if_needed() → L547-589
+    _generate_summary() → L591-605
+    _init_db() → L611-624
+    _log_to_ledger() → L626-643
+    update_thematic_memory() → L655-681
+    _do_thematic_update() → L683-765
+    _fetch_session_themes() → L767-802
+    _classify_turn_theme() → L804-855
+    _update_theme_summary() → L857-888
+    _fallback_raw_theme() → L890-933
+    _should_store_short_term_turn() → L938-985
+    _release_short_term_handles() → L987-993
+    _looks_like_code_edit() → L996-1020
+    _summarize_for_short_term() → L1023-1088
+    _normalize_short_term_summary() → L1091-1117
 
-### agent_skills/memory_retrieval.py (718 lines)
-  class silence_stderr_fd → L10-23
-    __enter__() → L11-16
-    __exit__() → L18-23
-  class MemoryRetrievalResult → L60-63
-  class MemorySummaryCacheEntry → L67-71
-  PERSONAL_QUERY_MARKERS = ... → L78
-  PROJECT_QUERY_MARKERS = ... → L82
-  LOW_SIGNAL_SHARED_PREFIXES = ... → L87
-  _utcnow() → L99-100
-  _normalize_query() → L103-104
-  _get_query_embedding_fn() → L107-120
-  _embed_query_text() → L123-139
-  _cosine_similarity() → L142-150
-  _prune_cache_entries() → L153-159
-  _lookup_cached_memory_summary() → L162-177
-  _CACHE_MAX_SESSIONS = ... → L180
-  _store_cached_memory_summary() → L183-203
-  invalidate_memory_summary_cache() → L206-211
-  _is_expired() → L214-229
-  _is_too_old() → L232-244
-  _is_none_content() → L247-250
-  _recency_label() → L253-270
-  _fmt_memory() → L273-278
-  _dedupe_fact_lines() → L281-290
-  _query_collection() → L293-323
-  _within_distance() → L326-332
-  _is_file_index_record() → L335-355
-  _is_file_query() → L358-386
-  _classify_query_intent() → L389-397
-  _is_low_signal_shared_memory() → L400-409
-  build_memory_sections() → L412-626
-  synthesize_memory_summary() → L629-675
-  retrieve_memory_context() → L678-702
-  get_memory_summary() → L705-718
-
-### agent_skills/local_vector_memory.py (267 lines)
+### agent_skills/memory_retrieval.py (661 lines)
   class silence_stderr_fd → L11-24
     __enter__() → L12-17
     __exit__() → L19-24
-  FORGETTABLE_TTL_DAYS = ... → L47
-  class LocalVectorMemoryService → L50-267
-    __init__() → L56-71
-    _user_filter() → L73-74
-    add_memory() → L76-110
-    search_memory() → L112-225
-    delete_memory() → L227-247
-    _extract_text() → L249-252
-    list_all_for_reorg() → L254-258
-    add_session_to_memory() → L260-267
+  class MemorySummaryCacheEntry → L60-64
+  PERSONAL_QUERY_MARKERS = ... → L71
+  PROJECT_QUERY_MARKERS = ... → L75
+  LOW_SIGNAL_SHARED_PREFIXES = ... → L80
+  _utcnow() → L92-93
+  _normalize_query() → L96-97
+  _get_query_embedding_fn() → L100-113
+  _embed_query_text() → L116-132
+  _cosine_similarity() → L135-143
+  _prune_cache_entries() → L146-152
+  _lookup_cached_memory_summary() → L155-170
+  _CACHE_MAX_SESSIONS = ... → L173
+  _store_cached_memory_summary() → L176-196
+  invalidate_memory_summary_cache() → L199-204
+  _is_expired() → L207-222
+  _is_too_old() → L225-237
+  _is_none_content() → L240-243
+  _recency_label() → L246-263
+  _fmt_memory() → L266-273
+  _extract_content_key() → L276-289
+  _dedupe_fact_lines() → L292-311
+  _query_collection() → L314-344
+  _within_distance() → L347-353
+  _is_file_index_record() → L356-376
+  _is_file_query() → L379-407
+  _classify_query_intent() → L410-418
+  _is_low_signal_shared_memory() → L421-430
+  build_memory_sections() → L433-657
+
+### agent_skills/local_vector_memory.py (268 lines)
+  class silence_stderr_fd → L12-25
+    __enter__() → L13-18
+    __exit__() → L20-25
+  FORGETTABLE_TTL_DAYS = ... → L48
+  class LocalVectorMemoryService → L51-268
+    __init__() → L57-72
+    _user_filter() → L74-75
+    add_memory() → L77-111
+    search_memory() → L113-226
+    delete_memory() → L228-248
+    _extract_text() → L250-253
+    list_all_for_reorg() → L255-259
+    add_session_to_memory() → L261-268
 
 ### agent_skills/prompt_queue_runner.py (680 lines)
   is_idle() → L59-97
@@ -665,44 +687,44 @@ _Auto-generated on 2026-03-27 08:15 UTC by `generate_code_map.py`_
   _extract_quoted_strings() → L808-823
   _extract_section_fragment() → L826-834
 
-### agent_skills/essence_loader.py (336 lines)
-  class EssenceState → L32-40
-  _log_to_work_log() → L50-56
-  _get_tools_dir() → L59-65
-  _get_essences_dir() → L68-72
-  load_essence() → L79-141
-  unload_essence() → L144-160
-  delete_essence() → L163-208
-  list_loaded_essences() → L211-213
-  list_available_essences() → L216-276
-  list_available() → L279-285
-  main() → L292-332
-
-### agent_skills/essence_runtime.py (427 lines)
+### agent_skills/essence_loader.py (337 lines)
   class EssenceState → L33-41
-  class EssenceRuntime → L48-283
-    __new__() → L53-57
-    __init__() → L59-67
-    load_essence() → L71-114
-    unload_essence() → L116-125
-    delete_essence() → L127-141
-    get_loaded() → L145-147
-    list_available() → L149-172
-    get_capabilities_map() → L174-180
-    route_to_essence() → L182-212
-    set_active_essence() → L216-220
-    get_active_essence() → L222-231
-    _port_memory() → L235-283
-  class JaneOrchestrator → L290-364
-    __init__() → L293-294
-    decompose_task() → L296-328
-    execute_plan() → L330-364
-  class CapabilityRegistry → L371-427
-    __init__() → L375-376
-    register() → L378-383
-    unregister() → L385-391
-    find_provider() → L393-396
-    request_service() → L398-427
+  _log_to_work_log() → L51-57
+  _get_tools_dir() → L60-66
+  _get_essences_dir() → L69-73
+  load_essence() → L80-142
+  unload_essence() → L145-161
+  delete_essence() → L164-209
+  list_loaded_essences() → L212-214
+  list_available_essences() → L217-277
+  list_available() → L280-286
+  main() → L293-333
+
+### agent_skills/essence_runtime.py (428 lines)
+  class EssenceState → L34-42
+  class EssenceRuntime → L49-284
+    __new__() → L54-58
+    __init__() → L60-68
+    load_essence() → L72-115
+    unload_essence() → L117-126
+    delete_essence() → L128-142
+    get_loaded() → L146-148
+    list_available() → L150-173
+    get_capabilities_map() → L175-181
+    route_to_essence() → L183-213
+    set_active_essence() → L217-221
+    get_active_essence() → L223-232
+    _port_memory() → L236-284
+  class JaneOrchestrator → L291-365
+    __init__() → L294-295
+    decompose_task() → L297-329
+    execute_plan() → L331-365
+  class CapabilityRegistry → L372-428
+    __init__() → L376-377
+    register() → L379-384
+    unregister() → L386-392
+    find_provider() → L394-397
+    request_service() → L399-428
 
 ### agent_skills/essence_scheduler.py (182 lines)
   TOOLS_DIR = ... → L31
@@ -715,50 +737,53 @@ _Auto-generated on 2026-03-27 08:15 UTC by `generate_code_map.py`_
   _matches_schedule() → L70-98
   run_scheduler() → L101-178
 
-### agent_skills/index_vault.py (378 lines)
+### agent_skills/index_vault.py (379 lines)
   _REQUIRED_PYTHON = ... → L28
   class _silence → L34-41
     __enter__() → L35-38
     __exit__() → L39-41
-  VAULT_PATH = ... → L58
-  HASH_INDEX_PATH = ... → L59
-  SKIP_FILES = ... → L61
-  SKIP_EXTENSIONS = ... → L62
-  IMAGE_EXTENSIONS = ... → L64
-  TEXT_EXTENSIONS = ... → L65
-  READABLE_EXTENSIONS = ... → L71
-  MAX_EXTRACT_CHARS = ... → L72
-  get_collection() → L77-83
-  is_already_tracked() → L86-96
-  add_to_chromadb() → L99-116
-  load_hash_index() → L121-127
-  save_hash_index() → L130-131
-  hash_file() → L134-139
-  describe_image() → L144-166
-  _extract_text_file() → L169-173
-  _extract_pdf_text() → L176-194
-  _extract_docx_text() → L197-218
-  extract_readable_text() → L221-229
-  _fallback_text_description() → L232-253
-  describe_readable_file() → L256-286
-  scan_vault() → L291-368
+  VAULT_PATH = ... → L59
+  HASH_INDEX_PATH = ... → L60
+  SKIP_FILES = ... → L62
+  SKIP_EXTENSIONS = ... → L63
+  IMAGE_EXTENSIONS = ... → L65
+  TEXT_EXTENSIONS = ... → L66
+  READABLE_EXTENSIONS = ... → L72
+  MAX_EXTRACT_CHARS = ... → L73
+  get_collection() → L78-84
+  is_already_tracked() → L87-97
+  add_to_chromadb() → L100-117
+  load_hash_index() → L122-128
+  save_hash_index() → L131-132
+  hash_file() → L135-140
+  describe_image() → L145-167
+  _extract_text_file() → L170-174
+  _extract_pdf_text() → L177-195
+  _extract_docx_text() → L198-219
+  extract_readable_text() → L222-230
+  _fallback_text_description() → L233-254
+  describe_readable_file() → L257-287
+  scan_vault() → L292-369
 
-### agent_skills/janitor_memory.py (537 lines)
-  DB_PATH = ... → L27
-  SHORT_TERM_DB_PATH = ... → L28
-  JANITOR_LOG = ... → L29
-  VAULT_IMAGES_DIR = ... → L30
-  MEMORY_JANITOR_MODEL = ... → L33
-  _llm_json() → L36-81
-  _is_expired() → L84-94
-  purge_expired_short_term() → L97-126
-  purge_expired_forgettable() → L130-131
-  purge_old_forgettable_memories() → L134-161
-  run_janitor() → L164-336
-  LOG_MAX_AGE_DAYS = ... → L338
-  purge_old_log_files() → L341-370
-  IMAGE_EXTENSIONS = ... → L373
-  cluster_vault_images() → L376-537
+### agent_skills/janitor_memory.py (694 lines)
+  DB_PATH = ... → L28
+  SHORT_TERM_DB_PATH = ... → L29
+  JANITOR_LOG = ... → L30
+  VAULT_IMAGES_DIR = ... → L31
+  MEMORY_JANITOR_MODEL = ... → L34
+  _llm_json() → L37-82
+  _is_expired() → L85-95
+  purge_expired_short_term() → L98-127
+  purge_expired_forgettable() → L131-132
+  purge_old_forgettable_memories() → L135-162
+  backfill_thematic_archival() → L165-212
+  dedup_cross_session_themes() → L215-288
+  run_janitor() → L291-480
+  LOG_MAX_AGE_DAYS = ... → L482
+  _PROTECTED_LOG_PATTERNS = ... → L485
+  purge_old_log_files() → L493-527
+  IMAGE_EXTENSIONS = ... → L530
+  cluster_vault_images() → L533-694
 
 ### agent_skills/janitor_system.py (110 lines)
   TEMP_FILES = ... → L13
@@ -771,7 +796,7 @@ _Auto-generated on 2026-03-27 08:15 UTC by `generate_code_map.py`_
   _truncate_log_tail() → L66-84
   archive_completed_jobs() → L86-93
 
-### agent_skills/nightly_audit.py (297 lines)
+### agent_skills/nightly_audit.py (328 lines)
   ENV_FILE = ... → L30
   AUDIT_LOG_DIR = ... → L31
   SKILLS_DIR = ... → L32
@@ -782,18 +807,21 @@ _Auto-generated on 2026-03-27 08:15 UTC by `generate_code_map.py`_
   AMBER_ARCH = ... → L37
   MEMORY_ARCH = ... → L38
   LOG_FILE = ... → L40
-  read_file() → L52-59
-  read_script_body() → L62-68
-  KEY_SCRIPTS = ... → L72
-  get_crontab() → L82-87
-  get_skill_files() → L90-91
-  get_amber_tool_files() → L94-98
-  IDLE_THRESHOLD_SECONDS = ... → L105
-  ACTIVITY_INDICATORS = ... → L108
-  is_user_idle() → L114-151
-  _run_cmd() → L154-158
-  run_audit_and_fix() → L161-238
-  main() → L242-293
+  LATEST_AUDIT_SUMMARY = ... → L41
+  read_file() → L53-60
+  read_script_body() → L63-69
+  KEY_SCRIPTS = ... → L73
+  get_crontab() → L83-88
+  get_skill_files() → L91-92
+  get_amber_tool_files() → L95-99
+  IDLE_THRESHOLD_SECONDS = ... → L106
+  ACTIVITY_INDICATORS = ... → L109
+  is_user_idle() → L115-152
+  _run_cmd() → L155-159
+  _extract_health_summary() → L162-176
+  _write_latest_summary() → L179-188
+  run_audit_and_fix() → L191-268
+  main() → L272-324
 
 ### agent_skills/audit_auto_fixer.py (498 lines)
   AUDIT_DIR = ... → L36
@@ -954,13 +982,22 @@ _Auto-generated on 2026-03-27 08:15 UTC by `generate_code_map.py`_
   validate_essence() → L116-139
   main() → L142-157
 
-### agent_skills/show_job_queue.py (113 lines)
-  QUEUE_DIR = ... → L8
-  load_jobs() → L14-60
-  PRIORITY_LABEL = ... → L63
-  PRIORITY_SORT = ... → L69
-  format_table() → L72-104
-  main() → L107-109
+### agent_skills/show_job_queue.py (180 lines)
+  VESSENCE_HOME = ... → L9
+  QUEUE_DIR = ... → L10
+  SYSTEM_DEFAULTS_PATH = ... → L11
+  DEFAULT_JOB_QUEUE_COLUMNS = ... → L12
+  PRIORITY_LABEL = ... → L14
+  PRIORITY_SORT = ... → L20
+  STATUS_ICON = ... → L22
+  load_job_queue_columns() → L30-40
+  load_jobs() → L43-60
+  _parse_job_file() → L63-107
+  load_completed_jobs() → L110-122
+  get_job_queue_data() → L125-132
+  get_completed_jobs_data() → L135-142
+  format_markdown_table() → L145-166
+  main() → L169-176
 
 ### amber/agent.py (273 lines)
   _extract_user_query() → L45-59
@@ -1062,8 +1099,8 @@ _Auto-generated on 2026-03-27 08:15 UTC by `generate_code_map.py`_
     _get_declaration() → L52-70
     run_async() → L72-117
 
-### vault_web/main.py (1167 lines)
-  class ChatMessage → L886-889
+### vault_web/main.py (1173 lines)
+  class ChatMessage → L892-895
   GET /health → L95
   GET /sw.js → L100
   GET /manifest.webmanifest → L105
@@ -1106,13 +1143,13 @@ _Auto-generated on 2026-03-27 08:15 UTC by `generate_code_map.py`_
   PUT /api/playlists/{playlist_id} → L706
   DELETE /api/playlists/{playlist_id} → L714
   POST /api/files/upload → L736
-  POST /api/files/upload/single → L840
-  POST /api/amber/chat → L893
-  POST /api/amber/chat/stream → L921
-  GET /api/amber/tunnel-url → L988
-  POST /api/amber/unlock → L996
-  GET /api/essences → L1041
-  GET /api/essences/active → L1070
+  POST /api/files/upload/single → L846
+  POST /api/amber/chat → L899
+  POST /api/amber/chat/stream → L927
+  GET /api/amber/tunnel-url → L994
+  POST /api/amber/unlock → L1002
+  GET /api/essences → L1047
+  GET /api/essences/active → L1076
 
 ### vault_web/files.py (297 lines)
   THUMBNAIL_SIZE = ... → L23
@@ -1199,27 +1236,30 @@ _Auto-generated on 2026-03-27 08:15 UTC by `generate_code_map.py`_
   update_playlist() → L51-70
   delete_playlist() → L73-75
 
-### onboarding/main.py (354 lines)
+### onboarding/main.py (435 lines)
   DATA_DIR = ... → L20
   VAULT_DIR = ... → L21
   ENV_FILE = ... → L22
   PROFILE = ... → L23
-  _read_env_values() → L29-39
-  GET /health → L45
-  is_first_run() → L51-57
-  GET / → L61
-  POST /api/setup → L89
-  JANE_URL = ... → L140
-  POST /api/cli-login → L144
-  GET /api/cli-login/status → L158
-  GET /interview → L171
-  POST /api/interview/submit → L176
-  _build_profile() → L185-231
-  POST /api/settings → L237
-  POST /api/validate-key → L286
-  GET /success → L343
+  default_auth_method_for_brain() → L30-31
+  _read_env_values() → L34-44
+  GET /health → L50
+  onboarding_complete() → L56-62
+  is_first_run() → L65-67
+  GET / → L71
+  POST /api/setup → L107
+  JANE_URL = ... → L205
+  POST /api/cli-login → L209
+  GET /api/cli-login/status → L223
+  POST /api/cli-login/code → L234
+  GET /interview → L250
+  POST /api/interview/submit → L255
+  _build_profile() → L264-310
+  POST /api/settings → L316
+  POST /api/validate-key → L365
+  GET /success → L422
 
-### startup_code/jane_bootstrap.py (200 lines)
+### startup_code/jane_bootstrap.py (199 lines)
   DATA_ROOT = ... → L21
   VESSENCE_ROOT = ... → L22
   DOCS_DIR = ... → L23
@@ -1237,7 +1277,7 @@ _Auto-generated on 2026-03-27 08:15 UTC by `generate_code_map.py`_
   collection_count() → L92-96
   recent_entries() → L99-118
   query_entries() → L121-142
-  main() → L145-196
+  main() → L145-195
 
 ### startup_code/memory_daemon.py (162 lines)
   ROOT = ... → L19
@@ -1255,17 +1295,16 @@ _Auto-generated on 2026-03-27 08:15 UTC by `generate_code_map.py`_
   _memory_watchdog() → L139-148
   POST /cache/invalidate → L154
 
-### startup_code/regenerate_jane_context.py (160 lines)
+### startup_code/regenerate_jane_context.py (146 lines)
   BASE = ... → L29
   DATA_ROOT = ... → L30
   VAULT_ROOT = ... → L31
   OUTPUT = ... → L32
   read_file() → L34-39
   extract_section() → L41-56
-  extract_amber_capabilities() → L58-64
-  extract_cron_jobs() → L66-92
-  extract_projects() → L94-101
-  build_context() → L103-154
+  extract_cron_jobs() → L58-84
+  extract_projects() → L86-93
+  build_context() → L95-140
 
 ### startup_code/seed_chromadb.py (173 lines)
   _REQUIRED_PYTHON = ... → L28
@@ -1310,35 +1349,41 @@ _Auto-generated on 2026-03-27 08:15 UTC by `generate_code_map.py`_
   generate_manifest() → L73-267
   main() → L271-325
 
-### startup_code/build_docker_bundle.py (413 lines)
-  VERSION = ... → L12
-  REPO_ROOT = ... → L14
-  MARKETING_ROOT = ... → L15
-  DOWNLOADS_DIR = ... → L16
-  INSTALLERS_DIR = ... → L17
-  PLATFORMS = ... → L19
-  reset_dir() → L45-48
-  copy_tree() → L51-52
-  build_readme() → L55-122
-  build_platform_package() → L125-199
-  _match_image_bins() → L213-220
-  _parse_compose_services() → L223-240
-  validate() → L243-385
-  build_all() → L388-409
+### startup_code/build_docker_bundle.py (672 lines)
+  REPO_ROOT = ... → L18
+  MARKETING_ROOT = ... → L19
+  DOWNLOADS_DIR = ... → L20
+  INSTALLERS_DIR = ... → L21
+  _INSTALLER_VERSION_RE = ... → L23
+  _next_installer_version() → L28-47
+  VERSION = ... → L50
+  PLATFORMS = ... → L52
+  update_marketing_download_links() → L81-120
+  reset_dir() → L123-126
+  copy_tree() → L129-130
+  _ensure_crlf() → L133-138
+  _check_bat_block_parens() → L141-161
+  build_readme() → L164-232
+  build_platform_package() → L235-350
+  _match_image_bins() → L364-371
+  _parse_compose_services() → L374-391
+  validate() → L394-536
+  verify_packages() → L539-638
+  build_all() → L641-668
 
-### startup_code/query_live_memory.py (136 lines)
+### startup_code/query_live_memory.py (125 lines)
   ROOT = ... → L16
-  LIVE_VECTOR_ROOT = ... → L24
-  CACHE_FILE = ... → L29
-  CACHE_TTL_SECS = ... → L30
-  CACHE_MAX_ENTRIES = ... → L31
-  CACHE_SIMILARITY_THRESHOLD = ... → L32
-  _cosine_similarity() → L35-43
-  _embed_query() → L46-51
-  _load_cache() → L54-62
-  _save_cache() → L65-71
-  _lookup_cache() → L74-82
-  main() → L85-132
+  LIVE_VECTOR_ROOT = ... → L23
+  CACHE_FILE = ... → L28
+  CACHE_TTL_SECS = ... → L29
+  CACHE_MAX_ENTRIES = ... → L30
+  CACHE_SIMILARITY_THRESHOLD = ... → L31
+  _cosine_similarity() → L34-42
+  _embed_query() → L45-50
+  _load_cache() → L53-61
+  _save_cache() → L64-70
+  _lookup_cache() → L73-81
+  main() → L84-121
 
 ### startup_code/claude_smart_context.py (121 lines)
   CODE_MAP_KEYWORDS = ... → L37
@@ -1366,6 +1411,38 @@ _Auto-generated on 2026-03-27 08:15 UTC by `generate_code_map.py`_
     get_all_pending() → L134-136
     cleanup_stale() → L138-151
   get_permission_broker() → L160-166
+
+### jane/gemini_api_brain.py (335 lines)
+  TOOL_BRIDGE_PORT = ... → L24
+  TOOL_BRIDGE_URL = ... → L25
+  TOOL_DECLARATIONS = ... → L28
+  class GeminiApiBrain → L133-324
+    __init__() → L136-140
+    _ensure_client() → L142-154
+    _ensure_bridge() → L156-195
+    _execute_tool() → L197-209
+    send_streaming() → L211-313
+    remove_session() → L315-317
+    shutdown() → L319-324
+  get_gemini_api_brain() → L331-335
+
+### jane/persistent_codex.py (401 lines)
+  _kill_process_tree() → L22-31
+  class CodexPersistentSession → L35-42
+    is_fresh() → L41-42
+  class CodexPersistentManager → L45-391
+    __init__() → L49-54
+    get() → L56-71
+    end() → L73-78
+    run_turn() → L80-127
+    _build_cmd() → L129-146
+    _execute_streaming() → L148-316
+    _format_command() → L319-329
+    _flush_pending_thought() → L332-343
+    _extract_item_text() → L346-365
+    _format_tool_result() → L367-376
+    _normalize_error_message() → L379-391
+  get_codex_persistent_manager() → L397-401
 
 ### jane/hooks/permission_gate.py (139 lines)
   APPROVAL_REQUIRED = ... → L22
@@ -1429,15 +1506,38 @@ _Auto-generated on 2026-03-27 08:15 UTC by `generate_code_map.py`_
   CURRENT_MODEL = ... → L22
   check_for_new_models() → L24-67
 
-### agent_skills/claude_cli_llm.py (89 lines)
-  _build_command() → L20-40
-  completion() → L43-73
-  completion_smart() → L76-78
-  completion_json() → L81-89
+### agent_skills/claude_cli_llm.py (116 lines)
+  _build_command() → L25-45
+  completion() → L48-78
+  completion_orchestrator() → L81-84
+  completion_agent() → L87-89
+  completion_utility() → L92-94
+  completion_smart() → L97-99
+  completion_json() → L102-116
+
+### agent_skills/consult_panel.py (232 lines)
+  FRONTIER_CLIS = ... → L29
+  SKIP_CLIS = ... → L36
+  CLI_TIMEOUT = ... → L39
+  detect_available_clis() → L42-54
+  query_cli() → L57-119
+  synthesize() → L122-151
+  consult_panel() → L154-194
 
 ### agent_skills/cron_utils.py (65 lines)
   send_discord() → L18-44
   load_cron_env() → L47-65
+
+### agent_skills/daily_code_review.py (185 lines)
+  LOG_FILE = ... → L23
+  REVIEW_DIR = ... → L24
+  REVIEW_EXTENSIONS = ... → L38
+  SKIP_PATTERNS = ... → L41
+  MAX_DIFF_CHARS = ... → L51
+  get_changed_files() → L54-80
+  get_diff_summary() → L83-116
+  run_team_review() → L119-142
+  main() → L145-181
 
 ### agent_skills/evolve_code_map_keywords.py (340 lines)
   VESSENCE_HOME = ... → L24
@@ -1508,11 +1608,34 @@ _Auto-generated on 2026-03-27 08:15 UTC by `generate_code_map.py`_
   list_jobs() → L24-49
   archive_completed() → L52-77
 
+### agent_skills/notify_audit_results.py (126 lines)
+  LOG_FILE = ... → L16
+  AUDIT_LOG_DIR = ... → L17
+  LATEST_AUDIT_SUMMARY = ... → L18
+  ANNOUNCEMENTS_PATH = ... → L19
+  STATE_PATH = ... → L20
+  _load_json() → L30-34
+  _save_json() → L37-41
+  _load_latest_audit() → L44-59
+  _extract_brief() → L62-67
+  _write_announcement() → L70-80
+  main() → L83-122
+
 ### agent_skills/notify_updates.py (57 lines)
   NOTIFY_FILE = ... → L15
   DISCORD_TOKEN = ... → L18
   CHANNEL_ID = ... → L19
   send_notification() → L21-54
+
+### agent_skills/process_watchdog.py (151 lines)
+  PROTECTED_NAMES = ... → L26
+  MAX_CONTAINER_AGE_MINUTES = ... → L27
+  MAX_RAM_PERCENT = ... → L28
+  kill_old_tts_containers() → L31-57
+  _parse_minutes() → L60-71
+  kill_idle_build_daemons() → L74-102
+  kill_memory_hogs() → L105-139
+  main() → L142-147
 
 ### agent_skills/qwen_query.py (50 lines)
   check_ollama() → L11-17
@@ -1529,6 +1652,10 @@ _Auto-generated on 2026-03-27 08:15 UTC by `generate_code_map.py`_
   PRIORITY_MAP = ... → L25
   get_pending_jobs() → L28-56
   main() → L59-77
+
+### agent_skills/safe_docker.py (108 lines)
+  run_docker() → L36-94
+  _force_kill() → L97-108
 
 ### agent_skills/save_context_summary.py (91 lines)
   PYTHON = ... → L27
@@ -1547,6 +1674,21 @@ _Auto-generated on 2026-03-27 08:15 UTC by `generate_code_map.py`_
   get_connected_outputs() → L38-49
   dim_screen() → L52-62
   main() → L65-90
+
+### agent_skills/topic_memory.py (295 lines)
+  MAX_TOPIC_CHARS = ... → L38
+  TRIGGER_EVERY_N_TURNS = ... → L39
+  TURN_COUNTER_FILE = ... → L40
+  _silence_stderr() → L46-52
+  _restore_stderr() → L55-57
+  _get_collection() → L60-66
+  _find_nearest_topics() → L69-92
+  _call_claude() → L95-147
+  _should_skip() → L150-164
+  _increment_turn_counter() → L167-179
+  process_turn() → L182-258
+  fire_and_forget() → L261-271
+  main() → L274-291
 
 ### agent_skills/user_manager.py (86 lines)
   USERS_DIR = ... → L16
@@ -1581,6 +1723,22 @@ _Auto-generated on 2026-03-27 08:15 UTC by `generate_code_map.py`_
     __init__() → L26-30
     __call__() → L32-54
 
+### startup_code/bump_android_version.py (152 lines)
+  VESSENCE_HOME = ... → L19
+  VERSION_FILE = ... → L20
+  ANDROID_DIR = ... → L21
+  DOWNLOADS_DIR = ... → L22
+  CHANGELOG = ... → L23
+  MAIN_PY = ... → L24
+  load_version() → L27-29
+  save_version() → L32-35
+  bump_patch() → L38-41
+  update_main_py() → L44-51
+  build_apk() → L54-72
+  verify_apk_version() → L75-101
+  deploy_apk() → L104-111
+  main() → L114-148
+
 ### startup_code/claude_full_startup_context.py (55 lines)
   DATA_ROOT = ... → L13
   VESSENCE_ROOT = ... → L14
@@ -1588,6 +1746,15 @@ _Auto-generated on 2026-03-27 08:15 UTC by `generate_code_map.py`_
   DOCS = ... → L17
   read_doc() → L32-39
   main() → L42-51
+
+### startup_code/installer_simulation.py (222 lines)
+  class InstallerSimulationError → L13-14
+  _write_executable() → L17-19
+  _assert_install_result() → L22-43
+  _simulate_unix() → L46-110
+  _winepath() → L113-123
+  _simulate_windows() → L126-210
+  simulate_installer_package() → L213-222
 
 ### startup_code/session_memory_dedup.py (125 lines)
   _entry_key() → L22-24

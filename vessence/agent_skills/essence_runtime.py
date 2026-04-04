@@ -16,6 +16,7 @@ from typing import Any
 import chromadb
 
 from jane.config import (
+    get_chroma_client,
     TOOLS_DIR,
     ESSENCES_DIR,
     VESSENCE_DATA_HOME,
@@ -98,7 +99,7 @@ class EssenceRuntime:
         # Open a per-essence ChromaDB (knowledge/chromadb inside the essence folder)
         chroma_path = os.path.join(essence_dir, "knowledge", "chromadb")
         os.makedirs(chroma_path, exist_ok=True)
-        chroma_client = chromadb.PersistentClient(path=chroma_path)
+        chroma_client = get_chroma_client(path=chroma_path)
 
         state = EssenceState(
             name=essence_name,
@@ -239,8 +240,8 @@ class EssenceRuntime:
             logger.info("No ChromaDB to port for '%s'", essence_name)
             return
 
-        src_client = chromadb.PersistentClient(path=chroma_path)
-        dst_client = chromadb.PersistentClient(path=VECTOR_DB_USER_MEMORIES)
+        src_client = get_chroma_client(path=chroma_path)
+        dst_client = get_chroma_client(path=VECTOR_DB_USER_MEMORIES)
         dst_collection = dst_client.get_or_create_collection(
             name=CHROMA_COLLECTION_USER_MEMORIES
         )

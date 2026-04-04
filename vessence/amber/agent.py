@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 # Increase recursion limit to prevent OllamaException on large LiteLLM responses
 sys.setrecursionlimit(5000)
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from agent_skills.memory_retrieval import get_memory_summary
+from agent_skills.memory_retrieval import build_memory_sections
 from jane.llm_config import LOCAL_LLM_MODEL, LOCAL_LLM_BASE_URL, LOCAL_LLM_MODEL_LITELLM
 from jane.config import (
     CONFIGS_DIR as _CONFIGS_DIR,
@@ -77,10 +77,10 @@ def _fetch_ambient_memory(query: str = "", session_id: str = "") -> str:
     if not query:
         query = f"{os.environ.get('USER_NAME', 'the user')} personal life family hobbies social activities preferences work"
     try:
-        summary = get_memory_summary(query, assistant_name="Amber", session_id=session_id)
-        if summary == "No relevant context found.":
+        sections = build_memory_sections(query, assistant_name="Jane")
+        if not sections:
             return ""
-        return summary
+        return "\n\n".join(sections)
     except Exception as e:
         logger.warning(f"shared ambient memory fetch failed: {e}")
         return ""

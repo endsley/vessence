@@ -41,14 +41,14 @@ with _silence():
 import datetime
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from jane.config import VECTOR_DB_USER_MEMORIES, CHROMA_COLLECTION_USER_MEMORIES
+from jane.config import get_chroma_client, VECTOR_DB_USER_MEMORIES, CHROMA_COLLECTION_USER_MEMORIES
 
 
 def add_fact(fact: str, topic: str = "General", subtopic: str = "", author: str = "jane", user_id: str = None) -> str:
     if user_id is None:
         user_id = os.environ.get("USER_NAME", "user")
     with _silence():
-        client = chromadb.PersistentClient(path=VECTOR_DB_USER_MEMORIES)
+        client = get_chroma_client(path=VECTOR_DB_USER_MEMORIES)
         collection = client.get_or_create_collection(
             name=CHROMA_COLLECTION_USER_MEMORIES,
             metadata={"hnsw:space": "cosine"}

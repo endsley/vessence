@@ -80,6 +80,29 @@ See full spec: `/home/chieh/vessence/configs/project_specs/vessence.md`
 - Only the actual response text (white text) should be spoken, not the grey intermediate steps
 - Applies to both web and Android
 
+### 11. Retrain hey_jane Wake Word Model
+- `hey_jane.onnx` is currently broken — always fires false positives
+- Using `hey_jarvis_v0.1.onnx` as a stopgap (works well, 0.98+ scores)
+- Need to collect clean audio samples and retrain with OpenWakeWord toolkit
+- Goal: custom "Hey Jane" model with similar accuracy to hey_jarvis
+
+### 12. Screen-Off Wake Word on OnePlus
+- OnePlus battery optimization aggressively kills foreground services
+- User must manually disable battery optimization for Vessence in system settings
+- No programmatic workaround found — `ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` is not sufficient on OnePlus
+- Document this as a known requirement for OnePlus users
+
+### 13. DiagnosticReporter Uses Raw HttpURLConnection
+- `DiagnosticReporter.kt` uses raw `HttpURLConnection` instead of `ApiClient` (OkHttp/Retrofit)
+- This may not route through the relay properly since it bypasses cookie management
+- Should be migrated to use `ApiClient` for consistency and proper auth
+
+### 14. Build Emulator Test Infrastructure for Android
+- Attempted to set up Android emulator for automated testing
+- Emulator lacks Google Play Services, which breaks Google OAuth and some APIs
+- Need to either use a Play Store emulator image or mock the Google dependencies
+- Consider Robolectric for unit-level UI tests as alternative
+
 ---
 
 ## Completed Projects

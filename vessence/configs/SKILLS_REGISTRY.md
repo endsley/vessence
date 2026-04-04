@@ -1,19 +1,21 @@
 # Skills & Capabilities Registry
 
-This document is a detailed index of all major capabilities for both Jane and Amber. It maps a high-level skill to its precise file location and the primary class or function that implements it. I must read this file at startup to have a complete, actionable map of our shared codebase.
+This document is a detailed index of Jane's major capabilities. It maps a high-level skill to its precise file location and the primary class or function that implements it. I must read this file at startup to have a complete, actionable map of the codebase.
 
 ---
 
-## Amber's Capabilities
+## Jane Runtime Capabilities
 
 -   **Capability:** Text-to-Speech (TTS)
     -   **File:** `$VESSENCE_HOME/amber/tools/speech_tools.py`
     -   **Class:** `TextToSpeechTool`
+    -   **Note:** Legacy module path; capability now belongs to Jane's unified runtime
 
 -   **Capability:** Local Computer Control
     -   **File:** `$VESSENCE_HOME/amber/tools/local_computer.py`
     -   **Class:** `LocalComputer`
     -   **Key Functions:** `click_at`, `type_text_at`, `scroll_document`, `navigate`, `search`, `list_windows`, `focus_window`
+    -   **Note:** Legacy module path; capability now belongs to Jane's unified runtime
 
 -   **Capability:** Secure Vault Management
     -   **File:** `$VESSENCE_HOME/amber/tools/vault_tools.py`
@@ -37,11 +39,12 @@ This document is a detailed index of all major capabilities for both Jane and Am
     -   **Location:** `$VESSENCE_HOME/vault_web/`
     -   **URL:** Served on `http://127.0.0.1:8080`, public via Cloudflare Quick Tunnel
     -   **Services:** `vault-web.service` (FastAPI/uvicorn), `vault-tunnel.service` (cloudflared)
-    -   **Features:** OTP auth via Discord, file browser, Amber chat, music player, share links
+    -   **Features:** OTP auth via Discord, file browser, Jane chat, music player, share links
 
 -   **Capability:** Web Research
     -   **File:** `$VESSENCE_HOME/amber/tools/research_tools.py`
     -   **Class:** `TechnicalResearchTool`
+    -   **Note:** Legacy module path; capability now belongs to Jane's unified runtime
 
 ## Shared Agent Skills
 

@@ -71,10 +71,36 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             }
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 _state.value = _state.value.copy(isPlaying = isPlaying)
-                if (isPlaying) startProgressUpdates() else progressJob?.cancel()
+                if (isPlaying) {
+                    startProgressUpdates()
+                    // Stop always-listen while music is playing (prevents mic picking up music)
+                    com.vessences.android.voice.WakeWordBridge.sttActive = true
+                    com.vessences.android.voice.AlwaysListeningService.stop(getApplication())
+                } else {
+                    progressJob?.cancel()
+                    // Resume always-listen when music stops
+                    com.vessences.android.voice.WakeWordBridge.sttActive = false
+                    val voiceSettings = com.vessences.android.data.repository.VoiceSettingsRepository(getApplication())
+                    if (voiceSettings.isAlwaysListeningEnabled()) {
+                        com.vessences.android.voice.AlwaysListeningService.start(getApplication())
+                    }
+                }
             }
         })
         loadPlaylists()
+
+        // Auto-play if navigated here from Jane's [MUSIC_PLAY:id] command
+        val pendingPlaylistId = com.vessences.android.MusicPlayNavigationState.consume()
+        if (pendingPlaylistId != null) {
+            android.util.Log.i("MusicVM", "Auto-playing playlist: $pendingPlaylistId")
+            viewModelScope.launch {
+                repo.getPlaylist(pendingPlaylistId).onSuccess { playlist ->
+                    _state.value = _state.value.copy(activePlaylist = playlist, currentTrackIndex = 0)
+                    preparePlaylist(playlist)
+                    playTrack(0)
+                }
+            }
+        }
     }
 
     fun loadPlaylists() {

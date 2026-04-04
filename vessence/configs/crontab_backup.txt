@@ -6,7 +6,6 @@ AMBIENT_HOME=/home/chieh/ambient/vessence-data
 JANE_BRAIN=claude
 TOOLS_DIR=/home/chieh/ambient/tools
 15 3 * * * /home/chieh/google-adk-env/adk-venv/bin/python $VESSENCE_HOME/startup_code/regenerate_jane_context.py >> $VESSENCE_DATA_HOME/logs/regenerate_jane_context.log 2>&1
-15 2 * * * /home/chieh/google-adk-env/adk-venv/bin/python $VESSENCE_HOME/agent_skills/janitor_memory.py >> $VESSENCE_DATA_HOME/logs/Amber_log/janitor_memory.log 2>&1
 # DISABLED: Discord disconnected
 # */3 * * * * $VESSENCE_HOME/startup_code/bot_watchdog.sh >> $VESSENCE_DATA_HOME/logs/System_log/watchdog.log 2>&1
 0 3 * * * /home/chieh/google-adk-env/adk-venv/bin/python $VESSENCE_HOME/agent_skills/generate_identity_essay.py >> $VESSENCE_DATA_HOME/logs/Amber_log/identity_essay.log 2>&1
@@ -19,8 +18,12 @@ TOOLS_DIR=/home/chieh/ambient/tools
 */5 * * * * /home/chieh/google-adk-env/adk-venv/bin/python $VESSENCE_HOME/agent_skills/job_queue_runner.py >> $VESSENCE_DATA_HOME/logs/job_queue.log 2>&1
 0 */6 * * * /home/chieh/google-adk-env/adk-venv/bin/python $VESSENCE_HOME/agent_skills/nightly_audit.py >> $VESSENCE_DATA_HOME/logs/nightly_audit.log 2>&1
 # Daily Briefing — morning and evening fetches
-10 2 * * * /home/chieh/google-adk-env/adk-venv/bin/python /home/chieh/ambient/tools/daily_briefing/functions/run_briefing.py >> $VESSENCE_DATA_HOME/logs/System_log/briefing.log 2>&1
+10 2 * * * timeout 30m /home/chieh/google-adk-env/adk-venv/bin/python /home/chieh/ambient/tools/daily_briefing/functions/run_briefing.py >> $VESSENCE_DATA_HOME/logs/System_log/briefing.log 2>&1
 * * * * * /home/chieh/google-adk-env/adk-venv/bin/python $VESSENCE_HOME/agent_skills/essence_scheduler.py >> $VESSENCE_DATA_HOME/logs/essence_scheduler.log 2>&1
 0 2 * * * /home/chieh/google-adk-env/adk-venv/bin/python $VESSENCE_HOME/agent_skills/audit_auto_fixer.py >> $VESSENCE_DATA_HOME/logs/audit_auto_fix.log 2>&1
 15 4 * * * /home/chieh/google-adk-env/adk-venv/bin/python $VESSENCE_HOME/agent_skills/generate_code_map.py >> $VESSENCE_DATA_HOME/logs/code_map.log 2>&1
 10 2 * * * /home/chieh/google-adk-env/adk-venv/bin/python /home/chieh/ambient/vessence/agent_skills/evolve_code_map_keywords.py >> /home/chieh/ambient/vessence-data/logs/evolve_keywords.log 2>&1
+*/40 * * * * /home/chieh/google-adk-env/adk-venv/bin/python /home/chieh/ambient/vessence/agent_skills/janitor_memory.py >> /home/chieh/ambient/vessence-data/logs/Amber_log/janitor_memory.log 2>&1
+30 3 * * * /home/chieh/google-adk-env/adk-venv/bin/python $VESSENCE_HOME/agent_skills/daily_code_review.py >> $VESSENCE_DATA_HOME/logs/daily_code_review.log 2>&1
+*/5 * * * * /home/chieh/google-adk-env/adk-venv/bin/python /home/chieh/ambient/vessence/agent_skills/process_watchdog.py >> /home/chieh/ambient/vessence-data/logs/System_log/watchdog.log 2>&1
+0 11 * * * /home/chieh/google-adk-env/adk-venv/bin/python $VESSENCE_HOME/agent_skills/notify_audit_results.py >> $VESSENCE_DATA_HOME/logs/System_log/audit_result_notify.log 2>&1

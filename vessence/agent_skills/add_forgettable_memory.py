@@ -48,7 +48,7 @@ with silence_stderr_fd():
     import chromadb
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from jane.config import SHORT_TERM_TTL_DAYS as DEFAULT_TTL_DAYS, VECTOR_DB_SHORT_TERM as SHORT_TERM_DB_PATH, CHROMA_COLLECTION_SHORT_TERM
+from jane.config import get_chroma_client, SHORT_TERM_TTL_DAYS as DEFAULT_TTL_DAYS, VECTOR_DB_SHORT_TERM as SHORT_TERM_DB_PATH, CHROMA_COLLECTION_SHORT_TERM
 
 
 def add_forgettable_memory(
@@ -68,7 +68,7 @@ def add_forgettable_memory(
     memory_id = str(uuid.uuid4())
 
     with silence_stderr_fd():
-        client = chromadb.PersistentClient(path=SHORT_TERM_DB_PATH)
+        client = get_chroma_client(path=SHORT_TERM_DB_PATH)
         collection = client.get_or_create_collection(
             name=CHROMA_COLLECTION_SHORT_TERM,
             metadata={"hnsw:space": "cosine"},

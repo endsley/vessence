@@ -7,7 +7,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from agent_skills.search_memory import get_memory_summary
+from agent_skills.memory_retrieval import build_memory_sections
 from jane.config import VESSENCE_DATA_HOME, VESSENCE_HOME
 from jane.research_router import run_research_offload, should_offload_research
 
@@ -259,12 +259,12 @@ def _safe_get_memory_summary(
     # Slow fallback: direct ChromaDB query (if daemon is down)
     try:
         essence_chromadb = _get_active_essence_chromadb_path()
-        memory_summary = get_memory_summary(
+        sections = build_memory_sections(
             message,
-            conversation_summary=conversation_summary,
-            session_id=session_id,
+            assistant_name="Jane",
             essence_chromadb_path=essence_chromadb,
         )
+        memory_summary = "\n\n".join(sections) if sections else "No relevant context found."
     except Exception:
         logger.exception("Jane memory retrieval failed")
         return _normalize_memory_summary("", fallback_summary)
@@ -551,6 +551,53 @@ def _build_system_sections(
     #     code_map = _cached("code_map_core", _load_code_map, ttl=600)
     #     if code_map:
     #         system_sections.append(f"## Code Map\n...")
+    # Conversational acknowledgment: brain outputs a brief [ACK] before the full response
+    system_sections.append(
+        "## Response Format — Acknowledgment\n"
+        "IMPORTANT: Before ANY tool calls, reasoning, or other output, you MUST output a brief "
+        "acknowledgment wrapped in [ACK]...[/ACK] tags as your VERY FIRST output. "
+        "This acknowledgment is displayed/spoken immediately while your full response streams.\n"
+        "The [ACK] should:\n"
+        "- Address the user by name\n"
+        "- Show you understood what they asked (be specific, not generic)\n"
+        "- Give a sense of how long it will take (quick lookup vs. complex task)\n"
+        "- Be 1 short sentence, conversational tone\n\n"
+        "Examples:\n"
+        "[ACK]Sure Chieh, let me check the weather real quick.[/ACK]\n"
+        "[ACK]On it Chieh — let me dig into that auth issue.[/ACK]\n"
+        "[ACK]That's a big refactor, Chieh. Let me plan it out — this'll take a minute.[/ACK]\n\n"
+        "For simple greetings or very short replies, skip the [ACK] tags and just respond naturally."
+    )
+    # Subagent delegation: Sonnet handles conversation, Opus handles heavy work
+    system_sections.append(
+        "## Delegation — When to Use Subagents\n"
+        "You are running as Sonnet (fast, conversational). For tasks that need deep reasoning "
+        "or complex code work, spawn an Opus subagent using the Agent tool. Delegate when:\n"
+        "- Writing or refactoring more than ~20 lines of code\n"
+        "- Debugging complex multi-file issues\n"
+        "- Deep architectural analysis or planning\n"
+        "- Multi-step research across the codebase\n\n"
+        "For everything else — conversation, quick answers, simple file reads, short edits, "
+        "status checks — handle it yourself. Don't delegate trivial tasks."
+    )
+    # Rich content tags for Android/web rendering
+    system_sections.append(
+        "## Rich Content Tags\n"
+        "When showing images from the vault, wrap the vault path in action tags:\n"
+        "  {{image:images/photo.jpg}} — renders as a clickable thumbnail\n"
+        "  {{play:audio/song.mp3}} — renders as an audio player\n"
+        "  {{navigate:Life Librarian}} — renders as a navigation button\n"
+        "Always use these tags when referencing vault files so the UI can render them properly."
+    )
+    # Default tools awareness
+    system_sections.append(
+        "## Available Tools\n"
+        "You have these tools available that users can interact with:\n"
+        "- **Life Librarian** — file browser for the user's vault (personal cloud storage). Navigate with {{navigate:Life Librarian}}\n"
+        "- **Music Playlist** — browse audio files, build playlists, play music. Navigate with {{navigate:Music Playlist}}\n"
+        "- **Daily Briefing** — daily news digest and topic summaries. Navigate with {{navigate:Daily Briefing}}\n"
+        "When users ask about their files, photos, music, or news, reference these tools."
+    )
     system_sections.append(
         "Prefer the user's most recent explicit message when it conflicts with older memory."
     )
@@ -586,18 +633,20 @@ def _format_recent_history(history: list[dict], max_turns: int = 6, max_chars: i
 
 
 TTS_SPOKEN_BLOCK_INSTRUCTION = (
-    "IMPORTANT — TTS mode is ON. The user will hear a short summary read aloud, "
-    "and can expand to see the full detailed response.\n"
-    "Structure your response as:\n"
-    "<spoken>1-3 sentence summary in plain spoken English. No symbols, no markdown. "
-    "Write exactly as you would speak — short sentences, conversational tone. "
-    "NEVER use parentheses, brackets, braces, asterisks, dashes, slashes, pipes, "
-    "colons for lists, or any symbols that sound awkward when read aloud.</spoken>\n\n"
-    "Then provide the full detailed response below the <spoken> block "
-    "(with markdown, code blocks, tables, bullet lists as needed). "
-    "The spoken part is a brief conversational summary; the full response has all the detail.\n"
-    "Example:\n"
-    "<spoken>I updated the config file to fix the timeout. The change is on line 42.</spoken>\n\n"
+    "IMPORTANT — TTS mode is ON. The user is LISTENING, not reading. "
+    "Keep your ENTIRE response short and conversational — like a spoken conversation, "
+    "not a written document. Aim for 2-5 sentences max for most replies.\n\n"
+    "Rules for TTS mode:\n"
+    "- Be concise. Answer in 2-5 short sentences like you're talking face to face.\n"
+    "- No markdown, no bullet lists, no code blocks, no tables in your main response.\n"
+    "- No parentheses, brackets, asterisks, or symbols that sound awkward spoken aloud.\n"
+    "- If the user asks something that genuinely needs detail (code, long explanation), "
+    "put the short spoken answer in a <spoken> tag and the full detail after it.\n"
+    "- For casual/simple questions, just reply naturally — no <spoken> tag needed.\n\n"
+    "Example (simple question):\n"
+    "Yeah, the timeout was set to 10 seconds. I bumped it to 30 and it should be fine now.\n\n"
+    "Example (needs detail):\n"
+    "<spoken>I fixed the timeout issue. The change is on line 42 of the config file.</spoken>\n\n"
     "Here's what I changed:\n"
     "- `timeout` was set to `10` — I bumped it to `30`\n"
     "```python\ntimeout = 30\n```"
@@ -764,23 +813,9 @@ async def build_jane_context_async(
         label = platform_labels.get(platform, platform)
         system_sections.append(f"[Platform] The user is chatting from the {label}.")
 
-    # Essence navigation capability (web and Android only)
-    if platform in ("android", "web"):
-        system_sections.append(
-            "[Navigation Actions] You can navigate the user to an essence or file by including "
-            "these tags in your response (they render as tappable buttons):\n"
-            "- {{navigate:Daily Briefing}} — opens the Daily Briefing essence\n"
-            "- {{navigate:Music Playlist}} — opens the Music Playlist essence\n"
-            "- {{navigate:Life Librarian}} — opens the file browser\n"
-            "- {{navigate:Work Log}} — opens the work log\n"
-            "- {{image:path/to/file.jpg}} — displays a vault image inline in the chat\n"
-            "- {{play:path/to/song.mp3}} — shows a playable audio card with play button\n"
-            "- {{search_results:audio:query}} — shows file search results for the query\n"
-            "Use these when the user asks to go somewhere, play something, or view files. "
-            "When the user asks to see an image or play a song, first search the vault using "
-            "your knowledge of files. Then include the appropriate tag with the vault-relative path. "
-            "Include the tag at the end of your response text."
-        )
+    # Navigation tag syntax removed from per-request context (2026-03-29).
+    # Tag syntax ({{navigate:X}}, {{image:X}}, {{play:X}}, {{search_results:audio:X}})
+    # is stored in ChromaDB memory and retrieved on demand when relevant.
 
     if tts_enabled:
         system_sections.append(TTS_SPOKEN_BLOCK_INSTRUCTION)

@@ -17,10 +17,13 @@ from starlette.middleware.sessions import SessionMiddleware
 from pydantic import BaseModel
 import asyncio
 import aiofiles
+import base64
 import hashlib
 import json
 import logging
+import re
 import subprocess
+import tempfile
 import time
 try:
     import chromadb
@@ -84,7 +87,31 @@ VAULT_WEB_DIR = CODE_ROOT / "vault_web"
 BASE_DIR = Path(__file__).parent
 MARKETING_DIR = CODE_ROOT / "marketing_site"
 MARKETING_DOWNLOADS_DIR = MARKETING_DIR / "downloads"
-ANDROID_VERSION = "0.0.41"
+import json as _json
+try:
+    _version_data = _json.loads((CODE_ROOT / "version.json").read_text())
+    ANDROID_VERSION = _version_data["version_name"]
+    _ANDROID_VERSION_CODE = _version_data["version_code"]
+except FileNotFoundError:
+    ANDROID_VERSION = "0.1.55"
+    _ANDROID_VERSION_CODE = 163
+
+# Startup validation: ensure the APK for the advertised version actually exists
+_expected_apk = MARKETING_DOWNLOADS_DIR / f"vessences-android-v{ANDROID_VERSION}.apk"
+if not _expected_apk.exists():
+    import logging as _logging
+    _logging.getLogger("jane.web").critical(
+        "APK MISSING: version.json says v%s but %s does not exist! "
+        "Run startup_code/bump_android_version.py to build it.",
+        ANDROID_VERSION, _expected_apk,
+    )
+elif _expected_apk.stat().st_size < 1_000_000:  # < 1MB = likely corrupt
+    import logging as _logging
+    _logging.getLogger("jane.web").critical(
+        "APK CORRUPT: %s is only %d bytes — likely not a valid APK. Rebuild with bump_android_version.py.",
+        _expected_apk, _expected_apk.stat().st_size,
+    )
+
 def _find_latest(pattern: str) -> Optional[Path]:
     """Return the newest file matching a glob pattern in MARKETING_DOWNLOADS_DIR, or None."""
     matches = sorted(MARKETING_DOWNLOADS_DIR.glob(pattern), key=lambda p: p.stat().st_mtime, reverse=True)
@@ -95,7 +122,8 @@ PUBLIC_RELEASE_DOWNLOADS = {
     "docker-compose.yml": MARKETING_DIR / "docker-compose.yml",
     # Docker image tarball
     "vessence-docker-0.0.43.tar.gz": MARKETING_DOWNLOADS_DIR / "vessence-docker-0.0.43.tar.gz",
-    # Android
+    # Universal Installer (bundled source + scripts)
+    "vessence-installer-0.0.42.zip": MARKETING_DOWNLOADS_DIR / "vessence-installer-0.0.42.zip",
     f"vessences-android-v{ANDROID_VERSION}.apk": MARKETING_DOWNLOADS_DIR / f"vessences-android-v{ANDROID_VERSION}.apk",
     "vessences-android.apk": MARKETING_DOWNLOADS_DIR / f"vessences-android-v{ANDROID_VERSION}.apk",
     "vessences-android-package.zip": MARKETING_DOWNLOADS_DIR / "vessences-android-package.zip",
@@ -245,8 +273,8 @@ async def startup():
     _background_tasks.add(reaper)
     reaper.add_done_callback(_background_tasks.discard)
     _logger.info("Jane Web startup complete — database initialized, essences loaded, ready to serve")
-    # Pre-warm Ollama gemma model so first intent classification is fast
-    prewarm = asyncio.create_task(_prewarm_ollama())
+    # Pre-warm gemma4:e4b — used by the prompt router for every request
+    prewarm = asyncio.create_task(_prewarm_gemma4())
     _background_tasks.add(prewarm)
     prewarm.add_done_callback(_background_tasks.discard)
     # Start Standing Brain processes (3 tiers: light/medium/heavy)
@@ -256,22 +284,41 @@ async def startup():
 
 
 async def _start_standing_brains():
-    """Start all standing brain CLI processes at service startup."""
+    """Start the standing brain CLI process at service startup."""
     try:
         from jane.standing_brain import get_standing_brain_manager
         manager = get_standing_brain_manager()
         await manager.start()
         health = await manager.health_check()
-        alive = sum(1 for v in health.values() if v["alive"])
-        _logger.info("Standing Brain: %d/%d brains alive — %s",
-                      alive, len(health),
-                      {k: f'{v["model"]} pid={v["pid"]}' for k, v in health.items() if v["alive"]})
+        if health.get("alive"):
+            _logger.info("Standing Brain alive: model=%s pid=%s turns=%d",
+                          health["model"], health.get("pid"), health.get("turns", 0))
+        else:
+            _logger.warning("Standing Brain not alive after startup: %s", health)
     except Exception as exc:
         _logger.error("Standing Brain startup failed: %s", exc)
 
 
+async def _prewarm_gemma4():
+    """Pre-warm gemma4:e4b for the prompt router."""
+    model = os.environ.get("GEMMA_ROUTER_MODEL", "gemma4:e4b")
+    if ":" not in model:
+        return
+    _logger.info("Pre-warming Gemma4 router model: %s", model)
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "ollama", "run", model, "hi",
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        await asyncio.wait_for(proc.wait(), timeout=120)
+        _logger.info("Gemma4 router model %s pre-warmed", model)
+    except Exception as e:
+        _logger.warning("Gemma4 prewarm failed: %s", e)
+
+
 async def _prewarm_ollama():
-    """Send a dummy classify call to load gemma into VRAM at startup."""
+    """Legacy prewarm — no longer called at startup."""
     import subprocess
     model = os.environ.get("INTENT_CLASSIFIER_MODEL", "gemma3:4b")
     if ":" not in model:
@@ -424,10 +471,16 @@ def get_session_id(request: Request) -> Optional[str]:
     return request.cookies.get(SESSION_COOKIE)
 
 
+def _is_local_browser_access(request: Request) -> bool:
+    host = (request.headers.get("host") or request.url.hostname or "").split(",")[0].strip().lower()
+    host = host.split(":")[0]
+    return host in ("localhost", "127.0.0.1", "::1")
+
+
 def require_auth(request: Request):
     # Allow internal requests from localhost (prompt queue runner, cron jobs)
     client_host = request.client.host if request.client else ""
-    if client_host in ("127.0.0.1", "::1", "localhost"):
+    if client_host in ("127.0.0.1", "::1", "localhost") or _is_local_browser_access(request):
         return request.query_params.get("session_id") or "internal"
     session_id = get_session_id(request)
     fp = device_fingerprint_from_request(request)
@@ -493,6 +546,17 @@ def get_or_bootstrap_session(request: Request) -> tuple[Optional[str], Optional[
         )
         prewarm_session(session_id)
         return session_id, trusted_row["id"]
+
+    if _is_local_browser_access(request):
+        session_id = create_session(fp, trusted=False, user_id=_default_user_id())
+        _logger.info(
+            "Session bootstrap created local session=%s host=%s ip=%s",
+            _session_log_id(session_id),
+            request.headers.get("host", ""),
+            _client_ip(request),
+        )
+        prewarm_session(session_id)
+        return session_id, None
 
     _logger.info(
         "Session bootstrap found no authenticated session ip=%s trusted_cookie=%s",
@@ -619,6 +683,34 @@ async def essences_page(request: Request, _=Depends(require_auth)):
 async def worklog_page(request: Request, _=Depends(require_auth)):
     return FileResponse(str(STATIC_DIR / "worklog.html"), media_type="text/html")
 
+@app.get("/api/job-queue")
+async def get_job_queue(_=Depends(require_auth)):
+    """Return job queue as structured JSON for client-side rendering."""
+    import subprocess as _sp
+    try:
+        r = _sp.run(
+            [sys.executable, os.path.join(CODE_ROOT, "agent_skills", "show_job_queue.py")],
+            capture_output=True, text=True, timeout=5,
+        )
+        return json.loads(r.stdout) if r.stdout.strip() else {"columns": [], "jobs": [], "count": 0}
+    except Exception:
+        return {"columns": [], "jobs": [], "count": 0}
+
+
+@app.get("/api/job-queue/completed")
+async def get_completed_jobs(_=Depends(require_auth)):
+    """Return completed jobs as structured JSON for client-side rendering."""
+    import subprocess as _sp
+    try:
+        r = _sp.run(
+            [sys.executable, os.path.join(CODE_ROOT, "agent_skills", "show_job_queue.py"), "--completed"],
+            capture_output=True, text=True, timeout=5,
+        )
+        return json.loads(r.stdout) if r.stdout.strip() else {"columns": [], "jobs": [], "count": 0}
+    except Exception:
+        return {"columns": [], "jobs": [], "count": 0}
+
+
 @app.get("/briefing", response_class=HTMLResponse)
 async def briefing_page(request: Request, _=Depends(require_auth)):
     return templates.TemplateResponse("briefing.html", {"request": request})
@@ -633,6 +725,39 @@ async def receive_crash_report(request: Request):
         f.write(f"\n{'='*60}\n{report}\n")
     _logger.error("Android crash report received:\n%s", report[:500])
     return {"status": "received"}
+
+
+@app.post("/api/device-diagnostics")
+async def receive_device_diagnostics(request: Request):
+    """Receive diagnostic data from Android: wake word status, mic state, errors, scores, etc."""
+    import json as _json
+    body = await request.json()
+    diag_file = Path(LOGS_DIR) / "android_diagnostics.jsonl"
+    with open(diag_file, "a") as f:
+        f.write(_json.dumps(body) + "\n")
+    category = body.get("category", "unknown")
+    message = body.get("message", "")
+    _logger.info("Android diagnostic [%s]: %s", category, message[:200])
+    return {"status": "received"}
+
+
+@app.get("/api/device-diagnostics")
+async def get_device_diagnostics(request: Request, _=Depends(require_auth), lines: int = 50):
+    """Read recent diagnostics (most recent first)."""
+    diag_file = Path(LOGS_DIR) / "android_diagnostics.jsonl"
+    if not diag_file.exists():
+        return {"diagnostics": []}
+    import json as _json
+    all_lines = diag_file.read_text().strip().split("\n")
+    recent = all_lines[-lines:]
+    recent.reverse()
+    entries = []
+    for line in recent:
+        try:
+            entries.append(_json.loads(line))
+        except _json.JSONDecodeError:
+            pass
+    return {"diagnostics": entries}
 
 
 @app.get("/settings/devices", response_class=HTMLResponse)
@@ -650,6 +775,12 @@ async def download_release_artifact(filename: str):
         glob_pattern = _INSTALLER_GLOBS.get(filename)
         if glob_pattern:
             target = _find_latest(glob_pattern)
+    # Dynamic APK fallback — serves versioned APKs deployed after server startup
+    # without requiring a restart. Matches any "vessences-android-vX.Y.Z.apk" request.
+    if (not target or not target.exists() or not target.is_file()) and filename.endswith(".apk"):
+        candidate = MARKETING_DOWNLOADS_DIR / filename
+        if candidate.exists() and candidate.is_file():
+            target = candidate
     if not target or not target.exists() or not target.is_file():
         raise HTTPException(status_code=404)
     suffix = target.suffix.lower()
@@ -693,9 +824,41 @@ def _save_app_settings(settings: dict):
 
 # ─── Chat TTS API — XTTS-v2 audio for Jane's chat responses ─────────────────
 
+def _split_tts_chunks(text: str, max_chars: int = 150) -> list[str]:
+    """Split text into sentence-level chunks for XTTS-v2 (~20s max per chunk)."""
+    import re
+    sentences = re.split(r'(?<=[.!?])\s+', text.strip())
+    chunks, current = [], ""
+    for s in sentences:
+        s = s.strip()
+        if not s:
+            continue
+        if current and len(current) + len(s) + 1 <= max_chars:
+            current += " " + s
+        else:
+            if current:
+                chunks.append(current)
+            if len(s) > max_chars:
+                for part in re.split(r',\s*', s):
+                    if current and len(current) + len(part) + 2 <= max_chars:
+                        current += ", " + part
+                    else:
+                        if current:
+                            chunks.append(current)
+                        current = part
+            else:
+                current = s
+    if current:
+        chunks.append(current)
+    return chunks or [text[:max_chars]]
+
+
+# Limit TTS to 1 concurrent Docker container to prevent RAM/CPU exhaustion
+_tts_semaphore = asyncio.Semaphore(1)
+
 @app.post("/api/tts/generate")
 async def generate_tts(request: Request, _=Depends(require_auth)):
-    """Generate XTTS-v2 audio for text. Returns wav file.
+    """Generate XTTS-v2 audio for text. Chunks by sentence, compresses to Opus/OGG.
     Body: {"text": "...", "speaker": "Barbora MacLean"}
     """
     body = await request.json()
@@ -704,38 +867,77 @@ async def generate_tts(request: Request, _=Depends(require_auth)):
     if not text:
         raise HTTPException(status_code=422, detail="text is required")
 
-    import hashlib
+    import hashlib, wave, tempfile, shutil
     text_hash = hashlib.md5(text.encode()).hexdigest()[:12]
     cache_dir = os.path.join(VESSENCE_DATA_HOME, "cache", "tts")
     os.makedirs(cache_dir, exist_ok=True)
-    cache_path = os.path.join(cache_dir, f"{text_hash}.wav")
+    ogg_path = os.path.join(cache_dir, f"{text_hash}.ogg")
 
-    if os.path.exists(cache_path):
-        return FileResponse(cache_path, media_type="audio/wav")
+    # Check cache (both ogg and legacy wav)
+    if os.path.exists(ogg_path):
+        return FileResponse(ogg_path, media_type="audio/ogg")
+    legacy_wav = os.path.join(cache_dir, f"{text_hash}.wav")
+    if os.path.exists(legacy_wav):
+        return FileResponse(legacy_wav, media_type="audio/wav")
 
     gpu_flag = ["--gpus", "all"] if os.path.exists("/usr/bin/nvidia-smi") else []
-    cmd = [
-        "docker", "run", "--rm", *gpu_flag,
-        "-e", "COQUI_TOS_AGREED=1",
-        "-v", f"{cache_dir}:/output",
-        "ghcr.io/coqui-ai/tts:latest",
-        "--text", text[:500],
-        "--model_name", "tts_models/multilingual/multi-dataset/xtts_v2",
-        "--speaker_idx", speaker,
-        "--language_idx", "en",
-        "--out_path", f"/output/{text_hash}.wav",
-    ]
+    chunks = _split_tts_chunks(text[:1000])
+    tmp_dir = tempfile.mkdtemp(prefix="tts_web_")
 
     try:
-        result = await asyncio.to_thread(
-            subprocess.run, cmd,
-            capture_output=True, text=True, timeout=120,
+        chunk_wavs = []
+        for i, chunk in enumerate(chunks):
+            chunk_wav = os.path.join(tmp_dir, f"chunk_{i:03d}.wav")
+            cmd = [
+                "docker", "run", "--rm", *gpu_flag,
+                "--memory=4g", "--cpus=2",
+                "-e", "COQUI_TOS_AGREED=1",
+                "-v", f"{tmp_dir}:/output",
+                "ghcr.io/coqui-ai/tts:latest",
+                "--text", chunk,
+                "--model_name", "tts_models/multilingual/multi-dataset/xtts_v2",
+                "--speaker_idx", speaker,
+                "--language_idx", "en",
+                "--out_path", f"/output/chunk_{i:03d}.wav",
+            ]
+            async with _tts_semaphore:
+                result = await asyncio.to_thread(
+                    subprocess.run, cmd,
+                    capture_output=True, text=True, timeout=120,
+                )
+            if result.returncode == 0 and os.path.exists(chunk_wav):
+                chunk_wavs.append(chunk_wav)
+
+        if not chunk_wavs:
+            raise HTTPException(status_code=500, detail="TTS generation failed")
+
+        # Concatenate WAV chunks
+        combined_wav = os.path.join(tmp_dir, "combined.wav")
+        with wave.open(chunk_wavs[0], 'rb') as first:
+            params = first.getparams()
+        with wave.open(combined_wav, 'wb') as out:
+            out.setparams(params)
+            for wp in chunk_wavs:
+                with wave.open(wp, 'rb') as w:
+                    out.writeframes(w.readframes(w.getnframes()))
+
+        # Compress to Opus/OGG
+        compress_result = await asyncio.to_thread(
+            subprocess.run,
+            ["ffmpeg", "-y", "-i", combined_wav, "-c:a", "libopus", "-b:a", "48k", ogg_path],
+            capture_output=True, text=True, timeout=60,
         )
-        if result.returncode == 0 and os.path.exists(cache_path):
-            return FileResponse(cache_path, media_type="audio/wav")
-        raise HTTPException(status_code=500, detail="TTS generation failed")
+        if compress_result.returncode == 0 and os.path.exists(ogg_path):
+            return FileResponse(ogg_path, media_type="audio/ogg")
+
+        # Fall back to serving uncompressed WAV if ffmpeg fails
+        shutil.copy2(combined_wav, legacy_wav)
+        return FileResponse(legacy_wav, media_type="audio/wav")
+
     except subprocess.TimeoutExpired:
         raise HTTPException(status_code=504, detail="TTS generation timed out")
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
 @app.get("/api/app/settings")
@@ -768,11 +970,30 @@ async def report_app_installed(request: Request):
 
 @app.get("/api/app/latest-version")
 async def latest_app_version():
+    # Read version.json fresh each time so builds are picked up without server restart
+    vdata = _json.loads((CODE_ROOT / "version.json").read_text())
+    version_name = vdata["version_name"]
+    version_code = vdata["version_code"]
+    apk_path = MARKETING_DOWNLOADS_DIR / f"vessences-android-v{version_name}.apk"
+    # Guard: don't advertise a version whose APK hasn't been deployed yet.
+    # If the file is missing, walk back to the newest APK that actually exists.
+    if not apk_path.exists():
+        existing = sorted(
+            MARKETING_DOWNLOADS_DIR.glob("vessences-android-v*.apk"),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        if existing:
+            version_name = existing[0].stem[len("vessences-android-v"):]
+            # version_code from version.json may be ahead — use file-based name only
+        else:
+            # No APK at all; return version info without a usable download URL
+            return {"version_code": version_code, "version_name": version_name, "download_url": None, "changelog": ""}
     return {
-        "version_code": 43,
-        "version_name": ANDROID_VERSION,
-        "download_url": f"/downloads/vessences-android-v{ANDROID_VERSION}.apk",
-        "changelog": "Message queuing, ESC cancel, TTS toggle, live broadcast, new chat button, platform awareness",
+        "version_code": version_code,
+        "version_name": version_name,
+        "download_url": f"/downloads/vessences-android-v{version_name}.apk",
+        "changelog": "",
     }
 
 
@@ -835,8 +1056,9 @@ async def auth_google_token(request: Request):
             id_token_str, google_requests.Request(), client_id
         )
         email = idinfo.get("email", "")
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid Google ID token")
+    except Exception as exc:
+        _logger.error("Google ID token verification failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=400, detail=f"Invalid Google ID token: {exc}")
     if not allowed_email(email):
         raise HTTPException(status_code=403, detail=f"Account {email} is not authorized.")
     fp = device_fingerprint_from_request(request)
@@ -942,13 +1164,13 @@ async def get_announcements(since: Optional[str] = None, _=Depends(require_auth)
 _AVAILABLE_MODELS = {
     "claude": ["claude-haiku-4-5-20251001", "claude-sonnet-4-6", "claude-opus-4-6"],
     "gemini": ["gemini-2.5-flash", "gemini-2.5-pro"],
-    "openai": ["gpt-4.1-mini", "gpt-4.1", "o3"],
+    "openai": ["gpt-5.4-mini", "gpt-5.4", "gpt-4.1-mini", "gpt-4.1", "o3"],
 }
 
 _DEFAULT_MODEL = {
     "claude": "claude-opus-4-6",
     "gemini": "gemini-2.5-pro",
-    "openai": "o3",
+    "openai": "gpt-5.4",
 }
 
 _ENV_VAR_FOR_MODEL = {
@@ -960,18 +1182,34 @@ _ENV_VAR_FOR_MODEL = {
 
 @app.get("/api/settings/models")
 async def get_model_settings(_=Depends(require_auth)):
-    """Return current model config and available options per provider."""
+    """Return current model config, available options, and 3-tier architecture."""
     provider = os.environ.get("JANE_BRAIN", "claude").lower()
     default = _DEFAULT_MODEL.get(provider, _DEFAULT_MODEL["claude"])
     env_var = _ENV_VAR_FOR_MODEL.get(provider, _ENV_VAR_FOR_MODEL["claude"])
-    # Also check legacy env var for backwards compatibility
     legacy_var = f"BRAIN_HEAVY_{provider.upper()}"
     current = os.environ.get(env_var) or os.environ.get(legacy_var) or default
+
+    # 4-Tier Architecture Information
+    from jane.config import SMART_MODEL, CHEAP_MODEL, LOCAL_LLM_MODEL
+    
+    # Heuristic for the new tiers based on existing config
+    # Orchestrator = current (the one you switch)
+    # Agent = SMART_MODEL (the specialized one)
+    # Utility = CHEAP_MODEL (the background one)
+    # Local = LOCAL_LLM_MODEL (Ollama)
+    
+    tiers = [
+        {"tier": "Orchestrator", "role": "The Primary Brain (Reasoning, Code)", "model": current},
+        {"tier": "Agent", "role": "The Specialist (Research, Memory)", "model": SMART_MODEL},
+        {"tier": "Utility", "role": "The Worker (Archival, Triage)", "model": CHEAP_MODEL},
+        {"tier": "Local", "role": "Privacy & Speed (Local Processing)", "model": LOCAL_LLM_MODEL},
+    ]
 
     return {
         "provider": provider,
         "model": {"current": current, "default": default, "env_var": env_var},
         "available_models": _AVAILABLE_MODELS,
+        "tiers": tiers,
     }
 
 
@@ -1508,6 +1746,26 @@ async def upload_single_file(
         f.write(data)
 
     rel_path = str(dest_path.relative_to(vault_root))
+
+    # Index in ChromaDB so Jane and memory system can find the file
+    try:
+        from vault_web.main import upsert_file_index_entry
+        upsert_file_index_entry(rel_path, f"File uploaded from Android: {dest_path.name}", mime, updated_by="android_upload")
+    except Exception:
+        pass
+
+    # Save to memory
+    try:
+        import subprocess as _sp
+        _sp.run([
+            sys.executable,
+            str(Path(__file__).resolve().parents[1] / "agent_skills" / "add_fact.py"),
+            f"File uploaded from Android: {dest_path.name} saved to vault/{subdir}/",
+            "--topic", "vault", "--subtopic", "upload",
+        ], timeout=10, capture_output=True)
+    except Exception:
+        pass
+
     response = JSONResponse({
         "file_url": f"/api/files/serve/{rel_path}",
         "filename": dest_path.name,
@@ -1574,6 +1832,52 @@ async def update_playlist_route(playlist_id: str, body: dict, _=Depends(require_
 async def delete_playlist_route(playlist_id: str, _=Depends(require_auth)):
     delete_playlist(playlist_id)
     return {"ok": True}
+
+
+@app.post("/api/music/play")
+async def music_play(body: dict, _=Depends(require_auth)):
+    """Search vault music by query and create a temporary playlist.
+
+    Body: {"query": "the scientist"} or {"query": "shakira"} or {"query": "random"}
+    Returns: {"playlist_id": "...", "name": "...", "tracks": [...], "temporary": true}
+    """
+    import glob, random, re
+
+    query = (body.get("query") or "").strip().lower()
+    vault_music = Path(os.environ.get("VAULT_HOME", Path.home() / "ambient" / "vault")) / "Music"
+
+    # Find all mp3 files
+    all_files = sorted(glob.glob(str(vault_music / "**" / "*.mp3"), recursive=True))
+    if not all_files:
+        raise HTTPException(status_code=404, detail="No music files found in vault")
+
+    if query in ("random", "anything", "something", "a song", "music"):
+        # Random selection — pick 10 random tracks
+        selected = random.sample(all_files, min(10, len(all_files)))
+        playlist_name = "Random Mix"
+    else:
+        # Search by filename (artist, title, keywords)
+        selected = [f for f in all_files if query in f.lower().split("/")[-1].lower()]
+        if not selected:
+            # Fuzzy: try each word
+            words = query.split()
+            selected = [f for f in all_files if any(w in f.lower().split("/")[-1].lower() for w in words)]
+        if not selected:
+            raise HTTPException(status_code=404, detail=f"No tracks matching '{query}'")
+        playlist_name = f"Playing: {query.title()}"
+
+    # Build track list
+    tracks = []
+    for filepath in selected:
+        rel_path = str(Path(filepath).relative_to(vault_music.parent.parent))  # relative to vault root
+        filename = Path(filepath).stem
+        tracks.append({"path": rel_path, "title": filename})
+
+    # Create temporary playlist
+    playlist = create_playlist(playlist_name, tracks)
+    playlist["temporary"] = True
+
+    return playlist
 
 
 # ─── Jane Chat API ────────────────────────────────────────────────────────────
@@ -1650,6 +1954,57 @@ async def jane_end_session(body: SessionControl, request: Request):
         response.set_cookie(TRUSTED_DEVICE_COOKIE, trusted_device_id, httponly=True, samesite="lax",
                             max_age=60 * 60 * 24 * 30)
     return response
+
+
+# ─── Provider Switch API ──────────────────────────────────────────────────────
+
+class SwitchProviderRequest(BaseModel):
+    provider: str
+
+@app.post("/api/jane/switch-provider")
+async def switch_provider(body: SwitchProviderRequest, request: Request):
+    """Switch the active LLM provider at runtime (kill old CLI, start new one)."""
+    session_id, trusted_device_id = get_or_bootstrap_session(request)
+    if not session_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    new_provider = body.provider.lower().strip()
+    if new_provider not in ("claude", "gemini", "openai"):
+        return JSONResponse({"ok": False, "error": f"Unknown provider: {new_provider}"}, status_code=400)
+
+    from jane.standing_brain import get_standing_brain_manager
+    manager = get_standing_brain_manager()
+
+    _logger.info("Provider switch requested: → %s (session=%s, ip=%s)",
+                 new_provider, _session_log_id(session_id), _client_ip(request))
+
+    result = await manager.switch_provider(new_provider)
+
+    if result.get("ok") and result.get("needs_auth"):
+        # Return info so the frontend can trigger the OAuth flow
+        result["auth_endpoint"] = "/api/cli-login"
+        result["auth_status_endpoint"] = "/api/cli-login/status"
+
+    return JSONResponse(result)
+
+
+@app.get("/api/jane/current-provider")
+async def current_provider():
+    """Return the currently active provider, model, and all available providers."""
+    import shutil
+    from jane.standing_brain import get_standing_brain_manager, _PROVIDER
+    manager = get_standing_brain_manager()
+    health = await manager.health_check()
+    available = []
+    for prov, cli_name in [("claude", "claude"), ("gemini", "gemini"), ("openai", "codex")]:
+        installed = shutil.which(cli_name) is not None
+        available.append({"provider": prov, "installed": installed, "active": prov == _PROVIDER})
+    return JSONResponse({
+        "provider": _PROVIDER,
+        "model": health.get("model", "unknown"),
+        "alive": health.get("alive", False),
+        "available": available,
+    })
 
 
 # ─── Generic Essence Tool API ─────────────────────────────────────────────────
@@ -1764,7 +2119,7 @@ async def serve_essence_page(essence_name: str, request: Request, _=Depends(requ
 
 # ─── Instant Commands (no LLM, no ChromaDB, <100ms) ─────────────────────────
 
-def _check_instant_command(message: str) -> str | None:
+def _check_instant_command(message: str, platform: str = "web") -> str | None:
     """Check if a message is an exact data-lookup command. Returns formatted result or None.
 
     Only matches short imperative commands, not questions or sentences that
@@ -1780,15 +2135,27 @@ def _check_instant_command(message: str) -> str | None:
 
     _JOB_QUEUE_PHRASES = {
         "show job queue", "job queue", "show me the job queue",
-        "show jobs", "list jobs", "pending jobs",
+        "show jobs", "list jobs", "pending jobs", "/jobs",
     }
     if msg in _JOB_QUEUE_PHRASES:
         try:
-            r = _sp.run([python_bin, os.path.join(CODE_ROOT, "agent_skills", "show_job_queue.py")],
+            r = _sp.run([python_bin, os.path.join(CODE_ROOT, "agent_skills", "show_job_queue.py"), "--markdown"],
                         capture_output=True, text=True, timeout=5)
             return r.stdout.strip() if r.stdout.strip() else "Job queue is empty."
         except Exception:
             return "Could not load job queue."
+
+    _COMPLETED_JOBS_PHRASES = {
+        "show completed jobs", "completed jobs", "show me completed jobs",
+        "finished jobs", "done jobs", "completed job queue",
+    }
+    if msg in _COMPLETED_JOBS_PHRASES:
+        try:
+            r = _sp.run([python_bin, os.path.join(CODE_ROOT, "agent_skills", "show_job_queue.py"), "--completed", "--markdown"],
+                        capture_output=True, text=True, timeout=5)
+            return r.stdout.strip() if r.stdout.strip() else "No completed jobs."
+        except Exception:
+            return "Could not load completed jobs."
 
     _COMMANDS_PHRASES = {"my commands", "commands", "show commands", "show me my commands", "list commands"}
     if msg in _COMMANDS_PHRASES:
@@ -1843,7 +2210,7 @@ async def _handle_jane_chat_stream(body: ChatMessage, request: Request):
 
     # ── Instant commands: bypass all LLM processing for pure data lookups ──
     raw_message = (body.message or "").strip()
-    instant_result = _check_instant_command(raw_message)
+    instant_result = _check_instant_command(raw_message, platform=body.platform or "web")
     if instant_result is not None:
         async def _instant_stream():
             yield json.dumps({"type": "delta", "data": instant_result}) + "\n"
@@ -2006,18 +2373,24 @@ async def jane_init_session(body: SessionControl, request: Request):
         raise HTTPException(status_code=401, detail="Not authenticated")
 
     try:
-        from jane_proxy import _get_brain_name, _use_persistent_claude, _get_execution_profile
+        from jane_proxy import _get_brain_name, _use_persistent_claude, _use_persistent_codex, _get_execution_profile
     except ImportError:
-        from .jane_proxy import _get_brain_name, _use_persistent_claude, _get_execution_profile
+        from .jane_proxy import _get_brain_name, _use_persistent_claude, _use_persistent_codex, _get_execution_profile
     from jane.context_builder import build_jane_context_async
 
     brain_name = _get_brain_name()
-    if not _use_persistent_claude(brain_name):
-        # Non-Claude brains don't need pre-warming
+    if not (_use_persistent_claude(brain_name) or _use_persistent_codex(brain_name)):
+        # Non-persistent brains don't need pre-warming
         return JSONResponse({"status": "skipped", "greeting": "Hey! What's on your mind?"})
 
-    from jane.persistent_claude import get_claude_persistent_manager
-    manager = get_claude_persistent_manager()
+    if _use_persistent_claude(brain_name):
+        from jane.persistent_claude import get_claude_persistent_manager
+        manager = get_claude_persistent_manager()
+        init_status = "Sending init prompt to Claude..."
+    else:
+        from jane.persistent_codex import get_codex_persistent_manager
+        manager = get_codex_persistent_manager()
+        init_status = "Sending init prompt to Codex..."
     session = await manager.get(body.session_id or session_id)
 
     if not session.is_fresh():
@@ -2049,7 +2422,7 @@ async def jane_init_session(body: SessionControl, request: Request):
                 s = status_queue.get_nowait()
                 yield json.dumps({"type": "status", "data": s}) + "\n"
 
-            yield json.dumps({"type": "status", "data": "Sending init prompt to Claude..."}) + "\n"
+            yield json.dumps({"type": "status", "data": init_status}) + "\n"
 
             init_prompt = (
                 f"{ctx.system_prompt}\n\n"
@@ -2363,16 +2736,20 @@ async def get_briefing_article_detail(article_id: str, _=Depends(require_auth)):
 
 @app.get("/api/briefing/audio/{article_id}/{summary_type}")
 async def briefing_audio(article_id: str, summary_type: str = "brief", _=Depends(require_auth)):
-    """Serve pre-generated TTS audio for a briefing article."""
+    """Serve pre-generated TTS audio for a briefing article (Opus/OGG preferred, WAV fallback)."""
     audio_dir = os.path.join(
         os.environ.get("TOOLS_DIR",
                        os.path.join(os.environ.get("AMBIENT_BASE", os.path.expanduser("~/ambient")), "tools")),
         "daily_briefing", "essence_data", "audio"
     )
-    audio_path = os.path.join(audio_dir, f"{article_id}_{summary_type}.wav")
-    if not os.path.isfile(audio_path):
-        raise HTTPException(status_code=404, detail="Audio not available for this article")
-    return FileResponse(audio_path, media_type="audio/wav")
+    # Prefer Opus/OGG, fall back to legacy WAV
+    ogg_path = os.path.join(audio_dir, f"{article_id}_{summary_type}.ogg")
+    wav_path = os.path.join(audio_dir, f"{article_id}_{summary_type}.wav")
+    if os.path.isfile(ogg_path):
+        return FileResponse(ogg_path, media_type="audio/ogg")
+    if os.path.isfile(wav_path):
+        return FileResponse(wav_path, media_type="audio/wav")
+    raise HTTPException(status_code=404, detail="Audio not available for this article")
 
 
 @app.get("/api/briefing/topics")
@@ -2429,6 +2806,92 @@ async def undismiss_briefing_article(article_id: str, _=Depends(require_auth)):
     return bt.undismiss_article(article_id)
 
 
+_SAVED_ARTICLES_DIR = Path(os.path.expanduser("~/ambient/vessence-data/briefing_saved"))
+
+
+@app.post("/api/briefing/saved")
+async def save_briefing_article(request: Request, _=Depends(require_auth)):
+    """Save an article permanently to a category. Saved articles are never auto-deleted."""
+    body = await request.json()
+    article_id = body.get("article_id")
+    category = body.get("category", "Uncategorized")
+    if not article_id:
+        raise HTTPException(status_code=400, detail="article_id required")
+
+    _SAVED_ARTICLES_DIR.mkdir(parents=True, exist_ok=True)
+    saved_file = _SAVED_ARTICLES_DIR / "saved.json"
+
+    saved = {}
+    if saved_file.exists():
+        async with aiofiles.open(saved_file, "r") as f:
+            saved = json.loads(await f.read())
+
+    # Find article data from current briefing articles cache
+    article_data = None
+    articles_dir = Path(os.environ.get("TOOLS_DIR",
+                        os.path.join(os.path.expanduser("~"), "ambient", "tools"))) / "daily_briefing" / "essence_data" / "articles"
+    article_file = articles_dir / f"{article_id}.json"
+    if article_file.exists():
+        async with aiofiles.open(article_file, "r") as f:
+            article_data = json.loads(await f.read())
+
+    # Store: keyed by article_id, includes category and saved timestamp
+    saved[article_id] = {
+        "article_id": article_id,
+        "category": category,
+        "saved_at": datetime.now(timezone.utc).isoformat(),
+        "article": article_data,
+    }
+
+    async with aiofiles.open(saved_file, "w") as f:
+        await f.write(json.dumps(saved, indent=2))
+
+    return {"status": "ok", "article_id": article_id, "category": category}
+
+
+@app.get("/api/briefing/saved/categories")
+async def list_saved_categories(_=Depends(require_auth)):
+    """List all categories that have saved articles."""
+    saved_file = _SAVED_ARTICLES_DIR / "saved.json"
+    if not saved_file.exists():
+        return {"categories": []}
+    async with aiofiles.open(saved_file, "r") as f:
+        saved = json.loads(await f.read())
+    cats = sorted(set(v.get("category", "Uncategorized") for v in saved.values()))
+    return {"categories": cats}
+
+
+@app.get("/api/briefing/saved")
+async def list_saved_articles(category: str = None, _=Depends(require_auth)):
+    """List saved articles, optionally filtered by category."""
+    saved_file = _SAVED_ARTICLES_DIR / "saved.json"
+    if not saved_file.exists():
+        return {"articles": []}
+    async with aiofiles.open(saved_file, "r") as f:
+        saved = json.loads(await f.read())
+    items = list(saved.values())
+    if category:
+        items = [i for i in items if i.get("category") == category]
+    items.sort(key=lambda x: x.get("saved_at", ""), reverse=True)
+    return {"articles": items}
+
+
+@app.delete("/api/briefing/saved/{article_id}")
+async def unsave_briefing_article(article_id: str, _=Depends(require_auth)):
+    """Remove an article from saved collection."""
+    saved_file = _SAVED_ARTICLES_DIR / "saved.json"
+    if not saved_file.exists():
+        raise HTTPException(status_code=404, detail="No saved articles")
+    async with aiofiles.open(saved_file, "r") as f:
+        saved = json.loads(await f.read())
+    if article_id not in saved:
+        raise HTTPException(status_code=404, detail="Article not saved")
+    del saved[article_id]
+    async with aiofiles.open(saved_file, "w") as f:
+        await f.write(json.dumps(saved, indent=2))
+    return {"status": "ok", "article_id": article_id}
+
+
 @app.get("/api/briefing/search")
 async def search_briefing_articles(q: str, _=Depends(require_auth)):
     """Search past articles via ChromaDB."""
@@ -2450,6 +2913,30 @@ async def get_briefing_image(article_id: str):
         if img_path.exists():
             return FileResponse(str(img_path))
     raise HTTPException(status_code=404, detail="Image not found")
+
+
+@app.get("/api/briefing/archive")
+async def list_briefing_archive(_=Depends(require_auth)):
+    """List available archived briefing dates."""
+    archive_dir = Path(os.path.expanduser("~/ambient/vessence-data/briefings"))
+    if not archive_dir.exists():
+        return {"status": "ok", "dates": []}
+    files = sorted(archive_dir.glob("*.json"), key=lambda f: f.name, reverse=True)
+    dates = [f.stem for f in files]
+    return {"status": "ok", "dates": dates}
+
+
+@app.get("/api/briefing/archive/{date}")
+async def get_archived_briefing(date: str, _=Depends(require_auth)):
+    """Get a specific archived briefing by date."""
+    archive_dir = Path(os.path.expanduser("~/ambient/vessence-data/briefings"))
+    file_path = archive_dir / f"{date}.json"
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Archive not found")
+
+    async with aiofiles.open(file_path, "r") as f:
+        data = json.loads(await f.read())
+    return data
 
 
 # ─── Tax Accountant 2025 Routes ──────────────────────────────────────────────
@@ -2601,77 +3088,823 @@ import select as _select
 
 _cli_login_process = None
 _cli_login_authenticated = False
+_cli_login_transcript_path: str | None = None
+_cli_login_provider: str | None = None
+_cli_login_local_port: int | None = None
+_cli_login_oauth_state: str | None = None
+_cli_login_pty_master_fd: int | None = None
+# Self-managed OAuth (bypasses CLI's broken Docker auth)
+_claude_oauth_verifier: str | None = None
+_claude_oauth_state: str | None = None
+_gemini_oauth_verifier: str | None = None
+_gemini_oauth_state: str | None = None
+
+_auth_status_cache: dict[str, tuple[float, dict]] = {}
+
+
+_claude_refresh_last_failure: float = 0.0  # timestamp of last failed refresh
+_CLAUDE_REFRESH_COOLDOWN = 300  # seconds (5 minutes) before retrying after failure
+
+
+def _attempt_claude_token_refresh() -> bool:
+    """Attempt to refresh the Claude OAuth token using the refresh token. Sync version."""
+    global _claude_refresh_last_failure
+
+    # Cooldown: don't retry if we failed recently
+    if _claude_refresh_last_failure and (time.time() - _claude_refresh_last_failure) < _CLAUDE_REFRESH_COOLDOWN:
+        return False
+
+    creds_path = Path.home() / ".claude" / ".credentials.json"
+    if not creds_path.exists():
+        return False
+
+    try:
+        creds = json.loads(creds_path.read_text())
+        refresh_token = creds.get("claudeAiOauth", {}).get("refreshToken")
+        if not refresh_token:
+            return False
+
+        # Token exchange with backoff
+        from urllib.parse import urlencode as _urlencode
+        import urllib.request as _urllib_req
+        token_data = _urlencode({
+            "grant_type": "refresh_token",
+            "client_id": "9d1c250a-e61b-44d9-88ed-5944d1962f5e",
+            "refresh_token": refresh_token,
+        }).encode()
+
+        for attempt in range(3):
+            try:
+                token_req = _urllib_req.Request(
+                    "https://platform.claude.com/v1/oauth/token",
+                    data=token_data,
+                    headers={
+                        "Content-Type": "application/x-www-form-urlencoded",
+                        "User-Agent": "claude-code/2.1.86",
+                        "Accept": "application/json",
+                    },
+                )
+                token_resp = _urllib_req.urlopen(token_req, timeout=15)
+                tokens = json.loads(token_resp.read())
+
+                # Update credentials
+                scopes = tokens.get("scope", "").split(" ") if tokens.get("scope") else creds["claudeAiOauth"].get("scopes", [])
+                creds["claudeAiOauth"].update({
+                    "accessToken": tokens["access_token"],
+                    "refreshToken": tokens.get("refresh_token", refresh_token),
+                    "expiresAt": int(time.time() * 1000) + tokens.get("expires_in", 3600) * 1000,
+                    "scopes": scopes,
+                })
+                creds_path.write_text(json.dumps(creds), encoding="utf-8")
+                return True
+            except Exception as exc:
+                if hasattr(exc, "code") and exc.code == 429:
+                    # Exponential backoff
+                    wait_time = 2 ** (attempt + 1)
+                    time.sleep(wait_time)
+                    continue
+                break
+    except Exception:
+        pass
+
+    _claude_refresh_last_failure = time.time()
+    return False
+
+
+def _cli_login_candidates(provider: str) -> list[list[str]]:
+    provider = (provider or "").lower()
+    if provider == "claude":
+        # Claude: self-managed OAuth (bypass CLI, handled in /api/cli-login)
+        return [["claude", "auth", "login"]]
+    if provider == "gemini":
+        return [["gemini", "auth", "login"]]
+    if provider == "openai":
+        # Codex: device-auth flow works in Docker (no localhost callback needed)
+        return [["codex", "login", "--device-auth"]]
+    return []
+
+
+def _cli_binary_for_provider(provider: str) -> str | None:
+    candidates = _cli_login_candidates(provider)
+    return candidates[0][0] if candidates else None
+
+
+def _mask_email(value: str) -> str:
+    if "@" not in value:
+        return value[:3] + "..." if value else ""
+    local, domain = value.split("@", 1)
+    local_masked = (local[:2] + "***") if local else "***"
+    return f"{local_masked}@{domain}"
+
+
+def _provider_auth_status_details(provider: str) -> dict:
+    provider = (provider or "").lower()
+    now = time.time()
+    if provider in _auth_status_cache:
+        ts, details = _auth_status_cache[provider]
+        if now - ts < 5:  # 5 second cache
+            return details
+
+    status_cmds = {
+        "claude": ["claude", "auth", "status"],
+    }
+    cmd = status_cmds.get(provider)
+    if not cmd:
+        return {"provider": provider, "supported": False, "logged_in": False}
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+    except Exception as exc:
+        return {
+            "provider": provider,
+            "supported": True,
+            "logged_in": False,
+            "status_error": str(exc),
+        }
+    details = {
+        "provider": provider,
+        "supported": True,
+        "status_returncode": result.returncode,
+        "logged_in": False,
+    }
+    if result.returncode != 0:
+        stderr = (result.stderr or "").strip()
+        if stderr:
+            details["status_stderr_tail"] = stderr.splitlines()[-1][:200]
+        # No cache for failed status check
+        return details
+    output = (result.stdout or "").strip()
+    if not output:
+        # No cache for empty output
+        return details
+
+    def parse_output(out_str: str) -> bool:
+        try:
+            parsed = json.loads(out_str)
+            if isinstance(parsed, dict):
+                details["logged_in"] = bool(parsed.get("loggedIn"))
+                if parsed.get("authMethod"):
+                    details["auth_method"] = parsed.get("authMethod")
+                if parsed.get("email"):
+                    details["email_hint"] = _mask_email(str(parsed.get("email")))
+                if parsed.get("subscriptionType"):
+                    details["subscription_type"] = parsed.get("subscriptionType")
+                return True
+        except Exception:
+            pass
+        lowered = out_str.lower()
+        details["logged_in"] = "logged in" in lowered and "not logged in" not in lowered
+        details["status_stdout_tail"] = out_str.splitlines()[-1][:200]
+        return True
+
+    parse_output(output)
+
+    # Automatic refresh for Claude if not logged in
+    if not details.get("logged_in") and provider == "claude":
+        if _attempt_claude_token_refresh():
+            # Refresh succeeded, re-run status check once (bypass cache)
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+                if result.returncode == 0:
+                    output = (result.stdout or "").strip()
+                    parse_output(output)
+            except Exception:
+                pass
+
+    _auth_status_cache[provider] = (now, details)
+    return details
+
+
+def _provider_auth_status(provider: str) -> bool:
+    return bool(_provider_auth_status_details(provider).get("logged_in"))
+
+
+def _cli_login_debug_snapshot(provider: str) -> dict:
+    process_state = "missing"
+    returncode = None
+    if _cli_login_process is not None:
+        polled = _cli_login_process.poll()
+        process_state = "running" if polled is None else "exited"
+        returncode = _cli_login_process.returncode
+
+    transcript_lines = _read_cli_transcript_lines(_cli_login_transcript_path)
+    return {
+        "provider": provider,
+        "process_state": process_state,
+        "process_returncode": returncode,
+        "cli_login_authenticated_flag": _cli_login_authenticated,
+        "transcript_tail": transcript_lines[-3:],
+        "auth_status": _provider_auth_status_details(provider),
+    }
+
+
+def _terminate_cli_login_process() -> None:
+    global _cli_login_process, _cli_login_transcript_path, _cli_login_provider
+    global _cli_login_local_port, _cli_login_oauth_state, _cli_login_pty_master_fd
+    if _cli_login_process and _cli_login_process.poll() is None:
+        _cli_login_process.kill()
+        try:
+            _cli_login_process.wait(timeout=5)
+        except Exception:
+            pass
+    if _cli_login_pty_master_fd is not None:
+        try:
+            os.close(_cli_login_pty_master_fd)
+        except OSError:
+            pass
+    _cli_login_process = None
+    _cli_login_transcript_path = None
+    _cli_login_provider = None
+    _cli_login_local_port = None
+    _cli_login_oauth_state = None
+    _cli_login_pty_master_fd = None
+
+
+def _discover_cli_login_port() -> int | None:
+    """Find the port Claude CLI's local OAuth callback server is listening on.
+
+    Strategy: parse /proc/net/tcp for all TCP LISTEN sockets on 127.0.0.1,
+    exclude known service ports, and return the remaining one.  In a Docker
+    container the process list is small, so this is reliable.  Falls back to
+    PID-based matching via /proc/<pid>/fd, then ss(8).
+    """
+    if not _cli_login_process or _cli_login_process.poll() is not None:
+        return None
+    import re as _re
+
+    # Known ports to ignore (our own services)
+    KNOWN_PORTS = {8081, 8090, 8080, 8082, 8083, 8000, 3000, 53, 631, 11434}
+
+    # --- Method 1: Scan /proc/net/tcp AND /proc/net/tcp6 for LISTEN sockets ---
+    # Claude CLI (Node.js) may bind on IPv6 ::1 instead of IPv4 127.0.0.1,
+    # especially inside Docker containers.  Check both.
+    try:
+        candidate_ports: list[int] = []
+        # IPv4 localhost hex representations
+        _IPV4_LOCALHOST = {"0100007F", "00000000"}
+        # IPv6 localhost (::1) in /proc/net/tcp6 format
+        _IPV6_LOCALHOST = {
+            "00000000000000000000000001000000",  # ::1
+            "00000000000000000000000000000000",  # ::
+        }
+        for tcp_path in ("/proc/net/tcp", "/proc/net/tcp6"):
+            try:
+                with open(tcp_path) as f:
+                    for line in f:
+                        parts = line.split()
+                        if len(parts) < 4:
+                            continue
+                        if parts[3] != "0A":  # 0A = LISTEN
+                            continue
+                        local = parts[1]
+                        ip_hex, port_hex = local.split(":")
+                        if ip_hex not in _IPV4_LOCALHOST and ip_hex not in _IPV6_LOCALHOST:
+                            continue
+                        port = int(port_hex, 16)
+                        if port not in KNOWN_PORTS and port not in candidate_ports:
+                            candidate_ports.append(port)
+            except FileNotFoundError:
+                continue
+
+        # If there's exactly one unknown listening port, that's our target.
+        # If multiple, try PID-based filtering below.
+        if len(candidate_ports) == 1:
+            return candidate_ports[0]
+
+        # Multiple candidates — try to narrow via PID fd matching
+        if candidate_ports:
+            # Build inode → port map (check both tcp and tcp6)
+            inode_to_port: dict[int, int] = {}
+            for tcp_path in ("/proc/net/tcp", "/proc/net/tcp6"):
+                try:
+                    with open(tcp_path) as f:
+                        for line in f:
+                            parts = line.split()
+                            if len(parts) < 10 or parts[3] != "0A":
+                                continue
+                            ip_hex, port_hex = parts[1].split(":")
+                            if ip_hex not in _IPV4_LOCALHOST and ip_hex not in _IPV6_LOCALHOST:
+                                continue
+                            port = int(port_hex, 16)
+                            if port in KNOWN_PORTS:
+                                continue
+                            inode_to_port[int(parts[9])] = port
+                except FileNotFoundError:
+                    continue
+
+            # Walk process tree from our PID
+            root_pid = _cli_login_process.pid
+            pids_to_check = [root_pid]
+            # Find children by scanning /proc/*/stat
+            try:
+                for entry in Path("/proc").iterdir():
+                    if not entry.name.isdigit():
+                        continue
+                    stat_path = entry / "stat"
+                    try:
+                        stat_text = stat_path.read_text()
+                        # Format: pid (comm) state ppid ...
+                        m = _re.search(r"\)\s+\S+\s+(\d+)", stat_text)
+                        if m and int(m.group(1)) in pids_to_check:
+                            pids_to_check.append(int(entry.name))
+                    except (OSError, PermissionError):
+                        continue
+            except (OSError, PermissionError):
+                pass
+
+            for pid in pids_to_check:
+                fd_dir = Path(f"/proc/{pid}/fd")
+                if not fd_dir.exists():
+                    continue
+                try:
+                    for fd in fd_dir.iterdir():
+                        try:
+                            target = os.readlink(str(fd))
+                        except (OSError, PermissionError):
+                            continue
+                        m = _re.match(r"socket:\[(\d+)\]", target)
+                        if m:
+                            inode = int(m.group(1))
+                            if inode in inode_to_port:
+                                return inode_to_port[inode]
+                except (OSError, PermissionError):
+                    continue
+
+            # Still multiple candidates — return the highest port (most likely
+            # to be the ephemeral one Claude picked)
+            return max(candidate_ports)
+    except Exception:
+        pass
+
+    # --- Method 2: Fallback to ss (not available in all Docker images) ---
+    try:
+        result = subprocess.run(
+            ["ss", "-tlnp"], capture_output=True, text=True, timeout=5,
+        )
+        for line in result.stdout.splitlines():
+            if "claude" in line or "node" in line:
+                m = _re.search(r"127\.0\.0\.1:(\d+)", line)
+                if m:
+                    port = int(m.group(1))
+                    if port not in KNOWN_PORTS:
+                        return port
+    except Exception:
+        pass
+
+    return None
+
+
+def _extract_oauth_state(auth_url: str) -> str | None:
+    """Extract the state parameter from an OAuth URL."""
+    if not auth_url:
+        return None
+    try:
+        from urllib.parse import urlparse, parse_qs
+        parsed = urlparse(auth_url)
+        params = parse_qs(parsed.query)
+        states = params.get("state", [])
+        return states[0] if states else None
+    except Exception:
+        return None
+
+
+def _read_cli_transcript_lines(path: str | None) -> list[str]:
+    if not path:
+        return []
+    transcript = Path(path)
+    if not transcript.exists():
+        return []
+    return [line.strip() for line in transcript.read_text(encoding="utf-8", errors="replace").splitlines() if line.strip()]
+
+
+def _attempt_claude_login_via_transcript(cmd: list[str]) -> tuple[str | None, list[str]]:
+    """Start Claude CLI login using a PTY so the Ink TUI works.
+
+    Uses pty.openpty() to give the CLI a real terminal, which is required
+    for the interactive 'Paste code here' prompt.  The PTY master fd is
+    stored in _cli_login_pty_master_fd so _submit_code_via_pty() can
+    write the auth code later.
+    """
+    global _cli_login_process, _cli_login_transcript_path, _cli_login_pty_master_fd
+    import pty as _pty
+    import select as _select_mod
+
+    # Create a PTY pair
+    master_fd, slave_fd = _pty.openpty()
+    _cli_login_pty_master_fd = master_fd
+
+    # Also keep a transcript file for debug
+    transcript_dir = tempfile.mkdtemp(prefix="jane-cli-login-")
+    transcript_path = Path(transcript_dir) / "claude-auth.log"
+    _cli_login_transcript_path = str(transcript_path)
+
+    _cli_login_process = subprocess.Popen(
+        cmd,
+        stdin=slave_fd,
+        stdout=slave_fd,
+        stderr=slave_fd,
+        close_fds=True,
+        env={**os.environ, "TERM": "xterm-256color", "COLUMNS": "200", "LINES": "40"},
+    )
+    os.close(slave_fd)
+
+    # Read output from the PTY master, looking for the auth URL
+    auth_url = None
+    raw_output = b""
+    output_lines: list[str] = []
+    url_pattern = re.compile(r"https?://\S+")
+    deadline = time.time() + 30
+
+    while time.time() < deadline:
+        ready, _, _ = _select_mod.select([master_fd], [], [], 0.5)
+        if ready:
+            try:
+                data = os.read(master_fd, 8192)
+                raw_output += data
+            except OSError:
+                break
+
+        # Strip ANSI codes and extract text
+        clean = re.sub(rb'\x1b\[[0-9;]*[a-zA-Z]', b'', raw_output)
+        clean = re.sub(rb'\x1b\][^\x07]*\x07', b'', clean)
+        clean = re.sub(rb'\x1b\]8;[^\x1b]*\x1b\\\\?', b'', clean)
+        text = clean.decode("utf-8", errors="replace")
+        output_lines = [l.strip() for l in text.splitlines() if l.strip()]
+
+        # Write transcript for debugging
+        transcript_path.write_text(text, encoding="utf-8")
+
+        # Look for URL
+        for line in output_lines:
+            match = url_pattern.search(line)
+            if match:
+                candidate = match.group(0).rstrip(")").rstrip("\\")
+                if "claude.com" in candidate or "anthropic.com" in candidate:
+                    auth_url = candidate
+                    break
+        if auth_url:
+            break
+        if _cli_login_process.poll() is not None:
+            break
+
+    return auth_url, output_lines
+
+
+_cli_login_device_code: str | None = None  # For OpenAI device-auth flow
+
+def _attempt_cli_login_command(cmd: list[str]) -> tuple[str | None, list[str]]:
+    global _cli_login_process, _cli_login_device_code
+    if cmd[0] == "claude":
+        return _attempt_claude_login_via_transcript(cmd)
+
+    _cli_login_device_code = None
+    _cli_login_process = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        env={**os.environ, "TERM": "dumb"},
+    )
+
+    auth_url = None
+    output_lines: list[str] = []
+    deadline = time.time() + 30
+    while time.time() < deadline:
+        if _cli_login_process.poll() is not None:
+            break
+        ready, _, _ = _select.select([_cli_login_process.stdout], [], [], 1.0)
+        if not ready:
+            continue
+        line = _cli_login_process.stdout.readline()
+        if not line:
+            break
+        stripped = line.strip()
+        if stripped:
+            output_lines.append(stripped)
+        # Extract URL
+        if not auth_url:
+            for word in line.split():
+                if word.startswith("http://") or word.startswith("https://"):
+                    auth_url = word.strip().rstrip(")")
+                    break
+        # Extract device code (e.g. "MMVV-CSOZV" — uppercase with dash)
+        if auth_url and not _cli_login_device_code:
+            device_match = re.search(r"\b([A-Z0-9]{4}-[A-Z0-9]{4,6})\b", stripped)
+            if device_match:
+                _cli_login_device_code = device_match.group(1)
+        # Stop once we have both URL and device code (or just URL for non-device flows)
+        if auth_url and (_cli_login_device_code or time.time() > deadline - 25):
+            # Read a bit more to catch the device code if it comes shortly after
+            if not _cli_login_device_code:
+                extra_deadline = time.time() + 3
+                while time.time() < extra_deadline:
+                    ready2, _, _ = _select.select([_cli_login_process.stdout], [], [], 0.5)
+                    if ready2:
+                        line2 = _cli_login_process.stdout.readline()
+                        if line2:
+                            stripped2 = line2.strip()
+                            if stripped2:
+                                output_lines.append(stripped2)
+                            dm = re.search(r"\b([A-Z0-9]{4}-[A-Z0-9]{4,6})\b", stripped2)
+                            if dm:
+                                _cli_login_device_code = dm.group(1)
+                                break
+            break
+    return auth_url, output_lines
 
 
 @app.post("/api/cli-login")
 async def cli_login(request: Request):
     """Start CLI login process and return the auth URL."""
-    global _cli_login_process, _cli_login_authenticated
+    global _cli_login_process, _cli_login_authenticated, _cli_login_provider
+    global _cli_login_local_port, _cli_login_oauth_state
     body = await request.json()
     provider = body.get("provider", os.environ.get("JANE_BRAIN", "gemini"))
 
     # Kill any previous login process
-    if _cli_login_process and _cli_login_process.poll() is None:
-        _cli_login_process.kill()
+    _terminate_cli_login_process()
     _cli_login_authenticated = False
+    _cli_login_provider = provider
 
-    login_cmds = {
-        "gemini": ["gemini", "auth", "login"],
-        "claude": ["claude", "login"],
-        "openai": ["codex", "login"],
-    }
-    cmd = login_cmds.get(provider)
-    if not cmd:
+    cmd_candidates = _cli_login_candidates(provider)
+    if not cmd_candidates:
         return JSONResponse({"error": f"Unknown provider: {provider}"})
 
     import shutil as _shutil
-    if not _shutil.which(cmd[0]):
-        return JSONResponse({"error": f"CLI '{cmd[0]}' is not installed yet. The first-boot installer may still be running — please wait a minute and try again."})
+    cli_bin = _cli_binary_for_provider(provider)
+    if not cli_bin or not _shutil.which(cli_bin):
+        return JSONResponse({"error": f"CLI '{cli_bin or provider}' is not installed yet. The first-boot installer may still be running — please wait a minute and try again."})
 
+    if _provider_auth_status(provider):
+        _cli_login_authenticated = True
+        return JSONResponse({"auth_url": None, "already_authenticated": True})
+
+    # --- Claude: self-managed OAuth (no dependency on CLI's callback server) ---
+    if provider == "claude":
+        import hashlib as _hashlib
+        global _claude_oauth_verifier, _claude_oauth_state
+        _claude_oauth_verifier = base64.urlsafe_b64encode(os.urandom(32)).rstrip(b"=").decode()
+        _claude_oauth_state = base64.urlsafe_b64encode(os.urandom(32)).rstrip(b"=").decode()
+        code_challenge = base64.urlsafe_b64encode(
+            _hashlib.sha256(_claude_oauth_verifier.encode()).digest()
+        ).rstrip(b"=").decode()
+        from urllib.parse import urlencode as _urlencode
+        auth_url = "https://claude.com/cai/oauth/authorize?" + _urlencode({
+            "code": "true",
+            "client_id": "9d1c250a-e61b-44d9-88ed-5944d1962f5e",
+            "response_type": "code",
+            "redirect_uri": "https://platform.claude.com/oauth/code/callback",
+            "scope": "org:create_api_key user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload",
+            "code_challenge": code_challenge,
+            "code_challenge_method": "S256",
+            "state": _claude_oauth_state,
+        })
+        return JSONResponse({"auth_url": auth_url})
+
+    # --- Gemini: self-managed Google OAuth ---
+    if provider == "gemini":
+        import hashlib as _hashlib
+        global _gemini_oauth_verifier, _gemini_oauth_state
+        _gemini_oauth_verifier = base64.urlsafe_b64encode(os.urandom(32)).rstrip(b"=").decode()
+        _gemini_oauth_state = base64.urlsafe_b64encode(os.urandom(32)).rstrip(b"=").decode()
+        code_challenge = base64.urlsafe_b64encode(
+            _hashlib.sha256(_gemini_oauth_verifier.encode()).digest()
+        ).rstrip(b"=").decode()
+        from urllib.parse import urlencode as _urlencode
+        auth_url = "https://accounts.google.com/o/oauth2/v2/auth?" + _urlencode({
+            "client_id": "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com",
+            "response_type": "code",
+            "redirect_uri": "https://codeassist.google.com/authcode",
+            "access_type": "offline",
+            "scope": "https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile",
+            "code_challenge": code_challenge,
+            "code_challenge_method": "S256",
+            "state": _gemini_oauth_state,
+        })
+        return JSONResponse({"auth_url": auth_url})
+
+    # --- Other providers: use CLI-based login ---
     try:
-        import subprocess as _sp
-        _cli_login_process = _sp.Popen(
-            cmd, stdout=_sp.PIPE, stderr=_sp.STDOUT,
-            text=True, env={**os.environ, "TERM": "dumb"},
-        )
-        import time as _time
-        auth_url = None
-        output_lines = []
-        deadline = _time.time() + 30
-        while _time.time() < deadline:
-            if _cli_login_process.poll() is not None:
-                break
-            ready, _, _ = _select.select([_cli_login_process.stdout], [], [], 1.0)
-            if ready:
-                line = _cli_login_process.stdout.readline()
-                if not line:
-                    break
-                output_lines.append(line.strip())
-                for word in line.split():
-                    if word.startswith("http://") or word.startswith("https://"):
-                        auth_url = word.strip().rstrip(")")
-                        break
-                if auth_url:
-                    break
+        last_output_lines: list[str] = []
+        for cmd in cmd_candidates:
+            auth_url, output_lines = _attempt_cli_login_command(cmd)
+            last_output_lines = output_lines
+            if auth_url:
+                resp_data = {"auth_url": auth_url}
+                if _cli_login_device_code:
+                    resp_data["device_code"] = _cli_login_device_code
+                return JSONResponse(resp_data)
+            if _provider_auth_status(provider):
+                _cli_login_authenticated = True
+                return JSONResponse({"auth_url": None, "already_authenticated": True})
+            _terminate_cli_login_process()
 
-        if auth_url:
-            return JSONResponse({"auth_url": auth_url})
-        elif _cli_login_process.poll() is not None and _cli_login_process.returncode == 0:
-            _cli_login_authenticated = True
-            return JSONResponse({"auth_url": None, "already_authenticated": True})
-        else:
-            return JSONResponse({"error": f"Could not get auth URL. Output: {' | '.join(output_lines[-3:])}"})
+        tail = " | ".join(last_output_lines[-3:]) if last_output_lines else "No CLI output captured."
+        return JSONResponse({"error": f"Could not get auth URL. Output: {tail}"})
     except Exception as e:
         return JSONResponse({"error": str(e)})
+
+
+@app.post("/api/cli-login/code")
+async def cli_login_code(request: Request):
+    """Submit a browser-returned auth code to the active CLI login session.
+
+    For Claude: delivers the OAuth code to the CLI's local HTTP callback server
+    at /callback?code=<code>&state=<state>.  The CLI uses PKCE and validates
+    the state param, then exchanges the code for an auth token.
+    """
+    global _cli_login_authenticated, _cli_login_local_port
+    body = await request.json()
+    code = (body.get("code") or "").strip()
+    provider = (body.get("provider") or _cli_login_provider or os.environ.get("JANE_BRAIN", "gemini")).lower()
+
+    if not code:
+        return JSONResponse({"ok": False, "error": "Authentication code is required."}, status_code=400)
+
+    # --- Claude: self-managed OAuth token exchange ---
+    if provider == "claude":
+        if not _claude_oauth_verifier or not _claude_oauth_state:
+            return JSONResponse({"ok": False, "error": "No active OAuth session. Click Connect Account again."}, status_code=400)
+
+        # The code from Anthropic's callback page is "AUTH_CODE#STATE" — extract just the code
+        auth_code = code.split("#")[0].strip()
+        if not auth_code:
+            return JSONResponse({"ok": False, "error": "Invalid code format."}, status_code=400)
+
+        # Exchange the code for tokens at Anthropic's token endpoint
+        from urllib.parse import urlencode as _urlencode
+        import urllib.request as _urllib_req
+        token_data = _urlencode({
+            "grant_type": "authorization_code",
+            "client_id": "9d1c250a-e61b-44d9-88ed-5944d1962f5e",
+            "code": auth_code,
+            "code_verifier": _claude_oauth_verifier,
+            "redirect_uri": "https://platform.claude.com/oauth/code/callback",
+        }).encode()
+
+        try:
+            token_req = _urllib_req.Request(
+                "https://platform.claude.com/v1/oauth/token",
+                data=token_data,
+                headers={
+                    "Content-Type": "application/x-www-form-urlencoded",
+                    "User-Agent": "claude-code/2.1.86",
+                    "Accept": "application/json",
+                },
+            )
+            token_resp = _urllib_req.urlopen(token_req, timeout=15)
+            tokens = json.loads(token_resp.read())
+        except Exception as exc:
+            last_exc = exc
+
+        if not tokens:
+            error_detail = str(last_exc)
+            if hasattr(last_exc, "read"):
+                try:
+                    error_body = last_exc.read().decode()
+                    error_json = json.loads(error_body)
+                    if error_json.get("error", {}).get("type") == "rate_limit_error":
+                        return JSONResponse({"ok": False, "error": "Token exchange failed: Anthropic's servers are rate-limiting requests for this application. This is a known issue. Please try again in a few minutes."}, status_code=429)
+                    error_detail = error_body[:300]
+                except:
+                    error_detail = last_exc.read().decode()[:300]
+            
+            return JSONResponse({"ok": False, "error": f"Token exchange failed: {error_detail}"}, status_code=400)
+
+        # Write credentials to Claude CLI's config file
+        import shutil as _shutil
+        claude_bin = _shutil.which("claude")
+        # Determine the claude config directory
+        claude_dir = Path.home() / ".claude"
+        claude_dir.mkdir(parents=True, exist_ok=True)
+        creds_path = claude_dir / ".credentials.json"
+
+        scopes = tokens.get("scope", "").split(" ") if tokens.get("scope") else []
+        creds = {
+            "claudeAiOauth": {
+                "accessToken": tokens["access_token"],
+                "refreshToken": tokens["refresh_token"],
+                "expiresAt": int(time.time() * 1000) + tokens.get("expires_in", 3600) * 1000,
+                "scopes": scopes,
+            }
+        }
+        creds_path.write_text(json.dumps(creds), encoding="utf-8")
+        creds_path.chmod(0o600)
+
+        # Invalidate cache for provider status
+        _auth_status_cache.pop(provider, None)
+
+        # Verify auth status
+        _cli_login_authenticated = True
+        if _provider_auth_status(provider):
+            return JSONResponse({"ok": True, "authenticated": True})
+        else:
+            # Credentials written but status check failed — still OK
+            return JSONResponse({"ok": True, "authenticated": True, "note": "Credentials saved, status check pending"})
+
+    # --- Gemini: self-managed Google OAuth token exchange ---
+    if provider == "gemini":
+        if not _gemini_oauth_verifier or not _gemini_oauth_state:
+            return JSONResponse({"ok": False, "error": "No active OAuth session. Click Connect Account again."}, status_code=400)
+
+        auth_code = code.strip()
+        from urllib.parse import urlencode as _urlencode
+        import urllib.request as _urllib_req
+        token_data = _urlencode({
+            "grant_type": "authorization_code",
+            "client_id": "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com",
+            "client_secret": "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",
+            "code": auth_code,
+            "code_verifier": _gemini_oauth_verifier,
+            "redirect_uri": "https://codeassist.google.com/authcode",
+        }).encode()
+
+        try:
+            token_req = _urllib_req.Request(
+                "https://oauth2.googleapis.com/token",
+                data=token_data,
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            )
+            token_resp = _urllib_req.urlopen(token_req, timeout=15)
+            tokens = json.loads(token_resp.read())
+        except Exception as exc:
+            last_exc = exc
+
+        if not tokens:
+            error_detail = str(last_exc)
+            if hasattr(last_exc, "read"):
+                try:
+                    error_body = last_exc.read().decode()
+                    error_json = json.loads(error_body)
+                    if "rateLimitExceeded" in error_body:
+                        return JSONResponse({"ok": False, "error": "Token exchange failed: Google's servers are rate-limiting requests for this application. Please try again in a few minutes."}, status_code=429)
+                    error_detail = error_body[:300]
+                except:
+                    error_detail = last_exc.read().decode()[:300]
+            return JSONResponse({"ok": False, "error": f"Token exchange failed: {error_detail}"}, status_code=400)
+
+        # Write credentials to Gemini CLI's config file (~/.gemini/oauth_creds.json)
+        gemini_dir = Path.home() / ".gemini"
+        gemini_dir.mkdir(parents=True, exist_ok=True)
+        creds_path = gemini_dir / "oauth_creds.json"
+
+        creds = {
+            "type": "authorized_user",
+            "client_id": "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com",
+            "client_secret": "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",
+            "refresh_token": tokens.get("refresh_token", ""),
+        }
+        creds_path.write_text(json.dumps(creds), encoding="utf-8")
+        creds_path.chmod(0o600)
+
+        # Invalidate cache
+        _auth_status_cache.pop(provider, None)
+
+        _cli_login_authenticated = True
+        return JSONResponse({"ok": True, "authenticated": True})
+
+    # --- Other providers: need active CLI process ---
+    if not _cli_login_process or _cli_login_process.poll() is not None:
+        return JSONResponse({"ok": False, "error": "No active login session. Start Connect Account again."}, status_code=400)
+
+        return JSONResponse({"ok": True, "authenticated": False, "pending": True, "debug": _cli_login_debug_snapshot(provider)})
+
+    # --- Other providers: write code to stdin (original behavior) ---
+    if not getattr(_cli_login_process, "stdin", None):
+        return JSONResponse({"ok": False, "error": "This login session does not accept code entry."}, status_code=400)
+
+    try:
+        _cli_login_process.stdin.write(code + "\n")
+        _cli_login_process.stdin.flush()
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": f"Could not submit authentication code: {exc}"}, status_code=500)
+
+    deadline = time.time() + 20
+    while time.time() < deadline:
+        if _provider_auth_status(provider):
+            _cli_login_authenticated = True
+            return JSONResponse({"ok": True, "authenticated": True, "debug": _cli_login_debug_snapshot(provider)})
+        if _cli_login_process.poll() is not None:
+            authenticated = _cli_login_process.returncode == 0 or _provider_auth_status(provider)
+            _cli_login_authenticated = authenticated
+            if authenticated:
+                return JSONResponse({"ok": True, "authenticated": True, "debug": _cli_login_debug_snapshot(provider)})
+            break
+        await asyncio.sleep(2.0)
+
+    return JSONResponse({"ok": True, "authenticated": False, "pending": True, "debug": _cli_login_debug_snapshot(provider)})
 
 
 @app.get("/api/cli-login/status")
 async def cli_login_status():
     """Check if the CLI login completed."""
     global _cli_login_process, _cli_login_authenticated
+    provider = (_cli_login_provider or os.environ.get("JANE_BRAIN", "gemini")).lower()
     if _cli_login_authenticated:
-        return JSONResponse({"authenticated": True})
+        return JSONResponse({"authenticated": True, "debug": _cli_login_debug_snapshot(provider)})
+    if _provider_auth_status(provider):
+        _cli_login_authenticated = True
+        return JSONResponse({"authenticated": True, "debug": _cli_login_debug_snapshot(provider)})
     if _cli_login_process and _cli_login_process.poll() is not None:
-        _cli_login_authenticated = _cli_login_process.returncode == 0
-        return JSONResponse({"authenticated": _cli_login_authenticated})
-    return JSONResponse({"authenticated": False})
+        _cli_login_authenticated = _cli_login_process.returncode == 0 or _provider_auth_status(provider)
+        return JSONResponse({"authenticated": _cli_login_authenticated, "debug": _cli_login_debug_snapshot(provider)})
+    return JSONResponse({"authenticated": False, "debug": _cli_login_debug_snapshot(provider)})

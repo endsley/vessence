@@ -5,43 +5,26 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Vessence — Settings</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=JetBrains+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/onboarding.css">
   <style>
-    body { background: #0a0a0f; color: #e2e8f0; font-family: 'Inter', system-ui, sans-serif; }
-    .card { background: #13131a; border: 1px solid #1e1e2e; }
-    .pill { background: #1e1e2e; border: 1px solid #2d2d40; }
-    input[type=text], input[type=password] {
-      background: #0d0d14; border: 1px solid #2d2d40; color: #e2e8f0;
-      transition: border-color 0.2s;
-    }
-    input:focus { outline: none; border-color: #7c3aed; }
-    .btn-primary { background: linear-gradient(135deg, #7c3aed, #5b21b6); }
-    .btn-primary:hover { opacity: 0.9; }
-    .btn-secondary { background: #1e1e2e; border: 1px solid #2d2d40; }
-    .btn-secondary:hover { background: #2d2d40; }
     @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
     .fade-in { animation: fadeIn 0.3s ease forwards; }
   </style>
 </head>
-<body class="min-h-screen">
+<body class="onboarding-page onboarding-settings min-h-screen">
 
 <div class="max-w-2xl mx-auto px-4 py-12 fade-in">
 
   <!-- Header -->
   <div class="flex items-center justify-between mb-8">
     <div>
+      <div class="section-eyebrow mb-3">Local system control</div>
       <div class="text-3xl mb-1">🧬</div>
       <h1 class="text-2xl font-bold text-white">Vessence Settings</h1>
-      <p class="text-slate-400 text-sm mt-0.5">Your system is running.</p>
-    </div>
-    <div class="flex gap-3">
-      <a href="{{ vault_url }}" target="_blank"
-        class="btn-secondary text-slate-300 text-sm px-4 py-2 rounded-lg inline-flex items-center gap-2">
-        ✨ Open Vault
-      </a>
-      <a href="{{ jane_url }}" target="_blank"
-        class="btn-secondary text-slate-300 text-sm px-4 py-2 rounded-lg inline-flex items-center gap-2">
-        🧠 Open Jane
-      </a>
+      <p class="text-slate-400 text-sm mt-0.5">Fine-tune Jane’s runtime, credentials, and access settings.</p>
     </div>
   </div>
 

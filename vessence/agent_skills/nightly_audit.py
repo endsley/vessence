@@ -38,6 +38,7 @@ AMBER_ARCH       = CONFIGS_DIR / "Amber_architecture.md"
 MEMORY_ARCH      = CONFIGS_DIR / "memory_manage_architecture.md"
 
 LOG_FILE = Path(LOGS_DIR) / "nightly_audit.log"
+LATEST_AUDIT_SUMMARY = AUDIT_LOG_DIR / "latest_audit_summary.json"
 AUDIT_LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 logging.basicConfig(
@@ -156,6 +157,35 @@ def _run_cmd(cmd, fallback='(unavailable)'):
         return subprocess.check_output(cmd, stderr=subprocess.DEVNULL, text=True).strip()
     except Exception:
         return fallback
+
+
+def _extract_health_summary(report: str) -> str:
+    lines = [line.strip() for line in report.splitlines() if line.strip()]
+    for idx, line in enumerate(lines):
+        lowered = line.lower().strip("*# :")
+        if lowered == "health summary":
+            summary_lines: list[str] = []
+            for next_line in lines[idx + 1:]:
+                if next_line.startswith("**") or next_line.startswith("#"):
+                    break
+                summary_lines.append(next_line)
+                if len(" ".join(summary_lines)) >= 280:
+                    break
+            if summary_lines:
+                return " ".join(summary_lines)[:280]
+    return (lines[0] if lines else "").replace("#", "").strip()[:280]
+
+
+def _write_latest_summary(now: datetime.datetime, report: str, report_path: Path) -> None:
+    payload = {
+        "generated_at": now.isoformat(),
+        "report_path": str(report_path),
+        "health_summary": _extract_health_summary(report),
+        "report": report.strip(),
+    }
+    tmp_path = LATEST_AUDIT_SUMMARY.with_suffix(".tmp")
+    tmp_path.write_text(json.dumps(payload, indent=2))
+    tmp_path.replace(LATEST_AUDIT_SUMMARY)
 
 
 def run_audit_and_fix(context: dict) -> str:
@@ -285,6 +315,7 @@ def main():
     # Save full report with timestamp (multiple runs per day now)
     report_path = AUDIT_LOG_DIR / f"audit_{timestamp}.md"
     report_path.write_text(f"# Audit — {now.strftime('%Y-%m-%d %H:%M')}\n\n{report}\n")
+    _write_latest_summary(now, report, report_path)
     logger.info(f"Report saved to {report_path}")
 
     # Log notification

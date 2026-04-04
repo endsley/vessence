@@ -1,3 +1,24 @@
+### 2026-04-02: Android Wake Word, Process Management & UX Polish
+- **Wake word detection working on Android:** OpenWakeWord with `hey_jarvis_v0.1.onnx` model, achieving 0.98+ detection scores. (`hey_jane` model broken, needs retraining.)
+- **Always-listening service lifecycle:** `AlwaysListeningService` now stops cleanly on detection (releases mic), `ChatInputRow` launches system STT (same path as mic button). Proper stop/restart lifecycle prevents mic contention.
+- **Process watchdog cron job:** `process_watchdog.py` runs every 5 min — kills zombie Docker containers, idle Gradle/Kotlin daemons (>10 min), and memory hogs.
+- **TTS Docker resource limits:** Limited to 1 concurrent container with memory and CPU caps.
+- **Gradle/Kotlin daemon auto-kill:** Daemons killed after 10 min idle to reclaim memory.
+- **DiagnosticReporter for Android:** `DiagnosticReporter.kt` sends device diagnostics to `/api/device-diagnostics` endpoint for remote debugging.
+- **Quick ack system:** ~200 responses across 12 categories in `_pick_ack()` in `jane_proxy.py`. Categorized messages skip ack (Opus answers directly); uncategorized get Opus-generated ack.
+- **End-phrase detection:** Voice conversations detect end phrases to cleanly close the conversation loop.
+- **Daily briefing idle check fixed:** Now uses `idle_state.json` instead of log file mtime. Briefing wrapped with `timeout 30m`.
+- **Android UI cleanup:** Removed white bar, hamburger button, prompt queue UI. Added new session confirmation dialog.
+- **Version bumped to 0.1.x series.**
+- **Build script verification:** APK build now verifies version matches `version.json`.
+
+### 2026-03-29: Codex-Specific Jane Web Streaming Path
+- **New provider isolation:** Codex no longer shares Claude's persistent streaming implementation in Jane web. Claude remains on `persistent_claude.py`; Codex now has its own `persistent_codex.py`.
+- **Codex transport:** Jane web now uses `codex exec --json` for first turn and `codex exec resume --json` for follow-up turns, keyed by Codex `thread_id`.
+- **Normalized frontend effect:** Claude, Gemini, and Codex now use different internal CLI protocols but are documented as converging onto the same Jane web client event model: `status`, `delta`, `done`, `error`.
+- **Richer Codex item mapping:** Codex non-final agent messages now surface as `thought`, command execution start/completion maps to `tool_use` / `tool_result`, and only the final assistant message is emitted as `delta`.
+- **Safety constraint preserved:** Codex streaming changes were isolated so Claude's existing `stream-json` parser and routing path were not modified.
+
 ### 2026-03-23: Overnight Job Queue Completion (11 jobs)
 - **Tunnel HTTP/2:** Switched Cloudflare tunnel from QUIC to HTTP/2 — eliminates stream resets on Android SSE
 - **TTS Spoken Summary:** `<spoken>` block in Jane's responses — TTS reads conversational summary, display shows full text

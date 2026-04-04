@@ -14,7 +14,10 @@ echo ""
 
 INSTALL_DIR="$HOME/vessence"
 
-read -p "  Are you sure you want to uninstall Vessence? (y/N): " CONFIRM
+read -p "  Are you sure you want to uninstall Vessence? (Y/n): " CONFIRM
+if [ -z "$CONFIRM" ]; then
+    CONFIRM="y"
+fi
 if [ "$CONFIRM" != "y" ] && [ "$CONFIRM" != "Y" ]; then
     echo "  Cancelled."
     exit 0

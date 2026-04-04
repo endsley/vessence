@@ -58,11 +58,12 @@ fun MessageBubble(
     aiColor: Color = Color(0xFFF59E0B),
     onNavigateToEssence: ((String) -> Unit)? = null,
     onSpeakText: ((String) -> Unit)? = null,
+    onSwitchProvider: ((String) -> Unit)? = null,
 ) {
     if (message.isUser) {
         UserBubble(message)
     } else {
-        AiBubble(message, aiName, aiColor, onNavigateToEssence, onSpeakText)
+        AiBubble(message, aiName, aiColor, onNavigateToEssence, onSpeakText, onSwitchProvider)
     }
 }
 
@@ -102,7 +103,7 @@ private fun UserBubble(message: ChatMessage) {
 }
 
 @Composable
-private fun AiBubble(message: ChatMessage, aiName: String, aiColor: Color, onNavigateToEssence: ((String) -> Unit)? = null, onSpeakText: ((String) -> Unit)? = null) {
+private fun AiBubble(message: ChatMessage, aiName: String, aiColor: Color, onNavigateToEssence: ((String) -> Unit)? = null, onSpeakText: ((String) -> Unit)? = null, onSwitchProvider: ((String) -> Unit)? = null) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -251,6 +252,7 @@ private fun AiBubble(message: ChatMessage, aiName: String, aiColor: Color, onNav
                         val imageUrl = "${ApiClient.getJaneBaseUrl()}/api/files/serve/$target"
                         val context = LocalContext.current
                         val imageLoader = remember { ApiClient.getAuthenticatedImageLoader(context) }
+                        var showFullscreen by remember { mutableStateOf(false) }
                         SubcomposeAsyncImage(
                             model = ImageRequest.Builder(context)
                                 .data(imageUrl)
@@ -261,7 +263,8 @@ private fun AiBubble(message: ChatMessage, aiName: String, aiColor: Color, onNav
                             modifier = Modifier
                                 .padding(top = 6.dp)
                                 .widthIn(max = 280.dp)
-                                .clip(RoundedCornerShape(12.dp)),
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable { showFullscreen = true },
                             contentScale = ContentScale.FillWidth,
                             loading = {
                                 Text("Loading image...", color = StatusColor, fontSize = 11.sp)
@@ -270,6 +273,33 @@ private fun AiBubble(message: ChatMessage, aiName: String, aiColor: Color, onNav
                                 Text("[Image not found]", color = StatusColor, fontSize = 11.sp)
                             },
                         )
+                        // Fullscreen image overlay
+                        if (showFullscreen) {
+                            androidx.compose.ui.window.Dialog(
+                                onDismissRequest = { showFullscreen = false },
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .background(Color.Black.copy(alpha = 0.9f))
+                                        .clickable { showFullscreen = false },
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    SubcomposeAsyncImage(
+                                        model = ImageRequest.Builder(context)
+                                            .data(imageUrl)
+                                            .crossfade(true)
+                                            .build(),
+                                        imageLoader = imageLoader,
+                                        contentDescription = target.substringAfterLast('/'),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(16.dp),
+                                        contentScale = ContentScale.Fit,
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
                 // Audio players
@@ -314,6 +344,35 @@ private fun AiBubble(message: ChatMessage, aiName: String, aiColor: Color, onNav
                                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
                                 )
                             }
+                        }
+                    }
+                }
+            }
+            // Provider switch buttons (shown on provider_error)
+            if (message.switchAlternatives.isNotEmpty() && onSwitchProvider != null) {
+                Row(
+                    modifier = Modifier.padding(top = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    for (alt in message.switchAlternatives) {
+                        val btnColor = when (alt) {
+                            "claude" -> Color(0xFF7C3AED)
+                            "gemini" -> Color(0xFF2563EB)
+                            "openai" -> Color(0xFF059669)
+                            else -> ActionChipColor
+                        }
+                        Surface(
+                            onClick = { onSwitchProvider(alt) },
+                            shape = RoundedCornerShape(12.dp),
+                            color = btnColor,
+                        ) {
+                            Text(
+                                text = "Switch to ${alt.replaceFirstChar { it.uppercase() }}",
+                                color = Color.White,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Medium,
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                            )
                         }
                     }
                 }

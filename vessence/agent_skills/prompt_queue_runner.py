@@ -28,7 +28,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from dotenv import load_dotenv
-from jane.config import ENV_FILE_PATH
+from jane.config import get_chroma_client, ENV_FILE_PATH
 load_dotenv(ENV_FILE_PATH)
 
 from jane.config import (
@@ -532,7 +532,7 @@ def archive_completed_prompts():
         purge_script = (
             "import os; os.environ['ORT_LOGGING_LEVEL']='3'\n"
             "import chromadb, sys\n"
-            f"client = chromadb.PersistentClient(path='{SHORT_TERM_DB}')\n"
+            f"client = get_chroma_client(path='{SHORT_TERM_DB}')\n"
             "col = client.get_or_create_collection('short_term_memory')\n"
             f"indices = {list(completed_indices)}\n"
             "results = col.get(where={'topic': 'prompt_queue'}, include=['metadatas'])\n"

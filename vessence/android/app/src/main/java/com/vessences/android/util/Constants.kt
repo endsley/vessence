@@ -13,7 +13,10 @@ object Constants {
     const val PREF_TRIGGER_TRAINED = "trigger_trained"
     const val PREF_TRIGGER_SAMPLES_COUNT = "trigger_samples_count"
     const val DEFAULT_TRIGGER_PHRASE = "hey jane"
+    const val PREF_WAKE_WORD_THRESHOLD = "wake_word_threshold"
+    const val DEFAULT_WAKE_WORD_THRESHOLD = 0.8f
     const val GOOGLE_CLIENT_ID = "1001681818033-pfdvctccvqm3gcd9a8n8v2j7jiia8a06.apps.googleusercontent.com"
     const val DEFAULT_RELAY_URL = "https://relay.vessences.com"
     const val PREF_CONNECTION_MODE = "connection_mode"  // "direct" or "relay"
+    const val PREF_KEEP_SCREEN_ON = "keep_screen_on"
 }

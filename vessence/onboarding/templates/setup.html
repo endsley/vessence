@@ -5,13 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Vessence — Setup</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=JetBrains+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/onboarding.css">
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
     body {
-      background: #0f172a;
-      color: #e2e8f0;
-      font-family: 'Inter', system-ui, -apple-system, sans-serif;
       overflow-x: hidden;
     }
 
@@ -23,7 +23,7 @@
       transform: translateX(-50%);
       width: 800px;
       height: 800px;
-      background: radial-gradient(circle, rgba(124,58,237,0.15) 0%, rgba(124,58,237,0.05) 40%, transparent 70%);
+      background: radial-gradient(circle, rgba(125, 211, 252, 0.16) 0%, rgba(96, 165, 250, 0.07) 40%, transparent 70%);
       pointer-events: none;
       z-index: 0;
     }
@@ -63,11 +63,11 @@
       transition: all 0.3s ease;
     }
     .dot.active {
-      background: #7C3AED;
-      box-shadow: 0 0 12px rgba(124,58,237,0.6);
+      background: #7dd3fc;
+      box-shadow: 0 0 12px rgba(125, 211, 252, 0.55);
     }
     .dot.completed {
-      background: #7C3AED;
+      background: #7dd3fc;
     }
     .dot-line {
       width: 32px;
@@ -76,7 +76,7 @@
       transition: background 0.3s ease;
     }
     .dot-line.completed {
-      background: #7C3AED;
+      background: #7dd3fc;
     }
 
     /* Cards */
@@ -88,24 +88,24 @@
       cursor: pointer;
     }
     .choice-card:hover {
-      border-color: #7C3AED;
+      border-color: #7dd3fc;
       background: #1e293b;
       transform: translateY(-2px);
       box-shadow: 0 8px 24px rgba(0,0,0,0.3);
     }
     .choice-card.selected {
-      border-color: #7C3AED;
-      background: rgba(124,58,237,0.1);
-      box-shadow: 0 0 20px rgba(124,58,237,0.2);
+      border-color: #7dd3fc;
+      background: rgba(125, 211, 252, 0.1);
+      box-shadow: 0 0 20px rgba(125, 211, 252, 0.2);
     }
 
     /* Buttons */
     .btn-primary {
-      background: linear-gradient(135deg, #7C3AED 0%, #6D28D9 100%);
+      background: linear-gradient(135deg, #7dd3fc 0%, #60a5fa 100%);
       transition: all 0.25s ease;
     }
     .btn-primary:hover {
-      box-shadow: 0 0 24px rgba(124,58,237,0.5);
+      box-shadow: 0 0 24px rgba(96, 165, 250, 0.42);
       transform: translateY(-1px);
     }
     .btn-primary:active {
@@ -124,8 +124,8 @@
       transition: all 0.25s ease;
     }
     .btn-secondary:hover {
-      border-color: #7C3AED;
-      color: #c4b5fd;
+      border-color: #7dd3fc;
+      color: #cfeeff;
     }
 
     /* Inputs */
@@ -138,8 +138,8 @@
     }
     .input-field:focus {
       outline: none;
-      border-color: #7C3AED;
-      box-shadow: 0 0 16px rgba(124,58,237,0.2);
+      border-color: #7dd3fc;
+      box-shadow: 0 0 16px rgba(125, 211, 252, 0.2);
     }
     .input-field::placeholder {
       color: #64748b;
@@ -147,8 +147,8 @@
 
     /* Celebration pulse */
     @keyframes celebratePulse {
-      0%, 100% { box-shadow: 0 0 20px rgba(124,58,237,0.3); }
-      50% { box-shadow: 0 0 50px rgba(124,58,237,0.6), 0 0 80px rgba(124,58,237,0.2); }
+      0%, 100% { box-shadow: 0 0 20px rgba(96, 165, 250, 0.26); }
+      50% { box-shadow: 0 0 50px rgba(96, 165, 250, 0.5), 0 0 80px rgba(125, 211, 252, 0.18); }
     }
     .celebrate-glow {
       animation: celebratePulse 2s ease-in-out infinite;
@@ -170,7 +170,7 @@
       position: absolute;
       width: 8px;
       height: 8px;
-      background: #7C3AED;
+      background: #7dd3fc;
       border-radius: 50%;
     }
     .sparkle:nth-child(1) { top: 10%; left: 20%; animation: sparkle 2s ease-in-out 0s infinite; }
@@ -191,7 +191,7 @@
     ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
   </style>
 </head>
-<body>
+<body class="onboarding-page onboarding-setup">
 
 <div class="hero-glow"></div>
 
@@ -226,21 +226,23 @@
 
       <!-- Logo / Name -->
       <div class="mb-10">
+        <div class="section-eyebrow justify-center mb-5">Private local intelligence</div>
         <div class="inline-flex items-center justify-center w-20 h-20 rounded-2xl bg-gradient-to-br from-violet-600 to-purple-800 mb-6 shadow-lg shadow-violet-500/20">
           <span class="text-4xl">&#10024;</span>
         </div>
         <h1 class="text-5xl sm:text-6xl font-extrabold text-white mb-4 tracking-tight">
           Vessence
         </h1>
-        <p class="text-xl text-slate-400 font-light max-w-md mx-auto">
-          Your personal AI companion. Private, growing, always yours.
+        <p class="text-xl text-slate-400 font-light max-w-md mx-auto page-hero-copy">
+          A local AI companion with memory, craft, and presence. Beautifully private from the first launch.
         </p>
       </div>
 
       <!-- Feature cards -->
-      <div class="grid sm:grid-cols-2 gap-4 mb-10 text-left">
+      <div class="grid sm:grid-cols-3 gap-4 mb-10 text-left">
         <div class="bg-slate-800/50 border border-slate-700/50 rounded-2xl p-6">
-          <div class="text-3xl mb-3">&#129302;</div>
+          <img src="/static/jane.png" alt="Jane" class="w-12 h-12 rounded-full object-cover border border-violet-500/50 mb-3"
+               onerror="this.outerHTML='<div class=&quot;text-3xl mb-3&quot;>&#129302;</div>'"/>
           <h3 class="text-white font-semibold text-lg mb-2">Meet Jane</h3>
           <p class="text-slate-400 text-sm leading-relaxed">
             Your permanent AI partner who grows with you. She remembers your preferences, your projects, and your goals.
@@ -250,7 +252,14 @@
           <div class="text-3xl mb-3">&#127912;</div>
           <h3 class="text-white font-semibold text-lg mb-2">Essences</h3>
           <p class="text-slate-400 text-sm leading-relaxed">
-            Specialized AI roles you can load -- accountant, tutor, researcher, and more. One click to transform Jane.
+            Specialized AI roles you can load -- accountant, tutor, researcher, and more. One click to transform your assistant.
+          </p>
+        </div>
+        <div class="bg-slate-800/50 border border-slate-700/50 rounded-2xl p-6">
+          <div class="text-3xl mb-3">&#128295;</div>
+          <h3 class="text-white font-semibold text-lg mb-2">Tools</h3>
+          <p class="text-slate-400 text-sm leading-relaxed">
+            Extend Jane with tools -- web search, file management, calendar, and more. Tools give Jane new capabilities.
           </p>
         </div>
       </div>
@@ -267,7 +276,7 @@
         Get Started
       </button>
 
-      <p class="text-slate-600 text-sm mt-4">Takes about 1 minute</p>
+      <p class="text-slate-600 text-sm mt-4">Takes about 1 minute to get your local Jane online</p>
     </div>
   </div>
 
@@ -282,13 +291,24 @@
     <div class="max-w-2xl mx-auto px-6 pt-20">
 
       <div class="mb-8">
-        <p class="text-violet-400 text-sm font-medium mb-2">Step 1 of 4</p>
-        <h2 class="text-3xl sm:text-4xl font-bold text-white mb-2">Choose Your Brain</h2>
-        <p class="text-slate-400">Pick the AI provider that powers Jane. You can change this later.</p>
+        <template x-if="presetBrain">
+          <div>
+            <p class="text-violet-400 text-sm font-medium mb-2">Step 1 of 4</p>
+            <h2 class="text-3xl sm:text-4xl font-bold text-white mb-2" x-text="presetAuthHeading()"></h2>
+            <p class="text-slate-400" x-text="presetAuthDescription()"></p>
+          </div>
+        </template>
+        <template x-if="!presetBrain">
+          <div>
+            <p class="text-violet-400 text-sm font-medium mb-2">Step 1 of 4</p>
+            <h2 class="text-3xl sm:text-4xl font-bold text-white mb-2">Choose Your Brain</h2>
+            <p class="text-slate-400">Pick the AI provider that powers Jane. You can change this later.</p>
+          </div>
+        </template>
       </div>
 
-      <!-- Provider Cards -->
-      <div class="space-y-3 mb-6">
+      <!-- Provider Cards (hidden when brain already selected by installer) -->
+      <div class="space-y-3 mb-6" x-show="!presetBrain">
 
         <!-- Gemini -->
         <div class="choice-card p-5" :class="{ 'selected': provider === 'gemini' }"
@@ -370,12 +390,12 @@
       <div x-show="provider" x-transition class="mb-8">
         <!-- Auth method toggle -->
         <div class="flex gap-3 mb-4">
-          <button @click="authMethod = 'account'"
+          <button @click="selectAuthMethod('account')"
                   class="flex-1 py-3 px-4 rounded-xl font-medium text-sm cursor-pointer transition-all"
                   :class="authMethod === 'account' ? 'bg-violet-600 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'">
             &#128100; Connect Account <span class="text-xs opacity-70">(recommended)</span>
           </button>
-          <button @click="authMethod = 'apikey'"
+          <button @click="selectAuthMethod('apikey')"
                   class="flex-1 py-3 px-4 rounded-xl font-medium text-sm cursor-pointer transition-all"
                   :class="authMethod === 'apikey' ? 'bg-violet-600 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'">
             &#128273; Use API Key
@@ -399,20 +419,68 @@
 
           <!-- Auth URL display -->
           <div x-show="cliAuthUrl" x-transition class="bg-slate-900 border-2 border-violet-500 rounded-xl p-5 mb-3">
-            <p class="text-violet-300 font-bold text-xl mb-3">&#128073; Open this URL in your browser to sign in:</p>
-            <div class="bg-black/50 rounded-lg p-4 mb-4 break-all">
-              <a :href="cliAuthUrl" target="_blank" class="text-violet-400 hover:text-violet-300 underline text-lg font-mono" x-text="cliAuthUrl"></a>
+            <p class="text-violet-300 font-bold text-xl mb-3" x-text="cliDeviceCode ? '&#128073; Sign in with ' + providerLabel() : '&#128073; Open ' + providerLabel() + ' sign-in'"></p>
+
+            <!-- Device code display (OpenAI) -->
+            <div x-show="cliDeviceCode" class="bg-violet-900/40 border-2 border-violet-400 rounded-xl p-5 mb-4 text-center">
+              <p class="text-slate-300 text-sm mb-2">Enter this code on the sign-in page:</p>
+              <p class="text-violet-300 font-mono text-3xl font-bold tracking-widest" x-text="cliDeviceCode"></p>
             </div>
-            <div class="space-y-2">
-              <p class="text-white text-base">1. Click the link above (or copy-paste it into your browser)</p>
+
+            <div class="mb-4">
+              <a :href="cliAuthUrl"
+                 target="_blank"
+                 rel="noopener noreferrer"
+                 class="btn-primary inline-flex items-center justify-center gap-3 text-white font-semibold px-6 py-3 rounded-2xl no-underline cursor-pointer">
+                <span>&#128279;</span>
+                <span x-text="'Open ' + providerLabel() + ' Login'">Open Login</span>
+              </a>
+            </div>
+            <div class="bg-black/40 rounded-lg p-4 mb-4 break-all">
+              <p class="text-slate-400 text-xs uppercase tracking-[0.2em] mb-2">Manual copy-paste fallback</p>
+              <div class="text-violet-400 text-sm font-mono" x-text="cliAuthUrl"></div>
+            </div>
+            <div class="space-y-2" x-show="cliDeviceCode">
+              <p class="text-white text-base">1. Click the button above to open <span x-text="providerLabel()"></span> sign-in</p>
+              <p class="text-white text-base">2. Enter the code shown above</p>
+              <p class="text-white text-base">3. Sign in with your account</p>
+              <p class="text-slate-400 text-sm mt-2">This page will update automatically once you've signed in.</p>
+            </div>
+            <div class="space-y-2" x-show="!cliDeviceCode">
+              <p class="text-white text-base">1. Click the button above to open <span x-text="providerLabel()"></span> in your browser</p>
               <p class="text-white text-base">2. Sign in with your <span class="text-violet-400 font-semibold" x-text="providerLabel()"></span> account</p>
               <p class="text-white text-base">3. Approve access when prompted</p>
+              <p class="text-slate-400 text-sm mt-4">After signing in, you'll see a confirmation code. Paste it below.</p>
             </div>
-            <p class="text-slate-400 text-sm mt-4">This page will update automatically once you've authenticated.</p>
+          </div>
+
+          <div x-show="(provider === 'claude' || provider === 'gemini') && cliAuthUrl && !cliDeviceCode" x-transition class="bg-slate-900 border border-slate-700 rounded-xl p-5 mb-3">
+            <label class="block text-white font-medium mb-2">Paste the code from the sign-in page</label>
+            <p class="text-slate-400 text-sm mb-3">After you sign in, you'll see a confirmation code. Copy it and paste it here.</p>
+            <div class="flex gap-3">
+              <input type="text"
+                     x-model="cliAuthCode"
+                     placeholder="Paste authentication code"
+                     class="input-field flex-1 px-4 py-3 text-base font-mono"
+                     @keydown.enter.prevent="submitCliAuthCode()">
+              <button @click="submitCliAuthCode()"
+                      :disabled="!cliAuthCode.trim() || cliAuthCodeSubmitting"
+                      class="btn-secondary text-slate-300 px-5 py-3 rounded-xl cursor-pointer font-medium text-sm whitespace-nowrap"
+                      :class="{ 'opacity-50 cursor-not-allowed': !cliAuthCode.trim() || cliAuthCodeSubmitting }">
+                Submit code
+              </button>
+            </div>
           </div>
 
           <p x-show="cliLoginMessage" x-text="cliLoginMessage" class="text-sm mt-2"
              :class="cliLoginStatus === 'success' ? 'text-green-400' : 'text-red-400'"></p>
+          <!-- Claude auth debug area — disabled for now
+          <div x-show="provider === 'claude' && cliDebugInfo" x-transition class="mt-4 bg-black/30 border border-slate-700 rounded-xl p-4">
+            <p class="text-slate-300 text-xs uppercase tracking-[0.2em] mb-2">Claude auth debug</p>
+            <p class="text-slate-400 text-sm mb-3">If this still fails, copy this block and send it to me.</p>
+            <pre class="text-xs text-sky-200 whitespace-pre-wrap break-all overflow-x-auto" x-text="JSON.stringify(cliDebugInfo, null, 2)"></pre>
+          </div>
+          -->
         </div>
 
         <!-- Option B: API Key -->
@@ -451,7 +519,7 @@
         <button @click="goTo(0)" class="btn-secondary text-slate-400 px-6 py-3 rounded-xl cursor-pointer">
           &#8592; Back
         </button>
-        <button @click="goTo(2)" :disabled="!provider"
+        <button @click="continueFromBrainStep()" :disabled="!canContinueFromBrainStep()"
                 class="btn-primary text-white font-semibold px-8 py-3 rounded-2xl cursor-pointer">
           Continue &#8594;
         </button>
@@ -515,7 +583,7 @@
         <button @click="goTo(1)" class="btn-secondary text-slate-400 px-6 py-3 rounded-xl cursor-pointer">
           &#8592; Back
         </button>
-        <button @click="submitSetup()" :disabled="!userName.trim() || submitting"
+        <button @click="submitSetup(true)" :disabled="!canFinishSetup()"
                 class="btn-primary text-white font-semibold px-8 py-3 rounded-2xl cursor-pointer">
           <span x-show="!submitting">Finish Setup &#8594;</span>
           <span x-show="submitting">Setting up...</span>
@@ -587,10 +655,12 @@
 function onboarding() {
   return {
     step: 0,
-    provider: 'gemini',
-    authMethod: 'account',
+    presetBrain: '{{ preset_brain or "" }}',
+    provider: '{{ preset_brain or "gemini" }}',
+    authMethod: '{{ preset_auth_method or "account" }}',
     apiKey: '',
-    userName: '',
+    userName: '{{ initial_user_name or "" }}',
+    janeUrl: '{{ jane_url or "http://localhost:8081" }}',
     style: 'casual',
     submitting: false,
     errorMsg: '',
@@ -599,28 +669,64 @@ function onboarding() {
     cliLoginStatus: 'idle',
     cliLoginMessage: '',
     cliAuthUrl: '',
+    cliAuthCode: '',
+    cliAuthCodeAccepted: false,
+    cliAuthCodeSubmitting: false,
+    cliDeviceCode: null,
     cliLoginPollTimer: null,
+    cliDebugInfo: null,
 
     goTo(s) {
+      if (s === 2 && !this.canContinueFromBrainStep()) {
+        this.errorMsg = this.oauthRequiredMessage();
+        return;
+      }
       this.errorMsg = '';
       this.step = s;
     },
 
     selectProvider(p) {
       this.provider = p;
+      this.authMethod = this.defaultAuthMethodForProvider(p);
       this.apiKey = '';
       this.testStatus = 'idle';
       this.testMessage = '';
       this.cliLoginStatus = 'idle';
       this.cliLoginMessage = '';
       this.cliAuthUrl = '';
+      this.cliAuthCode = '';
+      this.cliAuthCodeAccepted = false;
+      this.cliAuthCodeSubmitting = false;
+      this.cliDebugInfo = null;
       if (this.cliLoginPollTimer) { clearInterval(this.cliLoginPollTimer); this.cliLoginPollTimer = null; }
+    },
+
+    selectAuthMethod(method) {
+      this.authMethod = method;
+      this.errorMsg = '';
+    },
+
+    defaultAuthMethodForProvider(provider) {
+      return provider === 'claude' ? 'account' : 'apikey';
+    },
+
+    presetAuthHeading() {
+      return this.authMethod === 'account' ? 'Connect Your Account' : 'Enter Your API Key';
+    },
+
+    presetAuthDescription() {
+      if (this.authMethod === 'account') {
+        return `Jane is set up to use ${this.providerLabel()}. Connect your existing account to continue.`;
+      }
+      return `Jane is set up to use ${this.providerLabel()}. Enter the API key for that provider to continue.`;
     },
 
     async startCliLogin() {
       this.cliLoginStatus = 'loading';
       this.cliLoginMessage = '';
       this.cliAuthUrl = '';
+      this.cliAuthCode = '';
+      this.cliAuthCodeSubmitting = false;
       try {
         const resp = await fetch('/api/cli-login', {
           method: 'POST',
@@ -628,22 +734,19 @@ function onboarding() {
           body: JSON.stringify({ provider: this.provider })
         });
         const data = await resp.json();
+        this.cliDebugInfo = data.debug || this.cliDebugInfo;
         if (data.auth_url) {
           this.cliAuthUrl = data.auth_url;
-          // Poll for completion
-          this.cliLoginPollTimer = setInterval(async () => {
-            try {
-              const check = await fetch('/api/cli-login/status');
-              const status = await check.json();
-              if (status.authenticated) {
-                clearInterval(this.cliLoginPollTimer);
-                this.cliLoginPollTimer = null;
-                this.cliLoginStatus = 'success';
-                this.cliLoginMessage = 'Account connected successfully!';
-                this.cliAuthUrl = '';
-              }
-            } catch (e) { /* keep polling */ }
-          }, 3000);
+          this.cliDeviceCode = data.device_code || null;
+          this.cliLoginStatus = 'idle';
+          if (this.cliDeviceCode) {
+            this.cliLoginMessage = 'Open the link below, enter the code, and sign in. This page will update automatically.';
+          } else {
+            this.cliLoginMessage = 'Complete the sign-in, then paste the authentication code here.';
+          }
+          this.ensureCliLoginPolling();
+        } else if (data.already_authenticated) {
+          this.handleCliLoginSuccess('Account already connected.');
         } else if (data.error) {
           this.cliLoginStatus = 'error';
           this.cliLoginMessage = data.error;
@@ -652,6 +755,107 @@ function onboarding() {
         this.cliLoginStatus = 'error';
         this.cliLoginMessage = 'Could not start login. Try using an API key instead.';
       }
+    },
+
+    handleCliLoginSuccess(message = 'Account connected successfully!') {
+      if (this.cliLoginPollTimer) {
+        clearInterval(this.cliLoginPollTimer);
+        this.cliLoginPollTimer = null;
+      }
+      this.cliLoginStatus = 'success';
+      this.cliLoginMessage = message;
+      this.cliAuthUrl = '';
+      this.cliAuthCodeAccepted = true;
+      this.cliAuthCodeSubmitting = false;
+    },
+
+    ensureCliLoginPolling() {
+      if (this.cliLoginPollTimer) return;
+      this.cliLoginPollTimer = setInterval(async () => {
+        try {
+          const check = await fetch('/api/cli-login/status');
+          const status = await check.json();
+          this.cliDebugInfo = status.debug || this.cliDebugInfo;
+          if (status.authenticated) {
+            this.handleCliLoginSuccess();
+          }
+        } catch (e) { /* keep polling */ }
+      }, 3000);
+    },
+
+    async submitCliAuthCode() {
+      if (!this.cliAuthCode.trim()) {
+        this.cliLoginStatus = 'error';
+        this.cliLoginMessage = 'Enter the authentication code from Anthropic.';
+        return;
+      }
+      this.cliAuthCodeSubmitting = true;
+      this.cliLoginStatus = 'loading';
+      this.cliLoginMessage = 'Submitting authentication code...';
+      try {
+        const resp = await fetch('/api/cli-login/code', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ provider: this.provider, code: this.cliAuthCode.trim() })
+        });
+        const data = await resp.json();
+        this.cliDebugInfo = data.debug || this.cliDebugInfo;
+        if (data.authenticated) {
+          this.handleCliLoginSuccess();
+          this.cliAuthCode = '';
+          return;
+        }
+        if (data.pending) {
+          this.cliAuthCodeAccepted = true;
+          this.cliLoginStatus = 'loading';
+          this.cliLoginMessage = 'Code submitted — you can click Continue to proceed.';
+          this.ensureCliLoginPolling();
+          this.cliAuthCodeSubmitting = false;
+          return;
+        }
+        this.cliLoginStatus = 'error';
+        this.cliLoginMessage = data.error || 'Claude did not accept that code.';
+        this.cliAuthCodeSubmitting = false;
+      } catch (e) {
+        this.cliLoginStatus = 'error';
+        this.cliLoginMessage = 'Could not submit the authentication code.';
+        this.cliAuthCodeSubmitting = false;
+      }
+    },
+
+    requiresAccountAuth() {
+      return this.authMethod === 'account';
+    },
+
+    oauthRequiredMessage() {
+      if (this.provider === 'claude' && this.authMethod === 'account') {
+        return 'Connect your Anthropic account before continuing, or switch to API key authentication.';
+      }
+      return 'Connect your account before continuing, or switch to API key authentication.';
+    },
+
+    canContinueFromBrainStep() {
+      if (!this.provider) return false;
+      if (!this.requiresAccountAuth()) return true;
+      return this.cliLoginStatus === 'success';
+    },
+
+    async continueFromBrainStep() {
+      if (!this.canContinueFromBrainStep()) {
+        this.errorMsg = this.oauthRequiredMessage();
+        return;
+      }
+      if (this.requiresAccountAuth() && this.cliLoginStatus === 'success') {
+        await this.submitSetup(true);
+        return;
+      }
+      this.goTo(2);
+    },
+
+    canFinishSetup() {
+      if (!this.userName.trim() || this.submitting) return false;
+      if (!this.requiresAccountAuth()) return true;
+      return this.cliLoginStatus === 'success';
     },
 
     providerLabel() {
@@ -695,9 +899,22 @@ function onboarding() {
       }
     },
 
-    async submitSetup() {
-      if (!this.userName.trim()) {
+    async submitSetup(launchJane = false) {
+      if (!this.userName.trim() && !launchJane) {
         this.errorMsg = 'Please enter your name.';
+        return;
+      }
+      if (launchJane) {
+        if (!this.provider) {
+          this.errorMsg = 'Choose a provider first.';
+          return;
+        }
+        if (this.requiresAccountAuth() && this.cliLoginStatus !== 'success') {
+          this.errorMsg = this.oauthRequiredMessage();
+          return;
+        }
+      } else if (!this.canFinishSetup()) {
+        this.errorMsg = this.oauthRequiredMessage();
         return;
       }
       this.submitting = true;
@@ -713,6 +930,7 @@ function onboarding() {
             user_name: this.userName.trim(),
             api_key: this.authMethod === 'apikey' ? this.apiKey.trim() : '',
             auth_method: this.authMethod,
+            create_minimal_profile: launchJane,
           })
         });
         const data = await resp.json();
@@ -735,6 +953,11 @@ function onboarding() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ jane_brain: this.provider, ...keyMap[this.provider] })
           });
+        }
+
+        if (launchJane) {
+          window.location.replace(this.janeUrl);
+          return;
         }
 
         // Show the ready step

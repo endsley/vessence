@@ -11,7 +11,9 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.CancellableContinuation
@@ -29,11 +31,19 @@ data class BriefingUiState(
     val categories: List<String> = emptyList(),
     val selectedCategory: String = "All",
     val isLoading: Boolean = false,
+    val isLoadingArchive: Boolean = false,
     val error: String? = null,
     val lastUpdated: String? = null,
+    val viewingArchiveDate: String? = null,
+    val archiveDates: List<String> = emptyList(),
     val expandedArticleId: String? = null,
     val isSpeaking: Boolean = false,
     val readAllActive: Boolean = false,
+    val savedArticleIds: Set<String> = emptySet(),
+    val savedCategories: List<String> = listOf("Read Later", "Important", "Reference"),
+    val viewingSaved: Boolean = false,
+    val savedArticles: List<com.vessences.android.data.model.SavedArticleEntry> = emptyList(),
+    val savedFilterCategory: String? = null,
 )
 
 class BriefingViewModel(application: Application) : AndroidViewModel(application) {
@@ -52,9 +62,16 @@ class BriefingViewModel(application: Application) : AndroidViewModel(application
         // Cleanup old cached audio on startup
         com.vessences.android.util.BriefingAudioCache.cleanupOldFiles(appContext)
         refresh()
+        fetchArchiveDates()
+        fetchSavedArticleIds()
+        fetchSavedCategories()
     }
 
     fun refresh() {
+        if (_state.value.viewingArchiveDate != null) {
+            loadArchive(_state.value.viewingArchiveDate!!)
+            return
+        }
         viewModelScope.launch {
             _state.value = _state.value.copy(isLoading = true, error = null)
             try {
@@ -86,6 +103,64 @@ class BriefingViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    fun fetchArchiveDates() {
+        viewModelScope.launch {
+            try {
+                val request = Request.Builder().url("$baseUrl/api/briefing/archive").build()
+                val response = withContext(Dispatchers.IO) { client.newCall(request).execute() }
+                if (response.isSuccessful) {
+                    val body = response.body?.string() ?: "{}"
+                    val parsed = gson.fromJson(body, com.google.gson.JsonObject::class.java)
+                    val datesArray = parsed.getAsJsonArray("dates")
+                    if (datesArray != null) {
+                        val dates: List<String> = gson.fromJson(datesArray, object : TypeToken<List<String>>() {}.type)
+                        _state.value = _state.value.copy(archiveDates = dates)
+                    }
+                }
+                response.close()
+            } catch (e: Exception) {
+                // Ignore archive list failures
+            }
+        }
+    }
+
+    fun loadArchive(date: String) {
+        viewModelScope.launch {
+            _state.value = _state.value.copy(isLoadingArchive = true, error = null)
+            try {
+                val request = Request.Builder().url("$baseUrl/api/briefing/archive/$date").build()
+                val response = withContext(Dispatchers.IO) { client.newCall(request).execute() }
+                if (!response.isSuccessful) throw Exception("Archive not found")
+                
+                val body = response.body?.string() ?: "{}"
+                val parsed = gson.fromJson(body, com.google.gson.JsonObject::class.java)
+                val cardsArray = parsed.getAsJsonArray("cards")
+                val articles: List<BriefingArticle> = gson.fromJson(cardsArray, object : TypeToken<List<BriefingArticle>>() {}.type)
+                val categoriesArray = parsed.getAsJsonArray("categories")
+                val categories: List<String> = gson.fromJson(categoriesArray, object : TypeToken<List<String>>() {}.type)
+                
+                _state.value = _state.value.copy(
+                    articles = articles,
+                    categories = categories,
+                    viewingArchiveDate = date,
+                    isLoadingArchive = false,
+                    lastUpdated = date,
+                )
+                response.close()
+            } catch (e: Exception) {
+                _state.value = _state.value.copy(
+                    isLoadingArchive = false,
+                    error = "Failed to load archive for $date",
+                )
+            }
+        }
+    }
+
+    fun clearArchive() {
+        _state.value = _state.value.copy(viewingArchiveDate = null)
+        refresh()
+    }
+
     fun selectCategory(category: String) {
         _state.value = _state.value.copy(selectedCategory = category)
     }
@@ -114,7 +189,7 @@ class BriefingViewModel(application: Application) : AndroidViewModel(application
                 withContext(Dispatchers.IO) {
                     val request = Request.Builder()
                         .url("$baseUrl/api/briefing/article/$articleId/dismiss")
-                        .post(okhttp3.RequestBody.create(null, ByteArray(0)))
+                        .post(ByteArray(0).toRequestBody(null))
                         .build()
                     client.newCall(request).execute().close()
                 }
@@ -140,6 +215,9 @@ class BriefingViewModel(application: Application) : AndroidViewModel(application
     fun speakArticle(article: BriefingArticle, summaryType: String = "brief") {
         viewModelScope.launch {
             _state.value = _state.value.copy(isSpeaking = true)
+            // Pause always-listen during audio playback
+            com.vessences.android.voice.WakeWordBridge.sttActive = true
+            com.vessences.android.voice.AlwaysListeningService.stop(appContext)
 
             // Priority: 1) local cache, 2) stream from server, 3) device TTS
             val cachedFile = com.vessences.android.util.BriefingAudioCache.getCachedFile(appContext, article.id, summaryType)
@@ -162,6 +240,12 @@ class BriefingViewModel(application: Application) : AndroidViewModel(application
                 tts.speak(text)
             }
             _state.value = _state.value.copy(isSpeaking = false)
+            // Resume always-listen after audio finishes
+            com.vessences.android.voice.WakeWordBridge.sttActive = false
+            val voiceSettings = com.vessences.android.data.repository.VoiceSettingsRepository(appContext)
+            if (voiceSettings.isAlwaysListeningEnabled()) {
+                com.vessences.android.voice.AlwaysListeningService.start(appContext)
+            }
         }
     }
 
@@ -250,16 +334,30 @@ class BriefingViewModel(application: Application) : AndroidViewModel(application
             mediaPlayer = null
         }
         _state.value = _state.value.copy(isSpeaking = false, readAllActive = false)
+        // Resume always-listen
+        com.vessences.android.voice.WakeWordBridge.sttActive = false
+        val voiceSettings = com.vessences.android.data.repository.VoiceSettingsRepository(appContext)
+        if (voiceSettings.isAlwaysListeningEnabled()) {
+            com.vessences.android.voice.AlwaysListeningService.start(appContext)
+        }
     }
 
-    fun readAll() {
+    fun readAll(summaryType: String = "brief") {
         readAllJob?.cancel()
         readAllJob = viewModelScope.launch {
             _state.value = _state.value.copy(readAllActive = true, isSpeaking = true)
+            // Pause always-listen during read-all
+            com.vessences.android.voice.WakeWordBridge.sttActive = true
+            com.vessences.android.voice.AlwaysListeningService.stop(appContext)
             val articles = getFilteredArticles()
             for (article in articles) {
                 if (!_state.value.readAllActive) break
-                tts.speak("${article.title}. ${article.briefSummary}")
+                val text = if (summaryType == "full" && article.fullSummary != null) {
+                    "${article.title}. ${article.fullSummary}"
+                } else {
+                    "${article.title}. ${article.briefSummary}"
+                }
+                tts.speak(text)
             }
             _state.value = _state.value.copy(readAllActive = false, isSpeaking = false)
         }
@@ -297,6 +395,129 @@ class BriefingViewModel(application: Application) : AndroidViewModel(application
         val topicsArray = parsed.getAsJsonArray("topics") ?: return@withContext emptyList()
         val type = object : TypeToken<List<BriefingTopic>>() {}.type
         gson.fromJson(topicsArray, type)
+    }
+
+    fun saveArticle(articleId: String, category: String) {
+        viewModelScope.launch {
+            try {
+                val json = gson.toJson(mapOf("article_id" to articleId, "category" to category))
+                val body = okhttp3.RequestBody.create(
+                    "application/json".toMediaTypeOrNull(), json
+                )
+                withContext(Dispatchers.IO) {
+                    val request = Request.Builder()
+                        .url("$baseUrl/api/briefing/saved")
+                        .post(body)
+                        .build()
+                    client.newCall(request).execute().close()
+                }
+                _state.value = _state.value.copy(
+                    savedArticleIds = _state.value.savedArticleIds + articleId,
+                )
+                // Add category if new
+                if (category !in _state.value.savedCategories) {
+                    _state.value = _state.value.copy(
+                        savedCategories = _state.value.savedCategories + category,
+                    )
+                }
+            } catch (_: Exception) {}
+        }
+    }
+
+    fun unsaveArticle(articleId: String) {
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    val request = Request.Builder()
+                        .url("$baseUrl/api/briefing/saved/$articleId")
+                        .delete()
+                        .build()
+                    client.newCall(request).execute().close()
+                }
+                _state.value = _state.value.copy(
+                    savedArticleIds = _state.value.savedArticleIds - articleId,
+                    savedArticles = _state.value.savedArticles.filter { it.articleId != articleId },
+                )
+            } catch (_: Exception) {}
+        }
+    }
+
+    fun isArticleSaved(articleId: String): Boolean = articleId in _state.value.savedArticleIds
+
+    fun toggleSavedView() {
+        val newVal = !_state.value.viewingSaved
+        _state.value = _state.value.copy(viewingSaved = newVal)
+        if (newVal) loadSavedArticles()
+    }
+
+    fun loadSavedArticles(category: String? = null) {
+        viewModelScope.launch {
+            try {
+                val url = if (category != null) {
+                    "$baseUrl/api/briefing/saved?category=${java.net.URLEncoder.encode(category, "UTF-8")}"
+                } else {
+                    "$baseUrl/api/briefing/saved"
+                }
+                val request = Request.Builder().url(url).build()
+                val response = withContext(Dispatchers.IO) { client.newCall(request).execute() }
+                if (response.isSuccessful) {
+                    val body = response.body?.string() ?: "{}"
+                    val parsed = gson.fromJson(body, com.google.gson.JsonObject::class.java)
+                    val articlesArray = parsed.getAsJsonArray("articles")
+                    if (articlesArray != null) {
+                        val type = object : TypeToken<List<com.vessences.android.data.model.SavedArticleEntry>>() {}.type
+                        val saved: List<com.vessences.android.data.model.SavedArticleEntry> = gson.fromJson(articlesArray, type)
+                        _state.value = _state.value.copy(
+                            savedArticles = saved,
+                            savedFilterCategory = category,
+                        )
+                    }
+                }
+                response.close()
+            } catch (_: Exception) {}
+        }
+    }
+
+    private fun fetchSavedArticleIds() {
+        viewModelScope.launch {
+            try {
+                val request = Request.Builder().url("$baseUrl/api/briefing/saved").build()
+                val response = withContext(Dispatchers.IO) { client.newCall(request).execute() }
+                if (response.isSuccessful) {
+                    val body = response.body?.string() ?: "{}"
+                    val parsed = gson.fromJson(body, com.google.gson.JsonObject::class.java)
+                    val articlesArray = parsed.getAsJsonArray("articles")
+                    if (articlesArray != null) {
+                        val ids = articlesArray.map {
+                            it.asJsonObject.get("article_id")?.asString ?: ""
+                        }.filter { it.isNotEmpty() }.toSet()
+                        _state.value = _state.value.copy(savedArticleIds = ids)
+                    }
+                }
+                response.close()
+            } catch (_: Exception) {}
+        }
+    }
+
+    private fun fetchSavedCategories() {
+        viewModelScope.launch {
+            try {
+                val request = Request.Builder().url("$baseUrl/api/briefing/saved/categories").build()
+                val response = withContext(Dispatchers.IO) { client.newCall(request).execute() }
+                if (response.isSuccessful) {
+                    val body = response.body?.string() ?: "{}"
+                    val parsed = gson.fromJson(body, com.google.gson.JsonObject::class.java)
+                    val catsArray = parsed.getAsJsonArray("categories")
+                    if (catsArray != null) {
+                        val serverCats: List<String> = gson.fromJson(catsArray, object : TypeToken<List<String>>() {}.type)
+                        val defaults = listOf("Read Later", "Important", "Reference")
+                        val merged = (defaults + serverCats).distinct()
+                        _state.value = _state.value.copy(savedCategories = merged)
+                    }
+                }
+                response.close()
+            } catch (_: Exception) {}
+        }
     }
 
     override fun onCleared() {

@@ -1,0 +1,13 @@
+{
+  "sample_rate": 16000,
+  "frame_ms": 25.0,
+  "hop_ms": 10.0,
+  "n_dct_coeffs": 20,
+  "utterance_duration_s": 2.0,
+  "rff_dim": 2048,
+  "rff_sigma": 0.0,
+  "detection_threshold": 0.0,
+  "detection_stride_ms": 160.0,
+  "samples_dir": "samples",
+  "model_path": "model.json"
+}

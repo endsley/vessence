@@ -14,13 +14,19 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 COMPOSE = ROOT / "docker-compose.yml"
-DOCKERFILES = [
-    ROOT / "docker" / "amber" / "Dockerfile",
-    ROOT / "docker" / "vault" / "Dockerfile",
-    ROOT / "docker" / "jane" / "Dockerfile",
-    ROOT / "docker" / "onboarding" / "Dockerfile",
-    ROOT / "docker" / "chromadb" / "Dockerfile",
-]
+
+
+def active_dockerfiles() -> list[Path]:
+    dockerfiles: list[Path] = []
+    for line in COMPOSE.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "dockerfile:" not in stripped:
+            continue
+        rel = stripped.split("dockerfile:", 1)[1].strip()
+        path = ROOT / rel
+        if path.exists():
+            dockerfiles.append(path)
+    return dockerfiles
 
 
 def fail(msg: str) -> None:
@@ -62,7 +68,8 @@ def assert_dockerfiles_do_not_copy_runtime_data() -> None:
         re.compile(r"^\s*COPY\s+.*\bvault\b", re.IGNORECASE),
     ]
     exceptions = {"docker/onboarding/Dockerfile"}
-    for dockerfile in DOCKERFILES:
+    dockerfiles = active_dockerfiles()
+    for dockerfile in dockerfiles:
         rel = dockerfile.relative_to(ROOT).as_posix()
         text = dockerfile.read_text(encoding="utf-8").splitlines()
         for line in text:
@@ -74,13 +81,14 @@ def assert_dockerfiles_do_not_copy_runtime_data() -> None:
 
 
 def main() -> int:
+    dockerfiles = active_dockerfiles()
     assert_no_seeded_memory()
     assert_compose_uses_host_mounts()
     assert_dockerfiles_do_not_copy_runtime_data()
     print(json.dumps({
         "ok": True,
         "compose": str(COMPOSE),
-        "checked_dockerfiles": [str(p.relative_to(ROOT)) for p in DOCKERFILES],
+        "checked_dockerfiles": [str(p.relative_to(ROOT)) for p in dockerfiles],
         "result": "Packaged install starts from host-mounted empty state; no seeded Jane/Amber memories bundled in images."
     }, indent=2))
     return 0

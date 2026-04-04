@@ -17,7 +17,8 @@ echo.
 set "INSTALL_DIR=%USERPROFILE%\vessence"
 
 :: ── Confirm ─────────────────────────────────────────────────────────
-set /p CONFIRM="  Are you sure you want to uninstall Vessence? (y/N): "
+set /p CONFIRM="  Are you sure you want to uninstall Vessence? (Y/n): "
+if "%CONFIRM%"=="" set "CONFIRM=y"
 if /i not "%CONFIRM%"=="y" (
     echo  Cancelled.
     pause

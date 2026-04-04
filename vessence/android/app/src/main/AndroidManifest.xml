@@ -11,6 +11,9 @@
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- USE_FULL_SCREEN_INTENT removed — screen-off wake word disabled for now -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <application
         android:allowBackup="true"
@@ -62,8 +65,26 @@
 
         <service
             android:name=".voice.AlwaysListeningService"
-            android:foregroundServiceType="microphone"
+            android:foregroundServiceType="microphone|mediaPlayback"
             android:exported="false" />
+
+        <!-- Default Digital Assistant integration -->
+        <service
+            android:name=".voice.VessenceVoiceInteractionService"
+            android:permission="android.permission.BIND_VOICE_INTERACTION"
+            android:exported="true">
+            <meta-data
+                android:name="android.voice_interaction"
+                android:resource="@xml/voice_interaction_service" />
+            <intent-filter>
+                <action android:name="android.service.voice.VoiceInteractionService" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:name=".voice.VessenceVoiceInteractionSessionService"
+            android:permission="android.permission.BIND_VOICE_INTERACTION"
+            android:exported="true" />
     </application>
 
 </manifest>

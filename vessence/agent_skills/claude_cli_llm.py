@@ -16,6 +16,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from jane.config import PROVIDER_CLI, CHEAP_MODEL, SMART_MODEL, _PROVIDER
 
+# Tiered Model Mapping (as of 2026-03-27)
+# Orchestrator: Primary Reasoning (Opus/Sonnet)
+# Agent: Specialist (Sonnet/Pro)
+# Utility: Background Worker (Haiku/Flash)
+
 
 def _build_command(prompt: str, model: str, max_tokens: int) -> list[str]:
     """Build the CLI command for the active provider."""
@@ -73,17 +78,39 @@ def completion(prompt: str, *, model: str | None = None,
     return result.stdout.strip()
 
 
-def completion_smart(prompt: str, *, max_tokens: int = 4096, timeout: int = 120) -> str:
-    """Like completion() but uses the SMART model (for user-facing tasks)."""
+def completion_orchestrator(prompt: str, *, max_tokens: int = 4096, timeout: int = 180) -> str:
+    """Uses the highest-tier model (Opus/Sonnet) for complex reasoning/code."""
+    # current JANE_BRAIN setting usually points to the orchestrator
+    return completion(prompt, model=os.environ.get("BRAIN_HEAVY_CLAUDE", "claude-3-6-opus-20260320"), max_tokens=max_tokens, timeout=timeout)
+
+
+def completion_agent(prompt: str, *, max_tokens: int = 4096, timeout: int = 120) -> str:
+    """Uses the Agent-tier model (Sonnet) for specialized research and archival."""
     return completion(prompt, model=SMART_MODEL, max_tokens=max_tokens, timeout=timeout)
 
 
-def completion_json(prompt: str, *, timeout: int = 120) -> dict:
-    """Send a prompt expecting JSON output. Uses CHEAP model. Parses and returns dict."""
-    text = completion(prompt, max_tokens=4096, timeout=timeout)
+def completion_utility(prompt: str, *, max_tokens: int = 1024, timeout: int = 60) -> str:
+    """Uses the Utility-tier model (Haiku) for triage and simple tasks."""
+    return completion(prompt, model=CHEAP_MODEL, max_tokens=max_tokens, timeout=timeout)
+
+
+def completion_smart(prompt: str, *, max_tokens: int = 4096, timeout: int = 120) -> str:
+    """Legacy alias for completion_agent."""
+    return completion_agent(prompt, max_tokens=max_tokens, timeout=timeout)
+
+
+def completion_json(prompt: str, *, tier: str = "utility", timeout: int = 300) -> dict:
+    """Send a prompt expecting JSON output. Defaults to Utility tier.
+    Timeout increased to 300s for complex Agent-tier thematic archival."""
+    if tier == "agent":
+        text = completion_agent(prompt, max_tokens=4096, timeout=timeout)
+    else:
+        text = completion_utility(prompt, max_tokens=4096, timeout=timeout)
+    
     # Strip markdown code fences if present
-    if text.startswith("```"):
-        lines = text.split("\n")
-        lines = [l for l in lines if not l.startswith("```")]
-        text = "\n".join(lines)
+    if "```json" in text:
+        text = text.split("```json")[1].split("```")[0].strip()
+    elif "```" in text:
+        text = text.split("```")[1].split("```")[0].strip()
+    
     return json.loads(text)

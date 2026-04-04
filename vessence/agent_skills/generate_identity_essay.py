@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from jane.config import ENV_FILE_PATH, VAULT_DIR, VECTOR_DB_USER_MEMORIES
+from jane.config import get_chroma_client, ENV_FILE_PATH, VAULT_DIR, VECTOR_DB_USER_MEMORIES
 
 DB_PATH = VECTOR_DB_USER_MEMORIES
 _USER_NAME = os.environ.get("USER_NAME", "user")
@@ -19,7 +19,7 @@ AMBER_ESSAY_PATH = os.path.join(VAULT_DIR, "documents", "amber_identity_essay.tx
 load_dotenv(ENV_FILE_PATH)
 
 def update_essay():
-    client = chromadb.PersistentClient(path=DB_PATH)
+    client = get_chroma_client(path=DB_PATH)
     try:
         collection = client.get_collection(name="user_memories")
         all_mems = collection.get(include=["documents"])

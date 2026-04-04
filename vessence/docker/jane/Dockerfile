@@ -8,9 +8,15 @@ LABEL org.opencontainers.image.title="Vessence Jane"
 LABEL org.opencontainers.image.description="Jane — your personal AI assistant"
 LABEL org.opencontainers.image.source="https://github.com/vessence/vessence"
 
-# Minimal system deps: curl for health checks, ca-certs for HTTPS
+# Minimal system deps: curl for health checks, ca-certs for HTTPS, gnupg for NodeSource,
+# procps for process inspection during Claude CLI OAuth flow
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl ca-certificates \
+    curl ca-certificates gnupg procps \
+    && rm -rf /var/lib/apt/lists/*
+
+# Pre-install Node.js 22 (speeds up first-boot by ~2 minutes)
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -33,6 +39,7 @@ RUN find /app -name "*.db" -delete && find /app -name "*.sqlite3" -delete
 
 # First-boot CLI installer script
 COPY docker/jane/install_brain.sh /app/install_brain.sh
+COPY version.json ./version.json
 RUN chmod +x /app/install_brain.sh
 
 RUN mkdir -p /app/logs /app/vault /app/data /app/credentials

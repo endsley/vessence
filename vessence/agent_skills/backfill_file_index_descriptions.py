@@ -30,7 +30,7 @@ with _silence():
     import chromadb
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from jane.config import CHROMA_COLLECTION_FILE_INDEX, VAULT_DIR, VECTOR_DB_FILE_INDEX
+from jane.config import get_chroma_client, CHROMA_COLLECTION_FILE_INDEX, VAULT_DIR, VECTOR_DB_FILE_INDEX
 from agent_skills.index_vault import (
     READABLE_EXTENSIONS,
     describe_readable_file,
@@ -71,7 +71,7 @@ def _build_memory_text(path: Path, description: str, mime_type: str) -> str:
 
 def backfill(limit: int | None = None) -> dict:
     with _silence():
-        client = chromadb.PersistentClient(path=VECTOR_DB_FILE_INDEX)
+        client = get_chroma_client(path=VECTOR_DB_FILE_INDEX)
         coll = client.get_or_create_collection(CHROMA_COLLECTION_FILE_INDEX, metadata={"hnsw:space": "cosine"})
 
     rows = coll.get(include=["documents", "metadatas"])

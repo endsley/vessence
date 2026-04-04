@@ -34,6 +34,9 @@ import com.vessences.android.ui.essences.EssencesScreen
 import com.vessences.android.ui.home.HomeScreen
 import com.vessences.android.ui.music.MusicScreen
 import com.vessences.android.ui.settings.SettingsScreen
+import com.vessences.android.ui.settings.SettingsViewModel
+import com.vessences.android.ui.settings.SettingsViewModelFactory
+import com.vessences.android.ui.settings.SystemArchitectureScreen
 import com.vessences.android.ui.vault.VaultScreen
 import com.vessences.android.ui.voice.TriggerWordTrainingScreen
 import com.vessences.android.ui.briefing.BriefingScreen
@@ -70,6 +73,44 @@ fun VessencesApp(loginViewModel: LoginViewModel = viewModel()) {
 private fun AuthenticatedApp(loginViewModel: LoginViewModel) {
     val navController = rememberNavController()
 
+    // Handle navigation requests (notification tap, wake word, etc.)
+    val pendingTarget by NotificationNavigationState.pendingTarget.collectAsState()
+    LaunchedEffect(pendingTarget) {
+        val target = pendingTarget ?: return@LaunchedEffect
+        val isWakeWord = target == "jane_wake"
+        NotificationNavigationState.consumeTarget()
+        navController.navigate(NavTab.JANE.route) {
+            popUpTo(NavTab.HOME.route) { inclusive = false }
+            launchSingleTop = true
+        }
+        if (isWakeWord) {
+            // Set a flag that JaneChatScreen picks up to launch STT
+            WakeWordPendingFlag.set()
+        }
+    }
+
+    // Wake word: single handler — consume signal, navigate, set wakeWordTriggered via state
+    val wakeWordActive by com.vessences.android.voice.WakeWordBridge.activated.collectAsState()
+    LaunchedEffect(wakeWordActive) {
+        if (wakeWordActive) {
+            com.vessences.android.voice.WakeWordBridge.consume()
+            // Navigate to Jane chat — JaneChatScreen will see wakeWordTriggered=true
+            // and launch STT when it composes
+            NotificationNavigationState.pendingChatTarget = "jane_wake"
+        }
+    }
+
+    // Handle music play command from Jane chat: navigate to Music Playlist and auto-play
+    // Don't consume here — MusicViewModel reads and consumes the playlist ID on init
+    val musicPlayTarget by MusicPlayNavigationState.pendingPlaylist.collectAsState()
+    LaunchedEffect(musicPlayTarget) {
+        if (musicPlayTarget != null) {
+            navController.navigate("essence_view/Music Playlist") {
+                launchSingleTop = true
+            }
+        }
+    }
+
     Scaffold(
         containerColor = SlateBackground,
     ) { paddingValues ->
@@ -95,6 +136,11 @@ private fun AuthenticatedApp(loginViewModel: LoginViewModel) {
                             launchSingleTop = true
                         }
                     },
+                    onNavigateToSystemArchitecture = {
+                        navController.navigate("system_architecture") {
+                            launchSingleTop = true
+                        }
+                    }
                 )
             }
             composable(NavTab.JANE.route) {
@@ -133,6 +179,16 @@ private fun AuthenticatedApp(loginViewModel: LoginViewModel) {
                 EssenceViewRouter(
                     essenceName = essenceName,
                     onBack = { navController.popBackStack() },
+                )
+            }
+            composable("system_architecture") {
+                val context = androidx.compose.ui.platform.LocalContext.current
+                val settingsViewModel: SettingsViewModel = viewModel(
+                    factory = SettingsViewModelFactory(context)
+                )
+                SystemArchitectureScreen(
+                    viewModel = settingsViewModel,
+                    onBack = { navController.popBackStack() }
                 )
             }
         }

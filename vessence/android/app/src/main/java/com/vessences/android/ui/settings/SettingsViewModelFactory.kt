@@ -3,6 +3,7 @@ package com.vessences.android.ui.settings
 import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.viewmodel.CreationExtras
 
 class SettingsViewModelFactory(
     private val appContext: Context,
@@ -13,5 +14,9 @@ class SettingsViewModelFactory(
             return SettingsViewModel(appContext) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class: ${modelClass.name}")
+    }
+
+    override fun <T : ViewModel> create(modelClass: Class<T>, extras: CreationExtras): T {
+        return create(modelClass)
     }
 }

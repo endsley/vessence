@@ -67,11 +67,11 @@ class GeminiPersistentSession:
                 return
             await self._spawn_locked()
         try:
-            await asyncio.wait_for(self.ready_event.wait(), timeout=45.0)
+            await asyncio.wait_for(self.ready_event.wait(), timeout=90.0)
         except asyncio.TimeoutError as exc:
             async with self.state_lock:
                 await self._close_locked()
-            raise RuntimeError("Persistent Gemini did not become ready within 45s") from exc
+            raise RuntimeError("Persistent Gemini did not become ready within 90s") from exc
         if self.start_failure is not None:
             error = self.start_failure
             async with self.state_lock:
@@ -98,6 +98,12 @@ class GeminiPersistentSession:
         self.pending_text = ""
         self.startup_buffer = ""
         self.start_failure = None
+
+        # Load API key from runtime .env if not already in environment
+        # (onboarding may have written it after the container started)
+        # Gemini CLI checks GEMINI_API_KEY first, then GOOGLE_API_KEY
+        from jane.brain_adapters import _load_runtime_env_keys
+        _load_runtime_env_keys(("GOOGLE_API_KEY", "GEMINI_API_KEY"))
 
         try:
             self.process = await asyncio.create_subprocess_exec(
@@ -301,8 +307,15 @@ class GeminiPersistentSession:
 
             if not self.ready_event.is_set():
                 self.startup_buffer += text
+                import logging as _logging
+                _log = _logging.getLogger("jane.persistent_gemini")
+                if len(self.startup_buffer) % 200 < len(text):  # Log periodically
+                    _log.info("Gemini startup buffer (%d chars): ...%s",
+                              len(self.startup_buffer),
+                              repr(self.startup_buffer[-100:]))
                 prompt_idx, pattern = self._find_prompt(self.startup_buffer)
                 if prompt_idx is not None:
+                    _log.info("Gemini ready prompt found at index %d in %d chars", prompt_idx, len(self.startup_buffer))
                     self.ready_event.set()
                     self.startup_buffer = self.startup_buffer[prompt_idx + len(pattern):]
                     self.start_failure = None

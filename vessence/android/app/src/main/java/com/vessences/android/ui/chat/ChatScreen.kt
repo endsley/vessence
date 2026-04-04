@@ -6,6 +6,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -24,11 +25,13 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.VolumeOff
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Surface
@@ -37,11 +40,13 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -51,6 +56,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import kotlinx.coroutines.launch
 
 private val SlateBg = Color(0xFF0F172A)
 private val SlateCard = Color(0xFF1E293B)
@@ -68,9 +74,24 @@ fun ChatScreen(
     onBack: (() -> Unit)? = null,
 ) {
     val state by viewModel.state.collectAsState()
+    val alwaysListeningRunning by com.vessences.android.voice.AlwaysListeningService.running.collectAsState()
     val inputText = remember { mutableStateOf("") }
     val listState = rememberLazyListState()
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val userDetachedFromBottom by remember {
+        derivedStateOf {
+            val layout = listState.layoutInfo
+            val totalItems = layout.totalItemsCount
+            if (totalItems == 0) {
+                false
+            } else {
+                // Detached only if the sentinel (last item) is entirely off-screen,
+                // meaning the user intentionally scrolled up past Jane's message.
+                layout.visibleItemsInfo.none { it.index == totalItems - 1 }
+            }
+        }
+    }
 
     // Attachment state
     val attachedFileUri = remember { mutableStateOf<Uri?>(null) }
@@ -78,8 +99,15 @@ fun ChatScreen(
     var showAttachmentSheet by remember { mutableStateOf(false) }
     var showQueueSheet by remember { mutableStateOf(false) }
     var showVoicePicker by remember { mutableStateOf(false) }
+    var showNewSessionConfirm by remember { mutableStateOf(false) }
     val cameraPhotoUri = remember { mutableStateOf<Uri?>(null) }
     val ttsEnabled = remember { mutableStateOf(false) }
+    
+    val chatPrefs = remember { com.vessences.android.util.ChatPreferences(context) }
+    val autoListenEnabled = remember { mutableStateOf(chatPrefs.isAutoListenEnabled()) }
+    LaunchedEffect(autoListenEnabled.value) {
+        chatPrefs.setAutoListenEnabled(autoListenEnabled.value)
+    }
 
     // Always-listening permission state
     var pendingAlwaysListeningEnable by remember { mutableStateOf(false) }
@@ -108,20 +136,20 @@ fun ChatScreen(
         if (state.messages.isNotEmpty()) {
             // Small delay to let Compose lay out the new item first
             kotlinx.coroutines.delay(100)
-            listState.animateScrollToItem(state.messages.size - 1)
+            listState.animateScrollToItem(state.messages.size) // scroll to sentinel
         }
     }
 
-    // Auto-scroll during Jane's streaming — only if scroll thumb is near the bottom
-    // If user scrolled up to read something, don't interrupt
+    // Auto-scroll during Jane's streaming only while the user is still following the bottom,
+    // matching web Jane's behavior of pausing once they've scrolled up to read older content.
+    // Uses scrollToItem (instant) instead of animateScrollToItem to avoid animation queue buildup
+    // when deltas arrive rapidly during streaming.
     val totalMessages = state.messages.size
     val lastMessageText = state.messages.lastOrNull()?.text ?: ""
     LaunchedEffect(totalMessages, lastMessageText.length) {
         if (state.messages.isNotEmpty() && !state.messages.last().isUser) {
-            val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
-            val totalItems = listState.layoutInfo.totalItemsCount
-            if (totalItems - lastVisible <= 2) {
-                listState.animateScrollToItem(state.messages.size - 1)
+            if (!userDetachedFromBottom) {
+                listState.scrollToItem(state.messages.size) // scroll to sentinel
             }
         }
     }
@@ -132,6 +160,7 @@ fun ChatScreen(
         onDismiss = { showAttachmentSheet = false },
         aiColor = aiColor,
         ttsEnabled = ttsEnabled,
+        autoListenEnabled = autoListenEnabled,
         attachedFileUri = attachedFileUri,
         attachedFileName = attachedFileName,
         cameraPhotoUri = cameraPhotoUri,
@@ -152,8 +181,8 @@ fun ChatScreen(
             aiColor = aiColor,
             subtitle = subtitle,
             onBack = onBack,
-            onNewChat = { viewModel.clearSession() },
-            onQueue = if (aiName == "Jane") {{ showQueueSheet = true }} else null,
+            onNewChat = { showNewSessionConfirm = true },
+            isWakeListening = alwaysListeningRunning || state.voice.isWakeListening,
             ttsEnabled = state.ttsEnabled,
             isSpeaking = state.isSpeaking,
             onToggleTts = { viewModel.toggleTts() },
@@ -173,47 +202,41 @@ fun ChatScreen(
             onDismiss = { showVoicePicker = false },
         )
 
-        // Live activity banner (Jane working on another session)
-        if (state.liveStatus.isNotBlank()) {
-            LiveActivityBanner(
-                status = state.liveStatus,
-                platform = state.livePlatform,
-            )
-        }
-
-        // Queue progress bubble (updates in place)
-        if (state.progressBubble.isNotBlank()) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(Color(0xFF1A1A2E))
-                    .padding(horizontal = 12.dp, vertical = 10.dp),
-            ) {
-                Text(
-                    text = state.progressBubble,
-                    color = Color(0xFFCBD5E1),
-                    fontSize = 13.sp,
-                    lineHeight = 18.sp,
-                )
-            }
-        }
-
-        // Voice status banner
-        VoiceStatusBanner(
-            voice = state.voice,
-            aiColor = aiColor,
-        )
+        // Voice status banner removed — wake word status shown as icon in header
 
         // Messages
-        ChatMessageList(
-            messages = state.messages,
-            aiName = aiName,
-            aiColor = aiColor,
-            listState = listState,
-            modifier = Modifier.weight(1f),
-            onNavigateToEssence = onNavigateToEssence,
-            onSpeakText = { text -> viewModel.speakText(text) },
-        )
+        Box(modifier = Modifier.weight(1f)) {
+            ChatMessageList(
+                messages = state.messages,
+                aiName = aiName,
+                aiColor = aiColor,
+                listState = listState,
+                modifier = Modifier.fillMaxSize(),
+                onNavigateToEssence = onNavigateToEssence,
+                onSpeakText = { text -> viewModel.speakText(text) },
+                onSwitchProvider = { provider -> viewModel.switchProvider(provider) },
+            )
+
+            if (userDetachedFromBottom && state.messages.isNotEmpty()) {
+                FloatingActionButton(
+                    onClick = {
+                        scope.launch {
+                            listState.animateScrollToItem(state.messages.size) // scroll to sentinel
+                        }
+                    },
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(end = 16.dp, bottom = 16.dp),
+                    containerColor = SlateCard,
+                    contentColor = Color.White,
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.KeyboardArrowDown,
+                        contentDescription = "Jump to latest message",
+                    )
+                }
+            }
+        }
 
         // Error banner
         ErrorBanner(
@@ -249,6 +272,7 @@ fun ChatScreen(
         ChatInputRow(
             inputText = inputText,
             onSend = { text, uri -> viewModel.sendMessage(text = text, fileUri = uri) },
+            onSendVoice = { text -> viewModel.sendMessage(text = text, fromVoice = true) },
             fileAttachment = attachedFileUri,
             fileAttachmentName = attachedFileName,
             isSending = state.isSending,
@@ -259,6 +283,30 @@ fun ChatScreen(
             onShowAttachmentSheet = { showAttachmentSheet = true },
             onCancel = { viewModel.cancelCurrentResponse() },
             queuedCount = state.queuedCount,
+            triggerSpeech = state.wakeWordTriggered,
+            onSpeechTriggered = { viewModel.clearWakeWordTrigger() },
+        )
+    }
+
+    // New session confirmation dialog
+    if (showNewSessionConfirm) {
+        AlertDialog(
+            onDismissRequest = { showNewSessionConfirm = false },
+            title = { Text("Start new session?") },
+            text = { Text("Some memories from this session might be lost. Are you sure?") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showNewSessionConfirm = false
+                    viewModel.clearSession()
+                }) {
+                    Text("Yes, start new")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showNewSessionConfirm = false }) {
+                    Text("Cancel")
+                }
+            },
         )
     }
 
@@ -284,7 +332,7 @@ private fun ChatHeader(
     subtitle: String,
     onBack: (() -> Unit)?,
     onNewChat: (() -> Unit)? = null,
-    onQueue: (() -> Unit)? = null,
+    isWakeListening: Boolean = false,
     ttsEnabled: Boolean = false,
     isSpeaking: Boolean = false,
     onToggleTts: (() -> Unit)? = null,
@@ -326,24 +374,14 @@ private fun ChatHeader(
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        // TTS toggle / stop
+        // TTS toggle — always visible
         if (onToggleTts != null) {
-            if (isSpeaking && onStopSpeaking != null) {
-                IconButton(onClick = onStopSpeaking) {
-                    Icon(
-                        imageVector = Icons.Default.Close,
-                        contentDescription = "Stop speaking",
-                        tint = Color(0xFFEF4444),
-                    )
-                }
-            } else {
-                IconButton(onClick = onToggleTts) {
-                    Icon(
-                        imageVector = if (ttsEnabled) Icons.Default.VolumeUp else Icons.Default.VolumeOff,
-                        contentDescription = if (ttsEnabled) "Disable read aloud" else "Enable read aloud",
-                        tint = if (ttsEnabled) Color(0xFF38BDF8) else SlateMuted,
-                    )
-                }
+            IconButton(onClick = onToggleTts) {
+                Icon(
+                    imageVector = if (ttsEnabled) Icons.Default.VolumeUp else Icons.Default.VolumeOff,
+                    contentDescription = if (ttsEnabled) "Disable read aloud" else "Enable read aloud",
+                    tint = if (ttsEnabled) Color(0xFF38BDF8) else SlateMuted,
+                )
             }
         }
         if (onVoiceSettings != null && ttsEnabled) {
@@ -356,21 +394,20 @@ private fun ChatHeader(
                 )
             }
         }
-        if (onQueue != null) {
-            IconButton(onClick = onQueue) {
-                Icon(
-                    imageVector = Icons.Default.List,
-                    contentDescription = "Prompt Queue",
-                    tint = SlateMuted,
-                )
-            }
-        }
+        Icon(
+            imageVector = Icons.Default.GraphicEq,
+            contentDescription = if (isWakeListening) "Wake word active" else "Wake word off",
+            tint = if (isWakeListening) Color(0xFF22C55E) else Color(0xFF334155),
+            modifier = Modifier.size(18.dp),
+        )
+        Spacer(modifier = Modifier.width(4.dp))
         if (onNewChat != null) {
-            androidx.compose.material3.TextButton(onClick = onNewChat) {
-                Text(
-                    text = "New Session",
-                    color = SlateMuted,
-                    fontSize = 11.sp,
+            IconButton(onClick = onNewChat) {
+                Icon(
+                    imageVector = Icons.Default.Add,
+                    contentDescription = "New session",
+                    tint = SlateMuted,
+                    modifier = Modifier.size(22.dp),
                 )
             }
         }

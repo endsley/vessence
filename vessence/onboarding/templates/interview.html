@@ -5,35 +5,29 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Vessence — Getting to know you</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=JetBrains+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/onboarding.css">
   <style>
-    body { background: #0a0a0f; color: #e2e8f0; font-family: 'Inter', system-ui, sans-serif; }
-    .card { background: #13131a; border: 1px solid #1e1e2e; }
-    input[type=text], textarea {
-      background: #0d0d14; border: 1px solid #2d2d40; color: #e2e8f0;
-      transition: border-color 0.2s;
-    }
-    input:focus, textarea:focus { outline: none; border-color: #7c3aed; }
-    .btn-primary { background: linear-gradient(135deg, #7c3aed, #5b21b6); }
-    .btn-primary:hover { opacity: 0.9; }
-    .btn-secondary { background: #1e1e2e; border: 1px solid #2d2d40; }
-    .btn-secondary:hover { background: #2d2d40; }
     @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
     .fade-in { animation: fadeIn 0.4s ease forwards; }
     .progress-fill { transition: width 0.4s ease; }
   </style>
 </head>
-<body class="min-h-screen">
+<body class="onboarding-page onboarding-interview min-h-screen">
 
 <div class="max-w-2xl mx-auto px-4 py-12">
 
   <!-- Header -->
   <div class="mb-8">
+    <div class="section-eyebrow mb-4">Identity pass</div>
     <div class="flex items-center gap-2 mb-2">
       <div class="w-2 h-2 rounded-full bg-violet-500"></div>
       <span class="text-slate-400 text-sm">Step 3 of 3 — Getting to know you</span>
     </div>
     <h2 class="text-2xl font-bold text-white">A few questions</h2>
-    <p class="text-slate-400 mt-1">Amber and Jane will read these answers at every startup. The more you share, the more personal the experience. Everything is stored only on your machine.</p>
+    <p class="text-slate-400 mt-1">These answers shape Jane’s tone, memory, and sense of context. They stay on your machine and can be edited later.</p>
   </div>
 
   <!-- Progress bar -->

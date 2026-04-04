@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import datetime
 import os
+import re
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -27,13 +28,12 @@ os.environ.setdefault("ORT_LOGGING_LEVEL", "3")
 os.environ.setdefault("ONNXRUNTIME_EXECUTION_PROVIDERS", '["CPUExecutionProvider"]')
 with silence_stderr_fd():
     import chromadb
-try:
-    import ollama
-except ImportError:
-    ollama = None
+
+
 from chromadb.utils import embedding_functions
 
 from jane.config import (
+    get_chroma_client,
     CHROMA_COLLECTION_FILE_INDEX,
     CHROMA_COLLECTION_LONG_TERM,
     CHROMA_COLLECTION_SHORT_TERM,
@@ -41,11 +41,11 @@ from jane.config import (
     CHROMA_FILE_INDEX_MAX_DISTANCE,
     CHROMA_LONG_TERM_MAX_DISTANCE,
     CHROMA_LONG_TERM_LIMIT,
+    CHROMA_PERMANENT_MAX_DISTANCE,
     CHROMA_SEARCH_LIMIT,
     CHROMA_SHORT_TERM_MAX_DISTANCE,
     CHROMA_SHORT_TERM_LIMIT,
     CHROMA_USER_MAX_DISTANCE,
-    LIBRARIAN_MODEL,
     MEMORY_SUMMARY_CACHE_MAX_ENTRIES,
     MEMORY_SUMMARY_CACHE_SIMILARITY,
     MEMORY_SUMMARY_CACHE_TTL_SECS,
@@ -54,13 +54,6 @@ from jane.config import (
     VECTOR_DB_FILE_INDEX,
     VECTOR_DB_USER_MEMORIES,
 )
-
-
-@dataclass
-class MemoryRetrievalResult:
-    sections: list[str]
-    facts_block: str
-    summary: str
 
 
 @dataclass
@@ -274,18 +267,46 @@ def _fmt_memory(doc: str, meta: dict | None) -> str:
     meta = meta or {}
     ts = meta.get("timestamp", meta.get("created_at", ""))
     topic = meta.get("topic", meta.get("source", "General"))
+    dist = meta.get("distance")
     age = _recency_label(ts) if ts else "unknown age"
-    return f"[{age}] ({topic}): {doc}"
+    dist_str = f" (Dist: {dist:.4f})" if dist is not None else ""
+    return f"[{age}] ({topic}){dist_str}: {doc}"
 
 
-def _dedupe_fact_lines(lines: list[str]) -> list[str]:
-    seen: set[str] = set()
+def _extract_content_key(line: str) -> str:
+    """Extract the content portion of a formatted memory line for dedup comparison.
+
+    Formatted lines look like: '[8d ago] (topic) (Dist: 0.1234): actual content...'
+    We strip the metadata prefix and normalize whitespace so the same content
+    from different collections (with different ages/distances) is recognized as
+    a duplicate.
+    """
+    text = str(line)
+    # Strip everything up to and including the last '): ' prefix
+    idx = text.rfind("): ")
+    if idx != -1:
+        text = text[idx + 3:]
+    return " ".join(text.split()).lower()[:120]
+
+
+def _dedupe_fact_lines(lines: list[str], global_seen: set[str] | None = None) -> list[str]:
+    """Deduplicate formatted memory lines.
+
+    If *global_seen* is provided, it is checked AND updated so that the same
+    content appearing in a later section is dropped.  This enables cross-section
+    dedup when the same set is passed to every call.
+    """
+    local_seen: set[str] = set()
     deduped: list[str] = []
     for line in lines:
-        normalized = " ".join(str(line).split()).lower()
-        if normalized in seen:
+        key = _extract_content_key(line)
+        if key in local_seen:
             continue
-        seen.add(normalized)
+        if global_seen is not None and key in global_seen:
+            continue
+        local_seen.add(key)
+        if global_seen is not None:
+            global_seen.add(key)
         deduped.append(line)
     return deduped
 
@@ -296,7 +317,7 @@ def _query_collection(client_path: str, collection_name: str, query: str, limit:
 
     try:
         with silence_stderr_fd():
-            client = chromadb.PersistentClient(path=client_path)
+            client = get_chroma_client(path=client_path)
             collection = client.get_collection(name=collection_name)
         n_results = min(limit, collection.count())
         if n_results <= 0:
@@ -486,20 +507,26 @@ def build_memory_sections(query: str, assistant_name: str = "Jane", essence_chro
         docs, metas, distances = _safe_get("user_memories")
         for doc, meta, distance in zip(docs, metas, distances):
             meta = meta or {}
-            if not _within_distance(distance, CHROMA_USER_MAX_DISTANCE):
-                continue
             meta = {**meta, "distance": distance}
             memory_type = meta.get("memory_type", "long_term")
             if _is_file_index_record(doc, meta):
                 continue
             if _is_low_signal_shared_memory(doc, meta):
                 continue
+            # Per-tier distance thresholds: permanent rules always pass,
+            # other tiers use tighter thresholds to cut low-relevance noise.
             if memory_type == "permanent":
+                if not _within_distance(distance, CHROMA_PERMANENT_MAX_DISTANCE):
+                    continue
                 permanent_facts.append(_fmt_memory(doc, meta))
             elif memory_type in {"forgettable", "short_term"}:
+                if not _within_distance(distance, CHROMA_SHORT_TERM_MAX_DISTANCE):
+                    continue
                 if not _is_expired(meta):
                     legacy_short_term_facts.append(_fmt_memory(doc, meta))
             else:
+                if not _within_distance(distance, CHROMA_USER_MAX_DISTANCE):
+                    continue
                 # Skip prompt_queue entries from auto-injection — they're noise for
                 # most queries; retrieve them explicitly when needed via search.
                 if meta.get("topic") == "prompt_queue":
@@ -509,7 +536,7 @@ def build_memory_sections(query: str, assistant_name: str = "Jane", essence_chro
     if use_shared and use_short_term:
         try:
             with silence_stderr_fd():
-                client = chromadb.PersistentClient(path=VECTOR_DB_USER_MEMORIES)
+                client = get_chroma_client(path=VECTOR_DB_USER_MEMORIES)
                 collection = client.get_collection(name=CHROMA_COLLECTION_USER_MEMORIES)
                 extra_results = collection.get(
                     where={"memory_type": "forgettable"},
@@ -551,7 +578,7 @@ def build_memory_sections(query: str, assistant_name: str = "Jane", essence_chro
             _st_path = VECTOR_DB_SHORT_TERM
             if os.path.exists(_st_path):
                 with silence_stderr_fd():
-                    _st_client = chromadb.PersistentClient(path=_st_path)
+                    _st_client = get_chroma_client(path=_st_path)
                     _st_col = _st_client.get_collection(name=CHROMA_COLLECTION_SHORT_TERM)
                 _all = _st_col.get(include=["documents", "metadatas"], limit=min(200, _st_col.count()))
                 if _all["documents"]:
@@ -592,14 +619,18 @@ def build_memory_sections(query: str, assistant_name: str = "Jane", essence_chro
         ]
 
     # --- Build sections (same format as before) ---
+    # Cross-section dedup: a shared set ensures the same content from different
+    # collections is only injected once.  Order matters — higher-priority
+    # sections are deduped first so they "claim" the content.
+    _global_seen: set[str] = set()
     sections: list[str] = []
-    permanent_facts = _dedupe_fact_lines(permanent_facts)
-    long_term_facts = _dedupe_fact_lines(long_term_facts)
-    jane_long_term_facts = _dedupe_fact_lines(jane_long_term_facts)
-    short_term_facts = _dedupe_fact_lines(short_term_facts)
-    file_index_facts = _dedupe_fact_lines(file_index_facts)
-    legacy_short_term_facts = _dedupe_fact_lines(legacy_short_term_facts)
-    essence_facts = _dedupe_fact_lines(essence_facts)
+    permanent_facts = _dedupe_fact_lines(permanent_facts, _global_seen)
+    long_term_facts = _dedupe_fact_lines(long_term_facts, _global_seen)
+    jane_long_term_facts = _dedupe_fact_lines(jane_long_term_facts, _global_seen)
+    short_term_facts = _dedupe_fact_lines(short_term_facts, _global_seen)
+    file_index_facts = _dedupe_fact_lines(file_index_facts, _global_seen)
+    legacy_short_term_facts = _dedupe_fact_lines(legacy_short_term_facts, _global_seen)
+    essence_facts = _dedupe_fact_lines(essence_facts, _global_seen)
     if permanent_facts:
         sections.append("## Permanent Memory\n" + "\n".join(permanent_facts))
     if long_term_facts:
@@ -626,93 +657,5 @@ def build_memory_sections(query: str, assistant_name: str = "Jane", essence_chro
     return sections
 
 
-def synthesize_memory_summary(
-    query: str,
-    sections: list[str],
-    *,
-    conversation_summary: str = "",
-    assistant_name: str = "Jane",
-) -> str:
-    if not sections:
-        return "No relevant context found."
-
-    facts_block = "\n\n".join(sections)
-    MAX_FACTS_CHARS = 3000
-    if len(facts_block) > MAX_FACTS_CHARS:
-        facts_block = facts_block[:MAX_FACTS_CHARS] + "\n[...truncated for brevity]"
-    now_str = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
-    system_instr = (
-        f"You are the Memory Librarian for {os.environ.get('USER_NAME', 'the user')}'s assistant {assistant_name}. "
-        f"Current time: {now_str}.\n"
-        "Each memory entry is labeled with its timestamp and a human-readable age.\n"
-        "Analyze the memory tiers relative to the user's query and any conversation summary. "
-        "Return only the shortest useful summary for the next response.\n"
-        "Rules:\n"
-        "1. Recency priority: Short-Term > Long-Term > Permanent. The newer timestamp wins on conflicts.\n"
-        "2. Explicitly surface very recent items when they matter.\n"
-        "3. Avoid repeating facts already obvious from the conversation summary unless memory adds an important correction.\n"
-        "4. Ignore irrelevant noise.\n"
-        "5. If nothing beyond the conversation summary is useful, respond exactly with 'No relevant context found.'\n"
-        "6. Respond only with the synthesized summary."
-    )
-    user_prompt = (
-        f"User Query: {query}\n\n"
-        + (f"Conversation Summary:\n{conversation_summary}\n\n" if conversation_summary else "")
-        + f"Memory Tiers:\n{facts_block}"
-    )
-
-    try:
-        response = ollama.chat(
-            model=LIBRARIAN_MODEL,
-            messages=[
-                {"role": "system", "content": system_instr},
-                {"role": "user", "content": user_prompt},
-            ],
-        )
-        summary = response["message"]["content"].strip()
-        return summary or "No relevant context found."
-    except Exception as exc:
-        return f"Librarian Error: {exc}"
 
 
-def retrieve_memory_context(
-    query: str,
-    *,
-    conversation_summary: str = "",
-    assistant_name: str = "Jane",
-    session_id: str = "",
-    essence_chromadb_path: str | None = None,
-) -> MemoryRetrievalResult:
-    query_embedding = _embed_query_text(query) if session_id else None
-    if session_id and query_embedding:
-        cached_summary = _lookup_cached_memory_summary(session_id, query_embedding)
-        if cached_summary:
-            return MemoryRetrievalResult(sections=[], facts_block="", summary=cached_summary)
-
-    sections = build_memory_sections(query, assistant_name=assistant_name, essence_chromadb_path=essence_chromadb_path)
-    facts_block = "\n\n".join(sections)
-    summary = synthesize_memory_summary(
-        query,
-        sections,
-        conversation_summary=conversation_summary,
-        assistant_name=assistant_name,
-    )
-    if session_id and query_embedding and summary and summary != "No relevant context found.":
-        _store_cached_memory_summary(session_id, query, query_embedding, summary)
-    return MemoryRetrievalResult(sections=sections, facts_block=facts_block, summary=summary)
-
-
-def get_memory_summary(
-    query: str,
-    conversation_summary: str = "",
-    assistant_name: str = "Jane",
-    session_id: str = "",
-    essence_chromadb_path: str | None = None,
-) -> str:
-    return retrieve_memory_context(
-        query,
-        conversation_summary=conversation_summary,
-        assistant_name=assistant_name,
-        session_id=session_id,
-        essence_chromadb_path=essence_chromadb_path,
-    ).summary

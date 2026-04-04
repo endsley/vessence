@@ -51,6 +51,7 @@ data class ChatUiState(
     val ttsEnabled: Boolean = false,
     val isSpeaking: Boolean = false,
     val progressBubble: String = "",
+    val wakeWordTriggered: Boolean = false,
 )
 
 class ChatViewModel(
@@ -60,14 +61,20 @@ class ChatViewModel(
     private val appContext = context.applicationContext
     private val repo = ChatRepository()
     private val backendKey = backend.name.lowercase()
-    private val sessionId = "${backendKey}_android_${UUID.randomUUID().toString().take(8)}"
     private val chatPersistence = ChatPersistence(appContext)
     private val chatPrefs = ChatPreferences(appContext)
+    private val sessionId = if (backend == ChatBackend.JANE) chatPrefs.getJaneSessionId()
+                            else "${backendKey}_android_${UUID.randomUUID().toString().take(8)}"
     private val pendingQueue = ConcurrentLinkedQueue<PendingMessage>()
     private var currentStreamJob: Job? = null
     private val liveListener = LiveBroadcastListener(viewModelScope, sessionId.take(12))
     private val announcementPoller = AnnouncementPoller(viewModelScope)
     private val tts = AndroidTtsManager(appContext)
+
+    /** Emits a playlist ID when Jane responds with [MUSIC_PLAY:id]. UI observes and navigates. */
+    private val _musicPlayRequest = MutableStateFlow<String?>(null)
+    val musicPlayRequest: StateFlow<String?> = _musicPlayRequest
+    fun consumeMusicPlayRequest() { _musicPlayRequest.value = null }
 
     private val _state = MutableStateFlow(
         ChatUiState(
@@ -77,24 +84,32 @@ class ChatViewModel(
     )
     val state: StateFlow<ChatUiState> = _state
 
-    private val notifier: ChatNotificationManager? = try { ChatNotificationManager(appContext) } catch (_: Exception) { null }
-    private val voiceSettings: VoiceSettingsRepository? = try { VoiceSettingsRepository(appContext) } catch (_: Exception) { null }
+    private val notifier: ChatNotificationManager? = try { ChatNotificationManager(appContext) } catch (_: Throwable) { null }
+    private val voiceSettings: VoiceSettingsRepository? = try { VoiceSettingsRepository(appContext) } catch (_: Throwable) { null }
     private val voiceController: VoiceController? = try {
         VoiceController(
             context = appContext,
             backend = backend,
             externalScope = viewModelScope,
-            initialAlwaysListening = voiceSettings?.isAlwaysListeningEnabled() ?: false,
+            initialAlwaysListening = false,  // AlwaysListeningService handles wake word, not VoiceController
             onStateChanged = { voiceState ->
                 _state.value = _state.value.copy(voice = voiceState)
             },
             onTranscriptReady = { transcript ->
-                sendMessage(transcript, fromVoice = true)
+                if (com.vessences.android.ui.chat.EndPhraseDetector.isEndPhrase(transcript)) {
+                    android.util.Log.i("ChatVM", "End phrase from VoiceController: '$transcript'")
+                    endVoiceConversation()
+                } else {
+                    sendMessage(transcript, fromVoice = true)
+                }
             },
         )
-    } catch (_: Exception) { null }
+    } catch (_: Throwable) { null }
 
     init {
+        voiceController?.onSpeakingDone = {
+            _state.value = _state.value.copy(isSpeaking = false)
+        }
         try { notifier?.ensureChannels() } catch (_: Exception) {}
         // Auto-save messages whenever sending completes
         viewModelScope.launch {
@@ -146,11 +161,15 @@ class ChatViewModel(
                     val baseUrl = com.vessences.android.data.api.ApiClient.getJaneBaseUrl()
                     val request = okhttp3.Request.Builder()
                         .url("$baseUrl/api/jane/prefetch-memory")
-                        .post(okhttp3.RequestBody.create(null, ByteArray(0)))
+                        .post(ByteArray(0).toRequestBody(null))
                         .build()
                     com.vessences.android.data.api.ApiClient.getOkHttpClient().newCall(request).execute().close()
                 } catch (_: Exception) {}
             }
+            // Wake word bridge: set flag so ChatInputRow auto-launches the system STT UI
+            // This uses the EXACT same code path as pressing the mic button
+            // Wake word handling moved to VessencesApp — single observer, single handler.
+            // VessencesApp navigates to Jane AND calls triggerWakeWord() on this ViewModel.
         }
     }
 
@@ -295,9 +314,14 @@ class ChatViewModel(
                     }
                 }
 
-                val flow = repo.streamChat(backend, text, sessionId, resolvedFileContext, ttsEnabled = _state.value.ttsEnabled)
+                val flow = repo.streamChat(backend, text, sessionId, resolvedFileContext, ttsEnabled = fromVoice)
                 var accumulated = ""
                 var statusLog = mutableListOf<String>()
+                // Incremental ACK parser state
+                val visibleBuffer = StringBuilder()
+                val ackBuffer = StringBuilder()
+                var inAckBlock = false
+                var ackSpoken = false
                 var currentMsgId = aiMsg.id
                 var files = emptyList<com.vessences.android.data.model.StreamEvent.FileRef>()
 
@@ -323,19 +347,122 @@ class ChatViewModel(
                                 kotlinx.coroutines.delay(60)
                             }
                         }
+                        "thought" -> {
+                            if (event.data.isNotEmpty()) {
+                                statusLog.add(event.data)
+                                updateAiMessage(currentMsgId, accumulated, isStreaming = true, status = "Thinking…", statusLog = statusLog.toList())
+                                kotlinx.coroutines.delay(60)
+                            }
+                        }
+                        "tool_use" -> {
+                            if (event.data.isNotEmpty()) {
+                                statusLog.add(event.data)
+                                updateAiMessage(currentMsgId, accumulated, isStreaming = true, status = "Working…", statusLog = statusLog.toList())
+                                kotlinx.coroutines.delay(60)
+                            }
+                        }
+                        "tool_result" -> {
+                            if (event.data.isNotEmpty()) {
+                                statusLog.add(event.data)
+                                updateAiMessage(currentMsgId, accumulated, isStreaming = true, status = null, statusLog = statusLog.toList())
+                            }
+                        }
+                        "provider_error" -> {
+                            gotDone = true
+                            try {
+                                val errJson = com.google.gson.Gson().fromJson(event.data, com.google.gson.JsonObject::class.java)
+                                val provider = errJson.get("provider")?.asString ?: "provider"
+                                val category = errJson.get("category")?.asString ?: "error"
+                                val alts = errJson.getAsJsonArray("alternatives")?.map { it.asString } ?: emptyList()
+                                val categoryLabel = if (category == "billing") "billing/quota issue" else "rate limit"
+                                val errorMsg = "⚠️ ${provider.replaceFirstChar { it.uppercase() }} hit a $categoryLabel."
+                                updateAiMessage(currentMsgId, errorMsg, isStreaming = false, switchAlternatives = alts)
+                            } catch (e: Exception) {
+                                updateAiMessage(currentMsgId, event.data.ifEmpty { "⚠️ Provider error." }, isStreaming = false)
+                            }
+                            onSendComplete(fromVoice, null)
+                        }
+                        "ack" -> {
+                            // Quick ack from gemma4 — speak it for immediate feedback.
+                            // Uses raw tts.speak() which does NOT trigger auto-listen.
+                            // Auto-listen only fires after the "done" event via onSendComplete.
+                            val ackText = event.data.trim()
+                            if (ackText.isNotBlank() && !ackSpoken) {
+                                ackSpoken = true
+                                if (fromVoice) {
+                                    viewModelScope.launch { tts.speak(ackText) }
+                                }
+                                statusLog.add(ackText)
+                                updateAiMessage(currentMsgId, accumulated, isStreaming = true, status = ackText, statusLog = statusLog.toList())
+                            }
+                        }
                         "delta" -> {
-                            accumulated += event.data
-                            updateAiMessage(currentMsgId, accumulated, isStreaming = true, status = null, statusLog = statusLog.toList())
+                            // Incremental ACK parser — never leaks ACK markup into visible text
+                            for (ch in event.data) {
+                                if (inAckBlock) {
+                                    ackBuffer.append(ch)
+                                    // Check if we just closed [/ACK]
+                                    if (ackBuffer.endsWith("[/ACK]")) {
+                                        // Extract ACK content, speak it once
+                                        val ackContent = ackBuffer.toString()
+                                            .removePrefix("[ACK]")
+                                            .removeSuffix("[/ACK]")
+                                            .trim()
+                                        if (ackContent.isNotBlank() && !ackSpoken) {
+                                            ackSpoken = true
+                                            if (fromVoice) {
+                                                viewModelScope.launch { tts.speak(ackContent) }
+                                            }
+                                            statusLog.add(ackContent)
+                                        }
+                                        ackBuffer.clear()
+                                        inAckBlock = false
+                                    }
+                                } else {
+                                    visibleBuffer.append(ch)
+                                    // Check if visible buffer ends with [ACK] — start of ACK block
+                                    if (visibleBuffer.endsWith("[ACK]")) {
+                                        // Remove the [ACK] tag from visible text
+                                        visibleBuffer.setLength(visibleBuffer.length - "[ACK]".length)
+                                        inAckBlock = true
+                                        ackBuffer.clear()
+                                        ackBuffer.append("[ACK]")
+                                    }
+                                }
+                            }
+                            // Only show non-ACK content in the bubble.
+                            // Strip all markup tags so they never flash in the UI.
+                            val rawAccumulated = visibleBuffer.toString()
+                            accumulated = rawAccumulated
+                                .replace(Regex("<spoken>[\\s\\S]*?</spoken>", RegexOption.IGNORE_CASE), "")
+                                .replace(Regex("<visual>([\\s\\S]*?)</visual>", RegexOption.IGNORE_CASE)) { it.groupValues[1] }
+                                .replace(Regex("</?(?:spoken|visual|think|thinking|artifact)>", RegexOption.IGNORE_CASE), "")
+                            val ackStatus = if (statusLog.isNotEmpty()) statusLog.last() else null
+                            updateAiMessage(currentMsgId, accumulated, isStreaming = true, status = ackStatus, statusLog = statusLog.toList())
                         }
                         "done" -> {
                             gotDone = true
-                            val rawText = if (event.data.isNotEmpty()) event.data else accumulated
+                            var rawText = if (event.data.isNotEmpty()) event.data else accumulated
                             files = event.files
+                            // Strip [ACK] tags (already spoken during streaming)
+                            val ackRegex = Regex("\\[ACK\\][\\s\\S]*?\\[/ACK\\]\\s*")
+                            rawText = rawText.replace(ackRegex, "").trim()
                             // TTS mode: main text is spoken-friendly; <visual> blocks are display-only
                             val visualRegex = Regex("<visual>([\\s\\S]*?)</visual>", RegexOption.IGNORE_CASE)
                             // For display: keep visual content but strip the tags; also strip legacy <spoken> tags
                             val spokenRegex = Regex("<spoken>([\\s\\S]*?)</spoken>", RegexOption.IGNORE_CASE)
                             val spokenMatch = spokenRegex.find(rawText)
+                            // Check for music play command: [MUSIC_PLAY:playlist_id]
+                            val musicPlayRegex = Regex("\\[MUSIC_PLAY:([^\\]]+)\\]")
+                            val musicMatch = musicPlayRegex.find(rawText)
+                            if (musicMatch != null) {
+                                val playlistId = musicMatch.groupValues[1]
+                                android.util.Log.i("ChatVM", "Music play command detected: playlist=$playlistId")
+                                _musicPlayRequest.value = playlistId
+                                com.vessences.android.MusicPlayNavigationState.requestPlay(playlistId)
+                            }
+                            rawText = rawText.replace(musicPlayRegex, "").trim()
+
                             val displayText = rawText.replace(visualRegex) { it.groupValues[1] }
                                 .replace(spokenRegex, "").trimEnd().ifBlank { rawText }
                             // For TTS: if legacy <spoken> block exists, use it;
@@ -364,7 +491,7 @@ class ChatViewModel(
                 if (!gotDone) {
                     val finalText = if (accumulated.isNotBlank()) accumulated else "No response received."
                     updateAiMessage(currentMsgId, finalText, isStreaming = false)
-                    onSendComplete(fromVoice, null)
+                    onSendComplete(fromVoice, finalText)
                 }
             } catch (e: Exception) {
                 val msg = e.message ?: ""
@@ -374,7 +501,7 @@ class ChatViewModel(
                     updateAiMessage(aiMsg.id, "Error: $msg", isStreaming = false)
                 }
                 if (fromVoice) {
-                    voiceController?.onAssistantReply("Sorry, the connection was interrupted.")
+                    voiceController?.onAssistantReply("Sorry, the connection was interrupted.", chatPrefs.isAutoListenEnabled())
                 }
                 _state.value = _state.value.copy(isSending = false)
                 processNextInQueue()
@@ -382,13 +509,57 @@ class ChatViewModel(
         }
     }
 
+    private fun isConversationEnding(text: String): Boolean {
+        val lower = text.lowercase().trim()
+        val endings = listOf(
+            "we're done", "we are done", "were done",
+            "goodbye", "good bye", "bye",
+            "that's all", "that is all",
+            "talk to you later", "talk later",
+            "i'm done", "im done", "i am done",
+            "end conversation", "stop listening",
+            "okay we're done", "okay we are done",
+            "ok we're done", "ok we are done",
+            "thanks that's it", "that's it",
+            "never mind", "nevermind",
+        )
+        return endings.any { lower.contains(it) }
+    }
+
     private fun onSendComplete(fromVoice: Boolean, replyText: String?, spokenText: String? = null) {
-        if (fromVoice && replyText != null) {
-            voiceController?.onAssistantReply(replyText)
-        } else if (replyText != null) {
-            // Use <spoken> block for TTS if available; fall back to full display text
-            speakIfEnabled(spokenText?.takeIf { it.isNotBlank() } ?: replyText)
+        if (fromVoice) {
+            val textToSpeak = spokenText?.takeIf { it.isNotBlank() }
+                ?: replyText?.takeIf { it.isNotBlank() }
+                ?: "I finished, check the screen for details."
+
+            // Check if the user's last message was a conversation-ending phrase
+            val lastUserMsg = _state.value.messages.lastOrNull { it.isUser }?.text ?: ""
+            val conversationOver = isConversationEnding(lastUserMsg)
+
+            // If VoiceController is waiting for a reply, use it (handles TTS + auto re-listen)
+            if (voiceController != null && voiceController.isWaitingForReply()) {
+                _state.value = _state.value.copy(isSpeaking = true)
+                voiceController.onAssistantReply(textToSpeak, chatPrefs.isAutoListenEnabled() && !conversationOver)
+            } else {
+                // Voice came from Android SpeechRecognizer (mic button / wake word), not VoiceController
+                viewModelScope.launch {
+                    _state.value = _state.value.copy(isSpeaking = true)
+                    tts.speak(textToSpeak)
+                    _state.value = _state.value.copy(isSpeaking = false)
+                    if (conversationOver) {
+                        // User said goodbye — stop listening, release mic for wake word
+                        endVoiceConversation()
+                    } else if (chatPrefs.isAutoListenEnabled()) {
+                        // Unified path: trigger Google STT popup (same as mic button + wake word)
+                        _state.value = _state.value.copy(wakeWordTriggered = true)
+                    } else {
+                        // Auto-listen disabled — conversation over, release mic for wake word
+                        endVoiceConversation()
+                    }
+                }
+            }
         }
+        // Text-initiated: no speech — user reads the response
         _state.value = _state.value.copy(isSending = false)
         processNextInQueue()
     }
@@ -414,6 +585,8 @@ class ChatViewModel(
     fun installUpdate() {
         val update = _state.value.availableUpdate ?: return
         com.vessences.android.data.api.UpdateManager.downloadAndInstall(appContext, update.downloadUrl, update.versionName)
+        // Dismiss banner after starting download — user will install from notification
+        _state.value = _state.value.copy(updateDismissed = true)
     }
 
     fun toggleTts() {
@@ -428,6 +601,7 @@ class ChatViewModel(
 
     fun stopSpeaking() {
         tts.stop()
+        voiceController?.stopTts()
         _state.value = _state.value.copy(isSpeaking = false)
     }
 
@@ -443,10 +617,8 @@ class ChatViewModel(
             _state.value = _state.value.copy(isSpeaking = true)
             tts.speak(text)
             _state.value = _state.value.copy(isSpeaking = false)
-            // Auto-listen after TTS completes (if enabled)
-            if (chatPrefs.isAutoListenEnabled()) {
-                autoListenAfterTts()
-            }
+            // Auto-listen removed here — only onSendComplete triggers auto-listen.
+            // This prevents STT from opening prematurely after acks or intermediate speech.
         }
     }
 
@@ -513,48 +685,62 @@ class ChatViewModel(
     }
 
     private fun autoListenAfterTts() {
-        // Try VoiceController first (Vosk offline), fall back to Android SpeechRecognizer
-        if (voiceController != null) {
-            voiceController.startListeningWithTimeout(6000)
-        } else {
-            // Use Android's built-in SpeechRecognizer (no UI popup)
-            startAndroidSpeechRecognizer()
+        // Trigger the same Google STT UI as the mic button and wake word
+        _state.value = _state.value.copy(wakeWordTriggered = true)
+    }
+
+
+
+    /**
+     * End the voice conversation: release the sttActive flag and restart
+     * the always-listening service so it resumes wake word detection.
+     */
+    /** Set to true when conversation started from wake word trigger (screen was off) */
+    var cameFromWakeWord: Boolean = false
+
+    private fun endVoiceConversation() {
+        com.vessences.android.voice.WakeWordBridge.sttActive = false
+        // Restart wake word service if always-listen is enabled
+        if (voiceSettings?.isAlwaysListeningEnabled() == true) {
+            com.vessences.android.voice.AlwaysListeningService.start(appContext)
+            android.util.Log.i("ChatVM", "Restarted AlwaysListeningService after conversation end")
+        }
+        // If we came from wake word trigger, return app to background (lock screen)
+        if (cameFromWakeWord) {
+            cameFromWakeWord = false
+            val activity = appContext as? android.app.Activity
+            activity?.moveTaskToBack(true)
+            android.util.Log.i("ChatVM", "Returning to background after wake-word conversation")
         }
     }
 
-    private fun startAndroidSpeechRecognizer() {
-        viewModelScope.launch(Dispatchers.Main) {
-            try {
-                val recognizer = android.speech.SpeechRecognizer.createSpeechRecognizer(appContext)
-                val intent = android.content.Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                    putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL, android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                    putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE, java.util.Locale.getDefault())
-                    putExtra(android.speech.RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 6000L)
-                    putExtra(android.speech.RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 4000L)
-                }
-                recognizer.setRecognitionListener(object : android.speech.RecognitionListener {
-                    override fun onResults(results: android.os.Bundle?) {
-                        val matches = results?.getStringArrayList(android.speech.SpeechRecognizer.RESULTS_RECOGNITION)
-                        val transcript = matches?.firstOrNull()?.trim() ?: ""
-                        recognizer.destroy()
-                        if (transcript.isNotEmpty()) {
-                            sendMessage(transcript)
-                        }
-                    }
-                    override fun onError(error: Int) { recognizer.destroy() }
-                    override fun onReadyForSpeech(params: android.os.Bundle?) {}
-                    override fun onBeginningOfSpeech() {}
-                    override fun onRmsChanged(rmsdB: Float) {}
-                    override fun onBufferReceived(buffer: ByteArray?) {}
-                    override fun onEndOfSpeech() {}
-                    override fun onPartialResults(partialResults: android.os.Bundle?) {}
-                    override fun onEvent(eventType: Int, params: android.os.Bundle?) {}
-                })
-                recognizer.startListening(intent)
-            } catch (e: Exception) {
-                // Speech recognition not available — silently fail
+    private fun isConversationEndPhrase(text: String): Boolean {
+        val normalized = text.lowercase(java.util.Locale.US).trim()
+        val endPhrases = listOf(
+            "we're done", "we are done", "ok we're done", "ok we are done",
+            "this conversation ends", "end conversation", "conversation over",
+            "that's all", "that is all", "ok that's all",
+            "goodbye", "good bye", "bye jane", "bye bye",
+            "stop listening", "stop", "never mind", "nevermind",
+            "thank you jane", "thanks jane", "thanks that's it",
+            "ok done", "okay done", "i'm done", "i am done",
+        )
+        return endPhrases.any { phrase ->
+            if (phrase.length <= 5) {
+                normalized == phrase || normalized.startsWith("$phrase ") || normalized.endsWith(" $phrase")
+            } else {
+                normalized.contains(phrase)
             }
         }
+    }
+
+    private fun showSystemMessage(text: String) {
+        val msg = ChatMessage(
+            id = java.util.UUID.randomUUID().toString(),
+            text = text,
+            isUser = false,
+        )
+        _state.value = _state.value.copy(messages = _state.value.messages + msg)
     }
 
     fun clearSession() {
@@ -572,11 +758,23 @@ class ChatViewModel(
 
     fun setAlwaysListeningEnabled(enabled: Boolean) {
         voiceSettings?.setAlwaysListeningEnabled(enabled)
-        voiceController?.setAlwaysListeningEnabled(enabled)
+        // AlwaysListeningService handles wake word — NOT VoiceController
+        // Don't call voiceController?.setAlwaysListeningEnabled() — it would start
+        // a competing wake word detector that fights the service for the mic
     }
 
     fun syncVoicePreferences() {
-        voiceController?.setAlwaysListeningEnabled(voiceSettings?.isAlwaysListeningEnabled() ?: false)
+        // No-op: VoiceController no longer manages always-listening state
+    }
+
+    fun clearWakeWordTrigger() {
+        _state.value = _state.value.copy(wakeWordTriggered = false)
+    }
+
+    /** Called by VessencesApp when wake word fires — single entry point */
+    fun triggerWakeWord() {
+        cameFromWakeWord = true
+        _state.value = _state.value.copy(wakeWordTriggered = true)
     }
 
     fun startPushToTalk() {
@@ -585,6 +783,10 @@ class ChatViewModel(
 
     fun stopPushToTalk() {
         voiceController?.stopPushToTalk()
+    }
+
+    fun cancelListening() {
+        voiceController?.cancelListening()
     }
 
     fun clearVoiceError() {
@@ -600,6 +802,7 @@ class ChatViewModel(
         files: List<com.vessences.android.data.model.StreamEvent.FileRef> = emptyList(),
         spokenText: String? = null,
         fullText: String? = null,
+        switchAlternatives: List<String> = emptyList(),
     ) {
         _state.value = _state.value.copy(
             messages = _state.value.messages.map { msg ->
@@ -611,10 +814,60 @@ class ChatViewModel(
                     files = files,
                     spokenText = spokenText ?: msg.spokenText,
                     fullText = fullText ?: msg.fullText,
+                    switchAlternatives = if (switchAlternatives.isNotEmpty()) switchAlternatives else msg.switchAlternatives,
                 )
                 else msg
             }
         )
+    }
+
+    fun switchProvider(provider: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                _state.value = _state.value.copy(isSending = true)
+                val baseUrl = com.vessences.android.data.api.ApiClient.getJaneBaseUrl()
+                val jsonBody = com.google.gson.Gson().toJson(mapOf("provider" to provider))
+                val request = okhttp3.Request.Builder()
+                    .url("$baseUrl/api/jane/switch-provider")
+                    .post(jsonBody.toByteArray().toRequestBody("application/json".toMediaType()))
+                    .build()
+                val response = com.vessences.android.data.api.ApiClient.getOkHttpClient().newCall(request).execute()
+                val body = response.body?.string() ?: "{}"
+                val result = com.google.gson.Gson().fromJson(body, com.google.gson.JsonObject::class.java)
+                response.close()
+
+                val ok = result.get("ok")?.asBoolean ?: false
+                if (ok) {
+                    val model = result.get("model")?.asString ?: provider
+                    val needsAuth = result.get("needs_auth")?.asBoolean ?: false
+                    val msg = if (needsAuth) {
+                        "🔑 ${provider.replaceFirstChar { it.uppercase() }} needs authentication. Please log in from the web interface."
+                    } else {
+                        "✅ Switched to $model. You can continue chatting."
+                    }
+                    val aiMsg = ChatMessage(text = msg, isUser = false)
+                    _state.value = _state.value.copy(
+                        messages = _state.value.messages.map {
+                            if (it.switchAlternatives.isNotEmpty()) it.copy(switchAlternatives = emptyList()) else it
+                        } + aiMsg,
+                        isSending = false,
+                    )
+                } else {
+                    val error = result.get("error")?.asString ?: "Unknown error"
+                    val aiMsg = ChatMessage(text = "⚠️ Switch failed: $error", isUser = false)
+                    _state.value = _state.value.copy(
+                        messages = _state.value.messages + aiMsg,
+                        isSending = false,
+                    )
+                }
+            } catch (e: Exception) {
+                val aiMsg = ChatMessage(text = "⚠️ Switch failed: ${e.message}", isUser = false)
+                _state.value = _state.value.copy(
+                    messages = _state.value.messages + aiMsg,
+                    isSending = false,
+                )
+            }
+        }
     }
 
     override fun onCleared() {

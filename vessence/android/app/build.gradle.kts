@@ -4,6 +4,12 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+// Read version from single source of truth: vessence/version.json
+val versionFile = file("${rootProject.projectDir}/../version.json")
+val versionJson = groovy.json.JsonSlurper().parseText(versionFile.readText()) as Map<*, *>
+val appVersionCode = (versionJson["version_code"] as Number).toInt()
+val appVersionName = versionJson["version_name"] as String
+
 android {
     namespace = "com.vessences.android"
     compileSdk = 35
@@ -12,16 +18,29 @@ android {
         applicationId = "com.vessences.android"
         minSdk = 28
         targetSdk = 35
-        versionCode = 45
-        versionName = "0.0.43"
+        versionCode = appVersionCode
+        versionName = appVersionName
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        create("release") {
+            storeFile = file("${rootProject.projectDir}/vessence-release.jks")
+            storePassword = "REDACTED_PASSWORD"
+            keyAlias = "vessence"
+            keyPassword = "REDACTED_PASSWORD"
+        }
+    }
+
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("release")
+        }
         release {
             isMinifyEnabled = true
             isShrinkResources = true
+            signingConfig = signingConfigs.getByName("release")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -96,7 +115,8 @@ dependencies {
 
     // Voice
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
-    implementation("com.alphacephei:vosk-android:0.3.75")
+    // OpenWakeWord: lightweight ONNX-based wake word detection
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.20.0")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
@@ -126,6 +146,25 @@ tasks.register("verifyChangelog") {
     }
 }
 
+// ── ONNX model integrity check ────────────────────────────────────────────
+// Fails the build if any .onnx.data file exists in assets (Android can't load external data)
+tasks.register("verifyOnnxModels") {
+    doLast {
+        val assetsDir = file("src/main/assets/openwakeword")
+        if (assetsDir.exists()) {
+            val dataFiles = assetsDir.listFiles()?.filter { it.name.endsWith(".data") } ?: emptyList()
+            if (dataFiles.isNotEmpty()) {
+                throw GradleException(
+                    "ONNX external data files found in assets — Android cannot load these!\n" +
+                    "Files: ${dataFiles.joinToString { it.name }}\n" +
+                    "Fix: Run 'onnx.save_model(m, path, save_as_external_data=False)' to inline weights."
+                )
+            }
+        }
+        println("ONNX models verified: no external .data files.")
+    }
+}
+
 tasks.named("preBuild") {
-    dependsOn("verifyChangelog")
+    dependsOn("verifyChangelog", "verifyOnnxModels")
 }

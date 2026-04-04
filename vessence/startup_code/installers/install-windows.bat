@@ -2,6 +2,10 @@
 setlocal enabledelayedexpansion
 title Vessence Installer for Windows
 color 0F
+set "NONINTERACTIVE=%VESSENCE_NONINTERACTIVE%"
+set "SKIP_BROWSER=%VESSENCE_SKIP_BROWSER%"
+set "SKIP_COPY=%VESSENCE_SKIP_COPY%"
+set "PROVIDER_CHOICE=%VESSENCE_PROVIDER_CHOICE%"
 
 echo.
 echo  ====================================
@@ -33,7 +37,19 @@ if %errorlevel% neq 0 (
     echo      Please start Docker Desktop and wait until it says "Docker Desktop is running",
     echo      then run this installer again.
     echo.
-    pause
+    if not "%NONINTERACTIVE%"=="1" pause
+    exit /b 1
+)
+
+:: ── Check docker compose ──────────────────────────────────────────────
+docker compose version >nul 2>&1
+if %errorlevel% neq 0 (
+    echo  [!] Docker Compose plugin not found.
+    echo.
+    echo      Update Docker Desktop to a recent version and make sure
+    echo      the Compose plugin is enabled, then run this installer again.
+    echo.
+    if not "%NONINTERACTIVE%"=="1" pause
     exit /b 1
 )
 
@@ -52,7 +68,7 @@ echo.
 
 set "JANE_BRAIN=gemini"
 set "JANE_WEB_PERMISSIONS=0"
-set /p PROVIDER_CHOICE="  Enter 1, 2, or 3 [default: 1]: "
+if not defined PROVIDER_CHOICE set /p PROVIDER_CHOICE="  Enter 1, 2, or 3 [default: 1]: "
 
 if "%PROVIDER_CHOICE%"=="2" (
     set "JANE_BRAIN=claude"
@@ -65,12 +81,16 @@ if "%PROVIDER_CHOICE%"=="2" (
     echo  [OK] Jane will use OpenAI.
 ) else (
     echo.
-    echo  [OK] Jane will use Gemini (default).
+    echo  [OK] Jane will use Gemini ^(default^).
 )
 echo.
 
 :: ── Set up directory ──────────────────────────────────────────────────
-set "INSTALL_DIR=%USERPROFILE%\vessence"
+if defined VESSENCE_INSTALL_DIR (
+    set "INSTALL_DIR=%VESSENCE_INSTALL_DIR%"
+) else (
+    set "INSTALL_DIR=%USERPROFILE%\vessence"
+)
 
 echo  Install directory: %INSTALL_DIR%
 echo.
@@ -80,10 +100,57 @@ if not exist "%INSTALL_DIR%" (
 )
 
 :: ── Copy all files (source, Dockerfiles, configs) ───────────────────
-echo  Copying files...
-xcopy /s /e /y /q "%~dp0*" "%INSTALL_DIR%\" >nul
+if "%SKIP_COPY%"=="1" (
+    echo  [OK] Copy step skipped by VESSENCE_SKIP_COPY=1.
+) else (
+    if /i "%~dp0"=="%INSTALL_DIR%\\" (
+        echo  [OK] Installer is already running from %INSTALL_DIR%, skipping file copy.
+    ) else (
+        echo  Copying files...
+        xcopy /s /e /y /i /h /q "%~dp0*" "%INSTALL_DIR%\\" >nul
+        if errorlevel 4 (
+            echo.
+            echo  [!] Failed to copy installer files into %INSTALL_DIR%.
+            if not "%NONINTERACTIVE%"=="1" pause
+            exit /b 1
+        )
+        if not exist "%INSTALL_DIR%\docker-compose.yml" (
+            echo.
+            echo  [!] Installer copy completed but docker-compose.yml is missing in %INSTALL_DIR%.
+            if not "%NONINTERACTIVE%"=="1" pause
+            exit /b 1
+        )
+        if not exist "%INSTALL_DIR%\.env.example" (
+            echo.
+            echo  [!] Installer copy completed but .env.example is missing in %INSTALL_DIR%.
+            if not "%NONINTERACTIVE%"=="1" pause
+            exit /b 1
+        )
+        echo  [OK] Files copied to %INSTALL_DIR%
+    )
+)
+echo.
 
-echo  [OK] Files copied to %INSTALL_DIR%
+:: ── Install AI agent config files ────────────────────────────────────
+echo  Installing AI agent configuration files...
+if exist "%INSTALL_DIR%\agent_configs" (
+    if exist "%INSTALL_DIR%\agent_configs\CLAUDE.md" (
+        copy /y "%INSTALL_DIR%\agent_configs\CLAUDE.md" "%USERPROFILE%\CLAUDE.md" >nul
+        echo    [OK] CLAUDE.md installed
+    )
+    if exist "%INSTALL_DIR%\agent_configs\AGENTS.md" (
+        copy /y "%INSTALL_DIR%\agent_configs\AGENTS.md" "%USERPROFILE%\AGENTS.md" >nul
+        echo    [OK] AGENTS.md installed
+    )
+    if exist "%INSTALL_DIR%\agent_configs\GEMINI.md" (
+        if not exist "%USERPROFILE%\.gemini" mkdir "%USERPROFILE%\.gemini"
+        copy /y "%INSTALL_DIR%\agent_configs\GEMINI.md" "%USERPROFILE%\.gemini\GEMINI.md" >nul
+        echo    [OK] GEMINI.md installed
+    )
+    echo    [OK] Agent configs installed
+) else (
+    echo    [SKIP] No agent_configs directory found
+)
 echo.
 
 :: ── Create .env with provider selection ──────────────────────────────
@@ -111,7 +178,7 @@ docker compose build --no-cache
 if %errorlevel% neq 0 (
     echo.
     echo  [!] Failed to build Vessence images. Check the error above.
-    pause
+    if not "%NONINTERACTIVE%"=="1" pause
     exit /b 1
 )
 
@@ -120,7 +187,7 @@ if %errorlevel% neq 0 (
     echo.
     echo  [!] Failed to build/start Vessence. Check the error above.
     echo      Make sure Docker Desktop is running and you have internet access.
-    pause
+    if not "%NONINTERACTIVE%"=="1" pause
     exit /b 1
 )
 
@@ -132,14 +199,41 @@ echo.
 echo    Jane's brain: !JANE_BRAIN!
 echo.
 echo    Onboarding:  http://localhost:3000
-echo    Jane:        http://jane.localhost
+echo    Jane:        http://localhost:8081
+echo    Vault:       http://localhost:8081/vault
 echo    (Vault is accessible through Jane's interface)
 echo.
 echo    To stop:   docker compose down
 echo    To start:  docker compose up -d
 echo.
 
-:: ── Open browser ──────────────────────────────────────────────────────
-start http://localhost:3000
+echo  Waiting for onboarding to become ready at http://localhost:3000 ...
+set "ONBOARDING_READY="
+:: Extend to 300 seconds (5 minutes) for first-boot image/CLI setup
+for /L %%I in (1,1,300) do (
+    powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+      "try { $r = Invoke-WebRequest -UseBasicParsing http://localhost:3000/health -TimeoutSec 2; if ($r.StatusCode -eq 200) { exit 0 } else { exit 1 } } catch { exit 1 }" >nul 2>&1
+    if !errorlevel! equ 0 (
+        set "ONBOARDING_READY=1"
+        goto :onboarding_ready
+    )
+    timeout /t 1 /nobreak >nul
+)
 
-pause
+if not defined ONBOARDING_READY (
+    echo.
+    echo  [!] Onboarding did not become ready within 120 seconds.
+    echo      Recent onboarding/jane logs:
+    docker compose ps onboarding jane
+    docker compose logs --tail 60 onboarding jane
+    if not "%NONINTERACTIVE%"=="1" pause
+    exit /b 1
+)
+
+:onboarding_ready
+echo  [OK] Onboarding is ready.
+
+:: ── Open browser ──────────────────────────────────────────────────────
+if not "%SKIP_BROWSER%"=="1" start "" "http://localhost:3000"
+
+if not "%NONINTERACTIVE%"=="1" pause

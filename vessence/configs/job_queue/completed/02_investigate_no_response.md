@@ -1,5 +1,5 @@
 # Job: Investigate and fix "(no response)" messages in web Jane
-Status: in_progress
+Status: completed
 Priority: 1
 Created: 2026-03-27
 
@@ -58,3 +58,14 @@ None.
 ## Notes
 - The timing audit showed 20 `brain_execute_error` (avg 106s) and 28 `brain_execute_cancelled` (avg 100s) — these are strong candidates for the "(no response)" issue.
 - Prior conversation history mentions this has been an ongoing issue that was partially investigated but not fully resolved.
+
+## Result
+- Backend stream pipeline was refactored so context build now runs inside the pipeline task rather than blocking the stream setup path. This lets status/error events surface earlier and avoids the old "silent until later" behavior.
+- The stream path now retains an explicit `final_response` in the pipeline task and continues to emit a user-visible error when the brain returns an empty string instead of allowing the UI to present a fake successful empty response.
+- The Jane web frontend no longer falls back to `_(no response)_` for empty Jane responses. It now shows: `⚠️ Jane finished without returning text. Please try again.`
+- Existing backend error handling for cancelled/interrupted streams remains intact, and tests now cover the empty-response path explicitly.
+
+## Verification Run
+- Ran:
+  - `PYTHONPATH=/home/chieh/ambient/vessence /home/chieh/google-adk-env/adk-venv/bin/python -m pytest -q /home/chieh/ambient/vessence/test_code/test_jane_web_streaming.py /home/chieh/ambient/vessence/test_code/test_jane_web_stream_error.py`
+- Result: `11 passed`

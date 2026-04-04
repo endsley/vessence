@@ -17,10 +17,11 @@
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
   <style>
     [x-cloak] { display: none !important; }
-    :root { color-scheme: dark; --chat-font-size: 1.05rem; }
+    :root { color-scheme: dark; --chat-font-size: 1.05rem; --step-font-size: 12px; }
     html, body { height: 100%; overflow: hidden; }
     body { background: #0f172a; color: #e2e8f0; min-height: 100dvh; }
-    .chat-content { font-size: var(--chat-font-size) !important; }
+    .chat-content { font-size: var(--chat-font-size); }
+    .chat-content .step-text { font-size: var(--step-font-size) !important; }
     .scrollbar-thin::-webkit-scrollbar { width: 12px; }
     .scrollbar-thin::-webkit-scrollbar-track { background: #1e293b; border-radius: 6px; }
     .scrollbar-thin::-webkit-scrollbar-thumb { background: #64748b; border-radius: 6px; min-height: 40px; }
@@ -58,11 +59,28 @@
     }
   </style>
   <script>
-    // Apply saved font size before paint to avoid flash
+    // Apply saved font sizes before paint to avoid flash
     (function() {
       var fs = localStorage.getItem('vessence_font_size');
       if (fs) document.documentElement.style.setProperty('--chat-font-size', fs);
+      var ss = localStorage.getItem('vessence_step_font_size') || '12px';
+      document.documentElement.style.setProperty('--step-font-size', ss);
+      // Inject dynamic style for step font
+      var style = document.createElement('style');
+      style.id = 'step-font-style';
+      style.textContent = '.chat-content .step-text { font-size: ' + ss + ' !important; }';
+      document.head.appendChild(style);
     })();
+    function updateStepFontSize(size) {
+      localStorage.setItem('vessence_step_font_size', size);
+      document.documentElement.style.setProperty('--step-font-size', size);
+      var el = document.getElementById('step-font-style');
+      if (el) el.textContent = '.chat-content .step-text { font-size: ' + size + ' !important; }';
+    }
+    function updateChatFontSize(size) {
+      localStorage.setItem('vessence_font_size', size);
+      document.documentElement.style.setProperty('--chat-font-size', size);
+    }
   </script>
 </head>
 <body class="h-[100dvh] overflow-hidden flex flex-col" x-data="janeApp()" x-init="init()" x-cloak @keydown.escape.window="typing ? cancelResponse() : $refs.inputBox.focus()">
@@ -131,6 +149,49 @@
         <span x-show="activeEssence" x-cloak class="text-green-400">Essence active · <button @click="deactivateEssence()" class="text-slate-500 hover:text-red-400 underline transition">deactivate</button></span>
       </p>
     </div>
+    <!-- Provider badge + switch dropdown -->
+    <div class="relative" x-data="providerSwitcher()" @click.outside="open = false">
+      <button @click="toggle()" class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition border border-slate-700/50"
+        :class="{
+          'text-violet-400 hover:text-violet-300 hover:bg-violet-900/20': currentProvider === 'claude',
+          'text-blue-400 hover:text-blue-300 hover:bg-blue-900/20': currentProvider === 'gemini',
+          'text-emerald-400 hover:text-emerald-300 hover:bg-emerald-900/20': currentProvider === 'openai',
+          'text-slate-400 hover:text-white hover:bg-slate-800': !currentProvider,
+        }">
+        <span class="w-2 h-2 rounded-full" :class="{
+          'bg-green-500': alive, 'bg-red-500 animate-pulse': !alive
+        }"></span>
+        <span x-text="currentProvider ? currentProvider.charAt(0).toUpperCase() + currentProvider.slice(1) : 'Brain'"></span>
+        <span class="text-slate-500" x-text="model ? '(' + model.split('-').slice(-2).join('-') + ')' : ''"></span>
+        <svg class="w-3 h-3 transition-transform" :class="open ? 'rotate-180' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+        </svg>
+      </button>
+      <div x-show="open" x-cloak x-transition
+        class="absolute left-0 top-full mt-1 w-64 rounded-xl border border-slate-700 bg-slate-900 shadow-2xl overflow-hidden z-50">
+        <p class="px-3 py-2 text-[10px] text-slate-500 font-medium uppercase tracking-wider border-b border-slate-700/50">Switch Provider</p>
+        <template x-for="p in providers" :key="p.provider">
+          <button @click="switchTo(p.provider)"
+            class="flex items-center gap-2 px-3 py-2.5 text-xs w-full text-left transition"
+            :class="p.active ? 'text-white bg-violet-600/10' : p.installed ? 'text-slate-300 hover:text-white hover:bg-slate-800' : 'text-slate-600 cursor-not-allowed'"
+            :disabled="!p.installed && !p.active">
+            <span class="w-5 h-5 rounded flex items-center justify-center text-[10px] font-bold flex-shrink-0"
+              :class="{
+                'bg-violet-700 text-white': p.provider === 'claude',
+                'bg-blue-700 text-white': p.provider === 'gemini',
+                'bg-emerald-700 text-white': p.provider === 'openai',
+              }" x-text="p.provider.charAt(0).toUpperCase()"></span>
+            <span class="flex-1" x-text="p.provider.charAt(0).toUpperCase() + p.provider.slice(1)"></span>
+            <span x-show="p.active" class="text-[10px] text-green-400 font-medium">Active</span>
+            <span x-show="!p.installed && !p.active" class="text-[10px] text-slate-600">Not installed</span>
+            <span x-show="p.installed && !p.active" class="text-[10px] text-slate-500">Available</span>
+          </button>
+        </template>
+        <div x-show="switching" class="px-3 py-2 text-xs text-violet-400 border-t border-slate-700/50">
+          <span class="animate-pulse">Switching…</span>
+        </div>
+      </div>
+    </div>
     <!-- Essences dropdown -->
     <div class="relative" x-data="essenceDropdown()" @click.outside="open = false">
       <button @click="toggle()" class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-700/50">
@@ -190,7 +251,7 @@
       <div x-show="open" x-cloak x-transition
         class="absolute left-0 top-full mt-1 w-56 rounded-xl border border-slate-700 bg-slate-900 shadow-2xl overflow-hidden z-50">
           <template x-for="e in items" :key="e.name">
-            <a :href="e.name === 'Music Playlist' ? '/vault?tab=music' : e.name === 'Work Log' ? '/worklog' : e.name === 'Daily Briefing' ? '/briefing' : '/vault'"
+            <a :href="e.name === 'Music Playlist' ? '/vault?tab=music' : e.name === 'Daily Briefing' ? '/briefing' : '/vault'"
               class="flex items-center gap-2 px-3 py-2 text-xs text-slate-300 hover:text-white hover:bg-slate-800 transition">
               <span class="w-5 h-5 rounded bg-slate-700 flex items-center justify-center text-[10px] flex-shrink-0"
                 x-text="e.name.charAt(0).toUpperCase()"></span>
@@ -206,21 +267,42 @@
           </template>
       </div>
     </div>
-    <!-- User Guide link -->
-    <a href="/guide" class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-700/50" title="Jane User Guide">
-      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/>
-      </svg>
-      <span>Guide</span>
-    </a>
-    <!-- Architecture link -->
-    <a href="/architecture" class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-700/50" title="Jane Architecture">
-      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
-        <circle cx="12" cy="12" r="3" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"/>
-      </svg>
-      <span>Architecture</span>
-    </a>
+    <!-- System Guide dropdown -->
+    <div class="relative" x-data="{ guideOpen: false }" @click.outside="guideOpen = false">
+      <button @click="guideOpen = !guideOpen" class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-700/50">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/>
+        </svg>
+        <span>System Guide</span>
+        <svg class="w-3 h-3 transition-transform" :class="guideOpen ? 'rotate-180' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+        </svg>
+      </button>
+      <div x-show="guideOpen" x-cloak x-transition
+        class="absolute left-0 top-full mt-1 w-56 rounded-xl border border-slate-700 bg-slate-900 shadow-2xl overflow-hidden z-50">
+          <a href="/guide"
+            class="flex items-center gap-2 px-3 py-2.5 text-xs text-slate-300 hover:text-white hover:bg-slate-800 transition">
+            <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/>
+            </svg>
+            Guide
+          </a>
+          <a href="/architecture"
+            class="flex items-center gap-2 px-3 py-2.5 text-xs text-slate-300 hover:text-white hover:bg-slate-800 transition border-t border-slate-700/50">
+            <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/>
+            </svg>
+            Architecture
+          </a>
+          <a href="/worklog"
+            class="flex items-center gap-2 px-3 py-2.5 text-xs text-slate-300 hover:text-white hover:bg-slate-800 transition border-t border-slate-700/50">
+            <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/>
+            </svg>
+            Work Log
+          </a>
+      </div>
+    </div>
     <div class="ml-auto flex items-center gap-2">
       <button @click="clearSession()" class="text-slate-400 hover:text-white transition px-2.5 py-1.5 rounded-lg hover:bg-slate-800 text-xs font-medium" title="New Session">
         New Session
@@ -308,6 +390,90 @@
           <div x-show="modelSaveMsg" x-transition class="text-xs py-1.5 px-3 rounded-lg text-center"
             :class="modelSaveError ? 'bg-red-900/40 text-red-400' : 'bg-green-900/40 text-green-400'"
             x-text="modelSaveMsg"></div>
+
+          <!-- 3-Tier Architecture Table -->
+          <div class="mt-8 pt-6 border-t border-slate-800">
+            <h4 class="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-3">System Architecture</h4>
+            <div class="rounded-xl border border-slate-800 bg-slate-950/40 overflow-hidden">
+              <table class="w-full text-left text-[11px] leading-tight">
+                <thead>
+                  <tr class="border-b border-slate-800 bg-slate-900/50">
+                    <th class="px-3 py-2 font-semibold text-slate-400">Tier</th>
+                    <th class="px-3 py-2 font-semibold text-slate-400">Current Model</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-800/50">
+                  <template x-for="t in modelTiers" :key="t.tier">
+                    <tr class="hover:bg-slate-800/30 transition-colors">
+                      <td class="px-3 py-2.5">
+                        <div class="font-bold text-slate-200" x-text="t.tier"></div>
+                        <div class="text-[10px] text-slate-500 mt-0.5" x-text="t.role"></div>
+                      </td>
+                      <td class="px-3 py-2.5 font-mono text-violet-400" x-text="t.model"></td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+            </div>
+            <p class="text-[10px] text-slate-600 mt-3 px-1">
+              * The Orchestrator is Jane's primary reasoning brain. Agents handle background tasks like memory, research, and triage.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Font Size -->
+      <section x-data="{
+        chatSize: localStorage.getItem('vessence_font_size') || '1.05rem',
+        stepSize: localStorage.getItem('vessence_step_font_size') || '12px',
+        chatOptions: [
+          { label: 'Small', value: '0.85rem' },
+          { label: 'Medium', value: '0.95rem' },
+          { label: 'Default', value: '1.05rem' },
+          { label: 'Large', value: '1.15rem' },
+          { label: 'XL', value: '1.25rem' },
+        ],
+        stepOptions: [
+          { label: 'Tiny', value: '10px' },
+          { label: 'Small', value: '11px' },
+          { label: 'Default', value: '12px' },
+          { label: 'Medium', value: '13px' },
+          { label: 'Large', value: '15px' },
+        ],
+        setChatSize(v) {
+          this.chatSize = v;
+          updateChatFontSize(v);
+        },
+        setStepSize(v) {
+          this.stepSize = v;
+          updateStepFontSize(v);
+        }
+      }">
+        <h3 class="text-sm font-bold text-white mb-1">Font Size</h3>
+        <p class="text-xs text-slate-500 mb-3">Adjust response and intermediary step text size.</p>
+
+        <div class="mb-3">
+          <label class="text-xs text-slate-300 block mb-1.5">Response text</label>
+          <div class="flex gap-1.5">
+            <template x-for="opt in chatOptions" :key="opt.value">
+              <button @click="setChatSize(opt.value)"
+                class="px-2.5 py-1 rounded-lg text-[11px] font-medium transition border cursor-pointer"
+                :class="chatSize === opt.value ? 'bg-violet-600 text-white border-violet-500' : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-white hover:border-slate-500'"
+                x-text="opt.label"></button>
+            </template>
+          </div>
+        </div>
+
+        <div>
+          <label class="text-xs text-slate-300 block mb-1.5">Intermediary steps</label>
+          <div class="flex gap-1.5">
+            <template x-for="opt in stepOptions" :key="opt.value">
+              <button @click="setStepSize(opt.value)"
+                class="px-2.5 py-1 rounded-lg text-[11px] font-medium transition border cursor-pointer"
+                :class="stepSize === opt.value ? 'bg-violet-600 text-white border-violet-500' : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-white hover:border-slate-500'"
+                x-text="opt.label"></button>
+            </template>
+          </div>
         </div>
       </section>
 
@@ -367,8 +533,8 @@
             <span x-text="open ? '▾' : '▸'" class="text-[10px]"></span> Your Tools
           </summary>
           <div class="space-y-2 mt-2">
-            <template x-for="e in welcomeEssences.filter(i => (i.type || 'tool') === 'tool')" :key="e.name">
-              <a :href="e.name === 'Music Playlist' ? '/vault?tab=music' : e.name === 'Work Log' ? '/worklog' : e.name === 'Daily Briefing' ? '/briefing' : '/vault'"
+            <template x-for="e in welcomeEssences.filter(i => (i.type || 'tool') === 'tool' && i.name !== 'Work Log')" :key="e.name">
+              <a :href="e.name === 'Music Playlist' ? '/vault?tab=music' : e.name === 'Daily Briefing' ? '/briefing' : '/vault'"
                 class="flex items-start gap-3 p-3 rounded-xl border border-slate-700/50 bg-slate-800/30 hover:bg-slate-800/60 transition cursor-pointer">
                 <span class="w-9 h-9 rounded-lg bg-slate-700 flex items-center justify-center text-sm font-bold text-slate-300 flex-shrink-0 mt-0.5"
                   x-text="e.name.charAt(0).toUpperCase()"></span>
@@ -378,7 +544,7 @@
                 </div>
               </a>
             </template>
-            <template x-if="welcomeEssences.filter(i => (i.type || 'tool') === 'tool').length === 0">
+            <template x-if="welcomeEssences.filter(i => (i.type || 'tool') === 'tool' && i.name !== 'Work Log').length === 0">
               <p class="text-xs text-slate-500 italic px-1">No tools installed yet.</p>
             </template>
           </div>
@@ -422,7 +588,7 @@
     </template>
 
     <template x-for="(msg, i) in messages" :key="i">
-      <div :class="msg.role === 'user' ? 'flex justify-end' : 'flex justify-start'" :data-role="msg.role">
+      <div :class="msg.role === 'user' ? 'flex justify-end' : 'flex justify-start'" :data-role="msg.role" :data-msg-index="i">
         <template x-if="msg.role === 'jane'">
           <div class="flex items-start gap-2 max-w-[95%]" x-show="msg.text || msg.ack || msg.status || msg.streamingText || (msg.statusLog && msg.statusLog.length > 0)">
             <img src="/api/files/serve/images/people/jane/jane1.png"
@@ -435,29 +601,44 @@
                 <div class="mb-2 max-w-md">
                   <!-- Streaming state: show recent steps live (last 20, keeps the view compact) -->
                   <div x-show="!msg.text" class="pl-2 border-l border-slate-700 space-y-0.5 max-h-64 overflow-y-auto">
-                    <p x-show="msg.statusLog && msg.statusLog.length > 20" class="text-[15px] text-slate-600 mb-0.5"
+                    <p x-show="msg.statusLog && msg.statusLog.length > 20" class="step-text text-slate-600 mb-0.5"
                        x-text="'… ' + (msg.statusLog.length - 20) + ' earlier steps'"></p>
                     <template x-for="(entry, j) in (msg.statusLog || []).slice(-20)" :key="(msg.statusLog ? msg.statusLog.length : 0) - 20 + j">
-                      <p class="text-[15px] leading-snug"
-                         :class="(() => { const t = typeof entry === 'object' ? entry.text : entry; if (typeof entry === 'object' && entry.type === 'thought') return 'text-white'; return 'text-slate-400'; })()"
-                         x-html="formatStatusEntry(typeof entry === 'object' ? entry.text : entry)"></p>
+                      <p class="step-text leading-snug"
+                         :class="(() => {
+                           if (typeof entry === 'object') {
+                             if (entry.type === 'thought') return 'text-sky-300/80';
+                             if (entry.type === 'tool_use') return 'text-amber-400/80';
+                             if (entry.type === 'tool_result') return 'text-slate-500 italic';
+                             if (entry.type === 'status') return 'text-emerald-400/70';
+                           }
+                           return 'text-slate-400';
+                         })()"
+                         x-html="formatStatusEntry(typeof entry === 'object' ? ((entry.type === 'thought' ? '💭 ' : entry.type === 'tool_use' ? '' : entry.type === 'tool_result' ? '' : entry.type === 'status' ? '◦ ' : '') + entry.text) : ('◦ ' + entry))"></p>
                     </template>
-                    <p x-show="msg.status" class="text-[15px] text-green-300 leading-snug animate-pulse" x-html="formatStatusEntry(msg.status)"></p>
+                    <!-- Status line removed — thought process shown inline -->
                     <!-- Streaming response text (shown here until done fires) -->
-                    <div x-show="msg.streamingText" class="mt-1 pt-1 border-t border-slate-700/50 text-[15px] text-slate-200 leading-snug whitespace-pre-wrap" x-text="msg.streamingText"></div>
+                    <div x-show="msg.streamingText" class="chat-content mt-1 pt-1 border-t border-slate-700/50 text-slate-200 leading-snug whitespace-pre-wrap" x-text="msg.streamingText"></div>
                   </div>
                   <!-- Completed state: collapse into expandable summary -->
                   <div x-show="msg.text" x-data="{ expanded: false }">
                     <button @click="expanded = !expanded"
-                      class="text-[15px] text-slate-500 hover:text-slate-300 transition flex items-center gap-1 cursor-pointer">
-                      <span x-text="expanded ? '▾' : '▸'" class="text-[15px]"></span>
+                      class="step-text text-slate-500 hover:text-slate-300 transition flex items-center gap-1 cursor-pointer">
+                      <span x-text="expanded ? '▾' : '▸'"></span>
                       <span x-text="'Jane worked through ' + msg.statusLog.length + ' step' + (msg.statusLog.length === 1 ? '' : 's')"></span>
                     </button>
                     <div x-show="expanded" x-transition.duration.200ms class="mt-1 pl-2 border-l border-slate-700 space-y-0.5 max-h-96 overflow-y-auto">
                       <template x-for="(entry, j) in msg.statusLog" :key="j">
-                        <p class="text-[15px] leading-snug"
-                           :class="(() => { const t = typeof entry === 'object' ? entry.text : entry; if (typeof entry === 'object' && entry.type === 'thought') return 'text-white'; return 'text-slate-400'; })()"
-                           x-html="formatStatusEntry(typeof entry === 'object' ? entry.text : entry)"></p>
+                        <p class="step-text leading-snug"
+                           :class="(() => {
+                             if (typeof entry === 'object') {
+                               if (entry.type === 'thought') return 'text-sky-300/80';
+                               if (entry.type === 'tool_use') return 'text-amber-400/80';
+                               if (entry.type === 'tool_result') return 'text-slate-500 italic';
+                             }
+                             return 'text-slate-400';
+                           })()"
+                           x-html="formatStatusEntry(typeof entry === 'object' ? ((entry.type === 'thought' ? '💭 ' : entry.type === 'tool_use' ? '' : entry.type === 'tool_result' ? '' : '◦ ') + entry.text) : ('◦ ' + entry))"></p>
                       </template>
                     </div>
                   </div>
@@ -488,8 +669,7 @@
                   </template>
                 </div>
               </template>
-              <!-- Fallback: show status when no log entries yet -->
-              <p x-show="msg.status && (!msg.statusLog || msg.statusLog.length === 0)" x-text="msg.status" class="mb-2 max-w-md text-xs leading-relaxed text-slate-400"></p>
+              <!-- Status fallback removed — thought process shown inline -->
               <div x-show="msg.text && !msg.fullResponse" x-html="formatMessage(msg.text)"></div>
               <template x-if="msg.text && msg.fullResponse">
                 <div>
@@ -498,6 +678,23 @@
                     <summary class="text-xs text-slate-500 cursor-pointer select-none hover:text-slate-400 transition">&#9656; Show full response</summary>
                     <div class="mt-2" x-html="formatMessage(msg.fullResponse)"></div>
                   </details>
+                </div>
+              </template>
+              <!-- Provider switch buttons (shown on provider_error) -->
+              <template x-if="msg._switchAlternatives && msg._switchAlternatives.length > 0">
+                <div class="mt-3 flex flex-wrap gap-2">
+                  <template x-for="alt in msg._switchAlternatives" :key="alt">
+                    <button
+                      @click="switchProvider(alt, $el)"
+                      class="px-4 py-2 rounded-lg text-sm font-medium transition border cursor-pointer"
+                      :class="{
+                        'bg-violet-600 hover:bg-violet-500 text-white border-violet-500': alt === 'claude',
+                        'bg-blue-600 hover:bg-blue-500 text-white border-blue-500': alt === 'gemini',
+                        'bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-500': alt === 'openai'
+                      }">
+                      <span x-text="'Switch to ' + alt.charAt(0).toUpperCase() + alt.slice(1)"></span>
+                    </button>
+                  </template>
                 </div>
               </template>
               <div x-show="msg.text" class="mt-2 flex items-center gap-2">
@@ -517,14 +714,6 @@
                     <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
                   </button>
                 </template>
-                <button
-                  x-show="isSpeaking && currentSpeechText === (msg.spokenText || msg.text)"
-                  @click="stopSpeech()"
-                  type="button"
-                  class="rounded-full border border-violet-700 bg-violet-600/20 p-1.5 text-violet-200 transition hover:bg-violet-600/30"
-                  title="Stop audio">
-                  <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
-                </button>
                 <span x-show="msg.model" class="ml-auto text-[11px] text-sky-400/70 select-none" x-text="msg.model"></span>
               </div>
             </div>
@@ -615,22 +804,21 @@
           class="flex-1 text-white rounded-2xl px-4 py-3 text-sm resize-none focus:outline-none max-h-32 transition-colors duration-200 bg-slate-800 border border-slate-700 focus:border-violet-500"
           style="overflow:hidden"
           @input="autoResize($el)" x-ref="inputBox"></textarea>
-        <button @click="
-          if (!('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)) return;
-          const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-          if (chatListening) { chatListening = false; return; }
-          chatListening = true;
-          const rec = new SR();
-          rec.lang = 'en-US';
-          rec.interimResults = false;
-          rec.onresult = e => { input = (input ? input + ' ' : '') + e.results[0][0].transcript; chatListening = false; $nextTick(() => autoResize($refs.inputBox)); };
-          rec.onerror = () => { chatListening = false; };
-          rec.onend = () => { chatListening = false; };
-          rec.start();
-        " class="p-3 rounded-2xl transition flex-shrink-0"
-          :class="chatListening ? 'bg-red-600 text-white animate-pulse' : 'bg-slate-700 text-slate-400 hover:text-white hover:bg-slate-600'"
-          title="Voice input">
-          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4M12 15a3 3 0 003-3V5a3 3 0 00-6 0v7a3 3 0 003 3z"/></svg>
+        <button @click="toggleMic()"
+          class="p-3 rounded-2xl transition flex-shrink-0"
+          :class="micEnabled
+            ? (chatListening ? 'bg-red-600 text-white animate-pulse' : 'bg-red-700 text-red-200 hover:bg-red-600')
+            : 'bg-slate-700 text-slate-400 hover:text-white hover:bg-slate-600'"
+          :title="micEnabled ? (chatListening ? 'Listening...' : 'Mic on — click to turn off') : 'Mic off — click to turn on'">
+          <svg x-show="micEnabled" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4M12 15a3 3 0 003-3V5a3 3 0 00-6 0v7a3 3 0 003 3z"/></svg>
+          <svg x-show="!micEnabled" x-cloak class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4M12 15a3 3 0 003-3V5a3 3 0 00-6 0v7a3 3 0 003 3z"/><line x1="3" y1="3" x2="21" y2="21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        </button>
+        <button @click="toggleTtsMute()"
+          class="p-3 rounded-2xl transition flex-shrink-0"
+          :class="ttsMuted ? 'bg-slate-700 text-red-400 hover:text-red-300 hover:bg-slate-600' : 'bg-slate-700 text-violet-400 hover:text-violet-300 hover:bg-slate-600'"
+          :title="ttsMuted ? 'TTS muted — click to unmute' : 'TTS on — click to mute'">
+          <svg x-show="!ttsMuted" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072M17.95 6.05a8 8 0 010 11.9M6 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h2l4-4v14l-4-4z"/></svg>
+          <svg x-show="ttsMuted" x-cloak class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707A1 1 0 0112 5v14a1 1 0 01-1.707.707L5.586 15z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2"/></svg>
         </button>
         <button @click="send()" :disabled="!input.trim()"
           class="bg-violet-600 hover:bg-violet-500 disabled:opacity-40 text-white p-3 rounded-2xl transition flex-shrink-0">
@@ -690,6 +878,7 @@
         composerMenuOpen: false,
         responseMode: localStorage.getItem('jane_response_mode') || 'text',
         speechSupported: 'speechSynthesis' in window,
+        ttsMuted: (localStorage.getItem('jane_response_mode') || 'text') !== 'audio',
         isSpeaking: false,
         currentSpeechText: '',
         notificationsEnabled: localStorage.getItem('jane_notifications_enabled') === '1',
@@ -701,6 +890,8 @@
         _liveReader: null,
         sessionId,
         chatListening: false,
+        micEnabled: localStorage.getItem('jane_mic_enabled') === '1',
+        _micRecognition: null,
         activeEssence: null,
         activeEssenceDisplay: '',
 
@@ -711,6 +902,7 @@
         modelOptions: [],
         defaultModel: '',
         selectedModel: '',
+        modelTiers: [],
         modelSaveMsg: '',
         modelSaveError: false,
 
@@ -759,6 +951,10 @@
         setResponseMode(mode) {
           this.responseMode = mode === 'audio' ? 'audio' : 'text';
           localStorage.setItem('jane_response_mode', this.responseMode);
+          // Keep mute state in sync
+          this.ttsMuted = this.responseMode !== 'audio';
+          localStorage.setItem('jane_tts_muted', this.ttsMuted ? '1' : '0');
+          if (this.ttsMuted) this.stopSpeech();
         },
 
         enqueueMessage(message) {
@@ -844,7 +1040,7 @@
               // Use the latest bubble index (may have split into multiple)
               const finalIdx = this._currentJaneIndex ?? janeIndex;
               if (!this.messages[finalIdx].text.trim()) {
-                this.messages[finalIdx].text = '_(no response)_';
+                this.messages[finalIdx].text = '⚠️ Jane finished without returning text. Please try again.';
               }
               await this.notifyReply('Jane', this.messages[finalIdx].text);
               if (next.responseMode === 'audio') {
@@ -944,7 +1140,7 @@
               msg.text = spokenText;
               msg.fullResponse = fullText;
             } else {
-              msg.text = fullText || spokenText || '_(no response)_';
+              msg.text = fullText || spokenText || '⚠️ Jane finished without returning text. Please try again.';
               msg.fullResponse = null;
             }
             msg.spokenText = spokenText;
@@ -1026,13 +1222,19 @@
             const active = getActive();
             active.model = event.data || '';
           } else if (event.type === 'ack') {
-            // Classifier ack — don't show it, just note it silently
+            // Quick ack from Python classifier — show as status
+            if (event.data) {
+              const active = getActive();
+              active.statusLog = active.statusLog || [];
+              active.statusLog.push(event.data);
+              active.status = event.data;
+            }
             this.$nextTick(() => this.scrollBottom());
           } else if (event.type === 'status') {
             if (event.data) {
               const active = getActive();
               if (!active.statusLog) active.statusLog = [];
-              active.statusLog.push(event.data);
+              active.statusLog.push({ text: event.data, type: 'status' });
               active.status = 'Working…';
             }
             this.$nextTick(() => this.scrollBottom());
@@ -1074,9 +1276,25 @@
             // Only the 'done' event sets msg.text (the visible final response).
             const active = getActive();
             active.streamingText = (active.streamingText || '') + event.data;
+            // Detect [ACK]...[/ACK] block — display as status immediately
+            if (!active._ackDelivered) {
+              const ackMatch = active.streamingText.match(/\[ACK\]([\s\S]*?)\[\/ACK\]/);
+              if (ackMatch) {
+                active._ackDelivered = true;
+                const ackText = ackMatch[1].trim();
+                active.status = ackText;
+                // Speak ack immediately if TTS is on
+                if (this.responseMode === 'audio') this.speakText(ackText);
+                // Strip ACK from streaming preview
+                active.streamingText = active.streamingText.replace(/\[ACK\][\s\S]*?\[\/ACK\]\s*/, '');
+              }
+            } else {
+              // ACK already delivered — strip any leftover tags from streaming text
+              active.streamingText = active.streamingText.replace(/\[ACK\][\s\S]*?\[\/ACK\]\s*/, '');
+              active.status = '';
+            }
             // Hide <spoken> block from streaming preview
             active.streamingText = active.streamingText.replace(/<spoken>[\s\S]*?<\/spoken>/gi, '').replace(/<spoken>[\s\S]*$/i, '');
-            active.status = '';
             this.$nextTick(() => this.scrollBottom());
           } else if (event.type === 'done') {
             const active = getActive();
@@ -1084,7 +1302,9 @@
             const deltaText = active.streamingText || '';
             // Always prefer the done payload — it's the canonical complete response.
             // Fall back to accumulated streamingText if done arrives with no payload.
-            const rawText = doneText ? doneText : (deltaText || '_(no response)_');
+            let rawText = doneText ? doneText : (deltaText || '⚠️ Jane finished without returning text. Please try again.');
+            // Strip [ACK] block from final response (already displayed as status)
+            rawText = rawText.replace(/\[ACK\][\s\S]*?\[\/ACK\]\s*/, '').trim();
             active.streamingText = ''; // clear streaming preview now that final response is set
             // Extract <spoken> block for TTS and dual-display
             const spokenMatch = rawText.match(/<spoken>([\s\S]*?)<\/spoken>/i);
@@ -1096,11 +1316,35 @@
               active.text = active.spokenText;
               active.fullResponse = fullText;
             } else {
-              active.text = fullText || active.spokenText || '_(no response)_';
+              active.text = fullText || active.spokenText || '⚠️ Jane finished without returning text. Please try again.';
               active.fullResponse = null;
             }
             active.status = '';
             this.$nextTick(() => this.scrollBottom());
+          } else if (event.type === 'provider_error') {
+            const active = getActive();
+            try {
+              const errData = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
+              const provider = (errData.provider || 'provider').charAt(0).toUpperCase() + (errData.provider || 'provider').slice(1);
+              const category = errData.category === 'billing' ? 'billing/quota issue' : 'rate limit';
+              const alts = errData.alternatives || [];
+              let html = `⚠️ **${provider}** hit a ${category}.`;
+              if (errData.message) {
+                html += `\n\n> ${errData.message.substring(0, 200)}`;
+              }
+              if (alts.length > 0) {
+                html += `\n\nSwitch to another provider:`;
+              }
+              active.text = html;
+              active.status = '';
+              active._providerError = errData;
+              active._switchAlternatives = alts;
+            } catch (e) {
+              active.text = event.data || '⚠️ Provider error.';
+              active.status = '';
+            }
+            this.$nextTick(() => this.scrollBottom());
+            return true;
           } else if (event.type === 'error') {
             const active = getActive();
             active.text = event.data || '⚠️ Could not reach Jane.';
@@ -1110,20 +1354,21 @@
           return event.type === 'done';
         },
 
-        _userNearBottom: true,
-
-        _initScrollTracker() {
+        _previousBubbleVisible(streamingIndex) {
           const el = document.getElementById('chat-messages');
-          if (!el) return;
-          this._userScrolledUp = false;
-          el.addEventListener('scroll', () => {
-            const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
-            // User is "scrolled up" if they're more than 200px from the bottom
-            this._userScrolledUp = dist > 200;
-          }, { passive: true });
+          if (!el) return true;
+          const idx = Number.isInteger(streamingIndex) ? streamingIndex : (this._currentJaneIndex ?? this.messages.length - 1);
+          if (idx <= 0) return true;
+          const prev = el.querySelector(`[data-msg-index="${idx - 1}"]`);
+          if (!prev) return true;
+          const prevRect = prev.getBoundingClientRect();
+          const containerRect = el.getBoundingClientRect();
+          return prevRect.bottom > containerRect.top && prevRect.top < containerRect.bottom;
         },
 
-        scrollBottom(force) {
+        _initScrollTracker() {},
+
+        scrollBottom(force, streamingIndex) {
           const el = document.getElementById('chat-messages');
           if (!el) return;
           // Wait for browser layout/paint before scrolling — $nextTick fires
@@ -1132,10 +1377,9 @@
           requestAnimationFrame(() => {
             if (force) {
               el.scrollTop = el.scrollHeight;
-              this._userScrolledUp = false;
               return;
             }
-            if (!this._userScrolledUp) {
+            if (this._previousBubbleVisible(streamingIndex)) {
               el.scrollTop = el.scrollHeight;
             }
           });
@@ -1220,6 +1464,23 @@
               `<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg> ` +
               `View file</a>`
             );
+          });
+          // 1g. Job queue data — render as table client-side
+          s = s.replace(/<job-queue-data>([\s\S]*?)<\/job-queue-data>/g, (_, jsonStr) => {
+            try {
+              const data = JSON.parse(jsonStr);
+              if (!data.jobs || data.jobs.length === 0) return placeholder('Job queue is empty.');
+              const cols = data.columns || ['#', 'Job', 'Summary', 'Status', 'Result'];
+              const hdr = cols.map(c => `<th style="border:1px solid #888;padding:8px;">${c}</th>`).join('');
+              const rows = data.jobs.map(j => {
+                const cells = { '#': j.num, 'Job': j.name, 'Summary': j.summary || '\u2014', 'Status': j.status, 'Result': j.result || '\u2014' };
+                return '<tr>' + cols.map(c => `<td style="border:1px solid #888;padding:8px;">${cells[c] || '\u2014'}</td>`).join('') + '</tr>';
+              }).join('');
+              return placeholder(
+                `<b>Job Queue: ${data.count} job${data.count !== 1 ? 's' : ''}</b>` +
+                `<table style="border:1px solid #888;border-collapse:collapse;width:100%;"><tr>${hdr}</tr>${rows}</table>`
+              );
+            } catch (e) { return placeholder('Could not render job queue.'); }
           });
           {% endraw %}
 
@@ -1423,14 +1684,16 @@
               const ts = item.created_at || item.timestamp;
               // Progress updates with an ID: update existing bubble or create one
               if (item.id && item.type === 'queue_progress') {
-                const existing = this.messages.find(m => m._progressId === item.id);
+                // Check both active progress bubbles and finalized ones (by _completedProgressId)
+                const existing = this.messages.find(m => m._progressId === item.id || m._completedProgressId === item.id);
                 if (existing) {
                   existing.text = item.message;
                 } else {
                   this.messages.push({ role: 'jane', text: item.message, status: '', statusLog: [], _progressId: item.id });
                 }
-                // If final, clear the progress ID so it becomes a normal bubble
+                // If final, mark as completed but keep the ID for dedup on future polls
                 if (item.final && existing) {
+                  existing._completedProgressId = item.id;
                   delete existing._progressId;
                 }
               } else {
@@ -1446,8 +1709,75 @@
           }
         },
 
+        toggleTtsMute() {
+          this.ttsMuted = !this.ttsMuted;
+          localStorage.setItem('jane_tts_muted', this.ttsMuted ? '1' : '0');
+          // Unify: mute also switches response mode so server stops generating spoken text
+          this.responseMode = this.ttsMuted ? 'text' : 'audio';
+          localStorage.setItem('jane_response_mode', this.responseMode);
+          if (this.ttsMuted) this.stopSpeech();
+        },
+
+        toggleMic() {
+          if (!('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)) return;
+          this.micEnabled = !this.micEnabled;
+          localStorage.setItem('jane_mic_enabled', this.micEnabled ? '1' : '0');
+          if (this.micEnabled) {
+            this._startMicListening();
+          } else {
+            this._stopMicListening();
+          }
+        },
+
+        _startMicListening() {
+          if (this._micRecognition) return;
+          const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+          const rec = new SR();
+          rec.lang = 'en-US';
+          rec.interimResults = false;
+          rec.continuous = false;
+          rec.onresult = (e) => {
+            const transcript = e.results[0][0].transcript;
+            this.input = (this.input ? this.input + ' ' : '') + transcript;
+            this.$nextTick(() => this.autoResize(this.$refs.inputBox));
+          };
+          rec.onerror = (e) => {
+            this.chatListening = false;
+            // Restart if mic is still enabled (unless user denied permission)
+            if (this.micEnabled && e.error !== 'not-allowed') {
+              this._micRecognition = null;
+              setTimeout(() => { if (this.micEnabled) this._startMicListening(); }, 500);
+            } else {
+              this._micRecognition = null;
+              if (e.error === 'not-allowed') {
+                this.micEnabled = false;
+                localStorage.setItem('jane_mic_enabled', '0');
+              }
+            }
+          };
+          rec.onstart = () => { this.chatListening = true; };
+          rec.onend = () => {
+            this.chatListening = false;
+            this._micRecognition = null;
+            // Auto-restart if mic is still toggled on
+            if (this.micEnabled) {
+              setTimeout(() => { if (this.micEnabled) this._startMicListening(); }, 300);
+            }
+          };
+          this._micRecognition = rec;
+          rec.start();
+        },
+
+        _stopMicListening() {
+          this.chatListening = false;
+          if (this._micRecognition) {
+            this._micRecognition.abort();
+            this._micRecognition = null;
+          }
+        },
+
         speakText(text) {
-          if (!this.speechSupported) return;
+          if (!this.speechSupported || this.ttsMuted) return;
           const cleaned = (text || '')
             .replace(/[_*`#>\-\[\]\(\)]/g, ' ')
             .replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{FE00}-\u{FE0F}\u{1F900}-\u{1F9FF}\u{1FA00}-\u{1FA6F}\u{1FA70}-\u{1FAFF}\u{200D}\u{20E3}\u{E0020}-\u{E007F}]/gu, '')
@@ -1558,6 +1888,90 @@
           }).catch(() => {});
         },
 
+        // ── Provider Switch ──────────────────────────────────────────────────
+        async switchProvider(provider, btnEl) {
+          // Disable button to prevent double-clicks
+          if (btnEl) { btnEl.disabled = true; btnEl.textContent = 'Switching…'; }
+          try {
+            const resp = await fetch('/api/jane/switch-provider', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ provider }),
+            });
+            const result = await resp.json();
+            if (!result.ok) {
+              this.messages.push({ role: 'jane', text: `⚠️ Switch failed: ${result.error || 'Unknown error'}`, status: '' });
+              if (btnEl) { btnEl.disabled = false; btnEl.textContent = `Switch to ${provider.charAt(0).toUpperCase() + provider.slice(1)}`; }
+              return;
+            }
+            if (result.needs_auth) {
+              // Need to authenticate the new CLI — show auth flow
+              this.messages.push({
+                role: 'jane',
+                text: `🔑 **${provider.charAt(0).toUpperCase() + provider.slice(1)}** needs authentication. Starting login…`,
+                status: '',
+              });
+              this.$nextTick(() => this.scrollBottom());
+              await this._runProviderAuth(provider);
+            } else {
+              this.messages.push({
+                role: 'jane',
+                text: `✅ Switched to **${result.model || provider}**. You can continue chatting.`,
+                status: '',
+                model: result.model || provider,
+              });
+            }
+            // Remove switch buttons from error messages
+            for (const m of this.messages) {
+              if (m._switchAlternatives) m._switchAlternatives = [];
+            }
+          } catch (e) {
+            this.messages.push({ role: 'jane', text: `⚠️ Switch failed: ${e.message}`, status: '' });
+            if (btnEl) { btnEl.disabled = false; btnEl.textContent = `Switch to ${provider.charAt(0).toUpperCase() + provider.slice(1)}`; }
+          }
+          this.$nextTick(() => this.scrollBottom());
+        },
+
+        async _runProviderAuth(provider) {
+          // Trigger CLI login and poll for completion
+          try {
+            const loginResp = await fetch('/api/cli-login', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ provider }),
+            });
+            const loginData = await loginResp.json();
+            if (loginData.authenticated) {
+              this.messages.push({ role: 'jane', text: `✅ Already authenticated with ${provider}. Ready to go!`, status: '' });
+              this.$nextTick(() => this.scrollBottom());
+              return;
+            }
+            if (loginData.auth_url) {
+              this.messages.push({
+                role: 'jane',
+                text: `🔗 Open this link to authenticate:\n\n[${loginData.auth_url}](${loginData.auth_url})`,
+                status: '',
+              });
+              this.$nextTick(() => this.scrollBottom());
+            }
+            // Poll for auth completion
+            for (let i = 0; i < 60; i++) {
+              await new Promise(r => setTimeout(r, 3000));
+              const statusResp = await fetch('/api/cli-login/status');
+              const statusData = await statusResp.json();
+              if (statusData.authenticated) {
+                this.messages.push({ role: 'jane', text: `✅ Authenticated! Switched to **${provider}**. You can continue chatting.`, status: '' });
+                this.$nextTick(() => this.scrollBottom());
+                return;
+              }
+            }
+            this.messages.push({ role: 'jane', text: '⚠️ Authentication timed out. Try again or switch to a different provider.', status: '' });
+          } catch (e) {
+            this.messages.push({ role: 'jane', text: `⚠️ Auth error: ${e.message}`, status: '' });
+          }
+          this.$nextTick(() => this.scrollBottom());
+        },
+
         // ── Model Settings ──────────────────────────────────────────────────
         async loadModelSettings() {
           this.modelSettingsLoading = true;
@@ -1571,6 +1985,7 @@
               this.modelOptions = providerModels[this.modelProvider] || [];
               this.selectedModel = data.model?.current || '';
               this.defaultModel = data.model?.default || '';
+              this.modelTiers = data.tiers || [];
             }
           } catch (e) { console.warn('Failed to load model settings:', e); }
           this.modelSettingsLoading = false;
@@ -1649,7 +2064,7 @@
           });
           // Scroll to bottom if restoring messages
           if (this.messages.length > 0) {
-            this.$nextTick(() => this.scrollBottom());
+            this.$nextTick(() => this.scrollBottom(true));
           }
           this.registerNotifications();
           this.notificationPermission = ('Notification' in window) ? Notification.permission : 'unsupported';
@@ -1670,6 +2085,11 @@
             // Check if there's already an active essence
             this.loadActiveEssence();
             this.initSession();
+          }
+
+          // Auto-start mic if it was left on
+          if (this.micEnabled) {
+            this.$nextTick(() => this._startMicListening());
           }
 
           // Prefetch memory after 2s of idle so it's ready when the user types
@@ -1794,7 +2214,7 @@
               }
               msg.text = data.greeting || "Hey! What's on your mind?";
               msg.status = '';
-              msg.statusLog.push('Ready');
+              msg.statusLog.push({ text: 'Ready', type: 'status' });
               return;
             }
 
@@ -1814,7 +2234,7 @@
                 try {
                   const event = JSON.parse(line);
                   if (event.type === 'status') {
-                    msg.statusLog.push(event.data);
+                    msg.statusLog.push({ text: event.data, type: 'status' });
                     msg.status = 'Working...';
                   } else if (event.type === 'done') {
                     msg.text = event.data || "Hey! What's on your mind?";
@@ -1908,6 +2328,56 @@
     // Pre-fetch essences on page load so dropdowns open instantly
     _fetchAllEssences();
 
+    function providerSwitcher() {
+      return {
+        open: false,
+        currentProvider: '',
+        model: '',
+        alive: false,
+        providers: [],
+        switching: false,
+        async toggle() {
+          if (!this.open) await this.refresh();
+          this.open = !this.open;
+        },
+        async refresh() {
+          try {
+            const resp = await fetch('/api/jane/current-provider');
+            const data = await resp.json();
+            this.currentProvider = data.provider || '';
+            this.model = data.model || '';
+            this.alive = data.alive || false;
+            this.providers = data.available || [];
+          } catch (e) { /* ignore */ }
+        },
+        async switchTo(provider) {
+          if (provider === this.currentProvider) { this.open = false; return; }
+          this.switching = true;
+          try {
+            const resp = await fetch('/api/jane/switch-provider', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ provider }),
+            });
+            const result = await resp.json();
+            if (result.ok) {
+              this.currentProvider = result.provider || provider;
+              this.model = result.model || provider;
+              this.alive = !result.needs_auth;
+              await this.refresh();
+            } else {
+              alert('Switch failed: ' + (result.error || 'Unknown error'));
+            }
+          } catch (e) {
+            alert('Switch failed: ' + e.message);
+          }
+          this.switching = false;
+          this.open = false;
+        },
+        init() { this.refresh(); }
+      };
+    }
+
     function essenceDropdown() {
       return {
         open: false,
@@ -1950,7 +2420,7 @@
         async fetchItems() {
           try {
             const all = await _fetchAllEssences();
-            this.items = all.filter(i => (i.type || 'tool') === 'tool').sort((a, b) => a.name.localeCompare(b.name));
+            this.items = all.filter(i => (i.type || 'tool') === 'tool' && i.name !== 'Work Log').sort((a, b) => a.name.localeCompare(b.name));
           } catch (e) { console.error('Failed to fetch tools', e); }
         },
       }

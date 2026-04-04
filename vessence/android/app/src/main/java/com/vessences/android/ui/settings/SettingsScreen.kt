@@ -1,7 +1,10 @@
 package com.vessences.android.ui.settings
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -54,17 +57,43 @@ fun SettingsScreen(
     val state by viewModel.state.collectAsState()
     val context = LocalContext.current
     var pendingAlwaysListeningEnable by remember { mutableStateOf(false) }
+    var showPermissionDeniedDialog by remember { mutableStateOf(false) }
     val recordAudioLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
         if (granted && pendingAlwaysListeningEnable) {
-            if (!state.triggerTrained && onNavigateToTriggerTraining != null) {
-                onNavigateToTriggerTraining()
-            } else {
-                viewModel.setAlwaysListeningEnabled(true)
-            }
+            // OpenWakeWord uses pre-trained models — no trigger training needed
+            viewModel.setAlwaysListeningEnabled(true)
+        } else if (!granted && pendingAlwaysListeningEnable) {
+            // Permission denied — show dialog to open settings
+            showPermissionDeniedDialog = true
         }
         pendingAlwaysListeningEnable = false
+    }
+
+    // Dialog: permission permanently denied → open app settings
+    if (showPermissionDeniedDialog) {
+        AlertDialog(
+            onDismissRequest = { showPermissionDeniedDialog = false },
+            title = { Text("Microphone Permission Required") },
+            text = { Text("Always Listen needs microphone access to detect your wake word. Please enable it in app settings.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showPermissionDeniedDialog = false
+                    val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                        data = Uri.fromParts("package", context.packageName, null)
+                    }
+                    context.startActivity(intent)
+                }) {
+                    Text("Open Settings")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showPermissionDeniedDialog = false }) {
+                    Text("Cancel")
+                }
+            },
+        )
     }
 
     LazyColumn(
@@ -179,8 +208,6 @@ fun SettingsScreen(
                                     if (!hasMicPermission) {
                                         pendingAlwaysListeningEnable = true
                                         recordAudioLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                                    } else if (!state.triggerTrained && onNavigateToTriggerTraining != null) {
-                                        onNavigateToTriggerTraining()
                                     } else {
                                         viewModel.setAlwaysListeningEnabled(true)
                                     }
@@ -188,6 +215,39 @@ fun SettingsScreen(
                                     viewModel.setAlwaysListeningEnabled(false)
                                 }
                             },
+                        )
+                    }
+
+                    // Auto-listen after TTS toggle
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Divider(color = Color(0xFF334155))
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            Icons.Default.Mic,
+                            contentDescription = null,
+                            tint = Violet500,
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                "Auto-listen after voice reply",
+                                color = Color.White,
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 14.sp,
+                            )
+                            Text(
+                                "Automatically turn on the mic after Jane speaks",
+                                color = SlateText,
+                                fontSize = 12.sp,
+                            )
+                        }
+                        Switch(
+                            checked = state.autoListenAfterTts,
+                            onCheckedChange = { viewModel.setAutoListenAfterTts(it) },
                         )
                     }
 
@@ -243,7 +303,162 @@ fun SettingsScreen(
                                 )
                             }
                         }
+
+                        // Wake word sensitivity slider
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Divider(color = Color(0xFF334155))
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            "Wake word threshold: %.0f%%".format(state.wakeWordThreshold * 100),
+                            color = SlateText,
+                            fontSize = 13.sp,
+                        )
+                        Text(
+                            "Higher = fewer false triggers, Lower = more responsive",
+                            color = SlateText.copy(alpha = 0.6f),
+                            fontSize = 11.sp,
+                        )
+                        Slider(
+                            value = state.wakeWordThreshold,
+                            onValueChange = { viewModel.setWakeWordThreshold(it) },
+                            valueRange = 0.5f..0.95f,
+                            steps = 8,
+                            colors = SliderDefaults.colors(
+                                thumbColor = Violet500,
+                                activeTrackColor = Violet500,
+                            ),
+                        )
+
+                        // Debug: send diagnostic report
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Divider(color = Color(0xFF334155))
+                        Spacer(modifier = Modifier.height(8.dp))
+                        var diagSent by remember { mutableStateOf(false) }
+                        Button(
+                            onClick = {
+                                viewModel.sendDiagnosticPing()
+                                diagSent = true
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFF334155),
+                                contentColor = SlateText,
+                            ),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(if (diagSent) "Diagnostic sent!" else "Send diagnostic ping")
+                        }
                     }
+                }
+            }
+        }
+
+        // Set as Default Assistant
+        item {
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = SlateCard,
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            try {
+                                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                                    val roleManager = context.getSystemService(android.app.role.RoleManager::class.java)
+                                    val intent = roleManager?.createRequestRoleIntent(android.app.role.RoleManager.ROLE_ASSISTANT)
+                                    if (intent != null) {
+                                        context.startActivity(intent)
+                                    }
+                                } else {
+                                    // Pre-Android 10: open default apps settings
+                                    val intent = android.content.Intent(android.provider.Settings.ACTION_VOICE_INPUT_SETTINGS)
+                                    context.startActivity(intent)
+                                }
+                            } catch (_: Exception) {
+                                // Fallback: open general app settings
+                                val intent = android.content.Intent(android.provider.Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS)
+                                try { context.startActivity(intent) } catch (_: Exception) {}
+                            }
+                        }
+                        .padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        Icons.Default.Mic,
+                        contentDescription = null,
+                        tint = Violet500,
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            "Set as Default Assistant",
+                            color = Color.White,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 14.sp,
+                        )
+                        Text(
+                            "Long-press home opens Jane. May improve background wake word on some devices.",
+                            color = SlateText,
+                            fontSize = 12.sp,
+                        )
+                    }
+                }
+            }
+        }
+
+        // Keep screen on
+        item {
+            val prefs = context.getSharedPreferences(
+                com.vessences.android.util.Constants.PREFS_NAME,
+                android.content.Context.MODE_PRIVATE,
+            )
+            var keepScreenOn by remember {
+                mutableStateOf(prefs.getBoolean(com.vessences.android.util.Constants.PREF_KEEP_SCREEN_ON, true))
+            }
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = SlateCard,
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        Icons.Default.Mic,
+                        contentDescription = null,
+                        tint = Violet500,
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            "Keep screen on",
+                            color = Color.White,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 14.sp,
+                        )
+                        Text(
+                            "Prevents screen from sleeping. Helps wake word work reliably when on charger.",
+                            color = SlateText,
+                            fontSize = 12.sp,
+                        )
+                    }
+                    Switch(
+                        checked = keepScreenOn,
+                        onCheckedChange = { enabled ->
+                            keepScreenOn = enabled
+                            prefs.edit().putBoolean(com.vessences.android.util.Constants.PREF_KEEP_SCREEN_ON, enabled).apply()
+                            // Apply immediately to current activity
+                            val activity = context as? android.app.Activity
+                            if (enabled) {
+                                activity?.window?.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                            } else {
+                                activity?.window?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                            }
+                        },
+                    )
                 }
             }
         }

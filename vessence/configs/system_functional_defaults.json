@@ -1,0 +1,5 @@
+{
+  "job_queue": {
+    "columns": ["#", "Job", "Summary", "Status", "Result"]
+  }
+}

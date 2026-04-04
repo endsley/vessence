@@ -27,6 +27,7 @@ fun ChatMessageList(
     modifier: Modifier = Modifier,
     onNavigateToEssence: ((String) -> Unit)? = null,
     onSpeakText: ((String) -> Unit)? = null,
+    onSwitchProvider: ((String) -> Unit)? = null,
 ) {
     LazyColumn(
         modifier = modifier
@@ -58,7 +59,10 @@ fun ChatMessageList(
                 aiColor = aiColor,
                 onNavigateToEssence = onNavigateToEssence,
                 onSpeakText = onSpeakText,
+                onSwitchProvider = onSwitchProvider,
             )
         }
+        // Zero-height sentinel — scroll target so we always land at the true bottom
+        item(key = "scroll_anchor") { }
     }
 }

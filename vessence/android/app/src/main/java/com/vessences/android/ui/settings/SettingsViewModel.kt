@@ -12,12 +12,17 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 
+import com.vessences.android.util.ChatPreferences
+
 data class SettingsUiState(
     val devices: List<TrustedDevice> = emptyList(),
     val shares: List<ShareLink> = emptyList(),
+    val modelTiers: List<com.vessences.android.data.model.ModelTier> = emptyList(),
     val alwaysListeningEnabled: Boolean = false,
+    val autoListenAfterTts: Boolean = true,
     val triggerPhrase: String = "hey jane",
     val triggerTrained: Boolean = false,
+    val wakeWordThreshold: Float = com.vessences.android.util.Constants.DEFAULT_WAKE_WORD_THRESHOLD,
     val isLoading: Boolean = false,
     val error: String? = null,
 )
@@ -25,11 +30,14 @@ data class SettingsUiState(
 class SettingsViewModel(private val context: Context) : ViewModel() {
     private val repo = SettingsRepository()
     private val voiceSettings = VoiceSettingsRepository(context.applicationContext)
+    private val chatPrefs = ChatPreferences(context.applicationContext)
     private val _state = MutableStateFlow(
         SettingsUiState(
             alwaysListeningEnabled = voiceSettings.isAlwaysListeningEnabled(),
+            autoListenAfterTts = chatPrefs.isAutoListenEnabled(),
             triggerPhrase = voiceSettings.getTriggerPhrase(),
             triggerTrained = voiceSettings.isTriggerTrained(),
+            wakeWordThreshold = voiceSettings.getWakeWordThreshold(),
         )
     )
     val state: StateFlow<SettingsUiState> = _state
@@ -43,12 +51,16 @@ class SettingsViewModel(private val context: Context) : ViewModel() {
             _state.value = _state.value.copy(isLoading = true)
             val devices = repo.getDevices().getOrDefault(emptyList())
             val shares = repo.getShares().getOrDefault(emptyList())
+            val modelTiers = repo.getModelSettings().map { it.tiers }.getOrDefault(emptyList())
             _state.value = _state.value.copy(
                 devices = devices,
                 shares = shares,
+                modelTiers = modelTiers,
                 alwaysListeningEnabled = voiceSettings.isAlwaysListeningEnabled(),
+                autoListenAfterTts = chatPrefs.isAutoListenEnabled(),
                 triggerPhrase = voiceSettings.getTriggerPhrase(),
                 triggerTrained = voiceSettings.isTriggerTrained(),
+                wakeWordThreshold = voiceSettings.getWakeWordThreshold(),
                 isLoading = false,
             )
         }
@@ -70,9 +82,47 @@ class SettingsViewModel(private val context: Context) : ViewModel() {
         voiceSettings.setAlwaysListeningEnabled(enabled)
         _state.value = _state.value.copy(alwaysListeningEnabled = enabled)
         if (enabled) {
+            // Request battery optimization exemption for reliable screen-off operation
+            requestBatteryOptimizationExemption()
             AlwaysListeningService.start(context.applicationContext)
         } else {
             AlwaysListeningService.stop(context.applicationContext)
         }
+    }
+
+    private fun requestBatteryOptimizationExemption() {
+        val pm = context.getSystemService(android.content.Context.POWER_SERVICE) as android.os.PowerManager
+        if (!pm.isIgnoringBatteryOptimizations(context.packageName)) {
+            val intent = android.content.Intent(
+                android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                android.net.Uri.parse("package:${context.packageName}")
+            )
+            intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            try {
+                context.startActivity(intent)
+            } catch (_: Exception) {}
+        }
+    }
+
+    fun setAutoListenAfterTts(enabled: Boolean) {
+        chatPrefs.setAutoListenEnabled(enabled)
+        _state.value = _state.value.copy(autoListenAfterTts = enabled)
+    }
+
+    fun sendDiagnosticPing() {
+        com.vessences.android.DiagnosticReporter.init(context)
+        com.vessences.android.DiagnosticReporter.report("service", "manual_ping", mapOf(
+            "always_listening" to _state.value.alwaysListeningEnabled,
+            "threshold" to _state.value.wakeWordThreshold,
+            "trigger_phrase" to _state.value.triggerPhrase,
+            "source" to "settings_button",
+        ))
+    }
+
+    fun setWakeWordThreshold(threshold: Float) {
+        voiceSettings.setWakeWordThreshold(threshold)
+        _state.value = _state.value.copy(wakeWordThreshold = threshold)
+        // Don't restart service on every slider move — threshold picks up on next service start.
+        // User can leave Settings to trigger onResume → service restart.
     }
 }

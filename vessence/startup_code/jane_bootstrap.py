@@ -29,7 +29,7 @@ LONG_TERM = ("long_term_knowledge", VECTOR_ROOT / "long_term_memory", "long_term
 
 QUERY_SET = [
     "who is the user and who is Jane in relation to the user",
-    "recent updates current status active work project vessence jane amber vault website docker public release",
+    "recent updates current status active work project vessence jane vault website docker public release",
     "family wife daughter important personal facts relationships preferences",
     "technical priorities architecture memory system jane wrapper prompt queue adk ollama chromadb",
 ]
@@ -160,7 +160,6 @@ def main() -> None:
     print("## Identity")
     print(f"- User: {first_paragraph(read_text(DOCS_DIR / 'chieh_identity_essay.txt'))}")
     print(f"- Jane: {first_paragraph(read_text(DOCS_DIR / 'jane_identity_essay.txt'))}")
-    print(f"- Amber: {first_paragraph(read_text(DOCS_DIR / 'amber_identity_essay.txt'))}")
     user_profile = DATA_ROOT / "user_profile.md"
     if user_profile.exists():
         print(f"- user_profile.md: {first_paragraph(read_text(user_profile, 1200), 500)}")

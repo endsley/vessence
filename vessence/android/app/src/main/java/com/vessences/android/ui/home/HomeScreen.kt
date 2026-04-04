@@ -55,7 +55,9 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.vessences.android.data.api.AppVersion
 import com.vessences.android.data.api.UpdateManager
 import com.vessences.android.data.repository.FileRepository
+import com.vessences.android.data.repository.VoiceSettingsRepository
 import com.vessences.android.ui.essences.EssencesViewModel
+import com.vessences.android.voice.AlwaysListeningService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -80,6 +82,7 @@ fun HomeScreen(
     onNavigateToJane: () -> Unit,
     onNavigateToEssenceView: (String) -> Unit,
     onNavigateToSettings: () -> Unit,
+    onNavigateToSystemArchitecture: () -> Unit,
 ) {
     val essencesViewModel: EssencesViewModel = viewModel()
     val essencesState by essencesViewModel.state.collectAsState()
@@ -129,6 +132,12 @@ fun HomeScreen(
             icon = Icons.Default.Newspaper,
             iconTint = Color(0xFFF97316),
         ),
+        HomeEssenceCard(
+            name = "System Architecture",
+            description = "Current models and memory",
+            icon = Icons.Default.AutoAwesome,
+            iconTint = Color(0xFFC084FC),
+        ),
     )
 
     val workLogCard = HomeEssenceCard(
@@ -142,6 +151,10 @@ fun HomeScreen(
     val builtInNames = (builtInCards.map { it.name } + "Work Log").toSet()
     val apiEssences = essencesState.essences.filter { it.name !in builtInNames }
 
+    val voiceSettings = remember { VoiceSettingsRepository(context) }
+    var isListeningActive by remember { mutableStateOf(voiceSettings.isAlwaysListeningEnabled()) }
+
+    Box(modifier = Modifier.fillMaxSize()) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -240,11 +253,14 @@ fun HomeScreen(
                 )
             }
 
-            // Built-in tool cards (Life Librarian, Music Playlist)
+            // Built-in tool cards (Life Librarian, Music Playlist, Briefing, System Architecture)
             items(builtInCards.drop(1)) { card ->
                 StandardEssenceCard(
                     card = card,
-                    onClick = { onNavigateToEssenceView(card.name) },
+                    onClick = {
+                        if (card.name == "System Architecture") onNavigateToSystemArchitecture()
+                        else onNavigateToEssenceView(card.name)
+                    },
                 )
             }
 
@@ -313,9 +329,13 @@ fun HomeScreen(
             }
 
             // Bottom spacing
-            item { Spacer(modifier = Modifier.height(16.dp)) }
+            item { Spacer(modifier = Modifier.height(80.dp)) }
         }
     }
+
+    // Stop-listening control lives in the chat view (bottom "Stop speaking" button).
+    // No need for a separate FAB on the home screen.
+    } // Box
 }
 
 @Composable

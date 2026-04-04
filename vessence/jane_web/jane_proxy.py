@@ -11,12 +11,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import AsyncIterator
 
-from agent_skills.search_memory import get_memory_summary
 from agent_skills.conversation_manager import ConversationManager
-from agent_skills.memory_retrieval import invalidate_memory_summary_cache
+from agent_skills.memory_retrieval import build_memory_sections, invalidate_memory_summary_cache
 from jane.brain_adapters import BrainAdapterError, ExecutionProfile, build_execution_profile, get_brain_adapter, resolve_timeout_seconds
 from jane.context_builder import build_jane_context_async
-from jane.config import LOGS_DIR, WEB_CHAT_MODEL
+from jane.config import ENV_FILE_PATH, LOGS_DIR
 from jane.persistent_gemini import get_gemini_persistent_manager
 from jane.session_summary import format_session_summary, load_session_summary, update_session_summary_async
 from jane_web.broadcast import StreamBroadcaster
@@ -41,6 +40,29 @@ CODE_MAP_KEYWORDS = (
     "docker", "install", "hook", "startup",
     # Auto-evolved from daily conversations
     "web",
+    # Auto-evolved from daily conversations
+    "text",
+    "believe",
+    "mode",
+    "speech",
+    # Auto-evolved from daily conversations
+    "guide",
+    "user",
+    "gemini",
+    "claude",
+    "system",
+    "tools",
+    # Auto-evolved from daily conversations
+    "google",
+    # Auto-evolved from daily conversations
+    "switch",
+    "msg",
+    "switching",
+    "switched",
+    "openai",
+    # Auto-evolved from daily conversations
+    "stop",
+    "accent",
 )
 
 
@@ -123,6 +145,18 @@ def get_prefetch_result(session_id: str) -> str:
 
 
 def _get_brain_name() -> str:
+    env_path = Path(ENV_FILE_PATH) if ENV_FILE_PATH else None
+    if env_path and env_path.exists():
+        for raw_line in env_path.read_text(encoding="utf-8", errors="replace").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            if key.strip() == "JANE_BRAIN":
+                provider = value.strip().lower()
+                if provider in {"claude", "gemini", "openai"}:
+                    os.environ["JANE_BRAIN"] = provider
+                    return provider
     return os.environ.get("JANE_BRAIN", "gemini").lower()
 
 
@@ -138,12 +172,43 @@ def _get_execution_profile(brain_name: str | None = None) -> ExecutionProfile:
     return build_execution_profile(brain_name or _get_brain_name())
 
 
+def _use_gemini_api(brain_name: str) -> bool:
+    """Use Gemini API brain instead of CLI-based persistent Gemini."""
+    return brain_name == "gemini" and os.environ.get("JANE_WEB_GEMINI_API", "1") != "0"
+
 def _use_persistent_gemini(brain_name: str) -> bool:
-    return brain_name == "gemini" and os.environ.get("JANE_WEB_PERSISTENT_GEMINI", "1") != "0"
+    # Disabled by default — Gemini API brain is preferred
+    return brain_name == "gemini" and os.environ.get("JANE_WEB_PERSISTENT_GEMINI", "0") == "1"
 
 
 def _use_persistent_claude(brain_name: str) -> bool:
-    return brain_name in ("claude", "codex") and os.environ.get("JANE_WEB_PERSISTENT_CLAUDE", "1") != "0"
+    return brain_name == "claude" and os.environ.get("JANE_WEB_PERSISTENT_CLAUDE", "1") != "0"
+
+
+def _use_persistent_codex(brain_name: str) -> bool:
+    return brain_name in {"openai", "codex"} and os.environ.get("JANE_WEB_PERSISTENT_CODEX", "1") != "0"
+
+
+def _get_web_chat_model(brain_name: str) -> str:
+    env_vars = {
+        "claude": "JANE_MODEL_CLAUDE",
+        "gemini": "JANE_MODEL_GEMINI",
+        "openai": "JANE_MODEL_OPENAI",
+        "codex": "JANE_MODEL_OPENAI",
+    }
+    defaults = {
+        "claude": "claude-opus-4-6",
+        "gemini": "gemini-2.5-pro",
+        "openai": "gpt-5.4",
+        "codex": "gpt-5.4",
+    }
+    normalized = (brain_name or "").lower()
+    env_var = env_vars.get(normalized)
+    if env_var:
+        configured = os.environ.get(env_var, "").strip()
+        if configured:
+            return configured
+    return defaults.get(normalized, defaults["claude"])
 
 
 def _prune_stale_sessions(now: float | None = None) -> None:
@@ -163,8 +228,17 @@ def _prune_stale_sessions(now: float | None = None) -> None:
 
 
 async def _execute_brain_sync(session_id: str, brain_name: str, adapter, request_ctx) -> str:
+    if _use_gemini_api(brain_name):
+        from jane.gemini_api_brain import get_gemini_api_brain
+        brain = get_gemini_api_brain()
+        return await brain.send_streaming(
+            session_id=session_id,
+            system_prompt=request_ctx.system_prompt,
+            message=request_ctx.transcript,
+            model=os.environ.get("GEMINI_MODEL", "gemini-2.5-pro"),
+        )
     if _use_persistent_gemini(brain_name):
-        manager = get_gemini_persistent_manager(os.environ.get("VESSENCE_HOME", os.path.expanduser("~/vessence")))
+        manager = get_gemini_persistent_manager("/tmp")
         worker = await manager.get(session_id)
         prompt_text = f"{request_ctx.system_prompt}\n\n{request_ctx.transcript}".strip()
         return await worker.run_turn(
@@ -195,15 +269,48 @@ async def _execute_brain_sync(session_id: str, brain_name: str, adapter, request
             session_id,
             prompt_text,
             timeout_seconds=profile.timeout_seconds,
-            model=WEB_CHAT_MODEL,
+            model=_get_web_chat_model(brain_name),
+            yolo=profile.mode == "yolo",
+        )
+    if _use_persistent_codex(brain_name):
+        from jane.persistent_codex import get_codex_persistent_manager
+        manager = get_codex_persistent_manager()
+        profile = _get_execution_profile(brain_name)
+        session = await manager.get(session_id)
+        if session.is_fresh():
+            prompt_text = f"{request_ctx.system_prompt}\n\n{request_ctx.transcript}".strip()
+        elif not request_ctx.system_prompt:
+            prompt_text = request_ctx.transcript
+        else:
+            prompt_text = request_ctx.transcript.split("User:")[-1].strip().removesuffix("Jane:").strip()
+            prompt_text, _cm = _maybe_prepend_code_map(prompt_text)
+            if _cm:
+                logger.info("[%s] Code map injected (persistent codex sync)", session_id[:12])
+        return await manager.run_turn(
+            session_id,
+            prompt_text,
+            timeout_seconds=profile.timeout_seconds,
+            model=_get_web_chat_model(brain_name),
             yolo=profile.mode == "yolo",
         )
     return await asyncio.to_thread(adapter.execute, request_ctx.system_prompt, request_ctx.transcript)
 
 
 async def _execute_brain_stream(session_id: str, brain_name: str, adapter, request_ctx, emit) -> str:
+    if _use_gemini_api(brain_name):
+        from jane.gemini_api_brain import get_gemini_api_brain
+        brain = get_gemini_api_brain()
+        return await brain.send_streaming(
+            session_id=session_id,
+            system_prompt=request_ctx.system_prompt,
+            message=request_ctx.transcript,
+            on_delta=lambda d: emit("delta", d),
+            on_status=lambda s: emit("status", s),
+            on_tool_use=lambda n, a: emit("tool_use", f"🔧 {n}: {a[:100]}"),
+            model=os.environ.get("GEMINI_MODEL", "gemini-2.5-pro"),
+        )
     if _use_persistent_gemini(brain_name):
-        manager = get_gemini_persistent_manager(os.environ.get("VESSENCE_HOME", os.path.expanduser("~/vessence")))
+        manager = get_gemini_persistent_manager("/tmp")
         worker = await manager.get(session_id)
         prompt_text = f"{request_ctx.system_prompt}\n\n{request_ctx.transcript}".strip()
         return await worker.run_turn(
@@ -235,7 +342,34 @@ async def _execute_brain_stream(session_id: str, brain_name: str, adapter, reque
             on_delta=lambda delta: emit("delta", delta),
             on_status=lambda status: emit("status", status),
             timeout_seconds=profile.timeout_seconds,
-            model=WEB_CHAT_MODEL,
+            model=_get_web_chat_model(brain_name),
+            yolo=profile.mode == "yolo",
+        )
+    if _use_persistent_codex(brain_name):
+        from jane.persistent_codex import get_codex_persistent_manager
+        manager = get_codex_persistent_manager()
+        profile = _get_execution_profile(brain_name)
+        session = await manager.get(session_id)
+        if session.is_fresh():
+            prompt_text = f"{request_ctx.system_prompt}\n\n{request_ctx.transcript}".strip()
+        elif not request_ctx.system_prompt:
+            prompt_text = request_ctx.transcript
+        else:
+            prompt_text = request_ctx.transcript.split("User:")[-1].strip().removesuffix("Jane:").strip()
+            prompt_text, _cm = _maybe_prepend_code_map(prompt_text)
+            if _cm:
+                emit("status", "Loading code map for code-related query...")
+                logger.info("[%s] Code map injected (persistent codex stream)", session_id[:12])
+        return await manager.run_turn(
+            session_id,
+            prompt_text,
+            on_delta=lambda delta: emit("delta", delta),
+            on_status=lambda status: emit("status", status),
+            on_thought=lambda thought: emit("thought", thought),
+            on_tool_use=lambda tool: emit("tool_use", tool),
+            on_tool_result=lambda result: emit("tool_result", result),
+            timeout_seconds=profile.timeout_seconds,
+            model=_get_web_chat_model(brain_name),
             yolo=profile.mode == "yolo",
         )
     return await asyncio.to_thread(
@@ -334,12 +468,9 @@ def prewarm_session(session_id: str) -> None:
                     data = _json.loads(resp.read())
                     memory_summary = data.get("result", "")
             except Exception:
-                # Fallback to slow path
-                memory_summary = get_memory_summary(
-                    query,
-                    conversation_summary=summary_text,
-                    session_id=session_id,
-                )
+                # Fallback to slow path (direct ChromaDB, no Ollama librarian)
+                sections = build_memory_sections(query, assistant_name="Jane")
+                memory_summary = "\n\n".join(sections) if sections else ""
             if memory_summary and memory_summary != "No relevant context found.":
                 state.bootstrap_memory_summary = memory_summary
             state.bootstrap_complete = True
@@ -386,16 +517,52 @@ async def _await_prewarm_if_running(session_id: str, state: JaneSessionState, ti
 def end_session(session_id: str) -> None:
     state = _sessions.pop(session_id, None)
     if state and state.conv_manager:
-        try:
-            logger.info("[%s] Closing Jane session state", _session_log_id(session_id))
-            state.conv_manager.close()
-        except Exception:
-            logger.exception("[%s] Failed while closing ConversationManager", _session_log_id(session_id))
+        conv_manager = state.conv_manager
+        state.conv_manager = None
+
+        def _close_conversation_manager() -> None:
+            try:
+                logger.info("[%s] Background-closing Jane session state", _session_log_id(session_id))
+                conv_manager.close()
+                logger.info("[%s] Background session close complete", _session_log_id(session_id))
+            except Exception:
+                logger.exception("[%s] Failed while background-closing ConversationManager", _session_log_id(session_id))
+
+        logger.info("[%s] Detaching ConversationManager close to background thread", _session_log_id(session_id))
+        thread = threading.Thread(target=_close_conversation_manager, daemon=True)
+        thread.start()
     elif state:
         logger.info("[%s] Removed Jane session state without ConversationManager", _session_log_id(session_id))
 
-    # Also end the persistent Claude CLI session so next message starts fresh
+    # Clean up persistent brain sessions so next message starts fresh
     brain_name = _get_brain_name()
+    if _use_gemini_api(brain_name):
+        try:
+            from jane.gemini_api_brain import get_gemini_api_brain
+            get_gemini_api_brain().remove_session(session_id)
+            logger.info("[%s] Removed Gemini API brain session", _session_log_id(session_id))
+        except Exception:
+            logger.exception("[%s] Failed to remove Gemini API brain session", _session_log_id(session_id))
+    if _use_persistent_codex(brain_name):
+        try:
+            from jane.persistent_codex import get_codex_persistent_manager
+            manager = get_codex_persistent_manager()
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(manager.end(session_id))
+            except RuntimeError:
+                def _end_codex_session():
+                    try:
+                        asyncio.run(asyncio.wait_for(manager.end(session_id), timeout=10))
+                    except asyncio.TimeoutError:
+                        logger.warning("[%s] Persistent Codex shutdown timed out", _session_log_id(session_id))
+                    except Exception as exc:
+                        logger.error("[%s] Error in Codex session cleanup: %s", _session_log_id(session_id), exc)
+                thread = threading.Thread(target=_end_codex_session, daemon=True)
+                thread.start()
+            logger.info("[%s] Ended persistent Codex session", _session_log_id(session_id))
+        except Exception:
+            logger.exception("[%s] Failed to end persistent Codex session", _session_log_id(session_id))
     if _use_persistent_claude(brain_name):
         try:
             from jane.persistent_claude import get_claude_persistent_manager
@@ -408,9 +575,11 @@ def end_session(session_id: str) -> None:
                 # conflicts with event loops in other threads
                 def _end_session():
                     try:
-                        asyncio.run(manager.end(session_id))
-                    except Exception:
-                        pass
+                        asyncio.run(asyncio.wait_for(manager.end(session_id), timeout=10))
+                    except asyncio.TimeoutError:
+                        logger.warning("[%s] Persistent Claude shutdown timed out, proceeding with force kill", _session_log_id(session_id))
+                    except Exception as exc:
+                        logger.error("[%s] Error in background session cleanup: %s", _session_log_id(session_id), exc)
                 thread = threading.Thread(target=_end_session, daemon=True)
                 thread.start()
             logger.info("[%s] Ended persistent Claude session", _session_log_id(session_id))
@@ -536,6 +705,16 @@ def _persist_turns_async(
         except Exception as exc:
             logger.exception("[%s] Short-term writeback failed", session_id[:12])
             _log_stage(session_id, "short_term_writeback_async_error", stage_start, error=type(exc).__name__)
+
+        # Thematic short-term memory update (Sonnet-powered, may take 5-15s)
+        try:
+            stage_start = time.perf_counter()
+            if conv_manager:
+                conv_manager.update_thematic_memory(user_message, assistant_message)
+                _log_stage(session_id, "thematic_memory_update_async", stage_start)
+        except Exception as exc:
+            logger.exception("[%s] Thematic memory update failed", session_id[:12])
+            _log_stage(session_id, "thematic_memory_update_async_error", stage_start, error=type(exc).__name__)
 
         try:
             stage_start = time.perf_counter()
@@ -693,6 +872,275 @@ async def send_message(user_id: str, session_id: str, message: str, file_context
     return {"text": response, "files": []}
 
 
+def _pick_ack(user_message: str) -> str:
+    """Pick a context-appropriate quick ack based on the user's message.
+    Mix of professional, warm, casual, and occasionally humorous.
+    """
+    import random
+    msg = (user_message or "").lower().strip()
+
+    # Questions — informational / lookup
+    if any(msg.startswith(w) for w in ("is ", "are ", "was ", "were ", "do ", "does ", "did ",
+                                        "can ", "could ", "will ", "would ", "should ",
+                                        "how ", "what ", "where ", "when ", "why ", "who ",
+                                        "have you", "has ", "which ")):
+        return random.choice([
+            # Original
+            "Let me check.",
+            "Good question — looking into it.",
+            "Let me look into that.",
+            "Checking now.",
+            "Hmm, let me find out.",
+            "One sec, let me see.",
+            "Let me pull that up.",
+            "Give me a moment to check.",
+            "Interesting question — looking into it.",
+            "Let me think about that.",
+            "Let me take a look.",
+            "Digging into it now.",
+            "Hold on, checking.",
+            "Let me look that up.",
+            "Good one — let me see.",
+            # Warmer / casual
+            "Ooh, good question. Let me check.",
+            "One sec — I know this one... or I will in a moment.",
+            "Let me look into that real quick.",
+            "Give me a sec, I'll dig that up.",
+            "Let me poke around and find out.",
+            "That's a good one. Checking now.",
+            "Hold that thought — checking.",
+            "Curious about that too, actually. Let me check.",
+            "I should know this... let me verify.",
+            "Let me take a peek.",
+            "Hmm, good question. Digging in.",
+            "Fair question — checking now.",
+            "One moment while I track that down.",
+        ])
+
+    # Status/progress questions
+    if any(kw in msg for kw in ("status", "progress", "update", "how's it going",
+                                 "what's happening", "working on", "where are we",
+                                 "current state", "what happened")):
+        return random.choice([
+            # Original
+            "Let me check on that.",
+            "One sec, pulling up the status.",
+            "Checking the current state.",
+            "Let me see where things stand.",
+            "Pulling up the details now.",
+            "Let me get you caught up.",
+            "Checking what's happened.",
+            "Give me a sec to review.",
+            # Warmer
+            "One sec — pulling up the latest.",
+            "Let me see what's been going on.",
+            "Ah, good timing — let me review.",
+            "Hold on, let me see where we left off.",
+            "Let me take stock real quick.",
+        ])
+
+    # Requests to fix/debug
+    if any(kw in msg for kw in ("fix", "bug", "broken", "error", "crash", "wrong",
+                                 "doesn't work", "not working", "failed", "failing",
+                                 "issue", "problem")):
+        return random.choice([
+            # Original
+            "On it — let me investigate.",
+            "Looking into it now.",
+            "Let me dig into this.",
+            "I'll take a look at what's going on.",
+            "Let me trace through this.",
+            "Investigating now.",
+            "Let me figure out what happened.",
+            "On it — give me a moment.",
+            "Let me hunt this down.",
+            "Diving into the logs now.",
+            "I see — let me look into it.",
+            "Let me check what went wrong.",
+            # Warmer / humor
+            "Ugh, let me see what happened.",
+            "On it — detective mode activated.",
+            "Alright, let's figure this out.",
+            "Time to put on the debugging hat.",
+            "Let me take a look under the hood.",
+            "Hmm, that's not right. Let me investigate.",
+            "Ok, let's track this down.",
+            "I'll get to the bottom of this.",
+            "On the case. Give me a moment.",
+            "Something's off — let me look.",
+            "Alright, diving in.",
+        ])
+
+    # Opinions / thoughts / advice
+    if any(kw in msg for kw in ("think", "opinion", "suggest", "recommend", "advice",
+                                 "better", "prefer", "thoughts on", "feel about",
+                                 "makes sense", "good idea")):
+        return random.choice([
+            # Original
+            "Let me think about that.",
+            "Good question — let me consider the options.",
+            "Hmm, let me weigh in on that.",
+            "Let me think this through.",
+            "Interesting — give me a sec to think.",
+            "Let me consider that.",
+            # Warmer
+            "Hmm, let me think on that.",
+            "Let me chew on that for a moment.",
+            "Interesting angle. Let me consider...",
+            "Let me weigh the options real quick.",
+            "That's worth thinking about. One sec.",
+            "Hmm, I have thoughts. Let me organize them.",
+            "Good point — let me consider that.",
+            "Let me mull that over for a sec.",
+        ])
+
+    # Explanations / learning
+    if any(kw in msg for kw in ("explain", "tell me about", "what is", "what's a",
+                                 "how does", "why does", "meaning of", "difference between")):
+        return random.choice([
+            # Original
+            "Sure, let me explain.",
+            "Good question — here's the deal.",
+            "Let me break that down.",
+            "Here's how it works.",
+            "Let me walk you through it.",
+            "Alright, let me explain that.",
+            # Warmer
+            "Oh, this is a fun one. Let me explain.",
+            "Sure thing — here's the rundown.",
+            "Let me break that down for you.",
+            "Alright, storytime. Kind of.",
+            "So basically, here's what's going on.",
+            "Let me lay it out.",
+            "Happy to explain — here goes.",
+            "This is a good one to know. Let me explain.",
+        ])
+
+    # Greetings
+    if any(kw in msg for kw in ("hello", "hey", "hi ", "good morning", "good evening",
+                                 "good night", "what's up", "sup", "yo")):
+        return random.choice([
+            # Original
+            "Hey!",
+            "Hi there!",
+            "Hey, what's up?",
+            "Hey Chieh!",
+            "What's up?",
+            "Hi! What can I help with?",
+            "Hey! Good to hear from you.",
+            # Warmer
+            "Hey! What's on your mind?",
+            "Hi! Ready when you are.",
+            "Hey there! What are we working on?",
+            "Yo! What's the plan?",
+            "Hi! What's cooking?",
+            "Hey! Fire away.",
+        ])
+
+    # Thanks / appreciation
+    if any(kw in msg for kw in ("thank", "thanks", "appreciate", "nice work", "good job",
+                                 "well done", "awesome", "great job", "perfect")):
+        return random.choice([
+            # Original
+            "Glad to help!",
+            "Anytime!",
+            "Happy to help.",
+            "No problem!",
+            "Of course!",
+            "You got it.",
+            # Warmer
+            "Glad that worked out!",
+            "No sweat!",
+            "That's what I'm here for.",
+            "Teamwork!",
+            "We make a good team.",
+            "Appreciate you saying that!",
+            "Always happy to help.",
+        ])
+
+    # Show / list / display requests
+    if any(kw in msg for kw in ("show me", "list ", "display", "print", "give me",
+                                 "pull up", "let me see")):
+        return random.choice([
+            # Original
+            "Sure, pulling that up.",
+            "One moment.",
+            "Let me get that for you.",
+            "Coming right up.",
+            "Sure thing.",
+            "On it.",
+            "Grabbing that now.",
+            # Warmer
+            "Pulling it up now.",
+            "On it — here you go in a sec.",
+            "Sure thing, just a moment.",
+            "Let me fetch that.",
+            "Right away.",
+            "Give me a sec to pull that together.",
+        ])
+
+    # Build / deploy / create
+    if any(kw in msg for kw in ("build", "deploy", "create", "make", "set up",
+                                 "install", "add ", "implement", "write")):
+        return random.choice([
+            # Original
+            "On it.",
+            "Let me get that set up.",
+            "Building now.",
+            "Working on it.",
+            "Sure — putting that together.",
+            "Alright, let me build that out.",
+            "Let me handle that.",
+            "Starting on it now.",
+            "Sure, let me set that up.",
+            "Got it — getting started.",
+            # Warmer / humor
+            "On it!",
+            "Let's build this.",
+            "Rolling up my sleeves. Let's go.",
+            "Consider it started.",
+            "Building time. On it.",
+            "Sure — let me wire that up.",
+            "Alright, let's make it happen.",
+            "Let me cook something up.",
+            "Time to build. Let's go.",
+        ])
+
+    # Remove / delete / clean up
+    if any(kw in msg for kw in ("remove", "delete", "clean up", "get rid of", "drop")):
+        return random.choice([
+            # Original
+            "Got it — cleaning that up.",
+            "Removing it now.",
+            "On it.",
+            "Sure, taking care of that.",
+            "Let me handle that.",
+            # Warmer / humor
+            "Got it — cleaning house.",
+            "Gone in a sec.",
+            "Consider it gone.",
+            "Sweeping that away now.",
+            "On it — poof.",
+        ])
+
+    # Frustration / urgency
+    if any(kw in msg for kw in ("again", "still", "keeps", "annoying", "frustrated",
+                                 "seriously", "come on", "ugh", "wtf")):
+        return random.choice([
+            "I hear you. Let me take another look.",
+            "Sorry about that — let me fix this properly.",
+            "Understood. Let me dig deeper this time.",
+            "Fair. Let me get this right.",
+            "Yeah, that's not great. On it.",
+            "Let me approach this differently.",
+            "I got you — let me sort this out.",
+        ])
+
+    # Default — no obvious category match.
+    # Return None so Opus can generate a more nuanced, context-aware ack.
+    return None
+
+
 async def stream_message(
     user_id: str,
     session_id: str,
@@ -722,8 +1170,12 @@ async def stream_message(
     queue: asyncio.Queue[tuple[str, str | None]] = asyncio.Queue()
 
     _intermediary_steps: list[str] = []
+    first_visible_event_logged = False
+    final_response: str | None = None
+    _ack_seen = False  # tracks whether brain has emitted an [ACK] block
+    _accumulated_deltas = ""  # accumulates delta text to detect [ACK]
 
-    def emit(event_type: str, payload: str | None = None) -> None:
+    def _raw_emit(event_type: str, payload: str | None = None) -> None:
         item = (event_type, payload)
         # Log status and thought events for intermediary step history
         if event_type in ("status", "thought") and payload:
@@ -733,113 +1185,78 @@ async def stream_message(
             return
         loop.call_soon_threadsafe(queue.put_nowait, item)
 
+    def emit(event_type: str, payload: str | None = None) -> None:
+        nonlocal _ack_seen, _accumulated_deltas
+        # Track ACK in delta text
+        if event_type == "delta" and payload:
+            _accumulated_deltas += payload
+            if not _ack_seen and "[/ACK]" in _accumulated_deltas:
+                _ack_seen = True
+        # If gemma router already emitted an ack, suppress Claude's [ACK] block.
+        # If gemma didn't handle it (delegate/unknown), let Claude provide its own ack.
+        _raw_emit(event_type, payload)
+
     emit("start")
+    emit("status", "Reviewing the current thread and loading session context.")
+    await asyncio.sleep(0)  # flush start+status immediately so UI isn't blank
+
+    # Gemma4 router: classify prompt and short-circuit if self-handleable.
+    # Runs async with a 2s timeout — on timeout/error, falls through to Claude.
+    _gemma_short_circuit = False
+    _gemma_delegate_ack = None  # quick ack emitted by Gemma when delegating to Claude
+    try:
+        from jane_web.gemma_router import classify_prompt, ROUTER_MODEL
+        _router_history = [{"role": h["role"], "content": h.get("content", "")}
+                           for h in state.history[-10:]
+                           if h.get("role") in ("user", "assistant") and isinstance(h.get("content"), str)]
+        _classification, _router_response = await classify_prompt(message, _router_history)
+        if _classification == "self_handle" and _router_response:
+            _gemma_short_circuit = True
+            logger.info("[%s] Gemma router: self_handle — short-circuiting Claude", session_id[:12])
+        else:
+            logger.info("[%s] Gemma router: %s → Claude", session_id[:12], _classification)
+            # Emit an immediate ack so the user isn't waiting in silence while Claude loads
+            _gemma_delegate_ack = _pick_ack(message)
+            _raw_emit("model", ROUTER_MODEL)
+            _raw_emit("ack", _gemma_delegate_ack)
+            _ack_seen = True  # suppress Claude's [ACK] block since Gemma already acked
+            logger.info("[%s] Gemma router: delegate ack emitted: %s", session_id[:12], _gemma_delegate_ack[:60])
+    except Exception as _router_err:
+        logger.warning("[%s] Gemma router failed: %s — falling through to Claude", session_id[:12], _router_err)
+        _gemma_delegate_ack = _pick_ack(message)
+        _raw_emit("ack", _gemma_delegate_ack)
+        _ack_seen = True
+
+    if _gemma_short_circuit:
+        # Gemma handled it — emit model label, response, and done event.
+        _raw_emit("model", ROUTER_MODEL)
+        _raw_emit("delta", _router_response)
+        _raw_emit("done", _router_response)
+        broadcaster.finish(_router_response)
+        user_turn = {"role": "user", "content": persisted_user_message}
+        assistant_turn = {"role": "assistant", "content": _router_response}
+        state.history.extend([user_turn, assistant_turn])
+        state.history = state.history[-24:]
+        _persist_turns_async(
+            session_id, state.conv_manager,
+            user_turn, assistant_turn,
+            persisted_user_message, _router_response,
+        )
+        total_ms = int((time.perf_counter() - request_start) * 1000)
+        logger.info("[%s] Gemma short-circuit complete in %dms, response=%d chars",
+                    session_id[:12], total_ms, len(_router_response))
+        _log_stage(session_id, "request_total", request_start, mode="gemma_short_circuit")
+        # Yield the queued events as JSON lines (same format as normal stream)
+        while not queue.empty():
+            evt_type, evt_payload = queue.get_nowait()
+            yield json.dumps({"type": evt_type, "data": evt_payload}, ensure_ascii=True) + "\n"
+        return
 
     # Register emitter with permission broker so tool-approval requests
     # can be relayed to this SSE stream in real time.
     from jane_web.permission_broker import get_permission_broker
     _permission_broker = get_permission_broker()
     _permission_broker.register_emitter(session_id, emit)
-
-    emit("status", "Reviewing the current thread and loading session context.")
-    stage_start = time.perf_counter()
-    summary_text = format_session_summary(load_session_summary(session_id))
-    _log_stage(session_id, "session_summary_load", stage_start, summary_chars=len(summary_text or ""))
-    await _await_prewarm_if_running(session_id, state)
-    if summary_text:
-        emit("status", "Loaded prior conversation summary.")
-    else:
-        emit("status", "No prior conversation summary yet. Building context from the latest message.")
-
-    emit("status", "Loading memory and building context...")
-    request_ctx = None
-    try:
-        # Standing brain with existing session: skip expensive context build
-        # (context was sent on first turn, CLI remembers it)
-        from jane.standing_brain import get_standing_brain_manager
-        _sb_manager = get_standing_brain_manager()
-        _sb_brain = _sb_manager.brain
-        _skip_context = (
-            _sb_manager._started
-            and _sb_brain
-            and _sb_brain.alive
-            and _sb_brain.turn_count > 0
-        )
-
-        if _skip_context:
-            from jane.context_builder import JaneRequestContext, _format_recent_history
-            stage_start = time.perf_counter()
-            # Standing brain already has session context from turn 1's system prompt.
-            # Only inject [Recent exchanges] for pronoun resolution; skip [Session context]
-            # to avoid accumulating duplicate summaries across turns.
-            safety_parts = []
-            recent = _format_recent_history(state.history, max_turns=6, max_chars=2400)
-            if recent:
-                safety_parts.append(f"[Recent exchanges]\n{recent}")
-            safety_ctx = "\n\n".join(safety_parts)
-            user_msg, _cm_loaded = _maybe_prepend_code_map(message)
-            if _cm_loaded:
-                emit("status", "Loading code map for code-related query...")
-                logger.info("[%s] Code map injected (standing brain stream)", session_id[:12])
-            transcript = f"{safety_ctx}\n\nUser: {user_msg}" if safety_ctx else user_msg
-            request_ctx = JaneRequestContext(
-                system_prompt="",
-                transcript=transcript,
-                retrieved_memory_summary=state.bootstrap_memory_summary or "",
-            )
-            _log_stage(session_id, "context_build", stage_start,
-                       system_prompt_chars=0, transcript_chars=len(transcript),
-                       fresh_memory_retrieval=False, bootstrap_summary_chars=0)
-            logger.info("[%s] Standing brain turn %d — injected recent history only", session_id[:12], _sb_brain.turn_count)
-        else:
-            _memory_fallback = state.bootstrap_memory_summary or get_prefetch_result(session_id)
-            stage_start = time.perf_counter()
-            request_ctx = await build_jane_context_async(
-                message,
-                state.history,
-                file_context=resolved_file_context,
-                conversation_summary=summary_text,
-                session_id=session_id,
-                enable_memory_retrieval=True,
-                memory_summary_fallback=_memory_fallback,
-                platform=platform,
-                tts_enabled=tts_enabled,
-                on_status=lambda s: emit("status", s),
-            )
-        if request_ctx.retrieved_memory_summary:
-            state.bootstrap_memory_summary = request_ctx.retrieved_memory_summary
-        state.bootstrap_complete = True
-        _log_stage(
-            session_id,
-            "context_build",
-            stage_start,
-            system_prompt_chars=len(request_ctx.system_prompt or ""),
-            transcript_chars=len(request_ctx.transcript or ""),
-            fresh_memory_retrieval=True,
-            bootstrap_summary_chars=len(state.bootstrap_memory_summary or ""),
-        )
-        _dump_prompt(
-            session_id,
-            "stream",
-            message,
-            summary_text,
-            request_ctx,
-            False,
-            state.bootstrap_memory_summary,
-            resolved_file_context,
-        )
-    except Exception as exc:
-        logger.exception("[%s] Context build failed (stream)", session_id[:12])
-        _log_stage(session_id, "context_build_error", stage_start, error=type(exc).__name__)
-        emit("error", f"⚠️ Jane could not prepare context for this request: {exc}")
-        while not queue.empty():
-            event_type, payload = await queue.get()
-            yield json.dumps({"type": event_type, "data": payload}, ensure_ascii=True) + "\n"
-            if event_type == "error":
-                break
-        return
-
-    emit("status", _progress_snapshot(request_ctx, summary_text, resolved_file_context))
 
     brain_stop = asyncio.Event()
 
@@ -850,14 +1267,142 @@ async def stream_message(
             if not stop.is_set():
                 emit("heartbeat", "")
 
-    async def run_adapter_async() -> None:
+    async def run_pipeline_async() -> None:
+        nonlocal final_response
         stage_start = time.perf_counter()
         try:
-            # ── Standing Brain: single long-lived CLI process ──
+            stage_start = time.perf_counter()
+            summary_text = format_session_summary(load_session_summary(session_id))
+            _log_stage(session_id, "session_summary_load", stage_start, summary_chars=len(summary_text or ""))
+            await _await_prewarm_if_running(session_id, state)
+            if summary_text:
+                emit("status", "Loaded prior conversation summary.")
+            else:
+                emit("status", "No prior conversation summary yet. Building context from the latest message.")
+
+            emit("status", "Loading memory and building context...")
+            request_ctx = None
+
+            # Standing brain with existing session: skip expensive context build
+            # (context was sent on first turn, CLI remembers it)
             from jane.standing_brain import get_standing_brain_manager
             manager = get_standing_brain_manager()
+            _sb_brain = manager.brain
+            _skip_context = (
+                manager._started
+                and _sb_brain
+                and _sb_brain.alive
+                and _sb_brain.turn_count > 0
+            )
 
-            if manager._started and manager.brain and manager.brain.alive:
+            ctx_stage_start = time.perf_counter()
+            if _skip_context:
+                from jane.context_builder import JaneRequestContext, _format_recent_history, TTS_SPOKEN_BLOCK_INSTRUCTION
+                safety_parts = []
+                recent = _format_recent_history(state.history, max_turns=6, max_chars=2400)
+                if recent:
+                    safety_parts.append(f"[Recent exchanges]\n{recent}")
+                # Re-inject TTS instruction on every turn when TTS is active,
+                # since the standing brain only got the system prompt on turn 1
+                # and the user may have toggled TTS on mid-session.
+                if tts_enabled:
+                    safety_parts.append(f"[TTS MODE ACTIVE]\n{TTS_SPOKEN_BLOCK_INSTRUCTION}")
+                safety_ctx = "\n\n".join(safety_parts)
+                user_msg, _cm_loaded = _maybe_prepend_code_map(message)
+                if _cm_loaded:
+                    emit("status", "Loading code map for code-related query...")
+                    logger.info("[%s] Code map injected (standing brain stream)", session_id[:12])
+                transcript = f"{safety_ctx}\n\nUser: {user_msg}" if safety_ctx else user_msg
+                # If Gemma already emitted a quick ack, tell Claude so it can follow up naturally
+                if _gemma_delegate_ack:
+                    transcript += f'\n\n[ALREADY SPOKEN] A brief acknowledgment was already spoken to the user: "{_gemma_delegate_ack}" — do NOT repeat it or generate your own [ACK] block. Continue naturally from where that ack left off.'
+                request_ctx = JaneRequestContext(
+                    system_prompt="",
+                    transcript=transcript,
+                    retrieved_memory_summary=state.bootstrap_memory_summary or "",
+                )
+                _log_stage(
+                    session_id,
+                    "context_build",
+                    ctx_stage_start,
+                    system_prompt_chars=0,
+                    transcript_chars=len(transcript),
+                    fresh_memory_retrieval=False,
+                    bootstrap_summary_chars=0,
+                )
+                logger.info("[%s] Standing brain turn %d — injected recent history only", session_id[:12], _sb_brain.turn_count)
+            else:
+                _memory_fallback = state.bootstrap_memory_summary or get_prefetch_result(session_id)
+                request_ctx = await build_jane_context_async(
+                    message,
+                    state.history,
+                    file_context=resolved_file_context,
+                    conversation_summary=summary_text,
+                    session_id=session_id,
+                    enable_memory_retrieval=True,
+                    memory_summary_fallback=_memory_fallback,
+                    platform=platform,
+                    tts_enabled=tts_enabled,
+                    on_status=lambda s: emit("status", s),
+                )
+
+            # If Gemma already emitted a quick ack, inject context so Claude follows up naturally
+            from jane.context_builder import JaneRequestContext as _JRC
+            if _gemma_delegate_ack and request_ctx:
+                _ack_note = f'\n\n[ALREADY SPOKEN] A brief acknowledgment was already spoken to the user: "{_gemma_delegate_ack}" — do NOT repeat it or generate your own [ACK] block. Continue naturally from where that ack left off.'
+                if request_ctx.transcript:
+                    request_ctx = _JRC(
+                        system_prompt=request_ctx.system_prompt,
+                        transcript=request_ctx.transcript + _ack_note,
+                        retrieved_memory_summary=request_ctx.retrieved_memory_summary,
+                    )
+                elif request_ctx.system_prompt:
+                    request_ctx = _JRC(
+                        system_prompt=request_ctx.system_prompt + _ack_note,
+                        transcript=request_ctx.transcript,
+                        retrieved_memory_summary=request_ctx.retrieved_memory_summary,
+                    )
+
+            if request_ctx.retrieved_memory_summary:
+                state.bootstrap_memory_summary = request_ctx.retrieved_memory_summary
+            state.bootstrap_complete = True
+            _log_stage(
+                session_id,
+                "context_build",
+                ctx_stage_start,
+                system_prompt_chars=len(request_ctx.system_prompt or ""),
+                transcript_chars=len(request_ctx.transcript or ""),
+                fresh_memory_retrieval=True,
+                bootstrap_summary_chars=len(state.bootstrap_memory_summary or ""),
+            )
+            _dump_prompt(
+                session_id,
+                "stream",
+                message,
+                summary_text,
+                request_ctx,
+                False,
+                state.bootstrap_memory_summary,
+                resolved_file_context,
+            )
+
+            emit("status", _progress_snapshot(request_ctx, summary_text, resolved_file_context))
+
+            # ── Execution path selection ──────────────────────────────────────
+            # Gemini web requests intentionally use the Gemini API brain, not
+            # the standing-brain shortcut. If we let the generic standing-brain
+            # path win first, a provider switch from Claude → Gemini can still
+            # route the request into the manager path and produce an empty
+            # response instead of using the API-backed Gemini executor.
+            stage_start = time.perf_counter()
+            use_standing_brain = (
+                manager._started
+                and manager.brain
+                and manager.brain.alive
+                and not _use_gemini_api(brain_name)
+                and not _use_persistent_codex(brain_name)
+            )
+            if use_standing_brain:
                 model_name = await manager.get_model()
                 emit("model", model_name)
                 emit("status", f"Jane is thinking ({model_name})...")
@@ -870,7 +1415,9 @@ async def stream_message(
                         message=brain_message,
                         system_prompt=request_ctx.system_prompt,
                     ):
-                        if event_type in ("thought", "tool_use", "tool_result"):
+                        if event_type == "provider_error":
+                            emit("provider_error", chunk)
+                        elif event_type in ("thought", "tool_use", "tool_result"):
                             emit(event_type, chunk)
                         else:
                             response_parts.append(chunk)
@@ -879,10 +1426,17 @@ async def stream_message(
                     _permission_broker.unregister_emitter("standing_brain")
                 response = "".join(response_parts)
             else:
-                # ── Fallback: CLI subprocess (if standing brain not started) ──
-                if _use_persistent_gemini(brain_name):
+                # ── Provider-specific direct execution path ───────────────────
+                if _use_gemini_api(brain_name):
+                    emit("model", os.environ.get("GEMINI_MODEL", "gemini-2.5-pro"))
+                    emit("status", "Handing the request to Jane's Gemini API brain.")
+                elif _use_persistent_gemini(brain_name):
                     emit("model", "gemini-2.5-pro")
                     emit("status", "Handing the request to Jane's persistent Gemini brain.")
+                elif _use_persistent_codex(brain_name):
+                    model_name = _get_web_chat_model(brain_name)
+                    emit("model", model_name)
+                    emit("status", f"Handing the request to Jane's Codex brain ({model_name}).")
                 else:
                     emit("model", adapter.label)
                     emit("status", f"Handing the request to Jane's {adapter.label} brain.")
@@ -895,6 +1449,7 @@ async def stream_message(
                                session_id[:12], elapsed_ms)
                 emit("error", "⚠️ Jane's brain returned an empty response. This usually means the model is overloaded — please try again.")
             else:
+                final_response = response
                 emit("done", response)
         except asyncio.CancelledError:
             elapsed_ms = int((time.perf_counter() - stage_start) * 1000)
@@ -915,16 +1470,20 @@ async def stream_message(
             _log_stage(session_id, "brain_execute_error", stage_start, error="ConnectionError")
             emit("error", "⚠️ Connection lost during response. Please try again.")
         except Exception as exc:
-            logger.exception("[%s] Brain execution failed (stream)", session_id[:12])
-            _log_stage(session_id, "brain_execute_error", stage_start, error=type(exc).__name__)
-            emit("error", f"⚠️ Error contacting Jane: {exc}")
+            if request_ctx is None:
+                logger.exception("[%s] Context build failed (stream)", session_id[:12])
+                _log_stage(session_id, "context_build_error", stage_start, error=type(exc).__name__)
+                emit("error", f"⚠️ Jane could not prepare context for this request: {exc}")
+            else:
+                logger.exception("[%s] Brain execution failed (stream)", session_id[:12])
+                _log_stage(session_id, "brain_execute_error", stage_start, error=type(exc).__name__)
+                emit("error", f"⚠️ Error contacting Jane: {exc}")
         finally:
             brain_stop.set()
-            logger.info("[%s] Brain adapter stream task finished", _session_log_id(session_id))
+            logger.info("[%s] Jane stream pipeline task finished", _session_log_id(session_id))
 
-    task = asyncio.create_task(run_adapter_async())
+    task = asyncio.create_task(run_pipeline_async())
     keepalive_task = asyncio.create_task(_emit_keepalive(brain_stop, interval=3.0))
-    final_response: str | None = None
 
     try:
         while True:
@@ -978,6 +1537,9 @@ async def stream_message(
                     continue
             else:
                 event_type, payload = queue_task.result()
+            if not first_visible_event_logged and event_type in ("status", "delta", "done", "error"):
+                _log_stage(session_id, "first_visible_event", request_start, event_type=event_type)
+                first_visible_event_logged = True
             yield json.dumps({"type": event_type, "data": payload}, ensure_ascii=True) + "\n"
             if event_type == "delta":
                 broadcaster.feed_delta(payload or "")

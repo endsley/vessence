@@ -1,0 +1,293 @@
+:root {
+  --bg: #07131a;
+  --bg-deep: #041018;
+  --panel: rgba(10, 24, 30, 0.74);
+  --panel-strong: rgba(10, 26, 34, 0.92);
+  --panel-soft: rgba(245, 242, 235, 0.06);
+  --line: rgba(181, 214, 211, 0.16);
+  --line-strong: rgba(181, 214, 211, 0.34);
+  --text: #eef3ef;
+  --muted: #9eb0b6;
+  --muted-strong: #c4d1d4;
+  --accent: #7dd3fc;
+  --accent-2: #60a5fa;
+  --accent-3: #cfeeff;
+  --good: #89e6a8;
+  --bad: #ff918b;
+  --shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body.onboarding-page {
+  position: relative;
+  margin: 0;
+  color: var(--text);
+  background:
+    radial-gradient(circle at 12% 18%, rgba(96, 165, 250, 0.15), transparent 30%),
+    radial-gradient(circle at 82% 16%, rgba(125, 211, 252, 0.13), transparent 28%),
+    radial-gradient(circle at 50% 115%, rgba(191, 219, 254, 0.1), transparent 30%),
+    linear-gradient(180deg, #07131a 0%, #051018 52%, #041018 100%);
+  font-family: "Manrope", "Segoe UI", sans-serif;
+  overflow-x: hidden;
+}
+
+body.onboarding-page::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+  background-size: 56px 56px;
+  mask-image: radial-gradient(circle at center, black 55%, transparent 100%);
+  opacity: 0.35;
+}
+
+body.onboarding-page::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.035), transparent 35%),
+    linear-gradient(315deg, rgba(125, 211, 252, 0.08), transparent 45%);
+  opacity: 0.8;
+}
+
+.hero-glow {
+  background: radial-gradient(circle, rgba(96, 165, 250, 0.16) 0%, rgba(125, 211, 252, 0.12) 38%, transparent 72%);
+  filter: blur(6px);
+}
+
+.step-container,
+.min-h-screen {
+  position: relative;
+  z-index: 1;
+}
+
+h1, h2, h3 {
+  font-family: "Fraunces", Georgia, serif;
+  letter-spacing: -0.03em;
+}
+
+.card,
+.choice-card,
+.terminal,
+.page-card {
+  background: linear-gradient(180deg, rgba(12, 26, 34, 0.92), rgba(9, 20, 27, 0.84));
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(18px);
+}
+
+.choice-card {
+  border-radius: 22px;
+  transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease, background 180ms ease;
+}
+
+.choice-card:hover {
+  transform: translateY(-3px);
+  border-color: rgba(125, 211, 252, 0.42);
+  box-shadow: 0 28px 70px rgba(0, 0, 0, 0.44);
+}
+
+.choice-card.selected {
+  border-color: rgba(125, 211, 252, 0.6);
+  background:
+    linear-gradient(180deg, rgba(27, 44, 50, 0.96), rgba(11, 24, 30, 0.92)),
+    radial-gradient(circle at top right, rgba(96, 165, 250, 0.2), transparent 42%);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.5);
+}
+
+.pill {
+  background: rgba(255, 255, 255, 0.045);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--muted-strong);
+}
+
+.btn-primary,
+button.btn-primary,
+a.btn-primary {
+  border: 0;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2) 55%, #bfdbfe 100%);
+  color: #081116;
+  box-shadow: 0 16px 40px rgba(96, 165, 250, 0.28);
+}
+
+.btn-primary:hover,
+button.btn-primary:hover,
+a.btn-primary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 20px 50px rgba(96, 165, 250, 0.35);
+}
+
+.btn-secondary,
+button.btn-secondary,
+a.btn-secondary {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(181, 214, 211, 0.18);
+  color: var(--muted-strong);
+}
+
+.btn-secondary:hover,
+button.btn-secondary:hover,
+a.btn-secondary:hover {
+  border-color: rgba(125, 211, 252, 0.44);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.input-field,
+input[type="text"],
+input[type="password"],
+textarea {
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(181, 214, 211, 0.16);
+  color: var(--text);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+
+.input-field::placeholder,
+input::placeholder,
+textarea::placeholder {
+  color: rgba(190, 203, 209, 0.48);
+}
+
+.input-field:focus,
+input[type="text"]:focus,
+input[type="password"]:focus,
+textarea:focus {
+  outline: none;
+  border-color: rgba(125, 211, 252, 0.55);
+  box-shadow: 0 0 0 4px rgba(125, 211, 252, 0.08);
+}
+
+.dot {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.dot.active,
+.dot.completed,
+.dot-line.completed,
+.progress-fill {
+  background: linear-gradient(90deg, var(--accent-2), var(--accent));
+}
+
+.dot.active {
+  box-shadow: 0 0 22px rgba(255, 141, 106, 0.42);
+}
+
+.dot-line {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.text-slate-400,
+.text-slate-500,
+.text-slate-600 {
+  color: var(--muted) !important;
+}
+
+.text-violet-400,
+.text-violet-300 {
+  color: var(--accent-3) !important;
+}
+
+.text-green-400 {
+  color: var(--good) !important;
+}
+
+.text-red-400,
+.text-red-300 {
+  color: var(--bad) !important;
+}
+
+.bg-slate-800\/50,
+.bg-slate-900\/80,
+.bg-slate-800\/60,
+.bg-slate-900 {
+  background: var(--panel) !important;
+}
+
+.border-slate-700\/50,
+.border-slate-700,
+.border-slate-800 {
+  border-color: var(--line) !important;
+}
+
+.max-w-2xl,
+.max-w-lg {
+  position: relative;
+}
+
+.page-hero-copy {
+  max-width: 46rem;
+}
+
+.onboarding-note {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 18px;
+}
+
+.section-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  font-size: 0.74rem;
+  color: var(--accent-3);
+}
+
+.section-eyebrow::before {
+  content: "";
+  width: 1.25rem;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--accent-3));
+}
+
+.fade-in,
+.fade-in-delay-1,
+.fade-in-delay-2 {
+  animation-duration: 700ms;
+}
+
+.test-success {
+  color: var(--good);
+}
+
+.test-error {
+  color: var(--bad);
+}
+
+.test-loading {
+  color: var(--accent);
+}
+
+code,
+.font-mono {
+  font-family: "JetBrains Mono", "SFMono-Regular", monospace;
+}
+
+a {
+  text-underline-offset: 3px;
+}
+
+@media (max-width: 768px) {
+  body.onboarding-page::before {
+    background-size: 42px 42px;
+  }
+
+  .step-container {
+    padding-top: 2rem;
+    padding-bottom: 2rem;
+  }
+
+  .choice-card,
+  .card {
+    border-radius: 18px;
+  }
+}

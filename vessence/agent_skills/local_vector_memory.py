@@ -1,3 +1,4 @@
+from jane.config import get_chroma_client
 # Copyright 2026 Google LLC
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -62,7 +63,7 @@ class LocalVectorMemoryService(BaseMemoryService):
             self._db_path = os.path.abspath(path)
         
         logger.info(f"Initializing LocalVectorMemoryService at {self._db_path}")
-        self._client = chromadb.PersistentClient(path=self._db_path)
+        self._client = get_chroma_client(path=self._db_path)
         # Use Cosine similarity for better semantic matching
         with silence_stderr_fd():
             self._collection = self._client.get_or_create_collection(

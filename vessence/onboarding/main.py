@@ -24,6 +24,11 @@ PROFILE    = DATA_DIR / "user_profile.md"
 
 app = FastAPI(title="Vessence Setup")
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
+app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")), name="static")
+
+
+def default_auth_method_for_brain(brain: str) -> str:
+    return "account" if brain == "claude" else "apikey"
 
 
 def _read_env_values() -> dict[str, str]:
@@ -48,13 +53,18 @@ async def health():
 
 # ── First-run detection ───────────────────────────────────────────────────────
 
-def is_first_run() -> bool:
-    """First run if .env doesn't exist OR has no meaningful config (just a copy of .env.example)."""
-    if not ENV_FILE.exists():
-        return True
+def onboarding_complete() -> bool:
+    """Onboarding is complete only after config exists and the identity interview has been saved."""
+    if not ENV_FILE.exists() or not PROFILE.exists():
+        return False
     values = _read_env_values()
-    # If no user name and no API key are set, treat as first run
-    return not values.get("USER_NAME", "").strip() or values.get("USER_NAME", "").strip() == "User"
+    user_name = values.get("USER_NAME", "").strip()
+    return bool(user_name)
+
+
+def is_first_run() -> bool:
+    """Treat setup as incomplete until both .env and user_profile.md exist."""
+    return not onboarding_complete()
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -62,8 +72,8 @@ async def index(request: Request):
     if not is_first_run():
         env_values = _read_env_values()
         domain = env_values.get("CLOUDFLARE_DOMAIN", "").strip()
-        vault_url = f"https://vault.{domain}" if domain else "http://vault.localhost"
-        jane_url  = f"https://jane.{domain}"  if domain else "http://jane.localhost"
+        vault_url = f"https://vault.{domain}" if domain else "http://localhost:8081/vault"
+        jane_url  = f"https://jane.{domain}"  if domain else "http://localhost:8081"
         current_brain = env_values.get("JANE_BRAIN", "gemini")
         return templates.TemplateResponse(request, "settings.html", context={
             "vault_url": vault_url,
@@ -78,8 +88,16 @@ async def index(request: Request):
                 and env_values.get("ALLOWED_GOOGLE_EMAILS", "").strip()
             ),
         })
+    env_values = _read_env_values()
+    preset_brain = env_values.get("JANE_BRAIN", "").strip().lower()
+    if preset_brain not in ("gemini", "claude", "openai"):
+        preset_brain = ""
     return templates.TemplateResponse(request, "setup.html", context={
         "step": "welcome",
+        "preset_brain": preset_brain,
+        "preset_auth_method": default_auth_method_for_brain(preset_brain) if preset_brain else "account",
+        "initial_user_name": env_values.get("USER_NAME", "").strip(),
+        "jane_url": "http://localhost:8081",
     })
 
 
@@ -91,13 +109,38 @@ async def setup(request: Request):
 
     user_name  = body.get("user_name", "").strip()
     jane_brain = body.get("jane_brain", "claude")
-    api_key    = body.get("api_key", "").strip()
+    google_api_key = body.get("google_api_key", "").strip()
+    anthropic_api_key = body.get("anthropic_api_key", "").strip()
+    openai_api_key = body.get("openai_api_key", "").strip()
+    create_minimal_profile = bool(body.get("create_minimal_profile"))
+    api_key = (
+        body.get("api_key", "").strip()
+        or {
+            "gemini": google_api_key,
+            "claude": anthropic_api_key,
+            "openai": openai_api_key,
+        }.get(jane_brain, "")
+    )
+    google_client_id = body.get("google_client_id", "").strip()
+    google_client_secret = body.get("google_client_secret", "").strip()
+    allowed_google_emails = body.get("allowed_google_emails", "").strip()
+
+    if not user_name and create_minimal_profile:
+        user_name = "User"
 
     if not user_name:
         raise HTTPException(400, "Your name is required")
 
     if jane_brain not in ("claude", "openai", "gemini"):
         raise HTTPException(400, "Invalid provider. Choose claude, openai, or gemini.")
+
+    google_oauth_values = [
+        google_client_id,
+        google_client_secret,
+        allowed_google_emails,
+    ]
+    if any(google_oauth_values) and not all(google_oauth_values):
+        raise HTTPException(400, "Google Sign-In setup is incomplete. Provide client ID, client secret, and allowed emails together.")
 
     session_secret = secrets.token_hex(32)
 
@@ -108,11 +151,25 @@ async def setup(request: Request):
         "openai": "OPENAI_API_KEY",
     }.get(jane_brain, "GOOGLE_API_KEY")
 
-    api_key_line = f"\n{api_key_var}={api_key}\n" if api_key else "\n"
+    # Gemini CLI checks GEMINI_API_KEY first, then GOOGLE_API_KEY — set both
+    if api_key and jane_brain == "gemini":
+        api_key_line = f"\nGOOGLE_API_KEY={api_key}\nGEMINI_API_KEY={api_key}\n"
+    elif api_key:
+        api_key_line = f"\n{api_key_var}={api_key}\n"
+    else:
+        api_key_line = "\n"
 
     # Claude supports web-based tool permission gating via PreToolUse hooks;
     # other providers run fully autonomous (no hook support).
     web_permissions = "1" if jane_brain == "claude" else "0"
+
+    google_oauth_lines = ""
+    if all(google_oauth_values):
+        google_oauth_lines = (
+            f"GOOGLE_CLIENT_ID={google_client_id}\n"
+            f"GOOGLE_CLIENT_SECRET={google_client_secret}\n"
+            f"ALLOWED_GOOGLE_EMAILS={allowed_google_emails}\n"
+        )
 
     env_content = f"""# Vessence environment — written by onboarding on first run
 # Do not commit this file.
@@ -120,6 +177,7 @@ async def setup(request: Request):
 JANE_BRAIN={jane_brain}
 USER_NAME={user_name}
 {api_key_line}
+{google_oauth_lines}\
 SESSION_SECRET_KEY={session_secret}
 JANE_WEB_PERMISSIONS={web_permissions}
 
@@ -132,7 +190,14 @@ CHROMA_PORT=8000
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     ENV_FILE.write_text(env_content)
 
-    return JSONResponse({"success": True, "next": "/interview"})
+    if create_minimal_profile and not PROFILE.exists():
+        PROFILE.write_text(_build_profile({
+            "name": user_name,
+            "tone": "casual",
+            "extra": "User completed quick onboarding setup. Profile can be edited later from Vessence.",
+        }))
+
+    return JSONResponse({"success": True, "next": "/success" if create_minimal_profile else "/interview"})
 
 
 # ── CLI Login (OAuth flow — proxied to Jane container where CLI is installed) ──
@@ -163,6 +228,20 @@ async def cli_login_status():
             return JSONResponse(resp.json(), status_code=resp.status_code)
     except Exception:
         return JSONResponse({"authenticated": False})
+
+
+@app.post("/api/cli-login/code")
+async def cli_login_code(request: Request):
+    """Proxy auth-code submission to the Jane container."""
+    body = await request.json()
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(f"{JANE_URL}/api/cli-login/code", json=body)
+            return JSONResponse(resp.json(), status_code=resp.status_code)
+    except httpx.ConnectError:
+        return JSONResponse({"ok": False, "error": "Jane container is not ready yet. Please wait a moment and try again."}, status_code=503)
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": f"Could not reach Jane: {e}"}, status_code=500)
 
 
 # ── Identity interview ────────────────────────────────────────────────────────
@@ -341,13 +420,15 @@ async def validate_key(request: Request):
 
 @app.get("/success", response_class=HTMLResponse)
 async def success(request: Request):
+    if not onboarding_complete():
+        return RedirectResponse(url="/", status_code=303)
     domain = os.environ.get("CLOUDFLARE_DOMAIN", "")
     if domain:
         vault_url = f"https://vault.{domain}"
         jane_url  = f"https://jane.{domain}"
     else:
-        vault_url = "http://vault.localhost"
-        jane_url  = "http://jane.localhost"
+        vault_url = "http://localhost:8081/vault"
+        jane_url  = "http://localhost:8081"
     return templates.TemplateResponse(request, "success.html", context={
         "vault_url": vault_url,
         "jane_url": jane_url,

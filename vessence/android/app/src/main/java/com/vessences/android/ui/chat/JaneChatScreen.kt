@@ -2,6 +2,7 @@ package com.vessences.android.ui.chat
 
 import android.Manifest
 import android.app.Activity
+import androidx.activity.ComponentActivity
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -33,6 +34,7 @@ import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material3.*
@@ -48,7 +50,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
-import androidx.lifecycle.ViewModelStoreOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.vessences.android.SharedIntentState
 import com.vessences.android.data.api.AppVersion
@@ -70,7 +71,8 @@ fun JaneChatScreen(
     onBack: () -> Unit = {},
 ) {
     // Scope to Activity so the ViewModel survives navigation between tabs
-    val activity = LocalContext.current as ViewModelStoreOwner
+    val activity = LocalContext.current as? ComponentActivity
+        ?: error("JaneChatScreen requires a ComponentActivity context")
     val chatViewModel: ChatViewModel = viewModel(
         viewModelStoreOwner = activity,
         key = "jane_chat",
@@ -299,6 +301,12 @@ private fun ChatInputBar(
     var cameraPhotoUri by remember { mutableStateOf<Uri?>(null) }
     var ttsEnabled by remember { mutableStateOf(false) }
 
+    val chatPrefs = remember { com.vessences.android.util.ChatPreferences(context) }
+    var autoListenEnabled by remember { mutableStateOf(chatPrefs.isAutoListenEnabled()) }
+    LaunchedEffect(autoListenEnabled) {
+        chatPrefs.setAutoListenEnabled(autoListenEnabled)
+    }
+
     // Consume shared intent data
     LaunchedEffect(sharedUris, sharedText) {
         if (sharedUris.isNotEmpty()) {
@@ -345,17 +353,32 @@ private fun ChatInputBar(
     }
 
     // Speech recognition launcher
+    // Track when STT was last launched to prevent premature always-listen restart
+    var lastSttLaunchTime by remember { mutableStateOf(0L) }
+
     val speechLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
         isListeningForSpeech = false
+        val timeSinceLaunch = System.currentTimeMillis() - lastSttLaunchTime
         if (result.resultCode == Activity.RESULT_OK) {
             val matches = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
             val spoken = matches?.firstOrNull()
             if (!spoken.isNullOrBlank()) {
-                // Auto-send the recognized speech
-                chatViewModel.sendMessage(spoken)
+                chatViewModel.sendMessage(spoken, fromVoice = true)
+            } else {
+                // Empty result (silence timeout) — conversation over
+                com.vessences.android.voice.WakeWordBridge.sttActive = false
+                com.vessences.android.voice.AlwaysListeningService.start(context)
             }
+        } else if (timeSinceLaunch > 2000) {
+            // STT cancelled after running for >2s — user dismissed it, conversation over
+            com.vessences.android.voice.WakeWordBridge.sttActive = false
+            com.vessences.android.voice.AlwaysListeningService.start(context)
+        } else {
+            // STT cancelled within 2s of launch — likely failed to start properly.
+            // Don't restart always-listen yet, the wake word flow will retry.
+            android.util.Log.w("JaneChatScreen", "STT cancelled too quickly (${timeSinceLaunch}ms) — not restarting always-listen")
         }
     }
 
@@ -369,6 +392,8 @@ private fun ChatInputBar(
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
                 putExtra(RecognizerIntent.EXTRA_PROMPT, "Speak your message...")
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 4000L)
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 6000L)
             }
             speechLauncher.launch(speechIntent)
         }
@@ -380,14 +405,40 @@ private fun ChatInputBar(
         ) == PackageManager.PERMISSION_GRANTED
         if (hasMicPerm) {
             isListeningForSpeech = true
+            lastSttLaunchTime = System.currentTimeMillis()
+            // Mark STT as active so onResume doesn't restart always-listen
+            com.vessences.android.voice.WakeWordBridge.sttActive = true
+            // Stop wake word service to release mic before STT
+            com.vessences.android.voice.AlwaysListeningService.stop(context)
             val speechIntent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
                 putExtra(RecognizerIntent.EXTRA_PROMPT, "Speak your message...")
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 4000L)
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 6000L)
             }
             speechLauncher.launch(speechIntent)
         } else {
             micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+        }
+    }
+
+    // Auto-launch STT from wake word (set by VessencesApp after navigation)
+    val wakeWordPending by com.vessences.android.WakeWordPendingFlag.pending.collectAsState()
+    LaunchedEffect(wakeWordPending) {
+        if (wakeWordPending) {
+            com.vessences.android.WakeWordPendingFlag.consume()
+            kotlinx.coroutines.delay(200)
+            launchSpeechRecognition()
+        }
+    }
+
+    // Auto-launch STT after TTS response (conversation loop)
+    LaunchedEffect(chatState.wakeWordTriggered) {
+        if (chatState.wakeWordTriggered) {
+            chatViewModel.clearWakeWordTrigger()
+            kotlinx.coroutines.delay(200)
+            launchSpeechRecognition()
         }
     }
 
@@ -455,12 +506,13 @@ private fun ChatInputBar(
                         Text("Take photo", color = Color.White, fontSize = 16.sp)
                     }
                 }
+                
                 Surface(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable {
-                            ttsEnabled = !ttsEnabled
-                            showAttachmentSheet = false
+                            autoListenEnabled = !autoListenEnabled
+                            // Don't dismiss, let them see it change
                         },
                     color = Color.Transparent,
                 ) {
@@ -469,13 +521,13 @@ private fun ChatInputBar(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Icon(
-                            Icons.AutoMirrored.Filled.VolumeUp,
+                            if (autoListenEnabled) Icons.Default.Mic else Icons.Default.MicOff,
                             contentDescription = null,
-                            tint = if (ttsEnabled) Color(0xFF22C55E) else Violet500,
+                            tint = if (autoListenEnabled) Color(0xFF22C55E) else SlateMuted,
                         )
                         Spacer(modifier = Modifier.width(12.dp))
                         Text(
-                            text = if (ttsEnabled) "Voice response (on)" else "Voice response",
+                            text = if (autoListenEnabled) "Auto-listen after speaking (on)" else "Auto-listen after speaking (off)",
                             color = Color.White,
                             fontSize = 16.sp,
                         )
@@ -595,12 +647,16 @@ private fun ChatInputBar(
             )
             Spacer(modifier = Modifier.width(4.dp))
 
-            // Mic button for speech-to-text
-            IconButton(
-                onClick = { launchSpeechRecognition() },
-                modifier = Modifier.size(40.dp),
-            ) {
-                if (isListeningForSpeech) {
+            // Mic button for speech-to-text / Stop button when listening
+            if (chatState.voice.isCapturingCommand || isListeningForSpeech) {
+                // Show stop button while actively listening
+                IconButton(
+                    onClick = {
+                        chatViewModel.cancelListening()
+                        isListeningForSpeech = false
+                    },
+                    modifier = Modifier.size(40.dp),
+                ) {
                     val pulseTransition = rememberInfiniteTransition(label = "micPulse")
                     val scale by pulseTransition.animateFloat(
                         initialValue = 1f,
@@ -612,12 +668,17 @@ private fun ChatInputBar(
                         label = "micScale",
                     )
                     Icon(
-                        imageVector = Icons.Default.Mic,
-                        contentDescription = "Listening...",
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Stop listening",
                         tint = Color(0xFFEF4444),
                         modifier = Modifier.scale(scale),
                     )
-                } else {
+                }
+            } else {
+                IconButton(
+                    onClick = { launchSpeechRecognition() },
+                    modifier = Modifier.size(40.dp),
+                ) {
                     Icon(
                         imageVector = Icons.Default.Mic,
                         contentDescription = "Voice input",

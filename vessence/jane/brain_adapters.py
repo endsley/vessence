@@ -9,6 +9,32 @@ from pathlib import Path
 from typing import Callable
 
 
+def _load_runtime_env_keys(keys: tuple[str, ...]) -> None:
+    """Load specific keys from the runtime .env file into os.environ.
+
+    Called before each brain execution so that API keys written by the
+    onboarding wizard (after the container started) are picked up without
+    requiring a container restart.
+    """
+    env_path = Path(os.environ.get("VESSENCE_DATA_HOME", "/data")) / ".env"
+    if not env_path.exists():
+        return
+    needed = [k for k in keys if not os.environ.get(k)]
+    if not needed:
+        return
+    try:
+        for line in env_path.read_text().splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            k, v = k.strip(), v.strip()
+            if k in needed:
+                os.environ[k] = v
+    except Exception:
+        pass
+
+
 def _kill_pgroup(process: subprocess.Popen) -> None:
     """Kill a subprocess and its entire process group."""
     if process.poll() is not None:
@@ -65,6 +91,10 @@ class BrainAdapter:
         self.execution_profile = execution_profile
 
     def _missing_env(self) -> list[str]:
+        # Load keys from runtime .env file if not already in environment.
+        # This handles the case where onboarding wrote the .env after the
+        # Jane container was already running (Docker env_file is read-once).
+        _load_runtime_env_keys(self.required_env)
         return [key for key in self.required_env if not os.environ.get(key)]
 
     def build_command(self, system_prompt: str, transcript: str) -> list[str]:
@@ -115,7 +145,19 @@ class BrainAdapter:
 class GeminiBrainAdapter(BrainAdapter):
     name = "gemini"
     label = "Gemini"
-    required_env = ("GOOGLE_API_KEY",)
+    # GOOGLE_API_KEY is NOT required when using OAuth (credentials in ~/.gemini/oauth_creds.json)
+    required_env = ()
+
+    def _missing_env(self) -> list[str]:
+        """Gemini can authenticate via API key OR OAuth credentials."""
+        _load_runtime_env_keys(("GOOGLE_API_KEY", "GEMINI_API_KEY"))
+        if os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY"):
+            return []
+        # Check for OAuth credentials file
+        oauth_creds = Path.home() / ".gemini" / "oauth_creds.json"
+        if oauth_creds.exists():
+            return []
+        return ["GOOGLE_API_KEY (or OAuth login via Connect Account)"]
 
     def build_command(self, system_prompt: str, transcript: str) -> list[str]:
         cmd = [os.environ.get("GEMINI_BIN", "/usr/local/bin/gemini")]

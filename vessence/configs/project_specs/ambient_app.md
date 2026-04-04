@@ -128,6 +128,256 @@ dev_dependencies:
 
 ### 4.2 Visual Theme
 
+> **🔬 Research Note (2026-04-03 — auto):**
+> Here's the technical note, Chieh.
+> 
+> ---
+> 
+> # Premium UI Polish in Flutter — Technical Note for Project Ambient
+> 
+> ## 1. Rendering Foundation: Impeller
+> 
+> Before anything else — Impeller is now the default renderer (Flutter 3.27+). It pre-compiles shaders AOT, eliminating the runtime jank that plagued Skia. This means your animations will actually hit consistent 60/120fps on all target platforms. No extra config needed; just make sure you're on a current Flutter stable channel.
+> 
+> ## 2. Animation & Transition Toolkit
+> 
+> ### Core Package: `flutter_animate` (pub.dev)
+> The single most impactful package for micro-interactions. Chainable, declarative, composable.
+> 
+> ```dart
+> import 'package:flutter_animate/flutter_animate.dart';
+> 
+> // Message bubble appearing
+> Widget buildBubble(Widget child) {
+>   return child
+>     .animate()
+>     .fadeIn(duration: 200.ms)
+>     .slideY(begin: 0.1, end: 0, curve: Curves.easeOutCubic)
+>     .scale(begin: Offset(0.95, 0.95), end: Offset(1, 1));
+> }
+> 
+> // Staggered list load (chat history)
+> ListView.builder(
+>   itemBuilder: (ctx, i) => MessageBubble(messages[i])
+>     .animate()
+>     .fadeIn(delay: (50 * i).ms, duration: 300.ms)
+>     .slideX(begin: 0.05),
+> )
+> ```
+> 
+> ### Page Transitions: `animations` (official Flutter package)
+> Provides `SharedAxisTransition`, `FadeThroughTransition`, `ContainerTransform` — all Material Motion spec compliant.
+> 
+> ```dart
+> // In your GoRouter or Navigator
+> pageBuilder: (context, state) => CustomTransitionPage(
+>   child: ChatScreen(),
+>   transitionsBuilder: (ctx, anim, secAnim, child) {
+>     return FadeThroughTransition(
+>       animation: anim,
+>       secondaryAnimation: secAnim,
+>       child: child,
+>     );
+>   },
+> ),
+> ```
+> 
+> ### Staggered Lists: `flutter_staggered_animations`
+> For chat history load, settings panels, essence grids:
+> 
+> ```dart
+> AnimationLimiter(
+>   child: ListView.builder(
+>     itemBuilder: (ctx, i) => AnimationConfiguration.staggeredList(
+>       position: i,
+>       duration: const Duration(milliseconds: 375),
+>       child: SlideAnimation(
+>         verticalOffset: 30.0,
+>         child: FadeInAnimation(child: MessageTile(messages[i])),
+>       ),
+>     ),
+>   ),
+> )
+> ```
+> 
+> ## 3. Micro-Interactions
+> 
+> ### Button Press Feedback
+> Skip `InkWell` for premium feel. Use scale + haptic:
+> 
+> ```dart
+> class PressableButton extends StatefulWidget { /* ... */ }
+> 
+> // In state:
+> GestureDetector(
+>   onTapDown: (_) => _controller.forward(),
+>   onTapUp: (_) {
+>     _controller.reverse();
+>     HapticFeedback.lightImpact(); // crucial for feel
+>     widget.onPressed();
+>   },
+>   onTapCancel: () => _controller.reverse(),
+>   child: AnimatedBuilder(
+>     animation: _scaleAnimation, // 1.0 → 0.95 over 100ms
+>     builder: (ctx, child) => Transform.scale(
+>       scale: _scaleAnimation.value,
+>       child: child,
+>     ),
+>     child: widget.child,
+>   ),
+> )
+> ```
+> 
+> ### Send Button Animation
+> Morph between states using `AnimatedSwitcher` + rotation:
+> 
+> ```dart
+> AnimatedSwitcher(
+>   duration: const Duration(milliseconds: 200),
+>   transitionBuilder: (child, anim) => ScaleTransition(
+>     scale: anim,
+>     child: RotationTransition(turns: Tween(begin: 0.5, end: 1.0).animate(anim), child: child),
+>   ),
+>   child: hasText
+>     ? Icon(Icons.send_rounded, key: ValueKey('send'))
+>     : Icon(Icons.mic_rounded, key: ValueKey('mic')),
+> )
+> ```
+> 
+> ### Typing Indicator
+> Flutter has an [official cookbook recipe](https://docs.flutter.dev/cookbook/effects/typing-indicator) for this. The pattern: three dots with staggered scale animations.
+> 
+> ```dart
+> // Simplified — three AnimatedBuilder with offset intervals
+> for (int i = 0; i < 3; i++)
+>   AnimatedBuilder(
+>     animation: CurvedAnimation(
+>       parent: _controller, // repeating controller, 600ms
+>       curve: Interval(i * 0.15, 0.5 + i * 0.15, curve: Curves.easeInOut),
+>     ),
+>     builder: (ctx, _) => Transform.translate(
+>       offset: Offset(0, -4 * _animation.value),
+>       child: Dot(),
+>     ),
+>   )
+> ```
+> 
+> ## 4. Message Bubble Design
+> 
+> Key details that separate polished from amateur:
+> 
+> | Detail | Technique |
+> |---|---|
+> | **Tail/pointer** | `CustomPainter` with quadratic bezier, or `BubbleClipper` from `chat_bubbles` package |
+> | **Adaptive corners** | Grouped messages: round all corners except where bubbles touch (reduce `borderRadius` on adjacent side) |
+> | **Streaming text** | Animate character-by-character with `AnimatedDefaultTextStyle` + timer, or use `flutter_animate`'s `.typewriter()` effect |
+> | **Selection highlight** | `SelectableText` with custom `selectionColor` matching your accent |
+> | **Code blocks** | `flutter_highlight` or `highlight` package with a custom dark theme map |
+> | **Markdown** | `flutter_markdown` with custom `styleSheet` matching your theme |
+> 
+> ```dart
+> // Grouped bubble radius logic
+> BorderRadius _bubbleRadius(bool isMe, bool isFirst, bool isLast) {
+>   const r = Radius.circular(18);
+>   const small = Radius.circular(4);
+>   if (isMe) {
+>     return BorderRadius.only(
+>       topLeft: r, topRight: isFirst ? r : small,
+>       bottomLeft: r, bottomRight: isLast ? r : small,
+>     );
+>   }
+>   // mirror for other side
+> }
+> ```
+> 
+> ## 5. Dark Theme — The "Linear/Claude" Look
+> 
+> The secret is **restraint**: very few colors, lots of subtle contrast, and careful use of elevation.
+> 
+> ```dart
+> ThemeData ambientDark() {
+>   // Key: use a near-black background, NOT pure #000000
+>   const bg = Color(0xFF0D0D0D);        // Linear-style
+>   const surface = Color(0xFF1A1A1A);    // cards, bubbles
+>   const surfaceAlt = Color(0xFF242424); // input field, hover
+>   const border = Color(0xFF2E2E2E);     // subtle dividers
+>   const textPrimary = Color(0xFFE8E8E8);
+>   const textSecondary = Color(0xFF888888);
+>   const accent = Color(0xFF6C8EEF);     // your brand blue
+> 
+>   return ThemeData(
+>     brightness: Brightness.dark,
+>     scaffoldBackgroundColor: bg,
+>     colorScheme: ColorScheme.dark(
+>       surface: surface,
+>       primary: accent,
+>       onSurface: textPrimary,
+>     ),
+>     cardTheme: CardTheme(
+>       color: surface,
+>       elevation: 0,  // flat cards, use border instead
+>       shape: RoundedRectangleBorder(
+>         borderRadius: BorderRadius.circular(12),
+>         side: BorderSide(color: border, width: 0.5),
+>       ),
+>     ),
+>     textTheme: GoogleFonts.interTextTheme().apply(
+>       bodyColor: textPrimary,
+>       displayColor: textPrimary,
+>     ),
+>     inputDecorationTheme: InputDecorationTheme(
+>       filled: true,
+>       fillColor: surfaceAlt,
+>       border: OutlineInputBorder(
+>         borderRadius: BorderRadius.circular(12),
+>         borderSide: BorderSide(color: border),
+>       ),
+>       contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+>     ),
+>   );
+> }
+> ```
+> 
+> ### Polish Details That Matter
+> - **No pure black or pure white** — use `0xFF0D0D0D` / `0xFFE8E8E8`
+> - **0.5px borders** instead of shadows for card separation (the Linear approach)
+> - **4dp spacing grid** — all padding/margin multiples of 4
+> - **Inter or Geist font** via `google_fonts` package
+> - **Animated theme switching**: wrap `MaterialApp` with `AnimatedTheme` or use `themeAnimationDuration`
+> 
+> ## 6. Package Summary
+> 
+> | Package | Purpose | pub.dev |
+> |---|---|---|
+> | `flutter_animate` | Declarative micro-interactions & transitions | ✅ Actively maintained |
+> | `animations` | Material Motion page transitions | Official Flutter team |
+> | `flutter_staggered_animations` | List/grid staggered entry | Stable |
+> | `chat_bubbles` | Pre-built bubble shapes, typing indicator | Chat-specific |
+> | `google_fonts` | Inter, Geist, system-quality typography | Official Google |
+> | `flutter_markdown` | Markdown rendering in bubbles | Official Flutter team |
+> | `flutter_highlight` | Syntax-highlighted code blocks | Stable |
+> | `shimmer` | Loading skeleton placeholders | Good for "thinking" state |
+> 
+> ## 7. Performance Guardrails
+> 
+> - **`RepaintBoundary`** around each message bubble — prevents full-list repaint on new messages
+> - **`const` constructors** everywhere possible — reduces widget rebuilds
+> - **`ListView.builder`** (never `ListView(children: [...])`) — lazy rendering
+> - **Avoid `Opacity` widget** for fade effects — use `FadeTransition` or `AnimatedOpacity` which compose on the GPU layer
+> - **Profile with DevTools** — target <4ms build, <8ms paint per frame
+> 
+> ---
+> 
+> Sources:
+> - [Flutter Typing Indicator Cookbook](https://docs.flutter.dev/cookbook/effects/typing-indicator)
+> - [How Impeller Is Transforming Flutter UI Rendering in 2026](https://dev.to/eira-wexford/how-impeller-is-transforming-flutter-ui-rendering-in-2026-3dpd)
+> - [Impeller Rendering Engine — Official Docs](https://docs.flutter.dev/perf/impeller)
+> - [Flutter Staggered Animations](https://docs.flutter.dev/ui/animations/staggered-animations)
+> - [chat_bubbles package](https://pub.dev/packages/chat_bubbles)
+> - [flutter_micro_interactions package](https://pub.dev/packages/flutter_micro_interactions)
+> - [Top Flutter UI Libraries for 2026](https://www.f22labs.com/blogs/top-8-flutter-ui-libraries-for-2025-you-must-explore/)
+> - [Mastering Impeller Custom Shaders for 120fps](https://dev.to/devin-rosario/mastering-impeller-custom-shaders-for-120fps-flutter-apps-2020)
+
 > **🔬 Research Note (2026-03-26 — auto):**
 > # Premium Flutter UI Polish — Technical Note
 > 
@@ -816,6 +1066,194 @@ class SessionManager {
 ---
 
 ### Phase 1 — Core Chat (MVP)
+
+> **🔬 Research Note (2026-04-03 — auto):**
+> # Chat Persistence with sqflite in Flutter (Android + Linux Desktop)
+> 
+> ## Package
+> 
+> **`sqflite_common_ffi`** — use this instead of plain `sqflite`. It works on Android *and* Linux/Windows/macOS desktop via the FFI bridge. On Android it delegates to the native SQLite; on desktop it uses `sqlite3_flutter_libs`.
+> 
+> ```yaml
+> dependencies:
+>   sqflite_common_ffi: ^2.3.3
+>   path_provider: ^2.1.4
+>   path: ^1.9.0
+> ```
+> 
+> Initialize once at startup:
+> 
+> ```dart
+> import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+> 
+> void main() {
+>   databaseFactory = databaseFactoryFfi; // works on all platforms
+>   runApp(MyApp());
+> }
+> ```
+> 
+> ---
+> 
+> ## Schema
+> 
+> ```sql
+> -- v1
+> CREATE TABLE conversations (
+>   id         TEXT PRIMARY KEY,   -- UUID
+>   title      TEXT,
+>   created_at INTEGER NOT NULL,   -- epoch ms
+>   updated_at INTEGER NOT NULL
+> );
+> 
+> CREATE TABLE messages (
+>   id              TEXT PRIMARY KEY,   -- UUID
+>   conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+>   role            TEXT NOT NULL,      -- 'user' | 'assistant' | 'system'
+>   content         TEXT NOT NULL,
+>   created_at      INTEGER NOT NULL,   -- epoch ms
+>   metadata        TEXT               -- JSON blob for attachments, tool calls, etc.
+> );
+> 
+> CREATE INDEX idx_messages_conv_time ON messages(conversation_id, created_at DESC);
+> ```
+> 
+> Key decisions:
+> 
+> - **TEXT primary keys (UUIDs)** — lets you generate IDs client-side and merge across devices without collisions. Use `package:uuid`.
+> - **epoch ms integers for timestamps** — SQLite has no native datetime; integers sort and compare faster than ISO strings.
+> - **`ON DELETE CASCADE`** — deleting a conversation cleans up its messages. Requires `PRAGMA foreign_keys = ON` (set it in `onConfigure`).
+> - **Composite descending index** — this is the single most important index. It serves both the "load latest messages" query and the keyset pagination query below.
+> - **metadata as JSON TEXT** — avoids schema bloat for optional fields (attachments, function calls, token counts). Parse with `dart:convert` on read.
+> 
+> ---
+> 
+> ## Migration Strategy
+> 
+> `sqflite`'s `openDatabase` has built-in versioned migration support. Use `onCreate` for fresh installs and `onUpgrade` for each version bump:
+> 
+> ```dart
+> Future<Database> openChatDb() async {
+>   final dbPath = join(await getDatabasesPath(), 'chat.db');
+> 
+>   return openDatabase(
+>     dbPath,
+>     version: 2, // bump this for each migration
+>     onConfigure: (db) async {
+>       await db.execute('PRAGMA foreign_keys = ON');
+>     },
+>     onCreate: (db, version) async {
+>       // Run the full latest schema
+>       await db.execute(_sqlConversations);
+>       await db.execute(_sqlMessages);
+>       await db.execute(_sqlIndex);
+>       if (version >= 2) {
+>         await db.execute(_sqlV2Migration);
+>       }
+>     },
+>     onUpgrade: (db, oldVersion, newVersion) async {
+>       if (oldVersion < 2) {
+>         // Example: add a 'pinned' column to conversations
+>         await db.execute(
+>           'ALTER TABLE conversations ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0',
+>         );
+>       }
+>       // if (oldVersion < 3) { ... }
+>     },
+>   );
+> }
+> ```
+> 
+> Rules of thumb:
+> 
+> - **Never drop + recreate in production.** Always `ALTER TABLE` or create new tables and backfill.
+> - **Keep migrations monotonic and append-only.** Each `if (oldVersion < N)` block is permanent.
+> - **Test the `onCreate` path too** — it must produce an identical schema to running all migrations sequentially. A simple integration test that opens a fresh DB and compares `sqlite_master` output catches drift.
+> 
+> ---
+> 
+> ## Pagination (Keyset, Not OFFSET)
+> 
+> `OFFSET`-based pagination re-scans skipped rows on every page load. For a chat with thousands of messages, use **keyset pagination** (seek method) — it's O(1) per page via the index.
+> 
+> ```dart
+> /// Load [limit] messages older than [beforeTimestamp] for a conversation.
+> /// Pass null for the initial load (most recent messages).
+> Future<List<Message>> loadMessages(
+>   String conversationId, {
+>   int limit = 40,
+>   int? beforeTimestamp,
+> }) async {
+>   final where = beforeTimestamp != null
+>       ? 'conversation_id = ? AND created_at < ?'
+>       : 'conversation_id = ?';
+>   final args = beforeTimestamp != null
+>       ? [conversationId, beforeTimestamp]
+>       : [conversationId];
+> 
+>   final rows = await db.query(
+>     'messages',
+>     where: where,
+>     whereArgs: args,
+>     orderBy: 'created_at DESC',
+>     limit: limit,
+>   );
+> 
+>   return rows.map(Message.fromMap).toList().reversed.toList();
+> }
+> ```
+> 
+> How it works:
+> 
+> 1. **First load**: query the 40 most recent messages (`ORDER BY created_at DESC LIMIT 40`). The index serves this directly.
+> 2. **Scroll up**: pass `beforeTimestamp = oldestLoadedMessage.createdAt`. The index seeks directly to that point — no scanning.
+> 3. **Edge case — duplicate timestamps**: if two messages could share the same `created_at` ms value, add `id` as a tiebreaker:
+> 
+> ```sql
+> WHERE conversation_id = ? AND (created_at < ? OR (created_at = ? AND id < ?))
+> ORDER BY created_at DESC, id DESC
+> ```
+> 
+> Then update the index to `(conversation_id, created_at DESC, id DESC)`.
+> 
+> ---
+> 
+> ## DAO Pattern
+> 
+> Wrap all DB access in a single class. This keeps SQL out of your UI/BLoC code and gives you one place to test:
+> 
+> ```dart
+> class ChatDao {
+>   final Database db;
+>   ChatDao(this.db);
+> 
+>   Future<void> insertMessage(Message m) =>
+>       db.insert('messages', m.toMap(), conflictAlgorithm: ConflictAlgorithm.replace);
+> 
+>   Future<void> deleteConversation(String id) =>
+>       db.delete('conversations', where: 'id = ?', whereArgs: [id]);
+>       // CASCADE handles messages
+> 
+>   Future<List<Conversation>> listConversations({int limit = 20, int? beforeTimestamp}) async {
+>     // Same keyset pattern as messages, ordered by updated_at DESC
+>     // ...
+>   }
+> }
+> ```
+> 
+> ---
+> 
+> ## Concurrency Note
+> 
+> SQLite is single-writer. `sqflite_common_ffi` serializes writes internally, so you won't get `SQLITE_BUSY` from Dart code in the same isolate. If you move DB writes to a background isolate (e.g., for bulk import), open the database with `singleInstance: false` and use WAL mode:
+> 
+> ```dart
+> onConfigure: (db) async {
+>   await db.execute('PRAGMA journal_mode = WAL');
+>   await db.execute('PRAGMA foreign_keys = ON');
+> }
+> ```
+> 
+> WAL lets readers and a single writer operate concurrently without blocking each other.
 
 > **🔬 Research Note (2026-03-26 — auto):**
 > # Chat Persistence with sqflite — Technical Note
@@ -1871,6 +2309,145 @@ testWidgets('theme toggle switches between dark and light', (tester) async {
 
 ### Phase 3 — Conversational Voice Mode
 
+> **🔬 Research Note (2026-04-03 — auto):**
+> # Technical Note: Flutter Real-Time Microphone Capture for Project Ambient
+> 
+> ## Package Comparison
+> 
+> | Feature | `record` | `flutter_sound` | `mic_stream` |
+> |---|---|---|---|
+> | **Android** | Yes (AudioRecord + MediaCodec) | Yes | Yes |
+> | **Linux Desktop** | Yes (via `parecord`/`ffmpeg`) | Partial (Alpha as "Taudio" v10) | **No** |
+> | **Windows** | Yes | Partial | No |
+> | **macOS** | Yes | Yes | Yes |
+> | **Raw PCM stream API** | `startStream()` → `Stream<Uint8List>` | `startRecorder(toStream:)` → PCM Float32/Int16 | `MicStream.microphone()` → `Stream<Uint8List>` |
+> | **PCM 16-bit mono** | `AudioEncoder.pcm16bits` | `Codec.pcm16` | Yes (configurable) |
+> | **Sample rate control** | Yes | Yes | Yes |
+> | **Noise suppression / AEC** | Built-in (`autoGain`, `echoCancel`, `noiseSuppress`) | No | No |
+> | **Maintenance (2025-26)** | Active, official Flutter cookbook | Stalled; v9 stable but v10 alpha | Dormant, mobile-only |
+> | **Linux dependency** | PulseAudio + `ffmpeg` | N/A | N/A |
+> 
+> ## Recommendation: Use `record`
+> 
+> `record` is the only package that ships with **Android + Linux desktop + Windows + macOS** from a single dependency. It exposes a clean streaming API and has built-in AEC/noise suppression — critical for always-on ambient listening.
+> 
+> ```yaml
+> # pubspec.yaml
+> dependencies:
+>   record: ^5.1.0          # cross-platform mic capture
+>   web_socket_channel: ^3.0.0  # WebSocket client
+> ```
+> 
+> Linux prerequisite: `sudo apt install pulseaudio ffmpeg`
+> 
+> ## Flutter Side: Stream PCM over WebSocket
+> 
+> ```dart
+> import 'package:record/record.dart';
+> import 'package:web_socket_channel/web_socket_channel.dart';
+> 
+> final recorder = AudioRecorder();
+> 
+> Future<void> startStreaming(String wsUrl) async {
+>   if (!await recorder.hasPermission()) return;
+> 
+>   final ws = WebSocketChannel.connect(Uri.parse(wsUrl));
+> 
+>   final stream = await recorder.startStream(const RecordConfig(
+>     encoder: AudioEncoder.pcm16bits,
+>     sampleRate: 16000,   // 16 kHz — standard for VAD/STT
+>     numChannels: 1,      // mono
+>     autoGain: true,
+>     echoCancel: true,
+>     noiseSuppress: true,
+>   ));
+> 
+>   // Forward raw PCM chunks directly to the server
+>   stream.listen(
+>     (data) => ws.sink.add(data),  // binary Uint8List frames
+>     onDone: () => ws.sink.close(),
+>   );
+> }
+> 
+> Future<void> stop() async {
+>   await recorder.stop();
+> }
+> ```
+> 
+> ## Python Side: Receive PCM → Silero VAD → Whisper STT
+> 
+> ```python
+> import asyncio
+> import numpy as np
+> import torch
+> import websockets
+> from faster_whisper import WhisperModel
+> 
+> # Load models once at startup
+> vad_model, vad_utils = torch.hub.load('snakers4/silero-vad', 'silero_vad')
+> (get_speech_timestamps, _, _, _, _) = vad_utils
+> whisper = WhisperModel("large-v3", device="cuda", compute_type="float16")
+> 
+> SAMPLE_RATE = 16000
+> CHUNK_DURATION_S = 0.5  # 500ms chunks
+> CHUNK_BYTES = int(SAMPLE_RATE * CHUNK_DURATION_S * 2)  # 16-bit = 2 bytes/sample
+> 
+> async def handle_client(ws):
+>     buffer = bytearray()
+> 
+>     async for message in ws:
+>         buffer.extend(message)
+> 
+>         while len(buffer) >= CHUNK_BYTES:
+>             chunk = buffer[:CHUNK_BYTES]
+>             buffer = buffer[CHUNK_BYTES:]
+> 
+>             # Convert to float32 tensor for Silero
+>             audio = np.frombuffer(chunk, dtype=np.int16).astype(np.float32) / 32768.0
+>             tensor = torch.from_numpy(audio)
+> 
+>             # VAD check — skip silence
+>             speech_prob = vad_model(tensor, SAMPLE_RATE).item()
+>             if speech_prob < 0.5:
+>                 continue
+> 
+>             # STT on speech segments
+>             segments, _ = whisper.transcribe(audio, language="en")
+>             text = " ".join(s.text for s in segments).strip()
+>             if text:
+>                 await ws.send(text)
+> 
+> async def main():
+>     async with websockets.serve(handle_client, "0.0.0.0", 8765):
+>         await asyncio.Future()  # run forever
+> 
+> asyncio.run(main())
+> ```
+> 
+> ## Key Architecture Notes
+> 
+> 1. **Wire format**: Raw PCM 16-bit LE mono @ 16 kHz. No container, no codec overhead. Each WebSocket message is a variable-length `Uint8List` of PCM samples.
+> 
+> 2. **Buffering strategy**: The Python server accumulates 500ms chunks before running VAD. This balances latency (~500ms per decision) vs. CPU cost. Tune `CHUNK_DURATION_S` down to 200ms if you need faster responsiveness.
+> 
+> 3. **VAD before STT**: Silero VAD is ~1ms per chunk on CPU. Running it as a gate before Whisper avoids wasting GPU on silence — essential for always-on ambient mode.
+> 
+> 4. **Expected latency**: ~400-500ms end-to-end (capture → transcript) on a machine with GPU. On CPU-only, use `WhisperModel("base")` with `compute_type="int8"` for ~1s latency.
+> 
+> 5. **Linux audio on headless servers**: If Ambient runs on a headless Linux box, you'll need PulseAudio running (`pulseaudio --start`) or use PipeWire with the PulseAudio compatibility layer, since `record` depends on `parecord`.
+> 
+> 6. **Why not `flutter_sound`**: The v9→v10 ("Taudio") transition is incomplete, Linux support is experimental, and the API is heavier than needed for a pure streaming use case. `record` does exactly what Ambient needs with less surface area.
+> 
+> Sources:
+> - [record | Flutter package](https://pub.dev/packages/record)
+> - [flutter_sound | Flutter package](https://pub.dev/packages/flutter_sound)
+> - [mic_stream | Flutter package](https://pub.dev/packages/mic_stream)
+> - [Flutter Cookbook: Record or stream audio input](https://docs.flutter.dev/cookbook/audio/record)
+> - [Silero VAD (GitHub)](https://github.com/snakers4/silero-vad)
+> - [WhisperLiveKit (GitHub)](https://github.com/QuentinFuxa/WhisperLiveKit)
+> - [Streaming Audio from Flutter to AssemblyAI](https://medium.com/@david.richards.tech/streaming-audio-from-flutter-to-assemblyai-531cfd7d24d3)
+> - [High-Speed Voice Recognition with WhisperX & Silero-VAD](https://medium.com/@aidenkoh/how-to-implement-high-speed-voice-recognition-in-chatbot-systems-with-whisperx-silero-vad-cdd45ea30904)
+
 > **🔬 Research Note (2026-03-26 — auto):**
 > ## Technical Note: Flutter Real-Time Microphone Capture → Python VAD/STT
 > 
@@ -2905,11 +3482,11 @@ class FakeAudioService implements AudioService {
 - [x] 1.4 Input bar (text field, send button, disabled state)
 - [x] 1.5 Sidebar (conversation list, new chat, delete, date grouping)
 - [x] 1.6 Local SQLite conversation persistence (conversations + messages tables)
-- [ ] 1.7 Connection status indicator (ping loop, offline banner)
-- [ ] 1.8 Settings screen (server URL, display name)
-- [ ] 1.9 Dark theme (ChatGPT-style)
-- [ ] 1.10 Linux desktop build tested
-- [ ] 1.11 Android APK tested on device
+- [x] 1.7 Connection status indicator (ping loop, offline banner)
+- [x] 1.8 Settings screen (server URL, display name)
+- [x] 1.9 Dark theme (ChatGPT-style)
+- [x] 1.10 Linux desktop build tested
+- [x] 1.11 Android APK tested on device
 
 ### Phase 2 — Streaming & Polish
 - [ ] 2.1 SSE streaming enabled (switch to /run_sse, token-by-token display)
@@ -4038,3 +4615,1074 @@ Given your existing relay architecture:
 - **For end users** — keep the relay. Zero setup is the right call.
 - **For you (dev/admin)** — Tailscale free tier is worth running alongside the relay. It gives you direct, low-latency SSH and API access to the home server from anywhere without exposing ports. Takes 5 minutes to set up and doesn't conflict with the relay.
 - **Headscale** — only worth it if you have a philosophical objection to Tailscale's coordination server seeing your device metadata. Functionally identical, more maintenance.
+
+---
+
+### Research: flutter_vs_alternatives (2026-04-02)
+# Cross-Platform Framework Comparison (2025)
+
+## TL;DR Recommendation
+
+**Flutter** is the strongest choice for your target matrix (Linux, Windows, macOS, Android) today. Tauri v2 is a compelling runner-up if you're willing to trade native rendering for a smaller binary and web-tech UI.
+
+---
+
+## Head-to-Head
+
+| Criteria | Flutter | React Native | Tauri v2 |
+|---|---|---|---|
+| **Android** | First-class, production-grade | First-class, production-grade | Supported (v2+), but young |
+| **Desktop Linux** | Stable since 3.0 (2022). GTK-based runner. Active community plugins. | Requires `react-native-macos`/Windows forks; **no official Linux target** | First-class via webview2/webkit. Strongest Linux story of the three for web-tech stacks. |
+| **Windows** | Stable. Win32 runner. | Microsoft-maintained fork (`react-native-windows`), separate repo, lag behind core | Stable. WebView2 (Edge/Chromium). |
+| **macOS** | Stable since 3.0. | Microsoft-maintained fork (`react-native-macos`), perpetually behind | Stable. WKWebView. |
+| **Single codebase** | True single codebase, single build system (`dart pub`, one `pubspec.yaml`) | Fragmented: core RN + 2-3 community forks for desktop. Different native modules per platform. | Single codebase (Rust + web frontend). Genuinely unified. |
+| **Rendering** | Own engine (Skia/Impeller). Pixel-identical across platforms. | Native widgets (mobile), fabric renderer. Desktop uses platform widgets where forks exist. | System webview. Looks like a web app unless you invest in native-feel CSS. |
+| **Performance** | Compiled to native ARM/x86. Impeller (default on Android/iOS since 3.16) eliminates shader jank. Smooth 60/120fps. | JS bridge overhead on mobile. Hermes helps. Desktop perf varies by fork maturity. | Rust backend is fast. UI is webview — fine for business apps, not for 120fps animation. |
+| **Binary size** | ~15-20 MB base (mobile), ~25-40 MB (desktop) | ~30-50 MB with Hermes + native deps | ~3-8 MB (no bundled runtime). Smallest by far. |
+| **Dev experience** | Hot reload, Dart (easy to learn), excellent tooling (`flutter doctor`, DevTools). Single CLI. | Hot reload, JavaScript/TypeScript ecosystem, huge npm library pool. But desktop DX is rough — frequent native build issues. | Hot reload (Vite etc.), use any web framework (React/Svelte/Vue). Rust for backend logic — steep if team is unfamiliar. |
+| **Community/ecosystem** | 165k+ GitHub stars. Massive plugin ecosystem (`pub.dev`). Google-backed. | Largest community overall, but desktop-specific community is small and fragmented. Meta-backed (mobile only). | 85k+ GitHub stars. Fast-growing. Rust ecosystem for backend logic. Crabtree Labs + community. |
+
+---
+
+## Key Disqualifier: React Native
+
+React Native **has no official Linux desktop target**. The `react-native-linux` efforts are abandoned or experimental. For a project that requires Linux as a first-class citizen, RN is eliminated outright.
+
+---
+
+## Flutter vs Tauri v2 — Decision Factors
+
+| Factor | Favors Flutter | Favors Tauri v2 |
+|---|---|---|
+| Your team knows Dart or is framework-agnostic | X | |
+| Your team is strong in web tech (React/Vue/Svelte) | | X |
+| You need native-feel rendering (custom widgets, animations) | X | |
+| You want smallest possible binary / RAM footprint | | X |
+| You need mature plugin ecosystem (camera, BLE, sensors) | X | |
+| App is primarily forms/text/dashboards (not animation-heavy) | | X |
+| You want a single battle-tested build pipeline | X | |
+| You need deep Rust integration (e.g., local AI inference) | | X |
+
+---
+
+## Concrete Recommendation for Project Ambient
+
+**Go with Flutter.** Rationale:
+
+1. **All four targets are stable and first-class** — no forks, no separate repos, no community-maintained shims.
+2. **Single `pubspec.yaml`, single `flutter build` command** per platform. CI is straightforward.
+3. **Connecting to a local AI server (HTTP/WebSocket)** is well-served by `package:http`, `package:web_socket_channel`, and `package:dio` — all mature.
+4. **Impeller rendering engine** (default since Flutter 3.16) gives consistent, jank-free UI across all targets.
+5. **Platform channels** provide escape hatches to native code (Kotlin/Swift/C++) where needed.
+
+### Relevant Package Versions (stable as of mid-2025)
+
+```yaml
+environment:
+  sdk: ">=3.5.0 <4.0.0"
+  flutter: ">=3.24.0"
+
+dependencies:
+  dio: ^5.7.0              # HTTP client with interceptors
+  web_socket_channel: ^3.0.1  # WebSocket to ADK server
+  provider: ^6.1.2         # State management (or riverpod ^2.6.0)
+  go_router: ^14.0.0       # Declarative routing
+  flutter_secure_storage: ^9.2.0  # Credential storage
+```
+
+### If you later reconsider Tauri v2
+
+The main draw would be if you decide to embed Rust-based local inference (e.g., `llama.cpp` bindings via `llm` crate) directly in the app process instead of hitting a separate server. Tauri's Rust core makes that natural. Flutter would require FFI or a sidecar process for the same.
+
+---
+
+**Bottom line:** For a four-platform app talking to a local AI server, Flutter gives you the least friction, the most mature desktop Linux support, and a single codebase with no asterisks.
+
+---
+
+### Research: flutter_chat_ui (2026-04-03)
+# Flutter Chat UI Packages — Technical Note
+
+## Recommended Stack
+
+| Category | Package | Version | Notes |
+|---|---|---|---|
+| Markdown rendering | `gpt_markdown` | ^1.1.5 | Purpose-built for LLM output |
+| Code highlighting | `highlight` / `flutter_highlight` | 0.7.0 | 190+ languages, 90+ themes |
+| Streaming text | Custom `StreamBuilder` | N/A | ~50 lines, no package needed |
+| Chat list | `ListView.builder(reverse: true)` | Flutter core | Or `super_sliver_list` ^0.4.1 for jump-to-index |
+
+---
+
+## 1. Markdown Rendering
+
+### `gpt_markdown` — **Top Pick**
+- Built-in LaTeX (inline + block), GFM tables, text selection
+- **Handles partial/malformed markdown from streaming** (incomplete code fences, partial tables) — this is the killer feature for LLM UIs
+- Actively maintained, 160/160 pub points
+
+### `markdown_widget` (2.3.2+8) — **Runner-up**
+- Returns `List<Widget>` instead of a single widget — integrates naturally into `SliverList`
+- Built-in syntax highlighting and LaTeX via `flutter_math_fork`
+- More mature and battle-tested than `gpt_markdown`
+- **Downside:** No partial-markdown resilience — you'd need to manually close unclosed fences before rendering during streaming
+
+### `flutter_markdown` (0.7.7+1) — **Skip for this use case**
+- Official Flutter team package, but requires heavy custom work: no LaTeX, no highlighting, no streaming resilience, rebuilds entire widget tree on every text change
+
+---
+
+## 2. Code Syntax Highlighting
+
+**`highlight` + `flutter_highlight`** (both 0.7.0) remain the de facto standard despite being unmaintained since 2021. They're a highlight.js port covering 190+ languages and 90+ themes.
+
+- If using `markdown_widget`: already integrated internally, no extra work
+- If using `gpt_markdown`: plug in via custom code block builder
+- `flutter_code_editor` (0.3.5): overkill — it's an editor, not a renderer
+
+---
+
+## 3. Streaming / Typewriter Effect
+
+**Do not use `animated_text_kit`.** It animates a *complete* string character-by-character. LLM streaming delivers tokens incrementally — fundamentally different.
+
+The correct pattern:
+
+```dart
+// Accumulate tokens, throttle rebuilds to ~16fps
+final _buffer = StringBuffer();
+late final Stream<String> _throttled;
+
+@override
+void initState() {
+  super.initState();
+  _throttled = llmTokenStream
+    .map((token) { _buffer.write(token); return _buffer.toString(); })
+    .throttleTime(const Duration(milliseconds: 60));  // via rxdart
+}
+
+// In build():
+StreamBuilder<String>(
+  stream: _throttled,
+  builder: (context, snapshot) {
+    final text = snapshot.data ?? '';
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        Expanded(child: GptMarkdown(text)),
+        if (!snapshot.connectionState == ConnectionState.done)
+          const BlinkingCursor(),  // ← this gives the "typing" feel
+      ],
+    );
+  },
+)
+```
+
+Key points:
+- **Throttle rebuilds** to every 50–80ms (not every token) — `rxdart`'s `throttleTime` or a simple `Timer`
+- **Blinking cursor widget** at the end of text during streaming is what creates the ChatGPT feel
+- **Auto-scroll** to bottom on new content, but stop if user has scrolled up manually
+- `gpt_markdown` handles mid-stream incomplete markdown; `markdown_widget` does not
+
+---
+
+## 4. Chat List Performance
+
+| Approach | When to use |
+|---|---|
+| `ListView.builder(reverse: true)` | Default choice. Lazy-builds, simple, zero deps. Fine for <1K messages. |
+| `super_sliver_list` (0.4.1) | Need jump-to-message-by-index, pinned headers, or sliver composition. Best current sliver-compatible option. |
+| `scrollable_positioned_list` (0.3.8) | **Avoid** — unmaintained 2+ years, non-sliver architecture, dual-viewport bugs. |
+
+For the `reverse: true` pattern, one gotcha: items above viewport can shift when a streaming message grows in height. Mitigate by pinning scroll position to the bottom during active streaming.
+
+---
+
+## Decision for Ambient
+
+Given Ambient targets desktop (Linux, Windows, macOS) + Android with a local ADK server:
+
+- **`gpt_markdown`** is the pragmatic pick — streaming resilience saves significant custom code, and LaTeX support is free
+- If you later need finer control over how markdown widgets integrate into slivers (e.g., for an infinite-scroll history), swap to **`markdown_widget`** and add a pre-render pass that closes unclosed fences
+- `ListView.builder(reverse: true)` is sufficient initially; graduate to `super_sliver_list` if you add search/jump-to-message
+
+---
+
+### Research: adk_sse_streaming (2026-04-03)
+# SSE Streaming with Google ADK + FastAPI
+
+## TL;DR
+
+Google ADK's `Runner.run_async()` already yields `Event` objects as an async generator. Wrap it in a FastAPI `StreamingResponse` using `text/event-stream` content type. No extra SSE library needed on the server side.
+
+## Server Side (FastAPI/Starlette)
+
+### Core Pattern
+
+```python
+from fastapi import FastAPI, Request
+from fastapi.responses import StreamingResponse
+from google.adk.runners import Runner
+from google.adk.sessions import InMemorySessionService
+import json
+
+app = FastAPI()
+
+# Initialize once
+runner = Runner(
+    agent=your_agent,
+    app_name="ambient",
+    session_service=InMemorySessionService(),
+)
+
+@app.post("/run")
+async def run_stream(request: Request):
+    body = await request.json()
+    user_id = body["user_id"]
+    session_id = body["session_id"]
+    message = body["message"]
+
+    from google.genai.types import Content, Part
+    user_content = Content(
+        role="user",
+        parts=[Part(text=message)],
+    )
+
+    async def event_generator():
+        async for event in runner.run_async(
+            user_id=user_id,
+            session_id=session_id,
+            new_message=user_content,
+        ):
+            # Each ADK Event has .content (Content | None), .actions, etc.
+            if event.content and event.content.parts:
+                for part in event.content.parts:
+                    if part.text:
+                        payload = json.dumps({
+                            "type": "text_delta",
+                            "delta": part.text,
+                            "author": event.author,
+                            "turn_complete": event.is_final_response(),
+                        })
+                        yield f"data: {payload}\n\n"
+
+                    if part.function_call:
+                        payload = json.dumps({
+                            "type": "tool_call",
+                            "name": part.function_call.name,
+                            "args": dict(part.function_call.args),
+                        })
+                        yield f"data: {payload}\n\n"
+
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",  # disable nginx buffering
+        },
+    )
+```
+
+### Key Details
+
+- **`runner.run_async()`** is the async generator entry point. The synchronous `runner.run()` also exists but blocks.
+- **`event.is_final_response()`** — returns `True` when the agent's turn is fully complete (no more tool calls pending).
+- **`event.author`** — string identifying which agent/sub-agent produced this event (useful for multi-agent setups).
+- **SSE format** — each message is `data: <json>\n\n`. The double newline is the SSE message delimiter. No `event:` or `id:` fields needed for basic streaming.
+
+### Session Management
+
+```python
+# To create a session before streaming:
+session = await runner.session_service.create_session(
+    app_name="ambient",
+    user_id=user_id,
+)
+# session.id is the session_id to pass to run_async
+```
+
+### If Using ADK's Built-in Web Server
+
+ADK ships `google.adk.cli.fast_api` which exposes `/run_sse` out of the box:
+
+```bash
+adk web --port 8080
+```
+
+This already serves SSE at `POST /run_sse` with the same event format. If you need customization beyond what it provides, copy and adapt rather than monkey-patching.
+
+## Flutter Client Side
+
+### Package
+
+Use **`fetch_client`** (or raw `dart:io` `HttpClient`) — the standard `http` package buffers the full response and won't give you streaming. Alternatively, use `dio` with `responseType: ResponseType.stream`.
+
+```yaml
+# pubspec.yaml
+dependencies:
+  dio: ^5.4.0
+```
+
+### Dart Pattern (Dio)
+
+```dart
+import 'dart:convert';
+import 'package:dio/dio.dart';
+
+Stream<Map<String, dynamic>> streamRun({
+  required String baseUrl,
+  required String userId,
+  required String sessionId,
+  required String message,
+}) async* {
+  final dio = Dio();
+  final response = await dio.post(
+    '$baseUrl/run',
+    data: {
+      'user_id': userId,
+      'session_id': sessionId,
+      'message': message,
+    },
+    options: Options(
+      responseType: ResponseType.stream,
+      headers: {'Accept': 'text/event-stream'},
+    ),
+  );
+
+  final stream = (response.data as ResponseBody).stream;
+  String buffer = '';
+
+  await for (final chunk in stream.transform(utf8.decoder)) {
+    buffer += chunk;
+    // Split on double-newline (SSE message boundary)
+    while (buffer.contains('\n\n')) {
+      final idx = buffer.indexOf('\n\n');
+      final raw = buffer.substring(0, idx).trim();
+      buffer = buffer.substring(idx + 2);
+
+      if (raw.startsWith('data: ')) {
+        final payload = raw.substring(6);
+        if (payload == '[DONE]') return;
+        yield json.decode(payload) as Map<String, dynamic>;
+      }
+    }
+  }
+}
+```
+
+### Usage in a Widget
+
+```dart
+final tokens = StringBuffer();
+
+await for (final event in streamRun(...)) {
+  if (event['type'] == 'text_delta') {
+    tokens.write(event['delta']);
+    setState(() => _responseText = tokens.toString());
+  }
+  if (event['turn_complete'] == true) {
+    // Final response received
+  }
+}
+```
+
+## Nginx Reverse Proxy Gotcha
+
+If Amber sits behind nginx, disable response buffering or SSE chunks get batched:
+
+```nginx
+location /run {
+    proxy_pass http://127.0.0.1:8080;
+    proxy_buffering off;
+    proxy_cache off;
+    proxy_set_header Connection '';
+    proxy_http_version 1.1;
+    chunked_transfer_encoding off;
+}
+```
+
+## Summary
+
+| Layer | Component | Key Point |
+|-------|-----------|-----------|
+| ADK | `runner.run_async()` | Already an async generator of `Event` objects |
+| FastAPI | `StreamingResponse` | `media_type="text/event-stream"`, yield `data: ...\n\n` |
+| Flutter | `dio` with `ResponseType.stream` | Parse SSE manually (split on `\n\n`, strip `data: ` prefix) |
+| Infra | nginx | `proxy_buffering off;` is mandatory |
+
+---
+
+### Research: xtts_v2_setup (2026-04-03)
+---
+
+# XTTS v2 — Persistent FastAPI TTS Service Guide
+
+## Status & Package
+
+Coqui AI shut down Dec 2023. The actively maintained fork is by **Idiap Research Institute**:
+
+| | |
+|---|---|
+| **PyPI package** | `coqui-tts` (NOT the old `TTS`) |
+| **Latest version** | `0.27.5` |
+| **Python** | 3.10–3.14 |
+| **VRAM** | ~6 GB |
+| **Model weights** | Auto-download from HuggingFace (~1.8 GB) |
+| **License** | CPML on weights — check commercial use restrictions |
+
+---
+
+## 1. Installation
+
+```bash
+# PyTorch first (must match your CUDA version)
+pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu121
+
+# Then the TTS package
+pip install coqui-tts
+```
+
+---
+
+## 2. FastAPI Server (Production)
+
+The built-in `tts-server` is Flask-based and fine for dev, but for production you want a proper FastAPI wrapper with pre-loaded model and cached speaker embeddings.
+
+```python
+# server.py
+import io, torch, soundfile as sf
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
+from TTS.tts.configs.xtts_config import XttsConfig
+from TTS.tts.models.xtts import Xtts
+
+app = FastAPI()
+
+# ── Load model once at startup ──────────────────────────────
+config = XttsConfig()
+config.load_json("/path/to/xtts_v2/config.json")       # auto-downloaded path
+model = Xtts.init_from_config(config)
+model.load_checkpoint(config, checkpoint_dir="/path/to/xtts_v2/")
+model.cuda()
+
+# ── Pre-compute speaker embedding from reference clip ───────
+GPT_LATENT, SPEAKER_EMB = model.get_conditioning_latents(
+    audio_path=["voice_sample.wav"]   # 6–30s of clean speech
+)
+
+class TTSRequest(BaseModel):
+    text: str
+    language: str = "en"
+
+@app.post("/tts")
+async def synthesize(req: TTSRequest):
+    out = model.inference(
+        text=req.text,
+        language=req.language,
+        gpt_cond_latent=GPT_LATENT,
+        speaker_embedding=SPEAKER_EMB,
+    )
+    buf = io.BytesIO()
+    sf.write(buf, out["wav"].squeeze().cpu().numpy(), 24000, format="WAV")
+    buf.seek(0)
+    return StreamingResponse(buf, media_type="audio/wav")
+
+@app.post("/tts/stream")
+async def synthesize_stream(req: TTSRequest):
+    """Streaming endpoint — sends audio chunks as they're generated."""
+    def generate():
+        chunks = model.inference_stream(
+            text=req.text,
+            language=req.language,
+            gpt_cond_latent=GPT_LATENT,
+            speaker_embedding=SPEAKER_EMB,
+            stream_chunk_size=20,
+        )
+        for chunk in chunks:
+            buf = io.BytesIO()
+            sf.write(buf, chunk.squeeze().cpu().numpy(), 24000, format="WAV")
+            yield buf.getvalue()
+
+    return StreamingResponse(generate(), media_type="audio/wav")
+```
+
+Run with:
+```bash
+uvicorn server:app --host 0.0.0.0 --port 8100 --workers 1
+# workers=1 because the model is stateful on GPU; use nginx + multiple ports for scaling
+```
+
+---
+
+## 3. Voice Cloning
+
+Zero-shot — no fine-tuning needed. Just provide a **6–30 second** clean WAV of the target voice.
+
+```python
+# Can use multiple reference clips for better quality
+gpt_latent, spk_emb = model.get_conditioning_latents(
+    audio_path=["clip1.wav", "clip2.wav", "clip3.wav"]
+)
+```
+
+**Tips for reference audio:**
+- 16kHz+ sample rate, mono
+- Clean speech, no background noise/music
+- 15–30s total gives best results
+- Avoid whispers, singing, or extreme emotion
+
+---
+
+## 4. Expected GPU Latency
+
+| GPU | ~10s utterance | RTF | First-chunk (stream) |
+|-----|---------------|-----|---------------------|
+| RTX 3090 | ~3.0s | 0.30 | ~200ms |
+| RTX 4090 | ~1.8s | 0.18 | ~120ms |
+| RTX 3060 (12GB) | ~5.0s | 0.50 | ~350ms |
+
+RTF = Real-Time Factor (lower = faster). All values are approximate, non-batched.
+
+**For Ambient's use case** (conversational responses of 1–3 sentences): expect **0.5–1.5s** end-to-end on a 3090-class card using streaming, which is acceptable for voice assistant latency.
+
+---
+
+## 5. Python Client
+
+```python
+import httpx, sounddevice as sd, soundfile as sf, io
+
+TTS_URL = "http://localhost:8100/tts"
+
+def speak(text: str, lang: str = "en"):
+    resp = httpx.post(TTS_URL, json={"text": text, "language": lang}, timeout=30)
+    resp.raise_for_status()
+    data, sr = sf.read(io.BytesIO(resp.content))
+    sd.play(data, sr)
+    sd.wait()
+
+speak("Hey, this is Jane speaking.")
+```
+
+For streaming playback, use the `/tts/stream` endpoint with `httpx.stream()` and feed chunks to `sounddevice` as they arrive.
+
+---
+
+## 6. Systemd Service (Linux)
+
+```ini
+# /etc/systemd/system/xtts.service
+[Unit]
+Description=XTTS v2 TTS Server
+After=network.target
+
+[Service]
+User=ambient
+WorkingDirectory=/opt/ambient/tts
+ExecStart=/opt/ambient/tts/venv/bin/uvicorn server:app --host 0.0.0.0 --port 8100
+Restart=always
+Environment=CUDA_VISIBLE_DEVICES=0
+
+[Install]
+WantedBy=multi-user.target
+```
+
+---
+
+## Recommendations for Ambient
+
+1. **Use the Idiap fork** (`coqui-tts`) — the original `TTS` package is dead.
+2. **Pre-cache speaker embeddings** at server startup. Computing `get_conditioning_latents` takes ~2s — don't do it per-request.
+3. **Use streaming inference** for the voice assistant path to get first audio out in <200ms.
+4. **CPML license** on the model weights may restrict commercial use — review before shipping. Alternatively, consider fine-tuning an open-weight model like **StyleTTS 2** or **Piper** (lighter, Apache-2.0).
+5. **Fallback**: If XTTS v2 proves too heavy, **Piper TTS** runs on CPU with <100ms latency (lower quality, no zero-shot cloning, but MIT licensed and trivial to deploy).
+
+---
+
+### Research: f5_tts_comparison (2026-04-03)
+## F5-TTS vs XTTS v2 — Technical Comparison for Voice Assistant Use
+
+### TL;DR
+
+**F5-TTS is the better choice for Ambient.** Superior naturalness, active development, MIT code license. The one trade-off — no true token-level streaming — is workable with chunk-based inference.
+
+---
+
+### Head-to-Head
+
+| Dimension | F5-TTS (`SWivid/F5-TTS`) | XTTS v2 (`idiap/coqui-ai-TTS`) |
+|---|---|---|
+| **Naturalness** | SMOS 3.89, WER 2.42% (near ground-truth). Flow-matching architecture produces fluid prosody. | Good for 2023-era, but noticeably less natural on longer passages. No published MOS. |
+| **GPU Latency** | RTF 0.15 @ 16 NFE (~6.7x real-time). Chunk-based streaming only — no true token-level streaming yet ([#700](https://github.com/SWivid/F5-TTS/issues/700)). | True autoregressive streaming, <200ms time-to-first-audio. RTF ~0.3–0.5. |
+| **VRAM** | ~4–6 GB (336M params, 1.3 GB safetensors) | ~2–3 GB (467M params, 1.8 GB FP32) |
+| **Setup** | `pip install f5-tts`, Python ≥3.10, PyTorch + FFmpeg | `pip install coqui-tts` (Idiap fork), Python ≥3.10, PyTorch |
+| **Voice Cloning** | Zero-shot from <12s reference. SIM-o 0.66–0.76. English/Chinese strong. | Zero-shot from ~3s. Cross-language cloning across 17 languages. |
+| **Maintenance** | 14.3k stars. Last commit 2026-03-24. Active feature dev, regular releases (v1.1.18). | Original Coqui repo **dead** (last commit 2024-02). Idiap fork alive but maintenance-mode only (v0.27.5, 2026-01). |
+| **License (code)** | **MIT** — fully permissive | **MPL-2.0** — copyleft on modified files |
+| **License (weights)** | **CC-BY-NC-4.0** — non-commercial | **CPML** — non-commercial, and Coqui is gone so no one can sell you a commercial license |
+
+---
+
+### Recommendation for Ambient
+
+**Use F5-TTS.** Rationale:
+
+1. **Naturalness wins.** For a voice assistant that's meant to feel like talking to a person, F5-TTS's flow-matching output is a generation ahead of XTTS v2's autoregressive output.
+
+2. **Streaming gap is manageable.** F5-TTS doesn't do true token-level streaming, but chunk-based inference with ~300–500ms chunks is acceptable for a local assistant where network latency is zero. You can pipeline: start playing chunk N while generating chunk N+1.
+
+3. **Maintenance trajectory.** F5-TTS is on an upward trajectory with an active research team. XTTS v2 is on life support via a single maintainer at Idiap. Betting on F5-TTS is the safer long-term play.
+
+4. **License is fine for personal use.** CC-BY-NC-4.0 on weights is no issue for Ambient (personal assistant, not commercial product). If that changes, MIT code means you can train your own weights.
+
+5. **VRAM fits.** 4–6 GB is fine for a local server with a dedicated GPU.
+
+### Integration Pattern
+
+```python
+# pip install f5-tts
+from f5_tts.api import F5TTS
+
+tts = F5TTS(model_type="F5-TTS", ckpt_file="", vocab_file="")  # auto-downloads
+
+# Zero-shot clone from Amber's reference voice
+tts.infer(
+    ref_file="amber_voice_ref.wav",     # <12s reference clip
+    ref_text="transcript of the clip",   # or omit to use built-in Whisper ASR
+    gen_text="Hello Chieh, what are we working on today?",
+    file_wave="output.wav",
+    seed=-1,  # random
+)
+```
+
+For chunked streaming, split `gen_text` into sentences and call `infer()` in a pipeline, playing each chunk as the next generates.
+
+### One Thing to Watch
+
+The F5-TTS team has a streaming feature request open ([#700](https://github.com/SWivid/F5-TTS/issues/700)). If true streaming lands, it eliminates the only area where XTTS v2 had an edge. Worth tracking.
+
+---
+
+### Research: faster_whisper_vad (2026-04-03)
+# Real-Time STT Pipeline: faster-whisper + silero-vad
+
+## Package Versions
+
+```
+faster-whisper>=1.1.0
+silero-vad>=5.1
+sounddevice>=0.5.1
+numpy>=1.26
+```
+
+## Architecture
+
+```
+Mic (16kHz mono) → Ring Buffer → silero-vad → Speech Segments → faster-whisper → Text
+```
+
+The core idea: VAD gates the expensive whisper inference. Audio streams continuously into a ring buffer; VAD decides when speech starts/ends; only confirmed speech chunks hit whisper.
+
+## 1. VAD Setup
+
+```python
+import torch
+import numpy as np
+
+# Load silero-vad (ONNX backend — no torch runtime needed for inference)
+model, utils = torch.hub.load(
+    repo_or_dir="snakers4/silero-vad",
+    model="silero_vad",
+    onnx=True,
+    trust_repo=True,
+)
+(get_speech_timestamps, _, read_audio, VADIterator, collect_chunks) = utils
+
+# Streaming VAD iterator — processes 512-sample chunks (32ms at 16kHz)
+vad_iterator = VADIterator(
+    model,
+    threshold=0.5,          # speech probability threshold
+    sampling_rate=16000,
+    min_silence_duration_ms=600,  # end-of-utterance silence
+    speech_pad_ms=300,            # padding around detected speech
+)
+```
+
+**Key tuning knobs:**
+- `threshold`: lower (0.3) = more sensitive, higher (0.7) = fewer false triggers
+- `min_silence_duration_ms`: 600ms works well for conversational speech; drop to 300ms for snappy command-style input
+- `speech_pad_ms`: prevents clipping the start/end of words
+
+## 2. Streaming Audio Capture
+
+```python
+import sounddevice as sd
+import collections
+import threading
+
+SAMPLE_RATE = 16000
+CHUNK_MS = 32          # silero-vad expects 32ms chunks at 16kHz
+CHUNK_SAMPLES = int(SAMPLE_RATE * CHUNK_MS / 1000)  # 512
+
+audio_queue = collections.deque(maxlen=16000 * 30)  # 30s max utterance
+is_speaking = False
+speech_buffer = []
+
+def audio_callback(indata, frames, time_info, status):
+    """sounddevice callback — runs in a separate thread."""
+    if status:
+        print(f"Audio status: {status}")
+    # indata shape: (frames, 1) float32 — squeeze to 1D
+    audio_queue.extend(indata[:, 0].copy())
+
+stream = sd.InputStream(
+    samplerate=SAMPLE_RATE,
+    channels=1,
+    dtype="float32",
+    blocksize=CHUNK_SAMPLES,
+    callback=audio_callback,
+)
+```
+
+## 3. VAD Processing Loop
+
+```python
+def vad_loop():
+    """Main loop: pull chunks from queue, run VAD, accumulate speech."""
+    global is_speaking
+    speech_frames = []
+
+    while True:
+        if len(audio_queue) < CHUNK_SAMPLES:
+            threading.Event().wait(0.01)
+            continue
+
+        # Pull one chunk
+        chunk = np.array([audio_queue.popleft() for _ in range(CHUNK_SAMPLES)],
+                         dtype=np.float32)
+        chunk_tensor = torch.from_numpy(chunk)
+
+        # VAD returns dict with 'start' or 'end' keys, or None
+        speech_dict = vad_iterator(chunk_tensor, return_seconds=False)
+
+        if speech_dict is not None:
+            if "start" in speech_dict:
+                is_speaking = True
+                speech_frames = [chunk]
+            elif "end" in speech_dict:
+                is_speaking = False
+                speech_frames.append(chunk)
+                audio_segment = np.concatenate(speech_frames)
+                # Fire transcription on a worker thread
+                threading.Thread(
+                    target=transcribe_segment,
+                    args=(audio_segment,),
+                    daemon=True,
+                ).start()
+                speech_frames = []
+        elif is_speaking:
+            speech_frames.append(chunk)
+```
+
+## 4. Whisper Model Selection & Transcription
+
+```python
+from faster_whisper import WhisperModel
+
+# Model selection for latency vs accuracy:
+#   "tiny.en"    — ~40ms/utterance, lowest accuracy, English only
+#   "base.en"    — ~80ms/utterance, good for commands, English only
+#   "small.en"   — ~200ms/utterance, solid accuracy, English only
+#   "medium.en"  — ~500ms/utterance, high accuracy, English only
+#   "large-v3"   — ~1s+, best accuracy, multilingual
+#
+# Recommendation: "base.en" for command/assistant use, "small.en" for
+# general conversation. Use CTranslate2 int8 quantization on CPU.
+
+whisper_model = WhisperModel(
+    "base.en",
+    device="cpu",          # or "cuda" if GPU available
+    compute_type="int8",   # int8 on CPU, float16 on CUDA
+    cpu_threads=4,
+)
+
+def transcribe_segment(audio: np.ndarray):
+    """Transcribe a VAD-delimited speech segment."""
+    segments, info = whisper_model.transcribe(
+        audio,
+        language="en",
+        beam_size=1,             # greedy decoding — fastest
+        best_of=1,
+        temperature=0.0,
+        vad_filter=False,        # we already ran VAD
+        without_timestamps=True, # skip timestamp alignment
+    )
+    text = " ".join(seg.text.strip() for seg in segments)
+    if text:
+        handle_stt_result(text, info.language_probability)
+```
+
+## 5. Result Handling
+
+```python
+def handle_stt_result(text: str, confidence: float):
+    """Route transcription result to the application."""
+    # Filter low-confidence hallucinations (whisper loves to hallucinate
+    # "Thank you" or "..." on noise)
+    if confidence < 0.6 or len(text) < 2:
+        return
+    # Filter common whisper hallucination patterns
+    hallucination_patterns = {"thank you", "thanks for watching", "subscribe"}
+    if text.strip().lower() in hallucination_patterns:
+        return
+
+    print(f"[STT] {text}")
+    # → send to your LLM / command parser / event bus
+```
+
+## 6. Putting It Together
+
+```python
+def start_stt():
+    stream.start()
+    vad_thread = threading.Thread(target=vad_loop, daemon=True)
+    vad_thread.start()
+    return stream, vad_thread
+
+def stop_stt(stream, vad_thread):
+    stream.stop()
+    stream.close()
+    vad_iterator.reset_states()  # critical — reset VAD between sessions
+```
+
+## Production Considerations
+
+| Concern | Recommendation |
+|---|---|
+| **Latency budget** | VAD: ~2ms/chunk, Whisper base.en int8: ~80ms. Total end-to-end: under 700ms (600ms silence detection + 80ms transcription). |
+| **Hallucination** | Whisper hallucinates on silence/noise. The VAD gate eliminates 95% of this. The confidence + pattern filter catches the rest. |
+| **Memory** | base.en int8 uses ~150MB RAM. small.en int8 uses ~500MB. Load once, reuse. |
+| **Thread safety** | `faster_whisper.transcribe()` is **not** thread-safe. Use a dedicated transcription thread with a queue, or a `threading.Lock`. Don't call it from multiple threads concurrently. |
+| **GPU sharing** | If Amber's LLM is on GPU, run whisper on CPU (int8) to avoid VRAM contention. base.en on CPU is fast enough. |
+| **VAD reset** | Call `vad_iterator.reset_states()` between conversations/sessions. Stale state causes missed speech starts. |
+| **Max utterance length** | Cap `speech_frames` at ~30s. If VAD never fires an end event (e.g., background music), force-flush and transcribe what you have. |
+
+## Alternative: Chunked Partial Results (Lower Perceived Latency)
+
+If you want streaming partial transcripts (text appearing as the user speaks), transcribe rolling windows instead of waiting for VAD end:
+
+```python
+# Every 2 seconds while is_speaking, transcribe what you have so far
+# and emit partial results. On VAD end, emit final result.
+# This gives ~2s latency for first words appearing.
+```
+
+This trades CPU (repeated inference on overlapping audio) for perceived responsiveness. Good for UI display, unnecessary if you just need the final utterance.
+
+---
+
+### Research: tailscale_self_hosted (2026-04-03)
+# Tailscale / Headscale for Home Server Access
+
+> **Note:** The Vessence project later decided on its own relay server (`relay.vessences.com`), making Tailscale unnecessary for that architecture. This note covers the Tailscale/Headscale approach for reference or alternative deployments.
+
+---
+
+## 1. Architecture Overview
+
+```
+┌──────────────┐      ┌─────────────────┐      ┌──────────────────┐
+│ Android Phone │──┐   │  Tailscale /     │   ┌──│ Home Linux Server│
+│ (Tailscale)   │  ├──▶│  Headscale       │◀──┤  │ (Tailscale)      │
+│               │  │   │  Coordination    │   │  │ running Amber    │
+└──────────────┘  │   └─────────────────┘   │  └──────────────────┘
+┌──────────────┐  │                          │
+│ Windows Laptop│──┘                          │
+│ (Tailscale)   │─────────────────────────────┘
+└──────────────┘
+        All traffic is WireGuard-encrypted, peer-to-peer when possible.
+```
+
+Tailscale assigns each device a stable **100.x.y.z** IP on a private WireGuard mesh. Devices talk directly (NAT traversal via STUN/DERP); the coordination server only exchanges keys and metadata — no user traffic flows through it.
+
+---
+
+## 2. Option A: Tailscale (Managed)
+
+### Home Linux Server
+
+```bash
+# Install
+curl -fsSL https://tailscale.com/install.sh | sh
+
+# Authenticate
+sudo tailscale up --authkey=tskey-auth-XXXXX   # or interactive login
+
+# Confirm IP
+tailscale ip -4   # e.g. 100.64.0.1
+
+# Optional: advertise as exit node or subnet router
+sudo tailscale up --advertise-exit-node
+```
+
+The Amber ADK server listens on `0.0.0.0:8080` (or whatever port). No firewall changes needed — Tailscale traffic arrives on the `tailscale0` interface.
+
+### Android
+
+Install **Tailscale** from Google Play. Log in with the same account. The phone gets its own 100.x.y.z IP and can reach the server's Tailscale IP directly.
+
+### Windows Laptop
+
+Install the Tailscale Windows client. Same login. Done.
+
+### MagicDNS (recommended)
+
+Tailscale provides MagicDNS so you can use hostnames instead of IPs:
+
+```
+http://home-server:8080/api/chat
+```
+
+Enable in Tailscale admin console → DNS → Enable MagicDNS.
+
+### ACLs
+
+In the Tailscale admin console, lock down access:
+
+```jsonc
+// tailscale ACL policy
+{
+  "acls": [
+    {
+      "action": "accept",
+      "src": ["tag:client"],
+      "dst": ["tag:server:8080"]
+    }
+  ],
+  "tagOwners": {
+    "tag:client": ["autogroup:admin"],
+    "tag:server": ["autogroup:admin"]
+  }
+}
+```
+
+This restricts clients to only port 8080 on the server.
+
+**Cost:** Free for up to 100 devices / 3 users. More than enough.
+
+---
+
+## 3. Option B: Headscale (Fully Self-Hosted)
+
+Headscale is an open-source reimplementation of the Tailscale coordination server. Zero dependency on Tailscale's cloud.
+
+### Install Headscale on the Linux Server
+
+```bash
+# Latest stable (check https://github.com/juanfont/headscale/releases)
+wget https://github.com/juanfont/headscale/releases/download/v0.23.0/headscale_0.23.0_linux_amd64.deb
+sudo dpkg -i headscale_0.23.0_linux_amd64.deb
+
+# Edit config
+sudo nano /etc/headscale/config.yaml
+```
+
+Key config values:
+
+```yaml
+server_url: https://hs.yourdomain.com:443   # must be reachable from outside
+listen_addr: 0.0.0.0:8443
+private_key_path: /var/lib/headscale/private.key
+db_type: sqlite3
+db_path: /var/lib/headscale/db.sqlite
+ip_prefixes:
+  - 100.64.0.0/10
+dns:
+  magic_dns: true
+  base_domain: tail.home
+```
+
+You need a public domain with TLS (Let's Encrypt) for initial device registration. After that, all traffic is peer-to-peer WireGuard.
+
+```bash
+sudo systemctl enable --now headscale
+
+# Create a user
+headscale users create chieh
+
+# Generate a pre-auth key
+headscale preauthkeys create --user chieh --reusable --expiration 24h
+# → outputs a key like: xxxxxxxxxxxxxxxx
+```
+
+### Connect Devices to Headscale
+
+On each device (Linux, Windows, Android), use the **standard Tailscale client** pointed at your Headscale server:
+
+```bash
+# Linux server (itself) and Windows
+tailscale up --login-server https://hs.yourdomain.com:443 --authkey=xxxxxxxx
+```
+
+**Android:** Tailscale's Android app supports custom coordination servers starting from the F-Droid / sideloaded build. The Google Play version may not expose this setting. Options:
+
+1. Use the **Headscale-Android** fork or the Tailscale F-Droid build
+2. Build from source with `--login-server` baked in
+3. Use Headscale's OIDC flow and handle login via browser redirect
+
+This is the main friction point with Headscale on Android.
+
+---
+
+## 4. Flutter App: Does It Need Special Handling?
+
+**Short answer: No.** The Flutter app just makes HTTP requests to a normal IP/hostname. Tailscale operates at the OS network layer — it's invisible to apps.
+
+```dart
+// In your Flutter app config
+const String amberServerUrl = 'http://100.64.0.1:8080'; 
+// or with MagicDNS:
+const String amberServerUrl = 'http://home-server:8080';
+```
+
+### Considerations
+
+| Concern | Detail |
+|---|---|
+| **No special packages needed** | Standard `http`, `dio`, or `web_socket_channel` work fine. Tailscale IPs are just regular IPs from the app's perspective. |
+| **Android cleartext** | `100.x.y.z` is HTTP (not HTTPS). Add to `AndroidManifest.xml`: `android:usesCleartextTraffic="true"` or use a network security config scoping cleartext to `100.0.0.0/8`. |
+| **Connection detection** | The app should detect when Tailscale is disconnected. A simple health check (`GET /health`) with a 3-second timeout is sufficient. Show a "Connect to Tailscale" prompt on failure. |
+| **IP discovery** | Hardcoding `100.64.0.1` is fragile. Better: use MagicDNS hostname, or store the IP in app settings. |
+| **No platform-specific code** | Works identically on Linux, Windows, Android, macOS. No conditional logic needed. |
+
+### Recommended Network Security Config (Android)
+
+```xml
+<!-- android/app/src/main/res/xml/network_security_config.xml -->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">100.64.0.1</domain>
+    </domain-config>
+</network-security-config>
+```
+
+---
+
+## 5. Recommendation
+
+| Factor | Tailscale (managed) | Headscale (self-hosted) |
+|---|---|---|
+| Setup time | 5 minutes | 1-2 hours |
+| Android support | First-class | Requires sideload or fork |
+| Maintenance | Zero | You manage TLS, updates, DNS |
+| Privacy | Keys/metadata on Tailscale servers | Fully self-hosted |
+| Cost | Free tier sufficient | Free, but your time |
+
+**For Ambient specifically:** Use managed Tailscale unless the self-hosting requirement is non-negotiable. The Android client story with Headscale is the biggest pain point. Tailscale's free tier covers this use case with zero maintenance.
+
+That said — the Vessence architecture ultimately moved to a dedicated relay server (`relay.vessences.com`) which avoids requiring users to install Tailscale at all. If Ambient follows that path, this entire layer becomes unnecessary.

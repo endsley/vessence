@@ -156,7 +156,7 @@
     <div x-show="open" x-cloak x-transition
       class="absolute left-0 top-full mt-1 w-56 rounded-xl border border-slate-700 bg-slate-900 shadow-2xl overflow-hidden z-50">
         <template x-for="e in items" :key="e.name">
-          <a :href="e.name === 'Music Playlist' ? '/vault?tab=music' : e.name === 'Work Log' ? '/worklog' : e.name === 'Daily Briefing' ? '/briefing' : '/vault'"
+          <a :href="e.name === 'Music Playlist' ? '/vault?tab=music' : e.name === 'Daily Briefing' ? '/briefing' : '/vault'"
             class="flex items-center gap-2 px-3 py-2 text-xs text-slate-300 hover:text-white hover:bg-slate-800 transition">
             <span class="w-5 h-5 rounded bg-slate-700 flex items-center justify-center text-[10px] flex-shrink-0"
               x-text="e.name.charAt(0).toUpperCase()"></span>
@@ -167,6 +167,42 @@
         <template x-if="items.length === 0">
           <p class="px-3 py-2 text-[10px] text-slate-500 italic">No tools installed</p>
         </template>
+    </div>
+  </div>
+  <!-- System Guide dropdown -->
+  <div class="relative" x-data="{ guideOpen: false }" @click.outside="guideOpen = false">
+    <button @click="guideOpen = !guideOpen" class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-700/50">
+      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/>
+      </svg>
+      <span>System Guide</span>
+      <svg class="w-3 h-3 transition-transform" :class="guideOpen ? 'rotate-180' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+      </svg>
+    </button>
+    <div x-show="guideOpen" x-cloak x-transition
+      class="absolute left-0 top-full mt-1 w-56 rounded-xl border border-slate-700 bg-slate-900 shadow-2xl overflow-hidden z-50">
+        <a href="/guide"
+          class="flex items-center gap-2 px-3 py-2.5 text-xs text-slate-300 hover:text-white hover:bg-slate-800 transition">
+          <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/>
+          </svg>
+          Guide
+        </a>
+        <a href="/architecture"
+          class="flex items-center gap-2 px-3 py-2.5 text-xs text-slate-300 hover:text-white hover:bg-slate-800 transition border-t border-slate-700/50">
+          <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/>
+          </svg>
+          Architecture
+        </a>
+        <a href="/worklog"
+          class="flex items-center gap-2 px-3 py-2.5 text-xs text-slate-300 hover:text-white hover:bg-slate-800 transition border-t border-slate-700/50">
+          <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/>
+          </svg>
+          Work Log
+        </a>
     </div>
   </div>
   <div class="flex-1"></div>
@@ -1922,7 +1958,7 @@ function toolsDropdown() {
         const r = await fetch('/api/essences', { cache: 'no-store' });
         if (r.ok) {
           const all = await r.json();
-          this.items = all.filter(i => (i.type || 'tool') === 'tool').sort((a, b) => a.name.localeCompare(b.name));
+          this.items = all.filter(i => (i.type || 'tool') === 'tool' && i.name !== 'Work Log').sort((a, b) => a.name.localeCompare(b.name));
         }
       } catch (e) { console.error('Failed to fetch tools', e); }
     },

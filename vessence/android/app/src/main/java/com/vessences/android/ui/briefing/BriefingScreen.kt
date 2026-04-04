@@ -32,8 +32,12 @@ import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.RecordVoiceOver
+import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.BookmarkBorder
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
@@ -54,6 +58,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -93,6 +98,7 @@ fun BriefingScreen(
     val state by viewModel.state.collectAsState()
     val filteredArticles = viewModel.getFilteredArticles()
     var bottomSheetArticle by remember { mutableStateOf<BriefingArticle?>(null) }
+    var showHistorySheet by remember { mutableStateOf(false) }
 
     Box(
         modifier = Modifier
@@ -102,10 +108,12 @@ fun BriefingScreen(
         Column(modifier = Modifier.fillMaxSize()) {
             // Top bar
             TopBar(
-                onBack = onBack,
+                onBack = if (state.viewingArchiveDate != null) { { viewModel.clearArchive() } } else onBack,
                 lastUpdated = state.lastUpdated,
-                isLoading = state.isLoading,
+                isLoading = state.isLoading || state.isLoadingArchive,
+                viewingArchive = state.viewingArchiveDate != null,
                 onRefresh = { viewModel.refresh() },
+                onShowHistory = { showHistorySheet = true },
             )
 
             // Category filter chips
@@ -137,7 +145,7 @@ fun BriefingScreen(
                 }
             }
             // Loading state (initial)
-            else if (state.isLoading && state.articles.isEmpty()) {
+            else if ((state.isLoading || state.isLoadingArchive) && state.articles.isEmpty()) {
                 Box(
                     modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center,
@@ -146,7 +154,7 @@ fun BriefingScreen(
                 }
             }
             // Empty state
-            else if (filteredArticles.isEmpty() && !state.isLoading) {
+            else if (filteredArticles.isEmpty() && !state.isLoading && !state.isLoadingArchive) {
                 Box(
                     modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center,
@@ -164,25 +172,74 @@ fun BriefingScreen(
                     articles = filteredArticles,
                     viewModel = viewModel,
                     onExpand = { bottomSheetArticle = it },
+                    onSpeakBrief = { viewModel.speakArticle(it, "brief") },
+                    onSpeakFull = { viewModel.speakArticle(it, "full") },
+                    onDismiss = { viewModel.dismissArticle(it.id) },
                 )
             }
         }
 
         // FAB - Read All / Stop Audio
-        FloatingActionButton(
-            onClick = {
-                if (state.isSpeaking) viewModel.stopSpeaking() else viewModel.readAll()
-            },
-            containerColor = if (state.isSpeaking) Color(0xFFDC2626) else Violet500,
-            contentColor = Color.White,
+        var showReadMenu by remember { mutableStateOf(false) }
+        Column(
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .padding(16.dp),
+            horizontalAlignment = Alignment.End,
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            if (state.isSpeaking) {
-                Icon(Icons.Default.Close, contentDescription = "Stop audio")
-            } else {
-                Icon(Icons.Default.RecordVoiceOver, contentDescription = "Read all")
+            // Expanded menu options
+            if (showReadMenu && !state.isSpeaking) {
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = Color(0xFF1E293B),
+                    shadowElevation = 8.dp,
+                ) {
+                    Column(modifier = Modifier.padding(4.dp)) {
+                        Surface(
+                            onClick = { showReadMenu = false; viewModel.readAll("full") },
+                            shape = RoundedCornerShape(8.dp),
+                            color = Color.Transparent,
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                Icon(Icons.AutoMirrored.Filled.VolumeUp, "Full", tint = Color.White, modifier = Modifier.size(20.dp))
+                                Text("Read All (Full)", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                            }
+                        }
+                        Surface(
+                            onClick = { showReadMenu = false; viewModel.readAll("brief") },
+                            shape = RoundedCornerShape(8.dp),
+                            color = Color.Transparent,
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                Icon(Icons.AutoMirrored.Filled.VolumeUp, "Brief", tint = Color(0xFF94A3B8), modifier = Modifier.size(20.dp))
+                                Text("Read All (Brief)", color = Color(0xFF94A3B8), fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                            }
+                        }
+                    }
+                }
+            }
+            FloatingActionButton(
+                onClick = {
+                    if (state.isSpeaking) { viewModel.stopSpeaking(); showReadMenu = false }
+                    else showReadMenu = !showReadMenu
+                },
+                containerColor = if (state.isSpeaking) Color(0xFFDC2626) else Violet500,
+                contentColor = Color.White,
+            ) {
+                if (state.isSpeaking) {
+                    Icon(Icons.Default.Close, contentDescription = "Stop audio")
+                } else {
+                    Icon(Icons.Default.RecordVoiceOver, contentDescription = "Read all")
+                }
             }
         }
     }
@@ -195,6 +252,15 @@ fun BriefingScreen(
             onDismiss = { bottomSheetArticle = null },
         )
     }
+
+    // History Bottom Sheet
+    if (showHistorySheet) {
+        HistorySheet(
+            dates = state.archiveDates,
+            onSelect = { viewModel.loadArchive(it); showHistorySheet = false },
+            onDismiss = { showHistorySheet = false }
+        )
+    }
 }
 
 @Composable
@@ -202,7 +268,9 @@ private fun TopBar(
     onBack: (() -> Unit)?,
     lastUpdated: String?,
     isLoading: Boolean,
+    viewingArchive: Boolean,
     onRefresh: () -> Unit,
+    onShowHistory: () -> Unit,
 ) {
     Row(
         modifier = Modifier
@@ -224,15 +292,15 @@ private fun TopBar(
 
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                "Daily Briefing",
+                if (viewingArchive) "Briefing Archive" else "Daily Briefing",
                 color = Color.White,
                 fontSize = 20.sp,
                 fontWeight = FontWeight.Bold,
             )
             if (lastUpdated != null) {
                 Text(
-                    "Updated $lastUpdated",
-                    color = SlateMuted,
+                    if (viewingArchive) "Archive for $lastUpdated" else "Updated $lastUpdated",
+                    color = if (viewingArchive) Violet500 else SlateMuted,
                     fontSize = 11.sp,
                 )
             }
@@ -247,12 +315,80 @@ private fun TopBar(
             Spacer(modifier = Modifier.width(12.dp))
         }
 
+        IconButton(onClick = onShowHistory) {
+            Icon(
+                Icons.Default.History,
+                "History",
+                tint = if (viewingArchive) Violet500 else Color.White,
+            )
+        }
+
         IconButton(onClick = onRefresh) {
             Icon(
                 Icons.Default.Refresh,
                 "Refresh",
                 tint = Color.White,
             )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun HistorySheet(
+    dates: List<String>,
+    onSelect: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val sheetState = rememberModalBottomSheetState()
+    
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = SlateCard,
+        contentColor = Color.White,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 32.dp),
+        ) {
+            Text(
+                "Past Briefings",
+                modifier = Modifier.padding(16.dp),
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.White
+            )
+            
+            HorizontalDivider(color = SlateSubtle)
+            
+            if (dates.isEmpty()) {
+                Box(
+                    modifier = Modifier.fillMaxWidth().height(100.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("No archived briefings found", color = SlateMuted)
+                }
+            } else {
+                dates.forEach { date ->
+                    Surface(
+                        onClick = { onSelect(date) },
+                        color = Color.Transparent,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Default.History, null, tint = SlateMuted, modifier = Modifier.size(20.dp))
+                            Spacer(modifier = Modifier.width(16.dp))
+                            Text(date, color = Color.White, fontSize = 16.sp)
+                        }
+                    }
+                    HorizontalDivider(color = SlateSubtle.copy(alpha = 0.5f), modifier = Modifier.padding(horizontal = 16.dp))
+                }
+            }
         }
     }
 }
@@ -303,6 +439,9 @@ private fun ArticleGrid(
     articles: List<BriefingArticle>,
     viewModel: BriefingViewModel,
     onExpand: (BriefingArticle) -> Unit,
+    onSpeakBrief: (BriefingArticle) -> Unit,
+    onSpeakFull: (BriefingArticle) -> Unit,
+    onDismiss: (BriefingArticle) -> Unit,
 ) {
     LazyVerticalGrid(
         columns = GridCells.Fixed(2),
@@ -314,27 +453,42 @@ private fun ArticleGrid(
             ArticleCard(
                 article = article,
                 imageUrl = viewModel.getImageUrl(article.id),
+                isSaved = viewModel.isArticleSaved(article.id),
                 onExpand = { onExpand(article) },
-                onSpeak = { viewModel.speakArticle(article) },
+                onSpeakBrief = { onSpeakBrief(article) },
+                onSpeakFull = { onSpeakFull(article) },
+                onDismiss = { onDismiss(article) },
+                onSave = { viewModel.saveArticle(article.id, it) },
+                onUnsave = { viewModel.unsaveArticle(article.id) },
+                savedCategories = viewModel.state.value.savedCategories,
             )
         }
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ArticleCard(
     article: BriefingArticle,
     imageUrl: String,
+    isSaved: Boolean = false,
     onExpand: () -> Unit,
-    onSpeak: () -> Unit,
+    onSpeakBrief: () -> Unit,
+    onSpeakFull: () -> Unit,
+    onDismiss: () -> Unit,
+    onSave: (String) -> Unit = {},
+    onUnsave: () -> Unit = {},
+    savedCategories: List<String> = emptyList(),
 ) {
     val context = LocalContext.current
     val topicColor = TopicColors[article.topic.lowercase()] ?: Violet500
+    val dimmed = article.dismissed
 
     Surface(
         shape = RoundedCornerShape(12.dp),
         color = SlateCard,
         shadowElevation = 2.dp,
+        modifier = if (dimmed) Modifier.graphicsLayer(alpha = 0.5f) else Modifier,
     ) {
         Column {
             // Image area with topic badge
@@ -344,7 +498,6 @@ private fun ArticleCard(
                     .aspectRatio(16f / 10f)
                     .clip(RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp)),
             ) {
-                // Image or gradient fallback
                 AsyncImage(
                     model = ImageRequest.Builder(context)
                         .data(imageUrl)
@@ -355,158 +508,153 @@ private fun ArticleCard(
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize(),
                 )
-
-                // Gradient fallback overlay (shows through if image fails)
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
                         .background(
                             Brush.verticalGradient(
-                                colors = listOf(
-                                    Color.Transparent,
-                                    SlateBg.copy(alpha = 0.7f),
-                                ),
-                                startY = 0f,
-                                endY = Float.MAX_VALUE,
+                                colors = listOf(Color.Transparent, SlateBg.copy(alpha = 0.7f)),
+                                startY = 0f, endY = Float.MAX_VALUE,
                             ),
                         ),
                 )
-
                 // Topic badge
                 Surface(
                     shape = RoundedCornerShape(4.dp),
                     color = topicColor.copy(alpha = 0.9f),
-                    modifier = Modifier
-                        .padding(6.dp)
-                        .align(Alignment.TopStart),
+                    modifier = Modifier.padding(6.dp).align(Alignment.TopStart),
                 ) {
-                    Text(
-                        text = article.topic,
-                        color = Color.White,
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                    )
+                    Text(article.topic, color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+                }
+                // Dismissed badge
+                if (dimmed) {
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = Color(0xFF475569).copy(alpha = 0.9f),
+                        modifier = Modifier.padding(6.dp).align(Alignment.TopEnd),
+                    ) {
+                        Text("Archived", color = Color.White, fontSize = 9.sp,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+                    }
                 }
             }
 
             // Text content
-            Column(
-                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-            ) {
-                // Headline
-                Text(
-                    text = article.title,
-                    color = Color.White,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    lineHeight = 17.sp,
-                )
-
+            Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
+                Text(article.title, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                    maxLines = 2, overflow = TextOverflow.Ellipsis, lineHeight = 17.sp)
                 Spacer(modifier = Modifier.height(4.dp))
+                Text(formatSourceLine(article.source, article.published), color = SlateMuted, fontSize = 10.sp,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
 
-                // Source + time
-                Text(
-                    text = formatSourceLine(article.source, article.published),
-                    color = SlateMuted,
-                    fontSize = 10.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-
-                // Tags
                 if (article.tags.isNotEmpty()) {
                     Spacer(modifier = Modifier.height(4.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(3.dp),
-                    ) {
-                        Text(
-                            text = "${article.tagCount}",
-                            color = Violet500,
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier
-                                .background(Violet500.copy(alpha = 0.15f), RoundedCornerShape(4.dp))
-                                .padding(horizontal = 4.dp, vertical = 1.dp),
-                        )
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Text("${article.tagCount}", color = Violet500, fontSize = 9.sp, fontWeight = FontWeight.Bold,
+                            modifier = Modifier.background(Violet500.copy(alpha = 0.15f), RoundedCornerShape(4.dp))
+                                .padding(horizontal = 4.dp, vertical = 1.dp))
                         for (tag in article.tags.take(4)) {
-                            Text(
-                                text = tag,
-                                color = Color(0xFFA78BFA),
-                                fontSize = 9.sp,
-                                modifier = Modifier
-                                    .background(Color(0xFF7C3AED).copy(alpha = 0.1f), RoundedCornerShape(4.dp))
-                                    .padding(horizontal = 4.dp, vertical = 1.dp),
-                                maxLines = 1,
-                            )
+                            Text(tag, color = Color(0xFFA78BFA), fontSize = 9.sp,
+                                modifier = Modifier.background(Color(0xFF7C3AED).copy(alpha = 0.1f), RoundedCornerShape(4.dp))
+                                    .padding(horizontal = 4.dp, vertical = 1.dp), maxLines = 1)
                         }
                         if (article.tags.size > 4) {
-                            Text(
-                                text = "+${article.tags.size - 4}",
-                                color = SlateMuted,
-                                fontSize = 9.sp,
-                            )
+                            Text("+${article.tags.size - 4}", color = SlateMuted, fontSize = 9.sp)
                         }
                     }
                 }
 
                 Spacer(modifier = Modifier.height(4.dp))
+                Text(article.briefSummary, color = Color(0xFFCBD5E1), fontSize = 11.sp,
+                    maxLines = 3, overflow = TextOverflow.Ellipsis, lineHeight = 15.sp)
+                Spacer(modifier = Modifier.height(8.dp))
 
-                // Brief summary
-                Text(
-                    text = article.briefSummary,
-                    color = Color(0xFFCBD5E1),
-                    fontSize = 11.sp,
-                    maxLines = 3,
-                    overflow = TextOverflow.Ellipsis,
-                    lineHeight = 15.sp,
-                )
+                // Audio buttons row: Brief | Full
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Surface(
+                        onClick = onSpeakBrief,
+                        shape = RoundedCornerShape(6.dp),
+                        color = SlateSubtle,
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center,
+                        ) {
+                            Icon(Icons.AutoMirrored.Filled.VolumeUp, "Brief", tint = SlateMuted, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Brief", color = SlateMuted, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+                        }
+                    }
+                    Surface(
+                        onClick = onSpeakFull,
+                        shape = RoundedCornerShape(6.dp),
+                        color = SlateSubtle,
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center,
+                        ) {
+                            Icon(Icons.AutoMirrored.Filled.VolumeUp, "Full", tint = Color.White, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Full", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+                        }
+                    }
+                }
 
                 Spacer(modifier = Modifier.height(6.dp))
 
-                // Action row
+                // Action row: Open in browser | Expand | Save | Archive
+                var showSaveMenu by remember { mutableStateOf(false) }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
                     IconButton(
-                        onClick = {
-                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(article.url))
-                            context.startActivity(intent)
-                        },
+                        onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(article.url))) },
                         modifier = Modifier.size(28.dp),
                     ) {
-                        Icon(
-                            Icons.Default.OpenInBrowser,
-                            "Read article",
-                            tint = SlateMuted,
-                            modifier = Modifier.size(16.dp),
-                        )
+                        Icon(Icons.Default.OpenInBrowser, "Read article", tint = SlateMuted, modifier = Modifier.size(16.dp))
                     }
-
-                    IconButton(
-                        onClick = onExpand,
-                        modifier = Modifier.size(28.dp),
-                    ) {
-                        Icon(
-                            Icons.Default.ExpandMore,
-                            "Expand",
-                            tint = SlateMuted,
-                            modifier = Modifier.size(16.dp),
-                        )
+                    IconButton(onClick = onExpand, modifier = Modifier.size(28.dp)) {
+                        Icon(Icons.Default.ExpandMore, "Expand", tint = SlateMuted, modifier = Modifier.size(16.dp))
                     }
-
-                    IconButton(
-                        onClick = onSpeak,
-                        modifier = Modifier.size(28.dp),
-                    ) {
+                    Box {
+                        IconButton(
+                            onClick = { if (isSaved) onUnsave() else showSaveMenu = true },
+                            modifier = Modifier.size(28.dp),
+                        ) {
+                            Icon(
+                                if (isSaved) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
+                                if (isSaved) "Unsave" else "Save",
+                                tint = if (isSaved) Color(0xFFF59E0B) else SlateMuted,
+                                modifier = Modifier.size(16.dp),
+                            )
+                        }
+                        androidx.compose.material3.DropdownMenu(
+                            expanded = showSaveMenu,
+                            onDismissRequest = { showSaveMenu = false },
+                        ) {
+                            savedCategories.forEach { cat ->
+                                androidx.compose.material3.DropdownMenuItem(
+                                    text = { Text(cat, fontSize = 13.sp) },
+                                    onClick = { onSave(cat); showSaveMenu = false },
+                                )
+                            }
+                        }
+                    }
+                    IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
                         Icon(
-                            Icons.AutoMirrored.Filled.VolumeUp,
-                            "Read aloud",
-                            tint = SlateMuted,
+                            if (dimmed) Icons.Default.Refresh else Icons.Default.Close,
+                            if (dimmed) "Restore" else "Archive",
+                            tint = if (dimmed) Violet500 else SlateMuted,
                             modifier = Modifier.size(16.dp),
                         )
                     }

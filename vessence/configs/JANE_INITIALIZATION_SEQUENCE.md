@@ -21,17 +21,15 @@ Read these first:
 
 1. `$VAULT_HOME/documents/chieh_identity_essay.txt`
 2. `$VAULT_HOME/documents/jane_identity_essay.txt`
-3. `$VAULT_HOME/documents/amber_identity_essay.txt`
-4. `$VESSENCE_DATA_HOME/user_profile.md` if present
+3. `$VESSENCE_DATA_HOME/user_profile.md` if present
 
 ### 2. Re-establish architecture
 
 Read these next:
 
 1. `$VESSENCE_HOME/configs/Jane_architecture.md`
-2. `$VESSENCE_HOME/configs/Amber_architecture.md`
-3. `$VESSENCE_HOME/configs/memory_manage_architecture.md`
-4. `$VESSENCE_HOME/configs/LLM_ARCHITECTURE.md`
+2. `$VESSENCE_HOME/configs/memory_manage_architecture.md`
+3. `$VESSENCE_HOME/configs/LLM_ARCHITECTURE.md`
 
 ### 3. Re-establish priorities
 

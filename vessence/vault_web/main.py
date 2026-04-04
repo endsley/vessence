@@ -779,7 +779,13 @@ async def upload_files(
         if is_image_upload and not description:
             raise HTTPException(status_code=400, detail="Image uploads require a description.")
 
-        dest_dir = vault_root / subdir
+        # Apply safe_vault_path to the intended destination directory
+        try:
+            # Construct the full intended path, then validate it
+            intended_dest_dir_relative = Path(subdir)
+            dest_dir = safe_vault_path(str(intended_dest_dir_relative))
+        except ValueError as e:
+            raise HTTPException(status_code=403, detail=str(e))
         dest_dir.mkdir(parents=True, exist_ok=True)
 
         if is_image_upload:

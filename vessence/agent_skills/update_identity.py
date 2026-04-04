@@ -6,10 +6,10 @@ from pathlib import Path
 import os
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from jane.config import VECTOR_DB_USER_MEMORIES
+from jane.config import get_chroma_client, VECTOR_DB_USER_MEMORIES
 
 db_path = VECTOR_DB_USER_MEMORIES
-client = chromadb.PersistentClient(path=db_path)
+client = get_chroma_client(path=db_path)
 collection = client.get_collection(name="user_memories")
 
 new_facts = [

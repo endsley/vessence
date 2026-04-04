@@ -2,8 +2,74 @@
 # Vessence Installer for macOS
 # Double-click this file or run: bash install-mac.command
 
-set -e
+set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+INSTALL_DIR="${VESSENCE_INSTALL_DIR:-$HOME/vessence}"
+NONINTERACTIVE="${VESSENCE_NONINTERACTIVE:-0}"
+SKIP_BROWSER="${VESSENCE_SKIP_BROWSER:-0}"
+SKIP_COPY="${VESSENCE_SKIP_COPY:-0}"
+PROVIDER_CHOICE="${VESSENCE_PROVIDER_CHOICE:-}"
+
+pause_if_needed() {
+    if [ "$NONINTERACTIVE" != "1" ]; then
+        read -r -p "  Press Enter to exit..." _
+    fi
+}
+
+fail() {
+    echo "  [!] $1"
+    echo ""
+    pause_if_needed
+    exit 1
+}
+
+copy_package_contents() {
+    if [ "$SKIP_COPY" = "1" ]; then
+        echo "  [OK] Copy step skipped by VESSENCE_SKIP_COPY=1."
+        return
+    fi
+
+    if [ "$SCRIPT_DIR" = "$INSTALL_DIR" ]; then
+        echo "  [OK] Installer is already running from $INSTALL_DIR, skipping file copy."
+        return
+    fi
+
+    echo "  Copying files..."
+    mkdir -p "$INSTALL_DIR"
+    if ! (cd "$SCRIPT_DIR" && tar -cf - .) | (cd "$INSTALL_DIR" && tar -xf -); then
+        fail "Failed to copy installer files into $INSTALL_DIR."
+    fi
+
+    for required_path in docker-compose.yml .env.example; do
+        if [ ! -e "$INSTALL_DIR/$required_path" ]; then
+            fail "Installer copy completed but $required_path is missing in $INSTALL_DIR."
+        fi
+    done
+    echo "  [OK] Files copied to $INSTALL_DIR"
+}
+
+run_compose() {
+    if ! docker compose "$@"; then
+        fail "docker compose $* failed. Check the error output above."
+    fi
+}
+
+wait_for_onboarding() {
+    echo "  Waiting for onboarding to become ready at http://localhost:3000 ..."
+    for _ in $(seq 1 120); do
+        if curl -fsS http://localhost:3000/health >/dev/null 2>&1; then
+            echo "  [OK] Onboarding is ready."
+            return 0
+        fi
+        sleep 1
+    done
+
+    echo "  [!] Onboarding did not become ready within 120 seconds."
+    echo "      Recent onboarding/jane logs:"
+    docker compose ps onboarding jane || true
+    docker compose logs --tail 60 onboarding jane || true
+    fail "Onboarding never came up on http://localhost:3000."
+}
 
 echo ""
 echo "  ===================================="
@@ -22,7 +88,7 @@ if ! command -v docker &>/dev/null; then
     echo "        1. Launch Docker Desktop and wait for it to start"
     echo "        2. Run this installer again"
     echo ""
-    read -p "  Press Enter to exit..." _
+    pause_if_needed
     exit 1
 fi
 
@@ -33,7 +99,18 @@ if ! docker info &>/dev/null; then
     echo "      Please start Docker Desktop and wait until it says"
     echo "      \"Docker Desktop is running\", then run this installer again."
     echo ""
-    read -p "  Press Enter to exit..." _
+    pause_if_needed
+    exit 1
+fi
+
+# ── Check docker compose ──────────────────────────────────────────────
+if ! docker compose version &>/dev/null; then
+    echo "  [!] Docker Compose plugin not found."
+    echo ""
+    echo "      Update Docker Desktop to a recent version and make sure"
+    echo "      the Compose plugin is enabled, then run this installer again."
+    echo ""
+    pause_if_needed
     exit 1
 fi
 
@@ -53,7 +130,9 @@ echo ""
 JANE_BRAIN="gemini"
 JANE_WEB_PERMISSIONS="0"
 
-read -r -p "  Enter 1, 2, or 3 [default: 1]: " PROVIDER_CHOICE
+if [ -z "$PROVIDER_CHOICE" ] && [ "$NONINTERACTIVE" != "1" ]; then
+    read -r -p "  Enter 1, 2, or 3 [default: 1]: " PROVIDER_CHOICE
+fi
 
 case "$PROVIDER_CHOICE" in
     2)
@@ -74,20 +153,11 @@ case "$PROVIDER_CHOICE" in
 esac
 echo ""
 
-# ── Set up directory ──────────────────────────────────────────────────
-INSTALL_DIR="$HOME/vessence"
-
 echo "  Install directory: $INSTALL_DIR"
 echo ""
 
-mkdir -p "$INSTALL_DIR"
-
 # ── Copy all files (source, Dockerfiles, configs) ───────────────────
-echo "  Copying files..."
-cp -rf "$SCRIPT_DIR"/* "$INSTALL_DIR/" 2>/dev/null
-cp -rf "$SCRIPT_DIR"/.env.example "$INSTALL_DIR/" 2>/dev/null
-
-echo "  [OK] Files copied to $INSTALL_DIR"
+copy_package_contents
 echo ""
 
 # ── Create .env with provider selection ──────────────────────────────
@@ -111,8 +181,8 @@ echo ""
 echo "  Building and starting Vessence (this may take a few minutes on first run)..."
 echo ""
 cd "$INSTALL_DIR"
-docker compose build --no-cache
-docker compose up -d
+run_compose build --no-cache
+run_compose up -d
 
 echo ""
 echo "  ===================================="
@@ -122,14 +192,19 @@ echo ""
 echo "    Jane's brain: $JANE_BRAIN"
 echo ""
 echo "    Onboarding:  http://localhost:3000"
-echo "    Jane:        http://jane.localhost"
+echo "    Jane:        http://localhost:8081"
+echo "    Vault:       http://localhost:8081/vault"
 echo "    (Vault is accessible through Jane's interface)"
 echo ""
 echo "    To stop:   docker compose down"
 echo "    To start:  docker compose up -d"
 echo ""
 
-# ── Open browser ──────────────────────────────────────────────────────
-open "http://localhost:3000" 2>/dev/null || true
+wait_for_onboarding
 
-read -p "  Press Enter to close this window..." _
+# ── Open browser ──────────────────────────────────────────────────────
+if [ "$SKIP_BROWSER" != "1" ]; then
+    open "http://localhost:3000" 2>/dev/null || true
+fi
+
+pause_if_needed

@@ -17,7 +17,6 @@ ROOT = Path(os.environ.get("VESSENCE_HOME", str(Path(__file__).resolve().parents
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-import agent_skills.search_memory as search_memory
 from agent_skills.memory_retrieval import build_memory_sections
 from jane.config import VECTOR_DB_DIR, VESSENCE_DATA_HOME
 
@@ -100,22 +99,12 @@ def main() -> int:
             print(cached)
             return 0
 
-    # Cache miss — retrieve from ChromaDB
-    brain = os.environ.get("JANE_BRAIN", "gemini").lower()
-    bypass_librarian = os.environ.get("MEMORY_BYPASS_LIBRARIAN", "").strip() == "1"
-
-    # Models smart enough to synthesize raw facts directly (skip gemma librarian)
-    SMART_BRAINS = {"claude", "openai", "gpt-4", "gpt-4o"}
-
-    if bypass_librarian or brain in SMART_BRAINS:
-        sections = build_memory_sections(query, assistant_name="Jane", essence_chromadb_path=essence_path)
-        if not sections:
-            print("No relevant context found.")
-            return 0
-        summary = "\n\n".join(sections)
-    else:
-        # Other brains benefit from gemma pre-synthesis
-        summary = search_memory.get_memory_summary(query)
+    # Cache miss — retrieve from ChromaDB (direct sections, no Ollama librarian)
+    sections = build_memory_sections(query, assistant_name="Jane", essence_chromadb_path=essence_path)
+    if not sections:
+        print("No relevant context found.")
+        return 0
+    summary = "\n\n".join(sections)
 
     # Store in cache for next call
     if query_embedding and summary and summary != "No relevant context found.":

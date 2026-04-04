@@ -1,5 +1,6 @@
 package com.vessences.android.voice
 
+import com.vessences.android.DiagnosticReporter
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -17,39 +18,33 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
 import android.telephony.TelephonyManager
+import android.util.Log
 import androidx.core.app.NotificationCompat
-import androidx.core.app.NotificationManagerCompat
 import com.vessences.android.MainActivity
 import com.vessences.android.R
-import com.vessences.android.data.repository.ChatBackend
-import com.vessences.android.data.repository.ChatRepository
 import com.vessences.android.data.repository.VoiceSettingsRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.flow.catch
-import kotlinx.coroutines.flow.collect
-import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
-import org.json.JSONObject
-import org.vosk.Model
-import org.vosk.Recognizer
-import java.util.Locale
-import java.util.UUID
-import kotlin.math.abs
+
+private const val TAG = "AlwaysListening"
 
 class AlwaysListeningService : Service() {
 
     companion object {
         private const val CHANNEL_ID = "always_listening"
         private const val NOTIFICATION_ID = 9001
-        private const val RESPONSE_NOTIFICATION_ID = 9002
-        private const val RESPONSE_CHANNEL_ID = "jane_responses"
-        private const val COMMAND_TIMEOUT_MS = 5_000L
-        private const val COMMAND_SILENCE_MS = 1_300L
-        private const val SPEECH_RMS_THRESHOLD = 900
+        const val ACTION_STOP = "com.vessences.android.STOP_LISTENING"
+        private const val TRIGGER_COOLDOWN_MS = 5_000L
+
+        /** Prevents rapid re-triggering from background sound loops */
+        @Volatile
+        private var lastTriggerTimestamp: Long = 0L
+
+        private val _running = kotlinx.coroutines.flow.MutableStateFlow(false)
+        val running: kotlinx.coroutines.flow.StateFlow<Boolean> = _running
 
         fun start(context: Context) {
             val intent = Intent(context, AlwaysListeningService::class.java)
@@ -66,9 +61,8 @@ class AlwaysListeningService : Service() {
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    private val chatRepository = ChatRepository()
     private lateinit var voiceSettings: VoiceSettingsRepository
-    private lateinit var modelManager: VoskModelManager
+    private var detector: OpenWakeWordDetector? = null
 
     @Volatile
     private var isListening = false
@@ -81,22 +75,49 @@ class AlwaysListeningService : Service() {
     override fun onCreate() {
         super.onCreate()
         voiceSettings = VoiceSettingsRepository(applicationContext)
-        modelManager = VoskModelManager(applicationContext)
-        createNotificationChannels()
+        // Ensure DiagnosticReporter has context — service may start without Activity
+        DiagnosticReporter.init(applicationContext)
+        createNotificationChannel()
+        Log.i(TAG, "Service created")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_STOP) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
         val triggerPhrase = voiceSettings.getTriggerPhrase()
-        startForeground(NOTIFICATION_ID, buildListeningNotification(triggerPhrase))
-        acquireWakeLock()
-        startListeningLoop()
+        val notification = buildListeningNotification(triggerPhrase)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            startForeground(
+                NOTIFICATION_ID, notification,
+                android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+                    or android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK,
+            )
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
+        }
+        if (listeningThread?.isAlive != true) {
+            DiagnosticReporter.serviceEvent("AlwaysListening", "started")
+            acquireWakeLock()
+            startListeningLoop()
+        }
         return START_STICKY
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        DiagnosticReporter.serviceEvent("AlwaysListening", "stopped")
         isListening = false
+        _running.value = false
+        // Stop the listener thread and WAIT for it to exit before closing resources
+        listeningThread?.let { thread ->
+            thread.interrupt()
+            try { thread.join(3000) } catch (_: InterruptedException) {}
+        }
+        listeningThread = null
+        // Now safe to close resources — thread is no longer using them
         audioRecord?.let { record ->
             runCatching {
                 if (record.recordingState == AudioRecord.RECORDSTATE_RECORDING) {
@@ -106,35 +127,29 @@ class AlwaysListeningService : Service() {
             }
         }
         audioRecord = null
-        listeningThread?.interrupt()
-        listeningThread = null
+        detector?.close()
+        detector = null
         releaseWakeLock()
         scope.cancel()
         super.onDestroy()
     }
 
-    private fun createNotificationChannels() {
+    private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val manager = getSystemService(NotificationManager::class.java)
-
-            val listeningChannel = NotificationChannel(
-                CHANNEL_ID,
-                "Always Listening",
-                NotificationManager.IMPORTANCE_LOW,
-            ).apply {
-                description = "Shows when Vessence is listening for your wake word"
-                setShowBadge(false)
-            }
-            manager.createNotificationChannel(listeningChannel)
-
-            val responseChannel = NotificationChannel(
-                RESPONSE_CHANNEL_ID,
-                "Jane Responses",
-                NotificationManager.IMPORTANCE_DEFAULT,
-            ).apply {
-                description = "Shows responses from Jane"
-            }
-            manager.createNotificationChannel(responseChannel)
+            manager.createNotificationChannel(
+                NotificationChannel(CHANNEL_ID, "Always Listening", NotificationManager.IMPORTANCE_LOW).apply {
+                    description = "Shows when Vessence is listening for your wake word"
+                    setShowBadge(false)
+                }
+            )
+            // High-priority channel for wake word detection — needed for full-screen intent
+            manager.createNotificationChannel(
+                NotificationChannel("wake_word_alert", "Wake Word Alert", NotificationManager.IMPORTANCE_HIGH).apply {
+                    description = "Alerts when wake word is detected"
+                    setShowBadge(false)
+                }
+            )
         }
     }
 
@@ -146,13 +161,21 @@ class AlwaysListeningService : Service() {
             this, 0, openIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
+        val stopIntent = Intent(this, AlwaysListeningService::class.java).apply {
+            action = ACTION_STOP
+        }
+        val stopPendingIntent = PendingIntent.getService(
+            this, 1, stopIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Vessence is listening")
-            .setContentText("Listening for '$triggerPhrase'")
+            .setContentText("Say '$triggerPhrase' to talk to Jane")
             .setSmallIcon(R.mipmap.ic_launcher)
             .setOngoing(true)
             .setContentIntent(pendingIntent)
+            .addAction(0, "Stop", stopPendingIntent)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .build()
     }
@@ -163,102 +186,192 @@ class AlwaysListeningService : Service() {
             PowerManager.PARTIAL_WAKE_LOCK,
             "vessence:always_listening",
         ).apply {
-            acquire()
+            acquire(4 * 60 * 60 * 1000L)  // 4 hour timeout — prevents leak if service dies without onDestroy
         }
     }
 
     private fun releaseWakeLock() {
-        wakeLock?.let {
-            if (it.isHeld) it.release()
-        }
+        wakeLock?.let { if (it.isHeld) it.release() }
         wakeLock = null
     }
 
+    @Suppress("DEPRECATION")
     private fun isInCall(): Boolean {
-        val telephony = getSystemService(Context.TELEPHONY_SERVICE) as? TelephonyManager
-        return telephony?.callState != TelephonyManager.CALL_STATE_IDLE
+        return try {
+            val tm = getSystemService(Context.TELEPHONY_SERVICE) as? TelephonyManager
+            tm?.callState != TelephonyManager.CALL_STATE_IDLE
+        } catch (_: SecurityException) {
+            false  // Can't check — assume not in call
+        }
+    }
+
+    private fun isMediaPlaying(): Boolean {
+        return try {
+            val am = getSystemService(Context.AUDIO_SERVICE) as? android.media.AudioManager
+            am?.isMusicActive == true
+        } catch (_: Exception) {
+            false
+        }
     }
 
     private fun startListeningLoop() {
         isListening = true
-        listeningThread = Thread({
+        _running.value = true
+        // Periodic heartbeat so we can confirm the service is actually running
+        scope.launch {
+            var beatCount = 0
             while (isListening) {
-                if (isInCall()) {
+                beatCount++
+                val threshold = voiceSettings.getWakeWordThreshold()
+                val detectorAlive = detector != null
+                Log.i(TAG, "♥ heartbeat #$beatCount — detector=$detectorAlive threshold=$threshold listening=$isListening thread=${listeningThread?.isAlive}")
+                DiagnosticReporter.report("service", "heartbeat", mapOf(
+                    "beat" to beatCount,
+                    "detector_alive" to detectorAlive,
+                    "threshold" to threshold,
+                    "thread_alive" to (listeningThread?.isAlive == true),
+                ))
+                kotlinx.coroutines.delay(30_000)  // every 30s
+            }
+        }
+        listeningThread = Thread({
+            Log.i(TAG, "Listening thread started")
+            DiagnosticReporter.serviceEvent("AlwaysListening", "thread_started")
+            while (isListening) {
+                if (isInCall() || isMediaPlaying()) {
                     Thread.sleep(2000)
                     continue
                 }
                 try {
                     runWakeWordDetection()
-                } catch (e: InterruptedException) {
-                    break
                 } catch (e: Exception) {
-                    // Brief pause before retry on error
-                    if (isListening) Thread.sleep(1000)
+                    Log.e(TAG, "Wake word detection error", e)
+                    DiagnosticReporter.nonFatalError("AlwaysListening", "detection_loop_error", e)
+                    if (isListening) Thread.sleep(3000)
                 }
             }
-        }, "always-listening-loop").apply {
-            isDaemon = true
-            start()
-        }
+            Log.i(TAG, "Listening thread exiting")
+        }, "oww-listener").apply { start() }
     }
 
+    // ── Wake Word Detection (OpenWakeWord) ──────────────────────────────────
+
     private fun runWakeWordDetection() {
-        val model = modelManager.getModelSync() ?: return
-        val triggerPhrase = voiceSettings.getTriggerPhrase().lowercase(Locale.US)
-        val grammarPhrases = buildList {
-            add(triggerPhrase)
-            if (triggerPhrase != "hey jane") add("hey jane")
-            add("[unk]")
+        if (detector == null) {
+            val threshold = voiceSettings.getWakeWordThreshold()  // user-adjustable via Settings
+            Log.i(TAG, "Initializing OpenWakeWord detector (threshold=$threshold)...")
+            DiagnosticReporter.serviceEvent("AlwaysListening", "init_start", "threshold=$threshold")
+            val t0 = System.currentTimeMillis()
+            try {
+                detector = OpenWakeWordDetector(applicationContext, threshold = threshold)
+                val elapsed = System.currentTimeMillis() - t0
+                Log.i(TAG, "OpenWakeWord detector ready (${elapsed}ms, threshold=$threshold)")
+                DiagnosticReporter.wakeWordModelLoaded("hey_jane.onnx", elapsed)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to initialize OpenWakeWord detector", e)
+                DiagnosticReporter.wakeWordModelFailed("hey_jane.onnx", e.toString())
+                return
+            }
         }
-        val grammar = JSONObject().put("phrases", grammarPhrases).getJSONArray("phrases").toString()
+        val det = detector ?: return
 
-        val bufferSize = AudioRecord.getMinBufferSize(
-            ListeningSession.SAMPLE_RATE,
+        val minBufSize = AudioRecord.getMinBufferSize(
+            OpenWakeWordDetector.SAMPLE_RATE,
             AudioFormat.CHANNEL_IN_MONO,
             AudioFormat.ENCODING_PCM_16BIT,
-        ).coerceAtLeast(ListeningSession.SAMPLE_RATE)
-
-        val record = AudioRecord(
-            MediaRecorder.AudioSource.VOICE_RECOGNITION,
-            ListeningSession.SAMPLE_RATE,
-            AudioFormat.CHANNEL_IN_MONO,
-            AudioFormat.ENCODING_PCM_16BIT,
-            bufferSize,
         )
+        val bufferSize = minBufSize.coerceAtLeast(OpenWakeWordDetector.CHUNK_SIZE * 2)
+        Log.i(TAG, "AudioRecord minBufSize=$minBufSize, using bufferSize=$bufferSize")
+
+        val record = try {
+            AudioRecord(
+                MediaRecorder.AudioSource.VOICE_RECOGNITION,
+                OpenWakeWordDetector.SAMPLE_RATE,
+                AudioFormat.CHANNEL_IN_MONO,
+                AudioFormat.ENCODING_PCM_16BIT,
+                bufferSize,
+            )
+        } catch (e: SecurityException) {
+            Log.e(TAG, "Microphone permission denied", e)
+            DiagnosticReporter.micPermissionState(false)
+            return
+        }
 
         if (record.state != AudioRecord.STATE_INITIALIZED) {
+            Log.e(TAG, "AudioRecord not initialized! state=${record.state}")
             record.release()
-            Thread.sleep(2000)
+            DiagnosticReporter.micInitFailed("AudioRecord state=${record.state}")
             return
         }
 
         audioRecord = record
-        val recognizer = Recognizer(model, ListeningSession.SAMPLE_RATE.toFloat(), grammar)
+        val buffer = ShortArray(OpenWakeWordDetector.CHUNK_SIZE)
+        record.startRecording()
+        Log.i(TAG, "Listening for wake word... (recordingState=${record.recordingState})")
+        DiagnosticReporter.serviceEvent("AlwaysListening", "mic_started", "bufSize=$bufferSize recState=${record.recordingState}")
+
+        var chunkCount = 0
+        var maxScore = 0f
+        // Two-stage verification: require CONFIRMATION_FRAMES consecutive detections
+        // before triggering. This eliminates single-frame spikes from background speech.
+        // At 80ms per chunk, 5 frames = 400ms of sustained detection.
+        val CONFIRMATION_FRAMES = 5
+        var consecutiveDetections = 0
 
         try {
-            record.startRecording()
-            val buffer = ByteArray(bufferSize)
-
-            while (isListening && !isInCall()) {
+            while (isListening) {
                 val read = record.read(buffer, 0, buffer.size)
-                if (read <= 0) continue
+                if (read <= 0) {
+                    Log.w(TAG, "AudioRecord.read returned $read")
+                    continue
+                }
+                chunkCount++
 
-                val partialText = extractText(recognizer.partialResult, "partial")
-                if (partialText.isNotBlank() && matchesTrigger(partialText, triggerPhrase)) {
-                    onWakeWordDetected(model)
+                if (det.feedShorts(buffer, read)) {
+                    consecutiveDetections++
+                    if (consecutiveDetections < CONFIRMATION_FRAMES) {
+                        // Still accumulating confirmation — keep listening
+                        if (consecutiveDetections == 1) {
+                            Log.d(TAG, "🔍 Stage 1 candidate (score=${det.lastScore}), confirming...")
+                        }
+                        continue
+                    }
+                    // Stage 2: confirmed — N consecutive frames above threshold
+                    val now = System.currentTimeMillis()
+                    val elapsed = now - lastTriggerTimestamp
+                    if (elapsed < TRIGGER_COOLDOWN_MS) {
+                        Log.i(TAG, "🎯 Confirmed detection but COOLDOWN active (${elapsed}ms) — ignoring")
+                        consecutiveDetections = 0
+                        det.reset()
+                        continue
+                    }
+                    lastTriggerTimestamp = now
+                    Log.i(TAG, "🎯 Wake word CONFIRMED! score=${det.lastScore} after $consecutiveDetections consecutive frames")
+                    DiagnosticReporter.wakeWordDetected(det.lastScore)
+                    onWakeWordDetected()
+                    det.reset()
                     return
+                } else {
+                    // Score dropped below threshold — reset confirmation counter
+                    if (consecutiveDetections > 0) {
+                        Log.d(TAG, "🔍 Candidate rejected after $consecutiveDetections frames (score dropped to ${det.lastScore})")
+                    }
+                    consecutiveDetections = 0
                 }
 
-                if (recognizer.acceptWaveForm(buffer, read)) {
-                    val resultText = extractText(recognizer.result, "text")
-                    if (resultText.isNotBlank() && matchesTrigger(resultText, triggerPhrase)) {
-                        onWakeWordDetected(model)
-                        return
-                    }
+                // Track max score and send periodic updates
+                if (det.lastScore > maxScore) maxScore = det.lastScore
+                if (chunkCount % 625 == 0) {  // ~every 50s (625 * 80ms)
+                    Log.i(TAG, "📊 status: chunks=$chunkCount maxScore=%.4f lastScore=%.4f".format(maxScore, det.lastScore))
+                    DiagnosticReporter.report("wakeword", "periodic_status", mapOf(
+                        "chunks_processed" to chunkCount,
+                        "max_score" to maxScore,
+                        "last_score" to det.lastScore,
+                    ))
+                    maxScore = 0f  // reset per reporting period
                 }
             }
         } finally {
-            recognizer.close()
             runCatching {
                 if (record.recordingState == AudioRecord.RECORDSTATE_RECORDING) {
                     record.stop()
@@ -269,197 +382,83 @@ class AlwaysListeningService : Service() {
         }
     }
 
-    private fun matchesTrigger(text: String, triggerPhrase: String): Boolean {
-        val normalized = text.lowercase(Locale.US)
-        if (normalized.contains(triggerPhrase)) return true
+    // ── Wake Word Detected → Stop service, open chat, let ChatViewModel restart us ──
 
-        // Sliding window fuzzy match
-        val triggerWords = triggerPhrase.split(" ")
-        val textWords = normalized.split(" ")
-        if (textWords.size >= triggerWords.size) {
-            for (i in 0..textWords.size - triggerWords.size) {
-                val window = textWords.subList(i, i + triggerWords.size).joinToString(" ")
-                if (ListeningSession.normalizedSimilarity(window, triggerPhrase) >= 0.7) {
-                    return true
-                }
+    private fun onWakeWordDetected() {
+        Log.i(TAG, "Wake word detected — stopping service, handing off to chat")
+        DiagnosticReporter.wakeWordDetected(detector?.lastScore ?: 0f)
+
+        // Log device info for debugging background launch issues
+        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+        val isScreenOn = pm.isInteractive
+        val sdkVersion = Build.VERSION.SDK_INT
+        val manufacturer = Build.MANUFACTURER
+        val model = Build.MODEL
+        val product = Build.PRODUCT
+        Log.i(TAG, "📱 Device: $manufacturer $model (SDK $sdkVersion, product=$product)")
+        Log.i(TAG, "📱 Screen interactive: $isScreenOn")
+        DiagnosticReporter.report("wakeword", "device_info", mapOf(
+            "sdk_version" to sdkVersion,
+            "manufacturer" to manufacturer,
+            "model" to model,
+            "screen_interactive" to isScreenOn,
+            "product" to product,
+        ))
+
+        // Check if app can launch from background (Android 10+)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val am = getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+            val appTasks = am.appTasks
+            val isInForeground = appTasks.any { task ->
+                task.taskInfo?.isRunning == true
             }
+            Log.i(TAG, "📱 App tasks: ${appTasks.size}, isInForeground=$isInForeground")
+            DiagnosticReporter.report("wakeword", "app_state", mapOf(
+                "app_tasks" to appTasks.size,
+                "is_in_foreground" to isInForeground,
+            ))
         }
 
-        return ListeningSession.normalizedSimilarity(normalized, triggerPhrase) >= 0.7
-    }
-
-    private fun onWakeWordDetected(model: Model) {
-        vibrateShort()
-        val command = captureCommand(model)
-        if (command.isNotBlank()) {
-            sendToJane(command)
-        }
-    }
-
-    private fun vibrateShort() {
+        // Vibrate to acknowledge wake word
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                val manager = getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
-                manager.defaultVibrator.vibrate(
-                    VibrationEffect.createOneShot(100, VibrationEffect.DEFAULT_AMPLITUDE)
-                )
+                val vm = getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
+                vm.defaultVibrator.vibrate(VibrationEffect.createOneShot(150, VibrationEffect.DEFAULT_AMPLITUDE))
             } else {
                 @Suppress("DEPRECATION")
                 val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    vibrator.vibrate(
-                        VibrationEffect.createOneShot(100, VibrationEffect.DEFAULT_AMPLITUDE)
-                    )
-                } else {
-                    @Suppress("DEPRECATION")
-                    vibrator.vibrate(100)
-                }
+                vibrator.vibrate(VibrationEffect.createOneShot(150, VibrationEffect.DEFAULT_AMPLITUDE))
             }
-        } catch (_: Exception) {
-            // Vibration not critical
-        }
-    }
-
-    private fun captureCommand(model: Model): String {
-        val bufferSize = AudioRecord.getMinBufferSize(
-            ListeningSession.SAMPLE_RATE,
-            AudioFormat.CHANNEL_IN_MONO,
-            AudioFormat.ENCODING_PCM_16BIT,
-        ).coerceAtLeast(ListeningSession.SAMPLE_RATE)
-
-        val record = AudioRecord(
-            MediaRecorder.AudioSource.VOICE_RECOGNITION,
-            ListeningSession.SAMPLE_RATE,
-            AudioFormat.CHANNEL_IN_MONO,
-            AudioFormat.ENCODING_PCM_16BIT,
-            bufferSize,
-        )
-
-        if (record.state != AudioRecord.STATE_INITIALIZED) {
-            record.release()
-            return ""
+            Log.i(TAG, "📱 Vibration triggered")
+        } catch (e: Exception) {
+            Log.w(TAG, "📱 Vibration failed: ${e.message}")
         }
 
-        audioRecord = record
-        val recognizer = Recognizer(model, ListeningSession.SAMPLE_RATE.toFloat())
-
-        try {
-            record.startRecording()
-            val buffer = ByteArray(bufferSize)
-            var transcript = ""
-            var sawSpeech = false
-            val startAt = System.currentTimeMillis()
-            var lastSpeechAt = startAt
-
-            while (isListening) {
-                val read = record.read(buffer, 0, buffer.size)
-                if (read <= 0) continue
-
-                val energy = rmsLevel(buffer, read)
-                val partialText = extractText(recognizer.partialResult, "partial")
-
-                if (partialText.isNotBlank()) {
-                    transcript = partialText
-                    lastSpeechAt = System.currentTimeMillis()
-                    sawSpeech = true
-                } else if (energy >= SPEECH_RMS_THRESHOLD) {
-                    lastSpeechAt = System.currentTimeMillis()
-                    sawSpeech = true
-                }
-
-                if (recognizer.acceptWaveForm(buffer, read)) {
-                    val resultText = extractText(recognizer.result, "text")
-                    if (resultText.isNotBlank()) {
-                        transcript = resultText
-                        lastSpeechAt = System.currentTimeMillis()
-                        sawSpeech = true
-                    }
-                }
-
-                val now = System.currentTimeMillis()
-                if (sawSpeech && now - lastSpeechAt >= COMMAND_SILENCE_MS) break
-                if (!sawSpeech && now - startAt >= COMMAND_TIMEOUT_MS) break
-                if (now - startAt >= COMMAND_TIMEOUT_MS + 3000) break // absolute max
-            }
-
-            val finalText = extractText(recognizer.finalResult, "text").ifBlank { transcript }
-            return finalText.trim()
-        } finally {
-            recognizer.close()
-            runCatching {
-                if (record.recordingState == AudioRecord.RECORDSTATE_RECORDING) {
-                    record.stop()
-                }
-                record.release()
-            }
-            audioRecord = null
+        // Wake the screen if it's off
+        if (!isScreenOn) {
+            Log.i(TAG, "📱 Screen is off — acquiring wake lock to turn it on")
+            @Suppress("DEPRECATION")
+            val screenWake = pm.newWakeLock(
+                PowerManager.FULL_WAKE_LOCK
+                    or PowerManager.ACQUIRE_CAUSES_WAKEUP
+                    or PowerManager.ON_AFTER_RELEASE,
+                "vessence:wake_word_screen",
+            )
+            screenWake.acquire(10_000L)
+            Log.i(TAG, "📱 Screen wake lock acquired")
         }
-    }
 
-    private fun sendToJane(command: String) {
-        val sessionId = UUID.randomUUID().toString()
-        scope.launch(Dispatchers.IO) {
-            try {
-                val response = StringBuilder()
-                chatRepository.streamChat(
-                    backend = ChatBackend.JANE,
-                    message = command,
-                    sessionId = sessionId,
-                ).onEach { event ->
-                    if (event.data.isNotBlank()) response.append(event.data)
-                }.catch { e ->
-                    showResponseNotification("Error: ${e.message ?: "Failed to get response"}")
-                }.collect()
+        // Single event: WakeWordBridge.signal() is the sole trigger.
+        // It handles both navigation (via VessencesApp observing WakeWordBridge.activated)
+        // and STT launch (via JaneChatScreen observing wakeWordTriggered).
+        // DO NOT also set pendingChatTarget — that causes double-trigger.
+        WakeWordBridge.signal()
+        Log.i(TAG, "📱 WakeWordBridge signaled (single event source)")
 
-                val fullResponse = response.toString().trim()
-                if (fullResponse.isNotBlank()) {
-                    showResponseNotification(fullResponse)
-                }
-            } catch (e: Exception) {
-                showResponseNotification("Error: ${e.message ?: "Failed to send command"}")
-            }
-        }
-    }
-
-    private fun showResponseNotification(text: String) {
-        val openIntent = Intent(this, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
-        }
-        val pendingIntent = PendingIntent.getActivity(
-            this, 1, openIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
-
-        val notification = NotificationCompat.Builder(this, RESPONSE_CHANNEL_ID)
-            .setContentTitle("Jane")
-            .setContentText(text)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
-            .setSmallIcon(R.mipmap.ic_launcher)
-            .setContentIntent(pendingIntent)
-            .setAutoCancel(true)
-            .build()
-
-        try {
-            NotificationManagerCompat.from(this).notify(RESPONSE_NOTIFICATION_ID, notification)
-        } catch (_: SecurityException) {
-            // Missing POST_NOTIFICATIONS permission
-        }
-    }
-
-    private fun extractText(json: String, key: String): String =
-        runCatching { JSONObject(json).optString(key).trim() }.getOrDefault("")
-
-    private fun rmsLevel(buffer: ByteArray, length: Int): Int {
-        if (length < 2) return 0
-        var total = 0L
-        var samples = 0
-        var index = 0
-        while (index + 1 < length) {
-            val sample = ((buffer[index + 1].toInt() shl 8) or (buffer[index].toInt() and 0xff)).toShort()
-            total += abs(sample.toInt())
-            samples++
-            index += 2
-        }
-        return if (samples == 0) 0 else (total / samples).toInt()
+        // STOP the service completely. No polling, no waiting.
+        // ChatViewModel will call AlwaysListeningService.start() when conversation ends.
+        isListening = false
+        _running.value = false
+        stopSelf()
     }
 }

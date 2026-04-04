@@ -6,19 +6,53 @@ import re
 import shutil
 import subprocess
 import zipfile
+import os
 from pathlib import Path
 
+try:
+    from .installer_simulation import InstallerSimulationError, simulate_installer_package
+except ImportError:
+    from installer_simulation import InstallerSimulationError, simulate_installer_package
 
-VERSION = "0.0.12"
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 MARKETING_ROOT = REPO_ROOT / "marketing_site"
 DOWNLOADS_DIR = MARKETING_ROOT / "downloads"
 INSTALLERS_DIR = REPO_ROOT / "startup_code" / "installers"
 
+_INSTALLER_VERSION_RE = re.compile(
+    r"^vessence-(?:windows|mac|linux)-installer-v(\d+)\.(\d+)\.(\d+)\.zip$"
+)
+
+
+def _next_installer_version(downloads_dir: Path) -> str:
+    """Return the next installer semver patch version from existing package files.
+
+    Set `VESSENCE_INSTALLER_VERSION` to override auto-increment for a one-off build.
+    """
+    override = os.environ.get("VESSENCE_INSTALLER_VERSION", "").strip()
+    if override:
+        return override
+
+    highest = (0, 0, 20)
+    for path in downloads_dir.glob("vessence-*-installer-v*.zip"):
+        match = _INSTALLER_VERSION_RE.match(path.name)
+        if not match:
+            continue
+        version = tuple(int(part) for part in match.groups())
+        if version > highest:
+            highest = version
+
+    major, minor, patch = highest
+    return f"{major}.{minor}.{patch + 1}"
+
+
+VERSION = _next_installer_version(DOWNLOADS_DIR)
+
 PLATFORMS = {
     "windows": {
         "zip_name": f"vessence-windows-installer-v{VERSION}.zip",
+        "stable_name": "vessence-windows-installer.zip",
         "installer": "Install Vessence.bat",
         "installer_src": "install-windows.bat",
         "uninstaller": "Uninstall Vessence.bat",
@@ -27,6 +61,7 @@ PLATFORMS = {
     },
     "mac": {
         "zip_name": f"vessence-mac-installer-v{VERSION}.zip",
+        "stable_name": "vessence-mac-installer.zip",
         "installer": "install-mac.command",
         "uninstaller": "uninstall-mac.command",
         "uninstaller_src": "uninstall-mac.command",
@@ -34,12 +69,55 @@ PLATFORMS = {
     },
     "linux": {
         "zip_name": f"vessence-linux-installer-v{VERSION}.zip",
+        "stable_name": "vessence-linux-installer.zip",
         "installer": "install-linux.sh",
         "uninstaller": "uninstall-linux.sh",
         "uninstaller_src": "uninstall-linux.sh",
         "readme": "README-linux.txt",
     },
 }
+
+
+def update_marketing_download_links() -> None:
+    """Rewrite marketing site installer links to the current versioned filenames."""
+    for page in (MARKETING_ROOT / "index.html", MARKETING_ROOT / "install.html"):
+        text = page.read_text(encoding="utf-8")
+        text = re.sub(
+            r"/downloads/vessence-windows-installer(?:-v\d+\.\d+\.\d+)?\.zip",
+            f"/downloads/{PLATFORMS['windows']['zip_name']}",
+            text,
+        )
+        text = re.sub(
+            r'data-vault-download="vessence-windows-installer(?:-v\d+\.\d+\.\d+)?\.zip"',
+            f'data-vault-download="{PLATFORMS["windows"]["zip_name"]}"',
+            text,
+        )
+        text = re.sub(
+            r"<code>vessence-windows-installer(?:-v\d+\.\d+\.\d+)?\.zip</code>",
+            f"<code>{PLATFORMS['windows']['zip_name']}</code>",
+            text,
+        )
+        text = re.sub(
+            r"/downloads/vessence-mac-installer(?:-v\d+\.\d+\.\d+)?\.zip",
+            f"/downloads/{PLATFORMS['mac']['zip_name']}",
+            text,
+        )
+        text = re.sub(
+            r'data-vault-download="vessence-mac-installer(?:-v\d+\.\d+\.\d+)?\.zip"',
+            f'data-vault-download="{PLATFORMS["mac"]["zip_name"]}"',
+            text,
+        )
+        text = re.sub(
+            r"/downloads/vessence-linux-installer(?:-v\d+\.\d+\.\d+)?\.zip",
+            f"/downloads/{PLATFORMS['linux']['zip_name']}",
+            text,
+        )
+        text = re.sub(
+            r'data-vault-download="vessence-linux-installer(?:-v\d+\.\d+\.\d+)?\.zip"',
+            f'data-vault-download="{PLATFORMS["linux"]["zip_name"]}"',
+            text,
+        )
+        page.write_text(text, encoding="utf-8")
 
 
 def reset_dir(path: Path) -> None:
@@ -58,6 +136,29 @@ def _ensure_crlf(path: Path) -> None:
     # Normalize to LF first, then convert to CRLF
     data = data.replace(b"\r\n", b"\n").replace(b"\r", b"\n").replace(b"\n", b"\r\n")
     path.write_bytes(data)
+
+
+def _check_bat_block_parens(bat_path: Path) -> list[str]:
+    """Check a .bat file for unescaped parentheses inside ( ) blocks.
+
+    cmd.exe interprets ( and ) inside parenthesized blocks as block delimiters,
+    not as literal characters. This causes fatal parse errors (window disappears).
+    """
+    errors = []
+    depth = 0
+    for i, line in enumerate(bat_path.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
+        stripped = line.strip()
+        if stripped.startswith("::") or stripped.upper().startswith("REM "):
+            continue
+        if stripped.endswith("("):
+            depth += 1
+        if stripped.startswith(")"):
+            depth -= 1
+        if depth > 0 and re.match(r"^\s*echo\s", stripped, re.IGNORECASE):
+            echo_content = re.sub(r"^\s*echo\s*", "", stripped, flags=re.IGNORECASE)
+            if re.search(r"(?<!\^)[()]", echo_content):
+                errors.append(f"line {i}: unescaped parentheses in echo inside block: {stripped.strip()}")
+    return errors
 
 
 def build_readme(platform: str) -> str:
@@ -116,7 +217,8 @@ Quick start
 After installation
 ------------------
 - Onboarding:  http://localhost:3000
-- Jane:        http://jane.localhost
+- Jane:        http://localhost:8081
+- Vault:       http://localhost:8081/vault
 
 {stop_start[platform]}
 
@@ -160,6 +262,8 @@ def build_platform_package(platform: str) -> Path:
     # Shared files
     shutil.copy2(REPO_ROOT / "docker-compose.yml", staging / "docker-compose.yml")
     shutil.copy2(REPO_ROOT / ".env.example", staging / ".env.example")
+    if (REPO_ROOT / "version.json").exists():
+        shutil.copy2(REPO_ROOT / "version.json", staging / "version.json")
 
     traefik_src = REPO_ROOT / "traefik"
     if traefik_src.exists():
@@ -175,11 +279,36 @@ def build_platform_package(platform: str) -> Path:
         copy_tree(docker_dir, staging / "docker", ignore=docker_ignore)
 
     # Source directories needed by the Dockerfiles
-    for src_dir in ("jane", "jane_web", "vault_web", "agent_skills", "onboarding", "essences", "tools"):
+    for src_dir in ("jane", "jane_web", "vault_web", "agent_skills", "onboarding", "tools"):
         src_path = REPO_ROOT / src_dir
         if src_path.exists():
-            build_ignore = shutil.ignore_patterns("__pycache__", "*.pyc", ".git", "node_modules")
+            build_ignore = shutil.ignore_patterns(
+                "__pycache__", "*.pyc", ".git", "node_modules", "*.db", "*.sqlite3", "*.idsig", "downloads"
+            )
             copy_tree(src_path, staging / src_dir, ignore=build_ignore)
+
+    # Bundle default tools from the external tools directory
+    # These are user-facing tools (Life Librarian, Music Playlist, Daily Briefing)
+    for ext_dir_name, staging_name in [("tools", "tools"), ("essences", "essences")]:
+        ext_src = Path(os.environ.get(f"{ext_dir_name.upper()}_DIR", Path.home() / "ambient" / ext_dir_name))
+        if ext_src.exists():
+            ext_staging = staging / staging_name
+            ext_staging.mkdir(exist_ok=True)
+            for item_dir in ext_src.iterdir():
+                if not item_dir.is_dir():
+                    continue
+                manifest = item_dir / "manifest.json"
+                if manifest.exists():
+                    import json as _json
+                    try:
+                        data = _json.loads(manifest.read_text())
+                        if data.get("builtin", False):
+                            build_ignore = shutil.ignore_patterns(
+                                "__pycache__", "*.pyc", "*.db", "*.sqlite3",
+                            )
+                            copy_tree(item_dir, ext_staging / item_dir.name, ignore=build_ignore)
+                    except Exception:
+                        pass
 
     # Requirements files
     for req_file in ("requirements.txt", "requirements-jane.txt", "requirements-onboarding.txt"):
@@ -192,6 +321,25 @@ def build_platform_package(platform: str) -> Path:
     if configs_src.exists():
         configs_ignore = shutil.ignore_patterns("job_queue", "project_specs", "systemd", "kokoro_env.yml", "crontab_backup.txt", "*.pyc")
         copy_tree(configs_src, staging / "configs", ignore=configs_ignore)
+
+    # Agent instruction files — ensure all AI agents behave consistently
+    agent_configs_dir = staging / "agent_configs"
+    agent_configs_dir.mkdir(exist_ok=True)
+    for src_name, dst_name in [
+        ("CLAUDE.md", "CLAUDE.md"),           # → ~/CLAUDE.md
+        ("AGENTS.md", "AGENTS.md"),           # → ~/AGENTS.md (OpenAI Codex)
+    ]:
+        src_file = REPO_ROOT.parent / src_name  # These live in ~/, one level up from repo
+        if src_file.exists():
+            shutil.copy2(src_file, agent_configs_dir / dst_name)
+    # GEMINI.md lives in ~/.gemini/
+    gemini_md = Path.home() / ".gemini" / "GEMINI.md"
+    if gemini_md.exists():
+        shutil.copy2(gemini_md, agent_configs_dir / "GEMINI.md")
+    # Also bundle the code_lock module
+    code_lock = REPO_ROOT / "agent_skills" / "code_lock.py"
+    if code_lock.exists():
+        shutil.copy2(code_lock, agent_configs_dir / "code_lock.py")
 
     # README
     (staging / "README.txt").write_text(build_readme(platform), encoding="utf-8")
@@ -208,6 +356,13 @@ def build_platform_package(platform: str) -> Path:
 
     # Clean up staging
     shutil.rmtree(staging)
+
+    stable_name = cfg.get("stable_name")
+    if stable_name:
+        stable_path = DOWNLOADS_DIR / stable_name
+        if stable_path.exists():
+            stable_path.unlink()
+        shutil.copy2(zip_path, stable_path)
 
     size_kb = zip_path.stat().st_size / 1024
     print(f"  Built {cfg['zip_name']} ({size_kb:.0f} KB)")
@@ -400,6 +555,108 @@ def validate() -> bool:
     return True
 
 
+def verify_packages() -> bool:
+    """Post-build verification: extract each zip and check contents."""
+    import tempfile
+
+    errors: list[str] = []
+    required_files = [
+        "docker-compose.yml",
+        ".env.example",
+        "traefik/traefik.yml",
+        "docker/jane/Dockerfile",
+        "docker/onboarding/Dockerfile",
+        "vault_web/requirements.txt",
+    ]
+
+    for platform, cfg in PLATFORMS.items():
+        zip_path = DOWNLOADS_DIR / cfg["zip_name"]
+        if not zip_path.exists():
+            errors.append(f"[{platform}] Zip not found: {zip_path.name}")
+            continue
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with zipfile.ZipFile(zip_path, "r") as zf:
+                zf.extractall(tmpdir)
+
+            root = Path(tmpdir) / "vessence"
+            if not root.exists():
+                errors.append(f"[{platform}] Missing vessence/ root in zip")
+                continue
+
+            # Check required files
+            for rel_path in required_files:
+                if not (root / rel_path).exists():
+                    errors.append(f"[{platform}] Missing {rel_path}")
+
+            # Packages must never include runtime/local databases.
+            for db_path in list(root.rglob("*.db")) + list(root.rglob("*.sqlite3")):
+                errors.append(f"[{platform}] Unexpected packaged database: {db_path.relative_to(root)}")
+
+            # Scan text files for likely bundled credentials.
+            secret_patterns = {
+                "anthropic_api_key": re.compile(r"sk-ant-[A-Za-z0-9_-]{10,}"),
+                "openai_api_key": re.compile(r"sk-(?!proj-)[A-Za-z0-9_-]{16,}"),
+                "google_api_key": re.compile(r"AIza[0-9A-Za-z_-]{20,}"),
+                "google_oauth_secret": re.compile(r"GOCSPX-[0-9A-Za-z_-]{10,}"),
+                "session_secret": re.compile(r"SESSION_SECRET_KEY\s*=\s*(?!changeme)(?!your-)(?!<)[A-Za-z0-9_-]{16,}"),
+                "cloudflare_token": re.compile(r"CLOUDFLARE_TUNNEL_TOKEN\s*=\s*(?!$)[A-Za-z0-9._-]{20,}"),
+            }
+            for path in root.rglob("*"):
+                if not path.is_file():
+                    continue
+                try:
+                    text = path.read_text(encoding="utf-8", errors="strict")
+                except Exception:
+                    continue
+                # Known public client secrets (embedded in open-source CLI tools)
+                _public_secrets = {
+                    "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",  # Gemini CLI (google-gemini/gemini-cli)
+                }
+                for label, pattern in secret_patterns.items():
+                    match = pattern.search(text)
+                    if match and match.group(0) not in _public_secrets:
+                        errors.append(f"[{platform}] Potential {label} bundled in {path.relative_to(root)}")
+
+            # Check .bat files have CRLF and no unescaped parentheses in blocks
+            for bat in root.glob("*.bat"):
+                data = bat.read_bytes()
+                if b"\r\n" not in data:
+                    errors.append(f"[{platform}] {bat.name} has LF line endings (needs CRLF)")
+                elif data.replace(b"\r\n", b"").find(b"\n") != -1:
+                    errors.append(f"[{platform}] {bat.name} has mixed line endings")
+                # Check for unescaped parentheses inside ( ) blocks
+                bat_errors = _check_bat_block_parens(bat)
+                errors.extend(f"[{platform}] {bat.name}: {e}" for e in bat_errors)
+
+            # Check .sh/.command files have LF (not CRLF)
+            for sh in list(root.glob("*.sh")) + list(root.glob("*.command")):
+                data = sh.read_bytes()
+                if b"\r\n" in data:
+                    errors.append(f"[{platform}] {sh.name} has CRLF line endings (needs LF)")
+
+            # Check installer exists
+            installer_name = cfg["installer"]
+            if not (root / installer_name).exists():
+                errors.append(f"[{platform}] Installer script missing: {installer_name}")
+
+            try:
+                simulate_installer_package(platform, root)
+            except InstallerSimulationError as exc:
+                errors.append(f"[{platform}] Installer simulation failed: {exc}")
+
+        print(f"  [{platform}] Verified {cfg['zip_name']}")
+
+    if errors:
+        print(f"\n  VERIFICATION FAILED — {len(errors)} error(s):")
+        for i, err in enumerate(errors, 1):
+            print(f"    {i}. {err}")
+        return False
+
+    print("  All packages verified.")
+    return True
+
+
 def build_all() -> None:
     print("Running pre-build validation...")
     if not validate():
@@ -408,6 +665,7 @@ def build_all() -> None:
     print()
 
     DOWNLOADS_DIR.mkdir(parents=True, exist_ok=True)
+    update_marketing_download_links()
 
     # Remove old combined package
     old_zip = DOWNLOADS_DIR / "vessence-docker-package.zip"
@@ -421,6 +679,11 @@ def build_all() -> None:
     print("Building OS-specific installer packages...")
     for platform in PLATFORMS:
         build_platform_package(platform)
+
+    print("\nRunning post-build verification...")
+    if not verify_packages():
+        print("\nPost-build verification FAILED. Packages may be broken.")
+        raise SystemExit(1)
     print("Done.")
 
 

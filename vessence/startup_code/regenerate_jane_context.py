@@ -55,14 +55,6 @@ def extract_section(text, header_pattern, max_lines=30):
                 break
     return "\n".join(result).strip()
 
-def extract_amber_capabilities(arch_text):
-    caps = []
-    for line in arch_text.splitlines():
-        if line.strip().startswith("-   **Capability"):
-            cap = re.sub(r'\*\*', '', line).strip().lstrip("- ")
-            caps.append(cap)
-    return "\n".join(f"- {c}" for c in caps) if caps else "[not found]"
-
 def extract_cron_jobs(cron_text):
     jobs = []
     current = {}
@@ -104,32 +96,26 @@ def build_context():
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
 
     todo = read_file(f"{BASE}/configs/TODO_PROJECTS.md")
-    amber_arch = read_file(f"{BASE}/configs/Amber_architecture.md")
     cron = read_file(f"{BASE}/configs/CRON_JOBS.md")
     skills = read_file(f"{BASE}/configs/SKILLS_REGISTRY.md")
 
     projects = extract_projects(todo)
-    amber_caps = extract_amber_capabilities(amber_arch)
     cron_jobs = extract_cron_jobs(cron)
 
     context = f"""[Jane Architecture Context — Always Active]
 Generated: {now} | Auto-updated nightly by startup_code/regenerate_jane_context.py
 
 === SYSTEM IDENTITY ===
-- Jane (Jane#3353): Claude Code (claude-sonnet-4-6). Primary brain — reasoning, code, systems, research. Direct executor, not a delegator.
-- Amber: Google ADK + Gemini. Discord bot. Handles voice (Kokoro TTS), computer control, vault, web research.
+- Jane (Jane#3353): Claude Code (claude-opus-4-6). Sole agent — reasoning, code, systems, research. Direct executor, not a delegator.
+- Tools: Capabilities Jane can invoke (vault/file access, music playback, daily briefing, etc.)
+- Essences: Memories + modes of operation Jane can load to become a specialist (e.g., tax accountant)
 - User profile: see $VESSENCE_DATA_HOME/user_profile.md
 - Relationship rule: Friends, not user/assistant. No filler flattery.
 
 === ENVIRONMENT ===
-- ADK venv: $HOME/google-adk-env/adk-venv/bin/python
 - ChromaDB: $VESSENCE_DATA_HOME/vector_db (collection: user_memories)
 - Vault: $VAULT_HOME/
-- Amber ADK server: http://localhost:8000
-- Identity essays: $VAULT_HOME/documents/{{chieh,jane,amber}}_identity_essay.txt
-
-=== AMBER CAPABILITIES ===
-{amber_caps}
+- Identity essays: $VAULT_HOME/documents/{{chieh,jane}}_identity_essay.txt
 
 === MEMORY SYSTEM ===
 - Memory injection: automatic via UserPromptSubmit hooks (claude_smart_context.py + memory_hook.sh)
@@ -146,7 +132,7 @@ Generated: {now} | Auto-updated nightly by startup_code/regenerate_jane_context.
 
 === MANDATORY UPDATE RULES ===
 After any change: update the relevant config in $VESSENCE_HOME/configs/:
-Jane capability → Jane_architecture.md | Amber capability → Amber_architecture.md
+Jane capability → Jane_architecture.md
 Memory system → memory_manage_architecture.md | Skills → SKILLS_REGISTRY.md
 Projects/TODOs → TODO_PROJECTS.md | Accomplishments → PROJECT_ACCOMPLISHMENTS.md
 Cron jobs → CRON_JOBS.md
