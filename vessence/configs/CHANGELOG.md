@@ -1,5 +1,8 @@
 # Vessence Changelog
 
+## v0.1.56 (2026-04-04)
+- **Simplified wake word → STT:** Direct path — navigate to Jane + set WakeWordPendingFlag. No more indirection through jane_wake or pendingChatTarget.
+
 ## v0.1.55 (2026-04-04)
 - **Remove Stage 2 WakeWordVerifier:** Headless SpeechRecognizer was rejecting real triggers due to mic contention. Reverted to 5-frame temporal smoothing only.
 

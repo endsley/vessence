@@ -89,14 +89,18 @@ private fun AuthenticatedApp(loginViewModel: LoginViewModel) {
         }
     }
 
-    // Wake word: single handler — consume signal, navigate, set wakeWordTriggered via state
+    // Wake word: navigate to Jane + set STT flag directly (no indirection)
     val wakeWordActive by com.vessences.android.voice.WakeWordBridge.activated.collectAsState()
     LaunchedEffect(wakeWordActive) {
         if (wakeWordActive) {
             com.vessences.android.voice.WakeWordBridge.consume()
-            // Navigate to Jane chat — JaneChatScreen will see wakeWordTriggered=true
-            // and launch STT when it composes
-            NotificationNavigationState.pendingChatTarget = "jane_wake"
+            // Navigate to Jane
+            navController.navigate(NavTab.JANE.route) {
+                popUpTo(NavTab.HOME.route) { inclusive = false }
+                launchSingleTop = true
+            }
+            // Set STT flag directly — JaneChatScreen observes this
+            WakeWordPendingFlag.set()
         }
     }
 

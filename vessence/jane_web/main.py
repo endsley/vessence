@@ -93,8 +93,8 @@ try:
     ANDROID_VERSION = _version_data["version_name"]
     _ANDROID_VERSION_CODE = _version_data["version_code"]
 except FileNotFoundError:
-    ANDROID_VERSION = "0.1.55"
-    _ANDROID_VERSION_CODE = 163
+    ANDROID_VERSION = "0.1.56"
+    _ANDROID_VERSION_CODE = 164
 
 # Startup validation: ensure the APK for the advertised version actually exists
 _expected_apk = MARKETING_DOWNLOADS_DIR / f"vessences-android-v{ANDROID_VERSION}.apk"
