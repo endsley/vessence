@@ -13,6 +13,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -36,6 +37,11 @@ fun MusicScreen(
     viewModel: MusicViewModel = viewModel(),
 ) {
     val state by viewModel.state.collectAsState()
+
+    // Check for pending music play on every navigation (not just ViewModel init)
+    LaunchedEffect(Unit) {
+        viewModel.checkPendingPlay()
+    }
 
     Column(
         modifier = Modifier

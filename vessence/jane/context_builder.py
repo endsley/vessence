@@ -587,7 +587,27 @@ def _build_system_sections(
         "  {{image:images/photo.jpg}} — renders as a clickable thumbnail\n"
         "  {{play:audio/song.mp3}} — renders as an audio player\n"
         "  {{navigate:Life Librarian}} — renders as a navigation button\n"
-        "Always use these tags when referencing vault files so the UI can render them properly."
+        "Always use these tags when referencing vault files so the UI can render them properly.\n\n"
+        "## File Downloads\n"
+        "When the user asks for the actual file (download, send me the file, give me the mp3, etc.) "
+        "— as opposed to playing it — provide a markdown download link in your response:\n"
+        "  [The Scientist.mp3](/api/files/serve/Music/Coldplay/The%20Scientist.mp3)\n"
+        "The link renders as a clickable download in the chat bubble. "
+        "This is DIFFERENT from playing music (which uses [MUSIC_PLAY:id] and navigates to the player). "
+        "Examples:\n"
+        '- "play the scientist" → search + [MUSIC_PLAY:id] (navigates to player, conversation ends)\n'
+        '- "give me the scientist mp3" → [The Scientist.mp3](/api/files/serve/Music/...) (download link in chat)\n'
+        '- "send me that pdf" → [report.pdf](/api/files/serve/Documents/report.pdf) (download link in chat)\n'
+        "Use this for ANY file the user wants to download, not just music."
+    )
+    # Music playback instruction
+    system_sections.append(
+        "## Music Playback\n"
+        "Music play requests (e.g., 'play the scientist', 'play some coldplay') are handled "
+        "automatically by the proxy — you will NOT receive these messages. The proxy creates "
+        "a playlist and responds with [MUSIC_PLAY:id] directly.\n"
+        "If a music request somehow reaches you (e.g., complex phrasing), respond naturally "
+        "and mention you couldn't find a match, or suggest the user try 'play <artist/song>'."
     )
     # Default tools awareness
     system_sections.append(

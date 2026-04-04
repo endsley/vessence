@@ -38,11 +38,15 @@ Classify prompts as SELF_HANDLE or DELEGATE_OPUS.
 
 SELF_HANDLE — ONLY these categories:
 - Pure greetings: "hey", "hi", "good morning", "how are you"
-- Simple math: "what is 7 times 8"
+- Simple math: "what is 7 times 8", "convert 5 miles to km"
 - Basic definitions: "what is REST", "what does API stand for"
 - Jokes: "tell me a joke"
 - Weather questions (use cached data below): ALWAYS include current temp, today's high/low, condition, AND air quality (AQI). For forecast questions, include the relevant days.
-- Acknowledgments: "thanks", "ok", "sounds good"
+- Acknowledgments: "thanks", "ok", "sounds good", "got it", "nice", "cool"
+- Simple factual/trivia: "what year did WW2 end", "who wrote hamlet", "what's the capital of France"
+- Time/date questions: "what time is it", "what day is today", "what's the date"
+- Unit conversions: "how many cups in a gallon", "celsius to fahrenheit"
+- Casual follow-ups to previous messages: "haha", "that's funny", "yeah", "true", "makes sense", "right"
 
 DELEGATE_OPUS — EVERYTHING ELSE, including:
 - Any question about the system, app, features, or project
@@ -50,12 +54,12 @@ DELEGATE_OPUS — EVERYTHING ELSE, including:
 - Anything technical, code-related, or requiring context
 - When in doubt, ALWAYS delegate
 
-IMPORTANT: If you are not completely certain the prompt is a simple greeting/joke/math/definition, classify as DELEGATE_OPUS. False delegation is safe. False self-handling gives wrong answers.
+IMPORTANT: If you are not completely certain the prompt fits a SELF_HANDLE category above, classify as DELEGATE_OPUS. False delegation is safe. False self-handling gives wrong answers.
 
 {_PERSONAL_INFO}
 
 Format: CLASSIFICATION: [SELF_HANDLE or DELEGATE_OPUS]
-RESPONSE: [If SELF_HANDLE, provide the actual response. If DELEGATE_OPUS, just say "Delegating."]"""
+RESPONSE: [If SELF_HANDLE, provide the actual response. If DELEGATE_OPUS, provide a brief, natural acknowledgment that shows you understood what the user asked. Vary your tone based on context — be playful for casual topics, focused for technical work, warm for personal questions, witty when appropriate. Examples: "Ooh, good question — digging into that.", "On it, checking the wake word logs.", "Ha, let me think about that one.", "Sure thing, pulling up the weather." Keep it to one short sentence. This will be spoken aloud.]"""
 
 _CLASSIFY_RE = re.compile(r"CLASSIFICATION:\s*(SELF_HANDLE|DELEGATE_OPUS)", re.IGNORECASE)
 _RESPONSE_RE = re.compile(r"RESPONSE:\s*(.*)", re.DOTALL)
@@ -259,7 +263,10 @@ async def classify_prompt(
         classification = cls_match.group(1).upper()
 
         if classification == "DELEGATE_OPUS":
-            return ("delegate", None)
+            # Extract the contextual ack from the RESPONSE line
+            resp_match = _RESPONSE_RE.search(content)
+            delegate_ack = resp_match.group(1).strip().rstrip('"').strip() if resp_match else None
+            return ("delegate", delegate_ack or None)
 
         # SELF_HANDLE — extract only the RESPONSE portion
         resp_match = _RESPONSE_RE.search(content)

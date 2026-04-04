@@ -6,8 +6,10 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
@@ -72,6 +74,32 @@ class AlwaysListeningService : Service() {
     private var wakeLock: PowerManager.WakeLock? = null
     private var audioRecord: AudioRecord? = null
 
+    /** Tracks whether listening was paused due to screen off */
+    @Volatile
+    private var pausedForScreenOff = false
+
+    private val screenReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            when (intent?.action) {
+                Intent.ACTION_SCREEN_OFF -> {
+                    Log.i(TAG, "Screen OFF — pausing listening")
+                    DiagnosticReporter.serviceEvent("AlwaysListening", "screen_off_pause")
+                    pausedForScreenOff = true
+                    pauseListening()
+                }
+                Intent.ACTION_SCREEN_ON -> {
+                    if (pausedForScreenOff) {
+                        Log.i(TAG, "Screen ON — resuming listening")
+                        DiagnosticReporter.serviceEvent("AlwaysListening", "screen_on_resume")
+                        pausedForScreenOff = false
+                        resumeListening()
+                    }
+                }
+            }
+        }
+    }
+    private var screenReceiverRegistered = false
+
     override fun onCreate() {
         super.onCreate()
         voiceSettings = VoiceSettingsRepository(applicationContext)
@@ -102,6 +130,14 @@ class AlwaysListeningService : Service() {
             acquireWakeLock()
             startListeningLoop()
         }
+        if (!screenReceiverRegistered) {
+            val filter = IntentFilter().apply {
+                addAction(Intent.ACTION_SCREEN_OFF)
+                addAction(Intent.ACTION_SCREEN_ON)
+            }
+            registerReceiver(screenReceiver, filter)
+            screenReceiverRegistered = true
+        }
         return START_STICKY
     }
 
@@ -109,6 +145,10 @@ class AlwaysListeningService : Service() {
 
     override fun onDestroy() {
         DiagnosticReporter.serviceEvent("AlwaysListening", "stopped")
+        if (screenReceiverRegistered) {
+            unregisterReceiver(screenReceiver)
+            screenReceiverRegistered = false
+        }
         isListening = false
         _running.value = false
         // Stop the listener thread and WAIT for it to exit before closing resources
@@ -193,6 +233,34 @@ class AlwaysListeningService : Service() {
     private fun releaseWakeLock() {
         wakeLock?.let { if (it.isHeld) it.release() }
         wakeLock = null
+    }
+
+    /** Pause listening (screen off): stop thread, release mic and wake lock, but keep service alive */
+    private fun pauseListening() {
+        isListening = false
+        _running.value = false
+        listeningThread?.let { thread ->
+            thread.interrupt()
+            try { thread.join(3000) } catch (_: InterruptedException) {}
+        }
+        listeningThread = null
+        audioRecord?.let { record ->
+            runCatching {
+                if (record.recordingState == AudioRecord.RECORDSTATE_RECORDING) {
+                    record.stop()
+                }
+                record.release()
+            }
+        }
+        audioRecord = null
+        releaseWakeLock()
+    }
+
+    /** Resume listening (screen on): re-acquire wake lock and restart the listening loop */
+    private fun resumeListening() {
+        if (listeningThread?.isAlive == true) return  // already running
+        acquireWakeLock()
+        startListeningLoop()
     }
 
     @Suppress("DEPRECATION")
@@ -448,15 +516,16 @@ class AlwaysListeningService : Service() {
             Log.i(TAG, "📱 Screen wake lock acquired")
         }
 
-        // Single event: WakeWordBridge.signal() is the sole trigger.
-        // It handles both navigation (via VessencesApp observing WakeWordBridge.activated)
-        // and STT launch (via JaneChatScreen observing wakeWordTriggered).
-        // DO NOT also set pendingChatTarget — that causes double-trigger.
-        WakeWordBridge.signal()
-        Log.i(TAG, "📱 WakeWordBridge signaled (single event source)")
+        // Mark STT active BEFORE stopping — prevents onResume from restarting always-listen
+        WakeWordBridge.sttActive = true
 
-        // STOP the service completely. No polling, no waiting.
-        // ChatViewModel will call AlwaysListeningService.start() when conversation ends.
+        // Launch STT directly — works from any screen
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            com.vessences.android.MainActivity.instance?.launchStt()
+            Log.i(TAG, "📱 STT launched")
+        }
+
+        // STOP the service completely.
         isListening = false
         _running.value = false
         stopSelf()

@@ -167,9 +167,19 @@ class ChatViewModel(
                 } catch (_: Exception) {}
             }
             // Wake word bridge: set flag so ChatInputRow auto-launches the system STT UI
-            // This uses the EXACT same code path as pressing the mic button
-            // Wake word handling moved to VessencesApp — single observer, single handler.
-            // VessencesApp navigates to Jane AND calls triggerWakeWord() on this ViewModel.
+            // Listen for STT results from the global launcher in MainActivity
+            com.vessences.android.SttResultBus.onResult = { spoken ->
+                if (spoken != null && spoken.isNotBlank()) {
+                    if (com.vessences.android.ui.chat.EndPhraseDetector.isEndPhrase(spoken)) {
+                        endVoiceConversation()
+                    } else {
+                        sendMessage(spoken, fromVoice = true)
+                    }
+                } else {
+                    // Silence timeout or cancel — end conversation
+                    endVoiceConversation()
+                }
+            }
         }
     }
 
@@ -457,9 +467,11 @@ class ChatViewModel(
                             val musicMatch = musicPlayRegex.find(rawText)
                             if (musicMatch != null) {
                                 val playlistId = musicMatch.groupValues[1]
-                                android.util.Log.i("ChatVM", "Music play command detected: playlist=$playlistId")
+                                android.util.Log.i("ChatVM", "Music play command detected: playlist=$playlistId — ending conversation")
                                 _musicPlayRequest.value = playlistId
                                 com.vessences.android.MusicPlayNavigationState.requestPlay(playlistId)
+                                // Music = conversation ending event — no STT after this
+                                endVoiceConversation()
                             }
                             rawText = rawText.replace(musicPlayRegex, "").trim()
 
@@ -545,13 +557,17 @@ class ChatViewModel(
                 viewModelScope.launch {
                     _state.value = _state.value.copy(isSpeaking = true)
                     tts.speak(textToSpeak)
+                    // If stopSpeaking() was called while TTS was active, it already
+                    // set isSpeaking=false and called endVoiceConversation().
+                    // Don't re-launch STT in that case.
+                    if (!_state.value.isSpeaking) return@launch
                     _state.value = _state.value.copy(isSpeaking = false)
                     if (conversationOver) {
                         // User said goodbye — stop listening, release mic for wake word
                         endVoiceConversation()
                     } else if (chatPrefs.isAutoListenEnabled()) {
                         // Unified path: trigger Google STT popup (same as mic button + wake word)
-                        _state.value = _state.value.copy(wakeWordTriggered = true)
+                        com.vessences.android.MainActivity.instance?.launchStt()
                     } else {
                         // Auto-listen disabled — conversation over, release mic for wake word
                         endVoiceConversation()
@@ -603,6 +619,8 @@ class ChatViewModel(
         tts.stop()
         voiceController?.stopTts()
         _state.value = _state.value.copy(isSpeaking = false)
+        // Stop Speaking = conversation ends immediately (no STT), but always-listen resumes
+        endVoiceConversation()
     }
 
     fun speakText(text: String) {
@@ -686,7 +704,7 @@ class ChatViewModel(
 
     private fun autoListenAfterTts() {
         // Trigger the same Google STT UI as the mic button and wake word
-        _state.value = _state.value.copy(wakeWordTriggered = true)
+        com.vessences.android.MainActivity.instance?.launchStt()
     }
 
 
@@ -774,7 +792,7 @@ class ChatViewModel(
     /** Called by VessencesApp when wake word fires — single entry point */
     fun triggerWakeWord() {
         cameFromWakeWord = true
-        _state.value = _state.value.copy(wakeWordTriggered = true)
+        com.vessences.android.MainActivity.instance?.launchStt()
     }
 
     fun startPushToTalk() {

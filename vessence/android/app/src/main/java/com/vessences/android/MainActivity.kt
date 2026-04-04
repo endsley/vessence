@@ -24,6 +24,36 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.RequestPermission()
     ) { }
 
+    /** Global STT launcher — callable from anywhere via MainActivity.instance.launchStt() */
+    val sttLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        SttResultBus.postResult(result.resultCode, result.data)
+    }
+
+    fun launchStt() {
+        val hasMicPerm = ContextCompat.checkSelfPermission(
+            this, Manifest.permission.RECORD_AUDIO
+        ) == PackageManager.PERMISSION_GRANTED
+        if (!hasMicPerm) return
+
+        com.vessences.android.voice.WakeWordBridge.sttActive = true
+        com.vessences.android.voice.AlwaysListeningService.stop(this)
+
+        val intent = Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL, android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE, java.util.Locale.getDefault())
+            putExtra(android.speech.RecognizerIntent.EXTRA_PROMPT, "Speak your message...")
+            putExtra(android.speech.RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 4000L)
+            putExtra(android.speech.RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 6000L)
+        }
+        sttLauncher.launch(intent)
+    }
+
+    companion object {
+        @Volatile var instance: MainActivity? = null
+    }
+
     override fun onResume() {
         super.onResume()
         ChatNotificationManager.isAppInForeground = true
@@ -44,6 +74,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        instance = this
         // Draw behind system bars (status bar + navigation bar) — removes white bar
         androidx.core.view.WindowCompat.setDecorFitsSystemWindows(window, false)
         window.statusBarColor = android.graphics.Color.TRANSPARENT

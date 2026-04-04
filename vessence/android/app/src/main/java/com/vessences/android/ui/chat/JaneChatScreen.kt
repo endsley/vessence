@@ -423,17 +423,8 @@ private fun ChatInputBar(
         }
     }
 
-    // Auto-launch STT from wake word (set by VessencesApp after navigation)
-    val wakeWordPending by com.vessences.android.WakeWordPendingFlag.pending.collectAsState()
-    LaunchedEffect(wakeWordPending) {
-        if (wakeWordPending) {
-            com.vessences.android.WakeWordPendingFlag.consume()
-            kotlinx.coroutines.delay(200)
-            launchSpeechRecognition()
-        }
-    }
-
-    // Auto-launch STT after TTS response (conversation loop)
+    // Single STT trigger — handles both wake word and auto-listen after TTS
+    // ChatViewModel sets wakeWordTriggered=true from WakeWordPendingFlag OR from onSendComplete
     LaunchedEffect(chatState.wakeWordTriggered) {
         if (chatState.wakeWordTriggered) {
             chatViewModel.clearWakeWordTrigger()

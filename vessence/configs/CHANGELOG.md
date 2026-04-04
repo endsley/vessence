@@ -1,5 +1,34 @@
 # Vessence Changelog
 
+## v0.1.64 (2026-04-04)
+- **Fix gemma4 delegate ack:** Gemma4's contextual ack was being discarded on delegate path. Now properly extracted and spoken.
+- **Remove Python ack fallback:** If gemma4 has no ack, Claude handles it via [ACK] block instead of generic random phrases.
+
+## v0.1.63 (2026-04-04)
+- **Fix music auto-play on re-navigation:** MusicScreen now checks pending playlist via LaunchedEffect instead of relying on ViewModel init (which only runs once).
+
+## v0.1.62 (2026-04-04)
+- **Instant music play:** "play X" is handled deterministically at the proxy — no LLM needed. Creates playlist, emits [MUSIC_PLAY:id], Android navigates to Music Playlist and auto-plays.
+- **File download links:** Markdown links in chat render as clickable blue text for downloading files.
+- **Stop Speaking ends conversation:** No STT popup, always-listen resumes for wake word.
+
+## v0.1.61 (2026-04-04)
+- **Clickable download links in chat:** Markdown links render as tappable blue text. Jane can now put file download links directly in chat bubbles.
+- **Stop Speaking ends conversation:** Pressing Stop Speaking now ends the voice conversation (no STT popup) and restarts always-listen for wake word detection.
+- **Race condition fix:** If TTS is cancelled mid-speech, auto-listen no longer fires spuriously.
+
+## v0.1.60 (2026-04-04)
+- **Instant STT on wake word:** No navigation delay, no retry, no screen switching. STT popup launches immediately from any screen. Results go through SttResultBus to ChatViewModel regardless of current view.
+
+## v0.1.59 (2026-04-04)
+- **Eliminated all StateFlow chains for STT:** speechLauncher moved to MainActivity.launchStt(). Wake word, mic button, and auto-listen all call the same function directly. No more WakeWordBridge/WakeWordPendingFlag/wakeWordTriggered indirection.
+
+## v0.1.58 (2026-04-04)
+- Version bump fix
+
+## v0.1.57 (2026-04-04)
+- **Fix wake word STT not firing:** ChatViewModel now observes WakeWordPendingFlag and sets wakeWordTriggered. Single LaunchedEffect in JaneChatScreen handles both wake word and auto-listen.
+
 ## v0.1.56 (2026-04-04)
 - **Simplified wake word → STT:** Direct path — navigate to Jane + set WakeWordPendingFlag. No more indirection through jane_wake or pendingChatTarget.
 

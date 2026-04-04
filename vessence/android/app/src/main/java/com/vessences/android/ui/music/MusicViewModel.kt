@@ -103,6 +103,20 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun checkPendingPlay() {
+        val pendingPlaylistId = com.vessences.android.MusicPlayNavigationState.consume()
+        if (pendingPlaylistId != null) {
+            android.util.Log.i("MusicVM", "Auto-playing playlist (from checkPendingPlay): $pendingPlaylistId")
+            viewModelScope.launch {
+                repo.getPlaylist(pendingPlaylistId).onSuccess { playlist ->
+                    _state.value = _state.value.copy(activePlaylist = playlist, currentTrackIndex = 0)
+                    preparePlaylist(playlist)
+                    playTrack(0)
+                }
+            }
+        }
+    }
+
     fun loadPlaylists() {
         viewModelScope.launch {
             _state.value = _state.value.copy(isLoading = true)
