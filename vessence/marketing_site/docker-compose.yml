@@ -1,0 +1,74 @@
+# Vessence — docker-compose.yml
+# Download this file, then run: docker compose up
+# For full setup guide: https://vessences.com
+
+version: '3.9'
+
+services:
+
+  # ── Traefik reverse proxy (clean local URLs) ──────────────────────────────
+  traefik:
+    image: traefik:v3.0
+    command:
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+    ports:
+      - "80:80"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    restart: unless-stopped
+
+  # ── ChromaDB vector memory ────────────────────────────────────────────────
+  chromadb:
+    image: vessence/chromadb:1.0.0
+    volumes:
+      - ${AMBIENT_HOME:-./data}/vector_db:/chroma/chroma
+    restart: unless-stopped
+
+  # ── Vault web UI ──────────────────────────────────────────────────────────
+  vault:
+    image: vessence/vault:1.0.0
+    depends_on:
+      - chromadb
+    environment:
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - AMBIENT_HOME=/data
+    volumes:
+      - ${AMBIENT_HOME:-./data}:/data
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.vault.rule=Host(`vault.localhost`)"
+      - "traefik.http.services.vault.loadbalancer.server.port=8080"
+
+  # ── Jane (technical brain) ────────────────────────────────────────────────
+  jane:
+    image: vessence/jane:1.0.0
+    depends_on:
+      - chromadb
+    environment:
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - AMBIENT_HOME=/data
+    volumes:
+      - ${AMBIENT_HOME:-./data}:/data
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.jane.rule=Host(`jane.localhost`)"
+      - "traefik.http.services.jane.loadbalancer.server.port=8090"
+
+  # ── Cloudflare tunnel (optional — for external access) ───────────────────
+  # Uncomment and add your tunnel token to enable access from outside your home.
+  # Get a free tunnel at: https://dash.cloudflare.com → Zero Trust → Tunnels
+  #
+  # cloudflared:
+  #   image: cloudflare/cloudflared:latest
+  #   command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
+  #   restart: unless-stopped
+
+# Persistent volumes — all data survives restarts and updates
+volumes:
+  data:
+    driver: local

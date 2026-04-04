@@ -1,0 +1,10 @@
+{
+  "type": "chat",
+  "components": [
+    {
+      "id": "chat",
+      "type": "chat_panel",
+      "position": "main"
+    }
+  ]
+}

@@ -1,0 +1,202 @@
+# Vessence: Current Codebase Overview
+
+This document describes the current Vessence codebase and how the major components work together. Vessence is no longer just a Discord RAG bot. It is a multi-interface personal AI system with shared memory, a vault web app, onboarding, background jobs, and a swappable Jane brain.
+
+## Core Product Shape
+
+Vessence currently consists of four main product services:
+
+1. Amber
+- Always-on ADK agent.
+- Handles vault-aware assistance, memory writes, research tooling, Discord integration, and local-computer style capabilities.
+- Main code: `amber/`
+
+2. Jane
+- Primary technical brain.
+- Supports multiple CLI backends rather than being tied to one vendor.
+- Main code: `jane/` and `jane_web/`
+
+3. Vault Web
+- FastAPI web app for browsing files, viewing media, chatting, playlists, sharing, and auth.
+- Main code: `vault_web/`
+
+4. Onboarding
+- First-run setup flow that writes `.env`, collects user settings, and generates `user_profile.md`.
+- Main code: `onboarding/`
+
+The containerized deployment is driven by `docker-compose.yml`, with Traefik routing traffic to the Jane and Vault web services.
+
+## Jane: Current Architecture
+
+Jane is now split into vendor-neutral core logic and backend-specific CLI execution.
+
+### 1. `jane/context_builder.py`
+- Builds Jane's shared working context.
+- Reads:
+  - `$AMBIENT_HOME/user_profile.md`
+  - identity essays
+  - retrieved memory summary
+  - optional file context
+  - optional research brief
+- Produces the system/context prompt passed to the active Jane backend.
+
+### 2. `jane/brain_adapters.py`
+- Defines pluggable CLI adapters for Jane.
+- Current adapter types:
+  - Gemini CLI
+  - Claude Code
+  - OpenAI-backed CLI path
+- Keeps CLI-specific command syntax and runtime flags out of the shared memory layer.
+
+### 3. `jane/research_router.py`
+- Offloads web-research synthesis to the local Ollama stack.
+- Uses web search results plus the local model to create a compact research brief before the main Jane brain responds.
+- This is intended to conserve main-brain tokens.
+
+### 4. `jane_web/jane_proxy.py`
+- Main Jane web orchestration layer.
+- Creates/loads session state.
+- Calls `context_builder.py`.
+- Sends the request to the selected brain adapter.
+- Writes user and assistant turns back through `ConversationManager`.
+
+### 5. `jane/jane_session_wrapper.py`
+- PTY-based Jane wrapper for long-running terminal sessions.
+- Provides noise suppression, restart handling, context compaction support, and session management around the CLI experience.
+
+## Amber: Current Architecture
+
+Amber remains the ADK-based always-on agent.
+
+### 1. `amber/agent.py`
+- Main Amber ADK application definition.
+- Builds toolsets, selects Amber's active model, and wires in memory retrieval and callbacks.
+- Current live main brain is selected through `AMBER_BRAIN_MODEL`.
+
+### 2. `amber/logic/agent_logic.py`
+- Fact detection and contradiction logic.
+- Supports post-response memory extraction and consistency checks.
+
+### 3. `amber/tools/`
+- Tool implementations for:
+  - vault operations
+  - research
+  - speech
+  - local computer actions
+
+### 4. `amber/tools/research_tools.py`
+- Technical research helper path for Amber.
+- Uses local analysis tooling rather than always relying on the main Amber brain for synthesis.
+
+## Shared Memory System
+
+The memory system is shared between Jane and Amber and is centered on ChromaDB plus SQLite.
+
+### 1. ChromaDB
+- Live shared root: `/home/chieh/vessence-data/vector_db`
+- Main collection: `user_memories`
+- Additional stores:
+  - `short_term_memory`
+  - `long_term_knowledge`
+
+Purpose:
+- semantic long-term recall
+- recent short-term recall
+- archivist-promoted long-term knowledge
+
+### 2. `agent_skills/conversation_manager.py`
+- Jane's main structured conversation and archival manager.
+- Writes every turn to:
+  - in-memory conversation history
+  - SQLite ledger
+  - short-term ChromaDB memory
+- On idle/session close, triages short-term memory into:
+  - keep -> long-term
+  - short-term -> retain with expiry
+  - discard
+
+### 3. `agent_skills/search_memory.py`
+- Retrieves memory from multiple tiers.
+- Combines:
+  - shared long-term memory
+  - Jane long-term archive
+  - short-term memory
+  - legacy forgettable entries where still present
+- Produces a synthesized summary for injection into active context.
+
+### 4. `agent_skills/local_vector_memory.py`
+- ADK memory-service implementation backed by ChromaDB.
+- Supports Amber-facing memory access in the ADK stack.
+
+### 5. SQLite
+- Used separately from ChromaDB.
+- Main roles:
+  - Jane interaction ledger / flight recorder
+  - Vault/Jane web app state, auth, playlists, shares, and session-related app data
+
+## Model Roles
+
+Current intended model split:
+
+- Jane main brain: swappable CLI backend
+- Amber main brain: currently Gemini 2.5 Flash
+- Memory librarian: `gemma3:4b`
+- Research synthesis / local technical analysis: `qwen2.5-coder:14b`
+- Local fallback / coding-oriented helper work: `qwen2.5-coder:14b`
+
+## Web Apps
+
+### 1. `vault_web/`
+- FastAPI backend plus templates/static assets.
+- Provides:
+  - file browser
+  - auth
+  - media serving
+  - shares
+  - playlists
+  - chat integration
+
+### 2. `jane_web/`
+- Jane-facing web app.
+- Reuses much of the same stack and UI patterns as `vault_web/`.
+- Calls into `jane_proxy.py` for chat behavior.
+
+### 3. `onboarding/`
+- Setup wizard and settings UI.
+- Writes environment configuration and user profile.
+- Supports selecting Jane's active brain in the Vessence web stack.
+
+## Background / Maintenance Code
+
+### `agent_skills/`
+This directory contains many system skills and background jobs, including:
+- janitor tasks
+- memory maintenance
+- queue runners
+- identity updates
+- research helpers
+- vault indexing
+- backup helpers
+- heartbeat/autonomous research scripts
+
+### `startup_code/`
+- backup/restore/bootstrap scripts
+- new-machine initialization
+- watchdog/startup automation
+
+## Documentation Enforcement
+
+Memory-system code changes are protected by the git pre-commit hook at:
+- `.git/hooks/pre-commit`
+
+If memory-related source files are staged without also staging:
+- `configs/memory_manage_architecture.md`
+
+the commit is blocked.
+
+## Important Runtime Note
+
+For the local non-Docker setup on this machine, the live shared memory is under the Ambient root:
+- `/home/chieh/vessence-data/vector_db`
+
+That is the active `user_memories` store currently used for real memory retrieval, not the empty fallback `vessence/vector_db` root.

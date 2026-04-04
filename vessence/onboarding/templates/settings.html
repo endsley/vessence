@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Vessence — Settings</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { background: #0a0a0f; color: #e2e8f0; font-family: 'Inter', system-ui, sans-serif; }
+    .card { background: #13131a; border: 1px solid #1e1e2e; }
+    .pill { background: #1e1e2e; border: 1px solid #2d2d40; }
+    input[type=text], input[type=password] {
+      background: #0d0d14; border: 1px solid #2d2d40; color: #e2e8f0;
+      transition: border-color 0.2s;
+    }
+    input:focus { outline: none; border-color: #7c3aed; }
+    .btn-primary { background: linear-gradient(135deg, #7c3aed, #5b21b6); }
+    .btn-primary:hover { opacity: 0.9; }
+    .btn-secondary { background: #1e1e2e; border: 1px solid #2d2d40; }
+    .btn-secondary:hover { background: #2d2d40; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+    .fade-in { animation: fadeIn 0.3s ease forwards; }
+  </style>
+</head>
+<body class="min-h-screen">
+
+<div class="max-w-2xl mx-auto px-4 py-12 fade-in">
+
+  <!-- Header -->
+  <div class="flex items-center justify-between mb-8">
+    <div>
+      <div class="text-3xl mb-1">🧬</div>
+      <h1 class="text-2xl font-bold text-white">Vessence Settings</h1>
+      <p class="text-slate-400 text-sm mt-0.5">Your system is running.</p>
+    </div>
+    <div class="flex gap-3">
+      <a href="{{ vault_url }}" target="_blank"
+        class="btn-secondary text-slate-300 text-sm px-4 py-2 rounded-lg inline-flex items-center gap-2">
+        ✨ Open Vault
+      </a>
+      <a href="{{ jane_url }}" target="_blank"
+        class="btn-secondary text-slate-300 text-sm px-4 py-2 rounded-lg inline-flex items-center gap-2">
+        🧠 Open Jane
+      </a>
+    </div>
+  </div>
+
+  <!-- Jane's Brain -->
+  <div class="card rounded-xl mb-4">
+    <div class="p-5 border-b border-slate-800">
+      <h2 class="text-white font-semibold">Jane's Brain</h2>
+      <p class="text-slate-400 text-sm mt-0.5">Switch which AI CLI powers Jane. Takes effect after saving — no rebuild needed.</p>
+    </div>
+    <div class="p-5 space-y-3">
+      <label class="flex items-center gap-3 pill rounded-lg p-3 cursor-pointer hover:border-violet-500 transition-colors" id="brain-gemini-label">
+        <input type="radio" name="jane-brain" value="gemini" class="accent-violet-500" onchange="handleBrainChange()">
+        <div>
+          <span class="text-white font-medium">Gemini</span>
+          <span class="pill text-xs px-2 py-0.5 ml-2 text-violet-400 rounded-full border border-violet-700">Free</span>
+          <p class="text-slate-400 text-xs mt-0.5">Uses your Google API key. No extra cost.</p>
+        </div>
+      </label>
+      <label class="flex items-center gap-3 pill rounded-lg p-3 cursor-pointer hover:border-violet-500 transition-colors">
+        <input type="radio" name="jane-brain" value="claude" class="accent-violet-500" onchange="handleBrainChange()">
+        <div>
+          <span class="text-white font-medium">Claude Code</span>
+          <p class="text-slate-400 text-xs mt-0.5">Best for coding and technical work. Requires Anthropic API key.</p>
+        </div>
+      </label>
+      <label class="flex items-center gap-3 pill rounded-lg p-3 cursor-pointer hover:border-violet-500 transition-colors">
+        <input type="radio" name="jane-brain" value="openai" class="accent-violet-500" onchange="handleBrainChange()">
+        <div>
+          <span class="text-white font-medium">OpenAI (GPT-4o)</span>
+          <p class="text-slate-400 text-xs mt-0.5">Requires OpenAI API key.</p>
+        </div>
+      </label>
+
+      <div id="anthropic-key-section" class="hidden pt-1">
+        <label class="block text-slate-300 text-sm font-medium mb-1">Anthropic API Key</label>
+        <div class="flex gap-2">
+          <div class="relative flex-1">
+            <input type="password" id="anthropic-key" placeholder="sk-ant-api03-..."
+              class="w-full rounded-lg px-3 py-2 pr-10 text-sm">
+            <button onclick="toggleVisible('anthropic-key')" class="absolute right-3 top-2.5 text-slate-500 hover:text-slate-300 text-xs">👁</button>
+          </div>
+          <button onclick="validateKey('anthropic')" class="btn-secondary text-slate-300 text-sm px-3 py-2 rounded-lg cursor-pointer">Test</button>
+        </div>
+        <div id="anthropic-status" class="mt-1 text-xs hidden"></div>
+      </div>
+
+      <div id="openai-key-section" class="hidden pt-1">
+        <label class="block text-slate-300 text-sm font-medium mb-1">OpenAI API Key</label>
+        <div class="flex gap-2">
+          <div class="relative flex-1">
+            <input type="password" id="openai-key" placeholder="sk-proj-..."
+              class="w-full rounded-lg px-3 py-2 pr-10 text-sm">
+            <button onclick="toggleVisible('openai-key')" class="absolute right-3 top-2.5 text-slate-500 hover:text-slate-300 text-xs">👁</button>
+          </div>
+          <button onclick="validateKey('openai')" class="btn-secondary text-slate-300 text-sm px-3 py-2 rounded-lg cursor-pointer">Test</button>
+        </div>
+        <div id="openai-status" class="mt-1 text-xs hidden"></div>
+      </div>
+
+      <div id="permissions-section" class="hidden pt-3 border-t border-slate-800 mt-3">
+        <div class="flex items-center justify-between">
+          <div>
+            <span class="text-white font-medium text-sm">Web Permission Gating</span>
+            <p class="text-slate-400 text-xs mt-0.5">Jane asks for approval before running tools (Bash, file edits). Only available with Claude.</p>
+          </div>
+          <label class="relative inline-flex items-center cursor-pointer">
+            <input type="checkbox" id="web-permissions-toggle" class="sr-only peer"
+              {% if web_permissions_enabled %}checked{% endif %}>
+            <div class="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full
+              peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px]
+              after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-violet-600"></div>
+          </label>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- API Keys -->
+  <div class="card rounded-xl mb-4">
+    <div class="p-5 border-b border-slate-800">
+      <h2 class="text-white font-semibold">API Keys</h2>
+      <p class="text-slate-400 text-sm mt-0.5">Update keys without re-running the full setup.</p>
+    </div>
+    <div class="p-5 space-y-4">
+      <div>
+        <label class="block text-slate-300 text-sm font-medium mb-1">Google API Key</label>
+        <div class="flex gap-2">
+          <div class="relative flex-1">
+            <input type="password" id="google-key" placeholder="AIzaSy..."
+              class="w-full rounded-lg px-3 py-2 pr-10 text-sm">
+            <button onclick="toggleVisible('google-key')" class="absolute right-3 top-2.5 text-slate-500 hover:text-slate-300 text-xs">👁</button>
+          </div>
+          <button onclick="validateKey('google')" class="btn-secondary text-slate-300 text-sm px-3 py-2 rounded-lg cursor-pointer">Test</button>
+        </div>
+        <div id="google-status" class="mt-1 text-xs hidden"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Google Sign-In -->
+  <div class="card rounded-xl mb-4">
+    <div class="p-5 border-b border-slate-800">
+      <div class="flex items-center justify-between gap-4">
+        <div>
+          <h2 class="text-white font-semibold">Google Sign-In</h2>
+          <p class="text-slate-400 text-sm mt-0.5">Configure browser and app login for Vault and Jane.</p>
+        </div>
+        {% if google_oauth_configured %}
+        <span class="pill text-xs px-3 py-1 rounded-full text-green-300 border-green-800">Configured</span>
+        {% else %}
+        <span class="pill text-xs px-3 py-1 rounded-full text-amber-300 border-amber-800">Not configured</span>
+        {% endif %}
+      </div>
+    </div>
+    <div class="p-5 space-y-4">
+      <div>
+        <label class="block text-slate-300 text-sm font-medium mb-1">Google OAuth Client ID</label>
+        <input type="text" id="google-client-id" placeholder="...apps.googleusercontent.com"
+          class="w-full rounded-lg px-3 py-2 text-sm">
+      </div>
+      <div>
+        <label class="block text-slate-300 text-sm font-medium mb-1">Google OAuth Client Secret</label>
+        <div class="relative">
+          <input type="password" id="google-client-secret" placeholder="GOCSPX-..."
+            class="w-full rounded-lg px-3 py-2 pr-10 text-sm">
+          <button onclick="toggleVisible('google-client-secret')" class="absolute right-3 top-2.5 text-slate-500 hover:text-slate-300 text-xs">👁</button>
+        </div>
+      </div>
+      <div>
+        <label class="block text-slate-300 text-sm font-medium mb-1">Allowed Google Emails</label>
+        <input type="text" id="allowed-google-emails" value="{{ current_allowed_google_emails or '' }}"
+          placeholder="chieh@example.com,other@example.com"
+          class="w-full rounded-lg px-3 py-2 text-sm">
+        <p class="text-slate-500 text-xs mt-1">Only these accounts can sign in. Comma-separated.</p>
+      </div>
+      <div class="rounded-lg border border-slate-800 bg-black/20 px-4 py-3 text-xs text-slate-400">
+        <p>Google Cloud redirect URIs to add:</p>
+        <p class="mt-2 font-mono text-slate-300">https://jane.vessences.com/auth/google/callback</p>
+        <p class="mt-2 text-slate-500">Also add localhost variants if you use local web access.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Cloudflare -->
+  <div class="card rounded-xl mb-4">
+    <div class="p-5 border-b border-slate-800">
+      <h2 class="text-white font-semibold">Cloudflare Tunnel</h2>
+      <p class="text-slate-400 text-sm mt-0.5">Public URL for remote access to your Vault and Jane.</p>
+    </div>
+    <div class="p-5 space-y-4">
+      <div>
+        <label class="block text-slate-300 text-sm font-medium mb-1">Tunnel Token</label>
+        <input type="password" id="cf-token" placeholder="eyJhbGc..."
+          class="w-full rounded-lg px-3 py-2 text-sm">
+      </div>
+      <div>
+        <label class="block text-slate-300 text-sm font-medium mb-1">Domain</label>
+        <input type="text" id="cf-domain" value="{{ current_cloudflare_domain or '' }}" placeholder="yourdomain.com"
+          class="w-full rounded-lg px-3 py-2 text-sm">
+        <p class="text-slate-500 text-xs mt-1">Vault will be at vault.yourdomain.com, Jane at jane.yourdomain.com</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Discord -->
+  <div class="card rounded-xl mb-6">
+    <div class="p-5 border-b border-slate-800">
+      <h2 class="text-white font-semibold">Discord Bot</h2>
+      <p class="text-slate-400 text-sm mt-0.5">Talk to Amber on your phone via Discord.</p>
+    </div>
+    <div class="p-5 space-y-4">
+      <div>
+        <label class="block text-slate-300 text-sm font-medium mb-1">Bot Token</label>
+        <input type="password" id="discord-token" placeholder="Discord bot token"
+          class="w-full rounded-lg px-3 py-2 text-sm">
+      </div>
+      <div>
+        <label class="block text-slate-300 text-sm font-medium mb-1">Channel ID</label>
+        <input type="text" id="discord-channel" placeholder="123456789012345678"
+          class="w-full rounded-lg px-3 py-2 text-sm">
+      </div>
+    </div>
+  </div>
+
+  <div id="save-error" class="hidden bg-red-900/30 border border-red-700 rounded-lg p-3 mb-4 text-red-300 text-sm"></div>
+  <div id="save-success" class="hidden bg-green-900/30 border border-green-700 rounded-lg p-3 mb-4 text-green-300 text-sm">
+    ✅ Settings saved. Restart Vessence for changes to take effect: <code class="text-green-200">docker compose restart</code>
+  </div>
+
+  <div class="flex justify-end">
+    <button onclick="saveSettings()" id="save-btn"
+      class="btn-primary text-white font-semibold px-8 py-3 rounded-xl cursor-pointer">
+      Save settings
+    </button>
+  </div>
+</div>
+
+<script>
+// Pre-populate brain from current .env (loaded via data attribute if available)
+window.addEventListener('load', () => {
+  const currentBrain = '{{ current_brain or "gemini" }}';
+  const radio = document.querySelector(`input[name="jane-brain"][value="${currentBrain}"]`);
+  if (radio) radio.checked = true;
+  handleBrainChange();
+});
+
+function handleBrainChange() {
+  const brain = document.querySelector('input[name="jane-brain"]:checked')?.value;
+  document.getElementById('anthropic-key-section').classList.toggle('hidden', brain !== 'claude');
+  document.getElementById('openai-key-section').classList.toggle('hidden', brain !== 'openai');
+  document.getElementById('permissions-section').classList.toggle('hidden', brain !== 'claude');
+  // Auto-enable permissions when switching to Claude, disable when switching away
+  const permToggle = document.getElementById('web-permissions-toggle');
+  if (brain !== 'claude') permToggle.checked = false;
+}
+
+function toggleVisible(id) {
+  const el = document.getElementById(id);
+  el.type = el.type === 'password' ? 'text' : 'password';
+}
+
+async function validateKey(type) {
+  const inputs = { google: 'google-key', anthropic: 'anthropic-key', openai: 'openai-key' };
+  const value = document.getElementById(inputs[type])?.value.trim();
+  if (!value) return;
+  const statusEl = document.getElementById(type + '-status');
+  statusEl.classList.remove('hidden');
+  statusEl.textContent = 'Validating...';
+  statusEl.className = 'mt-1 text-xs text-slate-400';
+  try {
+    const resp = await fetch('/api/validate-key', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({type, value})
+    });
+    const data = await resp.json();
+    statusEl.textContent = data.valid ? '✅ Valid' : '❌ ' + (data.error || 'Invalid');
+    statusEl.className = `mt-1 text-xs ${data.valid ? 'text-green-400' : 'text-red-400'}`;
+  } catch(e) {
+    statusEl.textContent = '⚠️ Network error';
+    statusEl.className = 'mt-1 text-xs text-yellow-400';
+  }
+}
+
+async function saveSettings() {
+  const brain = document.querySelector('input[name="jane-brain"]:checked')?.value || 'gemini';
+  const btn = document.getElementById('save-btn');
+  btn.textContent = 'Saving...';
+  btn.disabled = true;
+
+  const webPerms = document.getElementById('web-permissions-toggle').checked;
+  const payload = {
+    jane_brain: brain,
+    jane_web_permissions: webPerms ? '1' : '0',
+    google_api_key: document.getElementById('google-key').value.trim(),
+    google_client_id: document.getElementById('google-client-id').value.trim(),
+    google_client_secret: document.getElementById('google-client-secret').value.trim(),
+    allowed_google_emails: document.getElementById('allowed-google-emails').value.trim(),
+    anthropic_api_key: document.getElementById('anthropic-key').value.trim(),
+    openai_api_key: document.getElementById('openai-key').value.trim(),
+    cloudflare_tunnel_token: document.getElementById('cf-token').value.trim(),
+    cloudflare_domain: document.getElementById('cf-domain').value.trim(),
+    discord_token: document.getElementById('discord-token').value.trim(),
+    discord_channel_id: document.getElementById('discord-channel').value.trim(),
+  };
+
+  try {
+    const resp = await fetch('/api/settings', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload)
+    });
+    const data = await resp.json();
+    if (data.success) {
+      document.getElementById('save-success').classList.remove('hidden');
+      document.getElementById('save-error').classList.add('hidden');
+    } else {
+      document.getElementById('save-error').textContent = data.error || 'Save failed.';
+      document.getElementById('save-error').classList.remove('hidden');
+    }
+  } catch(e) {
+    document.getElementById('save-error').textContent = 'Network error — is Vessence running?';
+    document.getElementById('save-error').classList.remove('hidden');
+  }
+
+  btn.textContent = 'Save settings';
+  btn.disabled = false;
+}
+</script>
+</body>
+</html>

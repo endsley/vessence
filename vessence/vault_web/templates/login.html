@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>{{ app_title or 'Amber Vault' }} — Login</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body {
+      background:
+        radial-gradient(circle at top right, rgba(167, 139, 250, 0.16), transparent 28%),
+        radial-gradient(circle at bottom left, rgba(245, 158, 11, 0.12), transparent 30%),
+        #0f172a;
+    }
+    .login-shell {
+      width: min(760px, 100%);
+      display: flex;
+      justify-content: center;
+    }
+    .story-panel { display: none; }
+    .story-card {
+      background: linear-gradient(180deg, rgba(15,23,42,0.72), rgba(15,23,42,0.94));
+      border: 1px solid rgba(148,163,184,0.18);
+      border-radius: 28px;
+      padding: 1.5rem;
+      box-shadow: 0 24px 70px rgba(2,6,23,0.36);
+      backdrop-filter: blur(12px);
+    }
+    .story-card img {
+      width: 100%;
+      height: auto;
+      border-radius: 22px;
+      border: 1px solid rgba(148,163,184,0.16);
+      margin-bottom: 1rem;
+    }
+    .compact-login-shell {
+      width: min(420px, 100%);
+    }
+  </style>
+</head>
+<body class="min-h-screen flex items-center justify-center p-4">
+  <div class="{{ 'compact-login-shell' if compact_login else 'login-shell' }}">
+    <div class="w-full max-w-xl mx-auto">
+
+    <!-- Logo -->
+    <div class="text-center {{ 'mb-6' if compact_login else 'mb-10' }}">
+      <img src="/api/files/serve/images/people/jane/jane1.png"
+        class="{{ 'w-16 h-16' if compact_login else 'w-24 h-24' }} rounded-full object-cover mx-auto border-2 border-violet-600 mb-3"
+        alt="Jane"
+        onerror="this.style.display='none'"/>
+      {% if not compact_login %}
+      <h1 class="text-4xl font-bold text-white">{{ app_title or 'Vessences' }}</h1>
+      <p class="text-slate-400 mt-2 text-base">{{ app_subtitle or 'Your personal AI companion' }}</p>
+      {% else %}
+      <h1 class="text-xl font-bold text-white">Vessences</h1>
+      {% endif %}
+    </div>
+
+    <!-- Card -->
+    <div class="bg-slate-800 rounded-3xl shadow-2xl {{ 'p-6' if compact_login else 'p-10 md:p-12' }} border border-slate-700">
+
+      {% if share_mode %}
+      <!-- Share mode: enter share code -->
+      <div id="share-form">
+        {% if not compact_login %}
+        <h2 class="text-white font-semibold text-lg mb-1">Enter Share Code</h2>
+        <p class="text-slate-400 text-sm mb-6">Enter the code you received to access shared files.</p>
+        {% endif %}
+        <div class="flex gap-2 mb-4">
+          <input id="share-code" type="text" maxlength="32" placeholder="Share code"
+            class="flex-1 bg-slate-700 text-white text-lg text-center tracking-wider rounded-xl px-4 py-3 border border-slate-600 focus:border-violet-500 focus:outline-none"
+            onkeydown="if(event.key==='Enter') verifyShare()"/>
+          <button onclick="verifyShare()"
+            class="bg-violet-600 hover:bg-violet-500 text-white px-6 rounded-xl font-semibold transition">
+            Enter
+          </button>
+        </div>
+        <p id="share-error" class="text-red-400 text-sm text-center hidden"></p>
+      </div>
+
+      {% else %}
+      <div class="space-y-6">
+        {% if not compact_login %}
+        <div class="text-center">
+        <h2 class="text-white font-semibold text-lg mb-2">Welcome back</h2>
+        <p class="text-slate-400 text-sm mb-6">Sign in with your approved Google account to access your vault.</p>
+        </div>
+        {% endif %}
+
+        {% if google_oauth_enabled %}
+        <div class="text-center">
+        <a href="/auth/google"
+          class="flex items-center justify-center gap-3 w-full bg-white hover:bg-slate-100 text-slate-800 font-semibold py-3 px-6 rounded-xl transition shadow-md">
+          <svg class="w-5 h-5" viewBox="0 0 24 24">
+            <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+            <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+            <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+            <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+          </svg>
+          Sign in with Google
+        </a>
+        </div>
+        {% else %}
+        <div class="rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-4 text-left">
+          <p class="text-sm font-semibold text-amber-200">Google sign-in is not configured.</p>
+          <p class="mt-1 text-sm text-amber-100/80">This deployment no longer accepts one-time codes. Configure Google OAuth to continue.</p>
+        </div>
+        {% endif %}
+      </div>
+      {% endif %}
+
+    </div>
+
+    {% if not compact_login %}
+    <p class="text-center text-slate-600 text-xs mt-6">{{ footer_label or 'Amber Vault · Project Ambient' }}</p>
+    {% endif %}
+    </div>
+  </div>
+
+  <script>
+    async function verifyShare() {
+      const code = document.getElementById('share-code').value.trim();
+      const err = document.getElementById('share-error');
+      err.classList.add('hidden');
+      const r = await fetch('/api/auth/verify-share', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ code }),
+      });
+      const d = await r.json();
+      if (d.ok) { window.location.href = '/'; }
+      else { err.textContent = d.error || 'Invalid code.'; err.classList.remove('hidden'); }
+    }
+  </script>
+</body>
+</html>

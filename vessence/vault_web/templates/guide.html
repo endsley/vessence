@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Jane User Guide — Vessence</title>
+<style>
+  :root { --bg: #0f172a; --surface: #1e293b; --border: #334155; --text: #e2e8f0; --dim: #94a3b8; --accent: #8b5cf6; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+  .container { max-width: 720px; margin: 0 auto; padding: 2rem 1.5rem 4rem; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  /* Header */
+  .header { display: flex; align-items: center; gap: 1rem; margin-bottom: 2rem; padding-bottom: 1rem; border-bottom: 1px solid var(--border); }
+  .header h1 { font-size: 1.5rem; font-weight: 700; }
+  .back-link { font-size: 0.875rem; margin-left: auto; padding: 0.4rem 1rem; border: 1px solid var(--border); border-radius: 999px; transition: all 0.2s; }
+  .back-link:hover { border-color: var(--accent); text-decoration: none; }
+
+  /* Sections */
+  h2 { font-size: 1.1rem; font-weight: 600; margin: 2rem 0 0.75rem; color: var(--accent); }
+  h3 { font-size: 0.95rem; font-weight: 600; margin: 1.25rem 0 0.5rem; }
+  p, li { font-size: 0.9rem; line-height: 1.7; color: var(--dim); }
+  p { margin-bottom: 0.75rem; }
+  ul { padding-left: 1.25rem; margin-bottom: 1rem; }
+  li { margin-bottom: 0.4rem; }
+  li strong { color: var(--text); }
+
+  /* Command table */
+  table { width: 100%; border-collapse: collapse; margin: 0.75rem 0 1.5rem; font-size: 0.85rem; }
+  th { text-align: left; padding: 0.5rem 0.75rem; background: var(--surface); color: var(--dim); font-weight: 500; border-bottom: 1px solid var(--border); }
+  td { padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--border); }
+  code { background: var(--surface); padding: 0.15rem 0.4rem; border-radius: 4px; font-size: 0.85em; color: var(--text); }
+
+  /* Tip boxes */
+  .tip { background: var(--surface); border-left: 3px solid var(--accent); padding: 0.75rem 1rem; border-radius: 0 8px 8px 0; margin: 1rem 0; font-size: 0.85rem; }
+  .tip strong { color: var(--text); }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <div class="header">
+    <h1>📘 Jane User Guide</h1>
+    <a href="/" class="back-link">← Back to Jane</a>
+  </div>
+
+  <!-- What is Jane -->
+  <h2>What is Jane?</h2>
+  <p>Jane is your personal AI assistant. She remembers your conversations, files, preferences, and projects through a persistent memory system (ChromaDB). The more you interact with her, the better she understands you.</p>
+
+  <!-- What are Essences -->
+  <h2>What are Essences?</h2>
+  <p>Essences are pluggable AI personalities. Each essence gives Jane a new role — a tax accountant, a news briefer, a music DJ. When you activate an essence, Jane loads that role's knowledge, tools, and personality while keeping her core memory of you.</p>
+  <ul>
+    <li><strong>Activate:</strong> Click an essence on the Essences page. Jane switches to that persona.</li>
+    <li><strong>Deactivate:</strong> Click "Back to Jane" in the header to return to default Jane.</li>
+    <li><strong>Memory:</strong> Each essence has its own isolated memory. Jane's universal memory is always available.</li>
+  </ul>
+
+  <!-- What are Tools -->
+  <h2>What are Tools?</h2>
+  <p>Tools are standalone utilities that essences and Jane can invoke to get things done. Examples include the file indexer, vault search, text-to-speech, and memory management tools. Each tool does one specific thing well.</p>
+
+  <h3>How they appear</h3>
+  <p>Installed tools show up in the <strong>Tools dropdown</strong> in the header. Jane loads the list at startup by scanning the tools directory.</p>
+
+  <h3>How they're used</h3>
+  <p>Jane calls tools automatically when your request is relevant — for example, if you ask to search your vault, she invokes the vault search tool behind the scenes. You can also reference a tool by name to be explicit.</p>
+
+  <h3>How to create your own tool</h3>
+  <p>Create a Python file in the <code>tools/</code> directory inside your essences folder. Your tool must expose function signatures that Jane can discover. At minimum, define:</p>
+  <ul>
+    <li><strong>A clear function name</strong> — descriptive of what it does (e.g., <code>search_notes</code>)</li>
+    <li><strong>A docstring</strong> — Jane reads this to understand when to call your tool</li>
+    <li><strong>Typed parameters</strong> — use Python type hints so Jane knows what arguments to pass</li>
+    <li><strong>A return value</strong> — return a string or dict that Jane can relay to the user</li>
+  </ul>
+  <p>Look at existing tools in the essences directory for working examples.</p>
+
+  <h3>Tools vs Essences</h3>
+  <p>Tools are <strong>single functions</strong> — they do one job and return a result. Essences are <strong>complete personas</strong> with their own memory, personality, and multiple tools combined. Think of tools as the building blocks that essences are made from.</p>
+
+  <div class="tip">
+    <strong>Example:</strong> A "vault search" tool finds files. The "Life Librarian" essence uses that tool plus memory, personality, and conversation skills to act as a full personal archivist.
+  </div>
+
+  <!-- Job Queue vs Prompt List -->
+  <h2>Job Queue vs Prompt List</h2>
+
+  <h3>Prompt List</h3>
+  <p>Quick tasks you want Jane to handle when you're away. Type <code>prompt: do X</code> and Jane queues it. When you go idle for 5+ minutes, Jane picks up the next prompt and works through it autonomously.</p>
+  <p>Good for: bug fixes, file cleanup, small features, research tasks.</p>
+
+  <h3>Job Queue</h3>
+  <p>Bigger, multi-step projects with full context. Each job is a detailed spec file with objective, steps, verification criteria, and files involved. Create jobs with <code>add job:</code> and execute with <code>run job queue:</code>.</p>
+  <p>Good for: building features, refactoring, audits, Docker builds, anything that needs a plan.</p>
+
+  <div class="tip">
+    <strong>When to use which:</strong> If you can describe it in one sentence → prompt list. If it needs a plan with multiple steps → job queue.
+  </div>
+
+  <!-- Commands -->
+  <h2>Commands</h2>
+  <table>
+    <tr><th>Command</th><th>What it does</th></tr>
+    <tr><td><code>prompt: &lt;text&gt;</code></td><td>Add a task to the autonomous prompt queue</td></tr>
+    <tr><td><code>run prompt list:</code></td><td>Execute all queued prompts now</td></tr>
+    <tr><td><code>add job:</code></td><td>Create a detailed job spec from conversation context</td></tr>
+    <tr><td><code>show job queue</code></td><td>Show all jobs (instant, no LLM)</td></tr>
+    <tr><td><code>show prompt list</code></td><td>Show prompt queue (instant, no LLM)</td></tr>
+    <tr><td><code>run job queue:</code></td><td>Execute the highest-priority pending job</td></tr>
+    <tr><td><code>build essence:</code></td><td>Start the essence builder interview</td></tr>
+    <tr><td><code>my commands</code></td><td>Show command reference (instant)</td></tr>
+  </table>
+
+  <!-- How Jane Thinks -->
+  <h2>How Jane Thinks</h2>
+  <p>Jane automatically picks the right brain for each message:</p>
+  <table>
+    <tr><th>Message type</th><th>Model</th><th>Speed</th></tr>
+    <tr><td>Greetings ("hey", "thanks")</td><td>Haiku (fast)</td><td>~5s</td></tr>
+    <tr><td>Simple questions ("what time is it")</td><td>Haiku</td><td>~5s</td></tr>
+    <tr><td>Medium tasks ("fix this bug")</td><td>Sonnet</td><td>~10-20s</td></tr>
+    <tr><td>Complex work ("build this feature")</td><td>Opus (powerful)</td><td>~15-60s</td></tr>
+  </table>
+  <p>The model label appears at the bottom-right of each response so you can see which brain handled it.</p>
+
+  <div class="tip">
+    <strong>White text = Jane's thoughts.</strong> While working on complex tasks, you'll see Jane's intermediate thinking (reading files, running searches, editing code) in small white text. These collapse into a summary after the response finishes.
+  </div>
+
+  <!-- Features -->
+  <h2>Features</h2>
+  <ul>
+    <li><strong>File upload:</strong> Drag-and-drop or use the attach button for PDFs, images, documents</li>
+    <li><strong>Voice:</strong> Click "Play audio" on any response to hear it read aloud. Toggle TTS in settings.</li>
+    <li><strong>LaTeX:</strong> Jane renders math: <code>$E=mc^2$</code> for inline, <code>$$\sum_{i=1}^n$$</code> for display</li>
+    <li><strong>Code:</strong> Syntax-highlighted code blocks with copy button</li>
+    <li><strong>Daily Briefing:</strong> Personalized news with brief/full audio summaries</li>
+    <li><strong>Memory:</strong> Jane remembers across sessions. She'll reference past conversations naturally.</li>
+  </ul>
+
+  <!-- Keyboard Shortcuts -->
+  <h2>Keyboard Shortcuts</h2>
+  <table>
+    <tr><th>Key</th><th>Action</th></tr>
+    <tr><td><code>Enter</code></td><td>Send message</td></tr>
+    <tr><td><code>Shift+Enter</code></td><td>New line (don't send)</td></tr>
+    <tr><td><code>Esc</code></td><td>Focus input box</td></tr>
+  </table>
+
+  <!-- Troubleshooting -->
+  <h2>Troubleshooting</h2>
+  <ul>
+    <li><strong>"Jane is offline"</strong> — Usually recovers in 30 seconds. Try a hard refresh (Ctrl+Shift+R).</li>
+    <li><strong>Slow first response after restart</strong> — The AI model is warming up. Subsequent messages will be faster.</li>
+    <li><strong>No essences showing</strong> — Click the dropdown again. Data pre-fetches on page load.</li>
+    <li><strong>Response cuts off</strong> — Jane may have hit a timeout. Send "continue" to pick up where she left off.</li>
+  </ul>
+
+  <div style="margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--border); text-align: center;">
+    <a href="/" class="back-link" style="display: inline-block;">← Back to Jane</a>
+  </div>
+
+</div>
+</body>
+</html>

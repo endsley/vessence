@@ -1,0 +1,17 @@
+# NOTE: This is a reference template only. Paths and User must be customized for deployment.
+[Unit]
+Description=Cloudflare Quick Tunnel for Amber Vault
+After=network.target vault-web.service
+Requires=vault-web.service
+
+[Service]
+Type=simple
+User=chieh
+ExecStart=/usr/local/bin/cloudflared tunnel --url http://127.0.0.1:8080 --no-autoupdate
+Restart=on-failure
+RestartSec=10
+StandardOutput=append:/home/chieh/vessence/logs/vault_tunnel.log
+StandardError=append:/home/chieh/vessence/logs/vault_tunnel.log
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,763 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Daily Briefing</title>
+  <meta name="theme-color" content="#0B0F19"/>
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <style>
+    [x-cloak] { display: none !important; }
+    :root { color-scheme: dark; }
+    body { background: #0B0F19; color: #e2e8f0; }
+    .scrollbar-thin::-webkit-scrollbar { width: 6px; }
+    .scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
+    .scrollbar-thin::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+    .card-hover { transition: transform 0.2s ease, box-shadow 0.2s ease; }
+    .card-hover:hover { transform: translateY(-3px); box-shadow: 0 12px 32px rgba(0,0,0,0.4); }
+    .line-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .line-clamp-3 { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+    .topic-colors { --topic-0: #8b5cf6; --topic-1: #3b82f6; --topic-2: #10b981; --topic-3: #f59e0b; --topic-4: #ef4444; --topic-5: #ec4899; --topic-6: #06b6d4; --topic-7: #84cc16; }
+    .fade-gradient { background: linear-gradient(135deg, #6d28d9 0%, #2563eb 50%, #0891b2 100%); }
+    .fab-pulse { animation: fab-pulse 2s infinite; }
+    @keyframes fab-pulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(139,92,246,0.4); }
+      50% { box-shadow: 0 0 0 10px rgba(139,92,246,0); }
+    }
+    .card-dismissed { opacity: 0.45; filter: grayscale(0.5); }
+  </style>
+</head>
+<body class="min-h-screen" x-data="briefingApp()" x-init="init()" x-cloak>
+
+  <!-- ── Header ──────────────────────────────────────────────────────────── -->
+  <header class="sticky top-0 z-40 bg-slate-950/90 backdrop-blur-md border-b border-slate-800">
+    <div class="max-w-7xl mx-auto px-4 py-3">
+      <!-- Top row: nav + title + actions -->
+      <div class="flex items-center gap-3 mb-3">
+        <!-- Back to Jane -->
+        <a href="/" class="flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition" title="Back to Jane">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+          <span class="text-xs font-medium hidden sm:inline">Jane</span>
+        </a>
+
+        <!-- Essences dropdown -->
+        <div class="relative" x-data="essenceDropdown()" @click.outside="open = false">
+          <button @click="toggle()" class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-700/50">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"/>
+            </svg>
+            <span>Essences</span>
+            <svg class="w-3 h-3 transition-transform" :class="open ? 'rotate-180' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+            </svg>
+          </button>
+          <div x-show="open" x-cloak x-transition
+            class="absolute left-0 top-full mt-1 w-56 rounded-xl border border-slate-700 bg-slate-900 shadow-2xl overflow-hidden z-50">
+              <a href="/"
+                class="flex items-center gap-2 px-3 py-2.5 text-xs text-slate-300 hover:text-white hover:bg-slate-800 transition">
+                <span class="w-5 h-5 rounded bg-violet-700 flex items-center justify-center text-[10px] font-bold text-white flex-shrink-0">J</span>
+                Jane
+              </a>
+              <template x-for="e in items" :key="e.name">
+                <a :href="'/vault?tab=essences&open=' + encodeURIComponent(e.name)"
+                  class="flex items-center gap-2 px-3 py-2 text-xs text-slate-300 hover:text-white hover:bg-slate-800 transition border-t border-slate-700/50">
+                  <span class="w-5 h-5 rounded bg-violet-800 flex items-center justify-center text-[10px] flex-shrink-0"
+                    x-text="e.name.charAt(0).toUpperCase()"></span>
+                  <span class="truncate" x-text="e.name"></span>
+                  <span x-show="e.loaded" class="ml-auto w-1.5 h-1.5 rounded-full bg-green-500 flex-shrink-0"></span>
+                </a>
+              </template>
+              <template x-if="items.length === 0">
+                <p class="px-3 py-2 text-[10px] text-slate-500 italic border-t border-slate-700/50">No essences installed</p>
+              </template>
+              <a href="/essences"
+                class="flex items-center gap-2 px-3 py-2.5 text-xs text-slate-500 hover:text-slate-300 transition border-t border-slate-700">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                </svg>
+                Manage essences
+              </a>
+          </div>
+        </div>
+        <!-- Tools dropdown -->
+        <div class="relative" x-data="toolsDropdown()" @click.outside="open = false">
+          <button @click="toggle()" class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-700/50">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+            </svg>
+            <span>Tools</span>
+            <svg class="w-3 h-3 transition-transform" :class="open ? 'rotate-180' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+            </svg>
+          </button>
+          <div x-show="open" x-cloak x-transition
+            class="absolute left-0 top-full mt-1 w-56 rounded-xl border border-slate-700 bg-slate-900 shadow-2xl overflow-hidden z-50">
+              <template x-for="e in items" :key="e.name">
+                <a :href="e.name === 'Music Playlist' ? '/vault?tab=music' : e.name === 'Work Log' ? '/worklog' : e.name === 'Daily Briefing' ? '/briefing' : '/vault'"
+                  class="flex items-center gap-2 px-3 py-2 text-xs text-slate-300 hover:text-white hover:bg-slate-800 transition">
+                  <span class="w-5 h-5 rounded bg-slate-700 flex items-center justify-center text-[10px] flex-shrink-0"
+                    x-text="e.name.charAt(0).toUpperCase()"></span>
+                  <span class="truncate" x-text="e.name"></span>
+                  <span x-show="e.loaded" class="ml-auto w-1.5 h-1.5 rounded-full bg-green-500 flex-shrink-0"></span>
+                </a>
+              </template>
+              <template x-if="items.length === 0">
+                <p class="px-3 py-2 text-[10px] text-slate-500 italic">No tools installed</p>
+              </template>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-2">
+          <svg class="w-6 h-6 text-violet-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10a2 2 0 012 2v1m2 13a2 2 0 01-2-2V7m2 13a2 2 0 002-2V9a2 2 0 00-2-2h-2m-4-3H9M7 16h6M7 8h6v4H7V8z"/>
+          </svg>
+          <h1 class="text-xl font-bold text-white">Daily Briefing</h1>
+        </div>
+
+        <div class="ml-auto flex items-center gap-2">
+          <!-- Last updated -->
+          <span class="text-xs text-slate-500 hidden sm:inline" x-show="lastUpdated" x-text="'Updated ' + timeAgo(lastUpdated)"></span>
+
+          <!-- Refresh -->
+          <button @click="triggerFetch()" :disabled="fetching"
+            class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-violet-600 hover:bg-violet-500 text-white transition disabled:opacity-50 disabled:cursor-not-allowed">
+            <svg class="w-3.5 h-3.5" :class="fetching ? 'animate-spin' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+            </svg>
+            <span x-text="fetching ? 'Fetching...' : 'Refresh'"></span>
+          </button>
+
+          <!-- Manage Topics -->
+          <button @click="showTopicModal = true"
+            class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 transition">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+            </svg>
+            <span class="hidden sm:inline">Topics</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Search bar -->
+      <div class="relative mb-3">
+        <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+        </svg>
+        <input type="text" x-model="searchQuery" @keydown.enter="searchArticles()" @input="if(!searchQuery) { searchResults = null; }"
+          placeholder="Search past articles..."
+          class="w-full pl-10 pr-10 py-2 bg-slate-900 border border-slate-700 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500 transition"/>
+        <button x-show="searchQuery" @click="searchQuery = ''; searchResults = null;"
+          class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white transition">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+
+      <!-- Category filter pills -->
+      <div class="flex flex-wrap gap-2 items-center">
+        <button @click="activeCategory = 'All'; loadArticles()"
+          :class="activeCategory === 'All' ? 'bg-violet-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700 border border-slate-700'"
+          class="px-3 py-1 rounded-full text-xs font-medium transition">
+          All
+        </button>
+        <template x-for="cat in categories" :key="cat">
+          <button @click="activeCategory = cat; loadArticles()"
+            :class="activeCategory === cat ? 'bg-violet-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700 border border-slate-700'"
+            class="px-3 py-1 rounded-full text-xs font-medium transition"
+            x-text="cat">
+          </button>
+        </template>
+        <!-- Show/Hide dismissed toggle -->
+        <button @click="showDismissed = !showDismissed"
+          :class="showDismissed ? 'bg-slate-700 text-slate-300' : 'bg-slate-800 text-slate-500 border border-slate-700'"
+          class="ml-auto px-3 py-1 rounded-full text-xs font-medium transition flex items-center gap-1">
+          <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.878 9.878L6.59 6.59m7.532 7.532l3.29 3.29M3 3l18 18" x-show="!showDismissed"/>
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" x-show="showDismissed"/>
+          </svg>
+          <span x-text="showDismissed ? 'Hide dismissed' : 'Show dismissed'"></span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- ── Main Content ────────────────────────────────────────────────────── -->
+  <main class="max-w-7xl mx-auto px-4 py-6 pb-24">
+
+    <!-- Loading skeleton -->
+    <div x-show="loading" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+      <template x-for="i in 6">
+        <div class="bg-slate-900 rounded-2xl border border-slate-800 overflow-hidden animate-pulse">
+          <div class="aspect-video bg-slate-800"></div>
+          <div class="p-4 space-y-3">
+            <div class="h-4 bg-slate-800 rounded w-3/4"></div>
+            <div class="h-3 bg-slate-800 rounded w-1/2"></div>
+            <div class="space-y-2">
+              <div class="h-3 bg-slate-800 rounded"></div>
+              <div class="h-3 bg-slate-800 rounded w-5/6"></div>
+            </div>
+          </div>
+        </div>
+      </template>
+    </div>
+
+    <!-- Empty state -->
+    <div x-show="!loading && displayArticles.length === 0" class="flex flex-col items-center justify-center py-20 text-center">
+      <svg class="w-16 h-16 text-slate-700 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10a2 2 0 012 2v1m2 13a2 2 0 01-2-2V7m2 13a2 2 0 002-2V9a2 2 0 00-2-2h-2m-4-3H9M7 16h6M7 8h6v4H7V8z"/>
+      </svg>
+      <h3 class="text-lg font-semibold text-slate-400 mb-1">No articles yet</h3>
+      <p class="text-sm text-slate-500 mb-4">Add some topics and hit Refresh to fetch your first briefing.</p>
+      <button @click="showTopicModal = true" class="px-4 py-2 bg-violet-600 hover:bg-violet-500 text-white text-sm rounded-xl transition">
+        Add Topics
+      </button>
+    </div>
+
+    <!-- Article card grid -->
+    <div x-show="!loading && displayArticles.length > 0" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+      <template x-for="article in displayArticles" :key="article.id">
+        <div class="bg-slate-900 rounded-2xl border border-slate-800 overflow-hidden card-hover flex flex-col"
+          :class="article.dismissed ? 'card-dismissed' : ''"
+          <!-- Image -->
+          <div class="relative aspect-video overflow-hidden">
+            <template x-if="article.image_url">
+              <img :src="article.image_url" :alt="article.title" class="w-full h-full object-cover"
+                @error="$el.style.display='none'; $el.nextElementSibling.style.display='flex'"/>
+            </template>
+            <div :style="'display:' + (article.image_url ? 'none' : 'flex') + ';background:linear-gradient(135deg,' + topicColor(article.topic) + ' 0%, #1e293b 100%)'"
+              class="w-full h-full items-center justify-center">
+              <svg class="w-12 h-12 text-white/20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10a2 2 0 012 2v1m2 13a2 2 0 01-2-2V7m2 13a2 2 0 002-2V9a2 2 0 00-2-2h-2m-4-3H9M7 16h6M7 8h6v4H7V8z"/>
+              </svg>
+            </div>
+            <!-- Topic badge -->
+            <span class="absolute top-3 left-3 px-2 py-0.5 rounded-full text-[10px] font-semibold text-white uppercase tracking-wider shadow-lg"
+              :style="'background:' + topicColor(article.topic)"
+              x-text="article.topic"></span>
+          </div>
+
+          <!-- Content -->
+          <div class="p-4 flex flex-col flex-1">
+            <!-- Headline -->
+            <h3 class="text-white font-semibold leading-snug line-clamp-2 mb-1.5" x-text="article.title"></h3>
+
+            <!-- Source + time -->
+            <p class="text-xs text-slate-500 mb-2">
+              <span x-text="article.source || 'Unknown'"></span>
+              <span class="mx-1">&middot;</span>
+              <span x-text="timeAgo(article.published_at || article.fetched_at)"></span>
+            </p>
+
+            <!-- Tags -->
+            <div x-show="article.tags && article.tags.length > 0" class="flex flex-wrap gap-1 mb-2">
+              <template x-for="tag in (article.tags || [])" :key="tag">
+                <span class="px-1.5 py-0.5 text-[10px] rounded bg-violet-600/20 text-violet-300 border border-violet-600/30" x-text="tag"></span>
+              </template>
+            </div>
+
+            <!-- Summary -->
+            <p class="text-sm text-slate-400 leading-relaxed flex-1 mb-3"
+              :class="expandedArticle === article.id ? '' : 'line-clamp-3'"
+              x-text="expandedArticle === article.id ? (article.full_summary || article.brief_summary || article.summary) : (article.brief_summary || article.summary)"></p>
+
+            <!-- Action row -->
+            <div class="flex items-center gap-2 pt-2 border-t border-slate-800">
+              <!-- Read more -->
+              <a :href="article.url" target="_blank" rel="noopener"
+                class="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-violet-400 hover:text-violet-300 hover:bg-violet-600/10 transition"
+                x-show="article.url">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
+                </svg>
+                Read
+              </a>
+
+              <!-- Expand/Collapse -->
+              <button @click="expandedArticle === article.id ? expandedArticle = null : expandArticle(article.id)"
+                class="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-400 hover:text-white hover:bg-slate-800 transition">
+                <svg class="w-3.5 h-3.5 transition-transform" :class="expandedArticle === article.id ? 'rotate-180' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                </svg>
+                <span x-text="expandedArticle === article.id ? 'Less' : 'More'"></span>
+              </button>
+
+              <!-- Heard / Dismiss -->
+              <button @click="toggleDismiss(article)"
+                class="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition"
+                :class="article.dismissed ? 'text-green-400 hover:text-green-300 hover:bg-green-600/10' : 'text-slate-400 hover:text-green-400 hover:bg-green-600/10'"
+                :title="article.dismissed ? 'Mark as unread' : 'Mark as heard'">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+                </svg>
+                <span x-text="article.dismissed ? 'Heard' : 'Heard'"></span>
+              </button>
+
+              <!-- TTS: Brief -->
+              <button @click="playArticleAudio(article.id, 'brief', article.summary)" class="ml-auto p-1.5 rounded-lg text-slate-500 hover:text-violet-400 hover:bg-violet-600/10 transition text-xs" title="Listen (brief)">
+                Brief ▶
+              </button>
+              <!-- TTS: Full -->
+              <button @click="playArticleAudio(article.id, 'full', article.fullSummary || article.summary)" class="p-1.5 rounded-lg text-slate-500 hover:text-violet-400 hover:bg-violet-600/10 transition text-xs" title="Listen (full)">
+                Full ▶
+              </button>
+            </div>
+          </div>
+        </div>
+      </template>
+    </div>
+  </main>
+
+  <!-- ── "Read All" FAB ──────────────────────────────────────────────────── -->
+  <div class="fixed bottom-6 right-6 z-50 flex flex-col items-end gap-2">
+    <!-- Stop button (shown while speaking) -->
+    <button x-show="isSpeaking" @click="stopSpeaking()" x-transition
+      class="flex items-center gap-2 px-4 py-3 bg-red-600 hover:bg-red-500 text-white font-medium rounded-2xl shadow-2xl transition">
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z"/>
+      </svg>
+      Stop Reading
+    </button>
+
+    <!-- Read All button -->
+    <button x-show="!isSpeaking && displayArticles.length > 0" @click="readAllSummaries()" x-transition
+      class="flex items-center gap-2 px-4 py-3 bg-violet-600 hover:bg-violet-500 text-white font-medium rounded-2xl shadow-2xl transition fab-pulse">
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"/>
+      </svg>
+      Read All
+    </button>
+  </div>
+
+  <!-- ── Topic Management Modal ──────────────────────────────────────────── -->
+  <div x-show="showTopicModal" x-cloak x-transition:enter="transition ease-out duration-200" x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100"
+    x-transition:leave="transition ease-in duration-150" x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0"
+    class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+    @click.self="showTopicModal = false" @keydown.escape.window="showTopicModal = false">
+
+    <div class="w-full max-w-lg bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden"
+      x-transition:enter="transition ease-out duration-200" x-transition:enter-start="opacity-0 scale-95" x-transition:enter-end="opacity-100 scale-100">
+
+      <!-- Modal header -->
+      <div class="flex items-center justify-between px-6 py-4 border-b border-slate-700">
+        <h2 class="text-lg font-bold text-white">Manage Topics</h2>
+        <button @click="showTopicModal = false" class="text-slate-500 hover:text-white transition">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+
+      <!-- Add topic form -->
+      <div class="px-6 py-4 border-b border-slate-800">
+        <h3 class="text-sm font-semibold text-slate-300 mb-3">Add New Topic</h3>
+        <div class="space-y-3">
+          <div>
+            <label class="text-xs text-slate-500 mb-1 block">Topic Name</label>
+            <input type="text" x-model="newTopicName" placeholder="e.g., Technology"
+              class="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-sm text-white placeholder-slate-500 focus:outline-none focus:border-violet-500 transition"/>
+          </div>
+          <div>
+            <label class="text-xs text-slate-500 mb-1 block">Keywords (comma-separated)</label>
+            <input type="text" x-model="newTopicKeywords" placeholder="e.g., AI, machine learning, tech"
+              class="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-sm text-white placeholder-slate-500 focus:outline-none focus:border-violet-500 transition"/>
+          </div>
+          <div class="flex items-end gap-3">
+            <div class="flex-1">
+              <label class="text-xs text-slate-500 mb-1 block">Priority</label>
+              <select x-model="newTopicPriority"
+                class="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-sm text-white focus:outline-none focus:border-violet-500 transition">
+                <option value="high">High</option>
+                <option value="normal">Normal</option>
+                <option value="low">Low</option>
+              </select>
+            </div>
+            <button @click="addTopic()" :disabled="!newTopicName.trim()"
+              class="px-4 py-2 bg-violet-600 hover:bg-violet-500 text-white text-sm font-medium rounded-lg transition disabled:opacity-40 disabled:cursor-not-allowed">
+              Add
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Existing topics list -->
+      <div class="px-6 py-4 max-h-64 overflow-y-auto scrollbar-thin">
+        <h3 class="text-sm font-semibold text-slate-300 mb-3">Current Topics</h3>
+        <template x-if="topics.length === 0">
+          <p class="text-sm text-slate-500 italic py-2">No topics configured yet.</p>
+        </template>
+        <div class="space-y-2">
+          <template x-for="t in topics" :key="t.name">
+            <div class="flex items-center justify-between px-3 py-2.5 bg-slate-800 rounded-xl border border-slate-700/50">
+              <div class="flex items-center gap-3">
+                <span class="w-3 h-3 rounded-full flex-shrink-0" :style="'background:' + topicColor(t.name)"></span>
+                <div>
+                  <p class="text-sm font-medium text-white" x-text="t.name"></p>
+                  <p class="text-xs text-slate-500" x-text="(t.keywords || []).join(', ') || 'No keywords'"></p>
+                </div>
+              </div>
+              <div class="flex items-center gap-2">
+                <span class="text-[10px] font-medium px-2 py-0.5 rounded-full bg-slate-700 text-slate-400 uppercase" x-text="t.priority || 'normal'"></span>
+                <button @click="deleteTopic(t.name)" class="text-slate-600 hover:text-red-400 transition p-1" title="Delete topic">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                  </svg>
+                </button>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <!-- Modal footer -->
+      <div class="px-6 py-3 border-t border-slate-800 flex justify-end">
+        <button @click="showTopicModal = false" class="px-4 py-2 text-sm text-slate-400 hover:text-white transition">
+          Done
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Alpine.js App ───────────────────────────────────────────────────── -->
+  <script>
+    function briefingApp() {
+      return {
+        articles: [],
+        topics: [],
+        categories: [],
+        activeCategory: 'All',
+        searchQuery: '',
+        searchResults: null,
+        loading: true,
+        fetching: false,
+        lastUpdated: null,
+        isSpeaking: false,
+        showTopicModal: false,
+        newTopicName: '',
+        newTopicKeywords: '',
+        newTopicPriority: 'normal',
+        expandedArticle: null,
+        showDismissed: false,
+        _readAllIndex: 0,
+        _readAllStop: false,
+
+        // Computed-like getter for display articles
+        get displayArticles() {
+          let list = this.searchResults !== null ? this.searchResults : this.articles;
+          if (!this.showDismissed) {
+            list = list.filter(a => !a.dismissed);
+          } else {
+            // Sort: non-dismissed first, dismissed at the bottom
+            list = [...list].sort((a, b) => (a.dismissed === b.dismissed) ? 0 : a.dismissed ? 1 : -1);
+          }
+          return list;
+        },
+
+        // Color palette for topics
+        _topicColorMap: {},
+        _colorPalette: ['#8b5cf6','#3b82f6','#10b981','#f59e0b','#ef4444','#ec4899','#06b6d4','#84cc16','#a855f7','#f97316'],
+        topicColor(name) {
+          if (!name) return this._colorPalette[0];
+          if (!this._topicColorMap[name]) {
+            const idx = Object.keys(this._topicColorMap).length % this._colorPalette.length;
+            this._topicColorMap[name] = this._colorPalette[idx];
+          }
+          return this._topicColorMap[name];
+        },
+
+        async init() {
+          await Promise.all([this.loadTopics(), this.loadArticles()]);
+          this.loading = false;
+        },
+
+        async loadArticles() {
+          try {
+            const params = new URLSearchParams();
+            if (this.activeCategory && this.activeCategory !== 'All') params.set('category', this.activeCategory);
+            const r = await fetch('/api/briefing/articles?' + params.toString());
+            if (r.ok) {
+              const data = await r.json();
+              this.articles = data.cards || data.articles || [];
+              this.categories = data.categories || [];
+              if (data.last_updated) this.lastUpdated = data.last_updated;
+            }
+          } catch (e) {
+            console.error('Failed to load articles:', e);
+          }
+        },
+
+        async loadTopics() {
+          try {
+            const r = await fetch('/api/briefing/topics');
+            if (r.ok) {
+              const data = await r.json();
+              this.topics = data.topics || data || [];
+              // Pre-assign colors
+              this.topics.forEach(t => this.topicColor(t.name));
+            }
+          } catch (e) {
+            console.error('Failed to load topics:', e);
+          }
+        },
+
+        async addTopic() {
+          const name = this.newTopicName.trim();
+          if (!name) return;
+          try {
+            const r = await fetch('/api/briefing/topics', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                name: name,
+                keywords: this.newTopicKeywords.split(',').map(k => k.trim()).filter(Boolean),
+                priority: this.newTopicPriority,
+              }),
+            });
+            if (r.ok) {
+              this.newTopicName = '';
+              this.newTopicKeywords = '';
+              this.newTopicPriority = 'normal';
+              await this.loadTopics();
+            }
+          } catch (e) {
+            console.error('Failed to add topic:', e);
+          }
+        },
+
+        async deleteTopic(name) {
+          if (!confirm('Delete topic "' + name + '"?')) return;
+          try {
+            const r = await fetch('/api/briefing/topics/' + encodeURIComponent(name), { method: 'DELETE' });
+            if (r.ok) {
+              if (this.activeTopic === name) {
+                this.activeTopic = null;
+                await this.loadArticles();
+              }
+              await this.loadTopics();
+            }
+          } catch (e) {
+            console.error('Failed to delete topic:', e);
+          }
+        },
+
+        async toggleDismiss(article) {
+          const wasDismissed = article.dismissed;
+          try {
+            if (wasDismissed) {
+              await fetch('/api/briefing/article/' + encodeURIComponent(article.id) + '/dismiss', { method: 'DELETE' });
+            } else {
+              await fetch('/api/briefing/article/' + encodeURIComponent(article.id) + '/dismiss', { method: 'POST' });
+            }
+            article.dismissed = !wasDismissed;
+          } catch (e) {
+            console.error('Failed to toggle dismiss:', e);
+          }
+        },
+
+        async expandArticle(articleId) {
+          this.expandedArticle = articleId;
+          // Fetch full detail if not already loaded
+          const article = this.articles.find(a => a.id === articleId);
+          if (article && !article.full_summary) {
+            try {
+              const r = await fetch('/api/briefing/article/' + encodeURIComponent(articleId));
+              if (r.ok) {
+                const data = await r.json();
+                article.full_summary = data.full_summary || data.summary || article.summary;
+              }
+            } catch (e) {
+              console.error('Failed to expand article:', e);
+            }
+          }
+        },
+
+        async triggerFetch() {
+          this.fetching = true;
+          try {
+            const r = await fetch('/api/briefing/fetch', { method: 'POST' });
+            if (r.ok) {
+              await this.loadArticles(this.activeTopic);
+            }
+          } catch (e) {
+            console.error('Failed to trigger fetch:', e);
+          } finally {
+            this.fetching = false;
+          }
+        },
+
+        async searchArticles() {
+          if (!this.searchQuery.trim()) {
+            this.searchResults = null;
+            return;
+          }
+          try {
+            const r = await fetch('/api/briefing/search?q=' + encodeURIComponent(this.searchQuery));
+            if (r.ok) {
+              const data = await r.json();
+              this.searchResults = data.articles || data || [];
+            }
+          } catch (e) {
+            console.error('Failed to search:', e);
+          }
+        },
+
+        _audioEl: null,
+
+        async playArticleAudio(articleId, summaryType, fallbackText) {
+          // Stop any current playback
+          this.stopSpeaking();
+          this.isSpeaking = true;
+
+          // Try server-generated audio first
+          const audioUrl = `/api/briefing/audio/${articleId}/${summaryType}`;
+          try {
+            const check = await fetch(audioUrl, { method: 'HEAD' });
+            if (check.ok) {
+              this._audioEl = new Audio(audioUrl);
+              this._audioEl.onended = () => { this.isSpeaking = false; this._audioEl = null; };
+              this._audioEl.onerror = () => {
+                // Server audio failed — fall back to browser TTS
+                this._audioEl = null;
+                this._browserTTS(fallbackText);
+              };
+              this._audioEl.play();
+              return;
+            }
+          } catch {}
+
+          // Fallback: browser TTS
+          this._browserTTS(fallbackText);
+        },
+
+        _browserTTS(text) {
+          if (!text || !('speechSynthesis' in window)) { this.isSpeaking = false; return; }
+          window.speechSynthesis.cancel();
+          clearInterval(this._speechKeepAlive);
+          const utter = new SpeechSynthesisUtterance(text);
+          utter.rate = 1.0;
+          utter.pitch = 1.0;
+          utter.onstart = () => {
+            this._speechKeepAlive = setInterval(() => {
+              if (!window.speechSynthesis.speaking) { clearInterval(this._speechKeepAlive); return; }
+              window.speechSynthesis.pause();
+              window.speechSynthesis.resume();
+            }, 10000);
+          };
+          utter.onend = () => { clearInterval(this._speechKeepAlive); this.isSpeaking = false; };
+          utter.onerror = () => { clearInterval(this._speechKeepAlive); this.isSpeaking = false; };
+          if (window.speechSynthesis.getVoices().length === 0) {
+            window.speechSynthesis.onvoiceschanged = () => { window.speechSynthesis.speak(utter); };
+          } else {
+            window.speechSynthesis.speak(utter);
+          }
+        },
+
+        readAllSummaries() {
+          const articles = this.displayArticles;
+          if (articles.length === 0) return;
+          this._readAllIndex = 0;
+          this._readAllStop = false;
+          this.isSpeaking = true;
+          this._readNext(articles);
+        },
+
+        _readNext(articles) {
+          if (this._readAllStop || this._readAllIndex >= articles.length) {
+            clearInterval(this._speechKeepAlive);
+            this.isSpeaking = false;
+            return;
+          }
+          const a = articles[this._readAllIndex];
+          const text = a.title + '. ' + (a.summary || '');
+          const utter = new SpeechSynthesisUtterance(text);
+          utter.rate = 1.0;
+          utter.onstart = () => {
+            clearInterval(this._speechKeepAlive);
+            this._speechKeepAlive = setInterval(() => {
+              if (!window.speechSynthesis.speaking) { clearInterval(this._speechKeepAlive); return; }
+              window.speechSynthesis.pause();
+              window.speechSynthesis.resume();
+            }, 10000);
+          };
+          utter.onend = () => {
+            clearInterval(this._speechKeepAlive);
+            this._readAllIndex++;
+            this._readNext(articles);
+          };
+          utter.onerror = () => {
+            clearInterval(this._speechKeepAlive);
+            this._readAllIndex++;
+            this._readNext(articles);
+          };
+          window.speechSynthesis.speak(utter);
+        },
+
+        stopSpeaking() {
+          this._readAllStop = true;
+          clearInterval(this._speechKeepAlive);
+          window.speechSynthesis.cancel();
+          if (this._audioEl) { this._audioEl.pause(); this._audioEl = null; }
+          this.isSpeaking = false;
+        },
+
+        timeAgo(dateStr) {
+          if (!dateStr) return '';
+          const now = Date.now();
+          const then = new Date(dateStr).getTime();
+          const diff = Math.max(0, now - then);
+          const mins = Math.floor(diff / 60000);
+          if (mins < 1) return 'just now';
+          if (mins < 60) return mins + 'm ago';
+          const hours = Math.floor(mins / 60);
+          if (hours < 24) return hours + 'h ago';
+          const days = Math.floor(hours / 24);
+          if (days < 7) return days + 'd ago';
+          return new Date(dateStr).toLocaleDateString();
+        },
+      };
+    }
+
+    function essenceDropdown() {
+      return {
+        open: false,
+        items: [],
+        toggle() {
+          if (!this.open) this.fetchItems();
+          this.open = !this.open;
+        },
+        async fetchItems() {
+          try {
+            const r = await fetch('/api/essences', { cache: 'no-store' });
+            if (r.ok) {
+              const all = await r.json();
+              this.items = all.filter(i => i.type === 'essence').sort((a, b) => a.name.localeCompare(b.name));
+            }
+          } catch (e) { console.error('Failed to fetch essences', e); }
+        },
+      }
+    }
+    function toolsDropdown() {
+      return {
+        open: false,
+        items: [],
+        toggle() {
+          if (!this.open) this.fetchItems();
+          this.open = !this.open;
+        },
+        async fetchItems() {
+          try {
+            const r = await fetch('/api/essences', { cache: 'no-store' });
+            if (r.ok) {
+              const all = await r.json();
+              this.items = all.filter(i => (i.type || 'tool') === 'tool').sort((a, b) => a.name.localeCompare(b.name));
+            }
+          } catch (e) { console.error('Failed to fetch tools', e); }
+        },
+      }
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,20 @@
+RESEARCH RESULTS FOR AMBER RESPONSIVENESS:
+1. ADK 1.26.0 Breaking Changes: 
+   - Minimum Python 3.10, Pydantic 2.7.0.
+   - Transition to Alembic for migrations.
+   - IMPORTANT: Default response modality in some core update flows is set to AUDIO only.
+   - Metric evaluators refactored.
+   - BigQuery plugin refactored to use OpenTelemetry.
+   
+2. Token Collision:
+   - CONFIRMED: Two processes using the same token simultaneously will fight for the connection. Discord will invalidate one, causing 'Zombie' sessions where the bot is online but unresponsive. This explains why using Jane's token for both Jane-CLI and Amber-Bridge failed.
+
+3. Health Check Observations:
+   - Brain health check PASSED (End-to-End Brain Response Received 1 events).
+   - Discord Bridge process is RUNNING.
+   - BUT NO TEXT is appearing in Discord.
+
+4. Hypothesis: 
+   - The token collision was the first barrier.
+   - The 'Audio Only' default in ADK 1.26.0 might be the second barrier, where Amber is generating an audio response (or no text response) by default.
+

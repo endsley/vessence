@@ -1,0 +1,39 @@
+# jane-web-deploy.service
+#
+# Updated jane-web service for use with the reverse proxy.
+# Key changes from the original jane-web.service:
+#   1. Binds to 127.0.0.1 only (proxy handles external traffic)
+#   2. After=jane-proxy.service ensures proxy starts first
+#   3. Port 8081 is the default; deploy.sh swaps between 8081/8082
+#
+# To install:
+#   cp configs/systemd/jane-web-deploy.service ~/.config/systemd/user/jane-web.service
+#   systemctl --user daemon-reload
+#   systemctl --user restart jane-web.service
+#
+# NOTE: The Cloudflare tunnel should be updated to point to port 8080 (proxy)
+# instead of 8081 (uvicorn directly).
+
+[Unit]
+Description=Jane Web Server (behind reverse proxy)
+After=network.target jane-proxy.service
+Wants=jane-proxy.service
+
+[Service]
+Type=simple
+Environment=AMBIENT_BASE=%h/ambient
+Environment=VESSENCE_HOME=%h/ambient/vessence
+Environment=VESSENCE_DATA_HOME=%h/ambient/vessence-data
+Environment=VAULT_HOME=%h/ambient/vault
+Environment=AMBIENT_HOME=%h/ambient/vessence-data
+Environment=PYTHONPATH=%h/ambient/vessence
+WorkingDirectory=%h/ambient/vessence/jane_web
+EnvironmentFile=%h/ambient/vessence-data/.env
+ExecStart=/home/chieh/google-adk-env/adk-venv/bin/python -m uvicorn main:app --host 127.0.0.1 --port 8081 --log-level info
+Restart=always
+RestartSec=10
+StandardOutput=append:%h/ambient/vessence-data/logs/jane_web.log
+StandardError=append:%h/ambient/vessence-data/logs/jane_web.log
+
+[Install]
+WantedBy=default.target

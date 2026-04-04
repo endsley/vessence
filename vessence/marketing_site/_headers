@@ -1,0 +1,8 @@
+/*
+  X-Frame-Options: DENY
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+
+/docker-compose.yml
+  Content-Type: application/octet-stream
+  Content-Disposition: attachment; filename="docker-compose.yml"

@@ -1,0 +1,1933 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Life Librarian</title>
+  <meta name="theme-color" content="#0f172a"/>
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+  <link rel="manifest" href="/manifest.webmanifest"/>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <!-- PDF.js -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf_viewer.min.css"/>
+  <!-- KaTeX -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css"/>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked@15/marked.min.js"></script>
+  <style>
+    [x-cloak] { display: none !important; }
+    :root { color-scheme: dark; --chat-font-size: 0.875rem; }
+    body { background: #0f172a; color: #e2e8f0; }
+    .chat-content { font-size: var(--chat-font-size) !important; }
+    .scrollbar-thin::-webkit-scrollbar { width: 6px; }
+    .scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
+    .scrollbar-thin::-webkit-scrollbar-thumb { background: #475569; border-radius: 6px; }
+    .scrollbar-thin::-webkit-scrollbar-thumb:hover { background: #64748b; }
+    .chat-bubble-user { background: #6d28d9; border-radius: 18px 18px 4px 18px; }
+    .chat-bubble-amber { background: #1e293b; border-radius: 18px 18px 18px 4px; border: 1px solid #334155; }
+    .file-card:hover { transform: translateY(-2px); }
+    .file-card { transition: transform 0.15s, box-shadow 0.15s; }
+    .drop-overlay { pointer-events: none; }
+    .drop-overlay.active { pointer-events: auto; }
+    /* Mobile tab bar */
+    @media (max-width: 768px) {
+      .mobile-tab-bar { position: fixed; bottom: 0; left: 0; right: 0; background: #1e293b; border-top: 1px solid #334155; z-index: 50; }
+      .main-content { padding-bottom: 64px; }
+    }
+  </style>
+  <script>
+    (function() {
+      var fs = localStorage.getItem('vessence_font_size');
+      if (fs) document.documentElement.style.setProperty('--chat-font-size', fs);
+    })();
+  </script>
+</head>
+<body class="min-h-screen" x-data="vaultApp()" x-cloak @keydown.escape.window="closeModal(); focusChatInput()" data-initial-tab="{{ initial_tab or 'vault' }}">
+
+<div x-show="androidAuthReady" x-cloak>
+<!-- ── First-run Welcome Overlay ──────────────────────────────────────────── -->
+<div id="vault-welcome-overlay"
+     class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm"
+     style="display:none!important"
+     x-data="{ show: !localStorage.getItem('vault_welcome_dismissed') }"
+     x-show="show"
+     x-transition:enter="transition ease-out duration-300"
+     x-transition:enter-start="opacity-0"
+     x-transition:enter-end="opacity-100">
+  <div class="max-w-md mx-4 bg-slate-900 border border-slate-700 rounded-2xl p-8 text-center shadow-2xl"
+       x-transition:enter="transition ease-out duration-300 delay-100"
+       x-transition:enter-start="opacity-0 scale-95"
+       x-transition:enter-end="opacity-100 scale-100">
+    <div class="text-5xl mb-4">✨</div>
+    <h2 class="text-2xl font-bold text-white mb-2">Life Librarian</h2>
+    <p class="text-slate-400 leading-relaxed mb-4">
+      Your personal life librarian — organizes and retrieves your files, documents, and media.
+    </p>
+    <p class="text-slate-400 leading-relaxed mb-4">
+      Drop files into the Vault and she'll remember them. Ask her questions and she'll search your memories. The longer you use Vessence, the more Amber knows you.
+    </p>
+    <div class="bg-slate-800 rounded-xl p-3 mb-6 text-left">
+      <p class="text-slate-400 text-sm mb-1"><strong class="text-slate-300">Try saying:</strong></p>
+      <p class="text-violet-300 text-sm italic">"Hey Amber, I just moved to Austin, Texas."</p>
+      <p class="text-slate-500 text-sm mt-1 italic">or "What files do I have about machine learning?"</p>
+    </div>
+    <button
+      @click="localStorage.setItem('vault_welcome_dismissed','1'); show = false"
+      class="w-full bg-violet-600 hover:bg-violet-500 text-white font-semibold py-3 rounded-xl transition-colors cursor-pointer">
+      Got it — let's go
+    </button>
+  </div>
+</div>
+<script>
+  // Remove the display:none!important override so Alpine can control visibility
+  document.addEventListener('alpine:init', () => {
+    document.getElementById('vault-welcome-overlay').style.removeProperty('display');
+  });
+</script>
+
+<!-- ── Top Bar ─────────────────────────────────────────────────────────────── -->
+<header class="bg-slate-900 border-b border-slate-700 px-4 py-3 flex items-center gap-3 sticky top-0 z-40">
+  <button class="md:hidden text-slate-400 hover:text-white" @click="sidebarOpen = !sidebarOpen">
+    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/>
+    </svg>
+  </button>
+  <!-- Back to Jane -->
+  <a href="/" class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition mr-1" title="Back to Jane">
+    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+    <img src="/api/files/serve/images/people/jane/jane1.png" class="w-5 h-5 rounded-full object-cover border border-slate-600" alt="Jane" onerror="this.outerHTML='<span class=\'w-5 h-5 rounded-full bg-violet-700 flex items-center justify-center text-[10px] font-bold text-white\'>J</span>'"/>
+    <span class="text-xs font-medium">Jane</span>
+  </a>
+  <!-- Essences dropdown -->
+  <div class="relative" x-data="essenceDropdown()" @click.outside="open = false">
+    <button @click="toggle()" class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-700/50">
+      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"/>
+      </svg>
+      <span>Essences</span>
+      <svg class="w-3 h-3 transition-transform" :class="open ? 'rotate-180' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+      </svg>
+    </button>
+    <div x-show="open" x-cloak x-transition
+      class="absolute left-0 top-full mt-1 w-56 rounded-xl border border-slate-700 bg-slate-900 shadow-2xl overflow-hidden z-50">
+        <a href="/"
+          class="flex items-center gap-2 px-3 py-2.5 text-xs text-slate-300 hover:text-white hover:bg-slate-800 transition">
+          <span class="w-5 h-5 rounded bg-violet-700 flex items-center justify-center text-[10px] font-bold text-white flex-shrink-0">J</span>
+          Jane
+        </a>
+        <template x-for="e in items" :key="e.name">
+          <a :href="'/vault?tab=essences&open=' + encodeURIComponent(e.name)"
+            class="flex items-center gap-2 px-3 py-2 text-xs text-slate-300 hover:text-white hover:bg-slate-800 transition border-t border-slate-700/50">
+            <span class="w-5 h-5 rounded bg-violet-800 flex items-center justify-center text-[10px] flex-shrink-0"
+              x-text="e.name.charAt(0).toUpperCase()"></span>
+            <span class="truncate" x-text="e.name"></span>
+            <span x-show="e.loaded" class="ml-auto w-1.5 h-1.5 rounded-full bg-green-500 flex-shrink-0"></span>
+          </a>
+        </template>
+        <template x-if="items.length === 0">
+          <p class="px-3 py-2 text-[10px] text-slate-500 italic border-t border-slate-700/50">No essences installed</p>
+        </template>
+        <a href="/essences"
+          class="flex items-center gap-2 px-3 py-2.5 text-xs text-slate-500 hover:text-slate-300 transition border-t border-slate-700">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+          </svg>
+          Manage essences
+        </a>
+    </div>
+  </div>
+  <!-- Tools dropdown -->
+  <div class="relative" x-data="toolsDropdown()" @click.outside="open = false">
+    <button @click="toggle()" class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-700/50">
+      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+      </svg>
+      <span>Tools</span>
+      <svg class="w-3 h-3 transition-transform" :class="open ? 'rotate-180' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+      </svg>
+    </button>
+    <div x-show="open" x-cloak x-transition
+      class="absolute left-0 top-full mt-1 w-56 rounded-xl border border-slate-700 bg-slate-900 shadow-2xl overflow-hidden z-50">
+        <template x-for="e in items" :key="e.name">
+          <a :href="e.name === 'Music Playlist' ? '/vault?tab=music' : e.name === 'Work Log' ? '/worklog' : e.name === 'Daily Briefing' ? '/briefing' : '/vault'"
+            class="flex items-center gap-2 px-3 py-2 text-xs text-slate-300 hover:text-white hover:bg-slate-800 transition">
+            <span class="w-5 h-5 rounded bg-slate-700 flex items-center justify-center text-[10px] flex-shrink-0"
+              x-text="e.name.charAt(0).toUpperCase()"></span>
+            <span class="truncate" x-text="e.name"></span>
+            <span x-show="e.loaded" class="ml-auto w-1.5 h-1.5 rounded-full bg-green-500 flex-shrink-0"></span>
+          </a>
+        </template>
+        <template x-if="items.length === 0">
+          <p class="px-3 py-2 text-[10px] text-slate-500 italic">No tools installed</p>
+        </template>
+    </div>
+  </div>
+  <div class="flex-1"></div>
+
+  <!-- Desktop tabs (only show if more than 1 tab) -->
+  <nav x-show="tabs.length > 1" class="hidden md:flex gap-1">
+    <template x-for="tab in tabs" :key="tab.id">
+      <button @click="activeTab = tab.id"
+        :class="activeTab === tab.id
+          ? 'bg-violet-600 text-white'
+          : 'text-slate-400 hover:text-white hover:bg-slate-800'"
+        class="px-4 py-2 rounded-lg text-sm font-medium transition flex items-center gap-1.5">
+        <span x-text="tab.icon"></span>
+        <span x-text="tab.label"></span>
+      </button>
+    </template>
+  </nav>
+  <div class="flex-1 hidden md:block"></div>
+
+  <button @click="logout" class="text-slate-500 hover:text-slate-300 text-sm transition">Sign out</button>
+</header>
+
+<!-- ── Main Layout ─────────────────────────────────────────────────────────── -->
+<div class="flex h-[calc(100vh-57px)] main-content">
+
+  <!-- Sidebar (Vault tab only) -->
+  <aside x-show="activeTab === 'vault'"
+    :class="sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'"
+    class="fixed md:relative z-30 w-64 h-full bg-slate-900 border-r border-slate-700 flex flex-col transition-transform duration-200 overflow-y-auto scrollbar-thin">
+    <div class="p-3">
+      <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider px-2 mb-2">Folders</p>
+      <!-- Folder tree -->
+      <div x-html="renderFolderTree(folderTree, '')"></div>
+    </div>
+  </aside>
+  <!-- Sidebar overlay on mobile -->
+  <div x-show="sidebarOpen && activeTab === 'vault'" @click="sidebarOpen=false"
+    class="fixed inset-0 bg-black/50 z-20 md:hidden"></div>
+
+  <!-- ── Vault Tab ─────────────────────────────────────────────────────────── -->
+  <main x-show="activeTab === 'vault'" class="flex-1 overflow-y-auto scrollbar-thin relative"
+    @dragover.prevent="uploadDragging = true"
+    @dragleave.self="uploadDragging = false"
+    @drop.prevent="onDrop($event)">
+
+    <!-- Drag-and-drop overlay -->
+    <div x-show="uploadDragging"
+      class="drop-overlay active absolute inset-0 z-20 bg-violet-900/60 border-2 border-dashed border-violet-400 rounded-none flex items-center justify-center"
+      @dragover.prevent @drop.prevent="onDrop($event)">
+      <div class="text-center pointer-events-none">
+        <p class="text-5xl mb-3">📂</p>
+        <p class="text-xl font-bold text-white">Drop files to upload</p>
+        <p class="text-sm text-violet-300 mt-1" x-text="currentPath ? 'Into: ' + currentPath : 'Auto-sorted by type'"></p>
+      </div>
+    </div>
+
+    <!-- Hidden file input -->
+    <input type="file" multiple x-ref="fileInput" class="hidden" @change="onFilePick($event)">
+
+    <!-- Breadcrumb + Sort + Upload -->
+    <div class="sticky top-0 bg-slate-900/95 backdrop-blur px-4 py-3 border-b border-slate-800 flex items-center gap-2 flex-wrap z-10">
+      <div class="flex items-center gap-1 text-sm flex-1 min-w-0 overflow-x-auto">
+        <button @click="navigate('')" class="text-violet-400 hover:text-violet-300 whitespace-nowrap">Vault</button>
+        <template x-for="(crumb, i) in breadcrumbs" :key="i">
+          <span class="flex items-center gap-1">
+            <span class="text-slate-600">/</span>
+            <button @click="navigate(crumb.path)"
+              :class="i === breadcrumbs.length-1 ? 'text-white font-medium' : 'text-violet-400 hover:text-violet-300'"
+              class="whitespace-nowrap" x-text="crumb.name"></button>
+          </span>
+        </template>
+      </div>
+      <select x-model="sortBy" @change="sortFiles()"
+        class="bg-slate-800 text-slate-300 text-xs rounded-lg px-3 py-1.5 border border-slate-700 focus:outline-none focus:border-violet-500">
+        <option value="name_asc">Name A→Z</option>
+        <option value="name_desc">Name Z→A</option>
+        <option value="date_desc">Newest first</option>
+        <option value="date_asc">Oldest first</option>
+        <option value="size_desc">Largest first</option>
+        <option value="size_asc">Smallest first</option>
+      </select>
+      <!-- View toggle -->
+      <div class="flex rounded-lg border border-slate-700 overflow-hidden">
+        <button @click="fileView='grid'" :class="fileView==='grid' ? 'bg-slate-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-white'" class="px-2 py-1.5 text-sm transition" title="Grid">⊞</button>
+        <button @click="fileView='tiny'" :class="fileView==='tiny' ? 'bg-slate-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-white'" class="px-2 py-1.5 text-sm transition" title="Tiny icons">⊟</button>
+        <button @click="fileView='list'" :class="fileView==='list' ? 'bg-slate-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-white'" class="px-2 py-1.5 text-sm transition" title="List">☰</button>
+      </div>
+      <label class="flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1.5 text-xs text-slate-300">
+        <span class="whitespace-nowrap">Icon size</span>
+        <input
+          type="range"
+          min="0"
+          max="4"
+          step="1"
+          x-model="iconScaleStep"
+          @input="persistIconScale()"
+          class="h-1.5 w-20 accent-violet-500 cursor-pointer bg-transparent">
+      </label>
+      <button @click="$refs.fileInput.click()"
+        class="flex items-center gap-1.5 bg-violet-700 hover:bg-violet-600 text-white text-xs font-medium px-3 py-1.5 rounded-lg transition">
+        ⬆ Upload
+      </button>
+    </div>
+
+    <!-- Multi-select action bar -->
+    <div x-show="selectedFiles.size > 0" x-cloak
+      class="sticky top-[53px] z-10 bg-violet-900/95 backdrop-blur border-b border-violet-700 px-4 py-2 flex items-center gap-3 flex-wrap">
+      <span class="text-violet-200 text-sm font-medium" x-text="selectedFiles.size + ' selected'"></span>
+      <template x-if="!showPlaylistInput">
+        <button @click="showPlaylistInput = true"
+          class="bg-violet-600 hover:bg-violet-500 text-white text-xs font-medium px-3 py-1.5 rounded-lg transition">
+          🎵 Create Playlist
+        </button>
+      </template>
+      <template x-if="showPlaylistInput">
+        <div class="flex items-center gap-2">
+          <input x-model="newPlaylistName" @keydown.enter="createPlaylistDirect()" @keydown.escape="showPlaylistInput=false"
+            placeholder="Playlist name…" x-ref="playlistNameInput"
+            class="bg-slate-800 text-white text-xs rounded-lg px-3 py-1.5 border border-violet-500 focus:outline-none w-40"
+            x-init="$nextTick(() => $refs.playlistNameInput?.focus())"/>
+          <button @click="createPlaylistDirect()"
+            class="bg-violet-600 hover:bg-violet-500 text-white text-xs font-medium px-3 py-1.5 rounded-lg transition">
+            Save
+          </button>
+          <button @click="showPlaylistInput=false" class="text-violet-300 hover:text-white text-xs transition">Cancel</button>
+        </div>
+      </template>
+      <button @click="selectedFiles = new Set(); showPlaylistInput = false"
+        class="text-violet-300 hover:text-white text-xs ml-auto transition">
+        ✕ Clear
+      </button>
+    </div>
+
+    <!-- Drag selection rectangle -->
+    <div x-show="dragSelecting" class="fixed pointer-events-none border border-violet-400 bg-violet-400/10 rounded z-50"
+      :style="dragRectStyle"></div>
+
+    <!-- Upload progress -->
+    <div x-show="uploadResults.length > 0" class="px-4 pt-3">
+      <div class="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden">
+        <div class="flex items-center justify-between px-4 py-2 border-b border-slate-700">
+          <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Upload Results</p>
+          <button @click="uploadResults = []" class="text-slate-500 hover:text-slate-300 text-xs">✕ Dismiss</button>
+        </div>
+        <div class="divide-y divide-slate-700/50 max-h-40 overflow-y-auto scrollbar-thin">
+          <template x-for="(r, i) in uploadResults" :key="i">
+            <div class="flex items-center gap-3 px-4 py-2">
+              <span x-text="r.status === 'ok' ? '✅' : r.status === 'duplicate' ? '⚠️' : '❌'"></span>
+              <span class="text-sm text-slate-200 flex-1 truncate" x-text="r.name"></span>
+              <span x-show="r.status === 'ok'" class="text-xs text-slate-500" x-text="r.subdir + '/'"></span>
+              <span x-show="r.status === 'duplicate'" class="text-xs text-amber-400">Duplicate</span>
+              <span x-show="r.status === 'error'" class="text-xs text-red-400" x-text="r.message"></span>
+            </div>
+          </template>
+        </div>
+      </div>
+    </div>
+
+    <div class="p-4" id="files-container"
+      @mousedown="startDragSelect($event)"
+      @mousemove.window="moveDragSelect($event)"
+      @mouseup.window="endDragSelect($event)">
+      <!-- Loading -->
+      <div x-show="loadingFiles" class="flex items-center justify-center py-20">
+        <svg class="animate-spin h-8 w-8 text-violet-400" viewBox="0 0 24 24" fill="none">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
+        </svg>
+      </div>
+
+      <!-- Folders -->
+      <div x-show="!loadingFiles && folders.length > 0" class="mb-6">
+        <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Folders</p>
+        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
+          <template x-for="folder in folders" :key="folder.path">
+            <button @click="navigate(folder.path)"
+              class="file-card bg-slate-800 hover:bg-slate-700 rounded-xl p-4 text-left border border-slate-700 hover:border-slate-600 shadow-sm">
+              <div class="text-3xl mb-2">📁</div>
+              <p class="text-sm font-medium text-white truncate" x-text="folder.name"></p>
+              <p class="text-xs text-slate-500 mt-0.5" x-text="folder.file_count + ' files'"></p>
+            </button>
+          </template>
+        </div>
+      </div>
+
+      <!-- Files -->
+      <div x-show="!loadingFiles && files.length > 0">
+        <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Files</p>
+
+        <!-- Grid view -->
+        <div x-show="fileView==='grid'" class="grid gap-3" :style="gridViewStyle()">
+          <template x-for="(file, idx) in sortedFiles" :key="file.path">
+            <button @click="handleFileClick(file, idx, $event)" :data-file-path="file.path"
+              :class="selectedFiles.has(file.path) ? 'border-violet-500 bg-violet-900/30' : 'border-slate-700 bg-slate-800 hover:bg-slate-700 hover:border-violet-600'"
+              class="file-card rounded-xl overflow-hidden text-left border shadow-sm relative">
+              <div x-show="selectedFiles.has(file.path)" class="absolute top-1.5 right-1.5 w-5 h-5 bg-violet-600 rounded-full flex items-center justify-center z-10">
+                <svg class="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
+              </div>
+              <template x-if="file.is_image">
+                <div class="w-full aspect-square bg-slate-700 overflow-hidden">
+                  <img :src="'/api/files/thumbnail/' + file.path" class="w-full h-full object-cover" loading="lazy" :alt="file.name" @error="$el.style.display='none'"/>
+                </div>
+              </template>
+              <template x-if="!file.is_image">
+                <div class="w-full aspect-square bg-slate-700/50 flex items-center justify-center">
+                  <span :style="gridIconStyle()" x-text="file.icon"></span>
+                </div>
+              </template>
+              <div class="p-2">
+                <p class="text-xs font-medium text-slate-200 truncate" x-text="file.name"></p>
+                <p class="text-xs text-slate-500" x-text="file.size_human"></p>
+              </div>
+            </button>
+          </template>
+        </div>
+
+        <!-- Tiny icon view -->
+        <div x-show="fileView==='tiny'" class="grid gap-1" :style="tinyViewStyle()">
+          <template x-for="(file, idx) in sortedFiles" :key="file.path">
+            <button @click="handleFileClick(file, idx, $event)" :data-file-path="file.path"
+              :class="selectedFiles.has(file.path) ? 'border-violet-500 bg-violet-900/30' : 'border-slate-700 bg-slate-800 hover:bg-slate-700 hover:border-violet-600'"
+              class="file-card rounded-lg overflow-hidden text-left border shadow-sm relative"
+              :title="file.name">
+              <div x-show="selectedFiles.has(file.path)" class="absolute top-0.5 right-0.5 w-4 h-4 bg-violet-600 rounded-full flex items-center justify-center z-10">
+                <svg class="w-2.5 h-2.5 text-white" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
+              </div>
+              <template x-if="file.is_image">
+                <div class="w-full aspect-square bg-slate-700 overflow-hidden">
+                  <img :src="'/api/files/thumbnail/' + file.path" class="w-full h-full object-cover" loading="lazy" :alt="file.name" @error="$el.style.display='none'"/>
+                </div>
+              </template>
+              <template x-if="!file.is_image">
+                <div class="w-full aspect-square bg-slate-700/50 flex items-center justify-center">
+                  <span :style="tinyIconStyle()" x-text="file.icon"></span>
+                </div>
+              </template>
+            </button>
+          </template>
+        </div>
+
+        <!-- List view -->
+        <div x-show="fileView==='list'" class="divide-y divide-slate-800 border border-slate-700 rounded-xl overflow-hidden">
+          <template x-for="(file, idx) in sortedFiles" :key="file.path">
+            <button @click="handleFileClick(file, idx, $event)" :data-file-path="file.path"
+              :class="selectedFiles.has(file.path) ? 'bg-violet-900/30 border-l-2 border-l-violet-500' : 'bg-slate-800/50 hover:bg-slate-700/60'"
+              class="w-full flex items-center gap-3 px-4 py-2.5 text-left transition">
+              <div x-show="selectedFiles.has(file.path)" class="w-4 h-4 bg-violet-600 rounded-full flex items-center justify-center flex-shrink-0">
+                <svg class="w-2.5 h-2.5 text-white" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
+              </div>
+              <div x-show="!selectedFiles.has(file.path)" class="w-4 flex-shrink-0"></div>
+              <template x-if="file.is_image">
+                <img
+                  :src="'/api/files/thumbnail/' + file.path"
+                  class="rounded object-cover flex-shrink-0"
+                  :style="listThumbStyle()"
+                  loading="lazy"
+                  @error="$el.outerHTML='<span class=\'text-center flex-shrink-0\' style=\"' + Alpine.$data(document.querySelector('[x-data]')).listIconStyle() + '\">' + file.icon + '</span>'"/>
+              </template>
+              <template x-if="!file.is_image">
+                <span class="text-center flex-shrink-0" :style="listIconStyle()" x-text="file.icon"></span>
+              </template>
+              <span class="text-sm text-slate-200 flex-1 truncate" x-text="file.name"></span>
+              <span class="text-xs text-slate-500 flex-shrink-0" x-text="file.size_human"></span>
+              <span class="text-xs text-slate-600 flex-shrink-0 hidden sm:block" x-text="file.modified_human || ''"></span>
+            </button>
+          </template>
+        </div>
+      </div>
+
+      <!-- Empty -->
+      <div x-show="!loadingFiles && files.length === 0 && folders.length === 0"
+        class="text-center py-20 text-slate-500">
+        <p class="text-4xl mb-3">📭</p>
+        <p>This folder is empty</p>
+      </div>
+    </div>
+  </main>
+
+  <!-- ── Chat Tab ──────────────────────────────────────────────────────────── -->
+  <main x-show="activeTab === 'chat'" class="flex-1 flex flex-col overflow-hidden">
+    <!-- File context banner -->
+    <div x-show="chatFileContext" class="bg-violet-900/40 border-b border-violet-700/50 px-4 py-2 flex items-center gap-2">
+      <span class="text-violet-300 text-sm">📎 Talking about:</span>
+      <span class="text-white text-sm font-medium truncate" x-text="chatFileContext"></span>
+      <button @click="chatFileContext = null" class="ml-auto text-violet-400 hover:text-violet-200 text-xs">✕ Clear</button>
+    </div>
+
+    <!-- Messages -->
+    <div class="flex-1 overflow-y-auto scrollbar-thin p-4 space-y-4" id="chat-messages" x-ref="chatMessages">
+      <template x-if="chatMessages.length === 0">
+        <div class="text-center py-16 text-slate-500">
+          <p class="text-5xl mb-4">💬</p>
+          <p class="text-lg font-medium text-slate-400">Chat with Amber</p>
+          <p class="text-sm mt-2">Ask about your files, create playlists, rename, share — anything.</p>
+        </div>
+      </template>
+
+      <template x-for="(msg, i) in chatMessages" :key="i">
+        <div :class="msg.role === 'user' ? 'flex justify-end' : 'flex justify-start'">
+          <template x-if="msg.role === 'amber'">
+            <div class="flex items-start gap-2 max-w-[85%]">
+              <img src="/api/files/serve/images/amber.png"
+                class="w-8 h-8 rounded-full object-cover flex-shrink-0 mt-1 border border-violet-700"
+                alt="Amber"
+                onerror="this.outerHTML='<div class=\'w-8 h-8 rounded-full bg-violet-700 flex items-center justify-center text-sm flex-shrink-0 mt-1\'>A</div>'"/>
+              <div class="chat-bubble-amber chat-content px-4 py-3 text-sm text-slate-200 leading-relaxed">
+                <p x-show="msg.status" x-text="msg.status" class="mb-2 max-w-md text-xs leading-relaxed text-slate-400"></p>
+                <div x-show="msg.text" x-html="formatMessage(msg.text)"></div>
+                <template x-if="msg.files && msg.files.length">
+                  <div class="mt-2 flex flex-col gap-2">
+                    <template x-for="(f, j) in msg.files" :key="j">
+                      <div>
+                        <template x-if="f.is_image">
+                          <div class="flex flex-col gap-1">
+                            <img :src="f.src" :alt="f.name" class="max-w-xs max-h-64 rounded-lg border border-slate-600" />
+                            <a :href="f.src" :download="f.name" class="text-xs text-violet-400 hover:text-violet-300 underline w-fit">⬇ Download <span x-text="f.name"></span></a>
+                          </div>
+                        </template>
+                        <template x-if="!f.is_image">
+                          <a :href="f.src" :download="f.name" class="inline-flex items-center gap-1 px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-sm text-slate-200 transition-colors">
+                            <span>📎</span><span x-text="f.name"></span><span class="text-xs text-slate-400 ml-1">⬇</span>
+                          </a>
+                        </template>
+                      </div>
+                    </template>
+                  </div>
+                </template>
+              </div>
+            </div>
+          </template>
+          <template x-if="msg.role === 'user'">
+            <div class="chat-bubble-user chat-content px-4 py-3 text-sm text-white max-w-[85%]" x-text="msg.text"></div>
+          </template>
+        </div>
+      </template>
+
+    </div>
+
+    <!-- LaTeX preview (shown when input contains $) -->
+    <div x-show="hasMathPreview(chatInput)" x-cloak
+      class="border-t border-slate-700 px-4 py-2 bg-slate-950/60 text-sm text-slate-300 max-h-28 overflow-y-auto scrollbar-thin">
+      <p class="text-xs text-slate-500 mb-1">Preview</p>
+      <div x-html="formatMessage(chatInput)"></div>
+    </div>
+
+    <!-- Input bar -->
+    <div class="border-t border-slate-700 p-3 bg-slate-900">
+      <input type="file" multiple x-ref="amberFileInput" class="hidden" @change="onAmberFilePick($event)">
+      <input type="file" accept="image/*" capture="environment" x-ref="amberCameraInput" class="hidden" @change="onAmberFilePick($event)">
+      <div class="flex gap-2 items-end">
+        <div class="relative flex-shrink-0" @click.outside="amberComposerMenuOpen = false">
+          <button @click="amberComposerMenuOpen = !amberComposerMenuOpen"
+            class="border border-slate-700 text-slate-300 hover:text-white hover:bg-slate-700 px-3 py-3 rounded-2xl text-sm font-medium transition">
+            +
+          </button>
+          <div x-show="amberComposerMenuOpen" x-cloak
+            class="absolute bottom-full left-0 mb-2 w-44 rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl overflow-hidden">
+            <button
+              @click="setAmberResponseMode('text'); amberComposerMenuOpen = false"
+              :class="amberResponseMode === 'text' ? 'bg-violet-600/20 text-white' : 'text-slate-300 hover:text-white hover:bg-slate-800'"
+              class="w-full text-left px-4 py-3 text-sm transition">
+              Text responses
+            </button>
+            <button
+              @click="setAmberResponseMode('audio'); amberComposerMenuOpen = false"
+              :class="amberResponseMode === 'audio' ? 'bg-violet-600/20 text-white' : 'text-slate-300 hover:text-white hover:bg-slate-800'"
+              class="w-full text-left px-4 py-3 text-sm transition border-t border-slate-800">
+              Audio responses
+            </button>
+            <button
+              @click="openAmberPicker('files')"
+              class="w-full text-left px-4 py-3 text-sm text-slate-300 hover:text-white hover:bg-slate-800 transition border-t border-slate-800">
+              Attach files
+            </button>
+            <button
+              @click="openAmberPicker('camera')"
+              class="w-full text-left px-4 py-3 text-sm text-slate-300 hover:text-white hover:bg-slate-800 transition border-t border-slate-800">
+              Take picture
+            </button>
+            <button
+              @click="toggleAmberNotifications()"
+              class="w-full text-left px-4 py-3 text-sm transition border-t border-slate-800"
+              :class="amberNotificationsEnabled ? 'bg-violet-600/20 text-white' : 'text-slate-300 hover:text-white hover:bg-slate-800'">
+              <span x-text="amberNotificationsEnabled ? 'Notifications on' : 'Turn notifications on'"></span>
+            </button>
+          </div>
+        </div>
+        <textarea x-model="chatInput" @keydown.enter.prevent="if(!$event.shiftKey) sendChat()"
+          placeholder="Message Amber…"
+          rows="1"
+          x-ref="chatInputBox"
+          class="flex-1 bg-slate-800 text-white rounded-2xl px-4 py-3 text-sm resize-none border border-slate-700 focus:border-violet-500 focus:outline-none max-h-32 scrollbar-thin"
+          @input="autoResize($el)"></textarea>
+        <button @click="sendChat" :disabled="!chatInput.trim()"
+          class="bg-violet-600 hover:bg-violet-500 disabled:opacity-40 text-white p-3 rounded-2xl transition flex-shrink-0">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/>
+          </svg>
+        </button>
+      </div>
+      <div x-show="amberAttachedFiles.length > 0" x-cloak class="flex flex-wrap gap-2 mt-2">
+        <template x-for="(file, idx) in amberAttachedFiles" :key="file.path + '-' + idx">
+          <div class="inline-flex items-center gap-2 bg-slate-800 border border-slate-700 rounded-full px-3 py-1 text-xs text-slate-300">
+            <span class="truncate max-w-[14rem]" x-text="file.name"></span>
+            <button @click="removeAmberAttachment(idx)" class="text-slate-500 hover:text-white">✕</button>
+          </div>
+        </template>
+      </div>
+      <p x-show="amberPendingMessages.length > 0" x-cloak class="text-slate-500 text-xs mt-2 text-center" x-text="amberPendingMessages.length + ' queued'"></p>
+    </div>
+  </main>
+
+  <!-- ── Music Tab ─────────────────────────────────────────────────────────── -->
+  <main x-show="activeTab === 'music'" class="flex-1 overflow-y-auto scrollbar-thin p-4">
+    <div class="max-w-3xl mx-auto">
+      <h2 class="text-xl font-bold text-white mb-6">🎵 Playlists</h2>
+
+      <div x-show="playlists.length === 0" class="text-center py-16 text-slate-500">
+        <p class="text-5xl mb-4">🎶</p>
+        <p class="text-lg text-slate-300 mb-2">Your Music Playlists</p>
+        <p class="text-sm max-w-sm mx-auto leading-relaxed">Create playlists by adding your own songs to a list. Use the <strong class="text-slate-300">Create Playlist</strong> button above, then add tracks from your Life Librarian's audio collection.</p>
+      </div>
+
+      <!-- Playlist list -->
+      <div x-show="!activePlaylist" class="space-y-3">
+        <template x-for="pl in playlists" :key="pl.id">
+          <div @click="loadPlaylist(pl.id)"
+            class="bg-slate-800 hover:bg-slate-700 rounded-xl p-4 flex items-center gap-4 cursor-pointer border border-slate-700 hover:border-slate-600 transition">
+            <div class="w-12 h-12 bg-violet-800 rounded-xl flex items-center justify-center text-2xl flex-shrink-0">🎵</div>
+            <div class="flex-1 min-w-0">
+              <p class="font-semibold text-white" x-text="pl.name"></p>
+              <p class="text-sm text-slate-400" x-text="pl.track_count + ' tracks'"></p>
+            </div>
+            <svg class="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+            </svg>
+          </div>
+        </template>
+      </div>
+
+      <!-- Active playlist player -->
+      <div x-show="activePlaylist">
+        <button @click="activePlaylist = null" class="flex items-center gap-2 text-violet-400 hover:text-violet-300 text-sm mb-4">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+          </svg>
+          All playlists
+        </button>
+
+        <div x-show="activePlaylist" class="bg-slate-800 rounded-2xl p-6 border border-slate-700">
+          <h3 class="text-xl font-bold text-white mb-1" x-text="activePlaylist?.name"></h3>
+          <p class="text-slate-400 text-sm mb-6" x-text="(activePlaylist?.tracks?.length || 0) + ' tracks'"></p>
+
+          <!-- Player controls -->
+          <div class="bg-slate-900 rounded-xl p-4 mb-6">
+            <div class="text-center mb-3">
+              <p class="text-white font-medium text-sm truncate" x-text="currentTrack?.title || 'No track selected'"></p>
+            </div>
+            <audio x-ref="audioPlayer" @ended="nextTrack()" @timeupdate="updateProgress()"
+              class="hidden"></audio>
+            <!-- Progress bar -->
+            <div class="w-full bg-slate-700 rounded-full h-1.5 mb-4 cursor-pointer"
+              @click="seekAudio($event)">
+              <div class="bg-violet-500 h-1.5 rounded-full transition-all" :style="`width: ${audioProgress}%`"></div>
+            </div>
+            <!-- Controls -->
+            <div class="flex items-center justify-center gap-4">
+              <button @click="toggleShuffle" :class="shuffle ? 'text-violet-400' : 'text-slate-500 hover:text-slate-300'" class="transition">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4h3l3 4h7M4 20h3l12-12M17 20l3-2-3-2M17 4l3 2-3 2"/>
+                </svg>
+              </button>
+              <button @click="prevTrack" class="text-slate-400 hover:text-white transition">
+                <svg class="w-7 h-7" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/>
+                </svg>
+              </button>
+              <button @click="togglePlay"
+                class="bg-violet-600 hover:bg-violet-500 text-white w-12 h-12 rounded-full flex items-center justify-center transition shadow-lg">
+                <svg x-show="!isPlaying" class="w-6 h-6 ml-0.5" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M8 5v14l11-7z"/>
+                </svg>
+                <svg x-show="isPlaying" class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>
+                </svg>
+              </button>
+              <button @click="nextTrack" class="text-slate-400 hover:text-white transition">
+                <svg class="w-7 h-7" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M6 18l8.5-6L6 6v12zm2.5-6 5.5 3.9V8.1L8.5 12zM16 6h2v12h-2z"/>
+                </svg>
+              </button>
+              <button @click="toggleRepeat" :class="repeat ? 'text-violet-400' : 'text-slate-500 hover:text-slate-300'" class="transition">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                </svg>
+              </button>
+            </div>
+            <!-- Volume control -->
+            <div class="flex items-center gap-2 mt-4 px-2">
+              <svg class="w-4 h-4 text-slate-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"/>
+              </svg>
+              <input type="range" min="0" max="100" :value="volume"
+                @input="volume = $event.target.value; if($refs.audioPlayer) $refs.audioPlayer.volume = volume / 100"
+                class="flex-1 h-1.5 rounded-full appearance-none cursor-pointer"
+                style="accent-color: #a855f7; background: #334155;">
+              <svg class="w-4 h-4 text-slate-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072M17.95 6.05a8 8 0 010 11.9M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"/>
+              </button>
+            </div>
+          </div>
+
+          <!-- Track list -->
+          <div class="space-y-1">
+            <template x-for="(track, i) in activePlaylist.tracks" :key="track.id">
+              <div @click="playTrack(i)"
+                :class="currentTrackIndex === i ? 'bg-violet-900/50 border-violet-700' : 'hover:bg-slate-700 border-transparent'"
+                class="flex items-center gap-3 p-3 rounded-xl cursor-pointer border transition">
+                <span class="text-slate-500 text-xs w-5 text-center font-mono"
+                  x-text="currentTrackIndex === i && isPlaying ? '▶' : (i+1)"></span>
+                <span class="flex-1 text-sm truncate" :class="currentTrackIndex === i ? 'text-violet-300 font-medium' : 'text-slate-300'"
+                  x-text="track.title"></span>
+                <span class="text-slate-600 text-xs">🎵</span>
+              </div>
+            </template>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- ── Settings Tab ───────────────────────────────────────────────────────── -->
+  <main x-show="activeTab === 'settings'" class="flex-1 overflow-y-auto scrollbar-thin p-4">
+    <div class="max-w-2xl mx-auto space-y-8">
+
+      <!-- Appearance -->
+      <section x-data="{
+        fontSizes: [
+          { label: 'Small',   value: '0.8rem' },
+          { label: 'Default', value: '0.875rem' },
+          { label: 'Large',   value: '1rem' },
+          { label: 'X-Large', value: '1.125rem' },
+        ],
+        current: localStorage.getItem('vessence_font_size') || '0.875rem',
+        setSize(v) {
+          this.current = v;
+          localStorage.setItem('vessence_font_size', v);
+          document.documentElement.style.setProperty('--chat-font-size', v);
+        }
+      }">
+        <h2 class="text-lg font-bold text-white mb-4">Appearance</h2>
+        <div class="bg-slate-800 rounded-xl p-4 border border-slate-700">
+          <label class="text-sm text-slate-300 block mb-3">Chat Font Size</label>
+          <div class="flex gap-2">
+            <template x-for="s in fontSizes" :key="s.value">
+              <button @click="setSize(s.value)"
+                class="px-3 py-1.5 rounded-lg text-xs font-medium border transition"
+                :class="current === s.value
+                  ? 'bg-violet-600 border-violet-500 text-white'
+                  : 'bg-slate-900 border-slate-700 text-slate-400 hover:text-white hover:border-slate-500'"
+                x-text="s.label"></button>
+            </template>
+          </div>
+          <p class="text-[10px] text-slate-500 mt-2">Applies to Jane and Amber chat messages.</p>
+        </div>
+      </section>
+
+      <!-- Trusted Devices -->
+      <section>
+        <h2 class="text-lg font-bold text-white mb-4">🔑 Trusted Devices</h2>
+        <div x-show="devices.length === 0" class="text-slate-500 text-sm">No trusted devices.</div>
+        <div class="space-y-2">
+          <template x-for="device in devices" :key="device.id">
+            <div class="bg-slate-800 rounded-xl p-4 flex items-center gap-3 border border-slate-700">
+              <div class="flex-1 min-w-0">
+                <p class="text-white text-sm font-medium truncate" x-text="device.label || 'Unknown device'"></p>
+                <p class="text-slate-500 text-xs mt-0.5">First seen: <span x-text="formatDate(device.first_seen)"></span></p>
+              </div>
+              <button @click="revokeDevice(device.id)"
+                class="text-red-400 hover:text-red-300 text-xs border border-red-800 hover:border-red-600 px-3 py-1.5 rounded-lg transition">
+                Revoke
+              </button>
+            </div>
+          </template>
+        </div>
+      </section>
+
+      <!-- Active Shares -->
+      <section>
+        <h2 class="text-lg font-bold text-white mb-4">🔗 Active Shares</h2>
+        <div x-show="shares.length === 0" class="text-slate-500 text-sm">No active shares.</div>
+        <div class="space-y-2">
+          <template x-for="share in shares" :key="share.id">
+            <div class="bg-slate-800 rounded-xl p-4 flex items-center gap-3 border border-slate-700">
+              <div class="flex-1 min-w-0">
+                <p class="text-white text-sm font-medium truncate" x-text="share.path || '/'"></p>
+                <p class="text-slate-500 text-xs mt-0.5">
+                  For: <span x-text="share.created_for"></span> ·
+                  Code: <span class="font-mono text-violet-400" x-text="share.code"></span> ·
+                  <span x-text="share.access_count + ' access(es)'"></span>
+                </p>
+              </div>
+              <button @click="revokeShare(share.id)"
+                class="text-red-400 hover:text-red-300 text-xs border border-red-800 hover:border-red-600 px-3 py-1.5 rounded-lg transition">
+                Revoke
+              </button>
+            </div>
+          </template>
+        </div>
+      </section>
+
+      <!-- Jane's Personality is in Jane's own settings (gear icon on Jane chat page) -->
+    </div>
+  </main>
+</div>
+
+<!-- Mobile Tab Bar -->
+<nav x-show="tabs.length > 1" class="mobile-tab-bar md:hidden flex">
+  <template x-for="tab in tabs" :key="tab.id">
+    <button @click="activeTab = tab.id; sidebarOpen = false"
+      class="flex-1 py-3 flex flex-col items-center gap-0.5 text-xs transition"
+      :class="activeTab === tab.id ? 'text-violet-400' : 'text-slate-500'">
+      <span class="text-lg" x-text="tab.icon"></span>
+      <span x-text="tab.label"></span>
+    </button>
+  </template>
+</nav>
+
+<!-- ── File Viewer Modal ─────────────────────────────────────────────────────── -->
+<div x-show="selectedFile" x-transition
+  class="fixed inset-0 z-50 flex md:items-center md:justify-center bg-black/70 p-0"
+  :class="selectedFile?.is_pdf ? '' : 'md:p-4'">
+  <div class="bg-slate-900 w-full h-full flex flex-col overflow-hidden border border-slate-700 shadow-2xl"
+    :class="selectedFile?.is_pdf ? '' : 'md:h-auto md:max-h-[90vh] md:rounded-2xl md:max-w-4xl'">
+
+    <!-- Modal header -->
+    <div class="flex items-center gap-3 px-4 py-3 border-b border-slate-800 flex-shrink-0">
+      <span x-text="selectedFile?.icon" class="text-xl"></span>
+      <p class="font-medium text-white text-sm flex-1 truncate" x-text="selectedFile?.name"></p>
+      <button @click="openChatAboutFile(selectedFile)" title="Ask Jane about this file"
+        class="text-violet-400 hover:text-violet-300 transition text-sm px-3 py-1.5 rounded-lg border border-violet-700 hover:border-violet-500 flex items-center gap-1.5">
+        💬 Ask Jane
+      </button>
+      <button @click="metaPanelOpen = !metaPanelOpen" :title="metaPanelOpen ? 'Hide info panel' : 'Show info panel'"
+        class="text-slate-400 hover:text-white transition ml-1">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+            x-bind:d="metaPanelOpen ? 'M13 5l7 7-7 7M5 5l7 7-7 7' : 'M11 19l-7-7 7-7m8 14l-7-7 7-7'"/>
+        </svg>
+      </button>
+      <button x-show="selectedFile?.is_pdf" @click="$refs.pdfFrame.requestFullscreen()" title="Full screen"
+        class="text-slate-400 hover:text-white transition ml-1">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+            d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5v-4m0 4h-4m4 0l-5-5"/>
+        </svg>
+      </button>
+      <button @click="closeModal()" class="text-slate-500 hover:text-white transition ml-1">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+        </svg>
+      </button>
+    </div>
+
+    <!-- Modal content -->
+    <div class="flex-1 overflow-auto scrollbar-thin flex flex-col md:flex-row">
+
+      <!-- Preview area -->
+      <div class="flex-1 bg-slate-950 flex items-center justify-center min-h-[200px] md:min-h-0 p-4">
+
+        <!-- Image -->
+        <template x-if="selectedFile?.is_image">
+          <img :src="'/api/files/serve/' + selectedFile.path"
+            class="max-w-full max-h-full object-contain rounded-lg"
+            :alt="selectedFile.name"/>
+        </template>
+
+        <!-- Video -->
+        <template x-if="selectedFile?.is_video">
+          <video :src="'/api/files/serve/' + selectedFile.path"
+            controls class="max-w-full max-h-full rounded-lg" preload="metadata"></video>
+        </template>
+
+        <!-- Audio -->
+        <template x-if="selectedFile?.is_audio">
+          <div class="text-center">
+            <div class="text-8xl mb-6">🎵</div>
+            <p class="text-white font-medium mb-4" x-text="selectedFile.name"></p>
+            <audio :src="'/api/files/serve/' + selectedFile.path"
+              controls class="w-72"></audio>
+            <div class="mt-4">
+              <button @click="addToPlaylistPrompt(selectedFile)"
+                class="text-violet-400 hover:text-violet-300 text-sm border border-violet-700 px-4 py-2 rounded-xl transition">
+                + Add to playlist
+              </button>
+            </div>
+          </div>
+        </template>
+
+        <!-- PDF -->
+        <template x-if="selectedFile?.is_pdf">
+          <iframe x-ref="pdfFrame"
+            :src="'/api/files/serve/' + selectedFile.path + '#toolbar=1'"
+            class="w-full flex-1" style="border:none;height:100%;"
+            allowfullscreen></iframe>
+        </template>
+
+        <!-- Text / Markdown editor -->
+        <template x-if="selectedFile?.is_text">
+          <div class="w-full h-full flex flex-col p-2 gap-2">
+            <textarea x-model="textContent"
+              spellcheck="false"
+              class="flex-1 w-full bg-slate-900 text-slate-100 text-sm font-mono rounded-xl p-4 border border-slate-700 focus:border-violet-500 focus:outline-none resize-none scrollbar-thin leading-relaxed"
+              style="min-height: 300px;"></textarea>
+            <div class="flex items-center gap-3 flex-shrink-0">
+              <button @click="saveTextContent"
+                :disabled="textContent === textOriginal || textSaving"
+                class="bg-violet-600 hover:bg-violet-500 disabled:opacity-40 text-white px-5 py-2 rounded-xl text-sm transition flex items-center gap-2">
+                <span x-show="!textSaving">💾 Save</span>
+                <span x-show="textSaving">Saving…</span>
+              </button>
+              <span x-show="textContent === textOriginal && !textSaving" class="text-xs text-slate-500">No unsaved changes</span>
+              <span x-show="textContent !== textOriginal && !textSaving" class="text-xs text-amber-400">Unsaved changes</span>
+              <a :href="'/api/files/serve/' + selectedFile?.path" download
+                class="ml-auto text-slate-500 hover:text-slate-300 text-xs transition">⬇ Download raw</a>
+            </div>
+          </div>
+        </template>
+
+        <!-- Other (non-text, non-media) -->
+        <template x-if="selectedFile && !selectedFile.is_image && !selectedFile.is_video && !selectedFile.is_audio && !selectedFile.is_pdf && !selectedFile.is_text">
+          <div class="text-center text-slate-400">
+            <div class="text-7xl mb-4" x-text="selectedFile.icon"></div>
+            <p class="mb-4" x-text="selectedFile.name"></p>
+            <a :href="'/api/files/serve/' + selectedFile.path" download
+              class="bg-violet-600 hover:bg-violet-500 text-white px-6 py-2.5 rounded-xl text-sm transition">
+              Download
+            </a>
+          </div>
+        </template>
+      </div>
+
+      <!-- Metadata panel -->
+      <div x-show="metaPanelOpen" x-transition:enter="transition-all duration-200" x-transition:leave="transition-all duration-200"
+        class="md:w-72 border-t md:border-t-0 md:border-l border-slate-800 flex flex-col overflow-y-auto scrollbar-thin bg-slate-900">
+        <div class="p-4 space-y-4">
+
+          <!-- File details -->
+          <div>
+            <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Details</p>
+            <dl class="space-y-1.5 text-xs">
+              <div class="flex justify-between gap-2">
+                <dt class="text-slate-500 flex-shrink-0">Name</dt>
+                <dd class="text-slate-200 text-right truncate" x-text="selectedFile?.name"></dd>
+              </div>
+              <div class="flex justify-between gap-2">
+                <dt class="text-slate-500 flex-shrink-0">Type</dt>
+                <dd class="text-slate-200 uppercase" x-text="selectedFile?.ext"></dd>
+              </div>
+              <div class="flex justify-between gap-2">
+                <dt class="text-slate-500 flex-shrink-0">Size</dt>
+                <dd class="text-slate-200" x-text="selectedFile?.size_human"></dd>
+              </div>
+              <div class="flex justify-between gap-2">
+                <dt class="text-slate-500 flex-shrink-0">Modified</dt>
+                <dd class="text-slate-200" x-text="selectedFile ? formatDate(selectedFile.modified) : ''"></dd>
+              </div>
+              <div class="flex flex-col gap-0.5 pt-0.5">
+                <dt class="text-slate-500">Path</dt>
+                <dd class="font-mono text-slate-400 break-all" x-text="selectedFile?.path"></dd>
+              </div>
+            </dl>
+          </div>
+
+          <!-- Content description (for search) -->
+          <div>
+            <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Content Description</p>
+            <p class="text-xs text-slate-600 mb-2">Describe what's in this file so Amber can find it by content.</p>
+            <textarea x-model="editDescription"
+              placeholder="e.g. Sheet music for Chopin Nocturne Op.9 No.2 in E-flat major…"
+              rows="4"
+              class="w-full bg-slate-800 text-slate-200 text-sm rounded-xl px-3 py-2 border border-slate-700 focus:border-violet-500 focus:outline-none resize-none scrollbar-thin"></textarea>
+            <button @click="saveDescription" x-show="editDescription !== (selectedFileMeta?.description || '')"
+              class="mt-2 w-full bg-violet-600 hover:bg-violet-500 text-white text-sm py-2 rounded-xl transition">
+              Save
+            </button>
+          </div>
+
+          <!-- Chroma metadata -->
+          <div x-show="selectedFileMeta?.chroma_meta && Object.keys(selectedFileMeta.chroma_meta).length > 0">
+            <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Memory</p>
+            <div class="space-y-1">
+              <template x-for="[k, v] in Object.entries(selectedFileMeta?.chroma_meta || {})" :key="k">
+                <div x-show="k !== 'source'" class="flex gap-2 text-xs">
+                  <span class="text-slate-500 capitalize" x-text="k + ':'"></span>
+                  <span class="text-slate-300 truncate" x-text="v"></span>
+                </div>
+              </template>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+
+<div
+  x-show="isAndroidWebView && !androidAuthReady"
+  x-cloak
+  class="fixed inset-0 z-[100] bg-slate-950"
+></div>
+
+<script>
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+function vaultApp() {
+  return {
+    isAndroidWebView: {{ 'true' if android_webview else 'false' }},
+    androidAuthReady: {{ 'false' if android_webview else 'true' }},
+    tabs: (function() {
+      var t = new URLSearchParams(window.location.search).get('tab');
+      if (t === 'music') {
+        return [
+          { id: 'music', label: 'Playlists', icon: '🎵' },
+        ];
+      }
+      return [
+        { id: 'vault', label: 'Files', icon: '📁' },
+        { id: 'settings', label: 'Settings', icon: '⚙️' },
+      ];
+    })(),
+    activeTab: new URLSearchParams(window.location.search).get('tab') || document.body.dataset.initialTab || 'vault',
+    sidebarOpen: false,
+
+    // Vault state
+    currentPath: '',
+    folders: [],
+    files: [],
+    folderTree: [],
+    breadcrumbs: [],
+    loadingFiles: false,
+    sortBy: localStorage.getItem('vault_sort') || 'name_asc',
+    lastChangeTs: '',
+    changePoller: null,
+
+    // View mode
+    fileView: 'list',
+    iconScaleStep: Number(localStorage.getItem('vault_icon_scale_step') || '1'),
+
+    // Multi-select
+    selectedFiles: new Set(),
+    lastClickedIdx: -1,
+    dragSelecting: false,
+    dragOrigin: null,
+    dragCurrent: null,
+    dragRectStyle: '',
+    newPlaylistName: '',
+    showPlaylistInput: false,
+
+    // File viewer
+    selectedFile: null,
+    selectedFileMeta: null,
+    editDescription: '',
+    metaPanelOpen: true,
+    textContent: '',
+    textOriginal: '',
+    textSaving: false,
+
+    // Chat state
+    chatMessages: [],
+    chatInput: '',
+    amberResponseMode: localStorage.getItem('amber_response_mode') || 'text',
+    amberAttachedFiles: [],
+    amberComposerMenuOpen: false,
+    amberNotificationsEnabled: localStorage.getItem('amber_notifications_enabled') === '1',
+    amberNotificationPermission: ('Notification' in window) ? Notification.permission : 'unsupported',
+    chatFileContext: null,
+    amberChatSession: sessionStorage.getItem('amber_chat_session') || ('vault_web_' + Math.random().toString(36).slice(2)),
+    amberTyping: false,
+    amberPendingMessages: [],
+
+    // Music state
+    playlists: [],
+    activePlaylist: null,
+    currentTrackIndex: 0,
+    isPlaying: false,
+    audioProgress: 0,
+    volume: 80,
+    shuffle: false,
+    repeat: false,
+
+    // Upload state
+    uploadDragging: false,
+    uploadResults: [],
+
+    // Settings
+    devices: [],
+    shares: [],
+    janePersonality: 'default',
+    personalityOptions: [],
+    personalitySaved: false,
+
+    async init() {
+      if (this.isAndroidWebView) {
+        await this.confirmAndroidAuth();
+        if (!this.androidAuthReady) return;
+      }
+      sessionStorage.setItem('amber_chat_session', this.amberChatSession);
+      this.registerAmberNotifications();
+      this.amberNotificationPermission = ('Notification' in window) ? Notification.permission : 'unsupported';
+      await this.loadDirectory('');
+      await this.loadFolderTree();
+      this.startChangePoller();
+      this.loadPlaylists();
+      if (this.activeTab === 'settings') {
+        this.loadSettings();
+      }
+      this.$watch('activeTab', val => {
+        if (val === 'settings') this.loadSettings();
+        if (val === 'music') this.loadPlaylists();
+      });
+    },
+
+    focusChatInput() {
+      this.$nextTick(() => this.$refs.chatInputBox?.focus());
+    },
+
+    async confirmAndroidAuth() {
+      try {
+        const response = await fetch('/api/auth/check', { method: 'POST', credentials: 'include' });
+        const data = await response.json();
+        this.androidAuthReady = !!data.authenticated;
+      } catch {
+        this.androidAuthReady = false;
+      }
+      if (!this.androidAuthReady) {
+        window.location.replace('/');
+      }
+    },
+
+    persistIconScale() {
+      localStorage.setItem('vault_icon_scale_step', String(this.iconScaleStep));
+    },
+
+    iconScaleFactor() {
+      return 1 + (Number(this.iconScaleStep) * 0.2);
+    },
+
+    gridViewStyle() {
+      const size = Math.round(150 * this.iconScaleFactor());
+      return `grid-template-columns: repeat(auto-fill, minmax(${size}px, 1fr));`;
+    },
+
+    tinyViewStyle() {
+      const size = Math.round(52 * this.iconScaleFactor());
+      return `grid-template-columns: repeat(auto-fill, minmax(${size}px, 1fr));`;
+    },
+
+    gridIconStyle() {
+      const px = Math.round(36 * this.iconScaleFactor());
+      return `font-size: ${px}px; line-height: 1;`;
+    },
+
+    tinyIconStyle() {
+      const px = Math.round(20 * this.iconScaleFactor());
+      return `font-size: ${px}px; line-height: 1;`;
+    },
+
+    listThumbStyle() {
+      const px = Math.round(32 * this.iconScaleFactor());
+      return `width: ${px}px; height: ${px}px;`;
+    },
+
+    listIconStyle() {
+      const px = Math.round(32 * this.iconScaleFactor());
+      const fontPx = Math.round(18 * this.iconScaleFactor());
+      return `width: ${px}px; min-width: ${px}px; font-size: ${fontPx}px; line-height: ${px}px;`;
+    },
+
+    // ── Vault ──────────────────────────────────────────────────────────────
+
+    async loadDirectory(path) {
+      this.loadingFiles = true;
+      try {
+        const r = await fetch(path ? `/api/files/list/${path}` : '/api/files');
+        const d = await r.json();
+        this.currentPath = path;
+        this.folders = d.folders || [];
+        this.files = d.files || [];
+        this.updateBreadcrumbs(path);
+        // Auto-select view based on folder type
+        const p = (path || '').toLowerCase();
+        if (p.includes('image') || p.includes('photo') || p.includes('picture') || p.includes('video')) {
+          this.fileView = 'tiny';
+        } else {
+          this.fileView = 'list';
+        }
+      } catch {}
+      this.loadingFiles = false;
+    },
+
+    navigate(path) {
+      this.sidebarOpen = false;
+      this.selectedFiles = new Set();
+      this.lastClickedIdx = -1;
+      this.loadDirectory(path);
+    },
+
+    updateBreadcrumbs(path) {
+      if (!path) { this.breadcrumbs = []; return; }
+      const parts = path.split('/').filter(Boolean);
+      this.breadcrumbs = parts.map((part, i) => ({
+        name: part,
+        path: parts.slice(0, i + 1).join('/'),
+      }));
+    },
+
+    get sortedFiles() {
+      const f = [...this.files];
+      const [key, dir] = this.sortBy.split('_');
+      f.sort((a, b) => {
+        let av, bv;
+        if (key === 'name')  { av = a.name.toLowerCase(); bv = b.name.toLowerCase(); }
+        if (key === 'date')  { av = a.modified; bv = b.modified; }
+        if (key === 'size')  { av = a.size; bv = b.size; }
+        if (dir === 'asc')  return av < bv ? -1 : av > bv ? 1 : 0;
+        return av > bv ? -1 : av < bv ? 1 : 0;
+      });
+      return f;
+    },
+
+    sortFiles() {
+      localStorage.setItem('vault_sort', this.sortBy);
+    },
+
+    async loadFolderTree() {
+      const r = await fetch('/api/files');
+      const d = await r.json();
+      this.folderTree = d.folders || [];
+    },
+
+    renderFolderTree(folders, prefix) {
+      return folders.map(f => `
+        <button onclick="Alpine.$data(document.querySelector('[x-data]')).navigate('${f.path}')"
+          class="w-full text-left flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm hover:bg-slate-800 text-slate-300 hover:text-white transition group">
+          <span>📁</span>
+          <span class="truncate flex-1">${f.name}</span>
+          <span class="text-xs text-slate-600 group-hover:text-slate-400">${f.file_count}</span>
+        </button>
+      `).join('');
+    },
+
+    async openFile(file) {
+      this.selectedFile = file;
+      this.metaPanelOpen = !file.is_pdf; // hide panel for PDFs to maximise viewing area
+      this.editDescription = '';
+      this.selectedFileMeta = null;
+      this.textContent = '';
+      this.textOriginal = '';
+      const r = await fetch(`/api/files/meta/${file.path}`);
+      this.selectedFileMeta = await r.json();
+      this.editDescription = this.selectedFileMeta?.description || '';
+      if (file.is_text) {
+        const tr = await fetch(`/api/files/content/${file.path}`);
+        const td = await tr.json();
+        this.textContent = td.content || '';
+        this.textOriginal = this.textContent;
+      }
+    },
+
+    closeModal() {
+      this.selectedFile = null;
+      this.selectedFileMeta = null;
+      this.textContent = '';
+      this.textOriginal = '';
+    },
+
+    async saveTextContent() {
+      if (!this.selectedFile || this.textSaving) return;
+      this.textSaving = true;
+      await fetch(`/api/files/content/${this.selectedFile.path}`, {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ content: this.textContent }),
+      });
+      this.textOriginal = this.textContent;
+      this.textSaving = false;
+    },
+
+    async saveDescription() {
+      if (!this.selectedFile) return;
+      await fetch(`/api/files/description/${this.selectedFile.path}`, {
+        method: 'PATCH',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ description: this.editDescription }),
+      });
+      if (this.selectedFileMeta) {
+        this.selectedFileMeta.description = this.editDescription;
+      }
+    },
+
+    startChangePoller() {
+      this.changePoller = setInterval(async () => {
+        const r = await fetch('/api/files/changes');
+        const d = await r.json();
+        if (d.last_change && d.last_change !== this.lastChangeTs) {
+          this.lastChangeTs = d.last_change;
+          this.loadDirectory(this.currentPath);
+        }
+      }, 10000);
+    },
+
+    // ── Chat ───────────────────────────────────────────────────────────────
+
+    openChatAboutFile(file) {
+      this.chatFileContext = file.path;
+      this.activeTab = 'chat';
+      this.closeModal();
+    },
+
+    async sendChat() {
+      const msg = this.chatInput.trim();
+      if (!msg) return;
+      this.enqueueAmberMessage(msg);
+      this.chatInput = '';
+      this.$nextTick(() => this.scrollChat());
+    },
+
+    setAmberResponseMode(mode) {
+      this.amberResponseMode = mode === 'audio' ? 'audio' : 'text';
+      localStorage.setItem('amber_response_mode', this.amberResponseMode);
+    },
+
+    enqueueAmberMessage(message) {
+      const msg = (message || '').trim();
+      if (!msg) return;
+      const fileContext = this.buildAmberFileContext();
+      this.chatMessages.push({ role: 'user', text: msg });
+      this.chatInput = '';
+      this.amberPendingMessages.push({
+        message: msg,
+        file_context: fileContext,
+        responseMode: this.amberResponseMode,
+      });
+      this.amberAttachedFiles = [];
+      if (!this.amberTyping) {
+        this.processAmberQueue();
+      }
+    },
+
+    async processAmberQueue() {
+      if (this.amberTyping || this.amberPendingMessages.length === 0) return;
+      const next = this.amberPendingMessages.shift();
+      const amberIndex = this.chatMessages.push({ role: 'amber', text: '', status: 'Sending your message to Amber.' }) - 1;
+      this.amberTyping = true;
+
+      try {
+        const r = await fetch('/api/amber/chat/stream', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            message: next.message,
+            session_id: this.amberChatSession,
+            file_context: next.file_context,
+          }),
+        });
+        if (!r.ok || !r.body) throw new Error('stream failed');
+        await this.consumeAmberStream(r.body, amberIndex);
+        if (!this.chatMessages[amberIndex].text.trim()) {
+          this.chatMessages[amberIndex].text = '_(no response)_';
+        }
+        await this.notifyAmberReply(this.chatMessages[amberIndex].text);
+        if (next.responseMode === 'audio') {
+          this.speakText(this.chatMessages[amberIndex].text);
+        }
+      } catch {
+        if (this.chatMessages[amberIndex]) {
+          this.chatMessages[amberIndex].text = '⚠️ Could not reach Amber.';
+          this.chatMessages[amberIndex].status = '';
+        }
+      }
+      this.amberTyping = false;
+      if (this.amberPendingMessages.length > 0) {
+        this.processAmberQueue();
+      }
+      this.$nextTick(() => this.scrollChat());
+    },
+
+    async consumeAmberStream(stream, amberIndex) {
+      const reader = stream.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { value, done } = await reader.read();
+        buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+
+        let newlineIndex;
+        while ((newlineIndex = buffer.indexOf('\n')) >= 0) {
+          const line = buffer.slice(0, newlineIndex).trim();
+          buffer = buffer.slice(newlineIndex + 1);
+          if (!line) continue;
+          this.applyAmberStreamEvent(line, amberIndex);
+        }
+
+        if (done) {
+          const tail = buffer.trim();
+          if (tail) this.applyAmberStreamEvent(tail, amberIndex);
+          break;
+        }
+      }
+    },
+
+    applyAmberStreamEvent(line, amberIndex) {
+      let event;
+      try {
+        event = JSON.parse(line);
+      } catch {
+        return;
+      }
+
+      const msg = this.chatMessages[amberIndex];
+      if (!msg) return;
+
+      if (event.type === 'status') {
+        msg.status = event.data || '';
+      } else if (event.type === 'done') {
+        msg.text = event.data || msg.text || '_(no response)_';
+        msg.files = event.files || [];
+        msg.status = '';
+      } else if (event.type === 'error') {
+        msg.text = event.data || '⚠️ Could not reach Amber.';
+        msg.status = '';
+      }
+      this.scrollChat();
+    },
+
+    async onAmberFilePick(event) {
+      const files = Array.from(event.target.files || []);
+      event.target.value = '';
+      if (!files.length) return;
+      await this.uploadAmberFiles(files);
+    },
+
+    openAmberPicker(kind) {
+      this.amberComposerMenuOpen = false;
+      this.$nextTick(() => {
+        const refName = kind === 'camera' ? 'amberCameraInput' : 'amberFileInput';
+        const input = this.$refs[refName];
+        if (input) {
+          setTimeout(() => input.click(), 0);
+        }
+      });
+    },
+
+    isImageUpload(file) {
+      return !!(file && ((file.type || '').startsWith('image/') || /\.(png|jpe?g|gif|webp|bmp|heic|svg)$/i.test(file.name || '')));
+    },
+
+    async collectAmberUploadDescriptions(files) {
+      const descriptions = [];
+      for (const file of files) {
+        if (!this.isImageUpload(file)) {
+          descriptions.push('');
+          continue;
+        }
+        const suggested = (file.name || 'image')
+          .replace(/\.[^.]+$/, '')
+          .replace(/[_-]+/g, ' ')
+          .trim();
+        const promptText = 'Give this image a short description so Amber can save it with a meaningful name.';
+        const description = window.prompt(promptText, suggested);
+        if (!description || !description.trim()) {
+          throw new Error(`Image description required for ${file.name || 'image upload'}.`);
+        }
+        descriptions.push(description.trim());
+      }
+      return descriptions;
+    },
+
+    async uploadAmberFiles(files) {
+      const fd = new FormData();
+      let descriptions = [];
+      try {
+        descriptions = await this.collectAmberUploadDescriptions(files);
+      } catch (error) {
+        alert(error.message || 'Image upload needs a description.');
+        return;
+      }
+      for (const file of files) fd.append('files', file);
+      fd.append('descriptions_json', JSON.stringify(descriptions));
+      const response = await fetch('/api/files/upload', { method: 'POST', body: fd });
+      if (!response.ok) {
+        let detail = '';
+        try {
+          const errorBody = await response.json();
+          detail = errorBody.detail || '';
+        } catch (_) {}
+        alert(detail || `Amber file upload failed (${response.status}).`);
+        console.error('Amber file upload failed', response.status);
+        return;
+      }
+      const data = await response.json();
+      for (const result of (data.results || [])) {
+        const path = result.path || result.existing_path;
+        if (!path) continue;
+        if (!this.amberAttachedFiles.some(file => file.path === path)) {
+          this.amberAttachedFiles.push({
+            name: result.saved_name || result.name || path.split('/').pop(),
+            path,
+            description: result.description || '',
+          });
+        }
+      }
+    },
+
+    removeAmberAttachment(index) {
+      this.amberAttachedFiles.splice(index, 1);
+    },
+
+    buildAmberFileContext() {
+      const sections = [];
+      if (this.chatFileContext) {
+        sections.push(`Active file:\\n- ${this.chatFileContext}`);
+      }
+      if (this.amberAttachedFiles.length) {
+        const lines = this.amberAttachedFiles.map(file => {
+          const suffix = file.description ? ` — ${file.description}` : '';
+          return `- ${file.name} (${file.path})${suffix}`;
+        });
+        sections.push(`Attached files:\\n${lines.join('\\n')}`);
+      }
+      return sections.length ? sections.join('\\n\\n') : null;
+    },
+
+    async registerAmberNotifications() {
+      if (!('serviceWorker' in navigator)) return null;
+      try {
+        return await navigator.serviceWorker.register('/sw.js');
+      } catch (error) {
+        console.error('Amber service worker registration failed', error);
+        return null;
+      }
+    },
+
+    async toggleAmberNotifications() {
+      if (this.amberNotificationsEnabled) {
+        this.amberNotificationsEnabled = false;
+        localStorage.setItem('amber_notifications_enabled', '0');
+        this.amberComposerMenuOpen = false;
+        return;
+      }
+      if (!('Notification' in window)) {
+        this.amberComposerMenuOpen = false;
+        return;
+      }
+      const registration = await this.registerAmberNotifications();
+      let permission = Notification.permission;
+      if (permission === 'default') {
+        permission = await Notification.requestPermission();
+      }
+      this.amberNotificationPermission = permission;
+      this.amberNotificationsEnabled = permission === 'granted' && !!registration;
+      localStorage.setItem('amber_notifications_enabled', this.amberNotificationsEnabled ? '1' : '0');
+      this.amberComposerMenuOpen = false;
+    },
+
+    async notifyAmberReply(text) {
+      if (!this.amberNotificationsEnabled || this.amberNotificationPermission !== 'granted' || !document.hidden) return;
+      const body = (text || '').replace(/\s+/g, ' ').trim().slice(0, 180) || 'Amber sent a reply.';
+      try {
+        const registration = await navigator.serviceWorker.getRegistration();
+        if (!registration) return;
+        await registration.showNotification('Amber replied', {
+          body,
+          icon: '/static/amber-app-icon.svg',
+          badge: '/static/amber-badge.svg',
+          tag: 'amber-reply',
+          renotify: true,
+          silent: false,
+          vibrate: [180, 80, 180],
+          data: { url: '/' },
+        });
+      } catch (error) {
+        console.error('Amber notification failed', error);
+      }
+    },
+
+    scrollChat() {
+      const el = document.getElementById('chat-messages');
+      if (el) el.scrollTop = el.scrollHeight;
+    },
+
+    formatMessage(text) {
+      const FILE_EXT = /\.(jpe?g|png|gif|webp|svg|mp3|wav|ogg|m4a|flac|mp4|mov|avi|webm|mkv|pdf|txt|md|doc|docx|zip|tar|gz|json|csv|py|js|sh)$/i;
+      const mathBlocks = [];
+      const renderMath = (src, display) => {
+        try {
+          return typeof katex !== 'undefined'
+            ? katex.renderToString(src.trim(), { displayMode: display, throwOnError: false })
+            : `<code>${display ? '$$' : '$'}${src}${display ? '$$' : '$'}</code>`;
+        } catch(e) { return `<code>${src}</code>`; }
+      };
+      // Extract math before HTML-escaping so LaTeX symbols aren't mangled
+      let s = text
+        .replace(/\$\$([\s\S]+?)\$\$/g, (_, m) => { mathBlocks.push(renderMath(m, true));  return `\x00M${mathBlocks.length-1}\x00`; })
+        .replace(/\$([^\$\n]+?)\$/g,     (_, m) => { mathBlocks.push(renderMath(m, false)); return `\x00M${mathBlocks.length-1}\x00`; });
+      // HTML-escape, markdown, filename links
+      s = s
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+        .replace(/`([^`]+)`/g, (_, inner) => {
+          if (FILE_EXT.test(inner.trim())) {
+            const encoded = encodeURIComponent(inner.trim());
+            return `<a href="/api/files/find?name=${encoded}" class="inline-flex items-center gap-1 text-violet-400 hover:text-violet-200 underline text-xs" @click.prevent="downloadVaultFile('${encoded}')">📎 ${inner}</a>`;
+          }
+          return `<code class="bg-slate-700 px-1 rounded text-violet-300 text-xs">${inner}</code>`;
+        })
+        .replace(/\n/g, '<br>');
+      // Restore math
+      return s.replace(/\x00M(\d+)\x00/g, (_, i) => mathBlocks[+i]);
+    },
+
+    hasMathPreview(text) {
+      return /\$/.test(text);
+    },
+
+    async downloadVaultFile(encodedName) {
+      const r = await fetch(`/api/files/find?name=${encodedName}`);
+      if (!r.ok) { alert('File not found in vault'); return; }
+      const { path } = await r.json();
+      const a = document.createElement('a');
+      a.href = `/api/files/serve/${path}`;
+      a.download = decodeURIComponent(encodedName);
+      a.click();
+    },
+
+    autoResize(el) {
+      el.style.height = 'auto';
+      el.style.height = Math.min(el.scrollHeight, 128) + 'px';
+    },
+
+    speakText(text) {
+      if (!('speechSynthesis' in window)) return;
+      const cleaned = (text || '')
+        .replace(/[_*`#>\-\[\]\(\)]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      if (!cleaned) return;
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(cleaned);
+      window.speechSynthesis.speak(utterance);
+    },
+
+    // ── Music ──────────────────────────────────────────────────────────────
+
+    async loadPlaylists() {
+      const r = await fetch('/api/playlists');
+      this.playlists = await r.json();
+    },
+
+    async loadPlaylist(id) {
+      try {
+        const r = await fetch(`/api/playlists/${id}`);
+        if (!r.ok) { console.error('loadPlaylist failed:', r.status); return; }
+        const data = await r.json();
+        this.activePlaylist = data;
+        this.currentTrackIndex = 0;
+        this.isPlaying = false;
+      } catch(e) {
+        console.error('loadPlaylist error:', e);
+      }
+    },
+
+    get currentTrack() {
+      return this.activePlaylist?.tracks?.[this.currentTrackIndex] || null;
+    },
+
+    playTrack(index) {
+      this.currentTrackIndex = index;
+      this.$nextTick(() => {
+        const audio = this.$refs.audioPlayer;
+        if (audio && this.currentTrack) {
+          const encodedPath = this.currentTrack.path.split('/').map(s => encodeURIComponent(s)).join('/');
+          audio.src = `/api/files/serve/${encodedPath}`;
+          audio.load();
+          audio.play().then(() => {
+            this.isPlaying = true;
+          }).catch(err => {
+            console.error('Audio play failed:', err);
+            this.isPlaying = false;
+          });
+        }
+      });
+    },
+
+    togglePlay() {
+      const audio = this.$refs.audioPlayer;
+      if (!audio) return;
+      if (!audio.src && this.currentTrack) {
+        const encodedPath = this.currentTrack.path.split('/').map(s => encodeURIComponent(s)).join('/');
+        audio.src = `/api/files/serve/${encodedPath}`;
+        audio.load();
+      }
+      if (this.isPlaying) { audio.pause(); this.isPlaying = false; }
+      else { audio.play().then(() => { this.isPlaying = true; }).catch(err => { console.error('Play failed:', err); }); }
+    },
+
+    nextTrack() {
+      if (!this.activePlaylist) return;
+      const tracks = this.activePlaylist.tracks;
+      if (this.shuffle) {
+        this.currentTrackIndex = Math.floor(Math.random() * tracks.length);
+      } else if (this.currentTrackIndex < tracks.length - 1) {
+        this.currentTrackIndex++;
+      } else if (this.repeat) {
+        this.currentTrackIndex = 0;
+      } else { this.isPlaying = false; return; }
+      this.playTrack(this.currentTrackIndex);
+    },
+
+    prevTrack() {
+      if (this.currentTrackIndex > 0) {
+        this.playTrack(this.currentTrackIndex - 1);
+      }
+    },
+
+    toggleShuffle() { this.shuffle = !this.shuffle; },
+    toggleRepeat() { this.repeat = !this.repeat; },
+
+    updateProgress() {
+      const audio = this.$refs.audioPlayer;
+      if (audio && audio.duration) {
+        this.audioProgress = (audio.currentTime / audio.duration) * 100;
+      }
+    },
+
+    seekAudio(e) {
+      const audio = this.$refs.audioPlayer;
+      if (!audio || !audio.duration) return;
+      const rect = e.currentTarget.getBoundingClientRect();
+      const pct = (e.clientX - rect.left) / rect.width;
+      audio.currentTime = pct * audio.duration;
+    },
+
+    handleFileClick(file, idx, event) {
+      if (this.dragSelecting) return; // ignore clicks that end a drag
+      if (event.shiftKey && this.lastClickedIdx >= 0) {
+        // Shift-click: select range
+        const files = this.sortedFiles;
+        const lo = Math.min(this.lastClickedIdx, idx);
+        const hi = Math.max(this.lastClickedIdx, idx);
+        const next = new Set(this.selectedFiles);
+        for (let i = lo; i <= hi; i++) next.add(files[i].path);
+        this.selectedFiles = next;
+      } else if (this.selectedFiles.size > 0 || file.is_audio) {
+        // Audio files always toggle; any file toggles when selection active
+        const next = new Set(this.selectedFiles);
+        if (next.has(file.path)) { next.delete(file.path); } else { next.add(file.path); }
+        this.selectedFiles = next;
+        this.lastClickedIdx = idx;
+      } else {
+        // Non-audio, nothing selected: open
+        this.lastClickedIdx = idx;
+        this.openFile(file);
+      }
+    },
+
+    // ── Drag-to-select ──────────────────────────────────────────────────────
+
+    startDragSelect(e) {
+      // Only start from the background, not from a file card
+      if (e.button !== 0 || e.target.closest('[data-file-path]')) return;
+      this.dragSelecting = false; // will set true on first move
+      this.dragOrigin = { x: e.clientX, y: e.clientY };
+      this.dragCurrent = { x: e.clientX, y: e.clientY };
+    },
+
+    moveDragSelect(e) {
+      if (!this.dragOrigin) return;
+      this.dragCurrent = { x: e.clientX, y: e.clientY };
+      const dx = Math.abs(this.dragCurrent.x - this.dragOrigin.x);
+      const dy = Math.abs(this.dragCurrent.y - this.dragOrigin.y);
+      if (dx > 4 || dy > 4) this.dragSelecting = true;
+      if (!this.dragSelecting) return;
+      const x1 = Math.min(this.dragOrigin.x, this.dragCurrent.x);
+      const y1 = Math.min(this.dragOrigin.y, this.dragCurrent.y);
+      const x2 = Math.max(this.dragOrigin.x, this.dragCurrent.x);
+      const y2 = Math.max(this.dragOrigin.y, this.dragCurrent.y);
+      this.dragRectStyle = `left:${x1}px;top:${y1}px;width:${x2-x1}px;height:${y2-y1}px`;
+    },
+
+    endDragSelect(e) {
+      if (!this.dragOrigin) return;
+      if (this.dragSelecting) {
+        const x1 = Math.min(this.dragOrigin.x, this.dragCurrent.x);
+        const y1 = Math.min(this.dragOrigin.y, this.dragCurrent.y);
+        const x2 = Math.max(this.dragOrigin.x, this.dragCurrent.x);
+        const y2 = Math.max(this.dragOrigin.y, this.dragCurrent.y);
+        const next = new Set(this.selectedFiles);
+        document.querySelectorAll('[data-file-path]').forEach(el => {
+          const r = el.getBoundingClientRect();
+          if (r.left < x2 && r.right > x1 && r.top < y2 && r.bottom > y1) {
+            next.add(el.dataset.filePath);
+          }
+        });
+        this.selectedFiles = next;
+      }
+      this.dragSelecting = false;
+      this.dragOrigin = null;
+      this.dragRectStyle = '';
+    },
+
+    // ── Create playlist directly ─────────────────────────────────────────────
+
+    async createPlaylistDirect() {
+      const audioFiles = this.sortedFiles.filter(f => this.selectedFiles.has(f.path) && f.is_audio);
+      if (!audioFiles.length) {
+        alert('No audio files selected.');
+        return;
+      }
+      const name = this.newPlaylistName.trim() || 'New Playlist';
+      const tracks = audioFiles.map(f => ({ path: f.path, title: f.name }));
+      const r = await fetch('/api/playlists', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, tracks }),
+      });
+      if (r.ok) {
+        this.selectedFiles = new Set();
+        this.newPlaylistName = '';
+        this.showPlaylistInput = false;
+        await this.loadPlaylists();
+        this.activeTab = 'music';
+      }
+    },
+
+    addToPlaylistPrompt(file) {
+      this.chatInput = `Add "${file.name}" to a playlist`;
+      this.chatFileContext = file.path;
+      this.activeTab = 'chat';
+      this.closeModal();
+    },
+
+    // ── Upload ─────────────────────────────────────────────────────────────
+
+    onFilePick(e) {
+      if (e.target.files.length) this.handleUpload(e.target.files);
+      e.target.value = '';
+    },
+
+    onDrop(e) {
+      this.uploadDragging = false;
+      if (e.dataTransfer.files.length) this.handleUpload(e.dataTransfer.files);
+    },
+
+    async handleUpload(fileList) {
+      const fd = new FormData();
+      for (const f of fileList) fd.append('files', f);
+      if (this.currentPath) fd.append('destination', this.currentPath);
+      this.uploadResults = [];
+      try {
+        const r = await fetch('/api/files/upload', { method: 'POST', body: fd });
+        const d = await r.json();
+        this.uploadResults = d.results || [];
+        await this.loadDirectory(this.currentPath);
+      } catch(e) {
+        this.uploadResults = [{ name: 'Upload failed', status: 'error', message: String(e) }];
+      }
+    },
+
+    // ── Settings ───────────────────────────────────────────────────────────
+
+    async loadSettings() {
+      const [dR, sR, pR] = await Promise.all([
+        fetch('/api/auth/devices'),
+        fetch('/api/shares'),
+        fetch('/api/settings/personality'),
+      ]);
+      this.devices = await dR.json();
+      this.shares = await sR.json();
+      const pData = await pR.json();
+      this.janePersonality = pData.current || 'default';
+      this.personalityOptions = pData.available || [];
+    },
+
+    async savePersonality() {
+      this.personalitySaved = false;
+      await fetch('/api/settings/personality', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ personality: this.janePersonality }),
+      });
+      this.personalitySaved = true;
+      setTimeout(() => { this.personalitySaved = false; }, 2000);
+    },
+
+    async revokeDevice(id) {
+      await fetch(`/api/auth/devices/${id}`, { method: 'DELETE' });
+      this.devices = this.devices.filter(d => d.id !== id);
+    },
+
+    async revokeShare(id) {
+      await fetch(`/api/shares/${id}`, { method: 'DELETE' });
+      this.shares = this.shares.filter(s => s.id !== id);
+    },
+
+    // ── Utils ──────────────────────────────────────────────────────────────
+
+    formatDate(iso) {
+      if (!iso) return '';
+      return new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+    },
+
+    async logout() {
+      await fetch('/api/auth/logout', { method: 'POST' });
+      window.location.href = '/';
+    },
+
+  }
+}
+
+function essenceDropdown() {
+  return {
+    open: false,
+    items: [],
+    toggle() {
+      if (!this.open) this.fetchItems();
+      this.open = !this.open;
+    },
+    async fetchItems() {
+      try {
+        const r = await fetch('/api/essences', { cache: 'no-store' });
+        if (r.ok) {
+          const all = await r.json();
+          this.items = all.filter(i => i.type === 'essence').sort((a, b) => a.name.localeCompare(b.name));
+        }
+      } catch (e) { console.error('Failed to fetch essences', e); }
+    },
+  }
+}
+function toolsDropdown() {
+  return {
+    open: false,
+    items: [],
+    toggle() {
+      if (!this.open) this.fetchItems();
+      this.open = !this.open;
+    },
+    async fetchItems() {
+      try {
+        const r = await fetch('/api/essences', { cache: 'no-store' });
+        if (r.ok) {
+          const all = await r.json();
+          this.items = all.filter(i => (i.type || 'tool') === 'tool').sort((a, b) => a.name.localeCompare(b.name));
+        }
+      } catch (e) { console.error('Failed to fetch tools', e); }
+    },
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,33 @@
+{
+  "essence_name": "ESSENCE_NAME",
+  "role_title": "the ROLE",
+  "version": "1.0",
+  "author": "AUTHOR",
+  "description": "DESCRIPTION",
+
+  "preferred_model": {
+    "model_id": "MODEL_ID",
+    "reasoning": "WHY_THIS_MODEL"
+  },
+
+  "permissions": [],
+
+  "external_credentials": [],
+
+  "capabilities": {
+    "provides": [],
+    "consumes": []
+  },
+
+  "ui": {
+    "type": "chat",
+    "entry_layout": "ui/layout.json"
+  },
+
+  "shared_skills": [],
+
+  "interaction_patterns": {
+    "conversation_starters": [],
+    "proactive_triggers": []
+  }
+}

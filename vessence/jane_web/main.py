@@ -1,0 +1,2677 @@
+#!/usr/bin/env python3
+"""main.py — Jane web UI (chat with Jane / Claude Code). Runs on port 8081.
+Shares all templates and static assets with vault_web so UI changes propagate to both.
+"""
+import os
+import sys
+import secrets
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Optional
+
+from fastapi import FastAPI, Request, Response, Cookie, HTTPException, Depends, UploadFile, File, Form
+from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, StreamingResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from starlette.middleware.sessions import SessionMiddleware
+from pydantic import BaseModel
+import asyncio
+import aiofiles
+import hashlib
+import json
+import logging
+import subprocess
+import time
+try:
+    import chromadb
+except ImportError:
+    chromadb = None
+
+CODE_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(CODE_ROOT))
+sys.path.insert(0, str(CODE_ROOT / "vault_web"))  # share vault_web modules
+
+# ── Logging setup ─────────────────────────────────────────────────────────────
+_DATA_HOME = os.environ.get("VESSENCE_DATA_HOME", os.path.expanduser("~/ambient/vessence-data"))
+_LOG_DIR = Path(_DATA_HOME) / "logs"
+_LOG_DIR.mkdir(parents=True, exist_ok=True)
+
+from logging.handlers import RotatingFileHandler as _RotatingFileHandler
+_file_handler = _RotatingFileHandler(
+    _LOG_DIR / "jane_web.log", maxBytes=10 * 1024 * 1024, backupCount=3, encoding="utf-8"
+)
+_file_handler.setFormatter(logging.Formatter(
+    "%(asctime)s %(levelname)s [%(name)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
+))
+_root_logger = logging.getLogger()
+_root_logger.addHandler(_file_handler)
+_root_logger.setLevel(logging.INFO)
+# Ensure jane.proxy logger also writes here
+logging.getLogger("jane.proxy").setLevel(logging.DEBUG)
+
+_logger = logging.getLogger("jane.web")
+_logger.info("=== Jane Web starting (PID %d) ===", os.getpid())
+
+from dotenv import load_dotenv
+from jane.config import ENV_FILE_PATH, VAULT_DIR, TOOLS_DIR, ESSENCES_DIR, VESSENCE_DATA_HOME, ADD_FACT_SCRIPT, ADK_VENV_PYTHON, LOGS_DIR, PROMPT_LIST_PATH
+
+load_dotenv(ENV_FILE_PATH)
+
+from database import init_db, get_db
+from auth import (
+    create_session, validate_session,
+    is_device_trusted, register_trusted_device,
+    get_trusted_device_by_id, get_trusted_device_by_fingerprint,
+    get_session_user, verify_otp,
+    get_trusted_devices, revoke_device,
+    device_fingerprint_from_request, unlock_ip,
+)
+from oauth import oauth, allowed_email, build_external_url, google_oauth_configured
+from files import (
+    list_directory, get_file_metadata, update_description,
+    generate_thumbnail, get_last_change_timestamp, safe_vault_path, is_text, TEXT_SIZE_LIMIT, get_mime,
+    make_descriptive_filename, upsert_file_index_entry,
+)
+from share import create_share, validate_share, list_shares, revoke_share
+from playlists import list_playlists, get_playlist, create_playlist, update_playlist, delete_playlist
+try:
+    from .jane_proxy import send_message, stream_message, get_tunnel_url, prewarm_session, end_session, run_prefetch_memory
+except ImportError:
+    from jane_proxy import send_message, stream_message, get_tunnel_url, prewarm_session, end_session, run_prefetch_memory
+
+# ── Shared UI: point directly at vault_web's static + templates ──────────────
+VAULT_WEB_DIR = CODE_ROOT / "vault_web"
+BASE_DIR = Path(__file__).parent
+MARKETING_DIR = CODE_ROOT / "marketing_site"
+MARKETING_DOWNLOADS_DIR = MARKETING_DIR / "downloads"
+ANDROID_VERSION = "0.0.41"
+def _find_latest(pattern: str) -> Optional[Path]:
+    """Return the newest file matching a glob pattern in MARKETING_DOWNLOADS_DIR, or None."""
+    matches = sorted(MARKETING_DOWNLOADS_DIR.glob(pattern), key=lambda p: p.stat().st_mtime, reverse=True)
+    return matches[0] if matches else None
+
+PUBLIC_RELEASE_DOWNLOADS = {
+    # Raw compose file for advanced users
+    "docker-compose.yml": MARKETING_DIR / "docker-compose.yml",
+    # Docker image tarball
+    "vessence-docker-0.0.43.tar.gz": MARKETING_DOWNLOADS_DIR / "vessence-docker-0.0.43.tar.gz",
+    # Android
+    f"vessences-android-v{ANDROID_VERSION}.apk": MARKETING_DOWNLOADS_DIR / f"vessences-android-v{ANDROID_VERSION}.apk",
+    "vessences-android.apk": MARKETING_DOWNLOADS_DIR / f"vessences-android-v{ANDROID_VERSION}.apk",
+    "vessences-android-package.zip": MARKETING_DOWNLOADS_DIR / "vessences-android-package.zip",
+    # Legacy (keep for existing links)
+    "vessence-installer-0.0.41.zip": MARKETING_DOWNLOADS_DIR / "vessence-installer-0.0.41.zip",
+}
+
+# Unversioned aliases that resolve to the latest versioned installer zip at request time
+_INSTALLER_GLOBS = {
+    "vessence-windows-installer.zip": "vessence-windows-installer-v*.zip",
+    "vessence-mac-installer.zip": "vessence-mac-installer-v*.zip",
+    "vessence-linux-installer.zip": "vessence-linux-installer-v*.zip",
+}
+
+app = FastAPI(title="Jane")
+app.add_middleware(SessionMiddleware, secret_key=os.getenv("SESSION_SECRET_KEY", "changeme"))
+app.mount("/static", StaticFiles(directory=VAULT_WEB_DIR / "static"), name="static")
+templates = Jinja2Templates(directory=VAULT_WEB_DIR / "templates")
+
+
+# ── Request logging middleware ────────────────────────────────────────────────
+def _touch_idle_state():
+    """Update idle_state.json so the prompt queue runner knows user is active."""
+    try:
+        import json as _j
+        from jane.config import IDLE_STATE_PATH
+        Path(IDLE_STATE_PATH).write_text(_j.dumps({
+            "last_active_ts": time.time(),
+            "last_active_iso": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        }))
+    except Exception:
+        pass
+
+@app.middleware("http")
+async def cache_control_middleware(request: Request, call_next):
+    response = await call_next(request)
+    path = request.url.path
+    if path.startswith("/static/"):
+        # Static assets: CSS, JS, images, fonts — cache at Cloudflare edge for 1 day
+        response.headers["Cache-Control"] = "public, max-age=86400"
+    elif path.startswith("/api/briefing/image/"):
+        # Briefing images: cache for 1 hour (refreshed daily)
+        response.headers["Cache-Control"] = "public, max-age=3600"
+    elif path.startswith("/api/"):
+        # API responses: never cache (dynamic data)
+        response.headers["Cache-Control"] = "no-store"
+    else:
+        # HTML pages: always revalidate (but allow conditional GET)
+        response.headers["Cache-Control"] = "no-cache"
+    return response
+
+
+@app.middleware("http")
+async def request_logging_middleware(request: Request, call_next):
+    start = time.time()
+    path = request.url.path
+    method = request.method
+    # Update idle state for non-polling requests (so queue runner knows user is active)
+    is_poll = path in ("/api/jane/announcements", "/health", "/api/files/changes", "/api/jane/live")
+    if not is_poll and method in ("POST", "GET") and "/api/" in path:
+        _touch_idle_state()
+    try:
+        response = await call_next(request)
+        if not is_poll:
+            elapsed_ms = int((time.time() - start) * 1000)
+            _logger.info("%s %s → %d (%dms)", method, path, response.status_code, elapsed_ms)
+        return response
+    except Exception as exc:
+        elapsed_ms = int((time.time() - start) * 1000)
+        _logger.exception("Unhandled error in %s %s after %dms: %s", method, path, elapsed_ms, exc)
+        raise
+
+SESSION_COOKIE = "jane_session"
+TRUSTED_DEVICE_COOKIE = "jane_trusted_device"
+STATIC_DIR = VAULT_WEB_DIR / "static"
+ANNOUNCEMENTS_PATH = Path(ENV_FILE_PATH).parent / "data" / "jane_announcements.jsonl"
+
+
+def _session_log_id(session_id: Optional[str]) -> str:
+    return session_id[:12] if session_id else "none"
+
+
+def _client_ip(request: Request) -> str:
+    return getattr(request.client, "host", "unknown") or "unknown"
+
+
+def _login_context(request: Request, **extra):
+    ctx = {
+        "request": request,
+        "app_title": "Jane",
+        "app_icon": "🧠",
+        "app_subtitle": "Your long-lived technical partner",
+        "footer_label": "Jane · Project Ambient",
+        "google_oauth_enabled": google_oauth_configured(),
+    }
+    ctx.update(extra)
+    return ctx
+
+
+def _read_announcements(since: Optional[str]) -> list[dict]:
+    if not ANNOUNCEMENTS_PATH.exists():
+        return []
+    # Truncate announcements file if it exceeds 1MB to prevent unbounded growth
+    try:
+        if ANNOUNCEMENTS_PATH.stat().st_size > 1 * 1024 * 1024:
+            lines = ANNOUNCEMENTS_PATH.read_text(encoding="utf-8", errors="replace").splitlines()
+            ANNOUNCEMENTS_PATH.write_text("\n".join(lines[-200:]) + "\n", encoding="utf-8")
+    except Exception:
+        pass
+    try:
+        since_dt = datetime.fromisoformat(since) if since else None
+    except ValueError:
+        since_dt = None
+    rows: list[dict] = []
+    with ANNOUNCEMENTS_PATH.open("r", encoding="utf-8") as handle:
+        for raw in handle:
+            raw = raw.strip()
+            if not raw:
+                continue
+            try:
+                payload = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+            created_at = payload.get("created_at") or payload.get("timestamp")
+            if since_dt and created_at:
+                try:
+                    created_dt = datetime.fromisoformat(created_at)
+                except ValueError:
+                    created_dt = None
+                if created_dt and created_dt <= since_dt:
+                    continue
+            rows.append(payload)
+    return rows
+
+
+# ─── Init ─────────────────────────────────────────────────────────────────────
+
+_background_tasks: set[asyncio.Task] = set()  # prevent GC of fire-and-forget tasks
+
+
+@app.on_event("startup")
+async def startup():
+    init_db()
+    _auto_load_essences()
+    # Start periodic reaper for stale Claude/Gemini sessions (prevents memory leaks)
+    reaper = asyncio.create_task(_reap_stale_sessions_loop())
+    _background_tasks.add(reaper)
+    reaper.add_done_callback(_background_tasks.discard)
+    _logger.info("Jane Web startup complete — database initialized, essences loaded, ready to serve")
+    # Pre-warm Ollama gemma model so first intent classification is fast
+    prewarm = asyncio.create_task(_prewarm_ollama())
+    _background_tasks.add(prewarm)
+    prewarm.add_done_callback(_background_tasks.discard)
+    # Start Standing Brain processes (3 tiers: light/medium/heavy)
+    standing_brain_task = asyncio.create_task(_start_standing_brains())
+    _background_tasks.add(standing_brain_task)
+    standing_brain_task.add_done_callback(_background_tasks.discard)
+
+
+async def _start_standing_brains():
+    """Start all standing brain CLI processes at service startup."""
+    try:
+        from jane.standing_brain import get_standing_brain_manager
+        manager = get_standing_brain_manager()
+        await manager.start()
+        health = await manager.health_check()
+        alive = sum(1 for v in health.values() if v["alive"])
+        _logger.info("Standing Brain: %d/%d brains alive — %s",
+                      alive, len(health),
+                      {k: f'{v["model"]} pid={v["pid"]}' for k, v in health.items() if v["alive"]})
+    except Exception as exc:
+        _logger.error("Standing Brain startup failed: %s", exc)
+
+
+async def _prewarm_ollama():
+    """Send a dummy classify call to load gemma into VRAM at startup."""
+    import subprocess
+    model = os.environ.get("INTENT_CLASSIFIER_MODEL", "gemma3:4b")
+    if ":" not in model:
+        return  # API model, no need to prewarm
+    _logger.info("Pre-warming Ollama model: %s", model)
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "ollama", "run", model, "hi",
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        await asyncio.wait_for(proc.wait(), timeout=60)
+        _logger.info("Ollama model %s pre-warmed successfully", model)
+    except Exception as exc:
+        _logger.warning("Ollama pre-warm failed: %s", exc)
+
+
+async def _reap_stale_sessions_loop():
+    """Periodically reap stale Claude and Gemini persistent sessions to prevent memory leaks."""
+    while True:
+        await asyncio.sleep(600)  # every 10 minutes
+        try:
+            from jane.persistent_claude import get_claude_persistent_manager
+            manager = get_claude_persistent_manager()
+            reaped = await manager.reap_stale_sessions()
+            if reaped:
+                _logger.info("Reaped %d stale Claude sessions", reaped)
+        except Exception as e:
+            _logger.warning("Claude session reaper error (non-fatal): %s", e)
+        # Also reap stale Gemini persistent sessions
+        try:
+            from jane.persistent_gemini import get_gemini_persistent_manager
+            gm = get_gemini_persistent_manager(os.environ.get("VESSENCE_HOME", ""))
+            gemini_reaped = await gm.reap_stale_sessions()
+            if gemini_reaped:
+                _logger.info("Reaped %d stale Gemini sessions", gemini_reaped)
+        except Exception as e:
+            _logger.warning("Gemini session reaper error (non-fatal): %s", e)
+        # Also prune in-memory Jane proxy sessions
+        try:
+            from jane_web.jane_proxy import _prune_stale_sessions
+            _prune_stale_sessions()
+        except Exception as e:
+            _logger.warning("Jane proxy session pruner error (non-fatal): %s", e)
+
+
+@app.on_event("shutdown")
+async def shutdown():
+    """Clean up persistent workers to prevent zombie processes on restart.
+
+    Uses force_shutdown_all() for Claude sessions to avoid deadlocking on
+    the session lock (which may be held by an in-progress turn). Uses killpg()
+    to kill entire process trees (Bun workers, tokio runtimes, etc.) instead
+    of just the parent process.
+    """
+    _logger.info("Jane Web shutting down — cleaning up persistent workers...")
+
+    # Claude: force-kill all subprocesses without acquiring locks
+    try:
+        from jane.persistent_claude import get_claude_persistent_manager
+        killed = get_claude_persistent_manager().force_shutdown_all()
+        _logger.info("Claude cleanup: killed %d processes", killed)
+    except Exception as e:
+        _logger.warning(f"Claude cleanup error (non-fatal): {e}")
+
+    # Gemini: shutdown PTY sessions
+    try:
+        from jane.persistent_gemini import get_gemini_persistent_manager
+        manager = get_gemini_persistent_manager(os.environ.get("VESSENCE_HOME", ""))
+        for sid in list(getattr(manager, '_sessions', {}).keys()):
+            try:
+                await manager.end(sid)
+            except Exception:
+                pass
+    except Exception as e:
+        _logger.warning(f"Gemini cleanup error (non-fatal): {e}")
+
+    # Standing Brain: kill all tiers in parallel
+    try:
+        from jane.standing_brain import get_standing_brain_manager
+        await get_standing_brain_manager().shutdown()
+    except Exception as e:
+        _logger.warning(f"Standing Brain cleanup error (non-fatal): {e}")
+
+    # Cancel background tasks (session reaper, etc.)
+    for task in list(_background_tasks):
+        task.cancel()
+    _logger.info("Jane Web shutdown complete.")
+
+
+def _auto_load_essences():
+    """Scan ESSENCES_DIR and auto-load all valid essences on startup."""
+    from agent_skills.essence_runtime import EssenceRuntime, CapabilityRegistry
+    global _capability_registry
+    _capability_registry = CapabilityRegistry()
+
+    runtime = _get_essence_runtime()
+    available = list_available_essences()
+    loaded_names = []
+    for e in available:
+        try:
+            state = load_essence(e["path"])
+            _essence_states[e["name"]] = state
+            # Also load into the runtime for orchestration
+            try:
+                runtime.load_essence(e["name"])
+            except Exception:
+                pass  # runtime may fail on chromadb import; non-fatal
+            # Register capabilities
+            caps = state.capabilities.get("provides", [])
+            if caps:
+                _capability_registry.register(e["name"], caps)
+            loaded_names.append(e["name"])
+            _logger.info("Auto-loaded essence '%s' (%s) — capabilities: %s",
+                         e["name"], state.role_title, caps)
+        except Exception as exc:
+            _logger.warning("Failed to auto-load essence '%s': %s", e["name"], exc)
+    _logger.info("Auto-loaded %d essences: %s", len(loaded_names), loaded_names)
+
+
+def _get_essence_runtime():
+    """Get or create the singleton EssenceRuntime."""
+    try:
+        from agent_skills.essence_runtime import EssenceRuntime
+        return EssenceRuntime(TOOLS_DIR)
+    except Exception as exc:
+        _logger.warning("Could not initialize EssenceRuntime: %s", exc)
+        return None
+
+
+@app.get("/health")
+async def health():
+    brain = os.getenv("JANE_BRAIN", "gemini")
+    return {"status": "ok", "service": "jane", "brain": brain}
+
+
+@app.get("/sw.js")
+async def service_worker():
+    return FileResponse(str(STATIC_DIR / "chat-sw.js"), media_type="application/javascript")
+
+
+@app.get("/manifest.webmanifest")
+async def web_manifest():
+    return FileResponse(str(STATIC_DIR / "jane.webmanifest"), media_type="application/manifest+json")
+
+
+# ─── Auth helpers ─────────────────────────────────────────────────────────────
+
+def get_session_id(request: Request) -> Optional[str]:
+    return request.cookies.get(SESSION_COOKIE)
+
+
+def require_auth(request: Request):
+    # Allow internal requests from localhost (prompt queue runner, cron jobs)
+    client_host = request.client.host if request.client else ""
+    if client_host in ("127.0.0.1", "::1", "localhost"):
+        return request.query_params.get("session_id") or "internal"
+    session_id = get_session_id(request)
+    fp = device_fingerprint_from_request(request)
+    if not session_id or not validate_session(session_id, fp):
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    return session_id
+
+
+def _default_user_id() -> str:
+    allowed = [e.strip() for e in os.getenv("ALLOWED_GOOGLE_EMAILS", "").split(",") if e.strip()]
+    if allowed:
+        return allowed[0]
+    user_name = os.getenv("USER_NAME", "").strip().lower()
+    return "_".join(user_name.split()) if user_name else "user"
+
+
+def get_trusted_device_cookie_id(request: Request) -> Optional[str]:
+    return request.cookies.get(TRUSTED_DEVICE_COOKIE)
+
+
+def get_or_bootstrap_session(request: Request) -> tuple[Optional[str], Optional[str]]:
+    session_id = get_session_id(request)
+    fp = device_fingerprint_from_request(request)
+    if session_id and validate_session(session_id, fp):
+        _logger.info(
+            "Session bootstrap reused existing session=%s trusted_cookie=%s ip=%s",
+            _session_log_id(session_id),
+            bool(get_trusted_device_cookie_id(request)),
+            _client_ip(request),
+        )
+        prewarm_session(session_id)
+        return session_id, get_trusted_device_cookie_id(request)
+
+    trusted_cookie_id = get_trusted_device_cookie_id(request)
+    trusted_row = get_trusted_device_by_id(trusted_cookie_id) if trusted_cookie_id else None
+    if trusted_row:
+        session_id = create_session(
+            trusted_row["fingerprint"],
+            trusted=True,
+            user_id=trusted_row["label"] or _default_user_id(),
+        )
+        _logger.info(
+            "Session bootstrap created session=%s via trusted-cookie trusted_device=%s ip=%s",
+            _session_log_id(session_id),
+            trusted_row["id"],
+            _client_ip(request),
+        )
+        prewarm_session(session_id)
+        return session_id, trusted_row["id"]
+
+    trusted_row = get_trusted_device_by_fingerprint(fp)
+    if trusted_row:
+        session_id = create_session(
+            fp,
+            trusted=True,
+            user_id=trusted_row["label"] or _default_user_id(),
+        )
+        _logger.info(
+            "Session bootstrap created session=%s via fingerprint-match trusted_device=%s ip=%s",
+            _session_log_id(session_id),
+            trusted_row["id"],
+            _client_ip(request),
+        )
+        prewarm_session(session_id)
+        return session_id, trusted_row["id"]
+
+    _logger.info(
+        "Session bootstrap found no authenticated session ip=%s trusted_cookie=%s",
+        _client_ip(request),
+        bool(trusted_cookie_id),
+    )
+    return None, None
+
+
+def check_share_or_auth(request: Request, path: str):
+    session_id = get_session_id(request)
+    fp = device_fingerprint_from_request(request)
+    if session_id and validate_session(session_id, fp):
+        return True
+    share_code = request.cookies.get("share_code")
+    if share_code:
+        share = validate_share(share_code)
+        if share and (path.startswith(share["path"]) or share["path"] == "/"):
+            return True
+    raise HTTPException(status_code=401, detail="Not authenticated")
+
+
+def is_android_webview_request(request: Request) -> bool:
+    user_agent = request.headers.get("user-agent", "")
+    return "VessencesAndroid/" in user_agent
+
+
+# ─── Pages ────────────────────────────────────────────────────────────────────
+
+@app.get("/", response_class=HTMLResponse)
+async def index(request: Request):
+    session_id, trusted_device_id = get_or_bootstrap_session(request)
+    if session_id:
+        try:
+            from .jane_proxy import get_active_brain
+        except ImportError:
+            from jane_proxy import get_active_brain
+        response = templates.TemplateResponse(
+            "jane.html",
+            {
+                "request": request,
+                "brain_label": get_active_brain(),
+                "initial_session_id": session_id,
+            },
+        )
+        if get_session_id(request) != session_id:
+            response.set_cookie(SESSION_COOKIE, session_id, httponly=True, samesite="lax",
+                                max_age=60 * 60 * 24 * 30)
+        if trusted_device_id and get_trusted_device_cookie_id(request) != trusted_device_id:
+            response.set_cookie(TRUSTED_DEVICE_COOKIE, trusted_device_id, httponly=True, samesite="lax",
+                                max_age=60 * 60 * 24 * 30)
+        return response
+    return templates.TemplateResponse("login.html", _login_context(request))
+
+
+@app.get("/share", response_class=HTMLResponse)
+async def share_page(request: Request):
+    return templates.TemplateResponse("login.html", _login_context(request, share_mode=True))
+
+
+@app.get("/vault", response_class=HTMLResponse)
+async def vault_page(request: Request):
+    """Serve the vault file browser (previously at vault_web port 8080)."""
+    session_id, trusted_device_id = get_or_bootstrap_session(request)
+    if session_id:
+        response = templates.TemplateResponse(
+            "app.html",
+            {
+                "request": request,
+                "initial_tab": "vault",
+                "android_webview": is_android_webview_request(request),
+            },
+        )
+        if get_session_id(request) != session_id:
+            response.set_cookie(SESSION_COOKIE, session_id, httponly=True, samesite="lax",
+                                max_age=60 * 60 * 24 * 30)
+        if trusted_device_id and get_trusted_device_cookie_id(request) != trusted_device_id:
+            response.set_cookie(TRUSTED_DEVICE_COOKIE, trusted_device_id, httponly=True, samesite="lax",
+                                max_age=60 * 60 * 24 * 30)
+        return response
+    return templates.TemplateResponse("login.html", _login_context(request))
+
+
+@app.get("/guide", response_class=HTMLResponse)
+async def guide_page(request: Request):
+    """Serve the Jane User Guide page."""
+    return templates.TemplateResponse("guide.html", {"request": request})
+
+
+@app.get("/architecture", response_class=HTMLResponse)
+async def architecture_page(request: Request):
+    """Serve the Jane Architecture deep-dive page."""
+    return templates.TemplateResponse("architecture.html", {"request": request})
+
+
+@app.get("/chat", response_class=HTMLResponse)
+async def chat_page(request: Request):
+    """Serve the Amber chat tab (previously at vault_web)."""
+    session_id, trusted_device_id = get_or_bootstrap_session(request)
+    if session_id:
+        response = templates.TemplateResponse(
+            "app.html",
+            {
+                "request": request,
+                "initial_tab": "chat",
+                "android_webview": is_android_webview_request(request),
+            },
+        )
+        if get_session_id(request) != session_id:
+            response.set_cookie(SESSION_COOKIE, session_id, httponly=True, samesite="lax",
+                                max_age=60 * 60 * 24 * 30)
+        if trusted_device_id and get_trusted_device_cookie_id(request) != trusted_device_id:
+            response.set_cookie(TRUSTED_DEVICE_COOKIE, trusted_device_id, httponly=True, samesite="lax",
+                                max_age=60 * 60 * 24 * 30)
+        return response
+    return templates.TemplateResponse("login.html", _login_context(request))
+
+
+@app.get("/essences", response_class=HTMLResponse)
+async def essences_page(request: Request, _=Depends(require_auth)):
+    return FileResponse(str(STATIC_DIR / "essences.html"), media_type="text/html")
+
+@app.get("/worklog", response_class=HTMLResponse)
+async def worklog_page(request: Request, _=Depends(require_auth)):
+    return FileResponse(str(STATIC_DIR / "worklog.html"), media_type="text/html")
+
+@app.get("/briefing", response_class=HTMLResponse)
+async def briefing_page(request: Request, _=Depends(require_auth)):
+    return templates.TemplateResponse("briefing.html", {"request": request})
+
+
+@app.post("/api/crash-report")
+async def receive_crash_report(request: Request):
+    body = await request.body()
+    report = body.decode("utf-8", errors="replace")
+    crash_file = Path(LOGS_DIR) / "android_crashes.log"
+    with open(crash_file, "a") as f:
+        f.write(f"\n{'='*60}\n{report}\n")
+    _logger.error("Android crash report received:\n%s", report[:500])
+    return {"status": "received"}
+
+
+@app.get("/settings/devices", response_class=HTMLResponse)
+async def devices_page(request: Request, _=Depends(require_auth)):
+    return templates.TemplateResponse("app.html", {"request": request, "initial_tab": "settings",
+                                                    "android_webview": is_android_webview_request(request)})
+
+
+@app.get("/downloads/{filename}")
+async def download_release_artifact(filename: str):
+    """Serve public release downloads (APK, docker packages, etc.)."""
+    target = PUBLIC_RELEASE_DOWNLOADS.get(filename)
+    # If not a static entry, check if it matches an installer glob pattern
+    if not target or not target.exists() or not target.is_file():
+        glob_pattern = _INSTALLER_GLOBS.get(filename)
+        if glob_pattern:
+            target = _find_latest(glob_pattern)
+    if not target or not target.exists() or not target.is_file():
+        raise HTTPException(status_code=404)
+    suffix = target.suffix.lower()
+    media_type = {
+        ".apk": "application/vnd.android.package-archive",
+        ".zip": "application/zip",
+        ".yml": "application/octet-stream",
+    }.get(suffix, "application/octet-stream")
+    return FileResponse(
+        str(target),
+        media_type=media_type,
+        filename=filename,
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )
+
+
+# ─── App Update API ───────────────────────────────────────────────────────────
+
+# ─── App Settings API (synced between server and Android) ────────────────────
+
+_APP_SETTINGS_PATH = os.path.join(VESSENCE_DATA_HOME, "data", "app_settings.json")
+
+
+def _load_app_settings() -> dict:
+    try:
+        with open(_APP_SETTINGS_PATH) as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def _save_app_settings(settings: dict):
+    os.makedirs(os.path.dirname(_APP_SETTINGS_PATH), exist_ok=True)
+    with open(_APP_SETTINGS_PATH, "w") as f:
+        json.dump(settings, f, indent=2)
+
+
+# ─── Chat TTS API — XTTS-v2 audio for Jane's chat responses ─────────────────
+
+@app.post("/api/tts/generate")
+async def generate_tts(request: Request, _=Depends(require_auth)):
+    """Generate XTTS-v2 audio for text. Returns wav file.
+    Body: {"text": "...", "speaker": "Barbora MacLean"}
+    """
+    body = await request.json()
+    text = body.get("text", "").strip()
+    speaker = body.get("speaker", "Barbora MacLean")
+    if not text:
+        raise HTTPException(status_code=422, detail="text is required")
+
+    import hashlib
+    text_hash = hashlib.md5(text.encode()).hexdigest()[:12]
+    cache_dir = os.path.join(VESSENCE_DATA_HOME, "cache", "tts")
+    os.makedirs(cache_dir, exist_ok=True)
+    cache_path = os.path.join(cache_dir, f"{text_hash}.wav")
+
+    if os.path.exists(cache_path):
+        return FileResponse(cache_path, media_type="audio/wav")
+
+    gpu_flag = ["--gpus", "all"] if os.path.exists("/usr/bin/nvidia-smi") else []
+    cmd = [
+        "docker", "run", "--rm", *gpu_flag,
+        "-e", "COQUI_TOS_AGREED=1",
+        "-v", f"{cache_dir}:/output",
+        "ghcr.io/coqui-ai/tts:latest",
+        "--text", text[:500],
+        "--model_name", "tts_models/multilingual/multi-dataset/xtts_v2",
+        "--speaker_idx", speaker,
+        "--language_idx", "en",
+        "--out_path", f"/output/{text_hash}.wav",
+    ]
+
+    try:
+        result = await asyncio.to_thread(
+            subprocess.run, cmd,
+            capture_output=True, text=True, timeout=120,
+        )
+        if result.returncode == 0 and os.path.exists(cache_path):
+            return FileResponse(cache_path, media_type="audio/wav")
+        raise HTTPException(status_code=500, detail="TTS generation failed")
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=504, detail="TTS generation timed out")
+
+
+@app.get("/api/app/settings")
+async def get_app_settings(_=Depends(require_auth)):
+    """Get synced app settings. Android polls this on startup."""
+    return JSONResponse(_load_app_settings())
+
+
+@app.put("/api/app/settings")
+async def update_app_settings(request: Request, _=Depends(require_auth)):
+    """Update app settings. Jane can call this to change user preferences remotely."""
+    body = await request.json()
+    current = _load_app_settings()
+    current.update(body)
+    _save_app_settings(current)
+    return JSONResponse({"ok": True, "settings": current})
+
+
+@app.post("/api/app/installed")
+async def report_app_installed(request: Request):
+    """Called by the Android app after installing a new version. Logs to work log."""
+    try:
+        body = await request.json()
+        version = body.get("version_name", "unknown")
+        _log_work_activity(f"Android app updated to v{version}", category="release")
+    except Exception:
+        pass
+    return JSONResponse({"ok": True})
+
+
+@app.get("/api/app/latest-version")
+async def latest_app_version():
+    return {
+        "version_code": 43,
+        "version_name": ANDROID_VERSION,
+        "download_url": f"/downloads/vessences-android-v{ANDROID_VERSION}.apk",
+        "changelog": "Message queuing, ESC cancel, TTS toggle, live broadcast, new chat button, platform awareness",
+    }
+
+
+# ─── Auth API ─────────────────────────────────────────────────────────────────
+
+@app.get("/auth/google")
+async def login_google(request: Request):
+    if not google_oauth_configured():
+        raise HTTPException(status_code=503, detail="Google sign-in is not configured on this deployment.")
+    redirect_uri = build_external_url(
+        request,
+        str(request.app.url_path_for("auth_google_callback")),
+        "JANE_PUBLIC_BASE_URL",
+    )
+    return await oauth.google.authorize_redirect(request, redirect_uri)
+
+
+@app.get("/auth/google/callback", name="auth_google_callback")
+async def auth_google_callback(request: Request):
+    if not google_oauth_configured():
+        raise HTTPException(status_code=503, detail="Google sign-in is not configured on this deployment.")
+    try:
+        token = await oauth.google.authorize_access_token(request)
+    except Exception:
+        raise HTTPException(status_code=400, detail="OAuth error")
+    user_info = token.get("userinfo", {})
+    email = user_info.get("email", "")
+    if not allowed_email(email):
+        raise HTTPException(status_code=403, detail=f"Account {email} is not authorized.")
+    fp = device_fingerprint_from_request(request)
+    if not is_device_trusted(fp):
+        trusted_device_id = register_trusted_device(fp, email)
+    else:
+        trusted_row = get_trusted_device_by_fingerprint(fp)
+        trusted_device_id = trusted_row["id"] if trusted_row else register_trusted_device(fp, email)
+    session_id = create_session(fp, trusted=True, user_id=email)
+    prewarm_session(session_id)
+    resp = RedirectResponse(url="/")
+    resp.set_cookie(SESSION_COOKIE, session_id, httponly=True, samesite="lax",
+                    max_age=60 * 60 * 24 * 30)  # 30 days
+    resp.set_cookie(TRUSTED_DEVICE_COOKIE, trusted_device_id, httponly=True, samesite="lax",
+                    max_age=60 * 60 * 24 * 30)
+    return resp
+
+
+@app.post("/api/auth/google-token")
+async def auth_google_token(request: Request):
+    """Accept a Google ID token from native Android apps and create a session."""
+    body = await request.json()
+    id_token_str = body.get("id_token", "")
+    if not id_token_str:
+        raise HTTPException(status_code=400, detail="id_token is required")
+    client_id = os.getenv("GOOGLE_CLIENT_ID", "")
+    if not client_id:
+        raise HTTPException(status_code=503, detail="Google sign-in is not configured.")
+    try:
+        from google.oauth2 import id_token as google_id_token
+        from google.auth.transport import requests as google_requests
+        idinfo = google_id_token.verify_oauth2_token(
+            id_token_str, google_requests.Request(), client_id
+        )
+        email = idinfo.get("email", "")
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid Google ID token")
+    if not allowed_email(email):
+        raise HTTPException(status_code=403, detail=f"Account {email} is not authorized.")
+    fp = device_fingerprint_from_request(request)
+    if not is_device_trusted(fp):
+        trusted_device_id = register_trusted_device(fp, email)
+    else:
+        trusted_row = get_trusted_device_by_fingerprint(fp)
+        trusted_device_id = trusted_row["id"] if trusted_row else register_trusted_device(fp, email)
+    session_id = create_session(fp, trusted=True, user_id=email)
+    prewarm_session(session_id)
+    resp = JSONResponse({"ok": True, "session_id": session_id, "trusted_device_id": trusted_device_id})
+    resp.set_cookie(SESSION_COOKIE, session_id, httponly=True, samesite="lax",
+                    max_age=60 * 60 * 24 * 30)
+    resp.set_cookie(TRUSTED_DEVICE_COOKIE, trusted_device_id, httponly=True, samesite="lax",
+                    max_age=60 * 60 * 24 * 30)
+    return resp
+
+
+@app.post("/api/auth/verify-share")
+async def verify_share(request: Request, body: dict, response: Response):
+    code = body.get("code", "")
+    share = validate_share(code)
+    if not share:
+        return JSONResponse({"ok": False, "error": "Invalid share code"}, status_code=400)
+    response.set_cookie("share_code", code, httponly=True, samesite="lax")
+    return {"ok": True, "path": share["path"]}
+
+
+@app.post("/api/auth/verify-otp")
+async def verify_totp_login(request: Request, body: dict):
+    code = (body.get("code") or "").strip()
+    if not code:
+        return JSONResponse({"ok": False, "error": "Code required."}, status_code=400)
+
+    ok, error = verify_otp(code, request.client.host)
+    if not ok:
+        return JSONResponse({"ok": False, "error": error or "Invalid code."}, status_code=400)
+
+    fp = device_fingerprint_from_request(request)
+    user_id = _default_user_id()
+    trusted_row = get_trusted_device_by_fingerprint(fp)
+    trusted_device_id = trusted_row["id"] if trusted_row else register_trusted_device(fp, user_id)
+    session_id = create_session(fp, trusted=True, user_id=user_id)
+    prewarm_session(session_id)
+
+    response = JSONResponse({"ok": True})
+    response.set_cookie(SESSION_COOKIE, session_id, httponly=True, samesite="lax",
+                        max_age=60 * 60 * 24 * 30)
+    response.set_cookie(TRUSTED_DEVICE_COOKIE, trusted_device_id, httponly=True, samesite="lax",
+                        max_age=60 * 60 * 24 * 30)
+    return response
+
+
+@app.post("/api/auth/logout")
+async def logout(request: Request):
+    session_id = get_session_id(request)
+    if session_id:
+        with get_db() as conn:
+            conn.execute("DELETE FROM sessions WHERE id=?", (session_id,))
+    resp = RedirectResponse(url="/", status_code=303)
+    resp.delete_cookie(SESSION_COOKIE)
+    resp.delete_cookie(TRUSTED_DEVICE_COOKIE)
+    return resp
+
+
+@app.get("/api/auth/devices")
+async def list_devices(_=Depends(require_auth)):
+    return get_trusted_devices()
+
+
+@app.delete("/api/auth/devices/{device_id}")
+async def delete_device(device_id: str, _=Depends(require_auth)):
+    revoke_device(device_id)
+    return {"ok": True}
+
+
+@app.post("/api/auth/check")
+async def check_auth(request: Request):
+    session_id, trusted_device_id = get_or_bootstrap_session(request)
+    response = JSONResponse({"authenticated": bool(session_id)})
+    if session_id and get_session_id(request) != session_id:
+        response.set_cookie(SESSION_COOKIE, session_id, httponly=True, samesite="lax",
+                            max_age=60 * 60 * 24 * 30)
+    if trusted_device_id and get_trusted_device_cookie_id(request) != trusted_device_id:
+        response.set_cookie(TRUSTED_DEVICE_COOKIE, trusted_device_id, httponly=True, samesite="lax",
+                            max_age=60 * 60 * 24 * 30)
+    return response
+
+
+@app.post("/api/auth/is-new-device")
+async def is_new_device(request: Request):
+    fp = device_fingerprint_from_request(request)
+    return {"new_device": not is_device_trusted(fp)}
+
+
+@app.get("/api/jane/announcements")
+async def get_announcements(since: Optional[str] = None, _=Depends(require_auth)):
+    return {"items": _read_announcements(since)}
+
+
+# ─── Brain Model Settings ────────────────────────────────────────────────────
+
+_AVAILABLE_MODELS = {
+    "claude": ["claude-haiku-4-5-20251001", "claude-sonnet-4-6", "claude-opus-4-6"],
+    "gemini": ["gemini-2.5-flash", "gemini-2.5-pro"],
+    "openai": ["gpt-4.1-mini", "gpt-4.1", "o3"],
+}
+
+_DEFAULT_MODEL = {
+    "claude": "claude-opus-4-6",
+    "gemini": "gemini-2.5-pro",
+    "openai": "o3",
+}
+
+_ENV_VAR_FOR_MODEL = {
+    "claude": "JANE_MODEL_CLAUDE",
+    "gemini": "JANE_MODEL_GEMINI",
+    "openai": "JANE_MODEL_OPENAI",
+}
+
+
+@app.get("/api/settings/models")
+async def get_model_settings(_=Depends(require_auth)):
+    """Return current model config and available options per provider."""
+    provider = os.environ.get("JANE_BRAIN", "claude").lower()
+    default = _DEFAULT_MODEL.get(provider, _DEFAULT_MODEL["claude"])
+    env_var = _ENV_VAR_FOR_MODEL.get(provider, _ENV_VAR_FOR_MODEL["claude"])
+    # Also check legacy env var for backwards compatibility
+    legacy_var = f"BRAIN_HEAVY_{provider.upper()}"
+    current = os.environ.get(env_var) or os.environ.get(legacy_var) or default
+
+    return {
+        "provider": provider,
+        "model": {"current": current, "default": default, "env_var": env_var},
+        "available_models": _AVAILABLE_MODELS,
+    }
+
+
+@app.post("/api/settings/models")
+async def save_model_settings(request: Request, _=Depends(require_auth)):
+    """Save model selection to .env and restart the standing brain."""
+    body = await request.json()
+    provider = os.environ.get("JANE_BRAIN", "claude").lower()
+    env_var = _ENV_VAR_FOR_MODEL.get(provider, _ENV_VAR_FOR_MODEL["claude"])
+
+    model = body.get("model")
+    if not model:
+        return {"ok": False, "error": "No model specified"}
+
+    # Update in-process env
+    os.environ[env_var] = model
+
+    # Write to .env file
+    env_path = ENV_FILE_PATH
+    lines = []
+    if os.path.exists(env_path):
+        async with aiofiles.open(env_path, "r") as f:
+            lines = (await f.read()).splitlines()
+
+    found = False
+    new_lines = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#") and "=" in stripped:
+            key = stripped.split("=", 1)[0].strip()
+            if key == env_var:
+                new_lines.append(f"{env_var}={model}")
+                found = True
+                continue
+        new_lines.append(line)
+    if not found:
+        new_lines.append(f"{env_var}={model}")
+
+    async with aiofiles.open(env_path, "w") as f:
+        await f.write("\n".join(new_lines) + "\n")
+
+    # Restart the standing brain so it picks up the new model
+    try:
+        from jane.standing_brain import get_standing_brain_manager
+        manager = get_standing_brain_manager()
+        if manager._started:
+            await manager.shutdown()
+            await manager.start()
+            logger.info("Standing brain restarted with model=%s after settings change", model)
+    except Exception:
+        logger.exception("Failed to restart standing brain after model change")
+
+    return {"ok": True, "model": model}
+
+
+# ─── Live Broadcast SSE ──────────────────────────────────────────────────────
+
+@app.get("/api/jane/live")
+async def jane_live_stream(request: Request):
+    """SSE endpoint: broadcasts summarized progress when Jane is working on another session."""
+    from jane_web.broadcast import broadcast_manager
+
+    session_id, _ = get_or_bootstrap_session(request)
+    if not session_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    user_id = get_session_user(session_id) or _default_user_id()
+
+    q = await broadcast_manager.subscribe(user_id)
+
+    async def event_generator():
+        try:
+            while True:
+                # Check if client disconnected
+                if await request.is_disconnected():
+                    break
+                try:
+                    event = await asyncio.wait_for(q.get(), timeout=15.0)
+                    yield event.to_json() + "\n"
+                except asyncio.TimeoutError:
+                    # Send keepalive to prevent proxy/browser timeout
+                    yield json.dumps({"type": "keepalive"}) + "\n"
+        finally:
+            await broadcast_manager.unsubscribe(user_id, q)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="application/x-ndjson",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.post("/api/jane/prefetch-memory")
+async def prefetch_memory(request: Request):
+    """Pre-fetch memory context while user is idle. Cached for 60s.
+
+    Fire-and-forget: starts a background query and returns immediately.
+    When the user sends their first message, the cached result is used as
+    memory_summary_fallback, skipping the ChromaDB round-trip.
+    """
+    session_id, _ = get_or_bootstrap_session(request)
+    if not session_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    run_prefetch_memory(session_id)
+    return {"status": "ok", "cached": True}
+
+
+# ─── Files API (shared vault) ─────────────────────────────────────────────────
+
+_MIME_TO_SUBDIR = {
+    "image": "images",
+    "audio": "audio",
+    "video": "video",
+}
+
+
+def _route_subdir(mime: str) -> str:
+    if mime == "application/pdf":
+        return "pdf"
+    top = mime.split("/")[0]
+    return _MIME_TO_SUBDIR.get(top, "documents")
+
+@app.get("/api/files")
+async def list_root(
+    request: Request,
+    offset: int = 0,
+    limit: int = 0,
+    _=Depends(require_auth),
+):
+    return _paginate_listing(list_directory(""), offset, limit)
+
+
+@app.get("/api/files/list/{path:path}")
+async def list_path(
+    path: str,
+    request: Request,
+    offset: int = 0,
+    limit: int = 0,
+    _=Depends(require_auth),
+):
+    return _paginate_listing(list_directory(path), offset, limit)
+
+
+def _paginate_listing(listing: dict, offset: int, limit: int) -> dict:
+    """Apply optional offset/limit pagination to a directory listing.
+    When limit <= 0, return the full listing (backwards compatible).
+    Pagination applies to files only; folders are always returned in full.
+    """
+    if limit <= 0:
+        return listing
+    if "error" in listing:
+        return listing
+    files = listing.get("files", [])
+    total_files = len(files)
+    paginated_files = files[offset:offset + limit]
+    listing["files"] = paginated_files
+    listing["total_files"] = total_files
+    listing["offset"] = offset
+    listing["limit"] = limit
+    return listing
+
+
+@app.get("/api/files/meta/{path:path}")
+async def file_meta(path: str, request: Request, _=Depends(require_auth)):
+    return get_file_metadata(path)
+
+
+@app.patch("/api/files/description/{path:path}")
+async def update_file_description(path: str, body: dict, _=Depends(require_auth)):
+    ok = update_description(path, body.get("description", ""))
+    return {"ok": ok}
+
+
+@app.get("/api/files/thumbnail/{path:path}")
+async def thumbnail(path: str, request: Request):
+    check_share_or_auth(request, path)
+    data = generate_thumbnail(path)
+    if not data:
+        raise HTTPException(status_code=404)
+    return Response(content=data, media_type="image/jpeg")
+
+
+@app.get("/api/files/serve/{path:path}")
+async def serve_file(path: str, request: Request):
+    check_share_or_auth(request, path)
+    try:
+        target = safe_vault_path(path)
+    except ValueError:
+        raise HTTPException(status_code=403)
+    if not target.exists() or not target.is_file():
+        raise HTTPException(status_code=404)
+    mime = get_mime(target.name)
+    range_header = request.headers.get("range")
+    if range_header:
+        return _range_response(target, mime, range_header)
+    headers = {}
+    if mime and mime.startswith("image/"):
+        headers["Cache-Control"] = "public, max-age=86400, immutable"
+    return FileResponse(str(target), media_type=mime, headers=headers)
+
+
+def _range_response(path: Path, mime: str, range_header: str):
+    size = path.stat().st_size
+    start, end = 0, size - 1
+    try:
+        ranges = range_header.replace("bytes=", "").split("-")
+        start = int(ranges[0]) if ranges[0] else 0
+        end = int(ranges[1]) if ranges[1] else size - 1
+    except Exception:
+        pass
+    end = min(end, size - 1)
+    length = end - start + 1
+
+    def iter_file():
+        with open(path, "rb") as f:
+            f.seek(start)
+            remaining = length
+            while remaining:
+                chunk = f.read(min(65536, remaining))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+                yield chunk
+
+    return StreamingResponse(iter_file(), status_code=206, media_type=mime, headers={
+        "Content-Range": f"bytes {start}-{end}/{size}",
+        "Accept-Ranges": "bytes",
+        "Content-Length": str(length),
+    })
+
+
+@app.get("/api/files/changes")
+async def file_changes(_=Depends(require_auth)):
+    return {"last_change": get_last_change_timestamp()}
+
+
+@app.get("/api/files/find")
+async def find_file(name: str, _=Depends(require_auth)):
+    name = os.path.basename(name)
+    for root, dirs, files in os.walk(VAULT_DIR):
+        if name in files:
+            rel = os.path.relpath(os.path.join(root, name), VAULT_DIR)
+            return {"path": rel}
+    raise HTTPException(status_code=404, detail="File not found in vault")
+
+
+# ── File type extension map ──────────────────────────────────────────────────
+_FILE_TYPE_EXTENSIONS = {
+    "audio": {".mp3", ".wav", ".flac", ".ogg", ".m4a", ".aac", ".wma"},
+    "image": {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg"},
+    "video": {".mp4", ".mkv", ".avi", ".mov", ".webm"},
+    "document": {".pdf", ".doc", ".docx", ".txt", ".md"},
+}
+
+def _detect_file_type(filename: str) -> str:
+    ext = os.path.splitext(filename)[1].lower()
+    for ftype, exts in _FILE_TYPE_EXTENSIONS.items():
+        if ext in exts:
+            return ftype
+    return "other"
+
+
+@app.get("/api/files/search")
+async def search_files(q: str, type: Optional[str] = None, _=Depends(require_auth)):
+    """Search vault files by name and ChromaDB description."""
+    if not q or not q.strip():
+        return {"results": []}
+
+    query = q.strip().lower()
+    results_map: dict[str, dict] = {}  # keyed by relative path
+
+    # 1. Walk vault and match filenames
+    type_exts = _FILE_TYPE_EXTENSIONS.get(type) if type else None
+    for root, _dirs, files in os.walk(VAULT_DIR):
+        for fname in files:
+            if fname.startswith("."):
+                continue
+            if query in fname.lower():
+                ext = os.path.splitext(fname)[1].lower()
+                if type_exts and ext not in type_exts:
+                    continue
+                rel = os.path.relpath(os.path.join(root, fname), VAULT_DIR)
+                ftype = _detect_file_type(fname)
+                results_map[rel] = {
+                    "name": fname,
+                    "path": rel,
+                    "type": ftype,
+                    "description": "",
+                    "serve_url": f"/api/files/serve/{rel}",
+                }
+
+    # 2. Query ChromaDB for file descriptions
+    try:
+        _skills_dir = os.path.join(
+            os.environ.get("VESSENCE_HOME", os.path.expanduser("~/ambient/vessence")),
+            "agent_skills",
+        )
+        if _skills_dir not in sys.path:
+            sys.path.insert(0, _skills_dir)
+        from memory_retrieval import _query_collection
+        vector_db = os.environ.get(
+            "VESSENCE_DATA_HOME", os.path.expanduser("~/ambient/vessence-data")
+        ) + "/vector_db"
+        for collection_name in ("vault_files", "facts"):
+            try:
+                docs, metas, _dists = _query_collection(vector_db, collection_name, q, 20)
+                for doc, meta in zip(docs, metas):
+                    # Try to extract a path from metadata
+                    fpath = (meta or {}).get("path", "") or (meta or {}).get("file", "") or ""
+                    if not fpath:
+                        continue
+                    # Make relative to vault
+                    if os.path.isabs(fpath):
+                        try:
+                            fpath = os.path.relpath(fpath, VAULT_DIR)
+                        except ValueError:
+                            continue
+                    fname = os.path.basename(fpath)
+                    ftype = _detect_file_type(fname)
+                    if type_exts:
+                        ext = os.path.splitext(fname)[1].lower()
+                        if ext not in type_exts:
+                            continue
+                    if fpath not in results_map:
+                        # Verify the file actually exists
+                        full = os.path.join(VAULT_DIR, fpath)
+                        if not os.path.isfile(full):
+                            continue
+                        results_map[fpath] = {
+                            "name": fname,
+                            "path": fpath,
+                            "type": ftype,
+                            "description": (doc or "")[:200],
+                            "serve_url": f"/api/files/serve/{fpath}",
+                        }
+                    else:
+                        # Enrich existing result with description
+                        if doc and not results_map[fpath]["description"]:
+                            results_map[fpath]["description"] = (doc or "")[:200]
+                break  # If first collection worked, don't try fallback
+            except Exception:
+                continue
+    except Exception:
+        pass  # ChromaDB not available — filename results only
+
+    results = list(results_map.values())[:20]
+    return {"results": results}
+
+
+@app.get("/api/files/play/{path:path}")
+async def play_audio_file(path: str, _=Depends(require_auth)):
+    """Serve an audio file with appropriate headers for streaming playback."""
+    try:
+        target = safe_vault_path(path)
+    except ValueError:
+        raise HTTPException(status_code=403)
+    if not target.exists() or not target.is_file():
+        raise HTTPException(status_code=404)
+    mime = get_mime(target.name)
+    return FileResponse(
+        str(target),
+        media_type=mime,
+        headers={"Accept-Ranges": "bytes"},
+    )
+
+
+@app.get("/api/files/content/{path:path}")
+async def get_file_content(path: str, _=Depends(require_auth)):
+    try:
+        target = safe_vault_path(path)
+    except ValueError:
+        raise HTTPException(status_code=403)
+    if not target.exists() or not target.is_file():
+        raise HTTPException(status_code=404)
+    if not is_text(target.name):
+        raise HTTPException(status_code=400, detail="Not a text file")
+    if target.stat().st_size > TEXT_SIZE_LIMIT:
+        raise HTTPException(status_code=413, detail="File too large to edit in browser")
+    async with aiofiles.open(target, "r", encoding="utf-8", errors="replace") as f:
+        content = await f.read()
+    return {"content": content}
+
+
+@app.put("/api/files/content/{path:path}")
+async def save_file_content(path: str, body: dict, _=Depends(require_auth)):
+    try:
+        target = safe_vault_path(path)
+    except ValueError:
+        raise HTTPException(status_code=403)
+    if not target.exists() or not target.is_file():
+        raise HTTPException(status_code=404)
+    if not is_text(target.name):
+        raise HTTPException(status_code=400, detail="Not a text file")
+    async with aiofiles.open(target, "w", encoding="utf-8") as f:
+        await f.write(body.get("content", ""))
+    with get_db() as conn:
+        conn.execute("INSERT INTO file_changes DEFAULT VALUES")
+    return {"ok": True}
+
+
+@app.post("/api/files/upload")
+async def upload_files(
+    files: list[UploadFile] = File(...),
+    destination: str = Form(""),
+    descriptions_json: str = Form("[]"),
+    _=Depends(require_auth),
+):
+    vault_root = Path(VAULT_DIR)
+    hash_index_path = vault_root / ".hash_index.json"
+    try:
+        descriptions = json.loads(descriptions_json or "[]")
+    except json.JSONDecodeError:
+        descriptions = []
+
+    try:
+        with open(hash_index_path) as f:
+            hash_index = json.load(f)
+    except Exception:
+        hash_index = {}
+
+    results = []
+    for index, upload in enumerate(files):
+        data = await upload.read()
+        file_hash = hashlib.sha256(data).hexdigest()
+
+        if file_hash in hash_index:
+            existing = hash_index[file_hash]
+            results.append({
+                "name": upload.filename,
+                "status": "duplicate",
+                "existing_path": existing.get("path", ""),
+            })
+            continue
+
+        if destination:
+            subdir = destination.strip("/")
+        else:
+            mime = upload.content_type or get_mime(upload.filename or "")
+            subdir = _route_subdir(mime)
+        description = ""
+        if index < len(descriptions):
+            description = str(descriptions[index] or "").strip()
+        is_image_upload = mime.startswith("image/")
+        if is_image_upload and not description:
+            raise HTTPException(status_code=400, detail="Image uploads require a description.")
+
+        dest_dir = vault_root / subdir
+        dest_dir.mkdir(parents=True, exist_ok=True)
+
+        if is_image_upload:
+            safe_name = make_descriptive_filename(upload.filename or "upload", description)
+        else:
+            safe_name = Path(upload.filename or "upload").name
+        dest_path = dest_dir / safe_name
+        if dest_path.exists():
+            stem, suffix = dest_path.stem, dest_path.suffix
+            counter = 1
+            while dest_path.exists():
+                dest_path = dest_dir / f"{stem}_{counter}{suffix}"
+                counter += 1
+
+        with open(dest_path, "wb") as f:
+            f.write(data)
+
+        rel_path = str(dest_path.relative_to(vault_root))
+        hash_index[file_hash] = {
+            "filename": dest_path.name,
+            "path": rel_path,
+            "description": description,
+        }
+        upsert_file_index_entry(rel_path, description, mime, updated_by="jane_web_upload")
+
+        try:
+            subprocess.run([
+                ADK_VENV_PYTHON,
+                ADD_FACT_SCRIPT,
+                f"File uploaded via web UI: {dest_path.name} saved to vault/{subdir}/",
+                "--topic", "vault", "--subtopic", "upload",
+            ], timeout=10, capture_output=True)
+        except Exception:
+            pass
+
+        results.append({
+            "name": upload.filename,
+            "saved_name": dest_path.name,
+            "status": "ok",
+            "path": rel_path,
+            "subdir": subdir,
+            "description": description,
+        })
+
+    try:
+        with open(hash_index_path, "w") as f:
+            json.dump(hash_index, f)
+    except Exception:
+        pass
+
+    with get_db() as conn:
+        conn.execute("INSERT INTO file_changes DEFAULT VALUES")
+
+    uploaded_names = [r["saved_name"] for r in results if r.get("status") == "ok"]
+    if uploaded_names:
+        _log_work_activity(f"File upload: {', '.join(uploaded_names[:3])}", category="file_upload")
+
+    return {"results": results}
+
+
+@app.post("/api/files/upload/single")
+async def upload_single_file(
+    request: Request,
+    file: UploadFile = File(...),
+):
+    """Simple single-file upload for Android — returns a serveable URL."""
+    session_id, trusted_device_id = get_or_bootstrap_session(request)
+    if not session_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    vault_root = Path(VAULT_DIR)
+    data = await file.read()
+    mime = file.content_type or get_mime(file.filename or "")
+    subdir = "working_files/android_uploads"
+    dest_dir = vault_root / subdir
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    safe_name = Path(file.filename or "upload").name
+    dest_path = dest_dir / safe_name
+    if dest_path.exists():
+        stem, suffix = dest_path.stem, dest_path.suffix
+        counter = 1
+        while dest_path.exists():
+            dest_path = dest_dir / f"{stem}_{counter}{suffix}"
+            counter += 1
+
+    with open(dest_path, "wb") as f:
+        f.write(data)
+
+    rel_path = str(dest_path.relative_to(vault_root))
+    response = JSONResponse({
+        "file_url": f"/api/files/serve/{rel_path}",
+        "filename": dest_path.name,
+        "path": rel_path,
+        "mime": mime,
+    })
+    if get_session_id(request) != session_id:
+        response.set_cookie(SESSION_COOKIE, session_id, httponly=True, samesite="lax",
+                            max_age=60 * 60 * 24 * 30)
+    if trusted_device_id and get_trusted_device_cookie_id(request) != trusted_device_id:
+        response.set_cookie(TRUSTED_DEVICE_COOKIE, trusted_device_id, httponly=True, samesite="lax",
+                            max_age=60 * 60 * 24 * 30)
+    return response
+
+
+# ─── Share API ────────────────────────────────────────────────────────────────
+
+@app.get("/api/shares")
+async def get_shares(_=Depends(require_auth)):
+    return list_shares()
+
+
+@app.post("/api/shares")
+async def new_share(body: dict, _=Depends(require_auth)):
+    code = create_share(body.get("path", ""), body.get("recipient", "guest"))
+    return {"ok": True, "code": code}
+
+
+@app.delete("/api/shares/{share_id}")
+async def delete_share(share_id: str, _=Depends(require_auth)):
+    revoke_share(share_id)
+    return {"ok": True}
+
+
+# ─── Playlist API ─────────────────────────────────────────────────────────────
+
+@app.get("/api/playlists")
+async def get_playlists(_=Depends(require_auth)):
+    return list_playlists()
+
+
+@app.get("/api/playlists/{playlist_id}")
+async def get_single_playlist(playlist_id: str, _=Depends(require_auth)):
+    p = get_playlist(playlist_id)
+    if not p:
+        raise HTTPException(status_code=404)
+    return p
+
+
+@app.post("/api/playlists")
+async def new_playlist(body: dict, _=Depends(require_auth)):
+    return create_playlist(body.get("name", "New Playlist"), body.get("tracks", []))
+
+
+@app.put("/api/playlists/{playlist_id}")
+async def update_playlist_route(playlist_id: str, body: dict, _=Depends(require_auth)):
+    p = update_playlist(playlist_id, body.get("name"), body.get("tracks"))
+    if not p:
+        raise HTTPException(status_code=404)
+    return p
+
+
+@app.delete("/api/playlists/{playlist_id}")
+async def delete_playlist_route(playlist_id: str, _=Depends(require_auth)):
+    delete_playlist(playlist_id)
+    return {"ok": True}
+
+
+# ─── Jane Chat API ────────────────────────────────────────────────────────────
+
+class ChatMessage(BaseModel):
+    message: str
+    session_id: str
+    file_context: Optional[str] = None
+    platform: Optional[str] = None  # "web", "android", "cli"
+    tts_enabled: Optional[bool] = False
+
+
+class SessionControl(BaseModel):
+    session_id: str
+
+
+async def _handle_jane_chat(body: ChatMessage, request: Request):
+    session_id, trusted_device_id = get_or_bootstrap_session(request)
+    if not session_id:
+        _logger.warning(
+            "Rejected jane chat request: no authenticated session body_session=%s ip=%s",
+            _session_log_id(body.session_id),
+            _client_ip(request),
+        )
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    user_id = get_session_user(session_id) or _default_user_id()
+    _logger.info(
+        "Accepted jane chat request session=%s user=%s msg_len=%d file_ctx=%s body_session=%s",
+        _session_log_id(session_id),
+        user_id,
+        len(body.message or ""),
+        bool(body.file_context),
+        _session_log_id(body.session_id),
+    )
+    result = await send_message(user_id, session_id, body.message, body.file_context, platform=body.platform, tts_enabled=body.tts_enabled or False)
+    response = JSONResponse({"response": result.get("text", ""), "files": result.get("files", [])})
+    if get_session_id(request) != session_id:
+        response.set_cookie(SESSION_COOKIE, session_id, httponly=True, samesite="lax",
+                            max_age=60 * 60 * 24 * 30)
+    if trusted_device_id and get_trusted_device_cookie_id(request) != trusted_device_id:
+        response.set_cookie(TRUSTED_DEVICE_COOKIE, trusted_device_id, httponly=True, samesite="lax",
+                            max_age=60 * 60 * 24 * 30)
+    return response
+
+
+@app.post("/api/jane/chat")
+async def jane_chat(body: ChatMessage, request: Request):
+    return await _handle_jane_chat(body, request)
+
+
+@app.post("/api/amber/chat")
+async def jane_chat_legacy(body: ChatMessage, request: Request):
+    """Legacy alias kept so older Jane frontends do not break."""
+    return await _handle_jane_chat(body, request)
+
+
+@app.post("/api/jane/session/end")
+async def jane_end_session(body: SessionControl, request: Request):
+    session_id, trusted_device_id = get_or_bootstrap_session(request)
+    if not session_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    _logger.info(
+        "Ending Jane session active_session=%s body_session=%s ip=%s",
+        _session_log_id(session_id),
+        _session_log_id(body.session_id),
+        _client_ip(request),
+    )
+    end_session(session_id)
+    response = JSONResponse({"ok": True})
+    if get_session_id(request) != session_id:
+        response.set_cookie(SESSION_COOKIE, session_id, httponly=True, samesite="lax",
+                            max_age=60 * 60 * 24 * 30)
+    if trusted_device_id and get_trusted_device_cookie_id(request) != trusted_device_id:
+        response.set_cookie(TRUSTED_DEVICE_COOKIE, trusted_device_id, httponly=True, samesite="lax",
+                            max_age=60 * 60 * 24 * 30)
+    return response
+
+
+# ─── Generic Essence Tool API ─────────────────────────────────────────────────
+# Allows any essence's custom_tools.py functions to be called via API
+# without hardcoding routes per essence.
+
+@app.post("/api/essence/{essence_name}/tool/{tool_name}")
+async def call_essence_tool(essence_name: str, tool_name: str, request: Request, _=Depends(require_auth)):
+    """Generic endpoint to invoke any essence tool by name."""
+    ambient_base = os.environ.get("AMBIENT_BASE", os.path.expanduser("~/ambient"))
+    search_dirs = [
+        os.environ.get("TOOLS_DIR", os.path.join(ambient_base, "tools")),
+        os.path.join(ambient_base, "essences"),
+    ]
+    tools_path = os.path.join(search_dirs[0], essence_name.lower().replace(" ", "_"), "functions", "custom_tools.py")
+
+    # Try common folder name patterns across both dirs
+    if not os.path.isfile(tools_path):
+        for search_dir in search_dirs:
+            if not os.path.isdir(search_dir):
+                continue
+            for entry in os.listdir(search_dir):
+                manifest = os.path.join(search_dir, entry, "manifest.json")
+                if os.path.isfile(manifest):
+                    try:
+                        with open(manifest) as f:
+                            m = json.load(f)
+                        if m.get("essence_name", "").lower() == essence_name.lower():
+                            tools_path = os.path.join(search_dir, entry, "functions", "custom_tools.py")
+                            break
+                    except Exception:
+                        continue
+            if os.path.isfile(tools_path):
+                break
+
+    if not os.path.isfile(tools_path):
+        raise HTTPException(status_code=404, detail=f"Essence '{essence_name}' not found or has no tools")
+
+    body = {}
+    try:
+        body = await request.json()
+    except Exception:
+        pass
+
+    python_bin = os.environ.get("PYTHON_BIN", sys.executable)
+    args_json = json.dumps(body) if body else ""
+    cmd = [python_bin, tools_path, tool_name]
+    if args_json:
+        cmd.append(args_json)
+
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120,
+                                cwd=os.path.dirname(tools_path))
+        if result.returncode != 0:
+            return JSONResponse({"status": "error", "message": result.stderr[:300]}, status_code=500)
+        return JSONResponse(json.loads(result.stdout))
+    except json.JSONDecodeError:
+        return JSONResponse({"status": "ok", "output": result.stdout.strip()})
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=504, detail="Tool execution timed out")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Dynamic essence page serving
+@app.get("/essence/{essence_name}", response_class=HTMLResponse)
+async def serve_essence_page(essence_name: str, request: Request, _=Depends(require_auth)):
+    """Serve an essence's UI — or redirect to Jane's chat for essence-type items."""
+    ambient_base = os.environ.get("AMBIENT_BASE", os.path.expanduser("~/ambient"))
+    search_dirs = [
+        os.environ.get("TOOLS_DIR", os.path.join(ambient_base, "tools")),
+        os.path.join(ambient_base, "essences"),
+    ]
+    # Find the essence folder across both directories
+    template_path = None
+    essence_folder_name = None
+    essence_type = "tool"
+    for search_dir in search_dirs:
+        if not os.path.isdir(search_dir):
+            continue
+        for entry in os.listdir(search_dir):
+            manifest = os.path.join(search_dir, entry, "manifest.json")
+            if os.path.isfile(manifest):
+                try:
+                    with open(manifest) as f:
+                        m = json.load(f)
+                    if m.get("essence_name", "").lower() == essence_name.lower():
+                        essence_type = m.get("type", "tool")
+                        essence_folder_name = entry
+                        candidate = os.path.join(search_dir, entry, "ui", "template.html")
+                        if os.path.isfile(candidate):
+                            template_path = candidate
+                        break
+                except Exception:
+                    continue
+        if essence_folder_name:
+            break
+
+    # Essence-type items redirect to Jane's chat with the essence activated
+    if essence_type == "essence" and essence_folder_name:
+        return RedirectResponse(url=f"/?essence={essence_folder_name}", status_code=302)
+
+    if not template_path:
+        raise HTTPException(status_code=404, detail=f"No UI template found for essence '{essence_name}'")
+
+    with open(template_path) as f:
+        html = f.read()
+    return HTMLResponse(html)
+
+
+
+
+# ─── Instant Commands (no LLM, no ChromaDB, <100ms) ─────────────────────────
+
+def _check_instant_command(message: str) -> str | None:
+    """Check if a message is an exact data-lookup command. Returns formatted result or None.
+
+    Only matches short imperative commands, not questions or sentences that
+    happen to contain the keyword.
+    """
+    import subprocess as _sp
+    msg = message.lower().strip().rstrip(":").strip()
+    python_bin = sys.executable
+
+    # Only match short commands (under 40 chars) to avoid catching questions
+    if len(msg) > 40:
+        return None
+
+    _JOB_QUEUE_PHRASES = {
+        "show job queue", "job queue", "show me the job queue",
+        "show jobs", "list jobs", "pending jobs",
+    }
+    if msg in _JOB_QUEUE_PHRASES:
+        try:
+            r = _sp.run([python_bin, os.path.join(CODE_ROOT, "agent_skills", "show_job_queue.py")],
+                        capture_output=True, text=True, timeout=5)
+            return r.stdout.strip() if r.stdout.strip() else "Job queue is empty."
+        except Exception:
+            return "Could not load job queue."
+
+    _COMMANDS_PHRASES = {"my commands", "commands", "show commands", "show me my commands", "list commands"}
+    if msg in _COMMANDS_PHRASES:
+        return (
+            "| Command | What it does |\n"
+            "|---|---|\n"
+            "| `add job:` | Creates a job spec from conversation |\n"
+            "| `show job queue:` | Shows jobs table |\n"
+            "| `run job queue:` | Executes highest-priority job |\n"
+            "| `build essence:` | Starts essence builder interview |\n"
+            "| `my commands:` | Shows this reference |"
+        )
+
+    if msg in ("show cron jobs", "cron jobs", "cron"):
+        try:
+            r = _sp.run(["crontab", "-l"], capture_output=True, text=True, timeout=5)
+            lines = [l for l in r.stdout.strip().split("\n") if l.strip() and not l.startswith("#")]
+            if not lines:
+                return "No active cron jobs."
+            return "```\n" + "\n".join(lines) + "\n```"
+        except Exception:
+            return "Could not load cron jobs."
+
+    return None
+
+
+# ─── Chat Stream ─────────────────────────────────────────────────────────────
+
+async def _handle_jane_chat_stream(body: ChatMessage, request: Request):
+    # Allow internal requests from localhost (prompt queue runner)
+    client_host = request.client.host if request.client else ""
+    if client_host in ("127.0.0.1", "::1", "localhost"):
+        session_id = body.session_id or "prompt_queue_session"
+        trusted_device_id = None
+    else:
+        session_id, trusted_device_id = get_or_bootstrap_session(request)
+    if not session_id:
+        _logger.warning(
+            "Rejected jane stream request: no authenticated session body_session=%s ip=%s",
+            _session_log_id(body.session_id),
+            _client_ip(request),
+        )
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    _logger.info(
+        "Accepted jane stream request session=%s msg_len=%d file_ctx=%s body_session=%s ip=%s",
+        _session_log_id(session_id),
+        len(body.message or ""),
+        bool(body.file_context),
+        _session_log_id(body.session_id),
+        _client_ip(request),
+    )
+
+    # ── Instant commands: bypass all LLM processing for pure data lookups ──
+    raw_message = (body.message or "").strip()
+    instant_result = _check_instant_command(raw_message)
+    if instant_result is not None:
+        async def _instant_stream():
+            yield json.dumps({"type": "delta", "data": instant_result}) + "\n"
+            yield json.dumps({"type": "done", "data": instant_result}) + "\n"
+        return StreamingResponse(_instant_stream(), media_type="application/x-ndjson")
+
+    # ── Big-task offload check ──────────────────────────────────────────────
+    from jane_web.task_classifier import classify_task, strip_bg_prefix
+    from jane_web.task_offloader import offload_task
+
+    task_class = classify_task(raw_message)
+
+    if task_class == "big":
+        clean_message = strip_bg_prefix(raw_message)
+        task_id = offload_task(clean_message, session_id, body.file_context, body.platform)
+        _logger.info(
+            "Offloaded big task %s session=%s msg_len=%d",
+            task_id, _session_log_id(session_id), len(clean_message),
+        )
+
+        async def offloaded_stream():
+            yield json.dumps({
+                "type": "offloaded",
+                "data": "I'll work on that in the background. You'll see progress updates here as I go.",
+                "task_id": task_id,
+            }) + "\n"
+            yield json.dumps({"type": "done", "data": "I'll work on that in the background. You'll see progress updates here as I go."}) + "\n"
+
+        response = StreamingResponse(
+            offloaded_stream(),
+            media_type="application/x-ndjson",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+        if get_session_id(request) != session_id:
+            response.set_cookie(SESSION_COOKIE, session_id, httponly=True, samesite="lax",
+                                max_age=60 * 60 * 24 * 30)
+        if trusted_device_id and get_trusted_device_cookie_id(request) != trusted_device_id:
+            response.set_cookie(TRUSTED_DEVICE_COOKIE, trusted_device_id, httponly=True, samesite="lax",
+                                max_age=60 * 60 * 24 * 30)
+        return response
+
+    # ── Normal streaming flow ─────────────────────────────────────────────
+    async def event_stream():
+        user_id = get_session_user(session_id) or _default_user_id()
+        _logger.info(
+            "Starting jane stream generator session=%s user=%s",
+            _session_log_id(session_id),
+            user_id,
+        )
+        try:
+            async with asyncio.timeout(1800):  # 30 minute timeout (matches Claude idle timeout)
+                async for chunk in stream_message(user_id, session_id, body.message, body.file_context, platform=body.platform, tts_enabled=body.tts_enabled or False):
+                    yield chunk
+        except (ConnectionError, OSError) as exc:
+            _logger.warning(
+                "jane_chat_stream connection error session=%s user=%s: %s",
+                _session_log_id(session_id), user_id, exc,
+            )
+            yield json.dumps({"type": "error", "data": "⚠️ Connection lost. Please try again."}) + "\n"
+        except Exception as exc:
+            _logger.exception(
+                "jane_chat_stream failed active_session=%s body_session=%s user=%s: %s",
+                _session_log_id(session_id),
+                _session_log_id(body.session_id),
+                user_id,
+                exc,
+            )
+            yield json.dumps({"type": "error", "data": f"⚠️ Could not reach Jane: {exc}"}) + "\n"
+            return
+        finally:
+            _logger.info("Jane stream generator closed session=%s", _session_log_id(session_id))
+
+    response = StreamingResponse(
+        event_stream(),
+        media_type="application/x-ndjson",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+    if get_session_id(request) != session_id:
+        response.set_cookie(SESSION_COOKIE, session_id, httponly=True, samesite="lax",
+                            max_age=60 * 60 * 24 * 30)
+    if trusted_device_id and get_trusted_device_cookie_id(request) != trusted_device_id:
+        response.set_cookie(TRUSTED_DEVICE_COOKIE, trusted_device_id, httponly=True, samesite="lax",
+                            max_age=60 * 60 * 24 * 30)
+    return response
+
+
+# ─── Permission Gate (web-based tool approval) ──────────────────────────────
+
+@app.post("/api/jane/permission/request")
+async def permission_request_endpoint(request: Request):
+    """Called by the PreToolUse hook inside the CLI. Blocks until user responds."""
+    from jane_web.permission_broker import get_permission_broker
+    body = await request.json()
+    broker = get_permission_broker()
+    req = await broker.create_request(
+        request_id=body["request_id"],
+        tool_name=body["tool_name"],
+        tool_input=body.get("tool_input", {}),
+        session_id=body.get("session_id", ""),
+    )
+    approved = await broker.wait_for_response(req)
+    return JSONResponse({"approved": approved, "reason": req.reason})
+
+
+@app.post("/api/jane/permission/respond")
+async def permission_respond_endpoint(request: Request):
+    """Called by the web frontend when user clicks approve/deny."""
+    from jane_web.permission_broker import get_permission_broker
+    body = await request.json()
+    broker = get_permission_broker()
+    success = broker.resolve(
+        request_id=body["request_id"],
+        approved=body.get("approved", False),
+        reason=body.get("reason", ""),
+    )
+    return JSONResponse({"ok": success})
+
+
+@app.get("/api/jane/permission/pending")
+async def permission_pending_endpoint(request: Request):
+    """Return all pending permission requests (for page reload recovery)."""
+    from jane_web.permission_broker import get_permission_broker
+    broker = get_permission_broker()
+    pending = broker.get_all_pending()
+    return JSONResponse({"requests": [
+        {
+            "request_id": r.request_id,
+            "tool_name": r.tool_name,
+            "tool_input": r.tool_input,
+            "created_at": r.created_at,
+        }
+        for r in pending
+    ]})
+
+
+@app.post("/api/jane/chat/stream")
+async def jane_chat_stream(body: ChatMessage, request: Request):
+    return await _handle_jane_chat_stream(body, request)
+
+
+@app.post("/api/amber/chat/stream")
+async def jane_chat_stream_legacy(body: ChatMessage, request: Request):
+    """Legacy alias kept so older Jane frontends do not break."""
+    return await _handle_jane_chat_stream(body, request)
+
+
+@app.post("/api/jane/init-session")
+async def jane_init_session(body: SessionControl, request: Request):
+    """Pre-warm Jane's Claude CLI session so the first real message is fast.
+
+    Triggers the full session init (CLAUDE.md, hooks, context build) with a
+    lightweight prompt. Returns a streaming NDJSON response with status events
+    and a greeting.
+    """
+    session_id, _ = get_or_bootstrap_session(request)
+    if not session_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    try:
+        from jane_proxy import _get_brain_name, _use_persistent_claude, _get_execution_profile
+    except ImportError:
+        from .jane_proxy import _get_brain_name, _use_persistent_claude, _get_execution_profile
+    from jane.context_builder import build_jane_context_async
+
+    brain_name = _get_brain_name()
+    if not _use_persistent_claude(brain_name):
+        # Non-Claude brains don't need pre-warming
+        return JSONResponse({"status": "skipped", "greeting": "Hey! What's on your mind?"})
+
+    from jane.persistent_claude import get_claude_persistent_manager
+    manager = get_claude_persistent_manager()
+    session = await manager.get(body.session_id or session_id)
+
+    if not session.is_fresh():
+        # Already warm — no init needed
+        return JSONResponse({"status": "already_warm", "greeting": ""})
+
+    # Build context for the init turn, streaming status updates
+    user_id = get_session_user(session_id) or _default_user_id()
+
+    async def _stream_init():
+        status_queue: asyncio.Queue = asyncio.Queue()
+
+        def _emit_status(msg: str):
+            status_queue.put_nowait(msg)
+
+        try:
+            # Build context with status callbacks
+            _emit_status("Loading personality and context...")
+            ctx = await build_jane_context_async(
+                "Session initialization",
+                [],
+                session_id=body.session_id or session_id,
+                platform="web",
+                on_status=_emit_status,
+            )
+
+            # Drain and yield all queued status events
+            while not status_queue.empty():
+                s = status_queue.get_nowait()
+                yield json.dumps({"type": "status", "data": s}) + "\n"
+
+            yield json.dumps({"type": "status", "data": "Sending init prompt to Claude..."}) + "\n"
+
+            init_prompt = (
+                f"{ctx.system_prompt}\n\n"
+                "This is a session initialization. Read your configuration and prepare for conversation. "
+                "Respond with a single short, warm greeting (1 sentence max). Do not ask questions."
+            )
+
+            profile = _get_execution_profile(brain_name)
+            greeting = await manager.run_turn(
+                body.session_id or session_id,
+                init_prompt,
+                on_delta=lambda d: None,
+                on_status=lambda s: None,
+                timeout_seconds=profile.timeout_seconds,
+                model=None,
+                yolo=profile.mode == "yolo",
+            )
+            yield json.dumps({"type": "done", "data": greeting.strip()}) + "\n"
+        except Exception as e:
+            _logger.exception("Init session failed")
+            yield json.dumps({"type": "done", "data": "Hey! Ready when you are."}) + "\n"
+
+    return StreamingResponse(_stream_init(), media_type="application/x-ndjson")
+
+
+@app.get("/api/amber/tunnel-url")
+async def tunnel_url(_=Depends(require_auth)):
+    return {"url": get_tunnel_url()}
+
+
+@app.post("/api/amber/unlock")
+async def amber_unlock(request: Request):
+    body = await request.json()
+    if body.get("secret") != os.getenv("VAULT_UNLOCK_SECRET", "amber_unlock"):
+        raise HTTPException(status_code=403)
+    unlock_ip(body.get("ip"))
+    return {"ok": True}
+
+
+# ─── Essence Management API ──────────────────────────────────────────────────
+
+from agent_skills.essence_loader import (
+    load_essence,
+    unload_essence,
+    delete_essence,
+    list_available_essences,
+    list_available,
+    list_loaded_essences,
+    EssenceState,
+)
+
+_essence_states: dict[str, EssenceState] = {}
+_capability_registry = None  # Initialized in _auto_load_essences()
+_ACTIVE_ESSENCE_PATH = os.path.join(VESSENCE_DATA_HOME, "data", "active_essence.json")
+
+
+def _read_active_essences() -> list[str]:
+    """Read the active essence list from disk."""
+    try:
+        with open(_ACTIVE_ESSENCE_PATH) as f:
+            data = json.load(f)
+        return data.get("active", [])
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return []
+
+
+def _write_active_essences(active: list[str]) -> None:
+    """Write the active essence list to disk."""
+    os.makedirs(os.path.dirname(_ACTIVE_ESSENCE_PATH), exist_ok=True)
+    with open(_ACTIVE_ESSENCE_PATH, "w") as f:
+        json.dump({"active": active}, f, indent=2)
+
+
+@app.get("/api/essences")
+async def list_essences(type: str = "all", _=Depends(require_auth)):
+    """List all available essences/tools. Optional ?type=tool or ?type=essence filter."""
+    available = list_available_essences(type_filter=type)
+    loaded_names = list_loaded_essences()
+    results = []
+    for e in available:
+        manifest_path = os.path.join(e["path"], "manifest.json")
+        capabilities = {}
+        preferred_model = {}
+        try:
+            with open(manifest_path) as f:
+                manifest = json.load(f)
+            capabilities = manifest.get("capabilities", {})
+            preferred_model = manifest.get("preferred_model", {})
+        except (json.JSONDecodeError, OSError):
+            pass
+        results.append({
+            "name": e["name"],
+            "role_title": e.get("role_title", ""),
+            "description": e.get("description", ""),
+            "type": e.get("type", "tool"),
+            "has_brain": e.get("has_brain", False),
+            "loaded": e["name"] in loaded_names,
+            "capabilities": capabilities,
+            "preferred_model": preferred_model,
+        })
+    return results
+
+
+@app.get("/api/essences/active")
+async def get_active_essences(_=Depends(require_auth)):
+    """Get the currently active essence(s)."""
+    return {"active": _read_active_essences()}
+
+
+@app.get("/api/essences/work_log/activities")
+async def get_work_log_activities_route(count: int = 50, _=Depends(require_auth)):
+    """Get recent activities from the Work Log essence."""
+    try:
+        from agent_skills.work_log_tools import get_recent_activities
+        activities = get_recent_activities(count=count)
+        return {"activities": activities}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Work Log error: {exc}")
+
+
+@app.get("/api/essences/capabilities")
+async def get_capabilities_map_route(_=Depends(require_auth)):
+    """Get the capability -> essence mapping for all loaded essences."""
+    if _capability_registry is None:
+        return {"capabilities": {}}
+    return {"capabilities": _capability_registry._providers}
+
+
+@app.get("/api/essences/{essence_name}")
+async def get_essence_detail(essence_name: str, _=Depends(require_auth)):
+    """Get details of a specific essence."""
+    available = list_available_essences()
+    match = None
+    for e in available:
+        if e["name"] == essence_name:
+            match = e
+            break
+    if not match:
+        raise HTTPException(status_code=404, detail=f"Essence '{essence_name}' not found")
+    manifest_path = os.path.join(match["path"], "manifest.json")
+    try:
+        with open(manifest_path) as f:
+            manifest = json.load(f)
+    except (json.JSONDecodeError, OSError) as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to read manifest: {exc}")
+    loaded_names = list_loaded_essences()
+    manifest["loaded"] = essence_name in loaded_names
+    return manifest
+
+
+@app.post("/api/essences/{essence_name}/load")
+async def load_essence_endpoint(essence_name: str, _=Depends(require_auth)):
+    """Load an essence by name."""
+    available = list_available_essences()
+    match = None
+    for e in available:
+        if e["name"] == essence_name:
+            match = e
+            break
+    if not match:
+        raise HTTPException(status_code=404, detail=f"Essence '{essence_name}' not found")
+    try:
+        state = load_essence(match["path"])
+        _essence_states[essence_name] = state
+        # Register capabilities
+        if _capability_registry:
+            caps = state.capabilities.get("provides", [])
+            if caps:
+                _capability_registry.register(essence_name, caps)
+        return {
+            "status": "loaded",
+            "role_title": state.role_title,
+            "permissions": state.manifest.get("permissions", []),
+        }
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+@app.post("/api/essences/{essence_name}/unload")
+async def unload_essence_endpoint(essence_name: str, _=Depends(require_auth)):
+    """Unload a loaded essence."""
+    try:
+        unload_essence(essence_name)
+        _essence_states.pop(essence_name, None)
+        # Unregister capabilities
+        if _capability_registry:
+            _capability_registry.unregister(essence_name)
+        active = _read_active_essences()
+        if essence_name in active:
+            active.remove(essence_name)
+            _write_active_essences(active)
+        return {"status": "unloaded"}
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Essence '{essence_name}' is not loaded")
+
+
+@app.delete("/api/essences/{essence_name}")
+async def delete_essence_endpoint(essence_name: str, port_memory: bool = False, _=Depends(require_auth)):
+    """Delete an essence. Use ?port_memory=true to port memory to Jane first."""
+    try:
+        delete_essence(essence_name, port_memory=port_memory)
+        _essence_states.pop(essence_name, None)
+        active = _read_active_essences()
+        if essence_name in active:
+            active.remove(essence_name)
+            _write_active_essences(active)
+        return {"status": "deleted", "memory_ported": port_memory}
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@app.post("/api/essences/{essence_name}/activate")
+async def activate_essence(essence_name: str, _=Depends(require_auth)):
+    """Set an essence as the active one. Accepts display name or folder name."""
+    available = list_available_essences()
+    # First try exact match by display name
+    match = next((e for e in available if e["name"] == essence_name), None)
+    # If not found, try matching by folder name (e.g. "tax_accountant_2025")
+    if not match:
+        match = next(
+            (e for e in available if os.path.basename(e["path"]) == essence_name),
+            None,
+        )
+    if not match:
+        raise HTTPException(status_code=404, detail=f"Essence '{essence_name}' not found")
+    _write_active_essences([match["name"]])
+    # Invalidate context builder cache so Jane picks up the new essence immediately
+    _invalidate_essence_context_cache()
+    return {"status": "activated", "name": match["name"]}
+
+
+@app.post("/api/essences/deactivate")
+async def deactivate_essence(_=Depends(require_auth)):
+    """Deactivate all active essences — return Jane to baseline."""
+    _write_active_essences([])
+    _invalidate_essence_context_cache()
+    return {"status": "deactivated"}
+
+
+@app.post("/api/jane/invalidate-essence-cache")
+async def invalidate_essence_cache(_=Depends(require_auth)):
+    """Invalidate the context builder's cached essence personality and tools."""
+    _invalidate_essence_context_cache()
+    return {"status": "ok"}
+
+
+def _invalidate_essence_context_cache():
+    """Clear essence-related entries from the context builder's in-memory cache."""
+    try:
+        from jane.context_builder import _context_cache
+        for key in ["essence_personality", "essence_tools"]:
+            _context_cache.pop(key, None)
+    except Exception:
+        pass  # non-fatal — cache will expire naturally within 5 minutes
+
+
+# ─── Work Log Activity Logging ────────────────────────────────────────────────
+
+def _log_work_activity(description: str, category: str = "general") -> None:
+    """Log an activity to the Work Log essence if it is loaded."""
+    try:
+        from agent_skills.work_log_tools import log_activity
+        log_activity(description, category=category)
+    except Exception:
+        pass  # Work log not available — non-fatal
+
+
+# ─── Daily Briefing API ──────────────────────────────────────────────────────
+
+_BRIEFING_FUNCTIONS_DIR = os.path.join(
+    os.environ.get("TOOLS_DIR",
+                   os.path.join(os.path.expanduser("~"), "ambient", "tools")),
+    "daily_briefing", "functions"
+)
+
+
+def _briefing_tools():
+    """Lazy import of daily briefing custom_tools."""
+    if _BRIEFING_FUNCTIONS_DIR not in sys.path:
+        sys.path.insert(0, _BRIEFING_FUNCTIONS_DIR)
+    import custom_tools as _bt
+    return _bt
+
+
+@app.get("/api/briefing/articles")
+async def get_briefing_articles(topic: Optional[str] = None, category: Optional[str] = None, _=Depends(require_auth)):
+    """Get latest briefing articles. Filter by topic name or category."""
+    bt = _briefing_tools()
+    result = bt.get_briefing_cards()
+    if result.get("status") != "ok":
+        return result
+    cards = result["cards"]
+    if category and category != "All":
+        cards = [c for c in cards if category in c.get("categories", [])]
+    elif topic:
+        cards = [c for c in cards if c.get("topic", "").lower() == topic.lower()]
+    return {"status": "ok", "cards": cards, "card_count": len(cards), "categories": result.get("categories", [])}
+
+
+@app.get("/api/briefing/article/{article_id}")
+async def get_briefing_article_detail(article_id: str, _=Depends(require_auth)):
+    """Get full article detail with comprehensive summary."""
+    bt = _briefing_tools()
+    result = bt.get_article_detail(article_id)
+    if result.get("status") == "error":
+        raise HTTPException(status_code=404, detail=result.get("message", "Not found"))
+    return result
+
+
+@app.get("/api/briefing/audio/{article_id}/{summary_type}")
+async def briefing_audio(article_id: str, summary_type: str = "brief", _=Depends(require_auth)):
+    """Serve pre-generated TTS audio for a briefing article."""
+    audio_dir = os.path.join(
+        os.environ.get("TOOLS_DIR",
+                       os.path.join(os.environ.get("AMBIENT_BASE", os.path.expanduser("~/ambient")), "tools")),
+        "daily_briefing", "essence_data", "audio"
+    )
+    audio_path = os.path.join(audio_dir, f"{article_id}_{summary_type}.wav")
+    if not os.path.isfile(audio_path):
+        raise HTTPException(status_code=404, detail="Audio not available for this article")
+    return FileResponse(audio_path, media_type="audio/wav")
+
+
+@app.get("/api/briefing/topics")
+async def get_briefing_topics(_=Depends(require_auth)):
+    """Get all tracked topics."""
+    bt = _briefing_tools()
+    return bt.list_topics()
+
+
+@app.post("/api/briefing/topics")
+async def add_briefing_topic(body: dict, _=Depends(require_auth)):
+    """Add a topic. Body: {name, keywords, priority}"""
+    bt = _briefing_tools()
+    name = body.get("name", "")
+    keywords = body.get("keywords", [])
+    priority = body.get("priority", "normal")
+    if not name or not keywords:
+        raise HTTPException(status_code=422, detail="name and keywords are required")
+    category = body.get("category", "General")
+    return bt.add_topic(name, keywords, priority, category)
+
+
+@app.delete("/api/briefing/topics/{topic_name}")
+async def delete_briefing_topic(topic_name: str, _=Depends(require_auth)):
+    """Remove a topic."""
+    bt = _briefing_tools()
+    result = bt.remove_topic(topic_name)
+    if result.get("status") == "error":
+        raise HTTPException(status_code=404, detail=result.get("message", "Not found"))
+    return result
+
+
+@app.post("/api/briefing/fetch")
+async def trigger_briefing_fetch(_=Depends(require_auth)):
+    """Manually trigger a briefing fetch."""
+    bt = _briefing_tools()
+    result = bt.fetch_and_summarize_all()
+    if result.get("status") == "error":
+        raise HTTPException(status_code=400, detail=result.get("message", "Fetch failed"))
+    return result
+
+
+@app.post("/api/briefing/article/{article_id}/dismiss")
+async def dismiss_briefing_article(article_id: str, _=Depends(require_auth)):
+    """Mark an article as dismissed ('heard it')."""
+    bt = _briefing_tools()
+    return bt.dismiss_article(article_id)
+
+
+@app.delete("/api/briefing/article/{article_id}/dismiss")
+async def undismiss_briefing_article(article_id: str, _=Depends(require_auth)):
+    """Un-dismiss an article."""
+    bt = _briefing_tools()
+    return bt.undismiss_article(article_id)
+
+
+@app.get("/api/briefing/search")
+async def search_briefing_articles(q: str, _=Depends(require_auth)):
+    """Search past articles via ChromaDB."""
+    if _BRIEFING_FUNCTIONS_DIR not in sys.path:
+        sys.path.insert(0, _BRIEFING_FUNCTIONS_DIR)
+    from article_indexer import search_articles
+    results = search_articles(q, n_results=10)
+    return {"status": "ok", "results": results, "count": len(results)}
+
+
+@app.get("/api/briefing/image/{article_id}")
+async def get_briefing_image(article_id: str):
+    """Serve a cached article image."""
+    images_dir = Path(os.environ.get("TOOLS_DIR",
+                      os.path.join(os.path.expanduser("~"), "ambient", "tools"))) / "daily_briefing" / "essence_data" / "images"
+    # Try common extensions
+    for ext in (".jpg", ".jpeg", ".png", ".webp", ".gif"):
+        img_path = images_dir / f"{article_id}{ext}"
+        if img_path.exists():
+            return FileResponse(str(img_path))
+    raise HTTPException(status_code=404, detail="Image not found")
+
+
+# ─── Tax Accountant 2025 Routes ──────────────────────────────────────────────
+
+_TAX_ESSENCE_DIR = os.path.join(os.path.expanduser("~/ambient/essences"), "tax_accountant_2025")
+_TAX_FUNCTIONS_DIR = os.path.join(_TAX_ESSENCE_DIR, "functions")
+
+def _run_tax_tool(tool_name: str, args: dict = None) -> dict:
+    """Run a tax accountant tool and return the result."""
+    python_bin = os.environ.get("PYTHON_BIN", sys.executable)
+    tools_path = os.path.join(_TAX_FUNCTIONS_DIR, "custom_tools.py")
+    cmd = [python_bin, tools_path, tool_name]
+    if args:
+        cmd.append(json.dumps(args))
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=120,
+                            cwd=_TAX_FUNCTIONS_DIR)
+    if result.returncode != 0:
+        return {"status": "error", "message": result.stderr[:500]}
+    try:
+        return json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return {"status": "ok", "output": result.stdout.strip()}
+
+
+@app.get("/tax-accountant")
+async def tax_accountant_page(request: Request, _=Depends(require_auth)):
+    """Redirect to Jane's chat with the tax accountant essence activated."""
+    return RedirectResponse(url="/?essence=tax_accountant_2025", status_code=302)
+
+
+@app.post("/api/tax/interview/start")
+async def tax_interview_start(_=Depends(require_auth)):
+    """Start or restart the tax interview."""
+    return JSONResponse(_run_tax_tool("interview_step", {"step_id": "filing_status"}))
+
+
+@app.post("/api/tax/interview/answer")
+async def tax_interview_answer(request: Request, _=Depends(require_auth)):
+    """Submit an answer to the current interview step."""
+    body = await request.json()
+    step_id = body.get("step_id", "filing_status")
+    user_response = body.get("response", {})
+    return JSONResponse(_run_tax_tool("interview_step", {
+        "step_id": step_id,
+        "user_response": user_response
+    }))
+
+
+@app.get("/api/tax/interview/state")
+async def tax_interview_state(_=Depends(require_auth)):
+    """Get the current interview state."""
+    return JSONResponse(_run_tax_tool("get_interview_state"))
+
+
+@app.post("/api/tax/calculate")
+async def tax_calculate(_=Depends(require_auth)):
+    """Run the full tax calculation."""
+    return JSONResponse(_run_tax_tool("calculate_tax"))
+
+
+@app.get("/api/tax/forms/{form_name}")
+async def tax_get_form(form_name: str, _=Depends(require_auth)):
+    """Get a generated tax form."""
+    output_dir = os.path.join(_TAX_ESSENCE_DIR, "working_files", "output")
+    # Find the most recent file matching form_name
+    if os.path.isdir(output_dir):
+        matches = sorted([f for f in os.listdir(output_dir) if f.startswith(form_name)], reverse=True)
+        if matches:
+            file_path = os.path.join(output_dir, matches[0])
+            return FileResponse(file_path, filename=matches[0])
+    raise HTTPException(status_code=404, detail=f"Form '{form_name}' not found")
+
+
+@app.get("/api/tax/summary")
+async def tax_summary(_=Depends(require_auth)):
+    """Get the most recent tax calculation summary."""
+    result_path = os.path.join(_TAX_ESSENCE_DIR, "working_files", "calculations", "tax_result.json")
+    if not os.path.exists(result_path):
+        return JSONResponse({"status": "error", "message": "No calculation found. Run calculate first."})
+    with open(result_path) as f:
+        return JSONResponse(json.load(f))
+
+
+@app.post("/api/tax/upload")
+async def tax_upload_document(file: UploadFile = File(...), doc_type: str = Form(""), _=Depends(require_auth)):
+    """Upload a tax document for processing."""
+    uploads_dir = os.path.join(_TAX_ESSENCE_DIR, "user_data", "uploads")
+    os.makedirs(uploads_dir, exist_ok=True)
+    file_path = os.path.join(uploads_dir, file.filename)
+    async with aiofiles.open(file_path, 'wb') as out_file:
+        content = await file.read()
+        await out_file.write(content)
+    return JSONResponse(_run_tax_tool("upload_document", {
+        "file_path": file_path,
+        "doc_type": doc_type
+    }))
+
+
+@app.post("/api/tax/reset")
+async def tax_reset(_=Depends(require_auth)):
+    """Reset the tax interview."""
+    return JSONResponse(_run_tax_tool("reset_interview"))
+
+
+@app.get("/api/tax/checklist")
+async def tax_checklist(_=Depends(require_auth)):
+    """Get the document checklist."""
+    return JSONResponse(_run_tax_tool("get_document_checklist"))
+
+
+@app.post("/api/tax/generate")
+async def tax_generate_forms(_=Depends(require_auth)):
+    """Generate all tax forms."""
+    return JSONResponse(_run_tax_tool("generate_forms"))
+
+
+@app.get("/api/tax/knowledge/search")
+async def tax_knowledge_search(q: str = "", _=Depends(require_auth)):
+    """Search the tax knowledge base."""
+    if not q:
+        return JSONResponse({"status": "error", "message": "Query parameter 'q' required"})
+    try:
+        chroma_path = os.path.join(_TAX_ESSENCE_DIR, "knowledge", "chromadb")
+        chroma_client = chromadb.PersistentClient(path=chroma_path)
+        coll = chroma_client.get_collection("tax_knowledge_2025")
+        results = coll.query(query_texts=[q], n_results=5)
+        return JSONResponse({
+            "status": "ok",
+            "results": [
+                {
+                    "content": doc,
+                    "metadata": meta,
+                    "distance": dist
+                }
+                for doc, meta, dist in zip(
+                    results["documents"][0],
+                    results["metadatas"][0],
+                    results["distances"][0]
+                )
+            ]
+        })
+    except Exception as e:
+        return JSONResponse({"status": "error", "message": str(e)})
+
+
+# ── CLI Login (runs inside Jane container where CLI is installed) ─────────────
+
+import select as _select
+
+_cli_login_process = None
+_cli_login_authenticated = False
+
+
+@app.post("/api/cli-login")
+async def cli_login(request: Request):
+    """Start CLI login process and return the auth URL."""
+    global _cli_login_process, _cli_login_authenticated
+    body = await request.json()
+    provider = body.get("provider", os.environ.get("JANE_BRAIN", "gemini"))
+
+    # Kill any previous login process
+    if _cli_login_process and _cli_login_process.poll() is None:
+        _cli_login_process.kill()
+    _cli_login_authenticated = False
+
+    login_cmds = {
+        "gemini": ["gemini", "auth", "login"],
+        "claude": ["claude", "login"],
+        "openai": ["codex", "login"],
+    }
+    cmd = login_cmds.get(provider)
+    if not cmd:
+        return JSONResponse({"error": f"Unknown provider: {provider}"})
+
+    import shutil as _shutil
+    if not _shutil.which(cmd[0]):
+        return JSONResponse({"error": f"CLI '{cmd[0]}' is not installed yet. The first-boot installer may still be running — please wait a minute and try again."})
+
+    try:
+        import subprocess as _sp
+        _cli_login_process = _sp.Popen(
+            cmd, stdout=_sp.PIPE, stderr=_sp.STDOUT,
+            text=True, env={**os.environ, "TERM": "dumb"},
+        )
+        import time as _time
+        auth_url = None
+        output_lines = []
+        deadline = _time.time() + 30
+        while _time.time() < deadline:
+            if _cli_login_process.poll() is not None:
+                break
+            ready, _, _ = _select.select([_cli_login_process.stdout], [], [], 1.0)
+            if ready:
+                line = _cli_login_process.stdout.readline()
+                if not line:
+                    break
+                output_lines.append(line.strip())
+                for word in line.split():
+                    if word.startswith("http://") or word.startswith("https://"):
+                        auth_url = word.strip().rstrip(")")
+                        break
+                if auth_url:
+                    break
+
+        if auth_url:
+            return JSONResponse({"auth_url": auth_url})
+        elif _cli_login_process.poll() is not None and _cli_login_process.returncode == 0:
+            _cli_login_authenticated = True
+            return JSONResponse({"auth_url": None, "already_authenticated": True})
+        else:
+            return JSONResponse({"error": f"Could not get auth URL. Output: {' | '.join(output_lines[-3:])}"})
+    except Exception as e:
+        return JSONResponse({"error": str(e)})
+
+
+@app.get("/api/cli-login/status")
+async def cli_login_status():
+    """Check if the CLI login completed."""
+    global _cli_login_process, _cli_login_authenticated
+    if _cli_login_authenticated:
+        return JSONResponse({"authenticated": True})
+    if _cli_login_process and _cli_login_process.poll() is not None:
+        _cli_login_authenticated = _cli_login_process.returncode == 0
+        return JSONResponse({"authenticated": _cli_login_authenticated})
+    return JSONResponse({"authenticated": False})

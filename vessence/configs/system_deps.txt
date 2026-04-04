@@ -1,0 +1,1 @@
+ffmpeg espeak-ng xclip xdotool wmctrl python3-pip python3-venv libnacl-dev

@@ -1,0 +1,819 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Jane Architecture — Vessence</title>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<style>
+  :root { --bg: #0f172a; --surface: #1e293b; --border: #334155; --text: #e2e8f0; --dim: #94a3b8; --accent: #8b5cf6; --warn: #f59e0b; --danger: #ef4444; --ok: #10b981; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+  .container { max-width: 820px; margin: 0 auto; padding: 2rem 1.5rem 4rem; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  /* Header */
+  .header { display: flex; align-items: center; gap: 1rem; margin-bottom: 2rem; padding-bottom: 1rem; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+  .header h1 { font-size: 1.5rem; font-weight: 700; }
+  .nav-links { margin-left: auto; display: flex; gap: 0.5rem; }
+  .back-link { font-size: 0.875rem; padding: 0.4rem 1rem; border: 1px solid var(--border); border-radius: 999px; transition: all 0.2s; white-space: nowrap; }
+  .back-link:hover { border-color: var(--accent); text-decoration: none; }
+
+  /* Section groups */
+  .group-title { font-size: 1.1rem; font-weight: 600; margin: 2rem 0 0.75rem; color: var(--accent); }
+
+  /* Expandable sections */
+  .section { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; margin-bottom: 0.5rem; overflow: hidden; }
+  .section-header { display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem 1rem; cursor: pointer; user-select: none; transition: background 0.15s; }
+  .section-header:hover { background: rgba(139, 92, 246, 0.05); }
+  .section-arrow { color: var(--dim); font-size: 0.7rem; transition: transform 0.2s; flex-shrink: 0; }
+  .section-arrow.open { transform: rotate(90deg); }
+  .section-name { font-weight: 600; font-size: 0.9rem; }
+  .section-brief { color: var(--dim); font-size: 0.8rem; margin-left: auto; text-align: right; }
+  .section-body { padding: 0 1rem 1rem; border-top: 1px solid var(--border); }
+  .section-body p, .section-body li { font-size: 0.85rem; line-height: 1.7; color: var(--dim); }
+  .section-body p { margin-top: 0.75rem; }
+  .section-body ul, .section-body ol { padding-left: 1.25rem; margin-top: 0.5rem; }
+  .section-body li { margin-bottom: 0.3rem; }
+  .section-body li strong { color: var(--text); }
+  .section-body code { background: var(--bg); padding: 0.1rem 0.4rem; border-radius: 4px; font-size: 0.82em; color: var(--text); }
+  .section-body h4 { font-size: 0.85rem; font-weight: 600; margin-top: 1rem; margin-bottom: 0.25rem; color: var(--text); }
+  .files { margin-top: 0.75rem; padding: 0.5rem 0.75rem; background: var(--bg); border-radius: 6px; font-size: 0.8rem; color: var(--dim); }
+  .files strong { color: var(--text); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; }
+  .files code { background: transparent; padding: 0; color: var(--accent); font-size: 0.8rem; }
+
+  /* ASCII flow */
+  .flow { margin-top: 0.75rem; padding: 0.6rem 0.75rem; background: var(--bg); border-radius: 6px; font-family: monospace; font-size: 0.75rem; line-height: 1.5; color: var(--dim); white-space: pre; overflow-x: auto; }
+
+  /* Callout boxes */
+  .callout { margin-top: 0.75rem; padding: 0.6rem 0.75rem; border-radius: 6px; font-size: 0.82rem; line-height: 1.6; }
+  .callout-warn { background: rgba(245, 158, 11, 0.08); border-left: 3px solid var(--warn); color: var(--dim); }
+  .callout-info { background: rgba(139, 92, 246, 0.08); border-left: 3px solid var(--accent); color: var(--dim); }
+  .callout-gap { background: rgba(239, 68, 68, 0.08); border-left: 3px solid var(--danger); color: var(--dim); }
+  .callout strong { color: var(--text); }
+
+  /* Table */
+  .arch-table { width: 100%; border-collapse: collapse; margin-top: 0.75rem; font-size: 0.82rem; }
+  .arch-table th, .arch-table td { padding: 0.4rem 0.6rem; border: 1px solid var(--border); text-align: left; }
+  .arch-table th { background: var(--bg); color: var(--text); font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.03em; }
+  .arch-table td { color: var(--dim); }
+  .arch-table td code { font-size: 0.8em; }
+</style>
+</head>
+<body>
+<div class="container" x-data="{ open: {} }">
+
+  <div class="header">
+    <h1>Jane Architecture</h1>
+    <div class="nav-links">
+      <a href="/" class="back-link">Back to Jane</a>
+      <a href="/guide" class="back-link">Back to Guide</a>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════════════════ -->
+  <!-- REQUEST LIFECYCLE                                                     -->
+  <!-- ══════════════════════════════════════════════════════════════════════ -->
+  <h2 class="group-title">Request Lifecycle</h2>
+
+  <div class="section">
+    <div class="section-header" @click="open.lifecycle = !open.lifecycle">
+      <span class="section-arrow" :class="open.lifecycle && 'open'">&#9654;</span>
+      <span class="section-name">End-to-End Message Flow</span>
+      <span class="section-brief">classify &rarr; context &rarr; brain &rarr; persist</span>
+    </div>
+    <div class="section-body" x-show="open.lifecycle" x-collapse>
+      <p>Every user message passes through the same pipeline, regardless of whether it's a greeting or a complex coding request. The pipeline runs inside <code>stream_message()</code> in <code>jane_proxy.py</code>.</p>
+      <div class="flow">Browser POST /api/jane/chat/stream
+  |
+  1. Acknowledge receipt (SSE "ack" event)
+  |
+  2. Intent Classification (gemma3:4b via Ollama, ~200ms)
+  |   Returns: level (greeting/simple/medium/hard), model hint, certainty %
+  |   Level maps to tier: greeting/simple &rarr; light, medium &rarr; medium, hard &rarr; heavy
+  |
+  3. Session Summary Load
+  |   Reads existing session summary (topics, open loops) from disk
+  |   Format: JSON with up to 5 tracked topics, each capped at 200 chars
+  |
+  4. Context Decision: skip_context or full build?
+  |   IF standing brain is alive AND turn_count > 0:
+  |     skip_context = True  &rarr;  lightweight safety context only
+  |   ELSE:
+  |     skip_context = False &rarr;  full context build (memory, profile, task state)
+  |
+  5. Context Assembly
+  |   skip_context path:  session summary + last 6 turns (2400 chars) + user message
+  |   full build path:    system prompt + ChromaDB memory + user profile + task state
+  |
+  6. Brain Dispatch
+  |   Standing brain (preferred): write to stdin of long-lived CLI process
+  |   Fallback: spawn one-shot CLI subprocess
+  |
+  7. Stream Response (SSE events: status, thought, delta, done)
+  |
+  8. Persist Turns (async background thread)
+  |   Write to ChromaDB short-term memory + update session summary
+  |
+  9. Emit "done" event to browser</div>
+      <div class="files">
+        <strong>Key files:</strong><br>
+        <code>jane_web/jane_proxy.py</code> &mdash; stream_message() (L738-1119), send_message() (L578-735)
+      </div>
+    </div>
+  </div>
+
+
+  <!-- ══════════════════════════════════════════════════════════════════════ -->
+  <!-- STANDING BRAIN ARCHITECTURE                                           -->
+  <!-- ══════════════════════════════════════════════════════════════════════ -->
+  <h2 class="group-title">Standing Brain Architecture</h2>
+
+  <div class="section">
+    <div class="section-header" @click="open.overview3 = !open.overview3">
+      <span class="section-arrow" :class="open.overview3 && 'open'">&#9654;</span>
+      <span class="section-name">Overview: Single Brain</span>
+      <span class="section-brief">one CLI process, full conversation continuity</span>
+    </div>
+    <div class="section-body" x-show="open.overview3" x-collapse>
+      <p>Jane runs a single, long-lived CLI process. All messages route to the same brain, ensuring full conversation continuity &mdash; no cross-brain context injection problems, no style discontinuity, no reasoning chain gaps.</p>
+      <table class="arch-table">
+        <tr><th>Provider</th><th>Default Model</th><th>Env Override</th></tr>
+        <tr><td>Claude</td><td>Opus 4.6</td><td><code>JANE_MODEL_CLAUDE</code></td></tr>
+        <tr><td>Gemini</td><td>Pro 2.5</td><td><code>JANE_MODEL_GEMINI</code></td></tr>
+        <tr><td>OpenAI</td><td>o3</td><td><code>JANE_MODEL_OPENAI</code></td></tr>
+      </table>
+      <p>The model can be changed at runtime via the settings UI. Changing the model kills the current brain and respawns with the new model.</p>
+      <div class="callout callout-info"><strong>Key design choice:</strong> Context depth (slim vs. full memory retrieval) is determined locally by <code>context_builder.py</code> keyword matching, not by a separate classifier. This eliminates the ~200ms Ollama round-trip per message.</div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-header" @click="open.standing = !open.standing">
+      <span class="section-arrow" :class="open.standing && 'open'">&#9654;</span>
+      <span class="section-name">Standing Brain Manager</span>
+      <span class="section-brief">spawn, send, restart, reap</span>
+    </div>
+    <div class="section-body" x-show="open.standing" x-collapse>
+      <p><code>StandingBrainManager</code> is a singleton that owns the single brain process. It handles its full lifecycle.</p>
+
+      <h4>Process Spawn</h4>
+      <p>Each brain is spawned as an <code>asyncio.create_subprocess_exec()</code> with stdin/stdout/stderr pipes. The working directory is set to <code>$VESSENCE_HOME</code>. Each process gets its own process group (<code>start_new_session=True</code>) for clean shutdown.</p>
+      <ul>
+        <li><strong>Claude:</strong> Uses <code>--input-format stream-json --output-format stream-json</code>. Waits for an <code>init</code> event on stdout that contains the <code>session_id</code>.</li>
+        <li><strong>Gemini:</strong> Uses <code>--approval-mode yolo --output-format text</code>. Waits 2 seconds for process to stabilize.</li>
+        <li><strong>OpenAI (Codex):</strong> Uses <code>codex exec --approval-mode full-auto</code>. Same 2-second wait.</li>
+      </ul>
+
+      <h4>Sending a Message</h4>
+      <p>When <code>send(tier, message, system_prompt)</code> is called:</p>
+      <ol>
+        <li>Acquire the tier's async lock (prevents concurrent sends to the same brain)</li>
+        <li>Check health: if dead, hit max failures (3), or hit max turns (20) &rarr; kill and respawn</li>
+        <li>Build the prompt:
+          <ul>
+            <li><strong>Turn 0 (first turn):</strong> <code>"{system_prompt}\n\nUser: {message}\nJane:"</code></li>
+            <li><strong>Turn 1+ (subsequent):</strong> Just <code>message</code> (raw)</li>
+          </ul>
+        </li>
+        <li>Write to stdin as NDJSON (Claude) or plain text (Gemini/OpenAI)</li>
+        <li>Read response events from stdout, yielding <code>(event_type, chunk)</code> tuples</li>
+        <li>Increment <code>turn_count</code>, reset failure counter on success</li>
+      </ol>
+
+      <h4>Forced Restart at 20 Turns</h4>
+      <p>After <code>MAX_TURNS_BEFORE_REFRESH = 20</code> turns, the brain is killed and respawned. This is because CLI processes accumulate context in their internal memory, and after enough turns the context window fills up and older information gets compressed or dropped. Restarting forces a clean slate with a fresh system prompt on the next turn.</p>
+
+      <h4>Idle Reaper</h4>
+      <p>A background task runs every 60 seconds and checks each brain's health:</p>
+      <ul>
+        <li><strong>Dead processes:</strong> Immediately respawned</li>
+        <li><strong>CPU runaway:</strong> If CPU exceeds 15% for a sustained 1 hour AND the brain is idle (5+ min since last use), it gets killed and respawned. This prevents runaway processes from burning resources while protecting brains that are actively working.</li>
+      </ul>
+
+      <div class="callout callout-warn"><strong>Note:</strong> The reaper never kills a brain that is actively handling a request. The <code>idle_seconds</code> check ensures only truly idle brains are candidates for termination.</div>
+
+      <div class="files">
+        <strong>Key files:</strong><br>
+        <code>jane/standing_brain.py</code> &mdash; StandingBrainManager, BrainProcess, spawn/send/kill/reap<br>
+        <code>jane/brain_adapters.py</code> &mdash; cold-start fallback when standing brain is unavailable
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-header" @click="open.classifier = !open.classifier">
+      <span class="section-arrow" :class="open.classifier && 'open'">&#9654;</span>
+      <span class="section-name">Context Classification</span>
+      <span class="section-brief">local keyword matching, drives context depth</span>
+    </div>
+    <div class="section-body" x-show="open.classifier" x-collapse>
+      <p>Message complexity is classified locally by <code>context_builder.py</code> using keyword matching (~0ms). This drives context depth &mdash; greetings get slim context, complex tasks get full memory + task state. All messages route to the single standing brain.</p>
+      <div class="files">
+        <strong>Key files:</strong><br>
+        <code>jane/context_builder.py</code> &mdash; <code>_classify_prompt_profile()</code>, keyword heuristics
+      </div>
+    </div>
+  </div>
+
+
+  <!-- ══════════════════════════════════════════════════════════════════════ -->
+  <!-- CONTEXT & MEMORY FLOW                                                 -->
+  <!-- ══════════════════════════════════════════════════════════════════════ -->
+  <h2 class="group-title">Context &amp; Memory Flow</h2>
+
+  <div class="section">
+    <div class="section-header" @click="open.ctxdecision = !open.ctxdecision">
+      <span class="section-arrow" :class="open.ctxdecision && 'open'">&#9654;</span>
+      <span class="section-name">The skip_context Decision</span>
+      <span class="section-brief">full build vs safety context</span>
+    </div>
+    <div class="section-body" x-show="open.ctxdecision" x-collapse>
+      <p>This is the most critical branching point in the entire system. Before assembling context, the proxy checks whether the target brain already has context from a previous turn:</p>
+      <div class="flow">_skip_context = (
+    brain is eligible for standing brain routing
+    AND manager is started
+    AND brain process is alive
+    AND brain.turn_count > 0    &larr; has seen at least one message
+)</div>
+      <p>If <code>_skip_context = True</code>: the system assumes the brain's CLI process still remembers its system prompt and earlier conversation from its internal memory. It assembles only a lightweight "safety context" &mdash; a fallback in case the CLI's internal memory has drifted.</p>
+      <p>If <code>_skip_context = False</code>: full context build happens &mdash; memory retrieval from ChromaDB, user profile, task state, code map, everything.</p>
+
+      <h4>What the safety context contains</h4>
+      <ul>
+        <li><strong>Session summary:</strong> A gemma-generated paragraph tracking up to 5 conversation topics</li>
+        <li><strong>Recent history:</strong> Last 6 turns from <code>state.history</code>, capped at 2400 characters total</li>
+        <li><strong>The current user message</strong></li>
+      </ul>
+
+      <h4>What the safety context does NOT contain</h4>
+      <ul>
+        <li>ChromaDB memory retrieval (long-term or short-term)</li>
+        <li>User profile or background</li>
+        <li>Task state or pending jobs</li>
+        <li>Essence personality (if active)</li>
+      </ul>
+
+      <div class="callout callout-gap"><strong>Known gap:</strong> On turn 2+ of any standing brain, ChromaDB is never queried. The brain relies entirely on its own CLI session memory for anything beyond the last 6 turns. If the CLI's context has compressed older messages, that information is lost.</div>
+
+      <div class="files">
+        <strong>Key files:</strong><br>
+        <code>jane_web/jane_proxy.py</code> &mdash; L828-868 (_skip_context decision and safety context assembly)<br>
+        <code>jane/context_builder.py</code> &mdash; _format_recent_history() (L558-583)
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-header" @click="open.fullbuild = !open.fullbuild">
+      <span class="section-arrow" :class="open.fullbuild && 'open'">&#9654;</span>
+      <span class="section-name">Full Context Build</span>
+      <span class="section-brief">PromptProfile, memory retrieval, assembly</span>
+    </div>
+    <div class="section-body" x-show="open.fullbuild" x-collapse>
+      <p>On the first turn of each brain (or after a restart), the full context build runs. The <code>PromptProfile</code> system determines what gets included based on the classifier level:</p>
+      <table class="arch-table">
+        <tr><th>Component</th><th>greeting</th><th>simple</th><th>medium</th><th>hard</th></tr>
+        <tr><td>Base personality</td><td>Yes</td><td>Yes</td><td>Yes</td><td>Yes</td></tr>
+        <tr><td>User background</td><td>No</td><td>Yes</td><td>Yes</td><td>Yes</td></tr>
+        <tr><td>ChromaDB memory</td><td>No</td><td>No</td><td>Yes</td><td>Yes</td></tr>
+        <tr><td>Conversation summary</td><td>No</td><td>No</td><td>Yes</td><td>Yes</td></tr>
+        <tr><td>Task state</td><td>No</td><td>No</td><td>Yes</td><td>Yes</td></tr>
+        <tr><td>Code map</td><td>No</td><td>No</td><td>Yes</td><td>Yes</td></tr>
+        <tr><td>Research offload</td><td>No</td><td>No</td><td>No</td><td>Yes</td></tr>
+        <tr><td>Essence personality</td><td>No</td><td>No</td><td>Yes</td><td>Yes</td></tr>
+      </table>
+      <p>Memory is pre-fetched asynchronously during classification to minimize latency. The memory daemon (port 8083) provides sub-100ms retrieval when available; if it's down, a slower direct ChromaDB query is used as fallback.</p>
+      <div class="flow">context_builder.build_jane_context_async()
+  |
+  +--> PromptProfile selection (based on level + keywords)
+  |
+  +--> Memory retrieval (async, already prefetched)
+  |      Query: memory daemon (8083) &rarr; ChromaDB similarity search
+  |      Returns: short-term + long-term memories as a summary paragraph
+  |
+  +--> Section assembly:
+  |      [1] Base system prompt ("You are Jane...")
+  |      [2] User profile (name, pronouns, preferences)
+  |      [3] Identity essay (auto-generated personality snapshot)
+  |      [4] Memory summary (from ChromaDB retrieval)
+  |      [5] Conversation summary (topics, open loops)
+  |      [6] Task state (pending jobs, current focus)
+  |      [7] Code map (function index, if code-related)
+  |      [8] Essence personality + tools (if essence active)
+  |      [9] Recent conversation history
+  |
+  +--> JaneRequestContext(system_prompt=..., transcript=...)</div>
+      <div class="files">
+        <strong>Key files:</strong><br>
+        <code>jane/context_builder.py</code> &mdash; PromptProfile, build_jane_context_async(), section assembly<br>
+        <code>agent_skills/search_memory.py</code> &mdash; get_memory_summary(), ChromaDB query
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-header" @click="open.crosstier = !open.crosstier">
+      <span class="section-arrow" :class="open.crosstier && 'open'">&#9654;</span>
+      <span class="section-name">Cross-Tier Context Passing</span>
+      <span class="section-brief">how (and where) context gets lost</span>
+    </div>
+    <div class="section-body" x-show="open.crosstier" x-collapse>
+      <p>With a single brain, conversation continuity is straightforward. The brain maintains its own context window. Here's the detailed flow:</p>
+
+      <h4>Scenario: User sends 5 messages</h4>
+      <div class="flow">Msg 1: "hey"           &rarr; classifier: greeting &rarr; light brain (haiku)
+Msg 2: "fix the login"  &rarr; classifier: hard    &rarr; heavy brain (opus)
+Msg 3: "what about X?"  &rarr; classifier: medium  &rarr; medium brain (sonnet)
+Msg 4: "yes, do it"     &rarr; classifier: medium  &rarr; medium brain (sonnet)
+Msg 5: "add tests too"  &rarr; classifier: hard    &rarr; heavy brain (opus)</div>
+
+      <h4>What each brain's CLI memory contains</h4>
+      <table class="arch-table">
+        <tr><th>Brain</th><th>CLI Memory</th><th>Gaps</th></tr>
+        <tr><td>Light (haiku)</td><td>System prompt + Msg 1 + response</td><td>Knows nothing about Msgs 2-5</td></tr>
+        <tr><td>Medium (sonnet)</td><td>System prompt + Msg 3 + response + Msg 4 + response</td><td>Knows nothing about Msgs 1, 2, 5</td></tr>
+        <tr><td>Heavy (opus)</td><td>System prompt + Msg 2 + response + Msg 5 + response</td><td>Knows nothing about Msgs 1, 3, 4. And between Msg 2 and Msg 5, it has a gap &mdash; doesn't know what sonnet discussed.</td></tr>
+      </table>
+
+      <h4>How the proxy tries to bridge this</h4>
+      <p>The web server maintains a unified <code>state.history</code> list that contains ALL turns from ALL tiers. When <code>_skip_context = True</code>, the proxy injects a safety context assembled from this shared history:</p>
+      <div class="flow">safety_ctx = [Session summary]     &larr; gemma-generated topic paragraph
+            + [Recent exchanges]    &larr; last 6 turns from state.history (all tiers)
+            + User: {message}       &larr; current user message
+
+This safety_ctx becomes the brain_message sent to the standing brain.</div>
+
+      <h4>Why this is often insufficient</h4>
+      <ul>
+        <li><strong>6 turns / 2400 chars is very small.</strong> A single opus response can be 2000+ chars. After 2-3 exchanges, the older ones are truncated away.</li>
+        <li><strong>No tier-switch detection.</strong> When the heavy brain receives Msg 5 after sonnet handled Msgs 3-4, the same thin safety context is used. There's no special "handoff" with richer context.</li>
+        <li><strong>The brain's own CLI memory conflicts.</strong> Opus remembers Msg 2's context in detail (it's in the CLI's internal memory), but gets a compressed summary of Msgs 3-4. This creates an inconsistency: detailed old context + vague recent context.</li>
+        <li><strong>No ChromaDB retrieval.</strong> Even though all turns are persisted to ChromaDB in the background, the skip_context path never queries ChromaDB. The memory that could bridge the gap is available but unused.</li>
+      </ul>
+
+      <div class="callout callout-gap"><strong>Known gap: Cross-tier amnesia.</strong> When tier switches happen, the new brain receives at most 2400 chars of recent history and a session summary. For conversations with rapid tier switching (e.g., casual greeting followed by a complex question), the complex brain can miss important context from the lighter brain's exchange.</div>
+
+      <div class="files">
+        <strong>Key files:</strong><br>
+        <code>jane_web/jane_proxy.py</code> &mdash; L843-868 (safety context assembly), L946 (brain_message selection)<br>
+        <code>jane/context_builder.py</code> &mdash; _format_recent_history() (L558)
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-header" @click="open.samedispatch = !open.samedispatch">
+      <span class="section-arrow" :class="open.samedispatch && 'open'">&#9654;</span>
+      <span class="section-name">Same-Tier Context Flow (Detail)</span>
+      <span class="section-brief">what happens on turn 2+ of the same brain</span>
+    </div>
+    <div class="section-body" x-show="open.samedispatch" x-collapse>
+      <p>When consecutive messages route to the same tier, the flow is simpler but still has nuances:</p>
+
+      <h4>Turn 1 (brain.turn_count == 0)</h4>
+      <ol>
+        <li>Full context build runs (PromptProfile, ChromaDB memory, user profile, etc.)</li>
+        <li><code>JaneRequestContext</code> is created with <code>system_prompt</code> (full) + <code>transcript</code> (user message)</li>
+        <li>Standing brain's <code>send()</code> prepends system prompt to message: <code>"{system_prompt}\n\nUser: {message}\nJane:"</code></li>
+        <li>Brain receives its full identity, memory, and context</li>
+      </ol>
+
+      <h4>Turn 2-19 (brain.turn_count > 0, _skip_context = True)</h4>
+      <ol>
+        <li>Safety context is assembled: session summary + last 6 turns + current message</li>
+        <li><code>JaneRequestContext</code> is created with <code>system_prompt=""</code> (empty) + <code>transcript</code> (safety context + message)</li>
+        <li>Standing brain's <code>send()</code> sends just the message (no system prompt prefix, since turn_count > 0)</li>
+        <li>Brain relies on its own CLI internal memory for system prompt, user profile, earlier turns</li>
+        <li>The safety context provides a thin fallback: if the CLI's memory has compressed older turns, the session summary and recent history help fill the gap</li>
+      </ol>
+
+      <h4>Turn 20 (brain.turn_count == MAX_TURNS_BEFORE_REFRESH)</h4>
+      <ol>
+        <li>Standing brain kills the process and respawns a fresh one</li>
+        <li>turn_count resets to 0</li>
+        <li>Next message triggers a full context build (turn 1 path)</li>
+        <li>Brain gets a fresh system prompt with updated memory from ChromaDB</li>
+      </ol>
+
+      <div class="callout callout-info"><strong>The 20-turn refresh exists because</strong> CLI processes accumulate context internally. After ~20 turns, the CLI's context window fills up and it starts compressing or dropping older messages. Restarting forces a clean slate with fresh ChromaDB memory, which may include facts learned during the 20 turns that the CLI's compressed context lost.</div>
+
+      <div class="files">
+        <strong>Key files:</strong><br>
+        <code>jane/standing_brain.py</code> &mdash; send() (L232-340), MAX_TURNS_BEFORE_REFRESH (L65)
+      </div>
+    </div>
+  </div>
+
+
+  <!-- ══════════════════════════════════════════════════════════════════════ -->
+  <!-- MEMORY SYSTEM                                                         -->
+  <!-- ══════════════════════════════════════════════════════════════════════ -->
+  <h2 class="group-title">Memory System</h2>
+
+  <div class="section">
+    <div class="section-header" @click="open.chromadb = !open.chromadb">
+      <span class="section-arrow" :class="open.chromadb && 'open'">&#9654;</span>
+      <span class="section-name">ChromaDB Collections</span>
+      <span class="section-brief">4 collections, shared across all brains</span>
+    </div>
+    <div class="section-body" x-show="open.chromadb" x-collapse>
+      <p>All persistent memory is stored in ChromaDB vector databases. These collections are the shared substrate between the standing brain and Amber.</p>
+      <table class="arch-table">
+        <tr><th>Collection</th><th>Purpose</th><th>TTL</th><th>Shared With</th></tr>
+        <tr><td><code>short_term_memory</code></td><td>Summarized conversation turns</td><td>14 days</td><td>Jane (all tiers), Amber</td></tr>
+        <tr><td><code>long_term_memory</code></td><td>Permanent facts, preferences, user information</td><td>None</td><td>Jane (all tiers), Amber</td></tr>
+        <tr><td><code>file_index</code></td><td>Indexed vault files with embeddings</td><td>None</td><td>Jane (all tiers), Amber</td></tr>
+        <tr><td><code>user_memories</code></td><td>Explicitly saved facts via add_fact.py</td><td>None</td><td>Jane (all tiers), Amber</td></tr>
+      </table>
+
+      <h4>How short-term memory works</h4>
+      <p>After each exchange, a background thread in <code>_persist_turns_async()</code> summarizes the turn using a local model and writes the summary to <code>short_term_memory</code>. The summary format is <code>concise_turn_memory_v1</code> &mdash; typically compressing ~400 chars of raw conversation into ~190 chars of summary.</p>
+
+      <h4>How memory retrieval works</h4>
+      <p>The memory daemon (port 8083) receives a query (the user's message), performs cosine similarity search against ChromaDB embeddings, and returns the most relevant memories. The librarian then synthesizes these into a coherent paragraph that gets injected into the system prompt.</p>
+
+      <div class="callout callout-gap"><strong>Known gap: Retrieval is semantic, not chronological.</strong> ChromaDB returns results by embedding similarity, not by recency. Asking "fix the installer" might not retrieve the turn where you discussed installer specs if the embeddings don't match well enough. The most recent conversation turn is not guaranteed to appear in retrieval results.</div>
+
+      <div class="files">
+        <strong>Key files:</strong><br>
+        <code>jane/config.py</code> &mdash; collection names, DB paths<br>
+        <code>agent_skills/local_vector_memory.py</code> &mdash; ChromaDB read/write<br>
+        <code>agent_skills/janitor_memory.py</code> &mdash; TTL cleanup, deduplication<br>
+        <code>startup_code/memory_daemon.py</code> &mdash; FastAPI query server on port 8083
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-header" @click="open.writepath = !open.writepath">
+      <span class="section-arrow" :class="open.writepath && 'open'">&#9654;</span>
+      <span class="section-name">Memory Write Path</span>
+      <span class="section-brief">async persistence, race conditions</span>
+    </div>
+    <div class="section-body" x-show="open.writepath" x-collapse>
+      <p>After each exchange, the proxy dispatches turn persistence to a background thread via <code>_persist_turns_async()</code>. This is non-blocking &mdash; the user sees the response immediately while persistence happens in parallel.</p>
+      <div class="flow">stream_message() completes
+  |
+  +--> background thread (daemon=True):
+         |
+         +--> conversation_manager.add_messages([user_turn, assistant_turn])
+         |      Summarizes turn using local model
+         |      Writes summary to ChromaDB short_term_memory
+         |      Invalidates memory summary cache
+         |
+         +--> update_session_summary_async(session_id, user_msg, assistant_msg)
+                Reads existing session summary
+                Asks local model to update topics based on new exchange
+                Writes updated summary to disk</div>
+
+      <div class="callout callout-warn"><strong>Race condition:</strong> Because persistence is async, if the user sends a second message quickly, the second message's memory retrieval might not see the first message's response in ChromaDB yet. The background thread may still be writing. This is partially mitigated by the in-memory <code>state.history</code> (which is updated synchronously), but ChromaDB-based retrieval on a fresh brain won't see the latest turn.</div>
+
+      <div class="files">
+        <strong>Key files:</strong><br>
+        <code>jane_web/jane_proxy.py</code> &mdash; _persist_turns_async() (L532-570)<br>
+        <code>agent_skills/conversation_manager.py</code> &mdash; add_messages(), turn summarization<br>
+        <code>jane/session_summary.py</code> &mdash; update_session_summary_async()
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-header" @click="open.readpath = !open.readpath">
+      <span class="section-arrow" :class="open.readpath && 'open'">&#9654;</span>
+      <span class="section-name">Memory Read Path</span>
+      <span class="section-brief">when memory is (and isn't) consulted</span>
+    </div>
+    <div class="section-body" x-show="open.readpath" x-collapse>
+      <p>Memory retrieval happens at different depths depending on the context path:</p>
+      <table class="arch-table">
+        <tr><th>Scenario</th><th>ChromaDB Queried?</th><th>Session Summary?</th><th>Recent History?</th></tr>
+        <tr><td>Turn 1, greeting/simple level</td><td>No</td><td>No</td><td>Yes (in transcript)</td></tr>
+        <tr><td>Turn 1, medium/hard level</td><td><strong>Yes</strong></td><td>Yes</td><td>Yes</td></tr>
+        <tr><td>Turn 2+, any level (skip_context)</td><td><strong>No</strong></td><td>Yes</td><td>Yes (6 turns, 2400 chars)</td></tr>
+        <tr><td>Turn 1 after 20-turn restart</td><td><strong>Yes</strong></td><td>Yes</td><td>Yes</td></tr>
+      </table>
+
+      <div class="callout callout-gap"><strong>Known gap:</strong> The skip_context path (turn 2+) accounts for the majority of messages in a typical conversation. On this path, ChromaDB is never consulted, even though it contains all recent conversation summaries. The brain depends entirely on its CLI's internal memory plus a thin 2400-char safety snippet. This is the primary reason context appears to be "forgotten" &mdash; the information exists in ChromaDB but is never read.</div>
+
+      <div class="files">
+        <strong>Key files:</strong><br>
+        <code>jane/context_builder.py</code> &mdash; _safe_get_memory_summary() (L232-271), _classify_prompt_profile() (L154-219)<br>
+        <code>jane_web/jane_proxy.py</code> &mdash; L843-868 (skip_context path), L870-885 (full build path)
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-header" @click="open.session = !open.session">
+      <span class="section-arrow" :class="open.session && 'open'">&#9654;</span>
+      <span class="section-name">Session Summary</span>
+      <span class="section-brief">topic tracking, lightweight bridge</span>
+    </div>
+    <div class="section-body" x-show="open.session" x-collapse>
+      <p>The session summary is a lightweight, on-disk JSON structure that tracks the current conversation's topics. It's the only piece of context that is both cheap to produce and always available on the skip_context path.</p>
+      <ul>
+        <li><strong>Max 5 topics</strong> tracked at a time, each capped at 200 chars</li>
+        <li><strong>Updated after every exchange</strong> by a local model in a background thread</li>
+        <li><strong>Thread-safe:</strong> Uses a write lock to prevent concurrent corruption</li>
+        <li><strong>Format:</strong> JSON with topic name, state (open/resolved), and brief description</li>
+      </ul>
+      <p>The session summary is the closest thing to a cross-brain shared memory that runs on every turn. However, it's a lossy compression &mdash; it captures topics, not details.</p>
+      <div class="files">
+        <strong>Key files:</strong><br>
+        <code>jane/session_summary.py</code> &mdash; load, update, format session summaries
+      </div>
+    </div>
+  </div>
+
+
+  <!-- ══════════════════════════════════════════════════════════════════════ -->
+  <!-- WEB & STREAMING                                                       -->
+  <!-- ══════════════════════════════════════════════════════════════════════ -->
+  <h2 class="group-title">Web &amp; Streaming</h2>
+
+  <div class="section">
+    <div class="section-header" @click="open.proxy = !open.proxy">
+      <span class="section-arrow" :class="open.proxy && 'open'">&#9654;</span>
+      <span class="section-name">Jane Proxy &amp; SSE Streaming</span>
+      <span class="section-brief">event types, keepalive, permission broker</span>
+    </div>
+    <div class="section-body" x-show="open.proxy" x-collapse>
+      <p>The proxy in <code>jane_proxy.py</code> orchestrates the full request lifecycle and streams response events back to the browser via Server-Sent Events (SSE).</p>
+
+      <h4>SSE Event Types</h4>
+      <table class="arch-table">
+        <tr><th>Event</th><th>Purpose</th></tr>
+        <tr><td><code>ack</code></td><td>Immediate acknowledgment that the request was received</td></tr>
+        <tr><td><code>status</code></td><td>Progress updates ("Loading memory...", "Jane is thinking...")</td></tr>
+        <tr><td><code>model</code></td><td>Which model was selected (haiku/sonnet/opus)</td></tr>
+        <tr><td><code>thought</code></td><td>Intermediate reasoning from Claude's extended thinking</td></tr>
+        <tr><td><code>delta</code></td><td>Incremental response text chunks</td></tr>
+        <tr><td><code>heartbeat</code></td><td>Keepalive ping every 3 seconds to prevent proxy timeout</td></tr>
+        <tr><td><code>permission</code></td><td>Tool approval request (Claude only, when web permissions enabled)</td></tr>
+        <tr><td><code>done</code></td><td>Final response text, signals stream completion</td></tr>
+        <tr><td><code>error</code></td><td>Error message if something went wrong</td></tr>
+      </table>
+
+      <h4>Permission Broker (Claude Only)</h4>
+      <p>When <code>JANE_WEB_PERMISSIONS=1</code>, Claude's standing brain runs with a PreToolUse hook that intercepts tool calls (Bash, Write, Edit). The hook POSTs to <code>/api/jane/permission/request</code>, and the broker routes the request to the browser via SSE. The user sees an approve/deny dialog. The emitter is registered under <code>"standing_brain"</code> so the broker can find it.</p>
+
+      <div class="files">
+        <strong>Key files:</strong><br>
+        <code>jane_web/jane_proxy.py</code> &mdash; stream_message(), SSE event emission<br>
+        <code>jane_web/permission_broker.py</code> &mdash; PermissionBroker, emitter registry<br>
+        <code>jane/hooks/permission_gate.py</code> &mdash; PreToolUse hook script
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-header" @click="open.broadcast = !open.broadcast">
+      <span class="section-arrow" :class="open.broadcast && 'open'">&#9654;</span>
+      <span class="section-name">Broadcast System</span>
+      <span class="section-brief">multi-listener SSE, periodic summaries</span>
+    </div>
+    <div class="section-body" x-show="open.broadcast" x-collapse>
+      <p>When Jane is responding, any connected client (web browser, Android app) can subscribe to the broadcast stream. The <code>StreamBroadcaster</code> batches delta events and periodically publishes a summary of what Jane is saying so far.</p>
+      <ul>
+        <li><strong>Summary interval:</strong> Every few seconds, a local model generates a 1-sentence summary of the in-progress response</li>
+        <li><strong>Multi-listener:</strong> Multiple browser tabs or devices can watch the same response in real-time</li>
+        <li><strong>Cleanup:</strong> Listeners are automatically unsubscribed on disconnect</li>
+      </ul>
+      <div class="files">
+        <strong>Key files:</strong><br>
+        <code>jane_web/broadcast.py</code> &mdash; BroadcastManager, StreamBroadcaster
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-header" @click="open.auth = !open.auth">
+      <span class="section-arrow" :class="open.auth && 'open'">&#9654;</span>
+      <span class="section-name">Authentication</span>
+      <span class="section-brief">Google OAuth, sessions, share codes</span>
+    </div>
+    <div class="section-body" x-show="open.auth" x-collapse>
+      <p>Multi-layer authentication protects all routes:</p>
+      <ul>
+        <li><strong>Google OAuth:</strong> Primary login via Google sign-in, token verified server-side. Restricted to allowed email addresses.</li>
+        <li><strong>Session cookies:</strong> 30-day httponly cookies, SameSite=lax</li>
+        <li><strong>Trusted devices:</strong> Separate cookie tracks known devices</li>
+        <li><strong>Localhost bypass:</strong> Requests from 127.0.0.1 skip auth for local access</li>
+        <li><strong>Share codes:</strong> Time-limited access tokens for sharing specific pages</li>
+      </ul>
+      <div class="files">
+        <strong>Key files:</strong><br>
+        <code>jane_web/main.py</code> &mdash; OAuth routes, session validation, device management
+      </div>
+    </div>
+  </div>
+
+
+  <!-- ══════════════════════════════════════════════════════════════════════ -->
+  <!-- ESSENCE SYSTEM                                                        -->
+  <!-- ══════════════════════════════════════════════════════════════════════ -->
+  <h2 class="group-title">Essence System</h2>
+
+  <div class="section">
+    <div class="section-header" @click="open.loader = !open.loader">
+      <span class="section-arrow" :class="open.loader && 'open'">&#9654;</span>
+      <span class="section-name">Essence Loader &amp; Activation</span>
+      <span class="section-brief">manifest.json, personality swap, memory isolation</span>
+    </div>
+    <div class="section-body" x-show="open.loader" x-collapse>
+      <p>Essences are self-contained AI agent packages. Each lives in a folder under <code>essences/</code> with a <code>manifest.json</code> describing its name, personality, tools, and ChromaDB path.</p>
+      <ul>
+        <li><strong>Auto-load:</strong> At startup, the loader scans the directory and registers all valid essences</li>
+        <li><strong>Memory isolation:</strong> Each essence has its own ChromaDB collection. Memories don't bleed between personas.</li>
+        <li><strong>Personality injection:</strong> When activated, the essence's personality replaces Jane's base system prompt</li>
+        <li><strong>Universal memory:</strong> Jane's core long-term memory remains accessible during essence activation</li>
+        <li><strong>Hot-reload:</strong> New essences can be added without restarting the server</li>
+      </ul>
+      <div class="files">
+        <strong>Key files:</strong><br>
+        <code>agent_skills/essence_loader.py</code> &mdash; load, unload, delete essences<br>
+        <code>agent_skills/essence_runtime.py</code> &mdash; singleton runtime manager<br>
+        <code>agent_skills/essence_builder.py</code> &mdash; 12-section interview mode for creating essences
+      </div>
+    </div>
+  </div>
+
+
+  <!-- ══════════════════════════════════════════════════════════════════════ -->
+  <!-- AUTOMATION                                                            -->
+  <!-- ══════════════════════════════════════════════════════════════════════ -->
+  <h2 class="group-title">Automation</h2>
+
+  <div class="section">
+    <div class="section-header" @click="open.promptq = !open.promptq">
+      <span class="section-arrow" :class="open.promptq && 'open'">&#9654;</span>
+      <span class="section-name">Prompt Queue</span>
+      <span class="section-brief">autonomous execution when user is idle</span>
+    </div>
+    <div class="section-body" x-show="open.promptq" x-collapse>
+      <p>Users add tasks with <code>prompt: do X</code>. When the user goes idle for 5+ minutes, Jane picks up queued prompts and executes them autonomously via a dedicated session on the internal API (localhost:8081).</p>
+      <ul>
+        <li><strong>Dedicated session:</strong> Prompt queue uses its own session ID, separate from web sessions</li>
+        <li><strong>Idle detection:</strong> Checks X11 idle time, mouse/keyboard activity</li>
+        <li><strong>Archival:</strong> Completed prompts are archived with results</li>
+      </ul>
+      <div class="files">
+        <strong>Key files:</strong><br>
+        <code>agent_skills/prompt_queue_runner.py</code> &mdash; load, add, run, archive prompts
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-header" @click="open.jobq = !open.jobq">
+      <span class="section-arrow" :class="open.jobq && 'open'">&#9654;</span>
+      <span class="section-name">Job Queue</span>
+      <span class="section-brief">markdown specs, priority system</span>
+    </div>
+    <div class="section-body" x-show="open.jobq" x-collapse>
+      <p>Jobs are detailed multi-step project specs stored as markdown files in <code>configs/job_queue/</code>. Each file contains objective, steps, verification criteria, and files involved.</p>
+      <ul>
+        <li><strong>Priority:</strong> Numeric field (lower = higher priority)</li>
+        <li><strong>Status tracking:</strong> pending &rarr; in-progress &rarr; completed</li>
+        <li><strong>Model hint:</strong> Each job specifies which model to use</li>
+        <li><strong>Archival:</strong> Completed jobs are moved to archive by the nightly janitor</li>
+      </ul>
+      <div class="files">
+        <strong>Key files:</strong><br>
+        <code>configs/job_queue/*.md</code> &mdash; job specification files<br>
+        <code>agent_skills/janitor_system.py</code> &mdash; archive_completed_jobs()
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-header" @click="open.cron = !open.cron">
+      <span class="section-arrow" :class="open.cron && 'open'">&#9654;</span>
+      <span class="section-name">Cron Pipeline</span>
+      <span class="section-brief">nightly batch, 2:00-6:00 AM</span>
+    </div>
+    <div class="section-body" x-show="open.cron" x-collapse>
+      <p>A batch of maintenance jobs runs every night between 2:00 and 6:00 AM:</p>
+      <table class="arch-table">
+        <tr><th>Time</th><th>Job</th><th>Description</th></tr>
+        <tr><td>2:00</td><td>usb_sync.py</td><td>Incremental backup to USB drive</td></tr>
+        <tr><td>2:10</td><td>run_briefing.py</td><td>Daily news fetch, gemma3:12b summaries</td></tr>
+        <tr><td>2:15</td><td>janitor_memory.py</td><td>ChromaDB cleanup, dedup, TTL enforcement</td></tr>
+        <tr><td>2:30</td><td>check_for_updates.py</td><td>Check for Vessence updates</td></tr>
+        <tr><td>3:00</td><td>janitor_system.py</td><td>Temp files, log rotation, job archival</td></tr>
+        <tr><td>3:15</td><td>regenerate_jane_context.py</td><td>Rebuild Jane's context summary</td></tr>
+        <tr><td>4:00</td><td>generate_identity_essay.py</td><td>Auto-generate personality snapshot from memory</td></tr>
+        <tr><td>4:15</td><td>generate_code_map.py</td><td>Regenerate the code map index used by this page</td></tr>
+        <tr><td>5:00</td><td>ambient_heartbeat.py</td><td>Proactive research and maintenance</td></tr>
+      </table>
+      <div class="files">
+        <strong>Key files:</strong><br>
+        <code>startup_code/usb_sync.py</code>, <code>agent_skills/janitor_memory.py</code>, <code>agent_skills/janitor_system.py</code>, <code>agent_skills/generate_code_map.py</code>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- ══════════════════════════════════════════════════════════════════════ -->
+  <!-- INFRASTRUCTURE                                                        -->
+  <!-- ══════════════════════════════════════════════════════════════════════ -->
+  <h2 class="group-title">Infrastructure</h2>
+
+  <div class="section">
+    <div class="section-header" @click="open.docker = !open.docker">
+      <span class="section-arrow" :class="open.docker && 'open'">&#9654;</span>
+      <span class="section-name">Docker &amp; Deployment</span>
+      <span class="section-brief">slim images, first-boot install, Cloudflare tunnel</span>
+    </div>
+    <div class="section-body" x-show="open.docker" x-collapse>
+      <p>The application runs in Docker with a slim base image. Heavy dependencies (models, ChromaDB data) are installed on first boot rather than baked into the image.</p>
+      <ul>
+        <li><strong>First-boot install:</strong> pip packages and model downloads happen on container start if not cached</li>
+        <li><strong>Volume mounts:</strong> Data, configs, and ChromaDB persist across container restarts</li>
+        <li><strong>Cloudflare tunnel:</strong> Named tunnel exposes the local server to the internet without port forwarding</li>
+        <li><strong>Reverse proxy:</strong> Handles upstream switching between Jane and other services</li>
+        <li><strong>TLS termination:</strong> Cloudflare handles HTTPS; local traffic is plain HTTP</li>
+      </ul>
+      <div class="files">
+        <strong>Key files:</strong><br>
+        <code>jane_web/reverse_proxy.py</code> &mdash; upstream switching, localhost detection<br>
+        <code>docker-compose.yml</code> &mdash; service definitions
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-header" @click="open.usb = !open.usb">
+      <span class="section-arrow" :class="open.usb && 'open'">&#9654;</span>
+      <span class="section-name">USB Backup</span>
+      <span class="section-brief">incremental rsync, weekly snapshots</span>
+    </div>
+    <div class="section-body" x-show="open.usb" x-collapse>
+      <p>Nightly incremental backups to a USB drive using rsync. Weekly full snapshots with hard-link deduplication.</p>
+      <ul>
+        <li><strong>Incremental:</strong> Only changed files are copied each night via rsync</li>
+        <li><strong>Snapshots:</strong> Weekly point-in-time copies using hard links (space-efficient)</li>
+        <li><strong>Rotation:</strong> Old snapshots are pruned to keep disk usage bounded</li>
+      </ul>
+      <div class="files">
+        <strong>Key files:</strong><br>
+        <code>startup_code/usb_sync.py</code> &mdash; rsync, snapshot, rotation
+      </div>
+    </div>
+  </div>
+
+
+  <!-- ══════════════════════════════════════════════════════════════════════ -->
+  <!-- KNOWN GAPS SUMMARY                                                    -->
+  <!-- ══════════════════════════════════════════════════════════════════════ -->
+  <h2 class="group-title">Known Gaps &amp; Planned Fixes</h2>
+
+  <div class="section">
+    <div class="section-header" @click="open.gaps = !open.gaps">
+      <span class="section-arrow" :class="open.gaps && 'open'">&#9654;</span>
+      <span class="section-name">Context Continuity Gaps</span>
+      <span class="section-brief">where and why memory is lost</span>
+    </div>
+    <div class="section-body" x-show="open.gaps" x-collapse>
+
+      <h4>1. Cross-Tier Amnesia</h4>
+      <p>When messages route to different tiers, the receiving brain has no knowledge of what other brains discussed. The safety context provides at most 6 turns / 2400 chars of shared history, which is often insufficient for complex conversations.</p>
+      <p><strong>Impact:</strong> "I just told haiku about X, now opus doesn't know about it."</p>
+
+      <h4>2. skip_context Bypasses ChromaDB</h4>
+      <p>On turn 2+ of any standing brain, ChromaDB is never queried. This is the majority of all messages. Even though conversation summaries exist in short-term memory, they are never read on this path.</p>
+      <p><strong>Impact:</strong> The brain relies entirely on its CLI's internal memory, which degrades over many turns.</p>
+
+      <h4>3. Safety Context is Too Thin</h4>
+      <p>6 turns / 2400 characters is approximately one detailed exchange. For conversations with back-and-forth, this window is exhausted quickly. There's no tier-awareness &mdash; the same thin context is used whether the tier just switched or not.</p>
+      <p><strong>Impact:</strong> After rapid exchanges, earlier context falls out of the safety window.</p>
+
+      <h4>4. Async Persistence Race</h4>
+      <p>Turn persistence runs in a background thread. If two messages arrive in quick succession, the second message's context build may not see the first message in ChromaDB yet.</p>
+      <p><strong>Impact:</strong> Rare in practice (users don't usually send messages faster than the ~500ms write latency), but possible.</p>
+
+      <h4>5. No Tier-Switch Detection</h4>
+      <p>The proxy doesn't track which tier handled the previous message. When a tier switch happens, no special context handoff occurs. The new brain gets the same thin safety context as if it were a same-tier continuation.</p>
+      <p><strong>Impact:</strong> Tier switches (common in natural conversation) have no extra protection against context loss.</p>
+
+      <h4>Planned Mitigation</h4>
+      <ul>
+        <li><strong>Add memory retrieval to skip_context path:</strong> Query ChromaDB even on turn 2+. The query is ~100ms &mdash; a small cost for significant reliability improvement.</li>
+        <li><strong>Tier-switch detection:</strong> Track <code>state.last_tier</code>. When tier changes, force full context build instead of skip_context.</li>
+        <li><strong>Increase safety context window:</strong> Tier-aware caps (light: 4 turns/1600 chars, medium: 10 turns/6000 chars, heavy: 15 turns/12000 chars).</li>
+        <li><strong>Treat brains as stateless with a bonus cache:</strong> Always inject enough context that the brain can respond correctly even if its CLI memory were completely empty.</li>
+      </ul>
+    </div>
+  </div>
+
+
+  <div style="margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--border); text-align: center; display: flex; justify-content: center; gap: 1rem;">
+    <a href="/" class="back-link" style="display: inline-block;">Back to Jane</a>
+    <a href="/guide" class="back-link" style="display: inline-block;">Back to Guide</a>
+  </div>
+
+</div>
+</body>
+</html>

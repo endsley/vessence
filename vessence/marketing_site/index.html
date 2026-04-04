@@ -1,0 +1,1142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Vessences | Build, Run, and Share AI Personas</title>
+  <meta
+    name="description"
+    content="Vessence is a self-hosted platform for AI personas called essences. Buy, rent, or build your own — a tax accountant, a tutor, a researcher. Free for local use. Marketplace for essences and reusable skills."
+  />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Cormorant+Garamond:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #071119;
+      --bg-soft: #10202c;
+      --panel: rgba(12, 27, 36, 0.72);
+      --panel-strong: rgba(10, 22, 31, 0.92);
+      --line: rgba(167, 216, 214, 0.14);
+      --line-strong: rgba(167, 216, 214, 0.28);
+      --text: #edf7f4;
+      --muted: #9db8b4;
+      --accent: #a7d8d6;
+      --accent-strong: #6ec5be;
+      --accent-warm: #f3c58b;
+      --shadow: 0 30px 80px rgba(0, 0, 0, 0.35);
+      --radius-xl: 32px;
+      --radius-lg: 24px;
+      --radius-md: 18px;
+      --max: 1180px;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      font-family: "Manrope", sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at 15% 15%, rgba(110, 197, 190, 0.18), transparent 28%),
+        radial-gradient(circle at 85% 12%, rgba(243, 197, 139, 0.14), transparent 24%),
+        radial-gradient(circle at 50% 60%, rgba(35, 80, 96, 0.24), transparent 45%),
+        linear-gradient(180deg, #081018 0%, #061018 35%, #07131d 100%);
+      min-height: 100vh;
+    }
+
+    a { color: inherit; text-decoration: none; }
+
+    .shell {
+      width: min(var(--max), calc(100vw - 32px));
+      margin: 0 auto;
+    }
+
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      backdrop-filter: blur(16px);
+      background: rgba(6, 15, 22, 0.78);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+    }
+
+    .topbar-inner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+      min-height: 72px;
+    }
+
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      font-weight: 800;
+      letter-spacing: 0.02em;
+    }
+
+    .brand-mark {
+      width: 38px;
+      height: 38px;
+      border-radius: 14px;
+      background: linear-gradient(145deg, rgba(167, 216, 214, 0.22), rgba(243, 197, 139, 0.22));
+      border: 1px solid rgba(167, 216, 214, 0.18);
+      display: grid;
+      place-items: center;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.08);
+      font-family: "Cormorant Garamond", serif;
+      font-size: 1.4rem;
+    }
+
+    .top-links {
+      display: flex;
+      align-items: center;
+      gap: 22px;
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+
+    .top-links a:hover { color: var(--text); }
+
+    .button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      min-height: 50px;
+      padding: 0 22px;
+      border-radius: 999px;
+      font-weight: 700;
+      border: 1px solid transparent;
+      transition: transform 180ms ease, border-color 180ms ease, background 180ms ease, color 180ms ease;
+      cursor: pointer;
+    }
+
+    .button:hover { transform: translateY(-1px); }
+    .button:active { transform: translateY(0); }
+
+    .button-primary {
+      color: #071119;
+      background: linear-gradient(135deg, var(--accent), var(--accent-warm));
+      box-shadow: 0 18px 35px rgba(115, 192, 187, 0.2);
+    }
+
+    .button-secondary {
+      color: var(--text);
+      background: rgba(255,255,255,0.02);
+      border-color: rgba(167, 216, 214, 0.18);
+    }
+
+    .hero {
+      padding: 72px 0 48px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .hero-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr);
+      gap: 36px;
+      align-items: start;
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      border: 1px solid rgba(167, 216, 214, 0.14);
+      border-radius: 999px;
+      padding: 10px 14px;
+      color: var(--accent);
+      background: rgba(255,255,255,0.02);
+      font-size: 0.82rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .eyebrow-dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: var(--accent-warm);
+      box-shadow: 0 0 18px rgba(243, 197, 139, 0.65);
+    }
+
+    h1 {
+      margin: 18px 0 16px;
+      font-family: "Cormorant Garamond", serif;
+      font-size: clamp(2.2rem, 4.5vw, 3.8rem);
+      line-height: 0.98;
+      letter-spacing: -0.025em;
+      font-weight: 700;
+    }
+
+    .hero-copy {
+      max-width: 700px;
+      font-size: 1.16rem;
+      line-height: 1.75;
+      color: var(--muted);
+    }
+
+    .explain-toggle {
+      margin: 12px 0 4px;
+    }
+    .explain-toggle button {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      color: var(--accent);
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 0.78rem;
+      padding: 5px 14px;
+      border-radius: 20px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .explain-toggle button:hover {
+      border-color: var(--accent);
+      background: var(--bg-soft);
+    }
+
+    .hero-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 14px;
+      margin: 28px 0 18px;
+    }
+    .micro-note {
+      color: #7e9b97;
+      font-size: 0.92rem;
+    }
+
+    .notice {
+      margin: 18px 0 0;
+      padding: 16px 18px;
+      border-radius: 18px;
+      background: rgba(243, 197, 139, 0.08);
+      border: 1px solid rgba(243, 197, 139, 0.22);
+      color: #f5dfbf;
+      line-height: 1.7;
+    }
+
+    .notice strong {
+      color: var(--text);
+    }
+
+    .download-card {
+      position: relative;
+      border-radius: var(--radius-xl);
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02)),
+        var(--panel);
+      border: 1px solid var(--line);
+      box-shadow: var(--shadow);
+      padding: 26px;
+      overflow: hidden;
+    }
+
+    .download-card::before {
+      content: "";
+      position: absolute;
+      inset: -30% auto auto -10%;
+      width: 220px;
+      height: 220px;
+      background: radial-gradient(circle, rgba(167, 216, 214, 0.2), transparent 70%);
+      pointer-events: none;
+    }
+
+    .download-card h3,
+    .section-title,
+    .cta-title {
+      font-family: "Cormorant Garamond", serif;
+      letter-spacing: -0.02em;
+    }
+
+    .download-card h3 {
+      margin: 4px 0 8px;
+      font-size: 2rem;
+    }
+
+    .download-card p {
+      color: var(--muted);
+      line-height: 1.7;
+      margin: 0 0 18px;
+    }
+
+    .stats {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin: 18px 0 20px;
+    }
+
+    .stat {
+      display: flex;
+      align-items: baseline;
+      gap: 18px;
+      border-radius: 14px;
+      padding: 14px 18px;
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.05);
+    }
+
+    .stat strong {
+      font-size: 1rem;
+      white-space: nowrap;
+      min-width: 120px;
+      flex-shrink: 0;
+      color: var(--accent);
+    }
+
+    .stat span {
+      color: var(--muted);
+      font-size: 0.88rem;
+      line-height: 1.45;
+    }
+
+    .terminal {
+      margin-top: 22px;
+      background: rgba(4, 10, 15, 0.88);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 22px;
+      overflow: hidden;
+    }
+
+    .terminal-head {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 14px 16px;
+      border-bottom: 1px solid rgba(255,255,255,0.05);
+    }
+
+    .terminal-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.2);
+    }
+
+    .terminal-dot:nth-child(1) { background: #f28482; }
+    .terminal-dot:nth-child(2) { background: #f6bd60; }
+    .terminal-dot:nth-child(3) { background: #84a59d; }
+
+    .terminal-body {
+      padding: 20px 18px 22px;
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 0.9rem;
+      color: #d6ebe4;
+      line-height: 1.7;
+    }
+
+    .terminal-body .prompt { color: #7f9893; }
+    .terminal-body .cmd { color: #f3c58b; }
+    .terminal-body .good { color: #9fd5b2; }
+
+    .section {
+      padding: 42px 0 26px;
+    }
+
+    .section-label {
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      font-size: 0.78rem;
+      color: var(--accent);
+      margin-bottom: 14px;
+    }
+
+    .section-title {
+      margin: 0 0 12px;
+      font-size: clamp(2.4rem, 4.8vw, 4rem);
+      line-height: 0.98;
+    }
+
+    .section-copy {
+      margin: 0;
+      color: var(--muted);
+      font-size: 1.05rem;
+      line-height: 1.8;
+      max-width: 760px;
+    }
+
+    .feature-grid,
+    .steps,
+    .agent-grid,
+    .faq-grid {
+      display: grid;
+      gap: 18px;
+      margin-top: 28px;
+    }
+
+    .feature-grid { grid-template-columns: repeat(3, 1fr); }
+    .steps { grid-template-columns: repeat(3, 1fr); }
+    .agent-grid { grid-template-columns: repeat(2, 1fr); }
+    .faq-grid { grid-template-columns: repeat(2, 1fr); }
+
+    .card {
+      border-radius: var(--radius-lg);
+      background: var(--panel);
+      border: 1px solid var(--line);
+      padding: 24px;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
+    }
+
+    .card h3 {
+      margin: 0 0 10px;
+      font-size: 1.18rem;
+    }
+
+    .card p,
+    .card li {
+      color: var(--muted);
+      line-height: 1.72;
+      font-size: 0.96rem;
+    }
+
+    .card ul {
+      margin: 14px 0 0;
+      padding: 0;
+      list-style: none;
+      display: grid;
+      gap: 10px;
+    }
+
+    .card li::before {
+      content: "•";
+      color: var(--accent-warm);
+      margin-right: 10px;
+    }
+
+    .agent-card {
+      position: relative;
+      overflow: hidden;
+      min-height: 320px;
+    }
+
+    .agent-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      border-radius: 999px;
+      padding: 8px 12px;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.06);
+      color: #d7ece7;
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    .agent-card h3 {
+      font-family: "Cormorant Garamond", serif;
+      font-size: 2.6rem;
+      margin: 18px 0 10px;
+    }
+
+    .agent-card::after {
+      content: "";
+      position: absolute;
+      inset: auto -30px -30px auto;
+      width: 160px;
+      height: 160px;
+      border-radius: 50%;
+      filter: blur(20px);
+      opacity: 0.45;
+      pointer-events: none;
+    }
+
+    .agent-card.jane::after {
+      background: rgba(243, 197, 139, 0.24);
+    }
+
+
+    .quote-band {
+      margin: 28px 0;
+      padding: 34px;
+      border-radius: var(--radius-xl);
+      background:
+        linear-gradient(135deg, rgba(243, 197, 139, 0.1), rgba(167, 216, 214, 0.06)),
+        rgba(255,255,255,0.02);
+      border: 1px solid rgba(243, 197, 139, 0.16);
+      text-align: center;
+    }
+
+    .quote-band blockquote {
+      margin: 0;
+      font-family: "Cormorant Garamond", serif;
+      font-size: clamp(2rem, 4.5vw, 3.4rem);
+      line-height: 1.08;
+    }
+
+    .steps .card strong {
+      display: inline-block;
+      color: var(--accent);
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 14px;
+    }
+
+    .download-panel {
+      margin-top: 28px;
+      display: grid;
+      grid-template-columns: 1.05fr 0.95fr;
+      gap: 18px;
+      align-items: stretch;
+    }
+
+    .auth-panel {
+      margin-top: 28px;
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 18px;
+    }
+
+    .auth-list {
+      list-style: none;
+      padding: 0;
+      margin: 18px 0 0;
+      display: grid;
+      gap: 10px;
+    }
+
+    .auth-list li {
+      color: var(--muted);
+      line-height: 1.7;
+      padding: 14px 16px;
+      border-radius: 18px;
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.05);
+    }
+
+    .auth-list strong {
+      display: block;
+      color: var(--text);
+      margin-bottom: 4px;
+    }
+
+    .code-block {
+      margin-top: 16px;
+      padding: 16px 18px;
+      border-radius: 18px;
+      background: rgba(3, 8, 12, 0.7);
+      border: 1px solid rgba(255,255,255,0.06);
+      font-family: "IBM Plex Mono", monospace;
+      color: #d6ebe4;
+      overflow-x: auto;
+      font-size: 0.9rem;
+      line-height: 1.7;
+    }
+
+    .download-list {
+      list-style: none;
+      padding: 0;
+      margin: 18px 0 0;
+      display: grid;
+      gap: 12px;
+    }
+
+    .download-list li {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      padding: 14px 16px;
+      border-radius: 18px;
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.05);
+    }
+
+    .download-list small {
+      color: var(--muted);
+      display: block;
+      margin-top: 4px;
+    }
+
+    .cta {
+      padding: 46px 0 90px;
+    }
+
+    .cta-card {
+      border-radius: 36px;
+      padding: 38px;
+      background:
+        radial-gradient(circle at top right, rgba(243, 197, 139, 0.18), transparent 30%),
+        radial-gradient(circle at bottom left, rgba(110, 197, 190, 0.16), transparent 28%),
+        var(--panel-strong);
+      border: 1px solid var(--line-strong);
+      box-shadow: var(--shadow);
+    }
+
+    .cta-title {
+      margin: 0 0 14px;
+      font-size: clamp(2.4rem, 5vw, 4rem);
+      line-height: 0.98;
+    }
+
+    .footer {
+      padding: 0 0 36px;
+      color: #6f8a87;
+      font-size: 0.9rem;
+    }
+
+    .footer-inner {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      padding-top: 22px;
+      border-top: 1px solid rgba(255,255,255,0.05);
+    }
+
+    @media (max-width: 980px) {
+      .hero-grid,
+      .download-panel,
+      .feature-grid,
+      .steps,
+      .agent-grid,
+      .faq-grid,
+      .auth-panel {
+        grid-template-columns: 1fr;
+      }
+
+      .top-links {
+        display: none;
+      }
+    }
+
+    @media (max-width: 640px) {
+      .shell {
+        width: 95%;
+      }
+
+      .download-card,
+      .card,
+      .stats,
+      .stat {
+        width: 100%;
+      }
+
+      .hero {
+        padding-top: 44px;
+      }
+
+      .download-card,
+      .card,
+      .cta-card,
+      .quote-band {
+        padding: 22px;
+      }
+
+      .stats {
+        /* Already stacked vertically, no grid override needed */
+      }
+
+      .hero-actions {
+        flex-direction: column;
+        align-items: stretch;
+      }
+
+      .footer-inner {
+        flex-direction: column;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <div class="shell topbar-inner">
+      <a class="brand" href="#top">
+        <span class="brand-mark">V</span>
+        <span>Vessences</span>
+      </a>
+      <div class="top-links">
+        <a href="#agents">Jane</a>
+        <a href="#download">Download</a>
+        <a href="/install.html">Install Guide</a>
+        <a href="#apps">Apps</a>
+        <a href="/marketplace.html">Marketplace</a>
+        <a href="#authorization">Authorization</a>
+        <a href="#faq">FAQ</a>
+        <a class="button button-primary" href="#download">Get Vessences</a>
+      </div>
+    </div>
+  </div>
+
+  <main id="top">
+    <section class="hero">
+      <div class="shell hero-grid">
+        <div>
+          <div class="eyebrow">
+            <span class="eyebrow-dot"></span>
+            AI personas you can build, load, and share
+          </div>
+          <h1>
+            One platform.<br />
+            Infinite AI personas.
+          </h1>
+          <p class="hero-copy" id="hero-simple">
+            Vessence gives you AI personas that actually remember you. Load an essence — tax accountant, tutor,
+            researcher — and Jane becomes that role. Buy ready-made essences, rent hosted ones, or build your own.
+            Free for local use. Everything stays on your computer, private and yours.
+          </p>
+          <p class="hero-copy" id="hero-technical" style="display:none;">
+            Vessence is a self-hosted Docker platform for building, running, and trading AI-powered personas called <strong>essences</strong>.
+            Jane is your AI agent backed by Claude, with ChromaDB memory that grows with you. Load an essence and Jane becomes that persona:
+            Jane the accountant, Jane the tutor, Jane the researcher. The marketplace supports three models: buy (download),
+            rent (hosted access), or free. Skills are reusable tool modules that essence builders can compose into their creations.
+          </p>
+          <div class="explain-toggle">
+            <button id="toggle-explain" onclick="toggleExplain()">
+              <span id="toggle-label">Technical</span>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>
+            </button>
+          </div>
+          <div class="hero-actions">
+            <a class="button button-primary" href="#download">Install Vessence</a>
+            <a class="button button-secondary" href="#apps">Get the Apps</a>
+          </div>
+          <p class="micro-note">Vessence is the platform. Essences are the personas. Free for local use — pay only for the relay service if you want remote access.</p>
+        </div>
+
+        <div class="download-card">
+          <div class="section-label">The System</div>
+          <h3>Vessence is the platform.</h3>
+          <p>
+            Vessence runs as a Docker stack on your machine. It includes Jane (your AI agent),
+            ChromaDB memory, and an essence loader. Buy essences from the marketplace, rent hosted ones from creators,
+            or build your own.
+          </p>
+          <div class="stats">
+            <div class="stat">
+              <strong>Essences</strong>
+              <span>Complete AI personas — accountant, tutor, researcher. Load one and Jane becomes that role.</span>
+            </div>
+            <div class="stat">
+              <strong>Skills</strong>
+              <span>Reusable tool modules that essence builders compose into their creations.</span>
+            </div>
+            <div class="stat">
+              <strong>Marketplace</strong>
+              <span>Buy, rent, or share essences and skills. Sellers set their own prices.</span>
+            </div>
+            <div class="stat">
+              <strong>Free</strong>
+              <span>Local use is free forever. Pay only for the relay service (vessences.com routing).</span>
+            </div>
+          </div>
+          <div class="hero-actions" style="flex-wrap:wrap;gap:10px">
+            <a class="button button-primary" href="/downloads/vessence-windows-installer-v0.0.12.zip" data-vault-download="vessence-windows-installer-v0.0.12.zip">&#x1f5b3; Windows</a>
+            <a class="button button-primary" href="/downloads/vessence-mac-installer-v0.0.12.zip" data-vault-download="vessence-mac-installer-v0.0.12.zip">&#xf8ff; Mac</a>
+            <a class="button button-primary" href="/downloads/vessence-linux-installer-v0.0.12.zip" data-vault-download="vessence-linux-installer-v0.0.12.zip">&#x1f427; Linux</a>
+            <a class="button button-secondary" href="/docker-compose.yml" data-vault-download="docker-compose.yml">Raw docker-compose.yml</a>
+          </div>
+          <div class="terminal">
+            <div class="terminal-head">
+              <span class="terminal-dot"></span>
+              <span class="terminal-dot"></span>
+              <span class="terminal-dot"></span>
+            </div>
+            <div class="terminal-body">
+              <div><span class="prompt">$</span> <span class="cmd">docker compose up</span></div>
+              <div>Pulling <span class="good">vessence/jane</span> ... <span class="good">done</span></div>
+              <div>Pulling <span class="good">vessence/vault</span> ... <span class="good">done</span></div>
+              <div>Starting onboarding wizard ... <span class="good">ready</span></div>
+              <div>Opening <span class="cmd">http://localhost:3000</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="apps">
+      <div class="shell">
+        <div class="section-label">Apps</div>
+        <h2 class="section-title">Three ways to connect to your Vessence.</h2>
+        <p class="section-copy">
+          Vessence is the system. These apps are interfaces — different ways to talk to the same Jane,
+          access the same vault, and use the same shared memory. Install Vessence first, then connect from whichever device you prefer.
+        </p>
+        <div class="feature-grid">
+          <article class="card">
+            <h3>Web Browser</h3>
+            <p>No install needed. Open <code>jane.localhost</code> in any browser on your network. Works on any device with a browser.</p>
+            <div style="margin-top:16px">
+              <a class="button button-secondary" style="min-height:42px;padding:0 18px;font-size:0.9rem" href="https://jane.vessences.com/" data-vault-path="/">Open Web Interface</a>
+            </div>
+          </article>
+          <article class="card">
+            <h3>Android App</h3>
+            <p>A native app with chat, phone file attachments, camera capture, and push notifications. Connects to your running Vessence over your network.</p>
+            <div style="margin-top:16px">
+              <a class="button button-primary" style="min-height:42px;padding:0 18px;font-size:0.9rem" href="/downloads/vessences-android-v0.0.41.apk" data-vault-download="vessences-android-v0.0.41.apk">Download APK</a>
+            </div>
+          </article>
+          <article class="card">
+            <h3>Linux Desktop App</h3>
+            <p>A native Flutter app with the same chat interface, conversation history, SSE streaming, and markdown rendering. Runs directly on your Linux desktop without a browser.</p>
+            <div style="margin-top:16px">
+              <a class="button button-primary" style="min-height:42px;padding:0 18px;font-size:0.9rem" href="/downloads/ambient-app-linux-x64.tar.gz" data-vault-download="ambient-app-linux-x64.tar.gz">Download tar.gz</a>
+            </div>
+          </article>
+        </div>
+        <div class="notice">
+          <strong>These are not separate products.</strong> They all connect to the same Vessence system. Install Vessence with Docker first, then use any combination of these to interact with it.
+        </div>
+        <!-- Download buttons are now inside each card above -->
+      </div>
+    </section>
+
+    <section class="section" id="authorization">
+      <div class="shell">
+        <div class="section-label">Authorization</div>
+        <h2 class="section-title">Sign in with Google to access your Vessence.</h2>
+        <p class="section-copy">
+          All access to your essences, files, and Jane is protected by Google sign-in.
+          Sign in once and your device is remembered — no repeated logins.
+        </p>
+        <div class="auth-panel">
+          <article class="card">
+            <h3>How it works</h3>
+            <ul class="auth-list">
+              <li>
+                <strong>Google sign-in</strong>
+                One-click sign in with your Google account on web or Android.
+              </li>
+              <li>
+                <strong>Trusted devices</strong>
+                After signing in, your device is remembered — no need to re-authenticate every visit.
+              </li>
+              <li>
+                <strong>One subscription</strong>
+                Just your existing Claude, OpenAI, or Gemini subscription. No extra API keys needed.
+              </li>
+            </ul>
+          </article>
+          <article class="card">
+            <h3>Get started</h3>
+            <p>
+              Once Vessence is running on your machine, sign in to access Jane and your essences.
+              The Android app connects to the same server.
+            </p>
+            <div class="hero-actions">
+              <a class="button button-primary" href="https://jane.vessences.com/" data-vault-path="/">Open Jane</a>
+              <a class="button button-secondary" href="https://jane.vessences.com/vault" data-vault-path="/vault">Open Life Librarian</a>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="shell">
+        <div class="section-label">Architecture</div>
+        <h2 class="section-title">One system, multiple interfaces.</h2>
+        <p class="section-copy">
+          Vessence is the backend — essence runtime, memory, and storage running in Docker on your machine.
+          You interact with it through whichever interface fits the moment.
+        </p>
+        <div class="feature-grid">
+          <article class="card">
+            <h3>Vessence (the system)</h3>
+            <p>The Docker stack: Jane agent, ChromaDB memory, essence loader, and marketplace connection. This is the core — everything else connects to it.</p>
+          </article>
+          <article class="card">
+            <h3>Web interfaces</h3>
+            <p>Browse essences, chat with Jane in any loaded role, manage your vault — all from your browser. No install needed.</p>
+          </article>
+          <article class="card">
+            <h3>Native apps</h3>
+            <p>Android and Linux desktop apps provide the same experience with native features like notifications, file attachments, and offline conversation history.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="agents">
+      <div class="shell">
+        <div class="section-label">One Agent, Many Roles</div>
+        <h2 class="section-title">Jane builds. Jane becomes.</h2>
+        <p class="section-copy">
+          Jane is the single AI agent at the heart of Vessence. Load an essence and she becomes that role —
+          Jane the accountant, Jane the tutor, Jane the archivist. She also builds new essences, handles
+          technical work, and grows with you over time through persistent memory.
+        </p>
+        <div class="agent-grid">
+          <article class="card agent-card jane">
+            <div class="agent-badge">Jane · Your AI Agent</div>
+            <h3>Jane</h3>
+            <p>
+              Jane is the AI agent inside Vessence. She handles coding, research, architecture,
+              editing, analysis, and planning. Load an essence and she takes on that role — each essence
+              defines its own knowledge, tools, and personality.
+            </p>
+            <ul>
+              <li>Load any essence and Jane becomes that persona</li>
+              <li>Direct help with coding and technical work</li>
+              <li>Each essence has its own tools, knowledge, and memory scope</li>
+              <li>Builds new essences through guided interviews</li>
+              <li>Buy essences from the marketplace or build your own</li>
+            </ul>
+          </article>
+          <article class="card">
+            <div class="agent-badge" style="color: var(--accent-warm);">Essences · Loadable Personas</div>
+            <h3>Essences</h3>
+            <p>
+              Essences are complete AI personas that overlay onto Jane. Each one defines its own knowledge base,
+              custom tools, personality, and behavior. They are independent from each other and can be swapped at any time.
+            </p>
+            <ul>
+              <li>Tax accountant, tutor, researcher, archivist — and more</li>
+              <li>Each essence has its own ChromaDB memory scope</li>
+              <li>Buy from the marketplace, get free community ones, or build your own</li>
+              <li>Shared base memory persists across all roles</li>
+            </ul>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="shell">
+        <div class="section-label">What Ships Today</div>
+        <h2 class="section-title">Useful from day one — with essences already built in.</h2>
+        <p class="section-copy">
+          Vessence ships with pre-built essences so you are not starting empty. Load an essence and Jane takes on that role immediately.
+          More essences are available on the marketplace, or build your own.
+        </p>
+        <div class="feature-grid">
+          <article class="card">
+            <h3>Pre-built essences</h3>
+            <p>File archivist, daily briefing, music playlist, work log — ready to use out of the box. No setup required.</p>
+          </article>
+          <article class="card">
+            <h3>Marketplace</h3>
+            <p>Browse and install essences built by others. Buy them outright, rent hosted access, or grab free community ones.</p>
+          </article>
+          <article class="card">
+            <h3>Build your own</h3>
+            <p>Jane walks you through a guided interview to create a custom essence. Define the knowledge, tools, and personality — Jane generates the code.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="shell">
+        <div class="quote-band">
+          <blockquote>
+            Vessence is not a chatbot wrapper. It is a vessel meant to hold your essences over time.
+          </blockquote>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="shell">
+        <div class="section-label">Why It Exists</div>
+        <h2 class="section-title">Your AI personas. Private, portable, yours forever.</h2>
+        <p class="section-copy">
+          Vessence is built so your AI personas and their memory stay under your control. No subscriptions to lose access,
+          no cloud lock-in. Essences are immutable products — like buying a new edition of a textbook when things change.
+          Simple, predictable, and entirely yours.
+        </p>
+        <div class="feature-grid">
+          <article class="card">
+            <h3>Private by default</h3>
+            <p>Vessence runs on your own machine. Your files, memory, and conversations never leave your control.</p>
+          </article>
+          <article class="card">
+            <h3>Free for local use</h3>
+            <p>Run Vessence locally at no cost. The only paid service is the relay (vessences.com routing) for remote access. Essences can be free or paid separately.</p>
+          </article>
+          <article class="card">
+            <h3>No update treadmill</h3>
+            <p>Essences are immutable — no forced updates, no migration headaches. If the domain changes, buy a new essence for the new year. Like a new edition of a textbook.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="download">
+      <div class="shell">
+        <div class="section-label">Install Vessence</div>
+        <h2 class="section-title">Step 1: Install the system. Step 2: Connect with any app.</h2>
+        <p class="section-copy">
+          Vessence is the system that runs on your machine. The apps are just different ways to talk to it.
+          Install Vessence first, then use whichever interface you prefer — browser, phone, or desktop.
+        </p>
+
+        <div class="steps">
+          <article class="card">
+            <strong>Step 1</strong>
+            <h3>Install &amp; Start Docker</h3>
+            <p>Docker is the only prerequisite. Download Docker Desktop, install it, then <strong>open Docker Desktop and wait until it says &ldquo;Docker Desktop is running&rdquo;</strong> before moving to Step 2.</p>
+            <a class="button button-secondary" href="https://www.docker.com/products/docker-desktop/" target="_blank" rel="noreferrer">Get Docker Desktop</a>
+          </article>
+          <article class="card">
+            <strong>Step 2</strong>
+            <h3>Download for your OS</h3>
+            <p>Download the installer for your platform, extract, and run the install script. The onboarding wizard opens automatically.</p>
+            <p style="margin-top:6px;font-size:0.82rem;opacity:0.8"><strong>Windows users:</strong> After extracting, right-click the .bat file &rarr; Properties &rarr; check &ldquo;Unblock&rdquo; &rarr; OK, then double-click to run.</p>
+            <div class="hero-actions" style="flex-wrap:wrap;gap:8px">
+              <a class="button button-primary" href="/downloads/vessence-windows-installer-v0.0.12.zip" data-vault-download="vessence-windows-installer-v0.0.12.zip">Windows</a>
+              <a class="button button-primary" href="/downloads/vessence-mac-installer-v0.0.12.zip" data-vault-download="vessence-mac-installer-v0.0.12.zip">Mac</a>
+              <a class="button button-primary" href="/downloads/vessence-linux-installer-v0.0.12.zip" data-vault-download="vessence-linux-installer-v0.0.12.zip">Linux</a>
+            </div>
+            <p style="margin-top:8px;font-size:0.85rem;opacity:0.7">Advanced: <a href="/docker-compose.yml" data-vault-download="docker-compose.yml" style="color:inherit;text-decoration:underline">Raw docker-compose.yml</a></p>
+          </article>
+          <article class="card">
+            <strong>Step 3</strong>
+            <h3>Connect from any device</h3>
+            <p>Use the web browser immediately, or install a native app for Android or Linux desktop.</p>
+            <div class="hero-actions">
+              <a class="button button-secondary" href="/downloads/vessences-android-v0.0.41.apk" data-vault-download="vessences-android-v0.0.41.apk">Android App</a>
+              <a class="button button-secondary" href="/downloads/ambient-app-linux-x64.tar.gz" data-vault-download="ambient-app-linux-x64.tar.gz">Linux App</a>
+            </div>
+          </article>
+        </div>
+
+        <div class="download-panel">
+          <article class="card">
+            <h3>What's inside Vessence</h3>
+            <p>
+              One Docker stack with everything the system needs. The apps connect to this — they don't replace it.
+            </p>
+            <div class="code-block">docker compose up</div>
+            <ul class="download-list">
+              <li>
+                <div>
+                  <strong>Jane</strong>
+                  <small>Your AI agent — load any essence and she becomes that persona. Also handles coding, research, and essence creation.</small>
+                </div>
+                <span>Container</span>
+              </li>
+              <li>
+                <div>
+                  <strong>Vault + ChromaDB</strong>
+                  <small>Files, media, long-term memory, and retrieval substrate.</small>
+                </div>
+                <span>Container</span>
+              </li>
+            </ul>
+          </article>
+
+          <article class="card">
+            <h3>Apps (interfaces to Vessence)</h3>
+            <p>
+              These are optional. They connect to your running Vessence — they are not separate products.
+              You can use just the browser, or add native apps for a better experience on specific devices.
+            </p>
+            <ul class="download-list">
+              <li>
+                <div>
+                  <strong>Web Browser</strong>
+                  <small>No install. Open vault.localhost or jane.localhost on any device on your network.</small>
+                </div>
+                <span>Built-in</span>
+              </li>
+              <li>
+                <div>
+                  <strong>Android App</strong>
+                  <small>Native chat with Jane, push notifications, camera attachments.</small>
+                </div>
+                <a class="button button-secondary" style="min-height:36px;padding:0 14px;font-size:0.85rem" href="/downloads/vessences-android-v0.0.41.apk" data-vault-download="vessences-android-v0.0.41.apk">APK</a>
+              </li>
+              <li>
+                <div>
+                  <strong>Linux Desktop App</strong>
+                  <small>Native Flutter app with streaming chat, markdown rendering, conversation history.</small>
+                </div>
+                <a class="button button-secondary" style="min-height:36px;padding:0 14px;font-size:0.85rem" href="/downloads/ambient-app-linux-x64.tar.gz" data-vault-download="ambient-app-linux-x64.tar.gz">tar.gz</a>
+              </li>
+            </ul>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="faq">
+      <div class="shell">
+        <div class="section-label">FAQ</div>
+        <h2 class="section-title">What users usually ask first.</h2>
+        <div class="faq-grid">
+          <article class="card">
+            <h3>Does this run on my machine?</h3>
+            <p>Yes. The intended default is Docker-based self-hosting on your own hardware. One-click installers for Windows, Mac, and Linux.</p>
+          </article>
+          <article class="card">
+            <h3>What does it cost?</h3>
+            <p>Vessence is free for local use. You only pay for the relay service if you want remote access via vessences.com. Essences on the marketplace can be free, paid, or rental — sellers set their own prices.</p>
+          </article>
+          <article class="card">
+            <h3>What are the three marketplace models?</h3>
+            <p><strong>Buy:</strong> download and own the essence. <strong>Rent:</strong> access a creator-hosted essence without downloading. <strong>Free:</strong> community essences at no cost.</p>
+          </article>
+          <article class="card">
+            <h3>What makes this different from a normal assistant?</h3>
+            <p>Loadable personas. Instead of one generic chatbot, you switch between specialized essences — each with its own knowledge, tools, and personality.</p>
+          </article>
+          <article class="card">
+            <h3>What are skills vs essences?</h3>
+            <p>Essences are complete AI personas. Skills are reusable tool modules (file search, TTS, calendar) that essence builders can compose into their creations. Both are sold on the marketplace.</p>
+          </article>
+          <article class="card">
+            <h3>Do essences get updates?</h3>
+            <p>No. Essences are immutable products — no versioning, no forced updates. If the domain changes (e.g. new tax year), you buy a new essence. Simple and predictable.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="cta">
+      <div class="shell">
+        <div class="cta-card">
+          <div class="section-label">Start Here</div>
+          <h2 class="cta-title">Install the system. Connect from any device.</h2>
+          <p class="section-copy">
+            Vessence is one platform for all your AI personas. Free for local use.
+            Install it once with Docker, load your first essence, and connect from any device.
+          </p>
+          <div class="hero-actions">
+            <a class="button button-primary" href="/downloads/vessence-docker-package.zip" data-vault-download="vessence-docker-package.zip">Install Vessence (Docker)</a>
+            <a class="button button-secondary" href="/downloads/vessences-android-v0.0.41.apk" data-vault-download="vessences-android-v0.0.41.apk">Android App</a>
+            <a class="button button-secondary" href="/downloads/ambient-app-linux-x64.tar.gz" data-vault-download="ambient-app-linux-x64.tar.gz">Linux App</a>
+            <!-- GitHub button hidden until repo is set up -->
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="shell footer-inner">
+      <div>Vessence — your AI personas, private and portable. Free for local use.</div>
+      <div><a href="/downloads/vessence-docker-package.zip" data-vault-download="vessence-docker-package.zip">Install Vessence</a> · <a href="/downloads/vessences-android-v0.0.41.apk" data-vault-download="vessences-android-v0.0.41.apk">Android App</a> · <a href="/downloads/ambient-app-linux-x64.tar.gz" data-vault-download="ambient-app-linux-x64.tar.gz">Linux App</a></div>
+    </div>
+  </footer>
+  <script>
+    for (const link of document.querySelectorAll("[data-vault-download]")) {
+      const filename = link.dataset.vaultDownload;
+      if (!filename) continue;
+      link.href = filename === "docker-compose.yml"
+        ? "/docker-compose.yml"
+        : `/downloads/${encodeURIComponent(filename)}`;
+    }
+  </script>
+  <script>
+    function toggleExplain() {
+      const simple = document.getElementById('hero-simple');
+      const tech = document.getElementById('hero-technical');
+      const label = document.getElementById('toggle-label');
+      const isSimple = simple.style.display !== 'none';
+      simple.style.display = isSimple ? 'none' : '';
+      tech.style.display = isSimple ? '' : 'none';
+      label.textContent = isSimple ? 'Simple' : 'Technical';
+    }
+  </script>
+</body>
+</html>

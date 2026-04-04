@@ -1,0 +1,7 @@
+{
+    "require_approval": ["Bash", "Write", "Edit", "NotebookEdit"],
+    "always_allow": ["Read", "Glob", "Grep", "Agent", "WebFetch", "WebSearch"],
+    "auto_approve_readonly_bash": true,
+    "timeout_seconds": 300,
+    "timeout_action": "deny"
+}

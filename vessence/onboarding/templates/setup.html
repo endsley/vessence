@@ -1,0 +1,754 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Vessence — Setup</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+    body {
+      background: #0f172a;
+      color: #e2e8f0;
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      overflow-x: hidden;
+    }
+
+    /* Ambient glow behind hero */
+    .hero-glow {
+      position: fixed;
+      top: -40%;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 800px;
+      height: 800px;
+      background: radial-gradient(circle, rgba(124,58,237,0.15) 0%, rgba(124,58,237,0.05) 40%, transparent 70%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* Step transitions */
+    .step-container {
+      position: relative;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .step-panel {
+      transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .slide-enter {
+      opacity: 0;
+      transform: translateX(60px);
+    }
+    .slide-active {
+      opacity: 1;
+      transform: translateX(0);
+    }
+    .slide-leave {
+      opacity: 0;
+      transform: translateX(-60px);
+    }
+
+    /* Progress dots */
+    .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #334155;
+      transition: all 0.3s ease;
+    }
+    .dot.active {
+      background: #7C3AED;
+      box-shadow: 0 0 12px rgba(124,58,237,0.6);
+    }
+    .dot.completed {
+      background: #7C3AED;
+    }
+    .dot-line {
+      width: 32px;
+      height: 2px;
+      background: #334155;
+      transition: background 0.3s ease;
+    }
+    .dot-line.completed {
+      background: #7C3AED;
+    }
+
+    /* Cards */
+    .choice-card {
+      background: #1e293b;
+      border: 2px solid #334155;
+      border-radius: 16px;
+      transition: all 0.25s ease;
+      cursor: pointer;
+    }
+    .choice-card:hover {
+      border-color: #7C3AED;
+      background: #1e293b;
+      transform: translateY(-2px);
+      box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+    }
+    .choice-card.selected {
+      border-color: #7C3AED;
+      background: rgba(124,58,237,0.1);
+      box-shadow: 0 0 20px rgba(124,58,237,0.2);
+    }
+
+    /* Buttons */
+    .btn-primary {
+      background: linear-gradient(135deg, #7C3AED 0%, #6D28D9 100%);
+      transition: all 0.25s ease;
+    }
+    .btn-primary:hover {
+      box-shadow: 0 0 24px rgba(124,58,237,0.5);
+      transform: translateY(-1px);
+    }
+    .btn-primary:active {
+      transform: translateY(0);
+    }
+    .btn-primary:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+      transform: none;
+      box-shadow: none;
+    }
+
+    .btn-secondary {
+      background: transparent;
+      border: 1px solid #475569;
+      transition: all 0.25s ease;
+    }
+    .btn-secondary:hover {
+      border-color: #7C3AED;
+      color: #c4b5fd;
+    }
+
+    /* Inputs */
+    .input-field {
+      background: #1e293b;
+      border: 2px solid #334155;
+      color: #e2e8f0;
+      border-radius: 12px;
+      transition: all 0.25s ease;
+    }
+    .input-field:focus {
+      outline: none;
+      border-color: #7C3AED;
+      box-shadow: 0 0 16px rgba(124,58,237,0.2);
+    }
+    .input-field::placeholder {
+      color: #64748b;
+    }
+
+    /* Celebration pulse */
+    @keyframes celebratePulse {
+      0%, 100% { box-shadow: 0 0 20px rgba(124,58,237,0.3); }
+      50% { box-shadow: 0 0 50px rgba(124,58,237,0.6), 0 0 80px rgba(124,58,237,0.2); }
+    }
+    .celebrate-glow {
+      animation: celebratePulse 2s ease-in-out infinite;
+    }
+
+    @keyframes float {
+      0%, 100% { transform: translateY(0px); }
+      50% { transform: translateY(-8px); }
+    }
+    .float-anim {
+      animation: float 3s ease-in-out infinite;
+    }
+
+    @keyframes sparkle {
+      0%, 100% { opacity: 0; transform: scale(0) rotate(0deg); }
+      50% { opacity: 1; transform: scale(1) rotate(180deg); }
+    }
+    .sparkle {
+      position: absolute;
+      width: 8px;
+      height: 8px;
+      background: #7C3AED;
+      border-radius: 50%;
+    }
+    .sparkle:nth-child(1) { top: 10%; left: 20%; animation: sparkle 2s ease-in-out 0s infinite; }
+    .sparkle:nth-child(2) { top: 15%; right: 25%; animation: sparkle 2s ease-in-out 0.5s infinite; }
+    .sparkle:nth-child(3) { bottom: 20%; left: 15%; animation: sparkle 2s ease-in-out 1s infinite; }
+    .sparkle:nth-child(4) { bottom: 25%; right: 20%; animation: sparkle 2s ease-in-out 1.5s infinite; }
+    .sparkle:nth-child(5) { top: 40%; left: 10%; animation: sparkle 2.5s ease-in-out 0.3s infinite; }
+    .sparkle:nth-child(6) { top: 35%; right: 12%; animation: sparkle 2.5s ease-in-out 0.8s infinite; }
+
+    /* Test connection status */
+    .test-success { color: #4ade80; }
+    .test-error { color: #f87171; }
+    .test-loading { color: #a78bfa; }
+
+    /* Smooth scrollbar */
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: #0f172a; }
+    ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+  </style>
+</head>
+<body>
+
+<div class="hero-glow"></div>
+
+<div x-data="onboarding()" x-cloak class="relative z-10">
+
+  <!-- Progress Indicator -->
+  <div class="fixed top-0 left-0 right-0 z-50 flex justify-center pt-6"
+       x-show="step > 0"
+       x-transition:enter="transition ease-out duration-300"
+       x-transition:enter-start="opacity-0 -translate-y-4"
+       x-transition:enter-end="opacity-100 translate-y-0">
+    <div class="flex items-center gap-2 bg-slate-900/80 backdrop-blur-sm px-6 py-3 rounded-full border border-slate-700/50">
+      <template x-for="i in 4" :key="i">
+        <div class="flex items-center gap-2">
+          <div class="dot"
+               :class="{ 'active': step === i, 'completed': step > i }"></div>
+          <div x-show="i < 4" class="dot-line" :class="{ 'completed': step > i }"></div>
+        </div>
+      </template>
+    </div>
+  </div>
+
+  <!-- STEP 0: Welcome -->
+  <div class="step-container" x-show="step === 0"
+       x-transition:enter="transition ease-out duration-500"
+       x-transition:enter-start="opacity-0 translate-x-16"
+       x-transition:enter-end="opacity-100 translate-x-0"
+       x-transition:leave="transition ease-in duration-300"
+       x-transition:leave-start="opacity-100 translate-x-0"
+       x-transition:leave-end="opacity-0 -translate-x-16">
+    <div class="max-w-2xl mx-auto px-6 text-center">
+
+      <!-- Logo / Name -->
+      <div class="mb-10">
+        <div class="inline-flex items-center justify-center w-20 h-20 rounded-2xl bg-gradient-to-br from-violet-600 to-purple-800 mb-6 shadow-lg shadow-violet-500/20">
+          <span class="text-4xl">&#10024;</span>
+        </div>
+        <h1 class="text-5xl sm:text-6xl font-extrabold text-white mb-4 tracking-tight">
+          Vessence
+        </h1>
+        <p class="text-xl text-slate-400 font-light max-w-md mx-auto">
+          Your personal AI companion. Private, growing, always yours.
+        </p>
+      </div>
+
+      <!-- Feature cards -->
+      <div class="grid sm:grid-cols-2 gap-4 mb-10 text-left">
+        <div class="bg-slate-800/50 border border-slate-700/50 rounded-2xl p-6">
+          <div class="text-3xl mb-3">&#129302;</div>
+          <h3 class="text-white font-semibold text-lg mb-2">Meet Jane</h3>
+          <p class="text-slate-400 text-sm leading-relaxed">
+            Your permanent AI partner who grows with you. She remembers your preferences, your projects, and your goals.
+          </p>
+        </div>
+        <div class="bg-slate-800/50 border border-slate-700/50 rounded-2xl p-6">
+          <div class="text-3xl mb-3">&#127912;</div>
+          <h3 class="text-white font-semibold text-lg mb-2">Essences</h3>
+          <p class="text-slate-400 text-sm leading-relaxed">
+            Specialized AI roles you can load -- accountant, tutor, researcher, and more. One click to transform Jane.
+          </p>
+        </div>
+      </div>
+
+      <!-- Privacy note -->
+      <div class="flex items-center justify-center gap-2 text-slate-500 text-sm mb-8">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+        </svg>
+        <span>Everything stays on your machine. Fully private.</span>
+      </div>
+
+      <button @click="goTo(1)" class="btn-primary text-white font-semibold px-10 py-4 rounded-2xl text-lg cursor-pointer">
+        Get Started
+      </button>
+
+      <p class="text-slate-600 text-sm mt-4">Takes about 1 minute</p>
+    </div>
+  </div>
+
+  <!-- STEP 1: Choose Your Brain -->
+  <div class="step-container" x-show="step === 1"
+       x-transition:enter="transition ease-out duration-500"
+       x-transition:enter-start="opacity-0 translate-x-16"
+       x-transition:enter-end="opacity-100 translate-x-0"
+       x-transition:leave="transition ease-in duration-300"
+       x-transition:leave-start="opacity-100 translate-x-0"
+       x-transition:leave-end="opacity-0 -translate-x-16">
+    <div class="max-w-2xl mx-auto px-6 pt-20">
+
+      <div class="mb-8">
+        <p class="text-violet-400 text-sm font-medium mb-2">Step 1 of 4</p>
+        <h2 class="text-3xl sm:text-4xl font-bold text-white mb-2">Choose Your Brain</h2>
+        <p class="text-slate-400">Pick the AI provider that powers Jane. You can change this later.</p>
+      </div>
+
+      <!-- Provider Cards -->
+      <div class="space-y-3 mb-6">
+
+        <!-- Gemini -->
+        <div class="choice-card p-5" :class="{ 'selected': provider === 'gemini' }"
+             @click="selectProvider('gemini')">
+          <div class="flex items-center gap-4">
+            <div class="w-12 h-12 rounded-xl bg-blue-500/10 flex items-center justify-center flex-shrink-0">
+              <span class="text-2xl">&#9830;&#65039;</span>
+            </div>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2">
+                <span class="text-white font-semibold text-lg">Gemini</span>
+                <span class="text-xs bg-green-500/20 text-green-400 px-2 py-0.5 rounded-full">Free tier</span>
+              </div>
+              <p class="text-slate-400 text-sm mt-1">Google's AI with generous free limits. Great to start with.</p>
+            </div>
+            <div class="flex-shrink-0">
+              <div class="w-5 h-5 rounded-full border-2 flex items-center justify-center"
+                   :class="provider === 'gemini' ? 'border-violet-500 bg-violet-500' : 'border-slate-600'">
+                <svg x-show="provider === 'gemini'" class="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
+                  <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+                </svg>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Claude -->
+        <div class="choice-card p-5" :class="{ 'selected': provider === 'claude' }"
+             @click="selectProvider('claude')">
+          <div class="flex items-center gap-4">
+            <div class="w-12 h-12 rounded-xl bg-orange-500/10 flex items-center justify-center flex-shrink-0">
+              <span class="text-2xl">&#129520;</span>
+            </div>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2">
+                <span class="text-white font-semibold text-lg">Claude</span>
+                <span class="text-xs bg-slate-700 text-slate-300 px-2 py-0.5 rounded-full">Paid</span>
+              </div>
+              <p class="text-slate-400 text-sm mt-1">Anthropic's Claude. Best for coding and deep reasoning. Supports web permission gating.</p>
+            </div>
+            <div class="flex-shrink-0">
+              <div class="w-5 h-5 rounded-full border-2 flex items-center justify-center"
+                   :class="provider === 'claude' ? 'border-violet-500 bg-violet-500' : 'border-slate-600'">
+                <svg x-show="provider === 'claude'" class="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
+                  <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+                </svg>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- OpenAI -->
+        <div class="choice-card p-5" :class="{ 'selected': provider === 'openai' }"
+             @click="selectProvider('openai')">
+          <div class="flex items-center gap-4">
+            <div class="w-12 h-12 rounded-xl bg-emerald-500/10 flex items-center justify-center flex-shrink-0">
+              <span class="text-2xl">&#128154;</span>
+            </div>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2">
+                <span class="text-white font-semibold text-lg">OpenAI</span>
+                <span class="text-xs bg-slate-700 text-slate-300 px-2 py-0.5 rounded-full">Paid</span>
+              </div>
+              <p class="text-slate-400 text-sm mt-1">GPT models. Good if you already have a ChatGPT subscription.</p>
+            </div>
+            <div class="flex-shrink-0">
+              <div class="w-5 h-5 rounded-full border-2 flex items-center justify-center"
+                   :class="provider === 'openai' ? 'border-violet-500 bg-violet-500' : 'border-slate-600'">
+                <svg x-show="provider === 'openai'" class="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
+                  <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+                </svg>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Auth Options (appears when provider selected) -->
+      <div x-show="provider" x-transition class="mb-8">
+        <!-- Auth method toggle -->
+        <div class="flex gap-3 mb-4">
+          <button @click="authMethod = 'account'"
+                  class="flex-1 py-3 px-4 rounded-xl font-medium text-sm cursor-pointer transition-all"
+                  :class="authMethod === 'account' ? 'bg-violet-600 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'">
+            &#128100; Connect Account <span class="text-xs opacity-70">(recommended)</span>
+          </button>
+          <button @click="authMethod = 'apikey'"
+                  class="flex-1 py-3 px-4 rounded-xl font-medium text-sm cursor-pointer transition-all"
+                  :class="authMethod === 'apikey' ? 'bg-violet-600 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'">
+            &#128273; Use API Key
+          </button>
+        </div>
+
+        <!-- Option A: Account Login (CLI OAuth via Jane container) -->
+        <div x-show="authMethod === 'account'" x-transition class="bg-slate-800/50 border border-slate-700/50 rounded-2xl p-6">
+          <p class="text-white font-medium mb-3">Connect your <span x-text="providerLabel()"></span> account</p>
+          <p class="text-slate-400 text-sm mb-4">Use your existing paid subscription. No API key needed.</p>
+
+          <button @click="startCliLogin()"
+                  :disabled="cliLoginStatus === 'loading'"
+                  class="btn-primary text-white font-semibold px-6 py-3 rounded-xl cursor-pointer w-full mb-4"
+                  :class="{ 'opacity-50': cliLoginStatus === 'loading' }">
+            <span x-show="cliLoginStatus === 'idle'">&#128279; Connect Account</span>
+            <span x-show="cliLoginStatus === 'loading'">Waiting for authentication...</span>
+            <span x-show="cliLoginStatus === 'success'">&#10003; Connected!</span>
+            <span x-show="cliLoginStatus === 'error'">&#10007; Failed — try API key instead</span>
+          </button>
+
+          <!-- Auth URL display -->
+          <div x-show="cliAuthUrl" x-transition class="bg-slate-900 border-2 border-violet-500 rounded-xl p-5 mb-3">
+            <p class="text-violet-300 font-bold text-xl mb-3">&#128073; Open this URL in your browser to sign in:</p>
+            <div class="bg-black/50 rounded-lg p-4 mb-4 break-all">
+              <a :href="cliAuthUrl" target="_blank" class="text-violet-400 hover:text-violet-300 underline text-lg font-mono" x-text="cliAuthUrl"></a>
+            </div>
+            <div class="space-y-2">
+              <p class="text-white text-base">1. Click the link above (or copy-paste it into your browser)</p>
+              <p class="text-white text-base">2. Sign in with your <span class="text-violet-400 font-semibold" x-text="providerLabel()"></span> account</p>
+              <p class="text-white text-base">3. Approve access when prompted</p>
+            </div>
+            <p class="text-slate-400 text-sm mt-4">This page will update automatically once you've authenticated.</p>
+          </div>
+
+          <p x-show="cliLoginMessage" x-text="cliLoginMessage" class="text-sm mt-2"
+             :class="cliLoginStatus === 'success' ? 'text-green-400' : 'text-red-400'"></p>
+        </div>
+
+        <!-- Option B: API Key -->
+        <div x-show="authMethod === 'apikey'" x-transition class="bg-slate-800/50 border border-slate-700/50 rounded-2xl p-6">
+          <label class="block text-white font-medium mb-2">
+            <span x-text="providerLabel()"></span> API Key
+          </label>
+          <p class="text-slate-400 text-sm mb-3">
+            Get your key:
+            <a x-show="provider === 'gemini'" href="https://aistudio.google.com/apikey" target="_blank" class="text-violet-400 underline">Google AI Studio</a>
+            <a x-show="provider === 'claude'" href="https://console.anthropic.com/settings/keys" target="_blank" class="text-violet-400 underline">Anthropic Console</a>
+            <a x-show="provider === 'openai'" href="https://platform.openai.com/api-keys" target="_blank" class="text-violet-400 underline">OpenAI Platform</a>
+          </p>
+          <div class="flex gap-3">
+            <input type="password"
+                   x-model="apiKey"
+                   :placeholder="apiKeyPlaceholder()"
+                   class="input-field flex-1 px-4 py-3 text-base"
+                   @keydown.enter="testConnection()">
+            <button @click="testConnection()"
+                    :disabled="!apiKey || testStatus === 'loading'"
+                    class="btn-secondary text-slate-300 px-5 py-3 rounded-xl cursor-pointer font-medium text-sm whitespace-nowrap"
+                    :class="{ 'opacity-50 cursor-not-allowed': !apiKey || testStatus === 'loading' }">
+              <span x-show="testStatus === 'idle'">Test</span>
+              <span x-show="testStatus === 'loading'" class="test-loading">Testing...</span>
+              <span x-show="testStatus === 'success'" class="test-success">&#10003; Valid</span>
+              <span x-show="testStatus === 'error'" class="test-error">&#10007; Failed</span>
+            </button>
+          </div>
+          <p x-show="testMessage" x-text="testMessage" class="text-sm mt-2" :class="testStatus === 'success' ? 'text-green-400' : 'text-red-400'"></p>
+        </div>
+      </div>
+
+      <!-- Navigation -->
+      <div class="flex justify-between items-center">
+        <button @click="goTo(0)" class="btn-secondary text-slate-400 px-6 py-3 rounded-xl cursor-pointer">
+          &#8592; Back
+        </button>
+        <button @click="goTo(2)" :disabled="!provider"
+                class="btn-primary text-white font-semibold px-8 py-3 rounded-2xl cursor-pointer">
+          Continue &#8594;
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 2: Personalize -->
+  <div class="step-container" x-show="step === 2"
+       x-transition:enter="transition ease-out duration-500"
+       x-transition:enter-start="opacity-0 translate-x-16"
+       x-transition:enter-end="opacity-100 translate-x-0"
+       x-transition:leave="transition ease-in duration-300"
+       x-transition:leave-start="opacity-100 translate-x-0"
+       x-transition:leave-end="opacity-0 -translate-x-16">
+    <div class="max-w-2xl mx-auto px-6 pt-20">
+
+      <div class="mb-8">
+        <p class="text-violet-400 text-sm font-medium mb-2">Step 2 of 4</p>
+        <h2 class="text-3xl sm:text-4xl font-bold text-white mb-2">Personalize</h2>
+        <p class="text-slate-400">Tell Jane a bit about yourself.</p>
+      </div>
+
+      <!-- Name -->
+      <div class="mb-8">
+        <label class="block text-white font-medium mb-3 text-lg">What should Jane call you?</label>
+        <input type="text"
+               x-model="userName"
+               placeholder="Your first name"
+               class="input-field w-full px-5 py-4 text-xl"
+               @keydown.enter="if(userName.trim()) goTo(3)">
+      </div>
+
+      <!-- Communication Style -->
+      <div class="mb-10">
+        <label class="block text-white font-medium mb-3 text-lg">Communication style</label>
+        <div class="grid grid-cols-3 gap-3">
+          <div class="choice-card p-4 text-center" :class="{ 'selected': style === 'casual' }"
+               @click="style = 'casual'">
+            <div class="text-2xl mb-2">&#128075;</div>
+            <div class="text-white font-medium">Casual</div>
+            <p class="text-slate-500 text-xs mt-1">Friendly, relaxed</p>
+          </div>
+          <div class="choice-card p-4 text-center" :class="{ 'selected': style === 'professional' }"
+               @click="style = 'professional'">
+            <div class="text-2xl mb-2">&#128188;</div>
+            <div class="text-white font-medium">Professional</div>
+            <p class="text-slate-500 text-xs mt-1">Clear, polished</p>
+          </div>
+          <div class="choice-card p-4 text-center" :class="{ 'selected': style === 'technical' }"
+               @click="style = 'technical'">
+            <div class="text-2xl mb-2">&#128187;</div>
+            <div class="text-white font-medium">Technical</div>
+            <p class="text-slate-500 text-xs mt-1">Precise, detailed</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Navigation -->
+      <div class="flex justify-between items-center">
+        <button @click="goTo(1)" class="btn-secondary text-slate-400 px-6 py-3 rounded-xl cursor-pointer">
+          &#8592; Back
+        </button>
+        <button @click="submitSetup()" :disabled="!userName.trim() || submitting"
+                class="btn-primary text-white font-semibold px-8 py-3 rounded-2xl cursor-pointer">
+          <span x-show="!submitting">Finish Setup &#8594;</span>
+          <span x-show="submitting">Setting up...</span>
+        </button>
+      </div>
+
+      <!-- Error -->
+      <div x-show="errorMsg" x-transition
+           class="mt-4 bg-red-900/30 border border-red-700 rounded-xl p-4 text-red-300 text-sm text-center"
+           x-text="errorMsg"></div>
+    </div>
+  </div>
+
+  <!-- STEP 3: Ready! -->
+  <div class="step-container" x-show="step === 3"
+       x-transition:enter="transition ease-out duration-500"
+       x-transition:enter-start="opacity-0 translate-x-16"
+       x-transition:enter-end="opacity-100 translate-x-0"
+       x-transition:leave="transition ease-in duration-300"
+       x-transition:leave-start="opacity-100 translate-x-0"
+       x-transition:leave-end="opacity-0 -translate-x-16">
+    <div class="max-w-lg mx-auto px-6 text-center relative">
+
+      <!-- Sparkle particles -->
+      <div class="sparkle"></div>
+      <div class="sparkle"></div>
+      <div class="sparkle"></div>
+      <div class="sparkle"></div>
+      <div class="sparkle"></div>
+      <div class="sparkle"></div>
+
+      <!-- Celebration icon -->
+      <div class="float-anim inline-block mb-8">
+        <div class="w-24 h-24 rounded-3xl bg-gradient-to-br from-violet-600 to-purple-800 flex items-center justify-center celebrate-glow mx-auto">
+          <span class="text-5xl">&#127881;</span>
+        </div>
+      </div>
+
+      <h2 class="text-4xl sm:text-5xl font-extrabold text-white mb-4">You're all set!</h2>
+      <p class="text-xl text-slate-400 mb-10">
+        Jane is ready and waiting for you, <span class="text-violet-400" x-text="userName || 'friend'"></span>.
+      </p>
+
+      <!-- Open Jane button -->
+      <a href="/interview"
+         class="btn-primary inline-block text-white font-semibold px-10 py-4 rounded-2xl text-lg celebrate-glow cursor-pointer no-underline">
+        Continue to Interview &#8594;
+      </a>
+
+      <!-- Quick links -->
+      <div class="mt-10 flex flex-wrap justify-center gap-4">
+        <a href="http://localhost:8081/essences" class="btn-secondary text-slate-400 px-5 py-2.5 rounded-xl text-sm no-underline hover:text-violet-300 inline-flex items-center gap-2 cursor-pointer">
+          <span>&#127912;</span> Browse Essences
+        </a>
+        <a href="http://localhost:3000" class="btn-secondary text-slate-400 px-5 py-2.5 rounded-xl text-sm no-underline hover:text-violet-300 inline-flex items-center gap-2 cursor-pointer">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+          </svg>
+          Settings
+        </a>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+function onboarding() {
+  return {
+    step: 0,
+    provider: 'gemini',
+    authMethod: 'account',
+    apiKey: '',
+    userName: '',
+    style: 'casual',
+    submitting: false,
+    errorMsg: '',
+    testStatus: 'idle',
+    testMessage: '',
+    cliLoginStatus: 'idle',
+    cliLoginMessage: '',
+    cliAuthUrl: '',
+    cliLoginPollTimer: null,
+
+    goTo(s) {
+      this.errorMsg = '';
+      this.step = s;
+    },
+
+    selectProvider(p) {
+      this.provider = p;
+      this.apiKey = '';
+      this.testStatus = 'idle';
+      this.testMessage = '';
+      this.cliLoginStatus = 'idle';
+      this.cliLoginMessage = '';
+      this.cliAuthUrl = '';
+      if (this.cliLoginPollTimer) { clearInterval(this.cliLoginPollTimer); this.cliLoginPollTimer = null; }
+    },
+
+    async startCliLogin() {
+      this.cliLoginStatus = 'loading';
+      this.cliLoginMessage = '';
+      this.cliAuthUrl = '';
+      try {
+        const resp = await fetch('/api/cli-login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ provider: this.provider })
+        });
+        const data = await resp.json();
+        if (data.auth_url) {
+          this.cliAuthUrl = data.auth_url;
+          // Poll for completion
+          this.cliLoginPollTimer = setInterval(async () => {
+            try {
+              const check = await fetch('/api/cli-login/status');
+              const status = await check.json();
+              if (status.authenticated) {
+                clearInterval(this.cliLoginPollTimer);
+                this.cliLoginPollTimer = null;
+                this.cliLoginStatus = 'success';
+                this.cliLoginMessage = 'Account connected successfully!';
+                this.cliAuthUrl = '';
+              }
+            } catch (e) { /* keep polling */ }
+          }, 3000);
+        } else if (data.error) {
+          this.cliLoginStatus = 'error';
+          this.cliLoginMessage = data.error;
+        }
+      } catch (e) {
+        this.cliLoginStatus = 'error';
+        this.cliLoginMessage = 'Could not start login. Try using an API key instead.';
+      }
+    },
+
+    providerLabel() {
+      const labels = { gemini: 'Gemini', claude: 'Anthropic', openai: 'OpenAI' };
+      return labels[this.provider] || '';
+    },
+
+    apiKeyPlaceholder() {
+      const ph = {
+        gemini: 'AIzaSy...',
+        claude: 'sk-ant-...',
+        openai: 'sk-...'
+      };
+      return ph[this.provider] || 'API key';
+    },
+
+    async testConnection() {
+      if (!this.apiKey) return;
+      this.testStatus = 'loading';
+      this.testMessage = '';
+
+      const typeMap = { gemini: 'google', claude: 'anthropic', openai: 'openai' };
+
+      try {
+        const resp = await fetch('/api/validate-key', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: typeMap[this.provider], value: this.apiKey })
+        });
+        const data = await resp.json();
+        if (data.valid) {
+          this.testStatus = 'success';
+          this.testMessage = 'API key is valid!';
+        } else {
+          this.testStatus = 'error';
+          this.testMessage = data.error || 'Invalid key.';
+        }
+      } catch (e) {
+        this.testStatus = 'error';
+        this.testMessage = 'Could not reach the server.';
+      }
+    },
+
+    async submitSetup() {
+      if (!this.userName.trim()) {
+        this.errorMsg = 'Please enter your name.';
+        return;
+      }
+      this.submitting = true;
+      this.errorMsg = '';
+
+      try {
+        // Save basic setup
+        const resp = await fetch('/api/setup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            jane_brain: this.provider,
+            user_name: this.userName.trim(),
+            api_key: this.authMethod === 'apikey' ? this.apiKey.trim() : '',
+            auth_method: this.authMethod,
+          })
+        });
+        const data = await resp.json();
+
+        if (!data.success) {
+          this.errorMsg = data.error || data.detail || 'Setup failed.';
+          this.submitting = false;
+          return;
+        }
+
+        // If API key was provided, save it too
+        if (this.apiKey.trim()) {
+          const keyMap = {
+            gemini: { google_api_key: this.apiKey.trim() },
+            claude: { anthropic_api_key: this.apiKey.trim() },
+            openai: { openai_api_key: this.apiKey.trim() },
+          };
+          await fetch('/api/settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ jane_brain: this.provider, ...keyMap[this.provider] })
+          });
+        }
+
+        // Show the ready step
+        this.goTo(3);
+        this.submitting = false;
+
+      } catch (e) {
+        this.errorMsg = 'Network error -- is Vessence still running?';
+        this.submitting = false;
+      }
+    }
+  };
+}
+</script>
+
+</body>
+</html>

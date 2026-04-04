@@ -1,0 +1,14 @@
+model_list:
+  - model_name: "gemini-3-flash-preview"
+    litellm_params:
+      model: "ollama/qwen2.5-coder:14b"
+      api_base: "http://localhost:11434"
+      drop_params: true
+  - model_name: "gemini-gemma"
+    litellm_params:
+      model: "ollama/gemma3:12b"
+      api_base: "http://localhost:11434"
+      drop_params: true
+
+litellm_settings:
+  drop_params: true

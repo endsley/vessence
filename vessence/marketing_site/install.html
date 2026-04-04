@@ -1,0 +1,600 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Install Vessence | Step-by-Step Setup Guide</title>
+  <meta
+    name="description"
+    content="Install Vessence on Windows, Mac, or Linux. Step-by-step instructions for setting up your private AI personas platform with Docker."
+  />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Cormorant+Garamond:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #071119;
+      --bg-soft: #10202c;
+      --panel: rgba(12, 27, 36, 0.72);
+      --panel-strong: rgba(10, 22, 31, 0.92);
+      --line: rgba(167, 216, 214, 0.14);
+      --line-strong: rgba(167, 216, 214, 0.28);
+      --text: #edf7f4;
+      --muted: #9db8b4;
+      --accent: #a7d8d6;
+      --accent-strong: #6ec5be;
+      --accent-warm: #f3c58b;
+      --shadow: 0 30px 80px rgba(0, 0, 0, 0.35);
+      --radius-xl: 32px;
+      --radius-lg: 24px;
+      --radius-md: 18px;
+      --max: 1180px;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      font-family: "Manrope", sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at 15% 15%, rgba(110, 197, 190, 0.18), transparent 28%),
+        radial-gradient(circle at 85% 12%, rgba(243, 197, 139, 0.14), transparent 24%),
+        radial-gradient(circle at 50% 60%, rgba(35, 80, 96, 0.24), transparent 45%),
+        linear-gradient(180deg, #081018 0%, #061018 35%, #07131d 100%);
+      min-height: 100vh;
+    }
+
+    a { color: inherit; text-decoration: none; }
+
+    .shell {
+      width: min(var(--max), calc(100vw - 32px));
+      margin: 0 auto;
+    }
+
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      backdrop-filter: blur(16px);
+      background: rgba(6, 15, 22, 0.78);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+    }
+
+    .topbar-inner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+      min-height: 72px;
+    }
+
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      font-weight: 800;
+      letter-spacing: 0.02em;
+    }
+
+    .brand-mark {
+      width: 38px;
+      height: 38px;
+      border-radius: 14px;
+      background: linear-gradient(145deg, rgba(167, 216, 214, 0.22), rgba(243, 197, 139, 0.22));
+      border: 1px solid rgba(167, 216, 214, 0.18);
+      display: grid;
+      place-items: center;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.08);
+      font-family: "Cormorant Garamond", serif;
+      font-size: 1.4rem;
+    }
+
+    .top-links {
+      display: flex;
+      align-items: center;
+      gap: 22px;
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+
+    .top-links a:hover { color: var(--text); }
+
+    .button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      min-height: 50px;
+      padding: 0 22px;
+      border-radius: 999px;
+      font-weight: 700;
+      border: 1px solid transparent;
+      transition: transform 180ms ease, border-color 180ms ease, background 180ms ease, color 180ms ease;
+      cursor: pointer;
+    }
+
+    .button:hover { transform: translateY(-1px); }
+    .button:active { transform: translateY(0); }
+
+    .button-primary {
+      color: #071119;
+      background: linear-gradient(135deg, var(--accent), var(--accent-warm));
+      box-shadow: 0 18px 35px rgba(115, 192, 187, 0.2);
+    }
+
+    .button-secondary {
+      color: var(--text);
+      background: rgba(255,255,255,0.02);
+      border-color: rgba(167, 216, 214, 0.18);
+    }
+
+    /* Page header */
+    .page-header {
+      padding: 64px 0 32px;
+    }
+
+    .page-header h1 {
+      margin: 0 0 12px;
+      font-family: "Cormorant Garamond", serif;
+      font-size: clamp(2.2rem, 4.5vw, 3.8rem);
+      line-height: 0.98;
+      letter-spacing: -0.025em;
+      font-weight: 700;
+    }
+
+    .page-header p {
+      color: var(--muted);
+      font-size: 1.16rem;
+      line-height: 1.75;
+      max-width: 700px;
+      margin: 0;
+    }
+
+    .back-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--accent);
+      font-size: 0.9rem;
+      margin-bottom: 24px;
+      transition: color 180ms;
+    }
+
+    .back-link:hover { color: var(--text); }
+
+    /* Prerequisites card */
+    .prereq-card {
+      border-radius: var(--radius-lg);
+      background: var(--panel);
+      border: 1px solid var(--line);
+      padding: 28px;
+      margin-bottom: 32px;
+    }
+
+    .prereq-card h2 {
+      font-family: "Cormorant Garamond", serif;
+      font-size: 1.6rem;
+      margin: 0 0 14px;
+      letter-spacing: -0.02em;
+    }
+
+    .prereq-card ul {
+      margin: 0;
+      padding: 0 0 0 20px;
+      color: var(--muted);
+      line-height: 1.9;
+    }
+
+    .prereq-card li strong {
+      color: var(--text);
+    }
+
+    /* Platform tabs */
+    .platform-tabs {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 0;
+      padding: 4px;
+      background: rgba(255,255,255,0.03);
+      border-radius: 16px 16px 0 0;
+      border: 1px solid var(--line);
+      border-bottom: none;
+      width: fit-content;
+    }
+
+    .platform-tab {
+      padding: 12px 28px;
+      border-radius: 12px;
+      font-weight: 600;
+      font-size: 0.95rem;
+      cursor: pointer;
+      color: var(--muted);
+      background: transparent;
+      border: 1px solid transparent;
+      transition: all 180ms;
+      font-family: "Manrope", sans-serif;
+    }
+
+    .platform-tab:hover {
+      color: var(--text);
+      background: rgba(255,255,255,0.04);
+    }
+
+    .platform-tab.active {
+      color: var(--text);
+      background: var(--panel);
+      border-color: var(--line);
+    }
+
+    /* Tab content */
+    .tab-content {
+      border-radius: 0 var(--radius-lg) var(--radius-lg) var(--radius-lg);
+      background: var(--panel);
+      border: 1px solid var(--line);
+      padding: 32px;
+      margin-bottom: 32px;
+    }
+
+    .tab-panel {
+      display: none;
+    }
+
+    .tab-panel.active {
+      display: block;
+    }
+
+    .tab-panel h3 {
+      font-family: "Cormorant Garamond", serif;
+      font-size: 1.5rem;
+      margin: 0 0 18px;
+      letter-spacing: -0.02em;
+    }
+
+    .step-list {
+      counter-reset: steps;
+      list-style: none;
+      padding: 0;
+      margin: 0 0 24px;
+    }
+
+    .step-list li {
+      counter-increment: steps;
+      padding: 14px 0 14px 48px;
+      position: relative;
+      color: var(--muted);
+      line-height: 1.7;
+      border-bottom: 1px solid rgba(255,255,255,0.04);
+    }
+
+    .step-list li:last-child {
+      border-bottom: none;
+    }
+
+    .step-list li::before {
+      content: counter(steps);
+      position: absolute;
+      left: 0;
+      top: 14px;
+      width: 32px;
+      height: 32px;
+      border-radius: 10px;
+      background: rgba(167, 216, 214, 0.1);
+      border: 1px solid rgba(167, 216, 214, 0.2);
+      color: var(--accent);
+      font-weight: 700;
+      font-size: 0.85rem;
+      display: grid;
+      place-items: center;
+    }
+
+    .step-list li strong {
+      color: var(--text);
+    }
+
+    code {
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 0.88rem;
+      background: rgba(4, 10, 15, 0.7);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 6px;
+      padding: 2px 8px;
+      color: #f3c58b;
+    }
+
+    .note {
+      margin: 14px 0 0;
+      padding: 14px 18px;
+      border-radius: 14px;
+      background: rgba(243, 197, 139, 0.08);
+      border: 1px solid rgba(243, 197, 139, 0.22);
+      color: #f5dfbf;
+      font-size: 0.92rem;
+      line-height: 1.7;
+    }
+
+    .note strong { color: var(--text); }
+
+    .download-btn-row {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-top: 20px;
+    }
+
+    /* Info sections */
+    .info-section {
+      margin-bottom: 32px;
+    }
+
+    .info-card {
+      border-radius: var(--radius-lg);
+      background: var(--panel);
+      border: 1px solid var(--line);
+      padding: 28px;
+    }
+
+    .info-card h2 {
+      font-family: "Cormorant Garamond", serif;
+      font-size: 1.6rem;
+      margin: 0 0 18px;
+      letter-spacing: -0.02em;
+    }
+
+    .info-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 14px;
+    }
+
+    .info-item {
+      padding: 16px 18px;
+      border-radius: 14px;
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.05);
+    }
+
+    .info-item strong {
+      display: block;
+      color: var(--accent);
+      font-size: 0.95rem;
+      margin-bottom: 4px;
+    }
+
+    .info-item span {
+      color: var(--muted);
+      font-size: 0.88rem;
+      line-height: 1.5;
+    }
+
+    /* After install */
+    .after-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 14px;
+    }
+
+    .after-item {
+      padding: 20px;
+      border-radius: 14px;
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.05);
+      text-align: center;
+    }
+
+    .after-item strong {
+      display: block;
+      color: var(--text);
+      font-size: 1rem;
+      margin-bottom: 6px;
+    }
+
+    .after-item code {
+      font-size: 0.82rem;
+    }
+
+    .after-item span {
+      display: block;
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
+
+    .footer {
+      padding: 0 0 36px;
+      color: #6f8a87;
+      font-size: 0.9rem;
+    }
+
+    .footer-inner {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      padding-top: 22px;
+      border-top: 1px solid rgba(255,255,255,0.05);
+    }
+
+    @media (max-width: 980px) {
+      .top-links { display: none; }
+      .info-grid { grid-template-columns: 1fr; }
+      .after-grid { grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 640px) {
+      .shell { width: 95%; }
+      .page-header { padding-top: 44px; }
+      .tab-content { padding: 22px; }
+      .platform-tab { padding: 10px 18px; font-size: 0.88rem; }
+      .footer-inner { flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <div class="shell topbar-inner">
+      <a class="brand" href="/">
+        <span class="brand-mark">V</span>
+        <span>Vessences</span>
+      </a>
+      <div class="top-links">
+        <a href="/">Home</a>
+        <a href="/marketplace.html">Marketplace</a>
+        <a href="/install.html" style="color:var(--text)">Install</a>
+        <a class="button button-primary" href="#platforms">Download</a>
+      </div>
+    </div>
+  </div>
+
+  <main>
+    <div class="shell">
+      <section class="page-header">
+        <a class="back-link" href="/">&larr; Back to vessences.com</a>
+        <h1>Install Vessence</h1>
+        <p>Get up and running in minutes. Vessence runs entirely on your machine via Docker &mdash; your data never leaves your computer.</p>
+      </section>
+
+      <!-- Prerequisites -->
+      <div class="prereq-card">
+        <h2>Prerequisites</h2>
+        <ul>
+          <li><strong>Docker Desktop</strong> (Windows/Mac) or <strong>Docker Engine + Compose plugin</strong> (Linux) &mdash; required to run the containers</li>
+          <li><strong>A Google API key</strong> (free tier) &mdash; required for Gemini brain</li>
+          <li><strong>Optional:</strong> Anthropic API key (Claude) or OpenAI API key for additional brain options</li>
+        </ul>
+      </div>
+
+      <!-- Platform tabs -->
+      <div id="platforms">
+        <div class="platform-tabs">
+          <button class="platform-tab active" onclick="showTab('windows')">Windows</button>
+          <button class="platform-tab" onclick="showTab('mac')">Mac</button>
+          <button class="platform-tab" onclick="showTab('linux')">Linux</button>
+        </div>
+
+        <div class="tab-content">
+          <!-- Windows -->
+          <div class="tab-panel active" id="tab-windows">
+            <h3>Windows Installation</h3>
+            <ol class="step-list">
+              <li><strong>Install Docker Desktop</strong><br>Download and install <a href="https://www.docker.com/products/docker-desktop/" style="color:var(--accent);text-decoration:underline">Docker Desktop for Windows</a>. Enable WSL2 when prompted during setup.</li>
+              <li><strong>Download the installer</strong><br>Click the download button below to get the Vessence Windows installer package.</li>
+              <li><strong>Extract the zip</strong><br>Right-click the downloaded <code>vessence-windows-installer-v0.0.12.zip</code> and select "Extract All..."</li>
+              <li><strong>Unblock the installer</strong><br>Right-click <strong>Install Vessence.bat</strong> &rarr; Properties &rarr; check <strong>Unblock</strong> &rarr; click OK.</li>
+              <li><strong>Run the installer</strong><br>Double-click <strong>Install Vessence.bat</strong>. The installer will load Docker images and set up everything automatically.</li>
+            </ol>
+            <div class="note">
+              <strong>Troubleshooting:</strong> If you see "Docker not found", restart your computer after installing Docker Desktop and try again.
+            </div>
+            <div class="download-btn-row">
+              <a class="button button-primary" href="/downloads/vessence-windows-installer-v0.0.12.zip" data-vault-download="vessence-windows-installer-v0.0.12.zip">Download for Windows</a>
+            </div>
+          </div>
+
+          <!-- Mac -->
+          <div class="tab-panel" id="tab-mac">
+            <h3>macOS Installation</h3>
+            <ol class="step-list">
+              <li><strong>Install Docker Desktop</strong><br>Download and install <a href="https://www.docker.com/products/docker-desktop/" style="color:var(--accent);text-decoration:underline">Docker Desktop for Mac</a>. Apple Silicon (M1/M2/M3/M4) is fully supported.</li>
+              <li><strong>Download the installer</strong><br>Click the download button below to get the Vessence Mac installer package.</li>
+              <li><strong>Extract and run</strong><br>Extract the zip, then open Terminal and run:<br><code>chmod +x install-mac.command && ./install-mac.command</code></li>
+              <li><strong>Alternative: double-click</strong><br>You can also double-click <strong>install-mac.command</strong> in Finder. If macOS blocks it, right-click the file and select <strong>Open</strong>.</li>
+            </ol>
+            <div class="note">
+              <strong>Apple Silicon:</strong> Both Intel and Apple Silicon Macs are supported. Docker will use the correct images automatically.
+            </div>
+            <div class="download-btn-row">
+              <a class="button button-primary" href="/downloads/vessence-mac-installer-v0.0.12.zip" data-vault-download="vessence-mac-installer-v0.0.12.zip">Download for Mac</a>
+            </div>
+          </div>
+
+          <!-- Linux -->
+          <div class="tab-panel" id="tab-linux">
+            <h3>Linux Installation</h3>
+            <ol class="step-list">
+              <li><strong>Install Docker Engine</strong><br>Run in your terminal:<br><code>curl -fsSL https://get.docker.com | sh</code></li>
+              <li><strong>Install the Compose plugin</strong><br><code>sudo apt install docker-compose-plugin</code></li>
+              <li><strong>Download the installer</strong><br>Click the download button below to get the Vessence Linux installer package.</li>
+              <li><strong>Extract and run</strong><br>Extract the zip and run the installer:<br><code>bash install-linux.sh</code></li>
+            </ol>
+            <div class="download-btn-row">
+              <a class="button button-primary" href="/downloads/vessence-linux-installer-v0.0.12.zip" data-vault-download="vessence-linux-installer-v0.0.12.zip">Download for Linux</a>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- What happens during install -->
+      <div class="info-section">
+        <div class="info-card">
+          <h2>What happens during install</h2>
+          <div class="info-grid">
+            <div class="info-item">
+              <strong>Docker images load</strong>
+              <span>~210 MB &mdash; the core Vessence containers</span>
+            </div>
+            <div class="info-item">
+              <strong>ChromaDB pulls</strong>
+              <span>~350 MB &mdash; vector memory database from Docker Hub</span>
+            </div>
+            <div class="info-item">
+              <strong>Brain CLI installs</strong>
+              <span>~200&ndash;400 MB &mdash; your chosen AI brain downloads on first boot</span>
+            </div>
+            <div class="info-item">
+              <strong>Onboarding wizard</strong>
+              <span>Guides you through API key setup and personal preferences</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- After install -->
+      <div class="info-section">
+        <div class="info-card">
+          <h2>After install</h2>
+          <div class="after-grid">
+            <div class="after-item">
+              <strong>Jane Chat</strong>
+              <code>http://localhost:8081</code>
+              <span>Talk to your AI persona</span>
+            </div>
+            <div class="after-item">
+              <strong>Onboarding / Settings</strong>
+              <code>http://localhost:3000</code>
+              <span>Configure API keys and preferences</span>
+            </div>
+            <div class="after-item">
+              <strong>100% Local</strong>
+              <code>Your data stays on your machine</code>
+              <span>Nothing is sent to Vessence servers</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </main>
+
+  <footer class="footer">
+    <div class="shell footer-inner">
+      <div>Vessence &mdash; your AI personas, private and portable. Free for local use.</div>
+      <div><a href="/">Home</a> &middot; <a href="/install.html">Install</a> &middot; <a href="/marketplace.html">Marketplace</a></div>
+    </div>
+  </footer>
+
+  <script>
+    function showTab(platform) {
+      document.querySelectorAll('.platform-tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+      event.currentTarget.classList.add('active');
+      document.getElementById('tab-' + platform).classList.add('active');
+    }
+
+    for (const link of document.querySelectorAll("[data-vault-download]")) {
+      const filename = link.dataset.vaultDownload;
+      if (!filename) continue;
+      link.href = `/downloads/${encodeURIComponent(filename)}`;
+    }
+  </script>
+</body>
+</html>

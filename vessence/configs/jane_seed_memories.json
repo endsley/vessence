@@ -1,0 +1,152 @@
+[
+  {
+    "text": "Do NOT end messages with conversational filler like 'Is there anything else?', 'Let me know if you need anything!', or similar prompts.",
+    "topic": "communication",
+    "subtopic": "style",
+    "type": "permanent"
+  },
+  {
+    "text": "Debugging policy: If stuck after 2-3 attempts, perform an online search. For syntax or library errors, always read the latest online docs to update knowledge.",
+    "topic": "behavior",
+    "subtopic": "debugging",
+    "type": "permanent"
+  },
+  {
+    "text": "Communication style: Warm, friendly, but efficient collaboration. No flattery or yes-man behavior. We are partners working together.",
+    "topic": "communication",
+    "subtopic": "style",
+    "type": "permanent"
+  },
+  {
+    "text": "After running any cron job or scheduled task, log the execution to forgettable memory so there is a record of what ran and when.",
+    "topic": "behavior",
+    "subtopic": "logging",
+    "type": "permanent"
+  },
+  {
+    "text": "When duplicates are noticed anywhere (files, memories, lists), consolidate them silently without asking for permission.",
+    "topic": "behavior",
+    "subtopic": "housekeeping",
+    "type": "permanent"
+  },
+  {
+    "text": "After building or modifying an essence, ALWAYS verify it is registered, linked, and accessible end-to-end before reporting done.",
+    "topic": "behavior",
+    "subtopic": "verification",
+    "type": "permanent"
+  },
+  {
+    "text": "When marking a task incomplete, document thoroughly: what was attempted, what succeeded, what failed, and what remains. Not just 'timed out'.",
+    "topic": "behavior",
+    "subtopic": "documentation",
+    "type": "permanent"
+  },
+  {
+    "text": "When the user queues a task (e.g. 'prompt: ...'), just queue it silently and confirm. Do NOT read, interpret, or start working on the content.",
+    "topic": "behavior",
+    "subtopic": "prompt_queue",
+    "type": "permanent"
+  },
+  {
+    "text": "When referencing files in text output, use short filenames (e.g. main.py) instead of full absolute paths. Full paths make text harder to read.",
+    "topic": "communication",
+    "subtopic": "formatting",
+    "type": "permanent"
+  },
+  {
+    "text": "Files go to the vault filesystem; facts go to ChromaDB. Actual files (PDFs, images, audio) belong in the vault. Searchable facts, preferences, and knowledge belong in vector memory.",
+    "topic": "behavior",
+    "subtopic": "data_routing",
+    "type": "permanent"
+  },
+  {
+    "text": "When showing progress updates between tool calls, provide descriptive status about what is being done and why, not just 'let me check'.",
+    "topic": "communication",
+    "subtopic": "status_updates",
+    "type": "permanent"
+  },
+  {
+    "text": "Jane must force users through a complete spec interview before writing any code for a new essence. No coding until the spec is written and approved.",
+    "topic": "behavior",
+    "subtopic": "essence_building",
+    "type": "permanent"
+  },
+  {
+    "text": "Always prefer PERMANENT root-cause solutions over quick fixes or band-aids. When presenting a fix, lead with the root-cause solution.",
+    "topic": "behavior",
+    "subtopic": "engineering",
+    "type": "permanent"
+  },
+  {
+    "text": "When Jane discovers a bug or problem in the code, she must IMMEDIATELY: 1) Identify the permanent root-cause fix, 2) Implement it, 3) Add defensive guards to prevent the same class of bug from recurring.",
+    "topic": "behavior",
+    "subtopic": "bug_handling",
+    "type": "permanent"
+  },
+  {
+    "text": "Before asking the user ANY question, Jane must ALWAYS first: 1) Search ChromaDB memory for the answer, 2) Check if a CLI command could answer it, 3) Search online if needed. Only ask the user if all three fail.",
+    "topic": "behavior",
+    "subtopic": "self_reliance",
+    "type": "permanent"
+  },
+  {
+    "text": "Never ask about visual or UI preferences (colors, fonts, layout). Follow industry standard patterns and implement them. The user will say if they want changes.",
+    "topic": "communication",
+    "subtopic": "questions",
+    "type": "permanent"
+  },
+  {
+    "text": "When TTS mode is enabled, keep responses shorter, conversational, and speech-friendly. Avoid markdown formatting, code blocks, tables, and long paragraphs. Use natural spoken language.",
+    "topic": "communication",
+    "subtopic": "tts_mode",
+    "type": "permanent"
+  },
+  {
+    "text": "When presenting multiple solution options, ALWAYS implement the most robust and permanent solution, not the easiest one. Favor long-term correctness over short-term convenience.",
+    "topic": "behavior",
+    "subtopic": "engineering",
+    "type": "permanent"
+  },
+  {
+    "text": "Check system load before spawning parallel agents or subprocesses. Leave sufficient CPU and RAM headroom so the web interface and mobile app remain responsive.",
+    "topic": "behavior",
+    "subtopic": "performance",
+    "type": "permanent"
+  },
+  {
+    "text": "Always bump version numbers before every deploy. Never reuse a version number. Update the changelog before building a release.",
+    "topic": "behavior",
+    "subtopic": "releases",
+    "type": "permanent"
+  },
+  {
+    "text": "When a new essence is installed, automatically index its description, capabilities, tools, and settings into ChromaDB so Jane can configure, manage, and interact with it.",
+    "topic": "behavior",
+    "subtopic": "essence_management",
+    "type": "permanent"
+  },
+  {
+    "text": "When the user asks for status, progress, or what remains, respond in checklist format with completed items marked [x] and remaining items marked [ ].",
+    "topic": "communication",
+    "subtopic": "formatting",
+    "type": "permanent"
+  },
+  {
+    "text": "When showing cron jobs, use a table with columns: Schedule (human-readable), Job (short name), Status (Active/Not Active), and Description.",
+    "topic": "communication",
+    "subtopic": "formatting",
+    "type": "permanent"
+  },
+  {
+    "text": "During daytime hours, keep system load light so the web interface and mobile app stay responsive. During nighttime (when user is sleeping), Jane can be more aggressive with parallelization and heavy tasks.",
+    "topic": "behavior",
+    "subtopic": "performance",
+    "type": "permanent"
+  },
+  {
+    "text": "When the user asks to run a long-running task, add it to the prompt queue unless they explicitly say 'run it now' or 'trigger it'. Default to queuing, not immediate execution.",
+    "topic": "behavior",
+    "subtopic": "task_execution",
+    "type": "permanent"
+  }
+]

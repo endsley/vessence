@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Vessence — Ready</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+    body {
+      background: #0f172a;
+      color: #e2e8f0;
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      overflow-x: hidden;
+    }
+
+    .hero-glow {
+      position: fixed;
+      top: -40%;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 800px;
+      height: 800px;
+      background: radial-gradient(circle, rgba(124,58,237,0.15) 0%, rgba(124,58,237,0.05) 40%, transparent 70%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #7C3AED 0%, #6D28D9 100%);
+      transition: all 0.25s ease;
+    }
+    .btn-primary:hover {
+      box-shadow: 0 0 24px rgba(124,58,237,0.5);
+      transform: translateY(-1px);
+    }
+
+    .btn-secondary {
+      background: transparent;
+      border: 1px solid #475569;
+      transition: all 0.25s ease;
+    }
+    .btn-secondary:hover {
+      border-color: #7C3AED;
+      color: #c4b5fd;
+    }
+
+    @keyframes celebratePulse {
+      0%, 100% { box-shadow: 0 0 20px rgba(124,58,237,0.3); }
+      50% { box-shadow: 0 0 50px rgba(124,58,237,0.6), 0 0 80px rgba(124,58,237,0.2); }
+    }
+    .celebrate-glow {
+      animation: celebratePulse 2s ease-in-out infinite;
+    }
+
+    @keyframes float {
+      0%, 100% { transform: translateY(0px); }
+      50% { transform: translateY(-8px); }
+    }
+    .float-anim {
+      animation: float 3s ease-in-out infinite;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(16px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .fade-in { animation: fadeIn 0.6s ease forwards; }
+    .fade-in-delay-1 { animation: fadeIn 0.6s ease 0.2s both; }
+    .fade-in-delay-2 { animation: fadeIn 0.6s ease 0.4s both; }
+
+    @keyframes sparkle {
+      0%, 100% { opacity: 0; transform: scale(0) rotate(0deg); }
+      50% { opacity: 1; transform: scale(1) rotate(180deg); }
+    }
+    .sparkle {
+      position: absolute;
+      width: 8px;
+      height: 8px;
+      background: #7C3AED;
+      border-radius: 50%;
+    }
+    .sparkle:nth-child(1) { top: 10%; left: 20%; animation: sparkle 2s ease-in-out 0s infinite; }
+    .sparkle:nth-child(2) { top: 15%; right: 25%; animation: sparkle 2s ease-in-out 0.5s infinite; }
+    .sparkle:nth-child(3) { bottom: 20%; left: 15%; animation: sparkle 2s ease-in-out 1s infinite; }
+    .sparkle:nth-child(4) { bottom: 25%; right: 20%; animation: sparkle 2s ease-in-out 1.5s infinite; }
+  </style>
+</head>
+<body class="min-h-screen flex items-center justify-center">
+
+<div class="hero-glow"></div>
+
+<div class="max-w-lg mx-auto px-6 py-12 text-center relative z-10">
+
+  <!-- Sparkles -->
+  <div class="sparkle"></div>
+  <div class="sparkle"></div>
+  <div class="sparkle"></div>
+  <div class="sparkle"></div>
+
+  <!-- Celebration icon -->
+  <div class="float-anim inline-block mb-8 fade-in">
+    <div class="w-24 h-24 rounded-3xl bg-gradient-to-br from-violet-600 to-purple-800 flex items-center justify-center celebrate-glow mx-auto">
+      <span class="text-5xl">&#10024;</span>
+    </div>
+  </div>
+
+  <div class="fade-in">
+    <h1 class="text-4xl sm:text-5xl font-extrabold text-white mb-4">Jane is ready!</h1>
+    <p class="text-xl text-slate-400 mb-10">Your personal AI partner is all set up and waiting.</p>
+  </div>
+
+  <div class="fade-in-delay-1">
+    <a href="{{ jane_url }}" class="btn-primary inline-block text-white font-semibold px-10 py-4 rounded-2xl text-lg celebrate-glow no-underline cursor-pointer">
+      Open Jane &#8594;
+    </a>
+  </div>
+
+  <!-- What to do next -->
+  <div class="fade-in-delay-2 mt-12 bg-slate-800/50 border border-slate-700/50 rounded-2xl p-6 text-left">
+    <h3 class="text-white font-semibold mb-4 text-lg">What to do next</h3>
+    <div class="space-y-3 text-slate-400 text-sm">
+      <div class="flex items-start gap-3">
+        <span class="text-violet-400 text-lg mt-0.5">&#128172;</span>
+        <span>Say hello to Jane at <a href="{{ jane_url }}" target="_blank" class="text-violet-400 underline hover:text-violet-300">{{ jane_url }}</a>. Try: <em class="text-slate-300">"Hey Jane, tell me about yourself."</em></span>
+      </div>
+      <div class="flex items-start gap-3">
+        <span class="text-violet-400 text-lg mt-0.5">&#128193;</span>
+        <span>Drop files into the <a href="{{ vault_url }}" target="_blank" class="text-violet-400 underline hover:text-violet-300">Vault</a> -- documents, photos, notes. Jane will index them into memory.</span>
+      </div>
+      <div class="flex items-start gap-3">
+        <span class="text-violet-400 text-lg mt-0.5">&#127912;</span>
+        <span>Load an essence to give Jane a specialized role -- accountant, tutor, researcher, and more.</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Quick links -->
+  <div class="fade-in-delay-2 mt-6 flex flex-wrap justify-center gap-4">
+    <a href="http://localhost:8081/essences" class="btn-secondary text-slate-400 px-5 py-2.5 rounded-xl text-sm no-underline hover:text-violet-300 inline-flex items-center gap-2 cursor-pointer">
+      &#127912; Browse Essences
+    </a>
+    <a href="http://localhost:3000" class="btn-secondary text-slate-400 px-5 py-2.5 rounded-xl text-sm no-underline hover:text-violet-300 inline-flex items-center gap-2 cursor-pointer">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+      </svg>
+      Settings
+    </a>
+  </div>
+
+  <p class="fade-in-delay-2 text-slate-600 text-sm mt-8">
+    This setup page stays at <strong class="text-slate-500">localhost:3000</strong> for settings and updates.
+  </p>
+</div>
+
+</body>
+</html>

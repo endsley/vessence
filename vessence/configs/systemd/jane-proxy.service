@@ -1,0 +1,17 @@
+[Unit]
+Description=Jane Web Reverse Proxy (zero-downtime)
+After=network.target
+Before=jane-web.service
+
+[Service]
+Type=simple
+Environment=PYTHONPATH=%h/ambient/vessence
+WorkingDirectory=%h/ambient/vessence/jane_web
+ExecStart=/home/chieh/google-adk-env/adk-venv/bin/python reverse_proxy.py --listen-port 8080 --upstream-port 8081 --log-level info
+Restart=always
+RestartSec=5
+StandardOutput=append:%h/ambient/vessence-data/logs/jane_proxy.log
+StandardError=append:%h/ambient/vessence-data/logs/jane_proxy.log
+
+[Install]
+WantedBy=default.target

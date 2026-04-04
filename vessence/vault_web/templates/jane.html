@@ -1,0 +1,1960 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Jane</title>
+  <meta name="theme-color" content="#0f172a"/>
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+  <link rel="manifest" href="/manifest.webmanifest"/>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <!-- Marked.js (lightweight markdown) -->
+  <script src="https://cdn.jsdelivr.net/npm/marked@15/marked.min.js"></script>
+  <!-- KaTeX -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css"/>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+  <style>
+    [x-cloak] { display: none !important; }
+    :root { color-scheme: dark; --chat-font-size: 1.05rem; }
+    html, body { height: 100%; overflow: hidden; }
+    body { background: #0f172a; color: #e2e8f0; min-height: 100dvh; }
+    .chat-content { font-size: var(--chat-font-size) !important; }
+    .scrollbar-thin::-webkit-scrollbar { width: 12px; }
+    .scrollbar-thin::-webkit-scrollbar-track { background: #1e293b; border-radius: 6px; }
+    .scrollbar-thin::-webkit-scrollbar-thumb { background: #64748b; border-radius: 6px; min-height: 40px; }
+    .scrollbar-thin::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+    .chat-bubble-user { background: #6d28d9; border-radius: 18px 18px 4px 18px; }
+    .chat-bubble-jane  { background: #1e293b; border-radius: 18px 18px 18px 4px; border: 1px solid #334155; }
+    /* Collapsible code blocks */
+    details.code-collapse { margin: 0.5rem 0; }
+    details.code-collapse summary {
+      cursor: pointer; font-size: 0.75rem; color: #64748b;
+      padding: 4px 8px; background: #0f172a; border: 1px solid #334155;
+      border-radius: 6px; user-select: none; list-style: none;
+    }
+    details.code-collapse summary::-webkit-details-marker { display: none; }
+    details.code-collapse summary::before { content: '▶ '; font-size: 0.6rem; }
+    details.code-collapse[open] summary::before { content: '▼ '; }
+    details.code-collapse[open] summary { border-radius: 6px 6px 0 0; border-bottom: none; }
+    details.code-collapse pre {
+      margin: 0 !important; border-radius: 0 0 6px 6px !important;
+      border: 1px solid #334155; border-top: none;
+      background: #0f172a !important; padding: 0.75rem !important;
+      overflow-x: auto; font-size: 0.8rem; line-height: 1.4;
+    }
+    details.code-collapse pre code { background: transparent !important; padding: 0 !important; }
+    /* Diff rendering */
+    .diff-block { margin: 0.5rem 0; border-radius: 6px; overflow: hidden; border: 1px solid #334155; font-size: 0.8rem; line-height: 1.5; }
+    .diff-block .diff-header { font-size: 0.75rem; color: #64748b; padding: 4px 8px; background: #0f172a; border-bottom: 1px solid #334155; }
+    .diff-block .diff-line { padding: 1px 10px; font-family: monospace; white-space: pre-wrap; word-break: break-all; }
+    .diff-block .diff-add { background: rgba(34,197,94,0.12); color: #4ade80; }
+    .diff-block .diff-del { background: rgba(239,68,68,0.12); color: #f87171; }
+    .diff-block .diff-hunk { background: rgba(96,165,250,0.1); color: #60a5fa; font-style: italic; }
+    .diff-block .diff-ctx { color: #94a3b8; }
+    .composer-shell {
+      padding-bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
+    }
+  </style>
+  <script>
+    // Apply saved font size before paint to avoid flash
+    (function() {
+      var fs = localStorage.getItem('vessence_font_size');
+      if (fs) document.documentElement.style.setProperty('--chat-font-size', fs);
+    })();
+  </script>
+</head>
+<body class="h-[100dvh] overflow-hidden flex flex-col" x-data="janeApp()" x-init="init()" x-cloak @keydown.escape.window="typing ? cancelResponse() : $refs.inputBox.focus()">
+
+  <!-- ── First-run Welcome Overlay ──────────────────────────────────────── -->
+  <div id="jane-welcome-overlay"
+       class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm"
+       style="display:none!important"
+       x-data="{ show: !localStorage.getItem('jane_welcome_dismissed') }"
+       x-show="show"
+       x-transition:enter="transition ease-out duration-300"
+       x-transition:enter-start="opacity-0"
+       x-transition:enter-end="opacity-100">
+    <div class="max-w-md mx-4 bg-slate-900 border border-slate-700 rounded-2xl p-8 text-center shadow-2xl"
+         x-transition:enter="transition ease-out duration-300 delay-100"
+         x-transition:enter-start="opacity-0 scale-95"
+         x-transition:enter-end="opacity-100 scale-100">
+      <img src="/api/files/serve/images/people/jane/jane1.png"
+        class="w-20 h-20 rounded-full object-cover mx-auto mb-4 border-2 border-violet-700"
+        alt="Jane"
+        onerror="this.outerHTML='<div class=\'w-20 h-20 rounded-full bg-violet-800 flex items-center justify-center text-3xl font-bold text-white mx-auto mb-4\'>J</div>'"/>
+      <h2 class="text-2xl font-bold text-white mb-2">This is Jane</h2>
+      <p class="text-slate-400 leading-relaxed mb-4">
+        Jane is your personal assistant. She grows with you, remembers everything, and helps you build and manage essences — personas that each serve a different purpose.
+      </p>
+      <p class="text-slate-400 leading-relaxed mb-4">
+        Use the menu to switch between Jane and your loaded essences like Life Librarian or Music Playlist.
+      </p>
+      <div class="bg-slate-800 rounded-xl p-3 mb-6 text-left">
+        <p class="text-slate-400 text-sm mb-1"><strong class="text-slate-300">Try asking:</strong></p>
+        <p class="text-violet-300 text-sm italic">"What can you help me with?"</p>
+        <p class="text-slate-500 text-sm mt-1 italic">or "Review this code for me."</p>
+      </div>
+      <button
+        @click="localStorage.setItem('jane_welcome_dismissed','1'); show = false"
+        class="w-full bg-violet-600 hover:bg-violet-500 text-white font-semibold py-3 rounded-xl transition-colors cursor-pointer">
+        Got it — let's go
+      </button>
+    </div>
+  </div>
+  <script>
+    document.addEventListener('alpine:init', () => {
+      document.getElementById('jane-welcome-overlay').style.removeProperty('display');
+    });
+  </script>
+
+  <!-- Connection status banner -->
+  <div x-show="!janeOnline" x-cloak x-transition
+    class="bg-amber-900/80 text-amber-200 text-xs text-center py-1.5 px-4 flex-shrink-0">
+    Jane is offline — reconnecting...
+  </div>
+
+  <!-- Header -->
+  <header class="flex items-center gap-3 px-4 py-3 bg-slate-900 border-b border-slate-700 flex-shrink-0">
+    <img src="/api/files/serve/images/people/jane/jane1.png"
+      class="w-9 h-9 rounded-full object-cover border border-violet-600"
+      alt="Jane"
+      onerror="this.outerHTML='<div class=\'w-9 h-9 rounded-full bg-violet-700 flex items-center justify-center font-bold text-white\'>J</div>'"/>
+    <div>
+      <h1 class="text-white font-semibold leading-tight">
+        <span x-show="!activeEssence">Jane</span>
+        <span x-show="activeEssence" x-cloak x-text="'Jane — ' + activeEssenceDisplay"></span>
+      </h1>
+      <p class="text-slate-400 text-xs">
+        <span x-show="!activeEssence">Your personal assistant · <span x-text="'TTS ' + (responseMode === 'audio' ? 'on' : 'off')"></span></span>
+        <span x-show="activeEssence" x-cloak class="text-green-400">Essence active · <button @click="deactivateEssence()" class="text-slate-500 hover:text-red-400 underline transition">deactivate</button></span>
+      </p>
+    </div>
+    <!-- Essences dropdown -->
+    <div class="relative" x-data="essenceDropdown()" @click.outside="open = false">
+      <button @click="toggle()" class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-700/50">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"/>
+        </svg>
+        <span>Essences</span>
+        <svg class="w-3 h-3 transition-transform" :class="open ? 'rotate-180' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+        </svg>
+      </button>
+      <div x-show="open" x-cloak x-transition
+        class="absolute left-0 top-full mt-1 w-56 rounded-xl border border-slate-700 bg-slate-900 shadow-2xl overflow-hidden z-50">
+          <a href="/"
+            class="flex items-center gap-2 px-3 py-2.5 text-xs transition hover:bg-slate-800"
+            :class="currentPage === 'jane' ? 'text-violet-300 bg-violet-600/10' : 'text-slate-300'">
+            <span class="w-5 h-5 rounded bg-violet-700 flex items-center justify-center text-[10px] font-bold text-white flex-shrink-0">J</span>
+            Jane
+          </a>
+          <template x-for="e in items" :key="e.name">
+            <a :href="'/?essence=' + encodeURIComponent(e.name)"
+              class="flex items-center gap-2 px-3 py-2 text-xs text-slate-300 hover:text-white hover:bg-slate-800 transition border-t border-slate-700/50">
+              <span class="w-5 h-5 rounded bg-violet-800 flex items-center justify-center text-[10px] flex-shrink-0"
+                x-text="e.name.charAt(0).toUpperCase()"></span>
+              <span class="truncate" x-text="e.name"></span>
+              <span x-show="e.loaded" class="ml-auto w-1.5 h-1.5 rounded-full bg-green-500 flex-shrink-0"></span>
+            </a>
+          </template>
+          <template x-if="loading">
+            <p class="px-3 py-2 text-[10px] text-slate-500 italic border-t border-slate-700/50">Loading...</p>
+          </template>
+          <template x-if="!loading && items.length === 0">
+            <p class="px-3 py-2 text-[10px] text-slate-500 italic border-t border-slate-700/50">No essences installed</p>
+          </template>
+          <a href="/essences"
+            class="flex items-center gap-2 px-3 py-2.5 text-xs text-slate-500 hover:text-slate-300 transition border-t border-slate-700">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+            </svg>
+            Manage essences
+          </a>
+      </div>
+    </div>
+    <!-- Tools dropdown -->
+    <div class="relative" x-data="toolsDropdown()" @click.outside="open = false">
+      <button @click="toggle()" class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-700/50">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+        </svg>
+        <span>Tools</span>
+        <svg class="w-3 h-3 transition-transform" :class="open ? 'rotate-180' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+        </svg>
+      </button>
+      <div x-show="open" x-cloak x-transition
+        class="absolute left-0 top-full mt-1 w-56 rounded-xl border border-slate-700 bg-slate-900 shadow-2xl overflow-hidden z-50">
+          <template x-for="e in items" :key="e.name">
+            <a :href="e.name === 'Music Playlist' ? '/vault?tab=music' : e.name === 'Work Log' ? '/worklog' : e.name === 'Daily Briefing' ? '/briefing' : '/vault'"
+              class="flex items-center gap-2 px-3 py-2 text-xs text-slate-300 hover:text-white hover:bg-slate-800 transition">
+              <span class="w-5 h-5 rounded bg-slate-700 flex items-center justify-center text-[10px] flex-shrink-0"
+                x-text="e.name.charAt(0).toUpperCase()"></span>
+              <span class="truncate" x-text="e.name"></span>
+              <span x-show="e.loaded" class="ml-auto w-1.5 h-1.5 rounded-full bg-green-500 flex-shrink-0"></span>
+            </a>
+          </template>
+          <template x-if="loading">
+            <p class="px-3 py-2 text-[10px] text-slate-500 italic">Loading...</p>
+          </template>
+          <template x-if="!loading && items.length === 0">
+            <p class="px-3 py-2 text-[10px] text-slate-500 italic">No tools installed</p>
+          </template>
+      </div>
+    </div>
+    <!-- User Guide link -->
+    <a href="/guide" class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-700/50" title="Jane User Guide">
+      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/>
+      </svg>
+      <span>Guide</span>
+    </a>
+    <!-- Architecture link -->
+    <a href="/architecture" class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-700/50" title="Jane Architecture">
+      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+        <circle cx="12" cy="12" r="3" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"/>
+      </svg>
+      <span>Architecture</span>
+    </a>
+    <div class="ml-auto flex items-center gap-2">
+      <button @click="clearSession()" class="text-slate-400 hover:text-white transition px-2.5 py-1.5 rounded-lg hover:bg-slate-800 text-xs font-medium" title="New Session">
+        New Session
+      </button>
+      <button @click="settingsOpen = !settingsOpen; if (settingsOpen) loadModelSettings()" class="text-slate-400 hover:text-white transition p-1.5 rounded-lg hover:bg-slate-800" :class="settingsOpen ? 'text-violet-400 bg-slate-800' : ''" title="Jane Settings">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+        </svg>
+      </button>
+      <form action="/api/auth/logout" method="post">
+        <button type="submit" class="text-slate-500 hover:text-slate-300 text-xs transition">Sign out</button>
+      </form>
+    </div>
+  </header>
+
+  <!-- Live activity banner (shows when Jane is working on another session) -->
+  <div x-show="liveStatus" x-cloak x-transition
+    class="flex items-center gap-2 px-4 py-2 bg-violet-900/30 border-b border-violet-800/50 text-sm">
+    <span class="w-2 h-2 rounded-full bg-violet-400 animate-pulse flex-shrink-0"></span>
+    <span class="text-violet-300 truncate" x-text="liveStatus"></span>
+    <span class="text-violet-500 text-xs flex-shrink-0" x-text="livePlatform ? '(' + livePlatform + ')' : ''"></span>
+  </div>
+
+  <!-- Settings Panel Drawer -->
+  <div x-show="settingsOpen" x-cloak x-transition:enter="transition ease-out duration-200"
+    x-transition:enter-start="translate-x-full" x-transition:enter-end="translate-x-0"
+    x-transition:leave="transition ease-in duration-150"
+    x-transition:leave-start="translate-x-0" x-transition:leave-end="translate-x-full"
+    class="fixed right-0 top-0 h-full w-96 bg-slate-900 border-l border-violet-500 z-50 flex flex-col shadow-2xl"
+    @click.outside="settingsOpen = false">
+    <div class="flex items-center justify-between px-4 py-3 border-b border-slate-700">
+      <h2 class="text-white text-sm font-semibold">Settings</h2>
+      <button @click="settingsOpen = false" class="text-slate-400 hover:text-white p-1">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div class="flex-1 overflow-y-auto p-4 space-y-6">
+
+      <!-- Brain Configuration -->
+      <section>
+        <h3 class="text-sm font-bold text-white mb-1">Brain Configuration</h3>
+        <p class="text-xs text-slate-500 mb-4">Choose which model Jane uses.</p>
+
+        <div x-show="modelSettingsLoading" class="text-slate-500 text-xs py-4 text-center">Loading...</div>
+
+        <div x-show="!modelSettingsLoading" class="space-y-4">
+          <!-- Provider badge -->
+          <div class="flex items-center gap-2 mb-2">
+            <span class="text-xs text-slate-400">Provider:</span>
+            <span class="text-xs font-mono text-violet-400 bg-violet-900/40 px-2 py-0.5 rounded" x-text="modelProvider"></span>
+          </div>
+
+          <!-- Single model selector -->
+          <div>
+            <label class="text-xs text-slate-300 block mb-1.5">
+              Jane's model
+            </label>
+            <div class="relative">
+              <select x-model="selectedModel"
+                class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white appearance-none cursor-pointer hover:border-slate-500 focus:border-violet-500 focus:ring-1 focus:ring-violet-500 outline-none">
+                <template x-for="m in modelOptions" :key="m">
+                  <option :value="m" x-text="m + (m === defaultModel ? '  (recommended)' : '')"></option>
+                </template>
+              </select>
+              <div class="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-500">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+              </div>
+            </div>
+          </div>
+
+          <!-- Action buttons -->
+          <div class="flex gap-2 pt-2">
+            <button @click="saveModelSettings()"
+              class="flex-1 bg-violet-600 hover:bg-violet-500 text-white text-xs font-medium py-2 px-4 rounded-lg transition">
+              Save
+            </button>
+            <button @click="resetModelDefaults()"
+              class="bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium py-2 px-4 rounded-lg border border-slate-700 transition">
+              Reset to Defaults
+            </button>
+          </div>
+
+          <!-- Save confirmation -->
+          <div x-show="modelSaveMsg" x-transition class="text-xs py-1.5 px-3 rounded-lg text-center"
+            :class="modelSaveError ? 'bg-red-900/40 text-red-400' : 'bg-green-900/40 text-green-400'"
+            x-text="modelSaveMsg"></div>
+        </div>
+      </section>
+
+      <!-- Link to full settings -->
+      <div class="pt-2 border-t border-slate-800">
+        <a href="/vault?tab=settings" class="text-xs text-slate-500 hover:text-slate-300 transition">
+          All settings (devices, shares) &rarr;
+        </a>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- Messages -->
+  <div class="flex-1 min-h-0 overflow-y-auto scrollbar-thin p-4 pb-6 space-y-4" id="chat-messages" x-ref="chatMessages">
+    <template x-if="messages.length === 0">
+      <div class="max-w-lg mx-auto py-12 px-4" x-data="{ welcomeEssences: [] }" x-init="_fetchAllEssences().then(d => welcomeEssences = d || []).catch(()=>{})">
+        <div class="text-center mb-8">
+          <img src="/api/files/serve/images/people/jane/jane1.png"
+            class="w-16 h-16 rounded-full object-cover mx-auto mb-3 border-2 border-violet-700"
+            alt="Jane"
+            onerror="this.outerHTML='<div class=\'w-16 h-16 rounded-full bg-violet-800 flex items-center justify-center text-2xl font-bold text-white mx-auto mb-3\'>J</div>'"/>
+          <h2 class="text-xl font-semibold text-white">Welcome to Vessence</h2>
+          <p class="text-slate-400 text-sm mt-2 leading-relaxed">I'm Jane — your technical partner. I grow with you, remember everything, and help you build useful tools and essences.</p>
+          <div class="mt-4 text-left space-y-2 text-xs text-slate-500 leading-relaxed">
+            <p><span class="text-slate-300 font-medium">Tools</span> are standalone utilities — a music player, a daily briefing, a file browser. They do one thing well.</p>
+            <p><span class="text-slate-300 font-medium">Essences</span> are complete AI personas — each one has its own knowledge, memory, skills, and personality. Load an essence and I become a different agent for a different purpose.</p>
+          </div>
+        </div>
+
+        <!-- Essences -->
+        <details class="mb-4" x-data="{ open: true }" :open="open">
+          <summary @click.prevent="open = !open" class="text-xs text-slate-500 uppercase tracking-wider font-medium px-1 cursor-pointer select-none flex items-center gap-1">
+            <span x-text="open ? '▾' : '▸'" class="text-[10px]"></span> Your Essences
+          </summary>
+          <div class="space-y-2 mt-2">
+            <template x-for="e in welcomeEssences.filter(i => i.type === 'essence')" :key="e.name">
+              <a :href="'/?essence=' + encodeURIComponent(e.name)"
+                class="flex items-start gap-3 p-3 rounded-xl border border-slate-700/50 bg-violet-900/20 hover:bg-violet-900/40 transition cursor-pointer border-violet-700/30">
+                <span class="w-9 h-9 rounded-lg bg-violet-800 flex items-center justify-center text-sm font-bold text-white flex-shrink-0 mt-0.5"
+                  x-text="e.name.charAt(0).toUpperCase()"></span>
+                <div class="min-w-0">
+                  <p class="text-sm font-medium text-slate-200" x-text="e.name"></p>
+                  <p class="text-xs text-slate-500 mt-0.5 line-clamp-2" x-text="e.description"></p>
+                </div>
+              </a>
+            </template>
+            <template x-if="welcomeEssences.filter(i => i.type === 'essence').length === 0">
+              <p class="text-xs text-slate-500 italic px-1">No essences yet.</p>
+            </template>
+          </div>
+        </details>
+
+        <!-- Tools -->
+        <details class="mb-6" x-data="{ open: true }" :open="open">
+          <summary @click.prevent="open = !open" class="text-xs text-slate-500 uppercase tracking-wider font-medium px-1 cursor-pointer select-none flex items-center gap-1">
+            <span x-text="open ? '▾' : '▸'" class="text-[10px]"></span> Your Tools
+          </summary>
+          <div class="space-y-2 mt-2">
+            <template x-for="e in welcomeEssences.filter(i => (i.type || 'tool') === 'tool')" :key="e.name">
+              <a :href="e.name === 'Music Playlist' ? '/vault?tab=music' : e.name === 'Work Log' ? '/worklog' : e.name === 'Daily Briefing' ? '/briefing' : '/vault'"
+                class="flex items-start gap-3 p-3 rounded-xl border border-slate-700/50 bg-slate-800/30 hover:bg-slate-800/60 transition cursor-pointer">
+                <span class="w-9 h-9 rounded-lg bg-slate-700 flex items-center justify-center text-sm font-bold text-slate-300 flex-shrink-0 mt-0.5"
+                  x-text="e.name.charAt(0).toUpperCase()"></span>
+                <div class="min-w-0">
+                  <p class="text-sm font-medium text-slate-200" x-text="e.name"></p>
+                  <p class="text-xs text-slate-500 mt-0.5 line-clamp-2" x-text="e.description"></p>
+                </div>
+              </a>
+            </template>
+            <template x-if="welcomeEssences.filter(i => (i.type || 'tool') === 'tool').length === 0">
+              <p class="text-xs text-slate-500 italic px-1">No tools installed yet.</p>
+            </template>
+          </div>
+        </details>
+
+        <!-- Action buttons -->
+        <div class="flex flex-wrap gap-2 mb-6">
+          <button @click="input = 'I want to create a new essence'; send()"
+            class="px-4 py-2 text-xs rounded-lg border border-violet-700/50 bg-violet-900/20 text-violet-300 hover:text-white hover:border-violet-500 hover:bg-violet-900/40 transition cursor-pointer">
+            + New Essence
+          </button>
+          <button @click="input = 'I want to create a new tool'; send()"
+            class="px-4 py-2 text-xs rounded-lg border border-slate-700 bg-slate-800/30 text-slate-400 hover:text-white hover:border-slate-500 hover:bg-slate-800/60 transition cursor-pointer">
+            + New Tool
+          </button>
+        </div>
+
+        <!-- Common commands -->
+        <div class="space-y-2">
+          <p class="text-xs text-slate-500 uppercase tracking-wider font-medium px-1">Quick Commands</p>
+          <div class="flex flex-wrap gap-2">
+            <button @click="input = 'Show my daily briefing'; send()"
+              class="px-3 py-1.5 text-xs rounded-lg border border-slate-700 text-slate-400 hover:text-white hover:border-violet-500 transition cursor-pointer">
+              Daily briefing
+            </button>
+            <button @click="input = 'Show job queue'; send()"
+              class="px-3 py-1.5 text-xs rounded-lg border border-slate-700 text-slate-400 hover:text-white hover:border-violet-500 transition cursor-pointer">
+              Show job queue
+            </button>
+            <button @click="input = 'What have you been working on?'; send()"
+              class="px-3 py-1.5 text-xs rounded-lg border border-slate-700 text-slate-400 hover:text-white hover:border-violet-500 transition cursor-pointer">
+              Recent activity
+            </button>
+            <button @click="input = 'What can you help me with?'; send()"
+              class="px-3 py-1.5 text-xs rounded-lg border border-slate-700 text-slate-400 hover:text-white hover:border-violet-500 transition cursor-pointer">
+              What can you do?
+            </button>
+          </div>
+        </div>
+      </div>
+    </template>
+
+    <template x-for="(msg, i) in messages" :key="i">
+      <div :class="msg.role === 'user' ? 'flex justify-end' : 'flex justify-start'" :data-role="msg.role">
+        <template x-if="msg.role === 'jane'">
+          <div class="flex items-start gap-2 max-w-[95%]" x-show="msg.text || msg.ack || msg.status || msg.streamingText || (msg.statusLog && msg.statusLog.length > 0)">
+            <img src="/api/files/serve/images/people/jane/jane1.png"
+              class="w-8 h-8 rounded-full object-cover flex-shrink-0 mt-1 border border-violet-700"
+              alt="Jane"
+              onerror="this.outerHTML='<div class=\'w-8 h-8 rounded-full bg-violet-700 flex items-center justify-center text-sm flex-shrink-0 mt-1 font-bold\'>J</div>'"/>
+            <div class="chat-bubble-jane chat-content px-4 py-3 text-sm text-slate-200 leading-relaxed">
+              <!-- Activity log: expanded while streaming, collapsed once response arrives -->
+              <template x-if="(msg.statusLog && msg.statusLog.length > 0) || msg.streamingText">
+                <div class="mb-2 max-w-md">
+                  <!-- Streaming state: show recent steps live (last 20, keeps the view compact) -->
+                  <div x-show="!msg.text" class="pl-2 border-l border-slate-700 space-y-0.5 max-h-64 overflow-y-auto">
+                    <p x-show="msg.statusLog && msg.statusLog.length > 20" class="text-[15px] text-slate-600 mb-0.5"
+                       x-text="'… ' + (msg.statusLog.length - 20) + ' earlier steps'"></p>
+                    <template x-for="(entry, j) in (msg.statusLog || []).slice(-20)" :key="(msg.statusLog ? msg.statusLog.length : 0) - 20 + j">
+                      <p class="text-[15px] leading-snug"
+                         :class="(() => { const t = typeof entry === 'object' ? entry.text : entry; if (typeof entry === 'object' && entry.type === 'thought') return 'text-white'; return 'text-slate-400'; })()"
+                         x-html="formatStatusEntry(typeof entry === 'object' ? entry.text : entry)"></p>
+                    </template>
+                    <p x-show="msg.status" class="text-[15px] text-green-300 leading-snug animate-pulse" x-html="formatStatusEntry(msg.status)"></p>
+                    <!-- Streaming response text (shown here until done fires) -->
+                    <div x-show="msg.streamingText" class="mt-1 pt-1 border-t border-slate-700/50 text-[15px] text-slate-200 leading-snug whitespace-pre-wrap" x-text="msg.streamingText"></div>
+                  </div>
+                  <!-- Completed state: collapse into expandable summary -->
+                  <div x-show="msg.text" x-data="{ expanded: false }">
+                    <button @click="expanded = !expanded"
+                      class="text-[15px] text-slate-500 hover:text-slate-300 transition flex items-center gap-1 cursor-pointer">
+                      <span x-text="expanded ? '▾' : '▸'" class="text-[15px]"></span>
+                      <span x-text="'Jane worked through ' + msg.statusLog.length + ' step' + (msg.statusLog.length === 1 ? '' : 's')"></span>
+                    </button>
+                    <div x-show="expanded" x-transition.duration.200ms class="mt-1 pl-2 border-l border-slate-700 space-y-0.5 max-h-96 overflow-y-auto">
+                      <template x-for="(entry, j) in msg.statusLog" :key="j">
+                        <p class="text-[15px] leading-snug"
+                           :class="(() => { const t = typeof entry === 'object' ? entry.text : entry; if (typeof entry === 'object' && entry.type === 'thought') return 'text-white'; return 'text-slate-400'; })()"
+                           x-html="formatStatusEntry(typeof entry === 'object' ? entry.text : entry)"></p>
+                      </template>
+                    </div>
+                  </div>
+                </div>
+              </template>
+              <!-- Permission approval dialog -->
+              <template x-if="msg._permissionRequests && msg._permissionRequests.length > 0">
+                <div class="mb-3 space-y-2">
+                  <template x-for="(perm, pi) in msg._permissionRequests" :key="perm.request_id">
+                    <div class="border border-amber-600/50 bg-amber-950/30 rounded-lg p-3">
+                      <div class="flex items-center gap-2 mb-2">
+                        <span class="text-amber-400 text-xs font-bold uppercase tracking-wide">Permission Required</span>
+                        <span class="text-xs text-slate-400" x-text="perm.tool_name"></span>
+                      </div>
+                      <pre class="text-xs text-slate-300 bg-slate-900/50 rounded p-2 mb-3 max-h-40 overflow-auto whitespace-pre-wrap break-all"
+                           x-text="typeof perm.tool_input === 'object' ? (perm.tool_input.command || perm.tool_input.file_path || JSON.stringify(perm.tool_input, null, 2)) : perm.tool_input"></pre>
+                      <div class="flex gap-2">
+                        <button @click="respondPermission(perm.request_id, true)"
+                          class="px-3 py-1.5 text-xs font-medium rounded bg-green-700 hover:bg-green-600 text-white transition cursor-pointer">
+                          Approve
+                        </button>
+                        <button @click="respondPermission(perm.request_id, false)"
+                          class="px-3 py-1.5 text-xs font-medium rounded bg-red-800 hover:bg-red-700 text-white transition cursor-pointer">
+                          Deny
+                        </button>
+                      </div>
+                    </div>
+                  </template>
+                </div>
+              </template>
+              <!-- Fallback: show status when no log entries yet -->
+              <p x-show="msg.status && (!msg.statusLog || msg.statusLog.length === 0)" x-text="msg.status" class="mb-2 max-w-md text-xs leading-relaxed text-slate-400"></p>
+              <div x-show="msg.text && !msg.fullResponse" x-html="formatMessage(msg.text)"></div>
+              <template x-if="msg.text && msg.fullResponse">
+                <div>
+                  <p class="text-sm text-white" x-text="msg.text"></p>
+                  <details class="mt-2">
+                    <summary class="text-xs text-slate-500 cursor-pointer select-none hover:text-slate-400 transition">&#9656; Show full response</summary>
+                    <div class="mt-2" x-html="formatMessage(msg.fullResponse)"></div>
+                  </details>
+                </div>
+              </template>
+              <div x-show="msg.text" class="mt-2 flex items-center gap-2">
+                <button
+                  @click="copyText(msg.text, $event)"
+                  type="button"
+                  class="rounded-full border border-slate-600 p-1.5 text-slate-300 transition hover:border-violet-500 hover:text-white"
+                  title="Copy">
+                  <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                </button>
+                <template x-if="speechSupported">
+                  <button
+                    @click="speakText(msg.spokenText || msg.text)"
+                    type="button"
+                    class="rounded-full border border-slate-600 p-1.5 text-slate-300 transition hover:border-violet-500 hover:text-white"
+                    title="Play audio">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
+                  </button>
+                </template>
+                <button
+                  x-show="isSpeaking && currentSpeechText === (msg.spokenText || msg.text)"
+                  @click="stopSpeech()"
+                  type="button"
+                  class="rounded-full border border-violet-700 bg-violet-600/20 p-1.5 text-violet-200 transition hover:bg-violet-600/30"
+                  title="Stop audio">
+                  <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+                </button>
+                <span x-show="msg.model" class="ml-auto text-[11px] text-sky-400/70 select-none" x-text="msg.model"></span>
+              </div>
+            </div>
+          </div>
+        </template>
+        <template x-if="msg.role === 'user'">
+          <div class="chat-bubble-user chat-content px-4 py-3 text-sm text-white max-w-[95%] group relative">
+            <span x-text="msg.text"></span>
+            <button @click="copyText(msg.text, $event)"
+              class="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity text-white/50 hover:text-white p-1 rounded"
+              title="Copy">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+            </button>
+          </div>
+        </template>
+      </div>
+    </template>
+
+  </div>
+
+  <div class="sticky bottom-0 z-10 flex-shrink-0 border-t border-slate-700 bg-slate-900/95 backdrop-blur composer-shell">
+    <!-- LaTeX preview -->
+    <div x-show="hasMathPreview(input)" x-cloak
+      class="px-4 py-2 bg-slate-950/60 text-sm text-slate-300 max-h-28 overflow-y-auto scrollbar-thin border-b border-slate-800">
+      <p class="text-xs text-slate-500 mb-1">Preview</p>
+      <div x-html="formatMessage(input)"></div>
+    </div>
+
+    <!-- Input bar -->
+    <div class="p-3">
+      <div x-show="isSpeaking" x-cloak class="mb-2 flex justify-center">
+        <button
+          @click="stopSpeech()"
+          type="button"
+          class="rounded-full border border-violet-700 bg-violet-600/20 px-4 py-2 text-sm text-violet-100 transition hover:bg-violet-600/30">
+          Stop audio
+        </button>
+      </div>
+      <input type="file" multiple x-ref="janeFileInput" class="hidden" @change="onJaneFilePick($event)">
+      <input type="file" accept="image/*" capture="environment" x-ref="janeCameraInput" class="hidden" @change="onJaneFilePick($event)">
+      <div class="flex gap-2 items-end">
+        <div class="relative flex-shrink-0" @click.outside="composerMenuOpen = false">
+          <button @click="composerMenuOpen = !composerMenuOpen"
+            class="border border-slate-700 text-slate-300 hover:text-white hover:bg-slate-700 px-3 py-3 rounded-2xl text-sm font-medium transition">
+            +
+          </button>
+          <div x-show="composerMenuOpen" x-cloak
+            class="absolute bottom-full left-0 mb-2 w-44 rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl overflow-hidden">
+            <button
+              @click="setResponseMode('text'); composerMenuOpen = false"
+              :class="responseMode === 'text' ? 'bg-violet-600/20 text-white' : 'text-slate-300 hover:text-white hover:bg-slate-800'"
+              class="w-full text-left px-4 py-3 text-sm transition">
+              Text responses
+            </button>
+            <button
+              @click="setResponseMode('audio'); composerMenuOpen = false"
+              :class="responseMode === 'audio' ? 'bg-violet-600/20 text-white' : 'text-slate-300 hover:text-white hover:bg-slate-800'"
+              class="w-full text-left px-4 py-3 text-sm transition border-t border-slate-800">
+              Audio responses
+            </button>
+            <button
+              @click="openJanePicker('files')"
+              class="w-full text-left px-4 py-3 text-sm text-slate-300 hover:text-white hover:bg-slate-800 transition border-t border-slate-800">
+              Attach files
+            </button>
+            <button
+              @click="openJanePicker('camera')"
+              class="w-full text-left px-4 py-3 text-sm text-slate-300 hover:text-white hover:bg-slate-800 transition border-t border-slate-800">
+              Take picture
+            </button>
+            <button
+              @click="toggleNotifications()"
+              class="w-full text-left px-4 py-3 text-sm transition border-t border-slate-800"
+              :class="notificationsEnabled ? 'bg-violet-600/20 text-white' : 'text-slate-300 hover:text-white hover:bg-slate-800'">
+              <span x-text="notificationsEnabled ? 'Notifications on' : 'Turn notifications on'"></span>
+            </button>
+            <button
+              x-show="typing" x-cloak
+              @click="cancelResponse(); composerMenuOpen = false"
+              class="w-full text-left px-4 py-3 text-sm text-red-400 hover:text-red-300 hover:bg-red-600/10 transition border-t border-slate-800">
+              Cancel response (Esc)
+            </button>
+          </div>
+        </div>
+        <textarea x-model="input" @keydown.enter.prevent="if(!$event.shiftKey) send()"
+          placeholder="Message Jane…"
+          rows="1"
+          class="flex-1 text-white rounded-2xl px-4 py-3 text-sm resize-none focus:outline-none max-h-32 transition-colors duration-200 bg-slate-800 border border-slate-700 focus:border-violet-500"
+          style="overflow:hidden"
+          @input="autoResize($el)" x-ref="inputBox"></textarea>
+        <button @click="
+          if (!('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)) return;
+          const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+          if (chatListening) { chatListening = false; return; }
+          chatListening = true;
+          const rec = new SR();
+          rec.lang = 'en-US';
+          rec.interimResults = false;
+          rec.onresult = e => { input = (input ? input + ' ' : '') + e.results[0][0].transcript; chatListening = false; $nextTick(() => autoResize($refs.inputBox)); };
+          rec.onerror = () => { chatListening = false; };
+          rec.onend = () => { chatListening = false; };
+          rec.start();
+        " class="p-3 rounded-2xl transition flex-shrink-0"
+          :class="chatListening ? 'bg-red-600 text-white animate-pulse' : 'bg-slate-700 text-slate-400 hover:text-white hover:bg-slate-600'"
+          title="Voice input">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4M12 15a3 3 0 003-3V5a3 3 0 00-6 0v7a3 3 0 003 3z"/></svg>
+        </button>
+        <button @click="send()" :disabled="!input.trim()"
+          class="bg-violet-600 hover:bg-violet-500 disabled:opacity-40 text-white p-3 rounded-2xl transition flex-shrink-0">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/>
+          </svg>
+        </button>
+      </div>
+      <div x-show="janeAttachedFiles.length > 0" x-cloak class="flex flex-wrap gap-2 mt-2">
+        <template x-for="(file, idx) in janeAttachedFiles" :key="file.path + '-' + idx">
+          <div class="inline-flex items-center gap-2 bg-slate-800 border border-slate-700 rounded-full px-3 py-1 text-xs text-slate-300">
+            <span class="truncate max-w-[14rem]" x-text="file.name"></span>
+            <button @click="removeJaneAttachment(idx)" class="text-slate-500 hover:text-white">✕</button>
+          </div>
+        </template>
+      </div>
+      <p class="text-slate-600 text-xs mt-2 text-center">Shift+Enter for new line</p>
+      <!-- Pending message queue panel -->
+      <div x-show="pendingMessages.length > 0" x-cloak class="mt-2">
+        <button @click="showQueue = !showQueue" class="text-slate-500 hover:text-slate-300 text-xs mx-auto block">
+          <span x-text="pendingMessages.length + ' queued'"></span>
+          <span x-text="showQueue ? '▾' : '▸'" class="ml-1"></span>
+        </button>
+        <div x-show="showQueue" x-cloak class="mt-2 bg-slate-800/80 border border-slate-700 rounded-lg p-2 max-h-40 overflow-y-auto scrollbar-thin">
+          <template x-for="(item, idx) in pendingMessages" :key="idx">
+            <div class="flex items-center gap-2 py-1 px-2 rounded hover:bg-slate-700/50 group text-xs text-slate-300">
+              <span class="text-slate-600 w-4 text-right shrink-0" x-text="idx + 1"></span>
+              <span class="truncate flex-1" x-text="item.message"></span>
+              <div class="flex gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                <button @click="moveQueueItem(idx, -1)" :disabled="idx === 0"
+                  class="text-slate-500 hover:text-white disabled:opacity-20 px-1" title="Move up">↑</button>
+                <button @click="moveQueueItem(idx, 1)" :disabled="idx === pendingMessages.length - 1"
+                  class="text-slate-500 hover:text-white disabled:opacity-20 px-1" title="Move down">↓</button>
+                <button @click="removeQueueItem(idx)"
+                  class="text-slate-500 hover:text-red-400 px-1" title="Remove">✕</button>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    function janeApp() {
+      const initialSessionId = {{ initial_session_id | tojson }};
+      const existingSessionId = sessionStorage.getItem('jane_web_session_id');
+      const sessionId = initialSessionId || existingSessionId || ('jane_web_' + Math.random().toString(36).slice(2));
+      sessionStorage.setItem('jane_web_session_id', sessionId);
+      return {
+        messages: JSON.parse(sessionStorage.getItem('jane_chat_messages') || '[]'),
+        input: '',
+        typing: false,
+        pendingMessages: [],
+        showQueue: false,
+        janeAttachedFiles: [],
+        composerMenuOpen: false,
+        responseMode: localStorage.getItem('jane_response_mode') || 'text',
+        speechSupported: 'speechSynthesis' in window,
+        isSpeaking: false,
+        currentSpeechText: '',
+        notificationsEnabled: localStorage.getItem('jane_notifications_enabled') === '1',
+        notificationPermission: ('Notification' in window) ? Notification.permission : 'unsupported',
+        janeOnline: true,
+        currentAbortController: null,
+        liveStatus: '',
+        livePlatform: '',
+        _liveReader: null,
+        sessionId,
+        chatListening: false,
+        activeEssence: null,
+        activeEssenceDisplay: '',
+
+        // Settings panel state
+        settingsOpen: false,
+        modelSettingsLoading: false,
+        modelProvider: '',
+        modelOptions: [],
+        defaultModel: '',
+        selectedModel: '',
+        modelSaveMsg: '',
+        modelSaveError: false,
+
+        formatStatusEntry(entry) {
+          const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+          const sep = entry.indexOf(': ');
+          if (sep === -1) {
+            let c = '#b0b8c4';
+            if (entry.startsWith('Reading')) c = '#c8ced6';
+            else if (entry.startsWith('Load')) c = '#bbf7d0';
+            return '<span style="color:' + c + '">' + esc(entry) + '</span>';
+          }
+          const label = entry.slice(0, sep);
+          let desc = entry.slice(sep + 2);
+          const fileLabels = ['Reading file', 'Editing file', 'Writing file'];
+          const cmdLabels = ['Running command'];
+          let color = '';
+          if (entry.startsWith('Load')) color = 'color: #bbf7d0';
+          else if (cmdLabels.includes(label)) color = 'color: #86efac';
+          else if (entry.startsWith('Reading')) color = 'color: #c8ced6';
+          else color = 'color: #b0b8c4';
+          /* Check for embedded actual command (tab-separated cmd:...) */
+          const cmdIdx = desc.indexOf('\tcmd:');
+          if (cmdIdx !== -1) {
+            const visibleDesc = desc.slice(0, cmdIdx);
+            const actualCmd = desc.slice(cmdIdx + 5);
+            const uid = 'cmd-' + Math.random().toString(36).slice(2, 8);
+            return '<details style="display:inline"><summary style="cursor:pointer;list-style:none;display:inline">'
+              + esc(label) + ': <span style="' + color + '">' + esc(visibleDesc) + '</span>'
+              + ' <span style="color:#64748b;font-size:0.75rem">▸</span>'
+              + '</summary>'
+              + '<pre style="margin:2px 0 0 12px;padding:4px 8px;background:#1e293b;border-radius:4px;font-size:0.8rem;color:#86efac;overflow-x:auto;white-space:pre-wrap;word-break:break-all">' + esc(actualCmd) + '</pre>'
+              + '</details>';
+          }
+          return esc(label) + ': <span style="' + color + '">' + esc(desc) + '</span>';
+        },
+
+        async send() {
+          const msg = this.input.trim();
+          if (!msg) return;
+          this.enqueueMessage(msg);
+          this.input = '';
+          this.$nextTick(() => { this.autoResize(this.$refs.inputBox); this.scrollBottom(true); });
+        },
+
+        setResponseMode(mode) {
+          this.responseMode = mode === 'audio' ? 'audio' : 'text';
+          localStorage.setItem('jane_response_mode', this.responseMode);
+        },
+
+        enqueueMessage(message) {
+          const msg = (message || '').trim();
+          if (!msg) return;
+          const fileContext = this.buildJaneFileContext();
+          this.messages.push({ role: 'user', text: msg });
+          this.pendingMessages.push({ message: msg, responseMode: this.responseMode, file_context: fileContext });
+          this.janeAttachedFiles = [];
+          this._userScrolledUp = false;  // Reset scroll on new message
+          if (!this.typing) {
+            this.processQueue();
+          }
+        },
+
+        moveQueueItem(idx, dir) {
+          const target = idx + dir;
+          if (target < 0 || target >= this.pendingMessages.length) return;
+          const items = this.pendingMessages;
+          [items[idx], items[target]] = [items[target], items[idx]];
+          // Force Alpine reactivity
+          this.pendingMessages = [...items];
+        },
+
+        removeQueueItem(idx) {
+          // Also remove the corresponding user bubble from chat
+          const removed = this.pendingMessages.splice(idx, 1)[0];
+          if (removed) {
+            // Find the matching user message (search from end, skip already-answered ones)
+            for (let i = this.messages.length - 1; i >= 0; i--) {
+              if (this.messages[i].role === 'user' && this.messages[i].text === removed.message) {
+                this.messages.splice(i, 1);
+                break;
+              }
+            }
+          }
+          if (this.pendingMessages.length === 0) this.showQueue = false;
+        },
+
+        async processQueue() {
+          if (this.typing || this.pendingMessages.length === 0) return;
+          const next = this.pendingMessages.shift();
+          const janeIndex = this.messages.push({ role: 'jane', text: '', ack: '', model: '', status: '', statusLog: [] }) - 1;
+          this._currentJaneIndex = janeIndex;
+          this.typing = true;
+
+          // Scroll to show Jane's new bubble (user just sent a message)
+          this.$nextTick(() => this.scrollBottom(true));
+
+          const MAX_RETRIES = 3;
+          const BASE_DELAY_MS = 2000;
+          let serverAcked = false;  // Track if the server received the message
+
+          for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+            try {
+              if (attempt > 0) {
+                // Only retry if the server never ack'd — otherwise the brain
+                // already has the message and retrying would produce a duplicate.
+                if (serverAcked) {
+                  console.warn('Server already ack\'d this message — not retrying to avoid duplicate');
+                  break;
+                }
+                const delay = BASE_DELAY_MS * Math.pow(2, attempt - 1);
+                this.messages[janeIndex].status = `Reconnecting to Jane (attempt ${attempt + 1}/${MAX_RETRIES + 1})...`;
+                this.messages[janeIndex].text = '';
+                await new Promise(resolve => setTimeout(resolve, delay));
+              }
+              this.currentAbortController = new AbortController();
+              const r = await fetch('/api/jane/chat/stream', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ message: next.message, session_id: this.sessionId, file_context: next.file_context, platform: 'web', tts_enabled: this.responseMode === 'audio' }),
+                signal: this.currentAbortController.signal,
+              });
+              if (!r.ok) {
+                const errMsg = await this.readJaneError(r);
+                if (r.status >= 500 && attempt < MAX_RETRIES && !serverAcked) continue;
+                throw new Error(errMsg);
+              }
+              if (!r.body) throw new Error('Jane stream was unavailable.');
+              serverAcked = true;  // Stream opened = server received the message
+              await this.consumeStream(r.body, janeIndex);
+              // Use the latest bubble index (may have split into multiple)
+              const finalIdx = this._currentJaneIndex ?? janeIndex;
+              if (!this.messages[finalIdx].text.trim()) {
+                this.messages[finalIdx].text = '_(no response)_';
+              }
+              await this.notifyReply('Jane', this.messages[finalIdx].text);
+              if (next.responseMode === 'audio') {
+                const finalMsg = this.messages[finalIdx];
+                const ttsText = finalMsg.spokenText || finalMsg.text;
+                this.speakText(ttsText);
+              }
+              break;
+            } catch (error) {
+              // User cancelled — don't treat as an error
+              if (error.name === 'AbortError') break;
+              const isNetworkError = error instanceof TypeError && error.message === 'Failed to fetch';
+              const isRetryable = isNetworkError || (error?.message || '').includes('status 5');
+              // Only retry if server never ack'd — prevents duplicate brain responses
+              if (isRetryable && attempt < MAX_RETRIES && !serverAcked) continue;
+
+              if (this.messages[janeIndex]) {
+                const partial = (this.messages[janeIndex].text || '').trim();
+                // Only try fallback if server never ack'd (no duplicate risk)
+                if (!partial && !serverAcked) {
+                  const recovered = await this.requestJaneFallback(next, janeIndex, error);
+                  if (recovered) {
+                    break;
+                  }
+                }
+                this.messages[janeIndex].text = partial
+                  ? `${partial}\n\n⚠️ Jane disconnected before the response finished.`
+                  : (error?.message || '⚠️ Could not reach Jane.');
+                this.messages[janeIndex].status = '';
+              }
+              break;
+            }
+          }
+          this.typing = false;
+          if (this.pendingMessages.length > 0) {
+            this.processQueue();
+          }
+        },
+
+        async consumeStream(stream, janeIndex) {
+          const reader = stream.getReader();
+          const decoder = new TextDecoder();
+          let buffer = '';
+          let sawTerminalEvent = false;
+
+          while (true) {
+            const { value, done } = await reader.read();
+            buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+
+            let newlineIndex;
+            while ((newlineIndex = buffer.indexOf('\n')) >= 0) {
+              const line = buffer.slice(0, newlineIndex).trim();
+              buffer = buffer.slice(newlineIndex + 1);
+              if (!line) continue;
+              if (this.applyStreamEvent(line, janeIndex)) {
+                sawTerminalEvent = true;
+              }
+            }
+
+            if (done) {
+              const tail = buffer.trim();
+              if (tail && this.applyStreamEvent(tail, janeIndex)) {
+                sawTerminalEvent = true;
+              }
+              break;
+            }
+          }
+
+          if (!sawTerminalEvent) {
+            throw new Error('Jane stream ended before completion.');
+          }
+        },
+
+        async requestJaneFallback(next, janeIndex, originalError) {
+          const msg = this.messages[janeIndex];
+          if (!msg) return false;
+          msg.status = 'Jane stream dropped. Retrying without streaming.';
+          try {
+            const response = await fetch('/api/jane/chat', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ message: next.message, session_id: this.sessionId, file_context: next.file_context, platform: 'web', tts_enabled: this.responseMode === 'audio' }),
+            });
+            if (!response.ok) {
+              throw new Error(await this.readJaneError(response));
+            }
+            const payload = await response.json();
+            const rawText = (payload?.response || '').trim();
+            if (!rawText) {
+              throw new Error('Jane returned an empty response.');
+            }
+            // Extract <spoken> block for TTS and dual-display
+            const spokenMatch = rawText.match(/<spoken>([\s\S]*?)<\/spoken>/i);
+            const spokenText = spokenMatch ? spokenMatch[1].trim() : null;
+            const fullText = rawText.replace(/<spoken>[\s\S]*?<\/spoken>/gi, '').trimEnd();
+            if (spokenText && fullText) {
+              msg.text = spokenText;
+              msg.fullResponse = fullText;
+            } else {
+              msg.text = fullText || spokenText || '_(no response)_';
+              msg.fullResponse = null;
+            }
+            msg.spokenText = spokenText;
+            msg.status = '';
+            await this.notifyReply('Jane', msg.text);
+            if (next.responseMode === 'audio') {
+              this.speakText(spokenText || msg.text);
+            }
+            return true;
+          } catch (fallbackError) {
+            console.error('Jane fallback request failed', fallbackError, originalError);
+            msg.status = '';
+            return false;
+          }
+        },
+
+        async readJaneError(response) {
+          let detail = '';
+          try {
+            const text = await response.text();
+            if (text) {
+              try {
+                const payload = JSON.parse(text);
+                detail = payload?.detail || payload?.response || payload?.error || text;
+              } catch {
+                detail = text;
+              }
+            }
+          } catch {
+            detail = '';
+          }
+          detail = (detail || '').trim();
+          return detail || `Jane request failed with status ${response.status}.`;
+        },
+
+        applyStreamEvent(line, janeIndex) {
+          let event;
+          try {
+            event = JSON.parse(line);
+          } catch {
+            return false;
+          }
+
+          let msg = this.messages[janeIndex];
+          if (!msg) return false;
+
+          // Helper: get the current active bubble
+          const getActive = () => {
+            const idx = this._currentJaneIndex ?? janeIndex;
+            return this.messages[idx] || msg;
+          };
+
+          // Helper: start a new bubble if the current one already has a final response
+          const maybeSplit = () => {
+            const active = getActive();
+            if (active.text && active.text.length > 50) {
+              const newIdx = this.messages.push({ role: 'jane', text: '', ack: '', model: '', status: '', statusLog: [], streamingText: '' }) - 1;
+              this._currentJaneIndex = newIdx;
+              return this.messages[newIdx];
+            }
+            return active;
+          };
+
+          if (event.type === 'heartbeat') {
+            return false;
+          } else if (event.type === 'offloaded') {
+            // Task was offloaded to background — show acknowledgment and mark the
+            // bubble with a progress ID so announcement updates can find it
+            const active = getActive();
+            active.text = event.data || 'Working on that in the background…';
+            active.status = '';
+            if (event.task_id) {
+              active._progressId = event.task_id;
+            }
+            this.$nextTick(() => this.scrollBottom());
+            // Don't return true — let the subsequent 'done' event close the stream
+          } else if (event.type === 'model') {
+            // Store which model is handling this response
+            const active = getActive();
+            active.model = event.data || '';
+          } else if (event.type === 'ack') {
+            // Classifier ack — don't show it, just note it silently
+            this.$nextTick(() => this.scrollBottom());
+          } else if (event.type === 'status') {
+            if (event.data) {
+              const active = getActive();
+              if (!active.statusLog) active.statusLog = [];
+              active.statusLog.push(event.data);
+              active.status = 'Working…';
+            }
+            this.$nextTick(() => this.scrollBottom());
+          } else if (event.type === 'permission_request') {
+            // Tool permission gate — show approve/deny dialog inline
+            try {
+              const data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
+              const active = getActive();
+              if (!active._permissionRequests) active._permissionRequests = [];
+              active._permissionRequests.push(data);
+              active.status = `⏳ Waiting for approval: ${data.tool_name}`;
+              this.$nextTick(() => this.scrollBottom(true));
+            } catch (e) { console.warn('Bad permission_request event:', e); }
+          } else if (event.type === 'thought') {
+            if (event.data) {
+              const active = getActive();
+              if (!active.statusLog) active.statusLog = [];
+              active.statusLog.push({ text: event.data, type: 'thought' });
+              active.status = 'Thinking…';
+            }
+            this.$nextTick(() => this.scrollBottom());
+          } else if (event.type === 'tool_use') {
+            if (event.data) {
+              const active = getActive();
+              if (!active.statusLog) active.statusLog = [];
+              active.statusLog.push({ text: event.data, type: 'tool_use' });
+              active.status = 'Working…';
+            }
+            this.$nextTick(() => this.scrollBottom());
+          } else if (event.type === 'tool_result') {
+            if (event.data) {
+              const active = getActive();
+              if (!active.statusLog) active.statusLog = [];
+              active.statusLog.push({ text: event.data, type: 'tool_result' });
+            }
+            this.$nextTick(() => this.scrollBottom());
+          } else if (event.type === 'delta' && event.data) {
+            // Accumulate into streamingText (shown inside disclosure triangle while streaming).
+            // Only the 'done' event sets msg.text (the visible final response).
+            const active = getActive();
+            active.streamingText = (active.streamingText || '') + event.data;
+            // Hide <spoken> block from streaming preview
+            active.streamingText = active.streamingText.replace(/<spoken>[\s\S]*?<\/spoken>/gi, '').replace(/<spoken>[\s\S]*$/i, '');
+            active.status = '';
+            this.$nextTick(() => this.scrollBottom());
+          } else if (event.type === 'done') {
+            const active = getActive();
+            const doneText = event.data || '';
+            const deltaText = active.streamingText || '';
+            // Always prefer the done payload — it's the canonical complete response.
+            // Fall back to accumulated streamingText if done arrives with no payload.
+            const rawText = doneText ? doneText : (deltaText || '_(no response)_');
+            active.streamingText = ''; // clear streaming preview now that final response is set
+            // Extract <spoken> block for TTS and dual-display
+            const spokenMatch = rawText.match(/<spoken>([\s\S]*?)<\/spoken>/i);
+            active.spokenText = spokenMatch ? spokenMatch[1].trim() : null;
+            const fullText = rawText.replace(/<spoken>[\s\S]*?<\/spoken>/gi, '').trimEnd();
+            // Dual response: if TTS mode produced a spoken block, show spoken as primary
+            // and full detail in a collapsible section
+            if (active.spokenText && fullText) {
+              active.text = active.spokenText;
+              active.fullResponse = fullText;
+            } else {
+              active.text = fullText || active.spokenText || '_(no response)_';
+              active.fullResponse = null;
+            }
+            active.status = '';
+            this.$nextTick(() => this.scrollBottom());
+          } else if (event.type === 'error') {
+            const active = getActive();
+            active.text = event.data || '⚠️ Could not reach Jane.';
+            active.status = '';
+            return true;
+          }
+          return event.type === 'done';
+        },
+
+        _userNearBottom: true,
+
+        _initScrollTracker() {
+          const el = document.getElementById('chat-messages');
+          if (!el) return;
+          this._userScrolledUp = false;
+          el.addEventListener('scroll', () => {
+            const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
+            // User is "scrolled up" if they're more than 200px from the bottom
+            this._userScrolledUp = dist > 200;
+          }, { passive: true });
+        },
+
+        scrollBottom(force) {
+          const el = document.getElementById('chat-messages');
+          if (!el) return;
+          // Wait for browser layout/paint before scrolling — $nextTick fires
+          // after Vue's vDOM update but before the browser has calculated the
+          // new element heights, causing partial scrolls on new bubbles.
+          requestAnimationFrame(() => {
+            if (force) {
+              el.scrollTop = el.scrollHeight;
+              this._userScrolledUp = false;
+              return;
+            }
+            if (!this._userScrolledUp) {
+              el.scrollTop = el.scrollHeight;
+            }
+          });
+        },
+
+        formatMessage(text) {
+          if (!text) return '';
+
+          // --- Phase 1: Extract special blocks into placeholders ---
+          const restored = [];
+          const placeholder = (html) => { restored.push(html); return `\x00R${restored.length-1}\x00`; };
+
+          let s = text;
+
+          // 1pre. Diff code blocks — extract before markdown
+          s = s.replace(/```diff\n([\s\S]*?)```/g, (_, body) => {
+            const lines = body.replace(/\n$/, '').split('\n').map(line => {
+              const esc = line.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+              if (line.startsWith('@@'))  return `<div class="diff-line diff-hunk">${esc}</div>`;
+              if (line.startsWith('+'))   return `<div class="diff-line diff-add">${esc}</div>`;
+              if (line.startsWith('-'))   return `<div class="diff-line diff-del">${esc}</div>`;
+              return `<div class="diff-line diff-ctx">${esc}</div>`;
+            }).join('');
+            return placeholder(`<div class="diff-block"><div class="diff-header">Diff</div>${lines}</div>`);
+          });
+
+          // 1a. LaTeX — extract before markdown touches the $ signs
+          s = s.replace(/\$\$([\s\S]+?)\$\$/g, (_, m) => placeholder(this._renderMath(m, true)));
+          s = s.replace(/\$([^\$\n]+?)\$/g,     (_, m) => placeholder(this._renderMath(m, false)));
+
+          // 1b. Vault images (![alt](url) with vault paths)
+          s = s.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_, alt, url) => {
+            const isVault = url.startsWith('/api/files/serve/') || url.startsWith('images/') || url.startsWith('/images/');
+            const src = isVault && !url.startsWith('/') ? '/api/files/serve/' + url : url;
+            return placeholder(
+              `<a href="${src}" target="_blank" class="inline-block my-2">` +
+              `<img src="${src}" alt="${alt || 'image'}" class="max-w-[240px] max-h-[240px] rounded-xl border border-slate-600 cursor-pointer hover:opacity-90 transition" onerror="this.outerHTML='<span class=\\'text-slate-500 text-xs\\'>[Image not found]</span>'"/>` +
+              `</a>`
+            );
+          });
+          // Vault image links [text](/api/files/serve/...image)
+          s = s.replace(/\[([^\]]*)\]\((\/api\/files\/serve\/[^)]*\.(?:png|jpe?g|gif|webp|bmp|heic|svg))\)/gi, (_, txt, url) => {
+            return placeholder(
+              `<a href="${url}" target="_blank" class="inline-block my-2">` +
+              `<img src="${url}" alt="${txt}" class="max-w-[240px] max-h-[240px] rounded-xl border border-slate-600 cursor-pointer hover:opacity-90 transition" onerror="this.outerHTML='<span class=\\'text-slate-500 text-xs\\'>[Image not found]</span>'"/>` +
+              `</a>`
+            );
+          });
+
+          {% raw %}
+          // 1c. Custom tags — extract before markdown
+          s = s.replace(/\{\{image:(.+?)\}\}/g, (_, path) => {
+            const url = `/api/files/serve/${path.trim()}`;
+            return placeholder(`<div class="my-2"><img src="${url}" alt="${path.trim().split('/').pop()}" class="max-w-[320px] max-h-[320px] rounded-xl border border-slate-600 cursor-pointer hover:opacity-90 transition" onclick="window.open('${url}', '_blank')" onerror="this.outerHTML='<span class=\\'text-slate-500 text-xs\\'>[Image not found]</span>'"/></div>`);
+          });
+          s = s.replace(/\{\{play:(.+?)\}\}/g, (_, path) => {
+            const url = `/api/files/serve/${path.trim()}`;
+            const name = path.trim().split('/').pop();
+            return placeholder(
+              `<div class="my-2 flex items-center gap-3 bg-slate-800 rounded-xl px-4 py-3 border border-slate-700">` +
+              `<button onclick="const a=this.nextElementSibling;a.paused?a.play():a.pause();this.textContent=a.paused?'▶':'⏸'" class="text-violet-400 hover:text-violet-300 text-lg flex-shrink-0">▶</button>` +
+              `<audio src="${url}" preload="none" onended="this.previousElementSibling.textContent='▶'"></audio>` +
+              `<span class="text-slate-300 text-sm truncate">${name}</span>` +
+              `<a href="${url}" download="${name}" class="ml-auto text-slate-500 hover:text-slate-300 text-xs">↓</a>` +
+              `</div>`
+            );
+          });
+          s = s.replace(/\{\{navigate:(.+?)\}\}/g, (_, name) => {
+            const route = name.trim() === 'Daily Briefing' ? '/briefing'
+              : name.trim() === 'Life Librarian' ? '/vault'
+              : name.trim() === 'Work Log' ? '/worklog'
+              : `/?essence=${encodeURIComponent(name.trim())}`;
+            return placeholder(
+              `<a href="${route}" class="inline-flex items-center gap-1 px-3 py-1 my-1 rounded-full bg-violet-600/20 text-violet-300 text-xs font-medium hover:bg-violet-600/30 transition no-underline">` +
+              `<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6"/></svg> ` +
+              `Open ${name.trim()}</a>`
+            );
+          });
+          s = s.replace(/\{\{open_file:(.+?)\}\}/g, (_, path) => {
+            return placeholder(
+              `<a href="/vault" class="inline-flex items-center gap-1 px-3 py-1 my-1 rounded-full bg-violet-600/20 text-violet-300 text-xs font-medium hover:bg-violet-600/30 transition no-underline">` +
+              `<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg> ` +
+              `View file</a>`
+            );
+          });
+          {% endraw %}
+
+          // --- Phase 2: Run markdown renderer ---
+          if (typeof marked !== 'undefined') {
+            const renderer = new marked.Renderer();
+            const defaultCode = renderer.code.bind(renderer);
+            renderer.code = function({ text, lang, escaped }) {
+              const raw = defaultCode({ text, lang, escaped });
+              const label = lang ? `Code (${lang})` : 'Output';
+              return `<details class="code-collapse"><summary>${label}</summary>${raw}</details>`;
+            };
+            s = marked.parse(s, { breaks: true, gfm: true, renderer });
+          } else {
+            // Fallback: basic escaping + line breaks
+            s = s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>');
+          }
+
+          // --- Phase 3: Restore placeholders ---
+          s = s.replace(/\x00R(\d+)\x00/g, (_, i) => restored[+i]);
+          // Marked may wrap placeholders in <p> tags — also handle HTML-escaped versions
+          s = s.replace(/\x00R(\d+)\x00/g, (_, i) => restored[+i]);
+
+          return s;
+        },
+
+        _renderMath(src, display) {
+          try {
+            return typeof katex !== 'undefined'
+              ? katex.renderToString(src.trim(), { displayMode: display, throwOnError: false })
+              : `<code>${display ? '$$' : '$'}${src}${display ? '$$' : '$'}</code>`;
+          } catch(e) { return `<code>${src}</code>`; }
+        },
+
+        hasMathPreview(text) { return /\$/.test(text); },
+
+        autoResize(el) {
+          el.style.height = 'auto';
+          const h = Math.min(el.scrollHeight, 128);
+          el.style.height = h + 'px';
+          el.style.overflow = el.scrollHeight > 128 ? 'auto' : 'hidden';
+        },
+
+        async onJaneFilePick(event) {
+          const files = Array.from(event.target.files || []);
+          event.target.value = '';
+          if (!files.length) return;
+          await this.uploadJaneFiles(files);
+        },
+
+        openJanePicker(kind) {
+          this.composerMenuOpen = false;
+          this.$nextTick(() => {
+            const refName = kind === 'camera' ? 'janeCameraInput' : 'janeFileInput';
+            const input = this.$refs[refName];
+            if (input) {
+              setTimeout(() => input.click(), 0);
+            }
+          });
+        },
+
+        isImageUpload(file) {
+          return !!(file && ((file.type || '').startsWith('image/') || /\.(png|jpe?g|gif|webp|bmp|heic|svg)$/i.test(file.name || '')));
+        },
+
+        async collectJaneUploadDescriptions(files) {
+          const descriptions = [];
+          for (const file of files) {
+            if (!this.isImageUpload(file)) {
+              descriptions.push('');
+              continue;
+            }
+            const suggested = (file.name || 'image')
+              .replace(/\.[^.]+$/, '')
+              .replace(/[_-]+/g, ' ')
+              .trim();
+            const promptText = `Give this image a short description so Jane can save it with a meaningful name.`;
+            const description = window.prompt(promptText, suggested);
+            if (!description || !description.trim()) {
+              throw new Error(`Image description required for ${file.name || 'image upload'}.`);
+            }
+            descriptions.push(description.trim());
+          }
+          return descriptions;
+        },
+
+        async uploadJaneFiles(files) {
+          const fd = new FormData();
+          let descriptions = [];
+          try {
+            descriptions = await this.collectJaneUploadDescriptions(files);
+          } catch (error) {
+            alert(error.message || 'Image upload needs a description.');
+            return;
+          }
+          for (const file of files) fd.append('files', file);
+          fd.append('descriptions_json', JSON.stringify(descriptions));
+          const response = await fetch('/api/files/upload', { method: 'POST', body: fd });
+          if (!response.ok) {
+            let detail = '';
+            try {
+              const errorBody = await response.json();
+              detail = errorBody.detail || '';
+            } catch (_) {}
+            alert(detail || `Jane file upload failed (${response.status}).`);
+            console.error('Jane file upload failed', response.status);
+            return;
+          }
+          const data = await response.json();
+          for (const result of (data.results || [])) {
+            const path = result.path || result.existing_path;
+            if (!path) continue;
+            if (!this.janeAttachedFiles.some(file => file.path === path)) {
+              this.janeAttachedFiles.push({
+                name: result.saved_name || result.name || path.split('/').pop(),
+                path,
+                description: result.description || '',
+              });
+            }
+          }
+        },
+
+        removeJaneAttachment(index) {
+          this.janeAttachedFiles.splice(index, 1);
+        },
+
+        buildJaneFileContext() {
+          if (!this.janeAttachedFiles.length) return null;
+          const lines = this.janeAttachedFiles.map(file => {
+            const suffix = file.description ? ` — ${file.description}` : '';
+            return `- ${file.name} (${file.path})${suffix}`;
+          });
+          return `Attached files:\\n${lines.join('\\n')}`;
+        },
+
+        async registerNotifications() {
+          if (!('serviceWorker' in navigator)) return null;
+          try {
+            return await navigator.serviceWorker.register('/sw.js');
+          } catch (error) {
+            console.error('Jane service worker registration failed', error);
+            return null;
+          }
+        },
+
+        async toggleNotifications() {
+          if (this.notificationsEnabled) {
+            this.notificationsEnabled = false;
+            localStorage.setItem('jane_notifications_enabled', '0');
+            this.composerMenuOpen = false;
+            return;
+          }
+          if (!('Notification' in window)) {
+            this.composerMenuOpen = false;
+            return;
+          }
+          const registration = await this.registerNotifications();
+          let permission = Notification.permission;
+          if (permission === 'default') {
+            permission = await Notification.requestPermission();
+          }
+          this.notificationPermission = permission;
+          this.notificationsEnabled = permission === 'granted' && !!registration;
+          localStorage.setItem('jane_notifications_enabled', this.notificationsEnabled ? '1' : '0');
+          this.composerMenuOpen = false;
+        },
+
+        async notifyReply(agentName, text) {
+          if (!this.notificationsEnabled || this.notificationPermission !== 'granted' || !document.hidden) return;
+          const body = (text || '').replace(/\s+/g, ' ').trim().slice(0, 180) || `${agentName} sent a reply.`;
+          try {
+            const registration = await navigator.serviceWorker.getRegistration();
+            if (!registration) return;
+            await registration.showNotification(`${agentName} replied`, {
+              body,
+              icon: '/static/jane-app-icon.svg',
+              badge: '/static/jane-badge.svg',
+              tag: 'jane-reply',
+              renotify: true,
+              silent: false,
+              vibrate: [180, 80, 180],
+              data: { url: '/' },
+            });
+          } catch (error) {
+            console.error('Jane notification failed', error);
+          }
+        },
+
+        async fetchAnnouncements() {
+          try {
+            const since = localStorage.getItem('jane_announcements_last_seen');
+            const url = since
+              ? `/api/jane/announcements?since=${encodeURIComponent(since)}`
+              : '/api/jane/announcements';
+            const response = await fetch(url, { cache: 'no-store' });
+            if (!response.ok) return;
+            const payload = await response.json();
+            const items = Array.isArray(payload.items) ? payload.items : [];
+            for (const item of items) {
+              if (!item?.message) continue;
+              const ts = item.created_at || item.timestamp;
+              // Progress updates with an ID: update existing bubble or create one
+              if (item.id && item.type === 'queue_progress') {
+                const existing = this.messages.find(m => m._progressId === item.id);
+                if (existing) {
+                  existing.text = item.message;
+                } else {
+                  this.messages.push({ role: 'jane', text: item.message, status: '', statusLog: [], _progressId: item.id });
+                }
+                // If final, clear the progress ID so it becomes a normal bubble
+                if (item.final && existing) {
+                  delete existing._progressId;
+                }
+              } else {
+                this.messages.push({ role: 'jane', text: item.message, status: '', statusLog: [] });
+              }
+              if (ts) {
+                localStorage.setItem('jane_announcements_last_seen', ts);
+              }
+            }
+            // Don't auto-scroll for announcements — user may be reading
+          } catch (error) {
+            console.error('Jane announcement poll failed', error);
+          }
+        },
+
+        speakText(text) {
+          if (!this.speechSupported) return;
+          const cleaned = (text || '')
+            .replace(/[_*`#>\-\[\]\(\)]/g, ' ')
+            .replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{FE00}-\u{FE0F}\u{1F900}-\u{1F9FF}\u{1FA00}-\u{1FA6F}\u{1FA70}-\u{1FAFF}\u{200D}\u{20E3}\u{E0020}-\u{E007F}]/gu, '')
+            .replace(/\s+/g, ' ')
+            .trim();
+          if (!cleaned) return;
+          this.stopSpeech();
+          const utterance = new SpeechSynthesisUtterance(cleaned);
+          utterance.onstart = () => {
+            this.isSpeaking = true;
+            this.currentSpeechText = text || '';
+          };
+          utterance.onend = () => this.resetSpeechState();
+          utterance.onerror = () => this.resetSpeechState();
+          this.currentSpeechText = text || '';
+          this.isSpeaking = true;
+          window.speechSynthesis.speak(utterance);
+        },
+
+        stopSpeech() {
+          if (!this.speechSupported) return;
+          window.speechSynthesis.cancel();
+          this.resetSpeechState();
+        },
+
+        resetSpeechState() {
+          this.isSpeaking = false;
+          this.currentSpeechText = '';
+        },
+
+        async respondPermission(requestId, approved) {
+          try {
+            await fetch('/api/jane/permission/respond', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ request_id: requestId, approved }),
+            });
+            // Remove this request from the UI
+            for (const msg of this.messages) {
+              if (msg._permissionRequests) {
+                const idx = msg._permissionRequests.findIndex(r => r.request_id === requestId);
+                if (idx >= 0) {
+                  msg._permissionRequests.splice(idx, 1);
+                  msg.status = approved ? 'Approved, continuing...' : 'Denied.';
+                  break;
+                }
+              }
+            }
+          } catch (e) {
+            console.warn('Failed to respond to permission request:', e);
+          }
+        },
+
+        async checkPendingPermissions() {
+          // On page load, check if there are pending permission requests (e.g. after refresh)
+          try {
+            const r = await fetch('/api/jane/permission/pending');
+            if (r.ok) {
+              const data = await r.json();
+              if (data.requests && data.requests.length > 0) {
+                // Show pending requests in the last jane message or create a new one
+                let target = this.messages[this.messages.length - 1];
+                if (!target || target.role !== 'jane') {
+                  this.messages.push({ role: 'jane', text: '', status: '', statusLog: [] });
+                  target = this.messages[this.messages.length - 1];
+                }
+                target._permissionRequests = data.requests;
+                target.status = `⏳ ${data.requests.length} pending permission request(s)`;
+              }
+            }
+          } catch (e) { /* ignore */ }
+        },
+
+        focusInput() {
+          this.$nextTick(() => this.$refs.inputBox?.focus());
+        },
+
+        endSession() {
+          this.stopSpeech();
+          if (!this.sessionId) return;
+          const payload = JSON.stringify({ session_id: this.sessionId });
+          navigator.sendBeacon('/api/jane/session/end', new Blob([payload], { type: 'application/json' }));
+          sessionStorage.removeItem('jane_web_session_id');
+        },
+
+        clearSession() {
+          this.cancelResponse();
+          this.endSession();
+          this.messages = [];
+          this.pendingMessages = [];
+          this.typing = false;
+          sessionStorage.removeItem('jane_chat_messages');
+          const newId = 'jane_web_' + Math.random().toString(36).slice(2);
+          this.sessionId = newId;
+          sessionStorage.setItem('jane_web_session_id', newId);
+        },
+
+        copyText(text, event) {
+          const cleaned = (text || '').trim();
+          if (!cleaned) return;
+          navigator.clipboard.writeText(cleaned).then(() => {
+            const btn = event?.target?.closest('button');
+            if (btn) {
+              const orig = btn.innerHTML;
+              btn.textContent = 'Copied!';
+              setTimeout(() => { btn.innerHTML = orig; }, 1500);
+            }
+          }).catch(() => {});
+        },
+
+        // ── Model Settings ──────────────────────────────────────────────────
+        async loadModelSettings() {
+          this.modelSettingsLoading = true;
+          this.modelSaveMsg = '';
+          try {
+            const r = await fetch('/api/settings/models');
+            if (r.ok) {
+              const data = await r.json();
+              this.modelProvider = data.provider || 'claude';
+              const providerModels = data.available_models || {};
+              this.modelOptions = providerModels[this.modelProvider] || [];
+              this.selectedModel = data.model?.current || '';
+              this.defaultModel = data.model?.default || '';
+            }
+          } catch (e) { console.warn('Failed to load model settings:', e); }
+          this.modelSettingsLoading = false;
+        },
+
+        async saveModelSettings() {
+          this.modelSaveMsg = '';
+          this.modelSaveError = false;
+          try {
+            const r = await fetch('/api/settings/models', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ model: this.selectedModel }),
+            });
+            if (r.ok) {
+              this.modelSaveMsg = 'Saved. Brain restarted with new model.';
+            } else {
+              this.modelSaveError = true;
+              this.modelSaveMsg = 'Failed to save settings.';
+            }
+          } catch (e) {
+            this.modelSaveError = true;
+            this.modelSaveMsg = 'Network error saving settings.';
+          }
+          setTimeout(() => { this.modelSaveMsg = ''; }, 4000);
+        },
+
+        resetModelDefaults() {
+          this.selectedModel = this.defaultModel;
+        },
+
+        cancelResponse() {
+          if (this.currentAbortController) {
+            this.currentAbortController.abort();
+            this.currentAbortController = null;
+          }
+          this.pendingMessages = [];
+          // Mark any streaming jane message as cancelled
+          const last = this.messages[this.messages.length - 1];
+          if (last && last.role === 'jane' && this.typing) {
+            last.text = last.text ? last.text + '\n\n*(cancelled)*' : '*(cancelled)*';
+            last.status = '';
+          }
+          this.typing = false;
+        },
+
+        _healthFailCount: 0,
+
+        async checkHealth() {
+          try {
+            const r = await fetch('/health', { cache: 'no-store', signal: AbortSignal.timeout(10000) });
+            if (r.ok) {
+              this._healthFailCount = 0;
+              this.janeOnline = true;
+            } else {
+              this._healthFailCount++;
+            }
+          } catch {
+            this._healthFailCount++;
+          }
+          // Only show offline after 2+ consecutive failures (avoids flicker during heavy requests)
+          if (this._healthFailCount >= 2) {
+            this.janeOnline = false;
+          }
+        },
+
+        init() {
+          this._initScrollTracker();
+          // Auto-save messages to sessionStorage on every change
+          this.$watch('messages', (msgs) => {
+            try {
+              // Strip streaming state before saving
+              const clean = msgs.map(m => ({...m, status: '', statusLog: []}));
+              sessionStorage.setItem('jane_chat_messages', JSON.stringify(clean));
+            } catch(e) { /* sessionStorage full or unavailable */ }
+          });
+          // Scroll to bottom if restoring messages
+          if (this.messages.length > 0) {
+            this.$nextTick(() => this.scrollBottom());
+          }
+          this.registerNotifications();
+          this.notificationPermission = ('Notification' in window) ? Notification.permission : 'unsupported';
+          this.fetchAnnouncements();
+          this.checkHealth();
+          this.checkPendingPermissions();
+          this.startLiveListener();
+
+          // Check for essence activation from URL param or already-active essence
+          const params = new URLSearchParams(window.location.search);
+          const essenceParam = params.get('essence');
+          if (essenceParam) {
+            // Clean the URL (remove ?essence= param) without reloading
+            const cleanUrl = window.location.pathname;
+            window.history.replaceState({}, '', cleanUrl);
+            this.activateEssenceAndInit(essenceParam);
+          } else {
+            // Check if there's already an active essence
+            this.loadActiveEssence();
+            this.initSession();
+          }
+
+          // Prefetch memory after 2s of idle so it's ready when the user types
+          setTimeout(() => {
+            fetch('/api/jane/prefetch-memory', { method: 'POST', credentials: 'include' })
+              .catch(() => {});
+          }, 2000);
+          window.setInterval(() => this.fetchAnnouncements(), 15000);
+          window.setInterval(() => this.checkHealth(), 15000);
+          window.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape') {
+              this.focusInput();
+            }
+          });
+          this.focusInput();
+        },
+
+        async loadActiveEssence() {
+          try {
+            const r = await fetch('/api/essences/active');
+            if (r.ok) {
+              const data = await r.json();
+              const active = data.active || [];
+              if (active.length > 0) {
+                this.activeEssence = active[0];
+                // Fetch display name from essences list
+                const allEssences = await _fetchAllEssences();
+                const match = allEssences.find(e => e.name === this.activeEssence);
+                this.activeEssenceDisplay = match ? (match.role_title || match.name) : this.activeEssence;
+              }
+            }
+          } catch (e) { /* non-fatal */ }
+        },
+
+        async activateEssenceAndInit(essenceName) {
+          // Activate the essence via API (may already be active from essences page)
+          let resolvedName = essenceName;
+          try {
+            const r = await fetch(`/api/essences/${encodeURIComponent(essenceName)}/activate`, { method: 'POST' });
+            if (r.ok) {
+              const data = await r.json();
+              if (data.name) resolvedName = data.name;
+            }
+          } catch (e) { /* best effort — may already be activated */ }
+
+          this.activeEssence = resolvedName;
+          // Fetch display name
+          try {
+            const allEssences = await _fetchAllEssences();
+            const match = allEssences.find(e => e.name === resolvedName);
+            this.activeEssenceDisplay = match ? (match.role_title || match.name) : resolvedName;
+          } catch (e) {
+            this.activeEssenceDisplay = resolvedName;
+          }
+
+          // Invalidate the context cache so Jane picks up the new essence personality
+          try {
+            await fetch('/api/jane/invalidate-essence-cache', { method: 'POST' });
+          } catch (e) { /* non-fatal */ }
+
+          // Clear history for a fresh essence session and init
+          this.messages = [];
+          sessionStorage.removeItem('jane_web_session_id');
+          const newSessionId = 'jane_web_' + Math.random().toString(36).slice(2);
+          sessionStorage.setItem('jane_web_session_id', newSessionId);
+          this.sessionId = newSessionId;
+
+          this.initSession();
+        },
+
+        async deactivateEssence() {
+          try {
+            await fetch('/api/essences/deactivate', { method: 'POST' });
+            // Invalidate cache
+            await fetch('/api/jane/invalidate-essence-cache', { method: 'POST' }).catch(() => {});
+          } catch (e) { /* best effort */ }
+          this.activeEssence = null;
+          this.activeEssenceDisplay = '';
+          // Reset session for a clean Jane experience
+          this.messages = [];
+          sessionStorage.removeItem('jane_web_session_id');
+          const newSessionId = 'jane_web_' + Math.random().toString(36).slice(2);
+          sessionStorage.setItem('jane_web_session_id', newSessionId);
+          this.sessionId = newSessionId;
+          this.initSession();
+        },
+
+        async initSession() {
+          // Skip if there's already chat history (returning user with active session)
+          if (this.messages.length > 0) return;
+
+          // Show wake-up message
+          const initIndex = this.messages.push({
+            role: 'jane',
+            text: '',
+            status: 'Waking up...',
+            statusLog: []
+          }) - 1;
+          const msg = this.messages[initIndex];
+
+          try {
+            const r = await fetch('/api/jane/init-session', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ session_id: this.sessionId }),
+            });
+
+            if (!r.ok) {
+              msg.text = "Hey, give me a sec to wake my brain up with a cup of coffee (initializing my memory)";
+              msg.status = '';
+              return;
+            }
+
+            const contentType = r.headers.get('content-type') || '';
+            if (contentType.includes('application/json')) {
+              // Non-streaming response (skipped or already_warm)
+              const data = await r.json();
+              if (data.status === 'already_warm') {
+                // Remove the init message — session is already warm
+                this.messages.splice(initIndex, 1);
+                return;
+              }
+              msg.text = data.greeting || "Hey! What's on your mind?";
+              msg.status = '';
+              msg.statusLog.push('Ready');
+              return;
+            }
+
+            // Streaming NDJSON response
+            const reader = r.body.getReader();
+            const decoder = new TextDecoder();
+            let buf = '';
+            while (true) {
+              const { value, done } = await reader.read();
+              if (done) break;
+              buf += decoder.decode(value || new Uint8Array(), { stream: !done });
+              let nl;
+              while ((nl = buf.indexOf('\n')) >= 0) {
+                const line = buf.slice(0, nl).trim();
+                buf = buf.slice(nl + 1);
+                if (!line) continue;
+                try {
+                  const event = JSON.parse(line);
+                  if (event.type === 'status') {
+                    msg.statusLog.push(event.data);
+                    msg.status = 'Working...';
+                  } else if (event.type === 'done') {
+                    msg.text = event.data || "Hey! What's on your mind?";
+                    msg.status = '';
+                  }
+                } catch {}
+              }
+            }
+
+            if (!msg.text) {
+              msg.text = "Hey! What's on your mind?";
+              msg.status = '';
+            }
+          } catch (e) {
+            console.warn('Session init failed:', e);
+            msg.text = "Hey! What's on your mind?";
+            msg.status = '';
+          }
+
+          this.$nextTick(() => this.scrollBottom());
+        },
+
+        async startLiveListener() {
+          try {
+            const r = await fetch('/api/jane/live');
+            if (!r.ok || !r.body) return;
+            const reader = r.body.getReader();
+            this._liveReader = reader;
+            const decoder = new TextDecoder();
+            let buf = '';
+            while (true) {
+              const { value, done } = await reader.read();
+              if (done) break;
+              buf += decoder.decode(value || new Uint8Array(), { stream: true });
+              let nl;
+              while ((nl = buf.indexOf('\n')) >= 0) {
+                const line = buf.slice(0, nl).trim();
+                buf = buf.slice(nl + 1);
+                if (!line) continue;
+                try {
+                  const evt = JSON.parse(line);
+                  if (evt.type === 'keepalive') continue;
+                  // Don't show events from our own session
+                  if (evt.source_session === this.sessionId?.slice(0, 12)) continue;
+                  const platformLabel = { web: 'web', android: 'Android', cli: 'CLI' }[evt.source_platform] || evt.source_platform;
+                  if (evt.type === 'start') {
+                    this.liveStatus = 'Jane is working on: ' + (evt.user_message || '').slice(0, 80) + '...';
+                    this.livePlatform = platformLabel;
+                  } else if (evt.type === 'progress') {
+                    this.liveStatus = evt.data || '';
+                    this.livePlatform = platformLabel;
+                  } else if (evt.type === 'done' || evt.type === 'error') {
+                    this.liveStatus = '';
+                    this.livePlatform = '';
+                  }
+                } catch {}
+              }
+            }
+            // Stream ended normally — reconnect after 5s
+            setTimeout(() => this.startLiveListener(), 5000);
+          } catch {
+            // Silently reconnect after 5s
+            setTimeout(() => this.startLiveListener(), 5000);
+          }
+        },
+      }
+    }
+
+    /* ── Shared essences cache ──────────────────────────────────────── */
+    const _essencesCache = { data: null, loading: null };
+    async function _fetchAllEssences() {
+      if (_essencesCache.data) return _essencesCache.data;
+      if (_essencesCache.loading) return _essencesCache.loading;
+      _essencesCache.loading = (async () => {
+        try {
+          const r = await fetch('/api/essences', { cache: 'no-store' });
+          if (r.ok) {
+            _essencesCache.data = await r.json();
+          } else {
+            _essencesCache.data = [];
+          }
+        } catch (e) {
+          console.error('Failed to fetch essences', e);
+          _essencesCache.data = [];
+        }
+        _essencesCache.loading = null;
+        return _essencesCache.data;
+      })();
+      return _essencesCache.loading;
+    }
+    // Pre-fetch essences on page load so dropdowns open instantly
+    _fetchAllEssences();
+
+    function essenceDropdown() {
+      return {
+        open: false,
+        items: [],
+        loading: false,
+        currentPage: window.location.pathname === '/vault' ? 'vault' : window.location.pathname === '/briefing' ? 'briefing' : 'jane',
+        async toggle() {
+          if (!this.open) {
+            this.loading = true;
+            this.open = true;
+            await this.fetchItems();
+            this.loading = false;
+          } else {
+            this.open = false;
+          }
+        },
+        async fetchItems() {
+          try {
+            const all = await _fetchAllEssences();
+            this.items = all.filter(i => i.type === 'essence').sort((a, b) => a.name.localeCompare(b.name));
+          } catch (e) { console.error('Failed to fetch essences', e); }
+        },
+      }
+    }
+    function toolsDropdown() {
+      return {
+        open: false,
+        items: [],
+        loading: false,
+        async toggle() {
+          if (!this.open) {
+            this.loading = true;
+            this.open = true;
+            await this.fetchItems();
+            this.loading = false;
+          } else {
+            this.open = false;
+          }
+        },
+        async fetchItems() {
+          try {
+            const all = await _fetchAllEssences();
+            this.items = all.filter(i => (i.type || 'tool') === 'tool').sort((a, b) => a.name.localeCompare(b.name));
+          } catch (e) { console.error('Failed to fetch tools', e); }
+        },
+      }
+    }
+  </script>
+</body>
+</html>

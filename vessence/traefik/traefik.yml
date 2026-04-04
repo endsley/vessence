@@ -1,0 +1,23 @@
+# Traefik static configuration for Vessence
+# Serves vault.localhost and jane.localhost cleanly without port numbers.
+
+api:
+  dashboard: false
+  insecure: false
+
+entryPoints:
+  web:
+    address: ":80"
+    forwardedHeaders:
+      insecure: true   # Trust X-Forwarded-* from cloudflared (needed for OAuth redirect URLs)
+
+providers:
+  docker:
+    endpoint: "unix:///var/run/docker.sock"
+    exposedByDefault: false
+    network: vessence
+
+log:
+  level: WARN
+
+accessLog: {}

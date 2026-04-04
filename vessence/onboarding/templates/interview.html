@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Vessence — Getting to know you</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { background: #0a0a0f; color: #e2e8f0; font-family: 'Inter', system-ui, sans-serif; }
+    .card { background: #13131a; border: 1px solid #1e1e2e; }
+    input[type=text], textarea {
+      background: #0d0d14; border: 1px solid #2d2d40; color: #e2e8f0;
+      transition: border-color 0.2s;
+    }
+    input:focus, textarea:focus { outline: none; border-color: #7c3aed; }
+    .btn-primary { background: linear-gradient(135deg, #7c3aed, #5b21b6); }
+    .btn-primary:hover { opacity: 0.9; }
+    .btn-secondary { background: #1e1e2e; border: 1px solid #2d2d40; }
+    .btn-secondary:hover { background: #2d2d40; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+    .fade-in { animation: fadeIn 0.4s ease forwards; }
+    .progress-fill { transition: width 0.4s ease; }
+  </style>
+</head>
+<body class="min-h-screen">
+
+<div class="max-w-2xl mx-auto px-4 py-12">
+
+  <!-- Header -->
+  <div class="mb-8">
+    <div class="flex items-center gap-2 mb-2">
+      <div class="w-2 h-2 rounded-full bg-violet-500"></div>
+      <span class="text-slate-400 text-sm">Step 3 of 3 — Getting to know you</span>
+    </div>
+    <h2 class="text-2xl font-bold text-white">A few questions</h2>
+    <p class="text-slate-400 mt-1">Amber and Jane will read these answers at every startup. The more you share, the more personal the experience. Everything is stored only on your machine.</p>
+  </div>
+
+  <!-- Progress bar -->
+  <div class="w-full bg-slate-800 rounded-full h-1 mb-8">
+    <div id="progress-bar" class="progress-fill bg-violet-500 h-1 rounded-full" style="width: 0%"></div>
+  </div>
+
+  <!-- Questions card -->
+  <div class="card rounded-xl p-6 space-y-6 mb-6">
+
+    <div>
+      <label class="block text-white font-medium mb-1">What's your name? <span class="text-red-400">*</span></label>
+      <p class="text-slate-500 text-sm mb-2">Just your first name is fine — this is how Amber and Jane address you.</p>
+      <input type="text" id="q-name" placeholder="Alex" class="w-full rounded-lg px-3 py-2 text-sm" oninput="updateProgress()">
+    </div>
+
+    <div class="border-t border-slate-800 pt-5">
+      <label class="block text-white font-medium mb-1">What do you do? <span class="text-slate-500 font-normal">(optional)</span></label>
+      <p class="text-slate-500 text-sm mb-2">Your role, profession, or what you spend most of your time on. Helps Jane calibrate how technical to be.</p>
+      <input type="text" id="q-role" placeholder="e.g. Software engineer, researcher, teacher, designer..." class="w-full rounded-lg px-3 py-2 text-sm" oninput="updateProgress()">
+    </div>
+
+    <div class="border-t border-slate-800 pt-5">
+      <label class="block text-white font-medium mb-1">Where are you based? <span class="text-slate-500 font-normal">(optional)</span></label>
+      <p class="text-slate-500 text-sm mb-2">City or region is enough. Used for time zones, local context, and relevant recommendations.</p>
+      <input type="text" id="q-location" placeholder="e.g. Boston, MA" class="w-full rounded-lg px-3 py-2 text-sm" oninput="updateProgress()">
+    </div>
+
+    <div class="border-t border-slate-800 pt-5">
+      <label class="block text-white font-medium mb-1">What topics matter most to you? <span class="text-slate-500 font-normal">(optional)</span></label>
+      <p class="text-slate-500 text-sm mb-2">Work interests, hobbies, side projects, things you're learning. Free form — just describe what your life revolves around.</p>
+      <textarea id="q-topics" rows="3" placeholder="e.g. Machine learning, building hardware projects, hiking, cooking, teaching my kids to code..."
+        class="w-full rounded-lg px-3 py-2 text-sm resize-none" oninput="updateProgress()"></textarea>
+    </div>
+
+    <div class="border-t border-slate-800 pt-5">
+      <label class="block text-white font-medium mb-1">Who's in your life? <span class="text-slate-500 font-normal">(optional)</span></label>
+      <p class="text-slate-500 text-sm mb-2">Partner, kids, close friends, family members — the people Amber should know about when you mention them. Names and short context are enough.</p>
+      <textarea id="q-family" rows="3" placeholder="e.g. Partner Jamie, daughter Maya (9 years old), my friend Dev who I meet for coffee most Fridays..."
+        class="w-full rounded-lg px-3 py-2 text-sm resize-none" oninput="updateProgress()"></textarea>
+    </div>
+
+    <div class="border-t border-slate-800 pt-5">
+      <label class="block text-white font-medium mb-1">What are you working toward? <span class="text-slate-500 font-normal">(optional)</span></label>
+      <p class="text-slate-500 text-sm mb-2">Current goals, active projects, things you want to accomplish in the next few months. Jane will use this to understand what "helping you" actually means.</p>
+      <textarea id="q-goals" rows="3" placeholder="e.g. Shipping my SaaS MVP, finishing my PhD, learning to play guitar, getting healthier..."
+        class="w-full rounded-lg px-3 py-2 text-sm resize-none" oninput="updateProgress()"></textarea>
+    </div>
+
+    <div class="border-t border-slate-800 pt-5">
+      <label class="block text-white font-medium mb-1">How do you want to be talked to? <span class="text-slate-500 font-normal">(optional)</span></label>
+      <p class="text-slate-500 text-sm mb-2">Tone, style, things to avoid. Amber and Jane take this seriously.</p>
+      <input type="text" id="q-tone" placeholder="e.g. Direct and honest, skip the pleasantries. Treat me like a peer, not a customer."
+        class="w-full rounded-lg px-3 py-2 text-sm" oninput="updateProgress()">
+    </div>
+
+    <div class="border-t border-slate-800 pt-5">
+      <label class="block text-white font-medium mb-1">Anything else you want them to know? <span class="text-slate-500 font-normal">(optional)</span></label>
+      <p class="text-slate-500 text-sm mb-2">Quirks, preferences, things that would help an assistant understand you. Totally open-ended.</p>
+      <textarea id="q-extra" rows="3" placeholder="e.g. I prefer bullet points over prose, I'm an early riser, I have ADHD and appreciate short responses..."
+        class="w-full rounded-lg px-3 py-2 text-sm resize-none" oninput="updateProgress()"></textarea>
+    </div>
+
+  </div>
+
+  <div id="interview-error" class="hidden bg-red-900/30 border border-red-700 rounded-lg p-3 mb-4 text-red-300 text-sm"></div>
+
+  <div class="flex gap-3 justify-end">
+    <button onclick="skipInterview()" class="btn-secondary text-slate-400 text-sm px-5 py-2.5 rounded-xl cursor-pointer">
+      Skip for now
+    </button>
+    <button onclick="submitInterview()" id="interview-btn"
+      class="btn-primary text-white font-semibold px-8 py-2.5 rounded-xl cursor-pointer">
+      Finish setup →
+    </button>
+  </div>
+</div>
+
+<script>
+function updateProgress() {
+  const fields = ['q-name','q-role','q-location','q-topics','q-family','q-goals','q-tone','q-extra'];
+  const filled = fields.filter(id => document.getElementById(id).value.trim().length > 0).length;
+  const pct = Math.round((filled / fields.length) * 100);
+  document.getElementById('progress-bar').style.width = pct + '%';
+}
+
+async function submitInterview() {
+  const name = document.getElementById('q-name').value.trim();
+  if (!name) {
+    const err = document.getElementById('interview-error');
+    err.textContent = 'Please enter your name — Amber and Jane need something to call you.';
+    err.classList.remove('hidden');
+    return;
+  }
+
+  const btn = document.getElementById('interview-btn');
+  btn.textContent = 'Saving...';
+  btn.disabled = true;
+
+  const answers = {
+    name:        name,
+    role:        document.getElementById('q-role').value.trim(),
+    location:    document.getElementById('q-location').value.trim(),
+    topics:      document.getElementById('q-topics').value.trim(),
+    family:      document.getElementById('q-family').value.trim(),
+    goals:       document.getElementById('q-goals').value.trim(),
+    tone:        document.getElementById('q-tone').value.trim(),
+    extra:       document.getElementById('q-extra').value.trim(),
+  };
+
+  try {
+    const resp = await fetch('/api/interview/submit', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(answers)
+    });
+    const data = await resp.json();
+    if (data.success) {
+      window.location.href = data.next || '/success';
+    } else {
+      document.getElementById('interview-error').textContent = data.error || 'Something went wrong.';
+      document.getElementById('interview-error').classList.remove('hidden');
+      btn.textContent = 'Finish setup →';
+      btn.disabled = false;
+    }
+  } catch(e) {
+    document.getElementById('interview-error').textContent = 'Network error — is Vessence still running?';
+    document.getElementById('interview-error').classList.remove('hidden');
+    btn.textContent = 'Finish setup →';
+    btn.disabled = false;
+  }
+}
+
+async function skipInterview() {
+  // Submit with just a placeholder name so profile.md still gets written
+  await fetch('/api/interview/submit', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({name: 'User', extra: 'User skipped the identity interview during onboarding.'})
+  });
+  window.location.href = '/success';
+}
+</script>
+</body>
+</html>
