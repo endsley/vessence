@@ -59,23 +59,30 @@ Write: conversation_manager.py summarizes turns → ChromaDB
 
 ## Key Directories
 ```
-jane_web/     → FastAPI web server (routes, auth, streaming)
+jane_web/     → FastAPI web server (routes, auth, streaming, SSE) — listens on 8081
 jane/         → Brain adapters, persistent sessions, context builder
-vault_web/    → HTML templates (jane.html, app.html, briefing.html)
-agent_skills/ → Standalone scripts (classifier, memory, TTS, queue)
-amber/        → Google ADK agent (Amber's brain)
+vault_web/    → Shared library modules (auth, files, playlists, share, database,
+                oauth) + HTML templates (templates/jane.html, app.html, briefing.html)
+                — NO standalone FastAPI app (retired in v0.1.71).
+agent_skills/ → Standalone scripts (classifier, memory, TTS, queue, essence runtime)
 essences/     → Self-contained AI agent packages
 android/      → Native Android app (Kotlin, Jetpack Compose)
+relay_server/ → Multi-user tunnel relay (port 8082) — WebSocket router for Docker
+                clients connecting to jane.vessences.com
 ```
+
+Note: `amber/` (Google ADK agent) and `jane/discord_bridge.py` were retired in
+v0.1.71 when Jane became the sole agent. See `configs/Amber_architecture.md`
+for historical context.
 
 <!-- AUTO-GENERATED BELOW — do not edit below this line -->
 
 # Code Map — Core (Python Backend)
-_Auto-generated on 2026-04-03 08:15 UTC by `generate_code_map.py`_
+_Auto-generated on 2026-04-05 01:57 UTC by `generate_code_map.py`_
 
 ## Priority Files
 
-### jane_web/jane_proxy.py (1569 lines)
+### jane_web/jane_proxy.py (1653 lines)
   CODE_MAP_KEYWORDS = ... → L26
   _maybe_prepend_code_map() → L69-73
   class JaneSessionState → L77-85
@@ -105,72 +112,72 @@ _Auto-generated on 2026-04-03 08:15 UTC by `generate_code_map.py`_
   _message_for_persistence() → L436-440
   prewarm_session() → L443-494
   _await_prewarm_if_running() → L497-514
-  end_session() → L517-580
-  _progress_snapshot() → L583-597
-  _LOG_MAX_BYTES = ... → L600
-  _truncate_log_if_needed() → L603-610
-  _log_stage() → L613-624
-  _log_start() → L627-635
-  _dump_prompt() → L638-670
-  _persist_turns_async() → L673-721
-  send_message() → L729-863
-  _pick_ack() → L866-1132
-  stream_message() → L1135-1552
-  _log_chat_to_work_log() → L1555-1557
-  get_active_brain() → L1560-1562
-  get_tunnel_url() → L1565-1569
+  end_session() → L517-589
+  _progress_snapshot() → L592-606
+  _LOG_MAX_BYTES = ... → L609
+  _truncate_log_if_needed() → L612-619
+  _log_stage() → L622-633
+  _log_start() → L636-644
+  _dump_prompt() → L647-679
+  _persist_turns_async() → L682-730
+  send_message() → L738-872
+  _pick_ack() → L875-1141
+  stream_message() → L1144-1636
+  _log_chat_to_work_log() → L1639-1641
+  get_active_brain() → L1644-1646
+  get_tunnel_url() → L1649-1653
 
-### jane_web/main.py (3845 lines)
-  class ChatMessage → L1820-1825
-  class SessionControl → L1828-1829
-  class SwitchProviderRequest → L1896-1897
-  GET /health → L434
-  GET /sw.js → L440
-  GET /manifest.webmanifest → L445
-  GET / → L571
-  GET /share → L597
-  GET /vault → L602
-  GET /guide → L625
-  GET /architecture → L631
-  GET /chat → L637
-  GET /essences → L660
-  GET /worklog → L664
-  GET /api/job-queue → L668
-  GET /api/job-queue/completed → L682
-  GET /briefing → L696
-  POST /api/crash-report → L701
-  POST /api/device-diagnostics → L712
-  GET /api/device-diagnostics → L726
-  GET /settings/devices → L745
-  GET /downloads/{filename} → L751
-  POST /api/tts/generate → L841
-  GET /api/app/settings → L925
-  PUT /api/app/settings → L931
-  POST /api/app/installed → L941
-  GET /api/app/latest-version → L953
-  GET /auth/google → L984
-  GET /auth/google/callback → L996
-  POST /api/auth/google-token → L1024
-  POST /api/auth/verify-share → L1062
-  POST /api/auth/verify-otp → L1072
-  POST /api/auth/logout → L1097
-  GET /api/auth/devices → L1109
-  DELETE /api/auth/devices/{device_id} → L1114
-  POST /api/auth/check → L1120
-  POST /api/auth/is-new-device → L1133
-  GET /api/jane/announcements → L1139
-  GET /api/settings/models → L1165
-  POST /api/settings/models → L1198
-  GET /api/jane/live → L1252
-  POST /api/jane/prefetch-memory → L1286
-  GET /api/files → L1316
-  GET /api/files/list/{path:path} → L1326
-  GET /api/files/meta/{path:path} → L1356
-  PATCH /api/files/description/{path:path} → L1361
-  GET /api/files/thumbnail/{path:path} → L1367
-  GET /api/files/serve/{path:path} → L1376
-  GET /api/files/changes → L1425
-  GET /api/files/find → L1430
+### jane_web/main.py (3912 lines)
+  class ChatMessage → L1901-1906
+  class SessionControl → L1909-1910
+  class SwitchProviderRequest → L1971-1972
+  GET /health → L460
+  GET /sw.js → L466
+  GET /manifest.webmanifest → L471
+  GET / → L597
+  GET /share → L623
+  GET /vault → L628
+  GET /guide → L651
+  GET /architecture → L657
+  GET /chat → L663
+  GET /essences → L686
+  GET /worklog → L690
+  GET /api/job-queue → L694
+  GET /api/job-queue/completed → L708
+  GET /briefing → L722
+  POST /api/crash-report → L727
+  POST /api/device-diagnostics → L738
+  GET /api/device-diagnostics → L752
+  GET /settings/devices → L771
+  GET /downloads/{filename} → L777
+  POST /api/tts/generate → L867
+  GET /api/app/settings → L951
+  PUT /api/app/settings → L957
+  POST /api/app/installed → L967
+  GET /api/app/latest-version → L979
+  GET /auth/google → L1010
+  GET /auth/google/callback → L1022
+  POST /api/auth/google-token → L1050
+  POST /api/auth/verify-share → L1088
+  POST /api/auth/verify-otp → L1098
+  POST /api/auth/logout → L1123
+  GET /api/auth/devices → L1135
+  DELETE /api/auth/devices/{device_id} → L1140
+  POST /api/auth/check → L1146
+  POST /api/auth/is-new-device → L1159
+  GET /api/jane/announcements → L1165
+  GET /api/settings/models → L1191
+  POST /api/settings/models → L1224
+  GET /api/jane/live → L1278
+  POST /api/jane/prefetch-memory → L1312
+  GET /api/files → L1342
+  GET /api/files/list/{path:path} → L1352
+  GET /api/files/meta/{path:path} → L1382
+  PATCH /api/files/description/{path:path} → L1387
+  GET /api/files/thumbnail/{path:path} → L1393
+  GET /api/files/serve/{path:path} → L1402
+  GET /api/files/changes → L1451
+  GET /api/files/find → L1456
 
 ### jane_web/broadcast.py (256 lines)
   SUMMARY_INTERVAL_SECONDS = ... → L16
@@ -356,7 +363,7 @@ _Auto-generated on 2026-04-03 08:15 UTC by `generate_code_map.py`_
     _evict_oldest_locked() → L394-407
   get_gemini_persistent_manager() → L413-417
 
-### jane/context_builder.py (833 lines)
+### jane/context_builder.py (855 lines)
   MAX_DOC_CHARS = ... → L15
   _CACHE_TTL = ... → L19
   _CACHE_MAX_ENTRIES = ... → L20
@@ -390,11 +397,11 @@ _Auto-generated on 2026-04-03 08:15 UTC by `generate_code_map.py`_
   _extract_tool_signatures() → L477-496
   CODE_MAP_CORE_PATH = ... → L499
   _load_code_map() → L502-504
-  _build_system_sections() → L507-604
-  _format_recent_history() → L607-632
-  TTS_SPOKEN_BLOCK_INSTRUCTION = ... → L635
-  build_jane_context() → L656-717
-  build_jane_context_async() → L720-833
+  _build_system_sections() → L507-626
+  _format_recent_history() → L629-654
+  TTS_SPOKEN_BLOCK_INSTRUCTION = ... → L657
+  build_jane_context() → L678-739
+  build_jane_context_async() → L742-855
 
 ### jane/config.py (267 lines)
   _resolve_roots() → L16-39
@@ -500,25 +507,6 @@ _Auto-generated on 2026-04-03 08:15 UTC by `generate_code_map.py`_
     shutdown() → L468-477
     _shutdown_impl() → L479-511
   main() → L514-522
-
-### jane/discord_bridge.py (381 lines)
-  TOKEN = ... → L40
-  CHANNEL_ID_STR = ... → L41
-  DIAGNOSTIC_MODE = ... → L42
-  BRAIN_MODE = ... → L43
-  LOCAL_BRAIN = ... → L45
-  TOKEN = ... → L51
-  CHANNEL_ID = ... → L52
-  clean_ansi() → L54-56
-  class DiscordBridge → L58-355
-    __init__() → L59-61
-    on_ready() → L63-67
-    create_session() → L69-76
-    run_fallback() → L78-92
-    handle_fallback_attachments() → L94-136
-    on_message() → L138-355
-  ensure_singleton() → L357-366
-  start_bridge() → L368-371
 
 ### jane/task_spine.py (115 lines)
   _utc_now() → L8-9
@@ -700,31 +688,31 @@ _Auto-generated on 2026-04-03 08:15 UTC by `generate_code_map.py`_
   list_available() → L280-286
   main() → L293-333
 
-### agent_skills/essence_runtime.py (428 lines)
-  class EssenceState → L34-42
-  class EssenceRuntime → L49-284
-    __new__() → L54-58
-    __init__() → L60-68
-    load_essence() → L72-115
-    unload_essence() → L117-126
-    delete_essence() → L128-142
-    get_loaded() → L146-148
-    list_available() → L150-173
-    get_capabilities_map() → L175-181
-    route_to_essence() → L183-213
-    set_active_essence() → L217-221
-    get_active_essence() → L223-232
-    _port_memory() → L236-284
-  class JaneOrchestrator → L291-365
-    __init__() → L294-295
-    decompose_task() → L297-329
-    execute_plan() → L331-365
-  class CapabilityRegistry → L372-428
-    __init__() → L376-377
-    register() → L379-384
-    unregister() → L386-392
-    find_provider() → L394-397
-    request_service() → L399-428
+### agent_skills/essence_runtime.py (429 lines)
+  class EssenceState → L35-43
+  class EssenceRuntime → L50-285
+    __new__() → L55-59
+    __init__() → L61-69
+    load_essence() → L73-116
+    unload_essence() → L118-127
+    delete_essence() → L129-143
+    get_loaded() → L147-149
+    list_available() → L151-174
+    get_capabilities_map() → L176-182
+    route_to_essence() → L184-214
+    set_active_essence() → L218-222
+    get_active_essence() → L224-233
+    _port_memory() → L237-285
+  class JaneOrchestrator → L292-366
+    __init__() → L295-296
+    decompose_task() → L298-330
+    execute_plan() → L332-366
+  class CapabilityRegistry → L373-429
+    __init__() → L377-378
+    register() → L380-385
+    unregister() → L387-393
+    find_provider() → L395-398
+    request_service() → L400-429
 
 ### agent_skills/essence_scheduler.py (182 lines)
   TOOLS_DIR = ... → L31
@@ -796,7 +784,7 @@ _Auto-generated on 2026-04-03 08:15 UTC by `generate_code_map.py`_
   _truncate_log_tail() → L66-84
   archive_completed_jobs() → L86-93
 
-### agent_skills/nightly_audit.py (328 lines)
+### agent_skills/nightly_audit.py (317 lines)
   ENV_FILE = ... → L30
   AUDIT_LOG_DIR = ... → L31
   SKILLS_DIR = ... → L32
@@ -813,15 +801,14 @@ _Auto-generated on 2026-04-03 08:15 UTC by `generate_code_map.py`_
   KEY_SCRIPTS = ... → L73
   get_crontab() → L83-88
   get_skill_files() → L91-92
-  get_amber_tool_files() → L95-99
-  IDLE_THRESHOLD_SECONDS = ... → L106
-  ACTIVITY_INDICATORS = ... → L109
-  is_user_idle() → L115-152
-  _run_cmd() → L155-159
-  _extract_health_summary() → L162-176
-  _write_latest_summary() → L179-188
-  run_audit_and_fix() → L191-268
-  main() → L272-324
+  IDLE_THRESHOLD_SECONDS = ... → L99
+  ACTIVITY_INDICATORS = ... → L102
+  is_user_idle() → L108-145
+  _run_cmd() → L148-152
+  _extract_health_summary() → L155-169
+  _write_latest_summary() → L172-181
+  run_audit_and_fix() → L184-258
+  main() → L262-313
 
 ### agent_skills/audit_auto_fixer.py (498 lines)
   AUDIT_DIR = ... → L36
@@ -874,31 +861,31 @@ _Auto-generated on 2026-04-03 08:15 UTC by `generate_code_map.py`_
   query_deepseek_local() → L140-148
   main() → L150-182
 
-### agent_skills/generate_code_map.py (524 lines)
+### agent_skills/generate_code_map.py (514 lines)
   VESSENCE_HOME = ... → L24
   CONFIGS_DIR = ... → L25
   CORE_PRIORITY_FILES = ... → L29
-  CORE_SECONDARY_DIRS = ... → L103
-  WEB_PRIORITY_FILES = ... → L115
-  WEB_SECONDARY_DIRS = ... → L120
-  ANDROID_ROOT = ... → L126
-  SKIP_DIRS = ... → L130
-  SKIP_FILES = ... → L131
-  MARKER = ... → L133
-  MAX_ENTRIES_PRIORITY = ... → L135
-  MAX_ENTRIES_SECONDARY = ... → L136
-  count_lines() → L143-148
-  index_python_file() → L151-188
-  index_html_file() → L191-217
-  index_kotlin_file() → L220-282
-  _index_file() → L285-299
-  _should_skip() → L302-307
-  _cap_entries() → L314-326
-  generate_core_map() → L329-381
-  generate_web_map() → L384-429
-  generate_android_map() → L432-470
-  _write_map() → L477-491
-  main() → L494-520
+  CORE_SECONDARY_DIRS = ... → L94
+  WEB_PRIORITY_FILES = ... → L105
+  WEB_SECONDARY_DIRS = ... → L110
+  ANDROID_ROOT = ... → L116
+  SKIP_DIRS = ... → L120
+  SKIP_FILES = ... → L121
+  MARKER = ... → L123
+  MAX_ENTRIES_PRIORITY = ... → L125
+  MAX_ENTRIES_SECONDARY = ... → L126
+  count_lines() → L133-138
+  index_python_file() → L141-178
+  index_html_file() → L181-207
+  index_kotlin_file() → L210-272
+  _index_file() → L275-289
+  _should_skip() → L292-297
+  _cap_entries() → L304-316
+  generate_core_map() → L319-371
+  generate_web_map() → L374-419
+  generate_android_map() → L422-460
+  _write_map() → L467-481
+  main() → L484-510
 
 ### agent_skills/ambient_heartbeat.py (395 lines)
   SPEC_PATH = ... → L37
@@ -999,222 +986,59 @@ _Auto-generated on 2026-04-03 08:15 UTC by `generate_code_map.py`_
   format_markdown_table() → L145-166
   main() → L169-176
 
-### amber/agent.py (273 lines)
-  _extract_user_query() → L45-59
-  _extract_session_id() → L62-73
-  _fetch_ambient_memory() → L76-86
-  unified_instruction_provider() → L89-149
-  create_app() → L151-271
+### vault_web/files.py (294 lines)
+  THUMBNAIL_SIZE = ... → L20
+  ICON_MAP = ... → L22
+  IMAGE_EXTS = ... → L39
+  VIDEO_EXTS = ... → L40
+  AUDIO_EXTS = ... → L41
+  TEXT_EXTS = ... → L42
+  TEXT_SIZE_LIMIT = ... → L48
+  is_text() → L51-52
+  safe_vault_path() → L55-61
+  ext() → L64-65
+  file_icon() → L68-69
+  is_image() → L72-73
+  is_video() → L76-77
+  is_audio() → L80-81
+  is_text() → L83-84
+  get_mime() → L87-89
+  make_descriptive_filename() → L92-104
+  build_file_index_document() → L107-111
+  upsert_file_index_entry() → L114-140
+  list_directory() → L143-192
+  get_file_metadata() → L195-248
+  update_description() → L251-261
+  get_last_change_timestamp() → L264-269
+  generate_thumbnail() → L272-286
+  _human_size() → L289-294
 
-### amber/logic/agent_logic.py (134 lines)
-  ANALYZER_MODEL = ... → L20
-  FACT_EXTRACTION_PROMPT = ... → L28
-  detect_facts_and_contradictions() → L47-134
-
-### amber/tools/vault_tools.py (1092 lines)
-  class VaultSaveTool → L199-375
-  class VaultSendFileTool → L377-472
-  class VaultDeleteTool → L474-516
-  class VaultReadFileTool → L518-603
-  class VaultAnalyzePdfTool → L606-678
-  class TerminalTool → L681-737
-  class VaultSearchTool → L739-767
-  class MemorySaveTool → L769-812
-  class MemoryUpdateTool → L815-852
-  class VaultTunnelURLTool → L854-888
-  class VaultReorganizeTool → L891-913
-  class VaultIndexTool → L916-959
-  class VaultFindAudioTool → L962-1007
-  class VaultPlaylistTool → L1010-1092
-  _add_fact() → L37-45
-  _search_memory() → L48-58
-  _delete_memory_by_query() → L61-81
-  _looks_like_garbage_filename() → L83-94
-  _generate_descriptive_filename() → L97-121
-  _get_hash_index_path() → L127-128
-  _load_hash_index() → L131-138
-  _save_hash_index() → L141-144
-  _hash_content() → L147-155
-  _check_duplicate() → L158-168
-  _register_hash() → L171-180
-  get_file_category() → L183-197
-    __init__() → L202-214
-    _get_declaration() → L216-231
-    run_async() → L233-375
-    __init__() → L380-389
-    _get_declaration() → L391-402
-    process_llm_request() → L405-427
-    run_async() → L429-472
-    __init__() → L477-486
-    _get_declaration() → L488-500
-    run_async() → L502-516
-    __init__() → L521-530
-    _get_declaration() → L532-549
-    run_async() → L551-603
-    __init__() → L609-619
-    _get_declaration() → L621-633
-    run_async() → L635-678
-    __init__() → L684-690
-    _get_declaration() → L692-704
-    run_async() → L706-737
-    __init__() → L742-747
-    _get_declaration() → L749-760
-    run_async() → L762-767
-    __init__() → L772-782
-    _get_declaration() → L784-797
-
-### amber/tools/local_computer.py (332 lines)
-  class LocalComputer → L38-332
-    __init__() → L43-50
-    _get_omni() → L52-55
-    _launch_browser() → L57-65
-    screen_size() → L67-69
-    current_state() → L71-132
-    get_crop() → L134-145
-    open_web_browser() → L147-150
-    click_at() → L152-157
-    hover_at() → L159-162
-    type_text_at() → L164-177
-    scroll_document() → L179-185
-    scroll_at() → L187-193
-    wait() → L195-197
-    go_back() → L199-204
-    go_forward() → L206-211
-    search() → L213-216
-    navigate() → L218-223
-    key_combination() → L225-236
-    drag_and_drop() → L238-246
-    list_windows() → L248-271
-    focus_window() → L273-275
-    find_and_focus_window() → L277-311
-    _get_active_window_title() → L313-329
-    environment() → L331-332
-
-### amber/tools/speech_tools.py (117 lines)
-  ROOT = ... → L9
-  VOICE_MAP = ... → L18
-  DEFAULT_VOICE = ... → L29
-  class TextToSpeechTool → L32-117
-    __init__() → L38-50
-    _get_declaration() → L52-70
-    run_async() → L72-117
-
-### vault_web/main.py (1173 lines)
-  class ChatMessage → L892-895
-  GET /health → L95
-  GET /sw.js → L100
-  GET /manifest.webmanifest → L105
-  GET / → L183
-  GET /share → L208
-  GET /essences → L216
-  GET /jane → L221
-  GET /settings/devices → L250
-  GET /chat → L262
-  GET /auth/google → L293
-  GET /auth/google/callback → L305
-  POST /api/auth/google-token → L331
-  POST /api/auth/verify-share → L367
-  POST /api/auth/verify-otp → L377
-  POST /api/auth/logout → L388
-  GET /api/auth/devices → L399
-  DELETE /api/auth/devices/{device_id} → L404
-  POST /api/auth/check → L410
-  POST /api/auth/is-new-device → L423
-  GET /api/settings/personality → L431
-  POST /api/settings/personality → L444
-  GET /api/app/latest-version → L458
-  GET /downloads/{filename} → L468
-  GET /api/files → L495
-  GET /api/files/list/{path:path} → L505
-  GET /api/files/meta/{path:path} → L535
-  PATCH /api/files/description/{path:path} → L540
-  GET /api/files/thumbnail/{path:path} → L547
-  GET /api/files/serve/{path:path} → L556
-  GET /api/files/changes → L612
-  GET /api/files/find → L617
-  GET /api/files/content/{path:path} → L628
-  PUT /api/files/content/{path:path} → L645
-  GET /api/shares → L665
-  POST /api/shares → L670
-  DELETE /api/shares/{share_id} → L678
-  GET /api/playlists → L686
-  GET /api/playlists/{playlist_id} → L691
-  POST /api/playlists → L699
-  PUT /api/playlists/{playlist_id} → L706
-  DELETE /api/playlists/{playlist_id} → L714
-  POST /api/files/upload → L736
-  POST /api/files/upload/single → L846
-  POST /api/amber/chat → L899
-  POST /api/amber/chat/stream → L927
-  GET /api/amber/tunnel-url → L994
-  POST /api/amber/unlock → L1002
-  GET /api/essences → L1047
-  GET /api/essences/active → L1076
-
-### vault_web/files.py (297 lines)
-  THUMBNAIL_SIZE = ... → L23
-  ICON_MAP = ... → L25
-  IMAGE_EXTS = ... → L42
-  VIDEO_EXTS = ... → L43
-  AUDIO_EXTS = ... → L44
-  TEXT_EXTS = ... → L45
-  TEXT_SIZE_LIMIT = ... → L51
-  is_text() → L54-55
-  safe_vault_path() → L58-64
-  ext() → L67-68
-  file_icon() → L71-72
-  is_image() → L75-76
-  is_video() → L79-80
-  is_audio() → L83-84
-  is_text() → L86-87
-  get_mime() → L90-92
-  make_descriptive_filename() → L95-107
-  build_file_index_document() → L110-114
-  upsert_file_index_entry() → L117-143
-  list_directory() → L146-195
-  get_file_metadata() → L198-251
-  update_description() → L254-264
-  get_last_change_timestamp() → L267-272
-  generate_thumbnail() → L275-289
-  _human_size() → L292-297
-
-### vault_web/auth.py (251 lines)
-  MAX_ATTEMPTS = ... → L21
-  LOCKOUT_MINUTES = ... → L22
-  SESSION_TRUSTED_DAYS = ... → L23
-  TOTP_SECRET = ... → L25
-  get_allowed_emails() → L28-30
-  is_allowed_email() → L33-38
-  user_id_from_email() → L41-43
-  default_user_id() → L46-53
-  get_totp() → L56-57
-  send_otp_discord() → L61-63
-  create_otp() → L66-68
-  verify_otp() → L71-89
-  get_totp_uri() → L92-95
-  _record_failed_attempt() → L98-112
-  unlock_ip() → L115-121
-  create_session() → L124-137
-  get_session_user() → L140-151
-  validate_session() → L154-170
-  is_device_trusted() → L173-178
-  register_trusted_device() → L181-198
-  get_trusted_device_by_id() → L201-213
-  get_trusted_device_by_fingerprint() → L216-228
-  get_trusted_devices() → L231-234
-  revoke_device() → L237-244
-  device_fingerprint_from_request() → L247-251
-
-### vault_web/amber_proxy.py (182 lines)
-  BRAIN_MODE = ... → L22
-  LOCAL_BRAIN = ... → L23
-  _unwrap_local_text() → L26-40
-  ADK_BASE = ... → L42
-  WEB_SESSION_PREFIX = ... → L43
-  ensure_session() → L46-54
-  _vault_rel() → L57-61
-  send_message() → L64-160
-  get_tunnel_url() → L163-182
+### vault_web/auth.py (248 lines)
+  MAX_ATTEMPTS = ... → L18
+  LOCKOUT_MINUTES = ... → L19
+  SESSION_TRUSTED_DAYS = ... → L20
+  TOTP_SECRET = ... → L22
+  get_allowed_emails() → L25-27
+  is_allowed_email() → L30-35
+  user_id_from_email() → L38-40
+  default_user_id() → L43-50
+  get_totp() → L53-54
+  send_otp_discord() → L58-60
+  create_otp() → L63-65
+  verify_otp() → L68-86
+  get_totp_uri() → L89-92
+  _record_failed_attempt() → L95-109
+  unlock_ip() → L112-118
+  create_session() → L121-134
+  get_session_user() → L137-148
+  validate_session() → L151-167
+  is_device_trusted() → L170-175
+  register_trusted_device() → L178-195
+  get_trusted_device_by_id() → L198-210
+  get_trusted_device_by_fingerprint() → L213-225
+  get_trusted_devices() → L228-231
+  revoke_device() → L234-241
+  device_fingerprint_from_request() → L244-248
 
 ### vault_web/oauth.py (62 lines)
   _normalized_email() → L8-9
@@ -1229,12 +1053,12 @@ _Auto-generated on 2026-04-03 08:15 UTC by `generate_code_map.py`_
   get_db() → L12-18
   init_db() → L21-83
 
-### vault_web/playlists.py (75 lines)
-  list_playlists() → L9-16
-  get_playlist() → L19-32
-  create_playlist() → L35-48
-  update_playlist() → L51-70
-  delete_playlist() → L73-75
+### vault_web/playlists.py (72 lines)
+  list_playlists() → L6-13
+  get_playlist() → L16-29
+  create_playlist() → L32-45
+  update_playlist() → L48-67
+  delete_playlist() → L70-72
 
 ### onboarding/main.py (435 lines)
   DATA_DIR = ... → L20
@@ -1349,7 +1173,7 @@ _Auto-generated on 2026-04-03 08:15 UTC by `generate_code_map.py`_
   generate_manifest() → L73-267
   main() → L271-325
 
-### startup_code/build_docker_bundle.py (672 lines)
+### startup_code/build_docker_bundle.py (691 lines)
   REPO_ROOT = ... → L18
   MARKETING_ROOT = ... → L19
   DOWNLOADS_DIR = ... → L20
@@ -1364,12 +1188,12 @@ _Auto-generated on 2026-04-03 08:15 UTC by `generate_code_map.py`_
   _ensure_crlf() → L133-138
   _check_bat_block_parens() → L141-161
   build_readme() → L164-232
-  build_platform_package() → L235-350
-  _match_image_bins() → L364-371
-  _parse_compose_services() → L374-391
-  validate() → L394-536
-  verify_packages() → L539-638
-  build_all() → L641-668
+  build_platform_package() → L235-369
+  _match_image_bins() → L383-390
+  _parse_compose_services() → L393-410
+  validate() → L413-555
+  verify_packages() → L558-657
+  build_all() → L660-687
 
 ### startup_code/query_live_memory.py (125 lines)
   ROOT = ... → L16
@@ -1397,6 +1221,24 @@ _Auto-generated on 2026-04-03 08:15 UTC by `generate_code_map.py`_
 
 ## Other Files
 
+### jane_web/gemma_router.py (335 lines)
+  OLLAMA_URL = ... → L22
+  ROUTER_MODEL = ... → L23
+  ROUTER_TIMEOUT = ... → L24
+  MAX_HISTORY_TURNS = ... → L25
+  _PERSONAL_INFO = ... → L28
+  SYSTEM_PROMPT = ... → L36
+  _CLASSIFY_RE = ... → L99
+  _RESPONSE_RE = ... → L100
+  _WEATHER_KEYWORDS = ... → L103
+  _load_all_mcps() → L110-132
+  _get_tool_capabilities_summary() → L135-152
+  _WEATHER_CACHE = ... → L154
+  _load_weather_context() → L160-188
+  _get_session() → L195-201
+  _build_history() → L204-217
+  classify_prompt() → L220-335
+
 ### jane_web/permission_broker.py (166 lines)
   PERMISSION_TIMEOUT_SECONDS = ... → L25
   class PermissionRequest → L29-37
@@ -1411,6 +1253,11 @@ _Auto-generated on 2026-04-03 08:15 UTC by `generate_code_map.py`_
     get_all_pending() → L134-136
     cleanup_stale() → L138-151
   get_permission_broker() → L160-166
+
+### jane_web/wake_word_verify.py (73 lines)
+  _get_model() → L19-27
+  _WAKE_WORD_MATCHES = ... → L31
+  verify_wake_word() → L34-73
 
 ### jane/gemini_api_brain.py (335 lines)
   TOOL_BRIDGE_PORT = ... → L24
@@ -1515,6 +1362,16 @@ _Auto-generated on 2026-04-03 08:15 UTC by `generate_code_map.py`_
   completion_smart() → L97-99
   completion_json() → L102-116
 
+### agent_skills/code_lock.py (130 lines)
+  VESSENCE_DATA_HOME = ... → L28
+  LOCK_DIR = ... → L29
+  LOCK_FILE = ... → L30
+  LOCK_TIMEOUT = ... → L31
+  acquire_lock() → L34-71
+  release_lock() → L74-80
+  who_holds_lock() → L83-101
+  code_edit_lock() → L105-111
+
 ### agent_skills/consult_panel.py (232 lines)
   FRONTIER_CLIS = ... → L29
   SKIP_CLIS = ... → L36
@@ -1556,6 +1413,17 @@ _Auto-generated on 2026-04-03 08:15 UTC by `generate_code_map.py`_
   update_keywords_file() → L246-279
   restart_jane_web() → L285-298
   main() → L304-336
+
+### agent_skills/fetch_weather.py (110 lines)
+  LAT = ... → L16
+  LON = ... → L17
+  LOCATION = ... → L18
+  VESSENCE_DATA_HOME = ... → L20
+  CACHE_DIR = ... → L24
+  OUTPUT_PATH = ... → L25
+  WMO_CODES = ... → L27
+  fetch_weather() → L39-99
+  main() → L102-106
 
 ### agent_skills/generate_identity_essay.py (152 lines)
   DB_PATH = ... → L13
@@ -1717,11 +1585,6 @@ _Auto-generated on 2026-04-03 08:15 UTC by `generate_code_map.py`_
   _get_activity_log_path() → L15-23
   log_activity() → L26-56
   get_recent_activities() → L59-74
-
-### amber/tools/research_tools.py (54 lines)
-  class TechnicalResearchTool → L21-54
-    __init__() → L26-30
-    __call__() → L32-54
 
 ### startup_code/bump_android_version.py (152 lines)
   VESSENCE_HOME = ... → L19

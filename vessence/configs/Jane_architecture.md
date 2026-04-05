@@ -589,7 +589,7 @@ Jane image bakes in 3 CLIs: `@google/gemini-cli`, `@anthropic-ai/claude-code`, O
 
 ### 11.3 Networking
 
-- **Traefik:** `vault.localhost` → vault:8080, `jane.localhost` → jane:8090
+- **Traefik:** `jane.localhost` / `vault.localhost` both route to `jane:8081` (unified since v0.1.71; vault service retired).
 - **Cloudflare:** Named tunnel (token in `.env`) or quick-tunnel fallback. Opt-in: `docker compose --profile cloudflare up`
 
 ### 11.4 Onboarding
@@ -675,9 +675,8 @@ vessence/
 │   ├── build_docker_bundle.py
 │   ├── usb_sync.py
 │   └── bot_watchdog.sh
-├── amber/                   # Legacy runtime code retained for compatibility during migration
 ├── android/                 # Native Kotlin/Compose Android app (see §10)
-├── relay_server/            # Discord/Slack relay
+├── relay_server/            # Multi-user tunnel relay (port 8082) + WebSocket router
 ├── marketing_site/          # Public landing page
 ├── onboarding/              # First-run wizard
 ├── docker/                  # Docker build files

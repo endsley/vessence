@@ -72,7 +72,7 @@ essences/     → Self-contained AI agent packages
 # Code Map Index
 
 Split into three targeted maps:
-- `CODE_MAP_CORE.md` — Python backend (jane/, agent_skills/, amber/, startup_code/)
+- `CODE_MAP_CORE.md` — Python backend (jane/, agent_skills/, startup_code/)
 - `CODE_MAP_WEB.md` — Web frontend (vault_web/templates/)
 - `CODE_MAP_ANDROID.md` — Android app (Kotlin)
 

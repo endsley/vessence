@@ -1,6 +1,11 @@
 # LLM Architecture — Model Assignments & Rationale
 
 **Last Updated:** 2026-03-16 (qwen2.5-coder:14b migration)
+**Status:** ⚠️ PARTIALLY OUTDATED (v0.1.71) — the Amber agent and its model
+assignments (`amber/agent.py` with qwen_agent, deepseek hot-swap, etc.) were
+retired when Jane became the sole agent. Current live models: Claude Opus 4.6
+for Jane's main brain, gemma4:e4b for the prompt router (see gemma_router.py),
+and optional qwen3 for local fallback research.
 **Maintainer:** Chieh
 
 This document describes every LLM used across the Project Ambient system, which model is assigned to which role, and the reasoning behind each assignment. The system uses a deliberate two-tier local LLM strategy alongside cloud models, each chosen for their specific strengths.

@@ -31,11 +31,15 @@ What does not belong here:
 - session state
 
 Examples:
-- `~/vessence/amber/`
-- `~/vessence/jane/`
-- `~/vessence/vault_web/`
-- `~/vessence/configs/`
-- `~/vessence/startup_code/`
+- `~/ambient/vessence/jane_web/` (FastAPI server on port 8081)
+- `~/ambient/vessence/jane/` (brain adapters, context builder)
+- `~/ambient/vessence/vault_web/` (shared library modules + HTML templates)
+- `~/ambient/vessence/configs/`
+- `~/ambient/vessence/startup_code/`
+- `~/ambient/vessence/relay_server/` (multi-user tunnel relay)
+
+Note: `~/ambient/vessence/amber/` was retired in v0.1.71 when Amber (the ADK
+agent) was deprecated. Jane is the sole agent.
 
 ## 2. Vault Root: `~/vault`
 

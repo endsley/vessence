@@ -1,4 +1,10 @@
-# Amber Troubleshooting Registry
+# Amber Troubleshooting Registry (HISTORICAL — retired v0.1.71)
+
+> **Status:** Amber was retired in v0.1.71. `amber/`, `amber-brain.service`,
+> `amber-bridge.service`, and `jane/discord_bridge.py` are all deleted. The
+> ADK server on port 8000 is no longer running. This file is preserved as
+> historical reference for anyone debugging archived logs; nothing documented
+> below applies to the current Jane-only system.
 
 This file tracks historical issues, failure modes, and verified fixes for the Amber Assistant system.
 
