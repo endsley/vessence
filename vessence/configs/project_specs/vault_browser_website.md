@@ -28,13 +28,15 @@ A Google Drive-style personal file browser for Chieh's vault (`/home/chieh/vesse
 ## Directory Structure
 
 ```
-/home/chieh/vessence/vault_web/
-├── main.py               # FastAPI app entry point
+# As of v0.1.71: vault_web is now a shared library package imported by jane_web.
+# The FastAPI app lives in jane_web/main.py on port 8081.
+/home/chieh/ambient/vessence/vault_web/
 ├── auth.py               # OTP, sessions, trusted devices
 ├── files.py              # Vault file browsing + metadata
-├── amber_proxy.py        # Proxy requests to Amber ADK API
 ├── share.py              # Share link generation + validation
 ├── playlists.py          # Playlist CRUD
+├── oauth.py              # Google OAuth helpers
+├── database.py           # SQLite connection / schema
 ├── vault_web.db          # SQLite: sessions, devices, shares, playlists
 ├── static/
 │   ├── app.js            # Frontend logic
@@ -231,8 +233,8 @@ No operation buttons in the Vault UI (no rename button, no delete button, no mov
 ## Cloudflare Quick Tunnel
 
 ### Auto-start on Boot
-- systemd service: `vault-web.service` — starts FastAPI on `localhost:8080`
-- systemd service: `vault-tunnel.service` — runs `cloudflared tunnel --url http://localhost:8080`
+- systemd service: `jane-web.service` — starts FastAPI on `localhost:8081` (absorbed former vault_web routes in v0.1.71)
+- systemd service: `vault-tunnel.service` — Cloudflare named tunnel for `jane.vessences.com` → `localhost:8081`
 - Both start automatically on boot
 
 ### URL Discovery

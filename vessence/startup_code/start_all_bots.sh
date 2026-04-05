@@ -1,6 +1,10 @@
 #!/bin/bash
-# start_all_bots.sh - Unified launcher for Amber and Jane
-# Optimized for systemd usage with absolute paths
+# start_all_bots.sh - Unified launcher for Jane's bridge(s).
+#
+# NOTE (v0.1.71): Amber ADK server + discord_bridge startup was removed.
+# amber/ directory, amber-brain.service, and jane/discord_bridge.py were
+# retired when Discord integration was disabled. Jane runs via systemd
+# (jane-web.service); this script only starts the gemini CLI bridge.
 
 HOME_DIR="${HOME:-$(getent passwd "$(id -u)" | cut -d: -f6)}"
 AMBIENT_BASE="${AMBIENT_BASE:-$HOME_DIR/ambient}"
@@ -30,47 +34,18 @@ if [ ! -x "$DEFAULT_VENV_BIN/python" ] && [ -x "/home/chieh/google-adk-env/adk-v
     DEFAULT_VENV_BIN="/home/chieh/google-adk-env/adk-venv/bin"
 fi
 VENV_BIN="${VENV_BIN:-$DEFAULT_VENV_BIN}"
-mkdir -p "$VESSENCE_DATA_HOME/logs/Amber_log" "$VESSENCE_DATA_HOME/logs/Jane_log" "$VESSENCE_DATA_HOME/logs/System_log"
+mkdir -p "$VESSENCE_DATA_HOME/logs/Jane_log" "$VESSENCE_DATA_HOME/logs/System_log"
 
-# 1. Cleanup existing processes (More aggressive)
-echo "Cleaning up existing bot processes..."
-pkill -9 -f "adk web" || true
-pkill -9 -f "discord_bridge.py" || true
-pkill -9 -f "bridge.py" || true
-
-# Also kill anything on port 8000 just in case
-if command -v fuser > /dev/null; then
-    fuser -k 8000/tcp || true
-fi
+# Cleanup existing bridge processes
+echo "Cleaning up existing bridge processes..."
+pkill -9 -f "gemini_cli_bridge/bridge.py" || true
 sleep 2
 
-# 2. Start Amber ADK Server (Brain)
-echo "Starting Amber Brain..."
-cd "$VESSENCE_HOME"
-nohup $VENV_BIN/adk web --port 8000 "$VESSENCE_HOME" > "$VESSENCE_DATA_HOME/logs/Amber_log/server.log" 2>&1 &
-
-# Wait for ADK server to be ready
-echo "Waiting for ADK server..."
-for i in {1..30}; do
-    if $VENV_BIN/python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/list-apps')" > /dev/null 2>&1; then
-        echo "ADK server is UP."
-        break
-    fi
-    sleep 1
-done
-
-# 3. Start Bridges in Parallel
-echo "Starting Amber and Jane Bridges in parallel..."
-
-# Start Amber Bridge in background
-cd "$VESSENCE_HOME"
-nohup $VENV_BIN/python jane/discord_bridge.py > "$VESSENCE_DATA_HOME/logs/Amber_log/bridge.log" 2>&1 &
-AMBER_BRIDGE_PID=$!
-
-# Start Jane Bridge in background
+# Start Jane Bridge (gemini CLI)
+echo "Starting Jane Bridge..."
 cd "$HOME_DIR/gemini_cli_bridge"
 nohup $VENV_BIN/python bridge.py > "$VESSENCE_DATA_HOME/logs/Jane_log/bridge.log" 2>&1 &
 JANE_BRIDGE_PID=$!
 
-echo "All bots are starting up. Amber Bridge PID: $AMBER_BRIDGE_PID, Jane Bridge PID: $JANE_BRIDGE_PID"
+echo "Jane Bridge started. PID: $JANE_BRIDGE_PID"
 echo "Check $VESSENCE_DATA_HOME/logs/System_log/start.log for overall status."

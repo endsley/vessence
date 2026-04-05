@@ -78,7 +78,7 @@ def list_personalities() -> list[dict]:
 
 def ensure_user_space_from_email(email: str, display_name: str | None = None) -> str:
     """Ensure a user space exists for the given email. Returns user_id."""
-    from auth import user_id_from_email
+    from vault_web.auth import user_id_from_email
     user_id = user_id_from_email(email)
     if not display_name:
         display_name = email.split("@")[0]

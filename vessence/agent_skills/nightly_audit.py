@@ -92,13 +92,6 @@ def get_skill_files():
     return sorted(p.name for p in SKILLS_DIR.glob("*.py") if p.name != "__init__.py")
 
 
-def get_amber_tool_files():
-    amber_tools = Path(VESSENCE_HOME) / "amber" / "tools"
-    if amber_tools.exists():
-        return sorted(p.name for p in amber_tools.glob("*.py"))
-    return []
-
-
 from agent_skills.cron_utils import send_discord
 
 
@@ -232,9 +225,6 @@ Keep the report under 800 words.
 ### agent_skills/ files on disk:
 {json.dumps(context['skill_files'], indent=2)}
 
-### amber/tools/ files on disk:
-{json.dumps(context['amber_tools'], indent=2)}
-
 ### CRON_JOBS.md (documentation):
 {context['cron_jobs_doc']}
 
@@ -301,7 +291,6 @@ def main():
     context = {
         'crontab':        get_crontab(),
         'skill_files':    get_skill_files(),
-        'amber_tools':    get_amber_tool_files(),
         'cron_jobs_doc':  read_file(CRON_JOBS_DOC),
         'skills_registry': read_file(SKILLS_REGISTRY),
         'jane_arch':      read_file(JANE_ARCH),

@@ -69,21 +69,40 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 val p = player ?: return
                 _state.value = _state.value.copy(currentTrackIndex = p.currentMediaItemIndex)
             }
+            override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                android.util.Log.e("MusicVM", "ExoPlayer error: ${error.errorCodeName} — ${error.message}", error)
+                // Common recoverable case: network dropped mid-stream (e.g., server restarted).
+                // Surface the error and let the user tap play again — ensurePlayerReady() will re-prepare.
+                _state.value = _state.value.copy(
+                    error = "Playback interrupted — tap a song to resume",
+                    isPlaying = false,
+                )
+            }
+            override fun onPlaybackStateChanged(state: Int) {
+                val name = when (state) {
+                    androidx.media3.common.Player.STATE_IDLE -> "IDLE"
+                    androidx.media3.common.Player.STATE_BUFFERING -> "BUFFERING"
+                    androidx.media3.common.Player.STATE_READY -> "READY"
+                    androidx.media3.common.Player.STATE_ENDED -> "ENDED"
+                    else -> "UNKNOWN($state)"
+                }
+                android.util.Log.d("MusicVM", "Playback state: $name")
+            }
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 _state.value = _state.value.copy(isPlaying = isPlaying)
                 if (isPlaying) {
                     startProgressUpdates()
-                    // Stop always-listen while music is playing (prevents mic picking up music)
+                    // Stop always-listen while music is playing (prevents mic picking up music).
+                    // sttActive=true also prevents other code paths from restarting the service.
                     com.vessences.android.voice.WakeWordBridge.sttActive = true
                     com.vessences.android.voice.AlwaysListeningService.stop(getApplication())
                 } else {
                     progressJob?.cancel()
-                    // Resume always-listen when music stops
-                    com.vessences.android.voice.WakeWordBridge.sttActive = false
-                    val voiceSettings = com.vessences.android.data.repository.VoiceSettingsRepository(getApplication())
-                    if (voiceSettings.isAlwaysListeningEnabled()) {
-                        com.vessences.android.voice.AlwaysListeningService.start(getApplication())
-                    }
+                    // Do NOT restart always-listen here. Track transitions fire
+                    // isPlaying=false then true rapidly, and the restart races with
+                    // the next stop() call — it used to crash the oww-listener thread.
+                    // Always-listen is restarted only when user leaves the Music screen
+                    // via closePlaylist() / onCleared().
                 }
             }
         })
@@ -137,6 +156,21 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun deletePlaylist(playlistId: String) {
+        viewModelScope.launch {
+            repo.deletePlaylist(playlistId).onSuccess {
+                android.util.Log.i("MusicVM", "Deleted playlist: $playlistId")
+                // Reload the list and clear active playlist if it was the one we deleted
+                if (_state.value.activePlaylist?.id == playlistId) {
+                    closePlaylist()
+                }
+                loadPlaylists()
+            }.onFailure { e ->
+                _state.value = _state.value.copy(error = "Failed to delete: ${e.message}")
+            }
+        }
+    }
+
     fun closePlaylist() {
         player?.stop()
         player?.clearMediaItems()
@@ -159,12 +193,37 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         p.prepare()
     }
 
+    /** If the player is in IDLE or ENDED state, re-prepare the current playlist.
+     *  Recovers from error states (network drops, server restart, playlist finished). */
+    private fun ensurePlayerReady() {
+        val p = player ?: return
+        val state = p.playbackState
+        if (state == androidx.media3.common.Player.STATE_IDLE ||
+            state == androidx.media3.common.Player.STATE_ENDED) {
+            android.util.Log.i("MusicVM", "Player in state=$state — re-preparing playlist")
+            val playlist = _state.value.activePlaylist ?: return
+            // Re-add media items if they got cleared
+            if (p.mediaItemCount == 0) {
+                playlist.tracks.forEach { track ->
+                    p.addMediaItem(MediaItem.fromUri(repo.getTrackUrl(track.path)))
+                }
+            }
+            p.prepare()
+        }
+    }
+
     fun playTrack(index: Int) {
         val p = player ?: return
+        ensurePlayerReady()
         if (index < 0 || index >= (p.mediaItemCount)) return
         p.seekTo(index, 0)
+        p.playWhenReady = true
         p.play()
-        _state.value = _state.value.copy(currentTrackIndex = index, isPlaying = true)
+        _state.value = _state.value.copy(
+            currentTrackIndex = index,
+            isPlaying = true,
+            error = null,  // clear any previous playback error
+        )
         startProgressUpdates()
     }
 
@@ -175,6 +234,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             _state.value = _state.value.copy(isPlaying = false)
             progressJob?.cancel()
         } else {
+            ensurePlayerReady()
+            p.playWhenReady = true
             p.play()
             _state.value = _state.value.copy(isPlaying = true)
             startProgressUpdates()
@@ -273,5 +334,11 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         progressJob?.cancel()
         player?.release()
         player = null
+        // Restore always-listen when leaving the Music screen
+        com.vessences.android.voice.WakeWordBridge.sttActive = false
+        val voiceSettings = com.vessences.android.data.repository.VoiceSettingsRepository(getApplication())
+        if (voiceSettings.isAlwaysListeningEnabled()) {
+            com.vessences.android.voice.AlwaysListeningService.start(getApplication())
+        }
     }
 }

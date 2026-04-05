@@ -302,15 +302,8 @@ private fun AiBubble(message: ChatMessage, aiName: String, aiColor: Color, onNav
                         }
                     }
                 }
-                // Audio players
-                for (match in actions) {
-                    if (match.groupValues[1] == "play") {
-                        val target = match.groupValues[2].trim()
-                        val audioUrl = "${ApiClient.getJaneBaseUrl()}/api/files/serve/$target"
-                        val fileName = target.substringAfterLast('/')
-                        AudioPlayCard(fileName = fileName, audioUrl = audioUrl)
-                    }
-                }
+                // Audio players removed — music plays via Music Playlist view, not inline.
+                // {{play:...}} tags are ignored and stripped from display text.
                 // Navigation / open_file chips
                 val navActions = actions.filter { it.groupValues[1] in listOf("navigate", "open_file") }
                 if (navActions.isNotEmpty()) {

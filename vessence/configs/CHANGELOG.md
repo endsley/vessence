@@ -1,5 +1,26 @@
 # Vessence Changelog
 
+## v0.1.71 (2026-04-04)
+- **Music playlist freeze fix:** After playing for a while (or after a server restart / network drop), ExoPlayer would enter STATE_IDLE or STATE_ENDED, and subsequent `play()` calls silently no-op'd — UI showed "playing" but nothing played. Added `ensurePlayerReady()` that calls `prepare()` + re-adds media items when needed, called from both `playTrack` and `togglePlayPause`. Also added `onPlaybackStateChanged` logging and surfaces an error banner on recoverable interruptions.
+
+## v0.1.70 (2026-04-04)
+- **Delete playlist button:** Each playlist in the Music Playlist list now has a red trash icon that opens a confirmation dialog before deleting.
+- **Server-down login message:** When the server is unreachable during login, the error shown is now "The server seems to be down. Please try again later." instead of Google's cryptic "Developer console is not set up correctly" or raw network exception.
+
+## v0.1.69 (2026-04-04)
+- **Fix music track-switch crash:** Rapidly switching tracks in the Music Playlist caused AlwaysListeningService to start/stop on every track transition, which could interrupt the oww-listener thread mid-sleep() and crash the app with an unhandled InterruptedException. Two-part fix: (1) wake word listener now catches InterruptedException and exits cleanly, (2) MusicViewModel no longer restarts always-listen on every transient isPlaying=false — only when the user leaves the Music screen (onCleared).
+
+## v0.1.68 (2026-04-04)
+- **Fix music playback:** Track paths were stored as `vault/Music/...` instead of `Music/...` (off-by-one in `.parent.parent` vs `.parent`), so `/api/files/serve/` couldn't find the files. Music now actually plays.
+- **ExoPlayer error surfacing:** Added onPlayerError listener in MusicViewModel so playback failures are logged and shown in UI instead of silently stuck.
+- **Tightened gemma4 acks:** System prompt now bans generic phrases ("good question", "digging into that") and requires at least one concrete noun from the user's message.
+
+## v0.1.67 (2026-04-04)
+- **Gemma4 music routing:** Gemma4 now classifies music requests (any phrasing) and extracts a clean search query. Proxy creates the playlist via a shared helper, emits [MUSIC_PLAY:id]. No more regex prefix matching, no duplicated code paths.
+- **No inline audio players in chat bubbles:** `{{play:...}}` tags are stripped from display; music only plays via the Music Playlist view.
+- **No STT after music autoplay:** When music plays, `sttActive` is cleared and `onSendComplete` no longer relaunches STT — conversation ends cleanly.
+- **Code dedup:** Consolidated 4 music-playlist-creation paths into one `create_music_playlist_from_query()` in main.py.
+
 ## v0.1.66 (2026-04-04)
 - **Stop Jane button:** Replaces the old speaker button in chat header. Visible only while Jane is thinking — tap to interrupt the current response (like pressing Esc in the terminal).
 - **Wake word v6 model:** Trained on 10K LibriSpeech negatives, F1=0.9089, FPR=0.78%, 0 false positives on held-out speech commands.

@@ -60,23 +60,23 @@ from jane.config import ENV_FILE_PATH, VAULT_DIR, TOOLS_DIR, ESSENCES_DIR, VESSE
 
 load_dotenv(ENV_FILE_PATH)
 
-from database import init_db, get_db
-from auth import (
+from vault_web.database import init_db, get_db
+from vault_web.auth import (
     create_session, validate_session,
     is_device_trusted, register_trusted_device,
     get_trusted_device_by_id, get_trusted_device_by_fingerprint,
     get_session_user, verify_otp,
     get_trusted_devices, revoke_device,
-    device_fingerprint_from_request, unlock_ip,
+    device_fingerprint_from_request,
 )
-from oauth import oauth, allowed_email, build_external_url, google_oauth_configured
-from files import (
+from vault_web.oauth import oauth, allowed_email, build_external_url, google_oauth_configured
+from vault_web.files import (
     list_directory, get_file_metadata, update_description,
     generate_thumbnail, get_last_change_timestamp, safe_vault_path, is_text, TEXT_SIZE_LIMIT, get_mime,
     make_descriptive_filename, upsert_file_index_entry,
 )
-from share import create_share, validate_share, list_shares, revoke_share
-from playlists import list_playlists, get_playlist, create_playlist, update_playlist, delete_playlist
+from vault_web.share import create_share, validate_share, list_shares, revoke_share
+from vault_web.playlists import list_playlists, get_playlist, create_playlist, update_playlist, delete_playlist
 try:
     from .jane_proxy import send_message, stream_message, get_tunnel_url, prewarm_session, end_session, run_prefetch_memory
 except ImportError:
@@ -93,8 +93,8 @@ try:
     ANDROID_VERSION = _version_data["version_name"]
     _ANDROID_VERSION_CODE = _version_data["version_code"]
 except FileNotFoundError:
-    ANDROID_VERSION = "0.1.66"
-    _ANDROID_VERSION_CODE = 174
+    ANDROID_VERSION = "0.1.71"
+    _ANDROID_VERSION_CODE = 179
 
 # Startup validation: ensure the APK for the advertised version actually exists
 _expected_apk = MARKETING_DOWNLOADS_DIR / f"vessences-android-v{ANDROID_VERSION}.apk"
@@ -300,19 +300,26 @@ async def _start_standing_brains():
 
 
 async def _prewarm_gemma4():
-    """Pre-warm gemma4:e4b for the prompt router."""
+    """Pre-warm gemma4:e4b via ollama HTTP API with keep_alive=-1 (pinned).
+
+    Using the HTTP API (not `ollama run`) lets us set keep_alive=-1, which
+    keeps the model loaded in memory indefinitely instead of ollama's 5-min
+    default idle timeout.
+    """
     model = os.environ.get("GEMMA_ROUTER_MODEL", "gemma4:e4b")
     if ":" not in model:
         return
     _logger.info("Pre-warming Gemma4 router model: %s", model)
     try:
-        proc = await asyncio.create_subprocess_exec(
-            "ollama", "run", model, "hi",
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-        await asyncio.wait_for(proc.wait(), timeout=120)
-        _logger.info("Gemma4 router model %s pre-warmed", model)
+        import aiohttp
+        ollama_url = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=120)) as session:
+            async with session.post(
+                f"{ollama_url}/api/generate",
+                json={"model": model, "prompt": "hi", "stream": False, "keep_alive": -1},
+            ) as resp:
+                await resp.read()
+        _logger.info("Gemma4 router model %s pre-warmed (keep_alive=-1)", model)
     except Exception as e:
         _logger.warning("Gemma4 prewarm failed: %s", e)
 
@@ -1749,7 +1756,7 @@ async def upload_single_file(
 
     # Index in ChromaDB so Jane and memory system can find the file
     try:
-        from vault_web.main import upsert_file_index_entry
+        from vault_web.files import upsert_file_index_entry
         upsert_file_index_entry(rel_path, f"File uploaded from Android: {dest_path.name}", mime, updated_by="android_upload")
     except Exception:
         pass
@@ -1834,6 +1841,47 @@ async def delete_playlist_route(playlist_id: str, _=Depends(require_auth)):
     return {"ok": True}
 
 
+def create_music_playlist_from_query(query: str) -> dict | None:
+    """Search vault music by query and create a temporary playlist.
+
+    Returns playlist dict {"id", "name", "tracks", ...} or None if no matches.
+    Shared by /api/music/play endpoint and jane_proxy gemma4 music handler.
+    """
+    import glob as _glob, random as _random
+
+    q = (query or "").strip().lower()
+    vault_music = Path(os.environ.get("VAULT_HOME", Path.home() / "ambient" / "vault")) / "Music"
+
+    all_files = sorted(_glob.glob(str(vault_music / "**" / "*.mp3"), recursive=True))
+    if not all_files:
+        return None
+
+    if q in ("random", "anything", "something", "a song", "music", "random song",
+             "some music", "something random"):
+        selected = _random.sample(all_files, min(10, len(all_files)))
+        playlist_name = "Random Mix"
+    else:
+        selected = [f for f in all_files if q in f.lower().split("/")[-1].lower()]
+        if not selected:
+            words = q.split()
+            selected = [f for f in all_files if any(w in f.lower().split("/")[-1].lower() for w in words)]
+        if not selected:
+            return None
+        playlist_name = f"Playing: {q.title()}"
+
+    tracks = []
+    for filepath in selected:
+        # rel_path is relative to VAULT_DIR (e.g., "Music/Coldplay/Clocks.mp3")
+        # so that /api/files/serve/{rel_path} resolves correctly server-side.
+        rel_path = str(Path(filepath).relative_to(vault_music.parent))
+        filename = Path(filepath).stem
+        tracks.append({"path": rel_path, "title": filename})
+
+    playlist = create_playlist(playlist_name, tracks)
+    playlist["temporary"] = True
+    return playlist
+
+
 @app.post("/api/music/play")
 async def music_play(body: dict, _=Depends(require_auth)):
     """Search vault music by query and create a temporary playlist.
@@ -1841,42 +1889,10 @@ async def music_play(body: dict, _=Depends(require_auth)):
     Body: {"query": "the scientist"} or {"query": "shakira"} or {"query": "random"}
     Returns: {"playlist_id": "...", "name": "...", "tracks": [...], "temporary": true}
     """
-    import glob, random, re
-
-    query = (body.get("query") or "").strip().lower()
-    vault_music = Path(os.environ.get("VAULT_HOME", Path.home() / "ambient" / "vault")) / "Music"
-
-    # Find all mp3 files
-    all_files = sorted(glob.glob(str(vault_music / "**" / "*.mp3"), recursive=True))
-    if not all_files:
-        raise HTTPException(status_code=404, detail="No music files found in vault")
-
-    if query in ("random", "anything", "something", "a song", "music"):
-        # Random selection — pick 10 random tracks
-        selected = random.sample(all_files, min(10, len(all_files)))
-        playlist_name = "Random Mix"
-    else:
-        # Search by filename (artist, title, keywords)
-        selected = [f for f in all_files if query in f.lower().split("/")[-1].lower()]
-        if not selected:
-            # Fuzzy: try each word
-            words = query.split()
-            selected = [f for f in all_files if any(w in f.lower().split("/")[-1].lower() for w in words)]
-        if not selected:
-            raise HTTPException(status_code=404, detail=f"No tracks matching '{query}'")
-        playlist_name = f"Playing: {query.title()}"
-
-    # Build track list
-    tracks = []
-    for filepath in selected:
-        rel_path = str(Path(filepath).relative_to(vault_music.parent.parent))  # relative to vault root
-        filename = Path(filepath).stem
-        tracks.append({"path": rel_path, "title": filename})
-
-    # Create temporary playlist
-    playlist = create_playlist(playlist_name, tracks)
-    playlist["temporary"] = True
-
+    query = (body.get("query") or "").strip()
+    playlist = create_music_playlist_from_query(query)
+    if playlist is None:
+        raise HTTPException(status_code=404, detail=f"No tracks matching '{query}'")
     return playlist
 
 
@@ -1925,12 +1941,6 @@ async def _handle_jane_chat(body: ChatMessage, request: Request):
 
 @app.post("/api/jane/chat")
 async def jane_chat(body: ChatMessage, request: Request):
-    return await _handle_jane_chat(body, request)
-
-
-@app.post("/api/amber/chat")
-async def jane_chat_legacy(body: ChatMessage, request: Request):
-    """Legacy alias kept so older Jane frontends do not break."""
     return await _handle_jane_chat(body, request)
 
 
@@ -2354,12 +2364,6 @@ async def jane_chat_stream(body: ChatMessage, request: Request):
     return await _handle_jane_chat_stream(body, request)
 
 
-@app.post("/api/amber/chat/stream")
-async def jane_chat_stream_legacy(body: ChatMessage, request: Request):
-    """Legacy alias kept so older Jane frontends do not break."""
-    return await _handle_jane_chat_stream(body, request)
-
-
 @app.post("/api/jane/init-session")
 async def jane_init_session(body: SessionControl, request: Request):
     """Pre-warm Jane's Claude CLI session so the first real message is fast.
@@ -2446,20 +2450,6 @@ async def jane_init_session(body: SessionControl, request: Request):
             yield json.dumps({"type": "done", "data": "Hey! Ready when you are."}) + "\n"
 
     return StreamingResponse(_stream_init(), media_type="application/x-ndjson")
-
-
-@app.get("/api/amber/tunnel-url")
-async def tunnel_url(_=Depends(require_auth)):
-    return {"url": get_tunnel_url()}
-
-
-@app.post("/api/amber/unlock")
-async def amber_unlock(request: Request):
-    body = await request.json()
-    if body.get("secret") != os.getenv("VAULT_UNLOCK_SECRET", "amber_unlock"):
-        raise HTTPException(status_code=403)
-    unlock_ip(body.get("ip"))
-    return {"ok": True}
 
 
 # ─── Essence Management API ──────────────────────────────────────────────────
@@ -2779,6 +2769,18 @@ async def delete_briefing_topic(topic_name: str, _=Depends(require_auth)):
     result = bt.remove_topic(topic_name)
     if result.get("status") == "error":
         raise HTTPException(status_code=404, detail=result.get("message", "Not found"))
+    return result
+
+
+@app.post("/api/briefing/articles/submit")
+async def submit_briefing_article(request: Request, _=Depends(require_auth)):
+    """Accept a shared article URL and queue it for processing."""
+    body = await request.json()
+    url = body.get("url", "").strip()
+    if not url or not re.match(r'^https?://', url):
+        raise HTTPException(status_code=400, detail="A valid URL starting with http(s):// is required")
+    bt = _briefing_tools()
+    result = bt.submit_article(url)
     return result
 
 

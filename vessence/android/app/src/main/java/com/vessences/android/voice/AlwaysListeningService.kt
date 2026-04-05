@@ -305,18 +305,37 @@ class AlwaysListeningService : Service() {
         listeningThread = Thread({
             Log.i(TAG, "Listening thread started")
             DiagnosticReporter.serviceEvent("AlwaysListening", "thread_started")
-            while (isListening) {
-                if (isInCall() || isMediaPlaying()) {
-                    Thread.sleep(2000)
-                    continue
+            try {
+                while (isListening) {
+                    if (isInCall() || isMediaPlaying()) {
+                        try {
+                            Thread.sleep(2000)
+                        } catch (_: InterruptedException) {
+                            Log.i(TAG, "Listening thread interrupted during pause-sleep — exiting cleanly")
+                            return@Thread
+                        }
+                        continue
+                    }
+                    try {
+                        runWakeWordDetection()
+                    } catch (ie: InterruptedException) {
+                        Log.i(TAG, "Listening thread interrupted during detection — exiting cleanly")
+                        return@Thread
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Wake word detection error", e)
+                        DiagnosticReporter.nonFatalError("AlwaysListening", "detection_loop_error", e)
+                        if (isListening) {
+                            try {
+                                Thread.sleep(3000)
+                            } catch (_: InterruptedException) {
+                                Log.i(TAG, "Listening thread interrupted during error-backoff — exiting cleanly")
+                                return@Thread
+                            }
+                        }
+                    }
                 }
-                try {
-                    runWakeWordDetection()
-                } catch (e: Exception) {
-                    Log.e(TAG, "Wake word detection error", e)
-                    DiagnosticReporter.nonFatalError("AlwaysListening", "detection_loop_error", e)
-                    if (isListening) Thread.sleep(3000)
-                }
+            } catch (ie: InterruptedException) {
+                Log.i(TAG, "Listening thread interrupted — exiting cleanly")
             }
             Log.i(TAG, "Listening thread exiting")
         }, "oww-listener").apply { start() }

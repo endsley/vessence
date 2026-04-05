@@ -2,10 +2,7 @@
 import secrets
 import random
 import string
-try:
-    from .database import get_db
-except ImportError:
-    from database import get_db
+from .database import get_db
 
 
 def create_share(path: str, created_for: str) -> str:

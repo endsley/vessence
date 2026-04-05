@@ -15,10 +15,7 @@ from jane.config import (
     CHROMA_COLLECTION_FILE_INDEX,
 )
 
-try:
-    from .database import get_db
-except ImportError:
-    from database import get_db
+from .database import get_db
 
 THUMBNAIL_SIZE = (180, 180)
 

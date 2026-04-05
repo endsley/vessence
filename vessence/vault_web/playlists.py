@@ -1,9 +1,6 @@
 """playlists.py — Playlist CRUD."""
 import secrets
-try:
-    from .database import get_db
-except ImportError:
-    from database import get_db
+from .database import get_db
 
 
 def list_playlists() -> list:

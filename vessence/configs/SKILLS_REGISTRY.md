@@ -36,10 +36,11 @@ This document is a detailed index of Jane's major capabilities. It maps a high-l
         -   `TerminalTool`
 
 -   **Capability:** Vault Browser Website
-    -   **Location:** `$VESSENCE_HOME/vault_web/`
-    -   **URL:** Served on `http://127.0.0.1:8080`, public via Cloudflare Quick Tunnel
-    -   **Services:** `vault-web.service` (FastAPI/uvicorn), `vault-tunnel.service` (cloudflared)
+    -   **Location:** `$VESSENCE_HOME/jane_web/` (routes + templates) + `$VESSENCE_HOME/vault_web/` (shared library modules: auth, files, oauth, playlists, share, database)
+    -   **URL:** Served on `http://127.0.0.1:8081`, public via Cloudflare named tunnel at `jane.vessences.com`
+    -   **Services:** `jane-web.service` (FastAPI/uvicorn), `vault-tunnel.service` (cloudflared named tunnel)
     -   **Features:** OTP auth via Discord, file browser, Jane chat, music player, share links
+    -   **Note:** Legacy `vault-web.service` on port 8080 and `vault_web/main.py` were retired in v0.1.71 — all endpoints consolidated into `jane_web/main.py`.
 
 -   **Capability:** Web Research
     -   **File:** `$VESSENCE_HOME/amber/tools/research_tools.py`
@@ -100,7 +101,7 @@ This document is a detailed index of Jane's major capabilities. It maps a high-l
     -   **Classes:** `EssenceRuntime` (lifecycle), `JaneOrchestrator` (Mode A top-down), `CapabilityRegistry` (Mode C peer-to-peer)
 
 -   **Capability:** Essence Web API
-    -   **File:** `vault_web/main.py` (lines 838+)
+    -   **File:** `jane_web/main.py`
     -   **Endpoints:** `GET/POST/DELETE /api/essences/*` — list, load, unload, activate, delete essences
 
 ---
@@ -123,7 +124,7 @@ This document is a detailed index of Jane's major capabilities. It maps a high-l
     -   **Purpose:** Customizable communication style presets for Jane, selectable per user
 
 -   **Capability:** Personality Settings API
-    -   **File:** `vault_web/main.py`
+    -   **File:** `jane_web/main.py`
     -   **Endpoints:** `GET /api/settings/personality`, `POST /api/settings/personality`
     -   **Purpose:** Read and update the current user's Jane personality preference via vault_web Settings tab
 

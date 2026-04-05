@@ -872,66 +872,6 @@ async def send_message(user_id: str, session_id: str, message: str, file_context
     return {"text": response, "files": []}
 
 
-def _detect_music_play(message: str) -> tuple[str, str, int] | None:
-    """Detect 'play X' music requests and create a playlist deterministically.
-
-    Returns (playlist_id, display_name, track_count) or None if not a music request.
-    """
-    import re as _re
-    msg = (message or "").strip().lower()
-
-    # Match patterns like "play the scientist", "play some coldplay", "play a random song"
-    # But NOT "play the video", "play the game", etc.
-    play_match = _re.match(
-        r"^(?:play|put on|throw on|queue up)\s+(?:me\s+|some\s+|a\s+)?(.+?)(?:\s+(?:for me|please))?$",
-        msg,
-    )
-    if not play_match:
-        return None
-
-    query = play_match.group(1).strip()
-    # Avoid false positives on non-music requests
-    non_music = {"video", "game", "movie", "clip", "episode", "show", "trailer", "youtube"}
-    if any(word in query.split() for word in non_music):
-        return None
-
-    try:
-        import glob, random
-        from pathlib import Path
-        vault_music = Path(os.environ.get("VAULT_HOME", os.path.expanduser("~/ambient/vault"))) / "Music"
-        all_files = sorted(glob.glob(str(vault_music / "**" / "*.mp3"), recursive=True))
-        if not all_files:
-            return None
-
-        if query in ("random", "anything", "something", "song", "music", "random song",
-                     "a song", "some music", "something random"):
-            selected = random.sample(all_files, min(10, len(all_files)))
-            playlist_name = "Playing a random mix"
-        else:
-            # Search by filename
-            selected = [f for f in all_files if query in f.lower().split("/")[-1].lower()]
-            if not selected:
-                words = query.split()
-                selected = [f for f in all_files if any(w in f.lower().split("/")[-1].lower() for w in words)]
-            if not selected:
-                return None  # No matches — let Claude handle it (might suggest alternatives)
-            playlist_name = f"Playing {query.title()}"
-
-        # Build track list and create playlist
-        from playlists import create_playlist
-        tracks = []
-        for filepath in selected:
-            rel_path = str(Path(filepath).relative_to(vault_music.parent.parent))
-            filename = Path(filepath).stem
-            tracks.append({"path": rel_path, "title": filename})
-
-        playlist = create_playlist(playlist_name, tracks)
-        return (playlist["id"], playlist_name, len(tracks))
-    except Exception as e:
-        logger.warning("Music play detection error: %s", e)
-        return None
-
-
 def _pick_ack(user_message: str) -> str:
     """Pick a context-appropriate quick ack based on the user's message.
     Mix of professional, warm, casual, and occasionally humorous.
@@ -1260,35 +1200,6 @@ async def stream_message(
     emit("status", "Reviewing the current thread and loading session context.")
     await asyncio.sleep(0)  # flush start+status immediately so UI isn't blank
 
-    # ── Music play shortcut: detect "play X" and handle deterministically ──
-    _music_handled = False
-    _music_response = None
-    try:
-        _music_result = _detect_music_play(message)
-        if _music_result is not None:
-            playlist_id, playlist_name, track_count = _music_result
-            _music_response = f"{playlist_name} ({track_count} track{'s' if track_count != 1 else ''}). [MUSIC_PLAY:{playlist_id}]"
-            _music_handled = True
-            logger.info("[%s] Music play shortcut: %s", session_id[:12], _music_response)
-    except Exception as _music_err:
-        logger.warning("[%s] Music play detection failed: %s", session_id[:12], _music_err)
-
-    if _music_handled:
-        _raw_emit("delta", _music_response)
-        _raw_emit("done", _music_response)
-        broadcaster.finish(_music_response)
-        user_turn = {"role": "user", "content": persisted_user_message}
-        assistant_turn = {"role": "assistant", "content": _music_response}
-        state.history.extend([user_turn, assistant_turn])
-        state.history = state.history[-24:]
-        _persist_turns_async(session_id, state.conv_manager, user_turn, assistant_turn, persisted_user_message, _music_response)
-        total_ms = int((time.perf_counter() - request_start) * 1000)
-        logger.info("[%s] Music play complete in %dms", session_id[:12], total_ms)
-        while not queue.empty():
-            evt_type, evt_payload = queue.get_nowait()
-            yield json.dumps({"type": evt_type, "data": evt_payload}, ensure_ascii=True) + "\n"
-        return
-
     # Gemma4 router: classify prompt and short-circuit if self-handleable.
     # Runs async with a 2s timeout — on timeout/error, falls through to Claude.
     _gemma_short_circuit = False
@@ -1299,7 +1210,21 @@ async def stream_message(
                            for h in state.history[-10:]
                            if h.get("role") in ("user", "assistant") and isinstance(h.get("content"), str)]
         _classification, _router_response = await classify_prompt(message, _router_history)
-        if _classification == "self_handle" and _router_response:
+        if _classification == "music_play" and _router_response:
+            # Gemma4 extracted a music play query — create playlist via shared helper
+            logger.info("[%s] Gemma router: music_play query='%s'", session_id[:12], _router_response)
+            from jane_web.main import create_music_playlist_from_query
+            playlist = create_music_playlist_from_query(_router_response)
+            if playlist is not None:
+                track_count = len(playlist.get("tracks", []))
+                _router_response = (
+                    f"{playlist['name']} ({track_count} track{'s' if track_count != 1 else ''}). "
+                    f"[MUSIC_PLAY:{playlist['id']}]"
+                )
+                _gemma_short_circuit = True
+            else:
+                logger.info("[%s] Music query had no matches — letting Claude respond", session_id[:12])
+        elif _classification == "self_handle" and _router_response:
             _gemma_short_circuit = True
             logger.info("[%s] Gemma router: self_handle — short-circuiting Claude", session_id[:12])
         else:

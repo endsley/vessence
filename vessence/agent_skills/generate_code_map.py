@@ -3,7 +3,7 @@
 
 Pure static analysis using ast.parse() for Python, regex for HTML/JS and Kotlin.
 No LLM required. Outputs three maps to configs/:
-  CODE_MAP_CORE.md   — Python backend (jane/, agent_skills/, amber/, startup_code/)
+  CODE_MAP_CORE.md   — Python backend (jane/, agent_skills/, startup_code/)
   CODE_MAP_WEB.md    — Web frontend (vault_web/templates/*.html, jane_web/*.html)
   CODE_MAP_ANDROID.md — Android app (android/ Kotlin files)
 
@@ -44,7 +44,6 @@ CORE_PRIORITY_FILES = [
     "jane/session_summary.py",
     "jane/automation_runner.py",
     "jane/jane_session_wrapper.py",
-    "jane/discord_bridge.py",
     "jane/task_spine.py",
     "jane/tts.py",
     "jane/audit_wrapper.py",
@@ -72,17 +71,9 @@ CORE_PRIORITY_FILES = [
     "agent_skills/qwen_orchestrator.py",
     "agent_skills/validate_essence.py",
     "agent_skills/show_job_queue.py",
-    # ── Amber ──
-    "amber/agent.py",
-    "amber/logic/agent_logic.py",
-    "amber/tools/vault_tools.py",
-    "amber/tools/local_computer.py",
-    "amber/tools/speech_tools.py",
-    # ── Vault Web ──
-    "vault_web/main.py",
+    # ── Vault Web (shared libraries used by jane_web) ──
     "vault_web/files.py",
     "vault_web/auth.py",
-    "vault_web/amber_proxy.py",
     "vault_web/oauth.py",
     "vault_web/database.py",
     "vault_web/playlists.py",
@@ -104,7 +95,6 @@ CORE_SECONDARY_DIRS = [
     "jane_web",
     "jane",
     "agent_skills",
-    "amber",
     "startup_code",
     "vault_web",
     "onboarding",
@@ -510,7 +500,7 @@ def main():
     _write_map(combined_path,
         "# Code Map Index\n\n"
         "Split into three targeted maps:\n"
-        "- `CODE_MAP_CORE.md` — Python backend (jane/, agent_skills/, amber/, startup_code/)\n"
+        "- `CODE_MAP_CORE.md` — Python backend (jane/, agent_skills/, startup_code/)\n"
         "- `CODE_MAP_WEB.md` — Web frontend (vault_web/templates/)\n"
         "- `CODE_MAP_ANDROID.md` — Android app (Kotlin)\n\n"
         "Run `python agent_skills/generate_code_map.py` to regenerate all, "

@@ -31,7 +31,7 @@ def test_jane_chat_stream_endpoint(monkeypatch):
     with TestClient(app) as client:
         with client.stream(
             "POST",
-            "/api/amber/chat/stream",
+            "/api/jane/chat/stream",
             json={"message": "hi", "session_id": "abc"},
         ) as response:
             body = "".join(

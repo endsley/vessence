@@ -1,5 +1,10 @@
 #!/bin/bash
-# reliable_start.sh - Enhanced background launcher
+# reliable_start.sh - Background launcher for Jane's gemini_cli_bridge
+#
+# NOTE (v0.1.71): Amber/discord_bridge startup was removed. The Amber ADK
+# server (adk web --port 8000) and jane/discord_bridge.py were retired when
+# amber/ was deleted. Jane runs via systemd (jane-web.service) and this
+# script only starts the gemini CLI bridge.
 HOME_DIR="${HOME:-$(getent passwd "$(id -u)" | cut -d: -f6)}"
 AMBIENT_BASE="${AMBIENT_BASE:-$HOME_DIR/ambient}"
 
@@ -28,63 +33,16 @@ if [ ! -x "$DEFAULT_VENV_BIN/python" ] && [ -x "/home/chieh/google-adk-env/adk-v
     DEFAULT_VENV_BIN="/home/chieh/google-adk-env/adk-venv/bin"
 fi
 VENV_BIN="${VENV_BIN:-$DEFAULT_VENV_BIN}"
-mkdir -p "$VESSENCE_DATA_HOME/logs/Amber_log" "$VESSENCE_DATA_HOME/logs/Jane_log"
+mkdir -p "$VESSENCE_DATA_HOME/logs/Jane_log"
 
-echo "Cleaning up existing processes..."
-pkill -9 -f "adk web|discord_bridge.py|bridge.py" || true
-rm -f /tmp/amber_bridge.lock /tmp/jane_bridge.lock
+echo "Cleaning up existing bridge processes..."
+pkill -9 -f "gemini_cli_bridge/bridge.py" || true
+rm -f /tmp/jane_bridge.lock
 sleep 2
 
-# 1. Start Amber Brain
-echo "Starting Amber Brain..."
-cd "$VESSENCE_HOME"
-nohup $VENV_BIN/adk web --port 8000 "$VESSENCE_HOME" > "$VESSENCE_DATA_HOME/logs/Amber_log/server.log" 2>&1 &
-
-# Wait for Brain HTTP
-for i in {1..30}; do
-    if $VENV_BIN/python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/list-apps')" > /dev/null 2>&1; then
-        echo "Brain HTTP is UP."
-        break
-    fi
-    sleep 1
-done
-
-# Deep health check: verify amber agent actually loads (catches syntax errors, import failures)
-echo "Verifying Amber agent loads cleanly..."
-TEST_SESSION="healthcheck_$$"
-$VENV_BIN/python -c "
-import urllib.request, json
-# Create session
-req = urllib.request.Request('http://localhost:8000/apps/amber/users/healthcheck/sessions/$TEST_SESSION',
-    data=b'{}', headers={'Content-Type': 'application/json'}, method='POST')
-try:
-    urllib.request.urlopen(req, timeout=10)
-except Exception as e:
-    print(f'Session create failed: {e}'); exit(1)
-# Send test message
-payload = json.dumps({'app_name':'amber','user_id':'healthcheck','session_id':'$TEST_SESSION',
-    'new_message':{'parts':[{'text':'ping'}],'role':'user'}}).encode()
-req2 = urllib.request.Request('http://localhost:8000/run',
-    data=payload, headers={'Content-Type': 'application/json'}, method='POST')
-try:
-    resp = urllib.request.urlopen(req2, timeout=30)
-    print('Agent health check PASSED.')
-except Exception as e:
-    print(f'Agent health check FAILED: {e}'); exit(1)
-" 2>&1
-if [ $? -ne 0 ]; then
-    echo "ERROR: Amber agent failed health check. Check server.log. Bridges NOT started."
-    exit 1
-fi
-
-# 2. Start Amber Bridge
-echo "Starting Amber Bridge..."
-cd "$VESSENCE_HOME"
-nohup $VENV_BIN/python jane/discord_bridge.py > "$VESSENCE_DATA_HOME/logs/Amber_log/bridge.log" 2>&1 &
-
-# 3. Start Jane Bridge
+# Start Jane Bridge (gemini CLI)
 echo "Starting Jane Bridge..."
 cd "$HOME_DIR/gemini_cli_bridge"
 nohup $VENV_BIN/python bridge.py > "$VESSENCE_DATA_HOME/logs/Jane_log/bridge.log" 2>&1 &
 
-echo "All bots initiated. Check logs for status."
+echo "Jane bridge initiated. Check logs for status."

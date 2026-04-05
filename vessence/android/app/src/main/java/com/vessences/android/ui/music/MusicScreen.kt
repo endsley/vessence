@@ -11,11 +11,15 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -79,6 +83,8 @@ fun MusicScreen(
 
 @Composable
 private fun PlaylistListScreen(state: MusicUiState, viewModel: MusicViewModel) {
+    var playlistToDelete by remember { mutableStateOf<com.vessences.android.data.model.Playlist?>(null) }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -105,14 +111,14 @@ private fun PlaylistListScreen(state: MusicUiState, viewModel: MusicViewModel) {
             LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(state.playlists) { playlist ->
                     Surface(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { viewModel.openPlaylist(playlist.id) },
+                        modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(12.dp),
                         color = SlateCard,
                     ) {
                         Row(
-                            modifier = Modifier.padding(16.dp),
+                            modifier = Modifier
+                                .clickable { viewModel.openPlaylist(playlist.id) }
+                                .padding(start = 16.dp, top = 16.dp, bottom = 16.dp, end = 4.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Text("\uD83C\uDFB5", fontSize = 28.sp)
@@ -121,12 +127,38 @@ private fun PlaylistListScreen(state: MusicUiState, viewModel: MusicViewModel) {
                                 Text(playlist.name, color = Color.White, fontWeight = FontWeight.SemiBold)
                                 Text("${playlist.trackCount} tracks", color = SlateText, fontSize = 12.sp)
                             }
+                            IconButton(onClick = { playlistToDelete = playlist }) {
+                                Icon(Icons.Default.Delete, contentDescription = "Delete playlist", tint = Color(0xFFEF4444))
+                            }
                             Icon(Icons.Default.ChevronRight, null, tint = SlateText)
                         }
                     }
                 }
             }
         }
+    }
+
+    // Confirmation dialog
+    if (playlistToDelete != null) {
+        AlertDialog(
+            onDismissRequest = { playlistToDelete = null },
+            title = { Text("Delete playlist?", color = Color.White) },
+            text = { Text("This will permanently delete \"${playlistToDelete?.name}\". This cannot be undone.", color = SlateText) },
+            confirmButton = {
+                TextButton(onClick = {
+                    playlistToDelete?.let { viewModel.deletePlaylist(it.id) }
+                    playlistToDelete = null
+                }) {
+                    Text("Delete", color = Color(0xFFEF4444))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { playlistToDelete = null }) {
+                    Text("Cancel", color = SlateText)
+                }
+            },
+            containerColor = SlateCard,
+        )
     }
 }
 

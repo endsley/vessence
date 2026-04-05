@@ -5,9 +5,9 @@ from pathlib import Path
 
 from starlette.requests import Request
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "vault_web"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from oauth import allowed_email, build_external_url
+from vault_web.oauth import allowed_email, build_external_url
 
 
 def _request(headers: list[tuple[bytes, bytes]] | None = None) -> Request:

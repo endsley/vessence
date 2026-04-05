@@ -13,10 +13,7 @@ from jane.config import ENV_FILE_PATH
 
 load_dotenv(ENV_FILE_PATH)
 
-try:
-    from .database import get_db
-except ImportError:
-    from database import get_db
+from .database import get_db
 
 MAX_ATTEMPTS = 5
 LOCKOUT_MINUTES = 30

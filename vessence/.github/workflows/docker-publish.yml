@@ -26,9 +26,6 @@ jobs:
           - service: chromadb
             dockerfile: docker/chromadb/Dockerfile
             image: chromadb
-          - service: amber
-            dockerfile: docker/amber/Dockerfile
-            image: amber
           - service: vault
             dockerfile: docker/vault/Dockerfile
             image: vault
@@ -101,7 +98,6 @@ jobs:
           SESSION_SECRET_KEY=smoke-test-secret
           CHROMADB_HOST=chromadb
           CHROMADB_PORT=8001
-          ADK_SERVER_URL=http://amber:8000
           EOF
 
       - name: Pull latest images

@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 OLLAMA_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 ROUTER_MODEL = os.environ.get("GEMMA_ROUTER_MODEL", "gemma4:e4b")
-ROUTER_TIMEOUT = float(os.environ.get("GEMMA_ROUTER_TIMEOUT", "2.0"))
+ROUTER_TIMEOUT = float(os.environ.get("GEMMA_ROUTER_TIMEOUT", "10.0"))
 MAX_HISTORY_TURNS = 5
 
 # Cached personal info — loaded once, never changes during runtime.
@@ -34,7 +34,7 @@ _PERSONAL_INFO = """User info:
 - Wife: spouse, REDACTED_PROFESSION at REDACTED_BUSINESS"""
 
 SYSTEM_PROMPT = f"""You are a prompt router for Jane, an AI assistant.
-Classify prompts as SELF_HANDLE or DELEGATE_OPUS.
+Classify prompts as SELF_HANDLE, MUSIC_PLAY, or DELEGATE_OPUS.
 
 SELF_HANDLE — ONLY these categories:
 - Pure greetings: "hey", "hi", "good morning", "how are you"
@@ -48,20 +48,55 @@ SELF_HANDLE — ONLY these categories:
 - Unit conversions: "how many cups in a gallon", "celsius to fahrenheit"
 - Casual follow-ups to previous messages: "haha", "that's funny", "yeah", "true", "makes sense", "right"
 
+MUSIC_PLAY — User wants to hear music/songs. Any phrasing:
+- "play the scientist", "put on some coldplay", "throw on a random song"
+- "can you play X", "please play X", "hey jane play X"
+- "I want to hear X", "listen to X", "play me something", "shuffle my music"
+For MUSIC_PLAY, RESPONSE must be ONLY the clean search query (artist/song/album name),
+with NO extra words, NO sentences, NO quotes. Use "random" for shuffle requests.
+Examples:
+  "play the scientist" → RESPONSE: the scientist
+  "hey jane can you put on some coldplay please" → RESPONSE: coldplay
+  "play me a random song" → RESPONSE: random
+  "I want to hear shakira" → RESPONSE: shakira
+
 DELEGATE_OPUS — EVERYTHING ELSE, including:
 - Any question about the system, app, features, or project
 - Any question you're not 100% sure about
 - Anything technical, code-related, or requiring context
 - When in doubt, ALWAYS delegate
 
-IMPORTANT: If you are not completely certain the prompt fits a SELF_HANDLE category above, classify as DELEGATE_OPUS. False delegation is safe. False self-handling gives wrong answers.
+IMPORTANT: If you are not completely certain the prompt fits a SELF_HANDLE or MUSIC_PLAY category, classify as DELEGATE_OPUS. False delegation is safe. False self-handling gives wrong answers.
 
 {_PERSONAL_INFO}
 
-Format: CLASSIFICATION: [SELF_HANDLE or DELEGATE_OPUS]
-RESPONSE: [If SELF_HANDLE, provide the actual response. If DELEGATE_OPUS, provide a brief, natural acknowledgment that shows you understood what the user asked. Vary your tone based on context — be playful for casual topics, focused for technical work, warm for personal questions, witty when appropriate. Examples: "Ooh, good question — digging into that.", "On it, checking the wake word logs.", "Ha, let me think about that one.", "Sure thing, pulling up the weather." Keep it to one short sentence. This will be spoken aloud.]"""
+Format: CLASSIFICATION: [SELF_HANDLE or MUSIC_PLAY or DELEGATE_OPUS]
+RESPONSE: [If SELF_HANDLE, provide the actual response. If MUSIC_PLAY, provide ONLY the search query (nothing else). If DELEGATE_OPUS, write a brief acknowledgment that proves you understood the specific ask.
 
-_CLASSIFY_RE = re.compile(r"CLASSIFICATION:\s*(SELF_HANDLE|DELEGATE_OPUS)", re.IGNORECASE)
+STRICT RULES for DELEGATE_OPUS acks:
+- MUST reference at least one concrete noun or concept from the user's message (e.g., "ViewModel", "wake word", "auth system", "the bug with X"). Copy the key term verbatim.
+- NEVER use generic phrases like "good question", "digging into that", "let me think", "interesting question". These are banned.
+- NEVER mention "looking it up" or "checking" unless the user actually asked to look something up.
+- Match tone to content: focused for code/bugs, warm for personal, direct for factual.
+- One short sentence. This is spoken aloud.
+
+Good examples (do NOT copy verbatim — paraphrase using the user's actual words):
+  User: "can you benchmark the kernel gradient implementation"
+  Ack: "On it — profiling the kernel gradient code now."
+
+  User: "the discord bot stopped posting to the server this morning"
+  Ack: "Looking into why the discord bot went silent this morning."
+
+  User: "help me draft an email to the conference organizers"
+  Ack: "Sure, let me help you put together that email to the organizers."
+
+Bad examples (never do this):
+  "Ooh, good question — digging into that."   ← generic, banned
+  "Let me think about that one."                ← generic, banned
+  "Interesting question — looking into it."     ← generic, banned
+]"""
+
+_CLASSIFY_RE = re.compile(r"CLASSIFICATION:\s*(SELF_HANDLE|MUSIC_PLAY|DELEGATE_OPUS)", re.IGNORECASE)
 _RESPONSE_RE = re.compile(r"RESPONSE:\s*(.*)", re.DOTALL)
 
 # Weather keywords — if detected, inject cached weather data into gemma's context
@@ -223,9 +258,14 @@ async def classify_prompt(
         "messages": messages,
         "stream": False,
         "think": False,
+        # Never unload — model stays in VRAM/RAM indefinitely. Ollama default
+        # is 5 minutes which is too short for our usage pattern.
+        "keep_alive": -1,
         "options": {
             "temperature": 0.1,
-            "num_predict": 256,
+            # Classification output is CLASSIFICATION: X\nRESPONSE: one short sentence
+            # — never more than ~60 tokens. Capping tight makes cold-starts fast.
+            "num_predict": 80,
         },
     }
 
@@ -261,6 +301,12 @@ async def classify_prompt(
             return ("unknown", None)
 
         classification = cls_match.group(1).upper()
+
+        if classification == "MUSIC_PLAY":
+            # Extract the clean search query from the RESPONSE line
+            resp_match = _RESPONSE_RE.search(content)
+            query = resp_match.group(1).strip().rstrip('"').strip() if resp_match else None
+            return ("music_play", query or None)
 
         if classification == "DELEGATE_OPUS":
             # Extract the contextual ack from the RESPONSE line

@@ -547,11 +547,14 @@ class ChatViewModel(
             // Check if the user's last message was a conversation-ending phrase
             val lastUserMsg = _state.value.messages.lastOrNull { it.isUser }?.text ?: ""
             val conversationOver = isConversationEnding(lastUserMsg)
+            // If music is about to play, sttActive was already cleared by endVoiceConversation()
+            // in the MUSIC_PLAY handler. Treat it as a conversation-ending event — no STT re-launch.
+            val musicPlaying = !com.vessences.android.voice.WakeWordBridge.sttActive
 
             // If VoiceController is waiting for a reply, use it (handles TTS + auto re-listen)
             if (voiceController != null && voiceController.isWaitingForReply()) {
                 _state.value = _state.value.copy(isSpeaking = true)
-                voiceController.onAssistantReply(textToSpeak, chatPrefs.isAutoListenEnabled() && !conversationOver)
+                voiceController.onAssistantReply(textToSpeak, chatPrefs.isAutoListenEnabled() && !conversationOver && !musicPlaying)
             } else {
                 // Voice came from Android SpeechRecognizer (mic button / wake word), not VoiceController
                 viewModelScope.launch {
@@ -562,8 +565,8 @@ class ChatViewModel(
                     // Don't re-launch STT in that case.
                     if (!_state.value.isSpeaking) return@launch
                     _state.value = _state.value.copy(isSpeaking = false)
-                    if (conversationOver) {
-                        // User said goodbye — stop listening, release mic for wake word
+                    if (conversationOver || musicPlaying) {
+                        // Music playing or user said goodbye — stop listening, release mic for wake word
                         endVoiceConversation()
                     } else if (chatPrefs.isAutoListenEnabled()) {
                         // Unified path: trigger Google STT popup (same as mic button + wake word)

@@ -1,8 +1,9 @@
 """
-essence_runtime.py — Multi-essence runtime for Amber.
+essence_runtime.py — Multi-essence runtime for Jane.
 
 Manages loading/unloading essences, orchestration (Mode A & Mode C),
-capability routing, and memory porting on deletion.
+capability routing, and memory porting on deletion. Actively imported
+by jane_web/main.py (not Amber — that retired in v0.1.71).
 """
 
 import json
@@ -47,7 +48,7 @@ class EssenceState:
 # ---------------------------------------------------------------------------
 
 class EssenceRuntime:
-    """Loads, unloads, and manages essences for Amber."""
+    """Loads, unloads, and manages essences for Jane."""
 
     _instance: "EssenceRuntime | None" = None
 
@@ -332,7 +333,7 @@ class JaneOrchestrator:
         """Send each subtask to its target essence and collect results.
 
         This is a framework stub — actual LLM invocation depends on the
-        Amber runtime loop. Returns a summary dict.
+        Jane runtime loop. Returns a summary dict.
         """
         results: list[dict] = []
         for step in plan:
@@ -347,7 +348,7 @@ class JaneOrchestrator:
                 })
                 continue
 
-            # Placeholder: in production the Amber runtime would invoke the
+            # Placeholder: in production the Jane runtime would invoke the
             # essence's LLM with the subtask and the essence's personality +
             # memory context.  Here we record the dispatch.
             results.append({
@@ -404,7 +405,7 @@ class CapabilityRegistry:
     ) -> dict:
         """Route a service request to the best provider.
 
-        Returns a result dict. In production the Amber runtime would
+        Returns a result dict. In production the Jane runtime would
         actually invoke the provider essence; here we return dispatch info.
         """
         provider = self.find_provider(capability)

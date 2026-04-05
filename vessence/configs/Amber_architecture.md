@@ -1,13 +1,15 @@
-# Amber Architecture & Design
+# Amber Architecture & Design (LEGACY — retired)
 
-This document describes the architecture, code structure, and design principles for Amber, the Discord-based assistant.
+> **Status (2026-04-04):** Amber has been retired. Jane is the sole agent. This document is preserved as historical reference only. The `vault_web/amber_proxy.py` bridge and its top-level shim were removed in v0.1.71, along with `vault-web.service`. The Discord bridge still runs but communicates directly with Jane.
+
+This document describes the architecture, code structure, and design principles for Amber, the Discord-based assistant that preceded the current Jane-only runtime.
 
 ---
 
 ## 1. Core Logic & Location
-- **Primary Directory:** `$VESSENCE_HOME/amber/`
-- **Main Entry Point:** The core agent logic is defined in `amber/agent.py`. This file initializes Amber's primary brain, sub-agents, and tools.
-- **Discord Bridge:** The Discord bot lives at `jane/discord_bridge.py`. It receives Discord messages, forwards them to the ADK server via `vault_web/amber_proxy.py`, and relays responses back. The top-level `amber_proxy.py` is a compatibility shim that re-exports `vault_web.amber_proxy`.
+- **Primary Directory:** `$VESSENCE_HOME/amber/` (retained for historical reference; not actively loaded)
+- **Main Entry Point:** The core agent logic was defined in `amber/agent.py`.
+- **Discord Bridge:** `jane/discord_bridge.py` now talks directly to Jane; the former `vault_web/amber_proxy.py` HTTP relay is gone.
 
 ## 2. Directory Structure & Purpose
 - **amber/logic/** — Contains specialized logic modules (e.g., `agent_logic.py` with the fact extraction callback).
