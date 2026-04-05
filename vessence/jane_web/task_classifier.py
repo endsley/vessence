@@ -55,6 +55,21 @@ def classify_task(message: str) -> str:
     if len(stripped) < _MIN_LENGTH_FOR_OFFLOAD:
         return "quick"
 
+    # Follow-up messages referring to Jane's prior turn need conversation
+    # history. Offloading them means pronouns like "this", "it", "that" lose
+    # their antecedent. If the message STARTS with a follow-up cue, keep it
+    # on the foreground path so the standing brain has history. (Does NOT
+    # match bare "please X" since many big tasks start politely with please.)
+    _FOLLOWUP_STARTERS = re.compile(
+        r"^(?:please\s+)?"
+        r"(?:go (?:ahead|and|on)|do (?:it|that|this)|yes(?:\s+please)?|sure|ok(?:ay)?|"
+        r"sounds good|proceed|go for it|implement (?:it|this|that)|let'?s do (?:it|this)|"
+        r"run with it|make it so)\b",
+        re.IGNORECASE,
+    )
+    if _FOLLOWUP_STARTERS.match(stripped):
+        return "quick"
+
     # Check for quick-query patterns first (questions are rarely big tasks)
     quick_score = sum(1 for r in _quick_re if r.search(stripped))
     if quick_score >= 2:

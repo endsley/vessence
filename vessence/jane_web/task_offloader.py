@@ -102,11 +102,30 @@ def _run_task(
 
     max_attempts = 2
     try:
-        # Build context for the automation run
-        system_prompt = ""
+        # Build context for the automation run.
+        # Pull the session's conversation history so the offloaded task can
+        # resolve pronouns like "this", "it", "that" back to Jane's previous
+        # turns. Without this, messages like "please implement this" have
+        # no antecedent and Jane responds "I don't know what you're referring to".
+        history: list[dict] = []
         try:
-            ctx = build_jane_context(message, [])
+            from jane_web.jane_proxy import _get_session
+            state = _get_session(session_id)
+            history = list(state.history) if state and state.history else []
+        except Exception as exc:
+            logger.warning("Could not load session history for offloaded task %s: %s", task_id, exc)
+
+        system_prompt = ""
+        prompt_text = message
+        try:
+            ctx = build_jane_context(message, history)
             system_prompt = ctx.system_prompt or ""
+            # Use the transcript (Recent Conversation + User: message) as the
+            # prompt so the model sees Jane's previous turns. The offloader
+            # previously passed just `message`, which made pronouns like "this"
+            # or "it" have no antecedent.
+            if ctx.transcript:
+                prompt_text = ctx.transcript
         except Exception:
             logger.warning("Context build failed for offloaded task %s, running without context", task_id)
 
@@ -115,7 +134,7 @@ def _run_task(
         for attempt in range(1, max_attempts + 1):
             try:
                 result = run_automation_prompt(
-                    message,
+                    prompt_text,
                     system_prompt=system_prompt,
                     workdir=VESSENCE_HOME,
                     on_progress=on_progress,
