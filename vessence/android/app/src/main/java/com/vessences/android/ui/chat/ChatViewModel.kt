@@ -10,6 +10,7 @@ import com.vessences.android.data.repository.ChatRepository
 import com.vessences.android.data.repository.AnnouncementPoller
 import com.vessences.android.data.repository.LiveBroadcastListener
 import com.vessences.android.voice.HybridTtsManager
+import com.vessences.android.voice.SentenceTtsQueue
 import com.vessences.android.data.repository.VoiceSettingsRepository
 import com.vessences.android.notifications.ChatNotificationManager
 import com.vessences.android.util.ChatPersistence
@@ -312,6 +313,10 @@ class ChatViewModel(
 
         currentStreamJob = viewModelScope.launch(Dispatchers.IO) {
             var gotDone = false
+            // Sentence-level TTS: accumulate text, fire TTS per sentence during streaming
+            var sentenceQueue: SentenceTtsQueue? = null
+            val sentenceBuffer = StringBuilder()
+            var sentenceTtsActive = false
             try {
                 // If there's a file attachment, upload it first
                 var resolvedFileContext = fileContext
@@ -477,6 +482,33 @@ class ChatViewModel(
                                 .replace(Regex("</?(?:spoken|visual|think|thinking|artifact)>", RegexOption.IGNORE_CASE), "")
                             val ackStatus = if (statusLog.isNotEmpty()) statusLog.last() else null
                             updateAiMessage(currentMsgId, accumulated, isStreaming = true, status = ackStatus, statusLog = statusLog.toList())
+
+                            // Sentence-level TTS: detect complete sentences and submit for generation
+                            if (fromVoice && HybridTtsManager.USE_SERVER_TTS) {
+                                // Initialize queue on first delta
+                                if (sentenceQueue == null) {
+                                    sentenceQueue = SentenceTtsQueue(appContext.cacheDir, viewModelScope)
+                                    sentenceQueue!!.startPlayback()
+                                    sentenceTtsActive = true
+                                }
+                                // Feed raw text (without markup) into sentence buffer
+                                val cleanDelta = event.data
+                                    .replace(Regex("</?(?:spoken|visual|think|thinking|artifact)>", RegexOption.IGNORE_CASE), "")
+                                sentenceBuffer.append(cleanDelta)
+                                // Extract complete sentences (ending with . ! ?)
+                                val sentenceRegex = Regex("([^.!?]+[.!?])\\s*")
+                                val matches = sentenceRegex.findAll(sentenceBuffer.toString()).toList()
+                                if (matches.isNotEmpty()) {
+                                    val consumed = matches.last().range.last + 1
+                                    for (m in matches) {
+                                        val sentence = m.groupValues[1].trim()
+                                        if (sentence.length > 3) {  // skip tiny fragments
+                                            sentenceQueue!!.submitSentence(sentence)
+                                        }
+                                    }
+                                    sentenceBuffer.delete(0, consumed)
+                                }
+                            }
                         }
                         "done" -> {
                             gotDone = true
@@ -518,7 +550,32 @@ class ChatViewModel(
                                 fullText = if (hasSpokenBlock) displayText else null,
                             )
                             notifier?.showReplyNotification(senderName = backend.displayName, message = displayText)
-                            onSendComplete(fromVoice, displayText, spokenText)
+
+                            // If sentence-level TTS was active, flush remaining buffer and wait
+                            if (sentenceTtsActive && sentenceQueue != null) {
+                                val remaining = sentenceBuffer.toString().trim()
+                                if (remaining.length > 3) {
+                                    sentenceQueue!!.submitSentence(remaining)
+                                }
+                                sentenceBuffer.clear()
+                                sentenceQueue!!.finishSubmitting()
+                                sentenceQueue!!.awaitCompletion()
+                                sentenceTtsActive = false
+                                // Skip normal TTS in onSendComplete — already played
+                                onSendComplete(fromVoice = false, displayText, spokenText)
+                                // But still handle auto-listen for voice mode
+                                if (fromVoice) {
+                                    _state.value = _state.value.copy(isSpeaking = false)
+                                    val lastUserMsg = _state.value.messages.lastOrNull { it.isUser }?.text ?: ""
+                                    if (!isConversationEnding(lastUserMsg) && chatPrefs.isAutoListenEnabled()) {
+                                        com.vessences.android.MainActivity.instance?.launchStt()
+                                    } else {
+                                        endVoiceConversation()
+                                    }
+                                }
+                            } else {
+                                onSendComplete(fromVoice, displayText, spokenText)
+                            }
                         }
                         "error" -> {
                             gotDone = true

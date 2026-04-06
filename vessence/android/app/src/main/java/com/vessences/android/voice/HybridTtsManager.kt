@@ -43,20 +43,24 @@ class HybridTtsManager(context: Context) {
 
         if (USE_SERVER_TTS) {
             Log.d(TAG, "Attempting server TTS (${text.take(50)}...)")
+            val t0 = System.currentTimeMillis()
             val success = try {
                 serverTts.speak(text)
             } catch (e: Exception) {
                 Log.w(TAG, "Server TTS exception: ${e.message}")
                 false
             }
+            val elapsed = System.currentTimeMillis() - t0
             if (success) {
-                Log.d(TAG, "Server TTS succeeded")
+                Log.d(TAG, "Server TTS succeeded in ${elapsed}ms")
                 return
             }
-            Log.d(TAG, "Server TTS failed, falling back to Android TTS")
+            Log.d(TAG, "Server TTS failed in ${elapsed}ms, falling back to Android TTS")
         }
 
+        val t1 = System.currentTimeMillis()
         localTts.speak(text)
+        Log.d(TAG, "Android TTS completed in ${System.currentTimeMillis() - t1}ms")
     }
 
     fun stop() {
