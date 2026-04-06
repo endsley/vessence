@@ -26,7 +26,7 @@ class HybridTtsManager(context: Context) {
     /** Exposed so ActionQueue can use local TTS directly for instant tool feedback. */
     val localTts = AndroidTtsManager(context)
 
-    private val serverTts = ServerTtsPlayer()
+    private val serverTts = ServerTtsPlayer(context.applicationContext.cacheDir)
 
     suspend fun speak(text: String) {
         if (text.isBlank()) return
