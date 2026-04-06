@@ -20,7 +20,7 @@ class HybridTtsManager(context: Context) {
          * Master switch for server TTS. Set to false to instantly revert
          * to Android-only TTS without any other code changes.
          */
-        const val USE_SERVER_TTS = true
+        const val USE_SERVER_TTS = false
     }
 
     /** Exposed so ActionQueue can use local TTS directly for instant tool feedback. */

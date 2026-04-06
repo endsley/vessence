@@ -10,7 +10,7 @@ sys.path.insert(0, VESSENCE_HOME)
 # Mock logger
 logging.basicConfig(level=logging.INFO)
 
-from agent_skills.conversation_manager import ConversationManager
+from agent_skills.memory.v1.conversation_manager import ConversationManager
 
 def verify():
     # Use the session ID from our current conversation

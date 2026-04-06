@@ -113,7 +113,7 @@ summary_style : "concise_turn_memory_v1" | "code_change_turn_memory_v1"
 - Legacy short-term entries written before this design change may still be bloated until the migration helper rewrites them.
 
 **Adding short-term memories explicitly:**
-- CLI: `agent_skills/add_forgettable_memory.py "fact text" [--days N] [--topic T] [--subtopic S] [--author A]`
+- CLI: `agent_skills/memory/v1/add_forgettable_memory.py "fact text" [--days N] [--topic T] [--subtopic S] [--author A]`
 - Python: `from agent_skills.add_forgettable_memory import add_forgettable_memory; add_forgettable_memory(fact, ...)`
 - Legacy compatibility: older runtime paths may still call `add_forgettable_memory.py` directly. New architecture should treat those writes as Jane memory writes unless explicitly marked as historical.
 
@@ -221,7 +221,7 @@ The ledger provides Jane with a deterministic way to investigate unexpected fail
 
 ## 4. Nightly Maintenance: The Memory Janitor
 
-To prevent the Long-Term Memory DB from becoming bloated with redundant or outdated information, a nightly maintenance script, "The Memory Janitor" (`agent_skills/janitor_memory.py`), runs to clean and consolidate the database. This process relies on an LLM to perform intelligent clustering and synthesis, rather than using vector distance metrics.
+To prevent the Long-Term Memory DB from becoming bloated with redundant or outdated information, a nightly maintenance script, "The Memory Janitor" (`agent_skills/memory/v1/janitor_memory.py`), runs to clean and consolidate the database. This process relies on an LLM to perform intelligent clustering and synthesis, rather than using vector distance metrics.
 
 ### 4.1. Detailed Algorithm
 

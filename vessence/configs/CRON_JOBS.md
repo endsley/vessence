@@ -6,7 +6,7 @@ This document logs all scheduled tasks (cron jobs) for the system. It must be up
 
 ## 1. Memory Janitor
 - **Schedule:** `15 2 * * *` (Runs daily at 2:15 AM)
-- **Script Path:** `$VESSENCE_HOME/agent_skills/janitor_memory.py`
+- **Script Path:** `$VESSENCE_HOME/agent_skills/memory/v1/janitor_memory.py`
 - **Description:** Performs maintenance on the vector memory, cleaning up old or redundant entries.
 
 ## 2. Bot Watchdog — DISABLED (Discord disconnected 2026-03-22)

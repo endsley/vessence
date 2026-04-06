@@ -71,7 +71,7 @@ def read_script_body(path, max_lines=200):
 
 # Key scripts whose bodies the audit should inspect for code/doc drift
 KEY_SCRIPTS = [
-    "agent_skills/janitor_memory.py",
+    "agent_skills/memory/v1/janitor_memory.py",
     "agent_skills/janitor_system.py",
     "agent_skills/generate_identity_essay.py",
     "agent_skills/check_for_updates.py",

@@ -7,7 +7,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from agent_skills.memory_retrieval import build_memory_sections
+from agent_skills.memory.v1.memory_retrieval import build_memory_sections
 from jane.config import VESSENCE_DATA_HOME, VESSENCE_HOME
 from jane.research_router import run_research_offload, should_offload_research
 

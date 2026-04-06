@@ -11,8 +11,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import AsyncIterator
 
-from agent_skills.conversation_manager import ConversationManager
-from agent_skills.memory_retrieval import build_memory_sections, invalidate_memory_summary_cache
+from agent_skills.memory.v1.conversation_manager import ConversationManager
+from agent_skills.memory.v1.memory_retrieval import build_memory_sections, invalidate_memory_summary_cache
 from jane.brain_adapters import BrainAdapterError, ExecutionProfile, build_execution_profile, get_brain_adapter, resolve_timeout_seconds
 from jane.context_builder import build_jane_context_async
 from jane.config import ENV_FILE_PATH, LOGS_DIR

@@ -93,8 +93,8 @@ try:
     ANDROID_VERSION = _version_data["version_name"]
     _ANDROID_VERSION_CODE = _version_data["version_code"]
 except FileNotFoundError:
-    ANDROID_VERSION = "0.1.103"
-    _ANDROID_VERSION_CODE = 216
+    ANDROID_VERSION = "0.1.106"
+    _ANDROID_VERSION_CODE = 219
 
 # Startup validation: ensure the APK for the advertised version actually exists
 _expected_apk = MARKETING_DOWNLOADS_DIR / f"vessences-android-v{ANDROID_VERSION}.apk"
@@ -1589,7 +1589,7 @@ async def search_files(q: str, type: Optional[str] = None, _=Depends(require_aut
         from memory_retrieval import _query_collection
         vector_db = os.environ.get(
             "VESSENCE_DATA_HOME", os.path.expanduser("~/ambient/vessence-data")
-        ) + "/vector_db"
+        ) + "/memory/v1/vector_db"
         for collection_name in ("vault_files", "facts"):
             try:
                 docs, metas, _dists = _query_collection(vector_db, collection_name, q, 20)

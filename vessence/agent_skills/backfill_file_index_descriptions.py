@@ -31,7 +31,7 @@ with _silence():
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from jane.config import get_chroma_client, CHROMA_COLLECTION_FILE_INDEX, VAULT_DIR, VECTOR_DB_FILE_INDEX
-from agent_skills.index_vault import (
+from agent_skills.memory.v1.index_vault import (
     READABLE_EXTENSIONS,
     describe_readable_file,
     extract_readable_text,

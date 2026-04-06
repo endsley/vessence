@@ -58,8 +58,8 @@ def _resolve_paths():
     vessence_data_home = os.environ.get("VESSENCE_DATA_HOME", os.path.join(ambient_base, "vessence-data"))
 
     seed_file = os.path.join(vessence_home, "configs", "jane_seed_memories.json")
-    vector_db_dir = os.path.join(vessence_data_home, "vector_db")
-    flag_file = os.path.join(vessence_data_home, "vector_db", ".seeded")
+    vector_db_dir = os.path.join(vessence_data_home, "memory/v1/vector_db")
+    flag_file = os.path.join(vessence_data_home, "memory/v1/vector_db", ".seeded")
 
     return seed_file, vector_db_dir, flag_file
 

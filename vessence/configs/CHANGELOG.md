@@ -1,5 +1,14 @@
 # Vessence Changelog
 
+## v0.1.106 (2026-04-06)
+- Version bump.
+
+## v0.1.105 (2026-04-06)
+- Version bump.
+
+## v0.1.104 (2026-04-06)
+- Version bump.
+
 ## v0.1.103 (2026-04-06)
 - Version bump.
 

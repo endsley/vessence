@@ -34,7 +34,7 @@ from jane.config import (
 from jane.tts import TTSEngine
 
 if TYPE_CHECKING:
-	from agent_skills.conversation_manager import ConversationManager
+	from agent_skills.memory.v1.conversation_manager import ConversationManager
 
 logging.basicConfig(
 	level=logging.INFO,
@@ -107,12 +107,12 @@ class JaneSessionWrapper:
 			logger.error("The 'gemini' command was not found in your PATH.")
 			sys.exit(1)
 
-		db_path = os.path.join(VESSENCE_DATA_HOME, 'vector_db', 'sessions', self.session_id)
+		db_path = os.path.join(VESSENCE_DATA_HOME, 'memory/v1/vector_db', 'sessions', self.session_id)
 		if os.path.exists(db_path):
 			shutil.rmtree(db_path)
 
 		try:
-			from agent_skills.conversation_manager import ConversationManager
+			from agent_skills.memory.v1.conversation_manager import ConversationManager
 			self.conv_manager = await self.loop.run_in_executor(None, ConversationManager, self.session_id)
 		except Exception as e:
 			logger.error(f"Failed to initialize ConversationManager: {e}")

@@ -77,7 +77,7 @@ def get_chroma_client(path: str):
         return chromadb.HttpClient(host=CHROMA_HOST, port=CHROMA_PORT)
     return chromadb.PersistentClient(path=path)
 
-VECTOR_DB_DIR        = f"{VESSENCE_DATA_HOME}/vector_db"
+VECTOR_DB_DIR        = f"{VESSENCE_DATA_HOME}/memory/v1/vector_db"
 VECTOR_DB_USER_MEMORIES = VECTOR_DB_DIR                          # main shared ChromaDB
 VECTOR_DB_SHORT_TERM = f"{VECTOR_DB_DIR}/short_term_memory"
 VECTOR_DB_LONG_TERM  = f"{VECTOR_DB_DIR}/long_term_memory"       # Jane's archived KB
@@ -128,15 +128,15 @@ CODEX_BIN        = os.environ.get("CODEX_BIN", "codex")
 JANE_BRIDGE_ENV  = os.environ.get("JANE_BRIDGE_ENV", os.path.join(HOME_DIR, "gemini_cli_bridge", ".env"))
 
 FALLBACK_SCRIPT       = f"{VESSENCE_HOME}/agent_skills/fallback_query.py"
-ADD_MEMORY_SCRIPT     = f"{VESSENCE_HOME}/agent_skills/add_forgettable_memory.py"
-ADD_FACT_SCRIPT       = f"{VESSENCE_HOME}/agent_skills/add_fact.py"
-SEARCH_MEMORY_SCRIPT  = f"{VESSENCE_HOME}/agent_skills/search_memory.py"
+ADD_MEMORY_SCRIPT     = f"{VESSENCE_HOME}/agent_skills/memory/v1/add_forgettable_memory.py"
+ADD_FACT_SCRIPT       = f"{VESSENCE_HOME}/agent_skills/memory/v1/add_fact.py"
+SEARCH_MEMORY_SCRIPT  = f"{VESSENCE_HOME}/agent_skills/memory/v1/search_memory.py"
 PROMPT_QUEUE_RUNNER   = f"{VESSENCE_HOME}/agent_skills/prompt_queue_runner.py"
 RESEARCH_ASSISTANT_SCRIPT = f"{VESSENCE_HOME}/agent_skills/research_assistant.py"
 VAULT_WEB_DB_PATH     = f"{VESSENCE_DATA_HOME}/vault_web/vault_web.db"
 ADK_SESSION_DB_DIR    = f"{VESSENCE_DATA_HOME}/adk"
 QWEN_QUERY_SCRIPT     = f"{VESSENCE_HOME}/agent_skills/qwen_query.py"
-INDEX_VAULT_SCRIPT    = f"{VESSENCE_HOME}/agent_skills/index_vault.py"
+INDEX_VAULT_SCRIPT    = f"{VESSENCE_HOME}/agent_skills/memory/v1/index_vault.py"
 VAULT_WEB_MODULE_DIR  = f"{VESSENCE_HOME}/vault_web"
 
 # ── Amber / ADK ───────────────────────────────────────────────────────────────

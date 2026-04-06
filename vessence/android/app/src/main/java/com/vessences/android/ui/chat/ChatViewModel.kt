@@ -481,7 +481,6 @@ class ChatViewModel(
                                 .replace(Regex("<visual>([\\s\\S]*?)</visual>", RegexOption.IGNORE_CASE)) { it.groupValues[1] }
                                 .replace(Regex("</?(?:spoken|visual|think|thinking|artifact)>", RegexOption.IGNORE_CASE), "")
                             val ackStatus = if (statusLog.isNotEmpty()) statusLog.last() else null
-                            updateAiMessage(currentMsgId, accumulated, isStreaming = true, status = ackStatus, statusLog = statusLog.toList())
 
                             // Sentence-level TTS: detect complete sentences and submit for generation
                             if (fromVoice && HybridTtsManager.USE_SERVER_TTS) {
@@ -508,6 +507,15 @@ class ChatViewModel(
                                     }
                                     sentenceBuffer.delete(0, consumed)
                                 }
+                            }
+
+                            // In voice mode with server TTS, hide text while speaking —
+                            // the user hears it via audio, text reveals when TTS finishes.
+                            // For Android TTS or non-voice mode, show text normally.
+                            if (sentenceTtsActive) {
+                                updateAiMessage(currentMsgId, "", isStreaming = true, status = "Speaking\u2026", statusLog = statusLog.toList())
+                            } else {
+                                updateAiMessage(currentMsgId, accumulated, isStreaming = true, status = ackStatus, statusLog = statusLog.toList())
                             }
                         }
                         "done" -> {
@@ -543,15 +551,8 @@ class ChatViewModel(
                                 ?: rawText.replace(visualRegex, "").replace(spokenRegex, "").trim().ifBlank { null }
                             // If <spoken> tag exists, store both versions for TTS toggle
                             val hasSpokenBlock = spokenMatch != null
-                            updateAiMessage(
-                                currentMsgId, displayText, isStreaming = false, files = files,
-                                statusLog = statusLog.toList(),
-                                spokenText = if (hasSpokenBlock) spokenMatch?.groupValues?.getOrNull(1)?.trim() else null,
-                                fullText = if (hasSpokenBlock) displayText else null,
-                            )
-                            notifier?.showReplyNotification(senderName = backend.displayName, message = displayText)
-
-                            // If sentence-level TTS was active, flush remaining buffer and wait
+                            // If sentence-level TTS was active, flush remaining buffer,
+                            // wait for all audio to finish, THEN reveal the text.
                             if (sentenceTtsActive && sentenceQueue != null) {
                                 val remaining = sentenceBuffer.toString().trim()
                                 if (remaining.length > 3) {
@@ -561,6 +562,14 @@ class ChatViewModel(
                                 sentenceQueue!!.finishSubmitting()
                                 sentenceQueue!!.awaitCompletion()
                                 sentenceTtsActive = false
+                                // Now reveal the full text after TTS finished
+                                updateAiMessage(
+                                    currentMsgId, displayText, isStreaming = false, files = files,
+                                    statusLog = statusLog.toList(),
+                                    spokenText = if (hasSpokenBlock) spokenMatch?.groupValues?.getOrNull(1)?.trim() else null,
+                                    fullText = if (hasSpokenBlock) displayText else null,
+                                )
+                                notifier?.showReplyNotification(senderName = backend.displayName, message = displayText)
                                 // Skip normal TTS in onSendComplete — already played
                                 onSendComplete(fromVoice = false, displayText, spokenText)
                                 // But still handle auto-listen for voice mode
@@ -574,6 +583,14 @@ class ChatViewModel(
                                     }
                                 }
                             } else {
+                                // Non-server-TTS path: show text immediately, then speak
+                                updateAiMessage(
+                                    currentMsgId, displayText, isStreaming = false, files = files,
+                                    statusLog = statusLog.toList(),
+                                    spokenText = if (hasSpokenBlock) spokenMatch?.groupValues?.getOrNull(1)?.trim() else null,
+                                    fullText = if (hasSpokenBlock) displayText else null,
+                                )
+                                notifier?.showReplyNotification(senderName = backend.displayName, message = displayText)
                                 onSendComplete(fromVoice, displayText, spokenText)
                             }
                         }

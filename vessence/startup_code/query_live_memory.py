@@ -17,7 +17,7 @@ ROOT = Path(os.environ.get("VESSENCE_HOME", str(Path(__file__).resolve().parents
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from agent_skills.memory_retrieval import build_memory_sections
+from agent_skills.memory.v1.memory_retrieval import build_memory_sections
 from jane.config import VECTOR_DB_DIR, VESSENCE_DATA_HOME
 
 LIVE_VECTOR_ROOT = Path(VECTOR_DB_DIR)
@@ -44,7 +44,7 @@ def _cosine_similarity(a: list[float], b: list[float]) -> float:
 
 def _embed_query(query: str) -> list[float] | None:
     try:
-        from agent_skills.memory_retrieval import _embed_query_text
+        from agent_skills.memory.v1.memory_retrieval import _embed_query_text
         return _embed_query_text(query)
     except Exception:
         return None
