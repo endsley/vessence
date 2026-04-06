@@ -38,12 +38,13 @@ class ServerTtsPlayer {
         private const val TTS_PATH = "/tts/stream"
     }
 
-    // Dedicated OkHttp client with short connect timeout but long read timeout
-    // (model cold-start can take seconds, but once streaming audio flows fast)
+    // Dedicated OkHttp client with short timeouts.
+    // readTimeout = max gap between bytes. Set to 10s so cold-start (30s model load)
+    // triggers fallback to Android TTS, but warm generation (~2s) works fine.
     private val httpClient = OkHttpClient.Builder()
-        .connectTimeout(5, TimeUnit.SECONDS)
-        .readTimeout(60, TimeUnit.SECONDS)
-        .writeTimeout(10, TimeUnit.SECONDS)
+        .connectTimeout(3, TimeUnit.SECONDS)
+        .readTimeout(10, TimeUnit.SECONDS)
+        .writeTimeout(5, TimeUnit.SECONDS)
         .build()
 
     private val currentTrack = AtomicReference<AudioTrack?>(null)

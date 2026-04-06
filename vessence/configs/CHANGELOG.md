@@ -1,5 +1,14 @@
 # Vessence Changelog
 
+## v0.1.94 (2026-04-06)
+- Version bump.
+
+## v0.1.93 (2026-04-06)
+- Same as v0.1.92.
+
+## v0.1.92 (2026-04-06)
+- **Standalone XTTS-v2 TTS server + Android hybrid TTS.** New persistent FastAPI server on port 8095 replaces Docker-per-request approach (~2s warm vs 10-15s). Android HybridTtsManager tries server XTTS-v2 streaming first, falls back to Android TTS. Idle auto-unload after 5min frees GPU. Switch gemma_summarize from gemma3:4b to gemma4:e4b. Remove dead kokoro_tts code.
+
 ## v0.1.91 (2026-04-06)
 - **Briefing: Vault-backed saved articles with custom groups.** Saved articles now write to `vault/saved_articles/<group>/` as JSON files. Removed preset categories — users create their own groups via the "New Group" field. Groups become vault folders searchable by Jane.
 

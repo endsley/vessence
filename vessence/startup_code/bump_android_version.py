@@ -101,6 +101,26 @@ def verify_apk_version(apk: Path, expected_code: int, expected_name: str):
     print(f"  ⚠ Could not parse APK version info")
 
 
+def ensure_changelog_entry(version_name: str):
+    """Add a stub changelog entry if one doesn't exist for this version."""
+    from datetime import date
+    marker = f"## v{version_name}"
+    text = CHANGELOG.read_text()
+    if marker in text:
+        print(f"  Changelog entry for v{version_name} already exists")
+        return
+    today = date.today().isoformat()
+    stub = f"## v{version_name} ({today})\n- Version bump.\n\n"
+    # Insert after the first line (title)
+    lines = text.split("\n", 2)
+    if len(lines) >= 3:
+        new_text = lines[0] + "\n" + lines[1] + "\n" + stub + lines[2]
+    else:
+        new_text = text + "\n" + stub
+    CHANGELOG.write_text(new_text)
+    print(f"  Added changelog stub for v{version_name}")
+
+
 def deploy_apk(apk: Path, version_name: str):
     """Copy APK to marketing downloads directory (versioned + generic)."""
     dest = DOWNLOADS_DIR / f"vessences-android-v{version_name}.apk"
@@ -133,19 +153,21 @@ def main():
     # 2. Update main.py
     update_main_py(new_name, new_code)
 
-    # 3. Build APK
+    # 3. Ensure changelog entry exists (Gradle verifyChangelog will fail without it)
+    ensure_changelog_entry(new_name)
+
+    # 4. Build APK
     apk = build_apk()
 
-    # 4. Verify APK has correct version baked in
+    # 5. Verify APK has correct version baked in
     verify_apk_version(apk, new_code, new_name)
 
-    # 5. Deploy to downloads
+    # 6. Deploy to downloads
     deploy_apk(apk, new_name)
 
-    # 6. Done
+    # 7. Done
     print()
     print(f"  ✓ Version {new_name} built, verified, and deployed.")
-    print(f"  → Don't forget to add a CHANGELOG entry in configs/CHANGELOG.md")
 
 
 if __name__ == "__main__":

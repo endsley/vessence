@@ -556,6 +556,11 @@ class JaneSessionState:
     bootstrap_ready: threading.Event = field(default_factory=threading.Event)
     recent_file_context: str = ""
     last_accessed_at: float = field(default_factory=time.time)
+    # Per-session semaphore to serialize concurrent requests and prevent history race conditions.
+    # Without this, two requests to the same session can interleave history reads/writes,
+    # causing Jane to answer the wrong question ("conversation offset" bug).
+    # Semaphore(1) ensures only one stream_message runs at a time per session.
+    request_gate: asyncio.Semaphore = field(default_factory=lambda: asyncio.Semaphore(1))
 
 
 _sessions: dict[str, JaneSessionState] = {}
@@ -1663,6 +1668,9 @@ async def stream_message(
     del user_id  # single-user system for now
     request_start = time.perf_counter()
     state = _get_session(session_id)
+    # Serialize requests per session — prevents conversation offset bug where
+    # concurrent requests race on history, causing Jane to answer the wrong question.
+    await state.request_gate.acquire()
     # Phone tools: extract any [TOOL_RESULT:{json}] markers the Android client
     # prepended to this user turn. Strip them from the user-visible bubble
     # (via persisted_user_message) but prepend a formatted context block onto
@@ -1898,6 +1906,7 @@ async def stream_message(
         while not queue.empty():
             evt_type, evt_payload = queue.get_nowait()
             yield json.dumps({"type": evt_type, "data": evt_payload}, ensure_ascii=True) + "\n"
+        state.request_gate.release()
         return
 
     # Register emitter with permission broker so tool-approval requests
@@ -1958,7 +1967,7 @@ async def stream_message(
             if _skip_context:
                 from jane.context_builder import JaneRequestContext, _format_recent_history, TTS_SPOKEN_BLOCK_INSTRUCTION
                 safety_parts = []
-                recent = _format_recent_history(state.history, max_turns=6, max_chars=2400)
+                recent = _format_recent_history(list(state.history), max_turns=6, max_chars=2400)
                 if recent:
                     safety_parts.append(f"[Recent exchanges]\n{recent}")
                 # Re-inject TTS instruction on every turn when TTS is active,
@@ -1994,7 +2003,7 @@ async def stream_message(
                 _memory_fallback = state.bootstrap_memory_summary or get_prefetch_result(session_id)
                 request_ctx = await build_jane_context_async(
                     message,
-                    state.history,
+                    list(state.history),  # snapshot copy — prevents race with concurrent writes
                     file_context=resolved_file_context,
                     conversation_summary=summary_text,
                     session_id=session_id,
@@ -2253,6 +2262,7 @@ async def stream_message(
     # Always persist if we got a response, even if client disconnected
     if final_response is None:
         logger.warning("[%s] Stream finished without final response payload", _session_log_id(session_id))
+        state.request_gate.release()
         return
 
     user_turn = {"role": "user", "content": persisted_user_message}
@@ -2280,6 +2290,7 @@ async def stream_message(
     logger.info("[%s] Stream request complete in %dms, response=%d chars, %d intermediary steps",
                 session_id[:12], total_ms, len(final_response or ""), len(_intermediary_steps))
     _log_stage(session_id, "request_total", request_start, mode="stream")
+    state.request_gate.release()
 
 
 def _log_chat_to_work_log(user_message: str, response: str) -> None:
