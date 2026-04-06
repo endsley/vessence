@@ -11,6 +11,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONObject
 import java.io.InputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -21,8 +22,9 @@ import java.util.concurrent.atomic.AtomicReference
 /**
  * Streams PCM audio from the XTTS-v2 TTS server and plays it via AudioTrack.
  *
- * The server sends a 12-byte header (sample_rate, channels, bits_per_sample as
- * little-endian int32), followed by raw 16-bit PCM data in chunked transfer encoding.
+ * Smart warm-check: queries /tts/health first. If model isn't loaded,
+ * returns false immediately (caller falls back to Android TTS) and triggers
+ * a background warm-up request so subsequent calls are fast.
  */
 class ServerTtsPlayer {
 
@@ -32,34 +34,103 @@ class ServerTtsPlayer {
         /**
          * Direct URL to the TTS server. Uses local network IP since the TTS server
          * is not behind the Cloudflare tunnel. Change this if your server IP changes.
-         * When we eventually route through the tunnel/relay, this becomes the jane base URL.
          */
         private const val TTS_BASE_URL = "http://192.168.86.21:8095"
-        private const val TTS_PATH = "/tts/stream"
+        private const val TTS_STREAM_PATH = "/tts/stream"
+        private const val TTS_HEALTH_PATH = "/tts/health"
+        private const val TTS_GENERATE_PATH = "/tts/generate"
     }
 
-    // Dedicated OkHttp client with short timeouts.
-    // readTimeout = max gap between bytes. Set to 10s so cold-start (30s model load)
-    // triggers fallback to Android TTS, but warm generation (~2s) works fine.
+    // Short connect timeout, moderate read timeout for warm generation (~2s)
     private val httpClient = OkHttpClient.Builder()
         .connectTimeout(3, TimeUnit.SECONDS)
-        .readTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(15, TimeUnit.SECONDS)
         .writeTimeout(5, TimeUnit.SECONDS)
+        .build()
+
+    // Quick client for health checks
+    private val healthClient = OkHttpClient.Builder()
+        .connectTimeout(2, TimeUnit.SECONDS)
+        .readTimeout(2, TimeUnit.SECONDS)
         .build()
 
     private val currentTrack = AtomicReference<AudioTrack?>(null)
     private val cancelled = AtomicBoolean(false)
     private val currentCall = AtomicReference<okhttp3.Call?>(null)
+    private val warmingUp = AtomicBoolean(false)
+
+    /**
+     * Check if the TTS model is loaded and ready.
+     * If not loaded, triggers a background warm-up and returns false.
+     */
+    private fun isModelWarm(): Boolean {
+        return try {
+            val request = Request.Builder()
+                .url("$TTS_BASE_URL$TTS_HEALTH_PATH")
+                .get()
+                .build()
+            val response = healthClient.newCall(request).execute()
+            if (!response.isSuccessful) {
+                response.close()
+                return false
+            }
+            val body = response.body?.string() ?: return false
+            val json = JSONObject(body)
+            json.optBoolean("model_loaded", false)
+        } catch (e: Exception) {
+            Log.w(TAG, "Health check failed: ${e.message}")
+            false
+        }
+    }
+
+    /**
+     * Trigger model warm-up in background (fire-and-forget).
+     * Sends a tiny generate request to force model loading.
+     */
+    private fun triggerWarmUp() {
+        if (warmingUp.getAndSet(true)) return  // already warming
+        Thread {
+            try {
+                Log.d(TAG, "Triggering XTTS-v2 warm-up...")
+                val request = Request.Builder()
+                    .url("$TTS_BASE_URL$TTS_GENERATE_PATH")
+                    .post("""{"text":"warm"}""".toByteArray()
+                        .toRequestBody("application/json".toMediaType()))
+                    .build()
+                // Use a client with long timeout for cold start
+                val warmClient = OkHttpClient.Builder()
+                    .connectTimeout(5, TimeUnit.SECONDS)
+                    .readTimeout(120, TimeUnit.SECONDS)
+                    .build()
+                val resp = warmClient.newCall(request).execute()
+                resp.close()
+                Log.d(TAG, "XTTS-v2 warm-up complete")
+            } catch (e: Exception) {
+                Log.w(TAG, "Warm-up failed: ${e.message}")
+            } finally {
+                warmingUp.set(false)
+            }
+        }.start()
+    }
 
     /**
      * Stream TTS audio from server and play it.
-     * Returns true if audio played successfully, false if server unreachable or error.
-     * Timeout: 8 seconds for server response (covers model cold-start + first chunk).
+     * Returns true if audio played successfully, false if server unreachable/cold/error.
+     *
+     * If the model isn't warm, returns false immediately and starts warm-up in background.
+     * Caller should fall back to Android TTS.
      */
     suspend fun speak(text: String): Boolean = withContext(Dispatchers.IO) {
         cancelled.set(false)
-        val url = "$TTS_BASE_URL$TTS_PATH"
 
+        // Smart warm-check: if model isn't loaded, fall back immediately and warm up
+        if (!isModelWarm()) {
+            Log.d(TAG, "Model not warm, falling back to Android TTS and triggering warm-up")
+            triggerWarmUp()
+            return@withContext false
+        }
+
+        val url = "$TTS_BASE_URL$TTS_STREAM_PATH"
         val jsonBody = """{"text":${escapeJson(text)}}"""
         val request = Request.Builder()
             .url(url)
@@ -70,17 +141,14 @@ class ServerTtsPlayer {
             val call = httpClient.newCall(request)
             currentCall.set(call)
 
-            // Execute with timeout covering connect + first response headers
-            val response = withTimeoutOrNull(8000L) {
-                withContext(Dispatchers.IO) {
-                    call.execute()
-                }
+            val response = withTimeoutOrNull(10_000L) {
+                withContext(Dispatchers.IO) { call.execute() }
             }
 
             if (cancelled.get()) return@withContext false
 
             if (response == null) {
-                Log.w(TAG, "Server TTS timed out waiting for response")
+                Log.w(TAG, "Server TTS timed out")
                 call.cancel()
                 return@withContext false
             }
@@ -92,7 +160,15 @@ class ServerTtsPlayer {
             }
 
             val body = response.body ?: run {
-                Log.w(TAG, "Server TTS returned empty body")
+                Log.w(TAG, "Empty response body")
+                response.close()
+                return@withContext false
+            }
+
+            // Verify content type is binary, not HTML/JSON error
+            val contentType = response.header("Content-Type", "")
+            if (contentType?.contains("text/html") == true || contentType?.contains("application/json") == true) {
+                Log.w(TAG, "Server returned $contentType instead of audio")
                 response.close()
                 return@withContext false
             }
@@ -101,7 +177,6 @@ class ServerTtsPlayer {
                 playPcmStream(stream)
             }
 
-            currentCall.set(null)
             return@withContext success && !cancelled.get()
         } catch (e: Exception) {
             if (!cancelled.get()) {
@@ -115,9 +190,7 @@ class ServerTtsPlayer {
 
     fun stop() {
         cancelled.set(true)
-        // Cancel the HTTP call to stop reading from network
         currentCall.getAndSet(null)?.cancel()
-        // Stop and release the AudioTrack
         currentTrack.getAndSet(null)?.let { track ->
             try {
                 track.pause()
@@ -127,9 +200,6 @@ class ServerTtsPlayer {
         }
     }
 
-    /**
-     * Play raw PCM from input stream. Returns true if playback completed successfully.
-     */
     private fun playPcmStream(stream: InputStream): Boolean {
         // Read 12-byte header: sample_rate(4), channels(4), bits(4)
         val headerBuf = ByteArray(12)
@@ -148,8 +218,10 @@ class ServerTtsPlayer {
         val channels = bb.getInt()
         val bitsPerSample = bb.getInt()
 
+        Log.d(TAG, "PCM header: rate=$sampleRate ch=$channels bits=$bitsPerSample")
+
         if (sampleRate !in 8000..48000 || channels !in 1..2 || bitsPerSample != 16) {
-            Log.e(TAG, "Invalid PCM header: rate=$sampleRate ch=$channels bits=$bitsPerSample")
+            Log.e(TAG, "Invalid PCM header — likely received error page instead of audio")
             return false
         }
 
@@ -194,23 +266,30 @@ class ServerTtsPlayer {
         currentTrack.set(track)
         track.play()
 
+        // Use even-sized buffer to guarantee 16-bit sample alignment
         val readBuf = ByteArray(4096)
         var totalBytes = 0
         try {
             while (!cancelled.get()) {
                 val n = stream.read(readBuf)
                 if (n <= 0) break
-                val written = track.write(readBuf, 0, n)
-                if (written < 0) {
-                    Log.e(TAG, "AudioTrack.write error: $written")
-                    return false
+
+                // Ensure we only write even number of bytes (16-bit PCM alignment)
+                val writeLen = if (n % 2 != 0) n - 1 else n
+
+                if (writeLen > 0) {
+                    val written = track.write(readBuf, 0, writeLen)
+                    if (written < 0) {
+                        Log.e(TAG, "AudioTrack.write error: $written")
+                        return false
+                    }
+                    totalBytes += written
                 }
-                totalBytes += written
             }
-            // Wait for playback to finish
             if (!cancelled.get() && totalBytes > 0) {
                 track.stop()
             }
+            Log.d(TAG, "Playback complete: $totalBytes bytes")
             return totalBytes > 0 && !cancelled.get()
         } catch (e: Exception) {
             if (!cancelled.get()) {
@@ -218,7 +297,6 @@ class ServerTtsPlayer {
             }
             return false
         } finally {
-            // Only release if we still own it (stop() may have already released)
             if (currentTrack.compareAndSet(track, null)) {
                 try { track.release() } catch (_: Exception) {}
             }
