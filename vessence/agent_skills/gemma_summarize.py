@@ -3,7 +3,7 @@
 gemma_summarize.py — Called by the Stop hook after every Claude response.
 
 Reads the most recent conversation turns from the session JSONL transcript,
-calls gemma3:4b (fast local model) to summarize, and saves to short-term
+calls gemma4:e4b (local model) to summarize, and saves to short-term
 ChromaDB memory. This gives crash resilience and context for subprocess sessions.
 
 Stop hook input (stdin): {"session_id": "...", "stop_hook_active": bool, ...}
@@ -29,7 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from jane.config import get_chroma_client, SHORT_TERM_TTL_DAYS, VECTOR_DB_SHORT_TERM
 
 SHORT_TERM_DB    = VECTOR_DB_SHORT_TERM
-GEMMA_MODEL      = "gemma3:4b"
+GEMMA_MODEL      = "gemma4:e4b"
 TURNS_TO_INCLUDE = 6      # last N messages to summarize (user + assistant)
 MIN_TEXT_LEN     = 100    # skip if too little content
 
@@ -106,7 +106,7 @@ def read_recent_turns(session_id: str) -> str:
 
 
 def summarize_with_gemma(text: str) -> str:
-    """Call gemma3:4b to produce a concise summary."""
+    """Call gemma4:e4b to produce a concise summary."""
     prompt = (
         "Summarize the following conversation in 3-4 sentences. "
         "Focus on what was decided, implemented, or discovered. "

@@ -1,9 +1,18 @@
 # Job #9: Wake Word v7 — More Speech + Music Negatives
 
 Priority: 1
-Status: pending
+Status: completed
 Created: 2026-04-04
-Updated: 2026-04-04 (full context buffed up for fresh-session execution)
+Updated: 2026-04-05 (completed)
+
+## Result (2026-04-05)
+- Built ~31.7K disk negatives: added 15K speech3 (LibriSpeech train-clean-100) + 5K music (vault `Music/*.mp3`) on top of v6's set. Source total post-augmentation: ~80K clips.
+- Trained new `hey_jane.onnx`: **Best F1=0.8790** (down from v6 0.9089), **FPR@0.6=0.56%** (down from v6 0.78%), all 11 real "hey jane" recordings score ≥0.9988, 0/500 false positives on speech commands.
+- F1 dropped slightly because precision fell on the music-heavy val split, but the real-world metric we care about — FPR on speech/music — improved.
+- v6 backup saved at `hey_jane_v6_backup.onnx`.
+- Bumped Android to **v0.1.72** (code 180) via `bump_android_version.py`, APK built/verified/deployed to `marketing_site/downloads/vessences-android-v0.1.72.apk`.
+- jane-web restarted; `/api/app/latest-version` returns 0.1.72.
+- CHANGELOG.md updated.
 
 ## TL;DR
 Train wake word v7 with ~30K total negatives (2.5× v6). Add 15K more speech

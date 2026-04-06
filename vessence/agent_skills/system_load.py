@@ -13,6 +13,7 @@ Nighttime (11 PM - 6 AM): aggressive — user is sleeping, use full resources.
 import datetime
 import logging
 import os
+import subprocess
 
 try:
     import psutil
@@ -26,6 +27,8 @@ MAX_PARALLEL = int(os.environ.get("JANE_MAX_PARALLEL", "4"))
 CPU_THRESHOLD_HIGH = float(os.environ.get("JANE_LOAD_THRESHOLD_CPU", "60"))
 CPU_THRESHOLD_MED = float(os.environ.get("JANE_LOAD_THRESHOLD_CPU_MED", "30"))
 MEM_FREE_MIN_GB = float(os.environ.get("JANE_LOAD_THRESHOLD_MEM_GB", "2.0"))
+GPU_THRESHOLD_HIGH = float(os.environ.get("JANE_LOAD_THRESHOLD_GPU", "70"))
+VRAM_FREE_MIN_MB = float(os.environ.get("JANE_LOAD_THRESHOLD_VRAM_MB", "1024"))
 NIGHT_START_HOUR = int(os.environ.get("JANE_NIGHT_START", "23"))  # 11 PM
 NIGHT_END_HOUR = int(os.environ.get("JANE_NIGHT_END", "6"))       # 6 AM
 
@@ -38,6 +41,42 @@ def _is_nighttime() -> bool:
         return hour >= NIGHT_START_HOUR or hour < NIGHT_END_HOUR
     else:
         return NIGHT_START_HOUR <= hour < NIGHT_END_HOUR
+
+
+def _query_gpu() -> dict:
+    """Query NVIDIA GPU utilization and VRAM via nvidia-smi.
+
+    Returns dict with gpu_percent, gpu_memory_used_mb, gpu_memory_total_mb,
+    gpu_memory_free_mb.  Defaults to 0% / 9999 MB free if nvidia-smi fails.
+    """
+    defaults = {
+        "gpu_percent": 0.0,
+        "gpu_memory_used_mb": 0.0,
+        "gpu_memory_total_mb": 0.0,
+        "gpu_memory_free_mb": 9999.0,
+    }
+    try:
+        out = subprocess.run(
+            [
+                "nvidia-smi",
+                "--query-gpu=utilization.gpu,memory.used,memory.total,memory.free",
+                "--format=csv,noheader,nounits",
+            ],
+            capture_output=True, text=True, timeout=5,
+        )
+        if out.returncode != 0:
+            return defaults
+        parts = [p.strip() for p in out.stdout.strip().split(",")]
+        if len(parts) >= 4:
+            return {
+                "gpu_percent": float(parts[0]),
+                "gpu_memory_used_mb": float(parts[1]),
+                "gpu_memory_total_mb": float(parts[2]),
+                "gpu_memory_free_mb": float(parts[3]),
+            }
+    except Exception as e:
+        logger.debug(f"nvidia-smi unavailable: {e}")
+    return defaults
 
 
 def get_system_load() -> dict:
@@ -69,6 +108,10 @@ def get_system_load() -> dict:
         result["load_avg_5min"] = round(load[1], 2)
     except (OSError, AttributeError):
         pass
+
+    # GPU metrics
+    gpu = _query_gpu()
+    result.update(gpu)
 
     return result
 
@@ -120,6 +163,8 @@ def should_defer() -> bool:
     load = get_system_load()
     cpu = load["cpu_percent"]
     mem_gb = load["memory_available_gb"]
+    gpu = load.get("gpu_percent", 0)
+    gpu_mem_free = load.get("gpu_memory_free_mb", 9999)
 
     if mem_gb < 1.0:
         logger.info(f"Deferring: critically low memory ({mem_gb:.1f} GB)")
@@ -132,7 +177,44 @@ def should_defer() -> bool:
         logger.info(f"Deferring: CPU at {cpu:.0f}% (threshold: {threshold}%)")
         return True
 
+    if gpu > GPU_THRESHOLD_HIGH:
+        logger.info(f"Deferring: GPU at {gpu:.0f}% (threshold: {GPU_THRESHOLD_HIGH}%)")
+        return True
+
+    if gpu_mem_free < VRAM_FREE_MIN_MB:
+        logger.info(f"Deferring: VRAM free {gpu_mem_free:.0f} MB < {VRAM_FREE_MIN_MB:.0f} MB minimum")
+        return True
+
     return False
+
+
+def has_ample_resources(threshold_pct: float = 60) -> bool:
+    """Return True if CPU, GPU, RAM, and VRAM are all below *threshold_pct* usage.
+
+    Default 60% — the system has genuine spare capacity for background work.
+    """
+    load = get_system_load()
+    cpu = load["cpu_percent"]
+    mem_pct = load["memory_percent"]
+    gpu = load.get("gpu_percent", 0)
+    gpu_total = load.get("gpu_memory_total_mb", 0)
+    gpu_used = load.get("gpu_memory_used_mb", 0)
+
+    if cpu > threshold_pct:
+        logger.debug(f"CPU {cpu:.0f}% > {threshold_pct}% — not ample")
+        return False
+    if mem_pct > threshold_pct:
+        logger.debug(f"RAM {mem_pct:.0f}% > {threshold_pct}% — not ample")
+        return False
+    if gpu_total > 0:
+        vram_pct = (gpu_used / gpu_total) * 100
+        if gpu > threshold_pct:
+            logger.debug(f"GPU {gpu:.0f}% > {threshold_pct}% — not ample")
+            return False
+        if vram_pct > threshold_pct:
+            logger.debug(f"VRAM {vram_pct:.0f}% > {threshold_pct}% — not ample")
+            return False
+    return True
 
 
 def wait_until_safe(max_wait_minutes: int = 15, check_interval_seconds: int = 240) -> bool:
@@ -170,9 +252,17 @@ def load_summary() -> str:
     load = get_system_load()
     parallelism = recommended_parallelism()
     period = "night" if load["is_nighttime"] else "day"
+    gpu_part = ""
+    if load.get("gpu_percent", 0) > 0 or load.get("gpu_memory_total_mb", 0) > 0:
+        gpu_part = (
+            f"GPU: {load['gpu_percent']:.0f}% | "
+            f"VRAM: {load.get('gpu_memory_free_mb', 0):.0f}MB free / "
+            f"{load.get('gpu_memory_total_mb', 0):.0f}MB | "
+        )
     return (
         f"CPU: {load['cpu_percent']:.0f}% | "
         f"Mem: {load['memory_available_gb']:.1f}GB free | "
+        f"{gpu_part}"
         f"Load: {load['load_avg_1min']} | "
         f"Period: {period} | "
         f"Recommended parallelism: {parallelism}"
@@ -219,15 +309,23 @@ def oneline() -> str:
     cpu = load["cpu_percent"]
     mem = load["memory_available_gb"]
 
+    gpu = load.get("gpu_percent", 0)
+    vram_free = load.get("gpu_memory_free_mb", 0)
+    gpu_part = ""
+    if gpu > 0 or load.get("gpu_memory_total_mb", 0) > 0:
+        gpu_part = f"GPU: {gpu:.0f}% | VRAM free: {vram_free:.0f}MB | "
+
     if defer:
         result = (
             f"[LOAD WARNING] CPU: {cpu:.0f}% | Mem: {mem:.1f}GB free | "
+            f"{gpu_part}"
             f"Parallel: {parallelism} | Defer: YES | Period: {period} "
             f"— reduce concurrency, system is stressed"
         )
     else:
         result = (
             f"[LOAD OK] CPU: {cpu:.0f}% | Mem: {mem:.1f}GB free | "
+            f"{gpu_part}"
             f"Parallel: {parallelism} | Defer: No | Period: {period}"
         )
     _save_cache(result)

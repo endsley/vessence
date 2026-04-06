@@ -160,12 +160,7 @@
 
       <!-- Category filter pills -->
       <div class="flex flex-wrap gap-2 items-center">
-        <button @click="activeCategory = 'All'; loadArticles()"
-          :class="activeCategory === 'All' ? 'bg-violet-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700 border border-slate-700'"
-          class="px-3 py-1 rounded-full text-xs font-medium transition">
-          All
-        </button>
-        <template x-for="cat in categories" :key="cat">
+        <template x-for="cat in tabCategories" :key="cat">
           <button @click="activeCategory = cat; loadArticles()"
             :class="activeCategory === cat ? 'bg-violet-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700 border border-slate-700'"
             class="px-3 py-1 rounded-full text-xs font-medium transition"
@@ -700,7 +695,16 @@
         articles: [],
         topics: [],
         categories: [],
-        activeCategory: 'All',
+        activeCategory: 'Shared',
+        get tabCategories() {
+          // Shared first (from backend), then All, then remaining categories
+          const rest = this.categories.filter(c => c !== 'Shared');
+          const tabs = [];
+          if (this.categories.includes('Shared')) tabs.push('Shared');
+          tabs.push('All');
+          tabs.push(...rest);
+          return tabs;
+        },
         searchQuery: '',
         searchResults: null,
         loading: true,
@@ -721,7 +725,7 @@
         audioPlayerType: 'brief',
         audioPlayerPlaying: false,
         // Saved articles
-        savedCategories: ['Research', 'Read Later', 'Important', 'Reference'],
+        savedCategories: [],
         newSaveCategory: '',
         viewingSaved: false,
         savedArticlesList: [],
@@ -769,6 +773,10 @@
               const data = await articlesRes.json();
               this.articles = data.cards || data.articles || [];
               this.categories = data.categories || [];
+              // Fall back to All if Shared has no articles
+              if (this.activeCategory === 'Shared' && !this.categories.includes('Shared')) {
+                this.activeCategory = 'All';
+              }
               if (data.last_updated) this.lastUpdated = data.last_updated;
             }
             // Mark saved articles

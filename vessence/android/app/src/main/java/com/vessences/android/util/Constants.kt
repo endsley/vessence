@@ -19,4 +19,9 @@ object Constants {
     const val DEFAULT_RELAY_URL = "https://relay.vessences.com"
     const val PREF_CONNECTION_MODE = "connection_mode"  // "direct" or "relay"
     const val PREF_KEEP_SCREEN_ON = "keep_screen_on"
+    // Phone tools (contacts / call / SMS draft / messages.read_recent).
+    // Default OFF until Phase 5 deployment; dispatcher silently drops tool
+    // calls when this flag is false so Android can ship the scaffolding
+    // without activating any user-visible behavior.
+    const val PREF_PHONE_TOOLS_ENABLED = "phone_tools_enabled"
 }

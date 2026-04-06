@@ -146,8 +146,8 @@ private fun ArchitectureHub(
             }
             item {
                 NavCard(
-                    title = "Standing Brain",
-                    subtitle = "The long-lived CLI process that keeps Jane fast — no cold starts between messages",
+                    title = "Jane's Mind (Standing Brain)",
+                    subtitle = "The deep reasoning half of Jane — a long-lived CLI process kept warm so there's no cold start between messages",
                     color = Cyan500,
                     onClick = { onNavigate("standing_brain") }
                 )
@@ -333,7 +333,7 @@ private fun JaneContent() {
         )
         InfoCard(
             title = "How Jane Thinks",
-            content = "When you send a message, Jane's brain is a long-lived CLI process (the 'Standing Brain') that stays running between messages. This means no cold-start delay — she responds in seconds, not minutes.\n\nFor complex questions, Jane shows you her thinking process: what files she's reading, what tools she's using, and what she's reasoning about. These appear as collapsible steps in the chat."
+            content = "Jane has two halves that work together as one agent:\n\n• Jane's initial ack — the fast front half. Speaks first within a second or two, handles simple things like greetings, trivia, and unit conversions on her own, and for bigger questions says something like \"give me a minute on this\" before handing off.\n\n• Jane's mind — the deep-reasoning half. A long-lived CLI process (the 'Standing Brain') kept warm between messages so there's no cold-start delay. This is where code, research, and real problem-solving happen.\n\nFor complex questions, Jane shows you her thinking process: what files she's reading, what tools she's using, and what she's reasoning about. These appear as collapsible steps in the chat."
         )
         InfoCard(
             title = "Jane's Tools",
@@ -465,8 +465,12 @@ private fun VaultContent() {
 private fun StandingBrainContent() {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         InfoCard(
+            title = "Jane's Two Halves",
+            content = "Jane is one agent, but her execution is split across two pluggable slots:\n\n• Jane's initial ack — the fast front half. Runs a small model (Haiku 4.5, Gemini Flash, GPT-5-nano, or local Gemma4) to speak first within ~1–2s, handle trivia itself, and otherwise emit a quick \"give me a minute\" style ack with an ETA hint before handing off.\n\n• Jane's mind (the 'Standing Brain') — the deep-reasoning half. Runs a frontier model (Claude Opus, Gemini Pro, or GPT-5) as a long-lived CLI process kept warm between messages. This is where the real thinking happens.\n\nFrom your side there's just Jane. The two halves only exist so the first response feels instant while the hard work still gets a frontier model behind it."
+        )
+        InfoCard(
             title = "What is the Standing Brain?",
-            content = "Instead of starting a new AI process for every message (which takes 5-30 seconds), Vessence keeps a long-lived CLI process running at all times. This 'Standing Brain' accepts messages via stdin and streams responses back — making conversations feel instant."
+            content = "Instead of starting a new AI process for every message (which takes 5-30 seconds), Vessence keeps a long-lived CLI process running at all times. This 'Standing Brain' hosts Jane's mind — it accepts messages via stdin and streams responses back, making conversations feel instant."
         )
         InfoCard(
             title = "How It Works",

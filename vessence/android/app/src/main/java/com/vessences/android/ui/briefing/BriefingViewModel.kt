@@ -29,7 +29,7 @@ data class BriefingUiState(
     val articles: List<BriefingArticle> = emptyList(),
     val topics: List<BriefingTopic> = emptyList(),
     val categories: List<String> = emptyList(),
-    val selectedCategory: String = "All",
+    val selectedCategory: String = "Shared",
     val isLoading: Boolean = false,
     val isLoadingArchive: Boolean = false,
     val error: String? = null,
@@ -40,7 +40,7 @@ data class BriefingUiState(
     val isSpeaking: Boolean = false,
     val readAllActive: Boolean = false,
     val savedArticleIds: Set<String> = emptySet(),
-    val savedCategories: List<String> = listOf("Read Later", "Important", "Reference"),
+    val savedCategories: List<String> = emptyList(),
     val viewingSaved: Boolean = false,
     val savedArticles: List<com.vessences.android.data.model.SavedArticleEntry> = emptyList(),
     val savedFilterCategory: String? = null,
@@ -78,10 +78,13 @@ class BriefingViewModel(application: Application) : AndroidViewModel(application
                 val (articles, categories) = fetchArticles()
                 val topics = fetchTopics()
                 val timestamp = SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date())
+                // Fall back to All if Shared has no articles
+                val effectiveCategory = if (_state.value.selectedCategory == "Shared" && "Shared" !in categories) "All" else _state.value.selectedCategory
                 _state.value = _state.value.copy(
                     articles = articles,
                     topics = topics,
                     categories = categories,
+                    selectedCategory = effectiveCategory,
                     isLoading = false,
                     lastUpdated = timestamp,
                 )
@@ -510,8 +513,7 @@ class BriefingViewModel(application: Application) : AndroidViewModel(application
                     val catsArray = parsed.getAsJsonArray("categories")
                     if (catsArray != null) {
                         val serverCats: List<String> = gson.fromJson(catsArray, object : TypeToken<List<String>>() {}.type)
-                        val defaults = listOf("Read Later", "Important", "Reference")
-                        val merged = (defaults + serverCats).distinct()
+                        val merged = serverCats.distinct()
                         _state.value = _state.value.copy(savedCategories = merged)
                     }
                 }

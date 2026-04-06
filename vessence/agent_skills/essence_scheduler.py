@@ -143,8 +143,17 @@ def run_scheduler():
             if last_run == current_minute:
                 continue
 
-            # Idle gate
-            if idle_only and not _is_user_idle():
+            # Resource gate (replaces idle-only for resource-aware jobs)
+            resource_only = job.get("resource_only", False)
+            if resource_only:
+                try:
+                    from agent_skills.system_load import should_defer
+                    if should_defer():
+                        logger.info(f"Skipping {job_key}: system resources busy (resource_only=true)")
+                        continue
+                except Exception:
+                    pass  # if check fails, let the job run
+            elif idle_only and not _is_user_idle():
                 logger.info(f"Skipping {job_key}: user is active (idle_only=true)")
                 continue
 

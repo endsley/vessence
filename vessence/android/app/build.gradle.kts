@@ -67,6 +67,60 @@ android {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
     }
+
+    // ── Vessence Tool Sources (Phase 7b) ──────────────────────────────
+    // Each tool under ~/ambient/tools/<name>/android/src/ ships a self-contained
+    // Kotlin package that belongs to Jane's tool layer, NOT the Android app
+    // kernel. At build time, the `generateToolSources` task below copies those
+    // sources into a generated directory that the Kotlin compiler picks up as
+    // an additional source set. This lets a new tool drop into tools/<name>/
+    // without editing anything in android/app/src/main/java.
+    sourceSets {
+        getByName("main") {
+            java.srcDirs(
+                "src/main/java",
+                layout.buildDirectory.dir("generated/source/tools/main/java"),
+            )
+        }
+    }
+}
+
+// ── Vessence Tool Source Generator ────────────────────────────────────
+val toolsRoot = file("${System.getProperty("user.home")}/ambient/tools")
+val generatedToolSourcesDir = layout.buildDirectory.dir("generated/source/tools/main/java")
+
+tasks.register<Copy>("generateToolSources") {
+    description = "Copy tool Kotlin sources from ~/ambient/tools/*/android/src/ into the generated source set."
+    group = "build"
+    onlyIf { toolsRoot.exists() }
+    if (toolsRoot.exists()) {
+        toolsRoot.listFiles()?.forEach { toolDir ->
+            if (toolDir.isDirectory) {
+                val toolAndroidSrc = file("${toolDir.absolutePath}/android/src")
+                if (toolAndroidSrc.exists()) {
+                    from(toolAndroidSrc) {
+                        include("**/*.kt")
+                    }
+                }
+            }
+        }
+    }
+    into(generatedToolSourcesDir)
+    doFirst {
+        generatedToolSourcesDir.get().asFile.mkdirs()
+        logger.lifecycle("generateToolSources: copying tool sources from $toolsRoot → ${generatedToolSourcesDir.get().asFile}")
+    }
+    doLast {
+        val count = fileTree(generatedToolSourcesDir.get().asFile).matching { include("**/*.kt") }.files.size
+        logger.lifecycle("generateToolSources: $count Kotlin file(s) generated")
+    }
+}
+
+// Wire the generator as a dependency of Kotlin compilation so it runs on every build.
+afterEvaluate {
+    tasks.named("preBuild").configure {
+        dependsOn("generateToolSources")
+    }
 }
 
 dependencies {

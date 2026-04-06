@@ -24,6 +24,22 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.RequestPermission()
     ) { }
 
+    /**
+     * Jane Phone Tools: multi-permission launcher for READ_CONTACTS, CALL_PHONE,
+     * SEND_SMS. Requested together on first launch so the handlers don't hit
+     * "permission denied" on the first tool invocation.
+     */
+    private val phoneToolsPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { grants ->
+        // Log-only — handlers re-check permission at invocation time and
+        // surface a NeedsUser status if anything is still missing.
+        val denied = grants.filterValues { !it }.keys
+        if (denied.isNotEmpty()) {
+            android.util.Log.i("MainActivity", "phone tools permissions denied: $denied")
+        }
+    }
+
     /** Global STT launcher — callable from anywhere via MainActivity.instance.launchStt() */
     val sttLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -104,6 +120,7 @@ class MainActivity : ComponentActivity() {
             }
         } catch (_: Exception) {}
         requestNotificationPermissionIfNeeded()
+        requestPhoneToolsPermissionsIfNeeded()
         handleIncomingShareIntent(intent)
         handleNotificationIntent(intent)
 
@@ -202,5 +219,23 @@ class MainActivity : ComponentActivity() {
             return
         }
         notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+    }
+
+    /**
+     * Jane Phone Tools: on first launch, proactively request the three runtime
+     * permissions the phone-tools handlers need. If any are already granted,
+     * Android no-ops silently. If all three are granted, this call is a no-op
+     * so subsequent launches don't show prompts.
+     */
+    private fun requestPhoneToolsPermissionsIfNeeded() {
+        val needed = listOf(
+            Manifest.permission.READ_CONTACTS,
+            Manifest.permission.CALL_PHONE,
+            Manifest.permission.SEND_SMS,
+        ).filter {
+            ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
+        }
+        if (needed.isEmpty()) return
+        phoneToolsPermissionLauncher.launch(needed.toTypedArray())
     }
 }

@@ -48,12 +48,43 @@ class AlwaysListeningService : Service() {
         private val _running = kotlinx.coroutines.flow.MutableStateFlow(false)
         val running: kotlinx.coroutines.flow.StateFlow<Boolean> = _running
 
+        /**
+         * Atomic guard that coordinates all calls to [startForegroundService]
+         * across every caller site. Set to true the instant [start] is called,
+         * cleared when either:
+         *  - onStartCommand runs (meaning the service is alive and promoted), OR
+         *  - onDestroy runs (meaning the service tore down), OR
+         *  - start() itself throws (so a broken attempt does not permanently
+         *    deadlock future starts).
+         *
+         * This is the CORRECT way to make start() idempotent. The previous
+         * `_running.value` check was racy because `_running` only flips inside
+         * startListeningLoop() which runs after foreground promotion — two
+         * rapid callers could both see `_running=false` and both enqueue a
+         * redundant startForegroundService(), eventually tripping Android 13's
+         * 5-second foreground-service deadline enforcement.
+         */
+        private val startInFlight = java.util.concurrent.atomic.AtomicBoolean(false)
+
         fun start(context: Context) {
-            val intent = Intent(context, AlwaysListeningService::class.java)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
+            // compareAndSet is the atomic primitive that makes this safe across
+            // any number of concurrent callers: only ONE call wins the race and
+            // proceeds to startForegroundService.
+            if (!startInFlight.compareAndSet(false, true)) {
+                android.util.Log.d(TAG, "start() called but another start is in flight — skipping")
+                return
+            }
+            try {
+                val intent = Intent(context, AlwaysListeningService::class.java)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(intent)
+                } else {
+                    context.startService(intent)
+                }
+            } catch (t: Throwable) {
+                // Reset the flag so a legitimate retry can proceed.
+                startInFlight.set(false)
+                throw t
             }
         }
 
@@ -102,28 +133,72 @@ class AlwaysListeningService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        voiceSettings = VoiceSettingsRepository(applicationContext)
-        // Ensure DiagnosticReporter has context — service may start without Activity
-        DiagnosticReporter.init(applicationContext)
+        // PROMOTE TO FOREGROUND IMMEDIATELY. On Android 13+ there is a hard
+        // 5-second budget from Context.startForegroundService() to the first
+        // Service.startForeground() call. onCreate runs on the main thread,
+        // and if the main thread is busy when onStartCommand is eventually
+        // scheduled, the budget may have elapsed. Calling startForeground
+        // here guarantees we promote in time regardless of main-thread load.
+        //
+        // We use a minimal placeholder notification that does NOT require
+        // reading VoiceSettingsRepository (which hits SharedPreferences disk
+        // I/O and can block on cold start). onStartCommand will replace it
+        // with the final notification that has the user's trigger phrase.
         createNotificationChannel()
-        Log.i(TAG, "Service created")
+        startForegroundWithPlaceholder()
+        voiceSettings = VoiceSettingsRepository(applicationContext)
+        DiagnosticReporter.init(applicationContext)
+        Log.i(TAG, "Service created and promoted to foreground")
     }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == ACTION_STOP) {
-            stopSelf()
-            return START_NOT_STICKY
-        }
-        val triggerPhrase = voiceSettings.getTriggerPhrase()
-        val notification = buildListeningNotification(triggerPhrase)
+    /** Minimal notification used during startup to satisfy the 5-second
+     *  startForeground() deadline before we've had a chance to read user
+     *  preferences. onStartCommand will replace this with the real one.
+     *
+     *  If this throws, we deliberately LET IT propagate instead of catching.
+     *  A swallowed exception here creates a zombie state: the service exists,
+     *  the process is alive, but foreground promotion never happened — so
+     *  Android will kill the app a few seconds later with a less obvious
+     *  trace. Better to crash fast and loud at the actual point of failure.
+     */
+    private fun startForegroundWithPlaceholder() {
+        val placeholder = androidx.core.app.NotificationCompat.Builder(this, CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.ic_btn_speak_now)
+            .setContentTitle("Jane")
+            .setContentText("Listening…")
+            .setOngoing(true)
+            .setPriority(androidx.core.app.NotificationCompat.PRIORITY_LOW)
+            .build()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             startForeground(
-                NOTIFICATION_ID, notification,
+                NOTIFICATION_ID, placeholder,
                 android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
                     or android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK,
             )
         } else {
-            startForeground(NOTIFICATION_ID, notification)
+            startForeground(NOTIFICATION_ID, placeholder)
+        }
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // We're past the 5-second foreground-promotion deadline at this point
+        // (onCreate already called startForeground with the placeholder), so
+        // clear the in-flight guard so future legitimate starts (after a stop)
+        // aren't blocked.
+        startInFlight.set(false)
+        if (intent?.action == ACTION_STOP) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        // Foreground promotion already happened in onCreate — here we just
+        // UPDATE the notification with the user's real trigger phrase.
+        try {
+            val triggerPhrase = voiceSettings.getTriggerPhrase()
+            val notification = buildListeningNotification(triggerPhrase)
+            val nm = getSystemService(NOTIFICATION_SERVICE) as? android.app.NotificationManager
+            nm?.notify(NOTIFICATION_ID, notification)
+        } catch (e: Throwable) {
+            Log.w(TAG, "failed to update notification with trigger phrase", e)
         }
         if (listeningThread?.isAlive != true) {
             DiagnosticReporter.serviceEvent("AlwaysListening", "started")
@@ -145,6 +220,11 @@ class AlwaysListeningService : Service() {
 
     override fun onDestroy() {
         DiagnosticReporter.serviceEvent("AlwaysListening", "stopped")
+        // Clear the start-in-flight guard immediately so a subsequent start()
+        // from another caller can proceed without waiting for the rest of
+        // onDestroy to finish (we're about to tear down the listener thread
+        // which can take up to 3 seconds on the join below).
+        startInFlight.set(false)
         if (screenReceiverRegistered) {
             unregisterReceiver(screenReceiver)
             screenReceiverRegistered = false

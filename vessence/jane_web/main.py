@@ -93,8 +93,8 @@ try:
     ANDROID_VERSION = _version_data["version_name"]
     _ANDROID_VERSION_CODE = _version_data["version_code"]
 except FileNotFoundError:
-    ANDROID_VERSION = "0.1.71"
-    _ANDROID_VERSION_CODE = 179
+    ANDROID_VERSION = "0.1.91"
+    _ANDROID_VERSION_CODE = 204
 
 # Startup validation: ensure the APK for the advertised version actually exists
 _expected_apk = MARKETING_DOWNLOADS_DIR / f"vessences-android-v{ANDROID_VERSION}.apk"
@@ -124,12 +124,45 @@ PUBLIC_RELEASE_DOWNLOADS = {
     "vessence-docker-0.0.43.tar.gz": MARKETING_DOWNLOADS_DIR / "vessence-docker-0.0.43.tar.gz",
     # Universal Installer (bundled source + scripts)
     "vessence-installer-0.0.42.zip": MARKETING_DOWNLOADS_DIR / "vessence-installer-0.0.42.zip",
-    f"vessences-android-v{ANDROID_VERSION}.apk": MARKETING_DOWNLOADS_DIR / f"vessences-android-v{ANDROID_VERSION}.apk",
-    "vessences-android.apk": MARKETING_DOWNLOADS_DIR / f"vessences-android-v{ANDROID_VERSION}.apk",
+    # NOTE: Android APK entries are resolved DYNAMICALLY at request time via
+    # _resolve_android_apk_path() — they are intentionally NOT in this static
+    # dict, because the version bumps between jane-web restarts and we don't
+    # want to force a restart on every APK deploy. See downloads handler.
     "vessences-android-package.zip": MARKETING_DOWNLOADS_DIR / "vessences-android-package.zip",
     # Legacy (keep for existing links)
     "vessence-installer-0.0.41.zip": MARKETING_DOWNLOADS_DIR / "vessence-installer-0.0.41.zip",
 }
+
+
+def _resolve_android_apk_path(filename: str) -> "Path | None":
+    """Resolve an Android APK download filename to a real path at request time.
+
+    Matches two shapes:
+      - "vessences-android.apk"            → latest via version.json lookup
+      - "vessences-android-v<X.Y.Z>.apk"   → specific version if the file exists
+
+    Returns None if the filename doesn't match the APK pattern or the file is
+    missing. Called from the /downloads/{filename} route handler.
+    """
+    if filename == "vessences-android.apk":
+        # Unversioned alias — always points at the current version from version.json.
+        try:
+            vdata = _json.loads((CODE_ROOT / "version.json").read_text())
+            current_version = vdata.get("version_name")
+            if current_version:
+                versioned = MARKETING_DOWNLOADS_DIR / f"vessences-android-v{current_version}.apk"
+                if versioned.exists():
+                    return versioned
+        except Exception:
+            pass
+        # Fallback: the deploy script writes a second copy at this unversioned path.
+        alias = MARKETING_DOWNLOADS_DIR / "vessences-android.apk"
+        return alias if alias.exists() else None
+    # Versioned pattern.
+    if filename.startswith("vessences-android-v") and filename.endswith(".apk"):
+        path = MARKETING_DOWNLOADS_DIR / filename
+        return path if path.exists() else None
+    return None
 
 # Unversioned aliases that resolve to the latest versioned installer zip at request time
 _INSTALLER_GLOBS = {
@@ -273,6 +306,8 @@ async def startup():
     _background_tasks.add(reaper)
     reaper.add_done_callback(_background_tasks.discard)
     _logger.info("Jane Web startup complete — database initialized, essences loaded, ready to serve")
+    # Resume processing any unprocessed shared articles left from before a restart
+    asyncio.create_task(_resume_shared_queue_if_needed())
     # Pre-warm gemma4:e4b — used by the prompt router for every request
     prewarm = asyncio.create_task(_prewarm_gemma4())
     _background_tasks.add(prewarm)
@@ -327,7 +362,7 @@ async def _prewarm_gemma4():
 async def _prewarm_ollama():
     """Legacy prewarm — no longer called at startup."""
     import subprocess
-    model = os.environ.get("INTENT_CLASSIFIER_MODEL", "gemma3:4b")
+    model = os.environ.get("INTENT_CLASSIFIER_MODEL", "gemma4:e4b")
     if ":" not in model:
         return  # API model, no need to prewarm
     _logger.info("Pre-warming Ollama model: %s", model)
@@ -782,8 +817,14 @@ async def download_release_artifact(filename: str):
         glob_pattern = _INSTALLER_GLOBS.get(filename)
         if glob_pattern:
             target = _find_latest(glob_pattern)
-    # Dynamic APK fallback — serves versioned APKs deployed after server startup
-    # without requiring a restart. Matches any "vessences-android-vX.Y.Z.apk" request.
+    # Dynamic APK resolution — versioned and unversioned APK filenames are
+    # resolved at request time (reading version.json fresh) so a bump_android_version
+    # deploy does not require a jane-web restart to serve the new file.
+    if not target or not target.exists() or not target.is_file():
+        apk_target = _resolve_android_apk_path(filename)
+        if apk_target is not None:
+            target = apk_target
+    # Legacy generic APK fallback (any .apk filename sitting in the downloads dir).
     if (not target or not target.exists() or not target.is_file()) and filename.endswith(".apk"):
         candidate = MARKETING_DOWNLOADS_DIR / filename
         if candidate.exists() and candidate.is_file():
@@ -1841,14 +1882,38 @@ async def delete_playlist_route(playlist_id: str, _=Depends(require_auth)):
     return {"ok": True}
 
 
+def _cleanup_temporary_playlists():
+    """Delete all Jane-generated temporary playlists from the database.
+
+    Jane creates playlists named "Random Mix" or "Playing: <query>" via voice
+    commands. These are meant to be ephemeral — played once and discarded.
+    Without cleanup they accumulate indefinitely. This function purges them
+    before a new one is created so there's never more than one temporary
+    playlist alive at a time.
+
+    User-created playlists (saved/renamed via the Music Playlist essence)
+    are never touched because they don't match the naming pattern.
+    """
+    try:
+        from vault_web.playlists import list_playlists, delete_playlist as _del
+        for p in list_playlists():
+            name = p.get("name", "")
+            if name == "Random Mix" or name.startswith("Playing:"):
+                _del(p["id"])
+    except Exception as e:
+        _logger.warning("temporary playlist cleanup failed: %s", e)
+
+
 def create_music_playlist_from_query(query: str) -> dict | None:
     """Search vault music by query and create a temporary playlist.
 
     Returns playlist dict {"id", "name", "tracks", ...} or None if no matches.
     Shared by /api/music/play endpoint and jane_proxy gemma4 music handler.
+    Cleans up any prior temporary playlists first so they don't accumulate.
     """
     import glob as _glob, random as _random
 
+    _cleanup_temporary_playlists()
     q = (query or "").strip().lower()
     vault_music = Path(os.environ.get("VAULT_HOME", Path.home() / "ambient" / "vault")) / "Music"
 
@@ -1861,10 +1926,25 @@ def create_music_playlist_from_query(query: str) -> dict | None:
         selected = _random.sample(all_files, min(10, len(all_files)))
         playlist_name = "Random Mix"
     else:
+        # Tier 1: full query as substring of filename
         selected = [f for f in all_files if q in f.lower().split("/")[-1].lower()]
         if not selected:
-            words = q.split()
-            selected = [f for f in all_files if any(w in f.lower().split("/")[-1].lower() for w in words)]
+            # Tier 2: word match — but filter out stopwords that match everything.
+            # "songs by foo fighter" should match on "foo" and "fighter", NOT "by" or "songs".
+            _stopwords = {"a", "an", "the", "by", "of", "in", "on", "to", "for", "and", "or",
+                          "is", "it", "my", "me", "we", "do", "have", "any", "some", "from",
+                          "song", "songs", "music", "play", "playing", "listen", "track", "tracks",
+                          "album", "artist", "something", "anything", "like", "want", "hear"}
+            words = [w for w in q.split() if w not in _stopwords and len(w) > 1]
+            if words:
+                # Require ALL remaining words to match (AND logic), not ANY (OR logic).
+                # "foo fighter" → file must contain both "foo" AND "fighter".
+                selected = [f for f in all_files
+                            if all(w in f.lower().split("/")[-1].lower() for w in words)]
+            if not selected and words:
+                # Tier 3: OR logic as last resort, but only with content words
+                selected = [f for f in all_files
+                            if any(w in f.lower().split("/")[-1].lower() for w in words)]
         if not selected:
             return None
         playlist_name = f"Playing: {q.title()}"
@@ -2772,15 +2852,119 @@ async def delete_briefing_topic(topic_name: str, _=Depends(require_auth)):
     return result
 
 
+# ── Background shared-article processor ──────────────────────────────────────
+_shared_queue_processor_task: Optional[asyncio.Task] = None
+
+
+async def _resume_shared_queue_if_needed():
+    """On startup, check if there are unprocessed shared articles and resume processing."""
+    global _shared_queue_processor_task
+    await asyncio.sleep(30)  # let the server finish warming up first
+    try:
+        queue_file = os.path.join(os.path.dirname(_BRIEFING_FUNCTIONS_DIR), "working_files", "shared_queue.json")
+        if not os.path.exists(queue_file):
+            return
+        with open(queue_file, "r") as f:
+            queue = json.load(f)
+        unprocessed = [e for e in queue if not e.get("processed")]
+        if not unprocessed:
+            return
+        _logger.info("Found %d unprocessed shared articles on startup — resuming queue processor", len(unprocessed))
+        if _shared_queue_processor_task is None or _shared_queue_processor_task.done():
+            _shared_queue_processor_task = asyncio.create_task(_process_shared_queue_draining())
+            _background_tasks.add(_shared_queue_processor_task)
+            _shared_queue_processor_task.add_done_callback(_background_tasks.discard)
+    except Exception:
+        _logger.exception("Failed to check shared queue on startup")
+_RESOURCE_POLL_INTERVAL = 30    # seconds between resource re-checks when busy
+_RESOURCE_MAX_WAIT = 3600       # give up after 1 hour total
+
+
+def _check_resources_available() -> bool:
+    """Check if system load is below 60% across CPU, GPU, RAM, VRAM."""
+    try:
+        _skills_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "agent_skills")
+        if _skills_dir not in sys.path:
+            sys.path.insert(0, _skills_dir)
+        from system_load import has_ample_resources
+        return has_ample_resources(threshold_pct=60)
+    except Exception:
+        return True  # if check fails, proceed
+
+
+async def _process_shared_queue_draining():
+    """Process queued articles one at a time, checking resources before each.
+
+    Starts immediately on article submission. Between each article, re-checks
+    that system load is below 60%. If busy, polls every 30s until resources
+    free up (up to 1 hour total wait).
+    """
+    loop = asyncio.get_running_loop()
+    if _BRIEFING_FUNCTIONS_DIR not in sys.path:
+        sys.path.insert(0, _BRIEFING_FUNCTIONS_DIR)
+    import run_briefing as _rb
+
+    total_processed = 0
+    waited_total = 0
+
+    while True:
+        # Wait for resources before processing the next article
+        while not _check_resources_available():
+            if waited_total >= _RESOURCE_MAX_WAIT:
+                _logger.info("Resources busy for %ds — sleeping 10min before retrying (%d processed so far)",
+                             waited_total, total_processed)
+                await asyncio.sleep(600)  # sleep 10 minutes then reset wait timer
+                waited_total = 0
+                continue
+            _logger.debug("System busy (>60%%) — rechecking in %ds (waited %ds total)",
+                          _RESOURCE_POLL_INTERVAL, waited_total)
+            await asyncio.sleep(_RESOURCE_POLL_INTERVAL)
+            waited_total += _RESOURCE_POLL_INTERVAL
+
+        # Process exactly one article
+        try:
+            result = await loop.run_in_executor(None, _rb.process_one_queued_article)
+        except Exception:
+            _logger.exception("Error processing queued article")
+            return
+
+        if not result.get("processed"):
+            # Queue is empty
+            if total_processed:
+                _logger.info("Queue drained — %d article(s) processed", total_processed)
+            return
+
+        total_processed += 1
+        waited_total = 0  # reset wait timer after successful processing
+        remaining = result.get("remaining", 0)
+        _logger.info("Processed article %s — %d remaining in queue",
+                      result.get("article_id", "?"), remaining)
+
+        if remaining == 0:
+            _logger.info("Queue drained — %d article(s) processed", total_processed)
+            return
+
+
 @app.post("/api/briefing/articles/submit")
 async def submit_briefing_article(request: Request, _=Depends(require_auth)):
     """Accept a shared article URL and queue it for processing."""
+    global _shared_queue_processor_task
     body = await request.json()
     url = body.get("url", "").strip()
     if not url or not re.match(r'^https?://', url):
         raise HTTPException(status_code=400, detail="A valid URL starting with http(s):// is required")
     bt = _briefing_tools()
     result = bt.submit_article(url)
+
+    # Spawn background processor if none is already running
+    if _shared_queue_processor_task is None or _shared_queue_processor_task.done():
+        _shared_queue_processor_task = asyncio.create_task(_process_shared_queue_draining())
+        _background_tasks.add(_shared_queue_processor_task)
+        _shared_queue_processor_task.add_done_callback(_background_tasks.discard)
+        _logger.info("Spawned background shared-queue processor for URL: %s", url)
+    else:
+        _logger.info("Background shared-queue processor already running — skipping spawn for URL: %s", url)
+
     return result
 
 
@@ -2809,6 +2993,7 @@ async def undismiss_briefing_article(article_id: str, _=Depends(require_auth)):
 
 
 _SAVED_ARTICLES_DIR = Path(os.path.expanduser("~/ambient/vessence-data/briefing_saved"))
+_VAULT_SAVED_ARTICLES = Path(os.path.expanduser("~/ambient/vault/saved_articles"))
 
 
 @app.post("/api/briefing/saved")
@@ -2848,19 +3033,33 @@ async def save_briefing_article(request: Request, _=Depends(require_auth)):
     async with aiofiles.open(saved_file, "w") as f:
         await f.write(json.dumps(saved, indent=2))
 
+    # Also save to vault as file: vault/saved_articles/<group>/<article_id>.json
+    vault_group_dir = _VAULT_SAVED_ARTICLES / category
+    vault_group_dir.mkdir(parents=True, exist_ok=True)
+    vault_article_file = vault_group_dir / f"{article_id}.json"
+    async with aiofiles.open(vault_article_file, "w") as f:
+        await f.write(json.dumps(saved[article_id], indent=2))
+    _logger.info("Saved article %s to vault group '%s'", article_id, category)
+
     return {"status": "ok", "article_id": article_id, "category": category}
 
 
 @app.get("/api/briefing/saved/categories")
 async def list_saved_categories(_=Depends(require_auth)):
-    """List all categories that have saved articles."""
+    """List all categories that have saved articles (from vault folders)."""
+    cats = set()
+    # Scan vault folders — these are the source of truth for group names
+    if _VAULT_SAVED_ARTICLES.exists():
+        for d in _VAULT_SAVED_ARTICLES.iterdir():
+            if d.is_dir() and any(d.glob("*.json")):
+                cats.add(d.name)
+    # Also check JSON index for anything not yet in vault
     saved_file = _SAVED_ARTICLES_DIR / "saved.json"
-    if not saved_file.exists():
-        return {"categories": []}
-    async with aiofiles.open(saved_file, "r") as f:
-        saved = json.loads(await f.read())
-    cats = sorted(set(v.get("category", "Uncategorized") for v in saved.values()))
-    return {"categories": cats}
+    if saved_file.exists():
+        async with aiofiles.open(saved_file, "r") as f:
+            saved = json.loads(await f.read())
+        cats.update(v.get("category", "Uncategorized") for v in saved.values())
+    return {"categories": sorted(cats)}
 
 
 @app.get("/api/briefing/saved")
@@ -2888,9 +3087,19 @@ async def unsave_briefing_article(article_id: str, _=Depends(require_auth)):
         saved = json.loads(await f.read())
     if article_id not in saved:
         raise HTTPException(status_code=404, detail="Article not saved")
+    category = saved[article_id].get("category", "")
     del saved[article_id]
     async with aiofiles.open(saved_file, "w") as f:
         await f.write(json.dumps(saved, indent=2))
+    # Remove from vault too
+    if category:
+        vault_file = _VAULT_SAVED_ARTICLES / category / f"{article_id}.json"
+        if vault_file.exists():
+            vault_file.unlink()
+            # Remove empty group folder
+            vault_group = vault_file.parent
+            if vault_group.exists() and not any(vault_group.iterdir()):
+                vault_group.rmdir()
     return {"status": "ok", "article_id": article_id}
 
 

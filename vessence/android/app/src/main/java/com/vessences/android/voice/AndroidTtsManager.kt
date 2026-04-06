@@ -38,6 +38,14 @@ class AndroidTtsManager(
                 override fun onError(utteranceId: String?, errorCode: Int) {
                     utteranceId?.let { pending.remove(it)?.resume(Unit) }
                 }
+
+                // API 23+: fired when an utterance is INTERRUPTED (e.g., another
+                // speak() with QUEUE_FLUSH replaced it). Without this handler,
+                // the interrupted utterance's continuation hangs forever because
+                // neither onDone nor onError fires for it.
+                override fun onStop(utteranceId: String?, interrupted: Boolean) {
+                    utteranceId?.let { pending.remove(it)?.resume(Unit) }
+                }
             }
         )
     }
@@ -69,6 +77,18 @@ class AndroidTtsManager(
     }
 
     fun stop() {
+        // Resume ALL pending continuations BEFORE stopping the engine.
+        // TextToSpeech.stop() cancels all queued utterances, but Android
+        // only fires onError for the CURRENTLY PLAYING utterance — silently
+        // dropped queued utterances get NO callback. Any coroutine suspended
+        // on a dropped utterance's ID would hang forever. This caused the
+        // tool-handler TTS deadlock: chat TTS called stop() mid-tool-utterance,
+        // the tool's continuation never resumed, the handler never completed,
+        // and PendingToolResultBuffer never received the result.
+        val orphaned = pending.keys.toList()
+        for (id in orphaned) {
+            pending.remove(id)?.resume(Unit)
+        }
         textToSpeech.stop()
     }
 

@@ -279,17 +279,27 @@ class StandingBrainManager:
         """Spawn a new CLI process for the brain."""
         cmd = self._build_cmd(bp)
 
-        # Use /tmp as CWD to avoid picking up CLAUDE.md / .gemini/GEMINI.md
-        # from the project directory.  CLAUDE.md contains hooks and rules
-        # (e.g. read CODE_MAP.md first, run check_continuation.py) that cause
-        # the CLI to do tool use instead of responding, leading to empty
-        # responses after the 20-turn refresh.
+        # Run from the project directory so the Claude CLI:
+        #   - loads CLAUDE.md (identity, rules, memory hooks, preferences)
+        #   - discovers the project tree (can Read/Grep/Edit files)
+        #   - fires UserPromptSubmit hooks (librarian memory injection)
+        #
+        # Previously this was /tmp to avoid CLAUDE.md's automation rules
+        # (self-continuation, job queue processing, CODE_MAP.md reading)
+        # which caused tool-use instead of responding. That's now handled
+        # by an explicit "standing brain mode" instruction injected into
+        # the system prompt (see context_builder.py STANDING_BRAIN_OVERRIDE)
+        # which tells the model to skip those sections.
+        _project_dir = os.environ.get(
+            "VESSENCE_HOME",
+            os.path.expanduser("~/ambient/vessence"),
+        )
         bp.process = await asyncio.create_subprocess_exec(
             *cmd,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            cwd="/tmp",
+            cwd=_project_dir,
             start_new_session=True,
         )
         bp.session_id = None

@@ -193,7 +193,7 @@ curl -fsSL https://ollama.com/install.sh | sh
 # Re-pull the models that were installed:
 # {chr(10).join('# ollama pull ' + line.split()[0] for line in manifest['ollama_models'].splitlines()[1:] if line.strip())}
 ollama pull qwen2.5-coder:14b
-ollama pull gemma3:4b
+ollama pull gemma4:e4b
 ```
 
 ---

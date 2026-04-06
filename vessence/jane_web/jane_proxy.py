@@ -22,6 +22,463 @@ from jane_web.broadcast import StreamBroadcaster
 
 logger = logging.getLogger("jane.proxy")
 
+# ── Jane Phone Tools: marker extraction ──────────────────────────────────────
+#
+# Jane's mind emits `[[CLIENT_TOOL:<name>:<json>]]` markers inline in her
+# streaming response to invoke client-side (Android) tools. This extractor
+# pulls them out of the delta stream, emits structured `client_tool_call`
+# SSE events, and strips the markers from the user-visible text.
+#
+# Implementation notes (per design spec §R1):
+#   - Streaming-safe: handles markers split across delta chunks by holding
+#     back any trailing text that could be a partial opener.
+#   - JSON-aware: the payload is a JSON object, so we count braces and track
+#     string-escape state to find the correct close; we do NOT search for `]]`
+#     naively because JSON strings may contain `]]`.
+#   - Code-fence aware: tracks triple-backtick state across chunks and skips
+#     marker scanning inside fenced code blocks to prevent prompt injection
+#     and avoid mis-triggering on prose examples.
+#   - Fail-open: on malformed tool name, invalid JSON, or buffer overflow
+#     (more than _MAX_HOLD bytes buffered between opener and close), the
+#     held text is flushed as visible and the marker is dropped. Safer to
+#     reveal the raw text than to execute an unvalidated tool call.
+
+import re as _re
+import uuid as _uuid
+
+
+class ToolMarkerExtractor:
+    """Streaming extractor for ``[[CLIENT_TOOL:name:json]]`` markers.
+
+    Create one per request. Feed delta chunks in via :meth:`feed`; receive
+    (sanitized_text, list_of_tool_calls). Call :meth:`flush` at stream end
+    to reveal any residual buffered text.
+    """
+
+    _OPEN = "[[CLIENT_TOOL:"
+    _CLOSE = "]]"
+    _MAX_HOLD = 4096  # bail out if we're mid-marker for more than this
+    _FENCE = "```"
+    _TOOL_NAME_RE = _re.compile(r"^[a-z][a-z0-9_.]*$")
+
+    def __init__(self) -> None:
+        self._buffer: str = ""          # unflushed tail (may contain partial marker)
+        self._in_fence: bool = False    # inside a ``` ... ``` code block
+
+    # ── public API ──────────────────────────────────────────────────────────
+    def feed(self, chunk: str) -> tuple[str, list[dict]]:
+        """Consume a delta chunk, return (safe_visible_text, tool_calls)."""
+        if not chunk:
+            return "", []
+        self._buffer += chunk
+        if len(self._buffer) > self._MAX_HOLD * 2:
+            # Runaway: flush and reset to avoid unbounded memory growth.
+            visible = self._buffer
+            self._buffer = ""
+            return visible, []
+        return self._drain()
+
+    def flush(self) -> tuple[str, list[dict]]:
+        """Called on stream end. Reveal any residual buffered text as visible.
+
+        If a marker was opened but never closed, the partial marker becomes
+        visible text (fail-open) — users see raw `[[CLIENT_TOOL:...` which is
+        a clear signal something went wrong server-side, not a silent miss.
+        """
+        visible, calls = self._drain(final=True)
+        tail = self._buffer
+        self._buffer = ""
+        return visible + tail, calls
+
+    # ── internals ───────────────────────────────────────────────────────────
+    def _drain(self, final: bool = False) -> tuple[str, list[dict]]:
+        """Extract complete markers from ``self._buffer``.
+
+        Updates ``self._buffer`` in place (removing consumed text) and returns
+        the safe-to-forward prefix plus any complete tool calls. When not
+        ``final``, holds back any trailing chars that could be a partial
+        opener or an unclosed marker.
+        """
+        out_visible_parts: list[str] = []
+        out_calls: list[dict] = []
+
+        while True:
+            if self._in_fence:
+                # Inside a code fence — forward everything up to the next ``` (which closes it).
+                close_idx = self._buffer.find(self._FENCE)
+                if close_idx < 0:
+                    # Still inside; flush all but a possible partial fence tail.
+                    hold = self._partial_fence_suffix_len(self._buffer)
+                    if hold > 0:
+                        out_visible_parts.append(self._buffer[:-hold])
+                        self._buffer = self._buffer[-hold:]
+                    else:
+                        out_visible_parts.append(self._buffer)
+                        self._buffer = ""
+                    break
+                end = close_idx + len(self._FENCE)
+                out_visible_parts.append(self._buffer[:end])
+                self._buffer = self._buffer[end:]
+                self._in_fence = False
+                continue  # re-scan for more
+
+            # Not in fence — look for either an opener or a fence.
+            opener_idx = self._buffer.find(self._OPEN)
+            fence_idx = self._buffer.find(self._FENCE)
+
+            # Decide which comes first (if any).
+            next_opener = opener_idx if opener_idx >= 0 else len(self._buffer) + 1
+            next_fence = fence_idx if fence_idx >= 0 else len(self._buffer) + 1
+
+            if next_opener >= len(self._buffer) and next_fence >= len(self._buffer):
+                # Neither present in the buffer.
+                # Still hold back any suffix that could be the start of an opener OR a fence.
+                hold = max(
+                    self._partial_opener_suffix_len(self._buffer),
+                    self._partial_fence_suffix_len(self._buffer),
+                )
+                if hold > 0:
+                    out_visible_parts.append(self._buffer[:-hold])
+                    self._buffer = self._buffer[-hold:]
+                else:
+                    out_visible_parts.append(self._buffer)
+                    self._buffer = ""
+                break
+
+            if next_fence < next_opener:
+                # A fence comes first — forward text up to and including the fence, enter fence state.
+                end = next_fence + len(self._FENCE)
+                out_visible_parts.append(self._buffer[:end])
+                self._buffer = self._buffer[end:]
+                self._in_fence = True
+                continue
+
+            # An opener comes first (or they tied — opener wins).
+            # Flush anything before the opener.
+            if next_opener > 0:
+                out_visible_parts.append(self._buffer[:next_opener])
+                self._buffer = self._buffer[next_opener:]
+            # Now self._buffer starts with "[[CLIENT_TOOL:". Try to find the close.
+            close_end = self._find_marker_end(self._buffer)
+            if close_end is None:
+                # Incomplete marker. If we're at stream end, fail-open (flush as visible).
+                if final or len(self._buffer) > self._MAX_HOLD:
+                    out_visible_parts.append(self._buffer)
+                    self._buffer = ""
+                # else: hold entire buffer until next chunk arrives
+                break
+            # We have a complete marker from 0 to close_end.
+            marker_text = self._buffer[:close_end]
+            parsed = self._parse_marker(marker_text)
+            if parsed is not None:
+                out_calls.append(parsed)
+            else:
+                # Malformed — fail-open, reveal as visible text.
+                out_visible_parts.append(marker_text)
+            self._buffer = self._buffer[close_end:]
+            # Loop to look for more markers in the remainder.
+
+        return "".join(out_visible_parts), out_calls
+
+    @staticmethod
+    def _partial_opener_suffix_len(buf: str) -> int:
+        """Length of the longest suffix of buf that is a proper prefix of _OPEN."""
+        open_tok = ToolMarkerExtractor._OPEN
+        max_check = min(len(buf), len(open_tok) - 1)
+        for i in range(max_check, 0, -1):
+            if buf.endswith(open_tok[:i]):
+                return i
+        return 0
+
+    @staticmethod
+    def _partial_fence_suffix_len(buf: str) -> int:
+        """Length of longest suffix of buf that is a proper prefix of ```."""
+        fence = ToolMarkerExtractor._FENCE
+        max_check = min(len(buf), len(fence) - 1)
+        for i in range(max_check, 0, -1):
+            if buf.endswith(fence[:i]):
+                return i
+        return 0
+
+    @classmethod
+    def _find_marker_end(cls, buf: str) -> int | None:
+        """Given a buffer starting with ``[[CLIENT_TOOL:``, find the byte index
+        where the matching ``]]`` ends (exclusive). Returns None if the marker
+        is not yet complete.
+
+        Parses name (up to first `:` after opener), then scans the JSON object
+        with brace/string-escape tracking, then requires the literal ``]]``.
+
+        Hard cap: if we scan past _MAX_HOLD characters without finding the
+        closing ``]]``, return a pseudo-complete position so the caller
+        fail-opens the marker. Prevents a runaway model (or injected giant
+        JSON payload) from forcing the extractor into an unbounded single
+        marker scan.
+        """
+        assert buf.startswith(cls._OPEN)
+        if len(buf) > cls._MAX_HOLD:
+            # Overflow — try to find a nearby ']]' and fail-open the whole
+            # span as visible text. If we can't find one, consume everything
+            # up to _MAX_HOLD and fail-open.
+            close = buf.find(cls._CLOSE, len(cls._OPEN))
+            if 0 < close < cls._MAX_HOLD:
+                return close + len(cls._CLOSE)
+            return cls._MAX_HOLD  # fail-open visible
+        i = len(cls._OPEN)
+        # Scan the tool name until the next ':'
+        name_start = i
+        while i < len(buf) and buf[i] != ":":
+            i += 1
+        if i >= len(buf):
+            return None  # name not yet terminated
+        if i == name_start:
+            # Empty name — malformed. Return a "pseudo-complete" position so the
+            # caller can fail-open the marker by parsing (which will also fail).
+            # Find the next ]] so we consume it all.
+            close = buf.find(cls._CLOSE, i)
+            return close + len(cls._CLOSE) if close >= 0 else None
+        i += 1  # skip the ':'
+        # Now at the start of the JSON object. Scan with brace + string state.
+        if i >= len(buf):
+            return None
+        if buf[i] != "{":
+            # JSON must start with an object per the spec. Malformed — fail-open.
+            close = buf.find(cls._CLOSE, i)
+            return close + len(cls._CLOSE) if close >= 0 else None
+        depth = 0
+        in_str = False
+        escape = False
+        json_end: int | None = None
+        while i < len(buf):
+            ch = buf[i]
+            if in_str:
+                if escape:
+                    escape = False
+                elif ch == "\\":
+                    escape = True
+                elif ch == '"':
+                    in_str = False
+            else:
+                if ch == '"':
+                    in_str = True
+                elif ch == "{":
+                    depth += 1
+                elif ch == "}":
+                    depth -= 1
+                    if depth == 0:
+                        json_end = i + 1
+                        break
+            i += 1
+        if json_end is None:
+            return None  # JSON not yet complete
+        # Expect ']]' immediately after the JSON.
+        if buf.startswith(cls._CLOSE, json_end):
+            return json_end + len(cls._CLOSE)
+        # Tolerate a few whitespace chars between '}' and ']]'
+        j = json_end
+        while j < len(buf) and buf[j] in " \t\r\n":
+            j += 1
+        if j >= len(buf):
+            return None
+        if buf.startswith(cls._CLOSE, j):
+            return j + len(cls._CLOSE)
+        # Any other char → malformed. Find the next ]] and fail-open the whole span.
+        close = buf.find(cls._CLOSE, j)
+        return close + len(cls._CLOSE) if close >= 0 else None
+
+    @classmethod
+    def _parse_marker(cls, marker_text: str) -> dict | None:
+        """Parse ``[[CLIENT_TOOL:name:{json}]]`` into {tool, args, call_id}.
+        Returns None on malformed input (caller fails-open).
+        """
+        if not marker_text.startswith(cls._OPEN) or not marker_text.endswith(cls._CLOSE):
+            return None
+        inner = marker_text[len(cls._OPEN):-len(cls._CLOSE)].rstrip()
+        colon = inner.find(":")
+        if colon < 0:
+            return None
+        name = inner[:colon].strip()
+        if not cls._TOOL_NAME_RE.match(name):
+            return None
+        json_str = inner[colon + 1:].strip()
+        try:
+            args = json.loads(json_str)
+        except Exception:
+            return None
+        if not isinstance(args, dict):
+            return None
+        return {
+            "tool": name,
+            "args": args,
+            "call_id": str(_uuid.uuid4()),
+        }
+
+
+# SMS draft open detection moved to tools/phone/server/__init__.py — see
+# jane.tool_loader.should_skip_initial_ack(). This used to be duplicated here
+# as a transitional fallback; now the tool loader is the single source of
+# truth and the fallback path has been removed so the two cannot drift.
+
+
+# ── Jane Phone Tools: TOOL_RESULT feedback channel ───────────────────────────
+#
+# Android prepends [TOOL_RESULT:{json}] markers to the next user message when
+# a tool completes/fails/is cancelled. We strip those off before showing the
+# user bubble, but pass the parsed results to Jane's mind in her context so
+# she knows what actually happened on the phone.
+
+class _SkipRouterSignal(Exception):
+    """Silent sentinel raised to skip the Gemma router without logging a
+    warning — used when an SMS draft is open and we must route the turn
+    straight to Jane's mind.
+    """
+
+
+_TOOL_RESULT_OPEN = "[TOOL_RESULT:"
+_TOOL_RESULT_CLOSE = "]"
+
+
+def _extract_tool_results(user_message: str) -> tuple[str, list[dict]]:
+    """Strip leading [TOOL_RESULT:{json}] markers from a user message.
+
+    Uses brace-counting + string-escape tracking (same technique as
+    ToolMarkerExtractor) instead of a non-greedy regex, so nested JSON
+    objects and string values containing ``}]`` are parsed correctly.
+
+    Returns (clean_message, list_of_parsed_results). Any malformed marker
+    stops the scan; the remaining text (with the bad marker intact) is
+    returned as the cleaned message so the user sees the raw failure
+    rather than a silent drop.
+    """
+    results: list[dict] = []
+    cleaned = user_message
+    while True:
+        # Skip leading whitespace between markers.
+        stripped = cleaned.lstrip()
+        if not stripped.startswith(_TOOL_RESULT_OPEN):
+            break
+        # Position of the '{' inside the marker.
+        json_start = len(cleaned) - len(stripped) + len(_TOOL_RESULT_OPEN)
+        # Skip optional whitespace after the "[TOOL_RESULT:" prefix.
+        while json_start < len(cleaned) and cleaned[json_start] in " \t":
+            json_start += 1
+        if json_start >= len(cleaned) or cleaned[json_start] != "{":
+            break
+        # Brace-count scan to find the matching closing '}'.
+        depth = 0
+        in_str = False
+        escape = False
+        i = json_start
+        json_end: int | None = None
+        while i < len(cleaned):
+            ch = cleaned[i]
+            if in_str:
+                if escape:
+                    escape = False
+                elif ch == "\\":
+                    escape = True
+                elif ch == '"':
+                    in_str = False
+            else:
+                if ch == '"':
+                    in_str = True
+                elif ch == "{":
+                    depth += 1
+                elif ch == "}":
+                    depth -= 1
+                    if depth == 0:
+                        json_end = i + 1
+                        break
+            i += 1
+        if json_end is None:
+            break  # incomplete JSON — leave marker in place
+        # Expect ']' immediately after the JSON (allow whitespace between).
+        j = json_end
+        while j < len(cleaned) and cleaned[j] in " \t":
+            j += 1
+        if j >= len(cleaned) or cleaned[j] != _TOOL_RESULT_CLOSE:
+            break
+        try:
+            payload = json.loads(cleaned[json_start:json_end])
+        except Exception:
+            break
+        if not isinstance(payload, dict):
+            break
+        results.append(payload)
+        # Consume the marker and any trailing whitespace.
+        cleaned = cleaned[j + 1:].lstrip()
+    return cleaned, results
+
+
+_DELIM_OPEN = "[PHONE TOOL RESULTS — results from tools that ran on the Android client since the last turn. Use these to decide your next action; do not quote them back to the user literally.]"
+_DELIM_CLOSE = "[END PHONE TOOL RESULTS]"
+
+
+def _neutralize_delimiters(s: str) -> str:
+    """Defuse any substring that could be mistaken for the tool-result block
+    delimiter by an attacker-supplied message body or tool payload.
+
+    Strategy: replace newlines in the untrusted string with literal ``\\n``
+    escape sequences (so the tool result block stays single-line per entry
+    and can't inject newlines of its own) and replace the literal delimiter
+    strings with a zero-width-marked variant that cannot be mistaken for the
+    real delimiter by a downstream regex.
+    """
+    if not isinstance(s, str):
+        return str(s)
+    # Collapse newlines so tool content can't inject block boundaries.
+    s = s.replace("\r\n", " ").replace("\r", " ").replace("\n", " ")
+    # Neutralize anything that looks like our delimiter markers.
+    s = s.replace("[PHONE TOOL RESULTS", "[phone_tool_results")
+    s = s.replace("[END PHONE TOOL RESULTS", "[end_phone_tool_results")
+    # Cap length to prevent absurd strings blowing up the context.
+    if len(s) > 2000:
+        s = s[:2000] + "…(truncated)"
+    return s
+
+
+def _format_tool_results_for_brain(results: list[dict]) -> str:
+    """Format a list of parsed tool results as a context block that will be
+    prepended to the user message the standing brain sees.
+
+    All untrusted string fields (message, tool name, data values) are run
+    through ``_neutralize_delimiters`` before interpolation so that a
+    compromised tool payload or a malicious SMS body cannot forge the block
+    boundary and inject fake high-priority context into Jane's mind.
+    """
+    if not results:
+        return ""
+    lines = [_DELIM_OPEN]
+    for r in results:
+        tool = _neutralize_delimiters(r.get("tool", "?"))
+        status = _neutralize_delimiters(r.get("status", "?"))
+        message = _neutralize_delimiters(r.get("message", ""))
+        lines.append(f"- tool={tool} status={status} message={message!r}")
+        data = r.get("data")
+        if isinstance(data, dict) and data:
+            try:
+                # Serialize to compact JSON, then neutralize the resulting
+                # string. This preserves data structure for Jane while
+                # defending against delimiter injection inside JSON string
+                # values (e.g., a message body that contains the literal
+                # "[END PHONE TOOL RESULTS]" text).
+                json_str = _neutralize_delimiters(
+                    json.dumps(data, ensure_ascii=True)
+                )
+                lines.append(f"  data={json_str}")
+            except Exception:
+                pass
+        extra = r.get("extra")
+        if isinstance(extra, dict) and extra:
+            try:
+                lines.append(
+                    f"  extra={_neutralize_delimiters(json.dumps(extra, ensure_ascii=True))}"
+                )
+            except Exception:
+                pass
+    lines.append(_DELIM_CLOSE)
+    return "\n".join(lines)
+
 
 CODE_MAP_KEYWORDS = (
     # Code navigation
@@ -63,6 +520,22 @@ CODE_MAP_KEYWORDS = (
     # Auto-evolved from daily conversations
     "stop",
     "accent",
+    # Auto-evolved from daily conversations
+    "briefing",
+    "send",
+    "daily",
+    "news",
+    "article",
+    "server",
+    "vessence",
+    "don",
+    "link",
+    "chrome",
+    # Auto-evolved from daily conversations
+    "message",
+    "wife",
+    "love",
+    "version",
 )
 
 
@@ -743,8 +1216,25 @@ async def send_message(user_id: str, session_id: str, message: str, file_context
     _sync_broadcaster = StreamBroadcaster(broadcast_user_id, session_id, platform or "", message)
     _sync_broadcaster.start()
     state = _get_session(session_id)
-    resolved_file_context = _resolve_file_context(state, message, file_context)
-    persisted_user_message = _message_for_persistence(message, resolved_file_context)
+    # Phone tools: extract any [TOOL_RESULT:{json}] markers the Android client
+    # prepended. Same treatment as the stream path — strip from user-visible
+    # bubble, prepend a [PHONE TOOL RESULTS] block onto the brain-visible
+    # message so Jane knows what the last phone-tool invocation did.
+    _cleaned_message, _tool_results = _extract_tool_results(message or "")
+    if _tool_results:
+        logger.info("[%s] (sync) received %d tool result(s) from client",
+                    session_id[:12], len(_tool_results))
+    _user_visible_message = _cleaned_message
+    if _tool_results:
+        _result_block = _format_tool_results_for_brain(_tool_results)
+        if _result_block:
+            message = _result_block + "\n\n" + _cleaned_message
+        else:
+            message = _cleaned_message
+    else:
+        message = _cleaned_message
+    resolved_file_context = _resolve_file_context(state, _user_visible_message, file_context)
+    persisted_user_message = _message_for_persistence(_user_visible_message, resolved_file_context)
     brain_name = _get_brain_name()
     adapter = get_brain_adapter(brain_name, _get_execution_profile(brain_name))
     logger.info("[%s] send_message (sync) brain=%s history=%d msg_len=%d file_ctx=%s",
@@ -868,6 +1358,26 @@ async def send_message(user_id: str, session_id: str, message: str, file_context
     _log_stage(session_id, "persistence_dispatch", stage_start)
     _log_stage(session_id, "request_total", request_start, mode="sync")
     _sync_broadcaster.finish(response or "")
+
+    # Phone tools: strip any [[CLIENT_TOOL:...]] markers from the sync response
+    # text so they never appear in the user-visible bubble. Sync mode cannot
+    # emit structured client_tool_call events (no SSE stream), so any tool
+    # invocations in sync mode are currently no-ops — but at minimum the raw
+    # markers should not leak to the UI. Tool calls in sync mode are logged
+    # for drift detection.
+    if response and "[[CLIENT_TOOL:" in response:
+        _sync_extractor = ToolMarkerExtractor()
+        _visible, _sync_tool_calls = _sync_extractor.feed(response)
+        _tail, _sync_tail_calls = _sync_extractor.flush()
+        response = _visible + _tail
+        _total_sync_calls = len(_sync_tool_calls) + len(_sync_tail_calls)
+        if _total_sync_calls > 0:
+            logger.warning(
+                "[%s] (sync) response contained %d client_tool_call marker(s) "
+                "that cannot be dispatched in non-streaming mode — stripped from "
+                "response text",
+                session_id[:12], _total_sync_calls,
+            )
 
     return {"text": response, "files": []}
 
@@ -1153,8 +1663,44 @@ async def stream_message(
     del user_id  # single-user system for now
     request_start = time.perf_counter()
     state = _get_session(session_id)
-    resolved_file_context = _resolve_file_context(state, message, file_context)
-    persisted_user_message = _message_for_persistence(message, resolved_file_context)
+    # Phone tools: extract any [TOOL_RESULT:{json}] markers the Android client
+    # prepended to this user turn. Strip them from the user-visible bubble
+    # (via persisted_user_message) but prepend a formatted context block onto
+    # the message the brain actually sees, so Jane knows what the last phone-
+    # tool invocation did without the user seeing raw JSON in their chat.
+    _cleaned_message, _tool_results = _extract_tool_results(message or "")
+    if _tool_results:
+        logger.info("[%s] received %d tool result(s) from client", session_id[:12], len(_tool_results))
+        # Verbose diagnostic: dump each tool result so a failed/needs_user
+        # status has its full reason visible in the log. Previously the only
+        # trace was a 60-char-truncated echo in Jane's next ack, which hid
+        # the actual failure reason from the logs.
+        for _idx, _tr in enumerate(_tool_results):
+            _tr_tool = _tr.get("tool", "?")
+            _tr_status = _tr.get("status", "?")
+            _tr_msg = str(_tr.get("message", ""))[:300]
+            _tr_data = _tr.get("data")
+            _tr_data_str = ""
+            if isinstance(_tr_data, (dict, list)):
+                try:
+                    _tr_data_str = " data=" + json.dumps(_tr_data, ensure_ascii=True)[:500]
+                except Exception:
+                    _tr_data_str = " data=<unserializable>"
+            logger.info(
+                "[%s]   tool_result[%d]: tool=%s status=%s msg=%r%s",
+                session_id[:12], _idx, _tr_tool, _tr_status, _tr_msg, _tr_data_str,
+            )
+    _brain_visible_message = _cleaned_message  # what the brain will see
+    _user_visible_message = _cleaned_message   # what the user will see in the bubble
+    if _tool_results:
+        _result_block = _format_tool_results_for_brain(_tool_results)
+        if _result_block:
+            _brain_visible_message = _result_block + "\n\n" + _cleaned_message
+    # From this point on, `message` is what the brain sees (includes tool
+    # results context); `persisted_user_message` uses the user-visible text.
+    message = _brain_visible_message
+    resolved_file_context = _resolve_file_context(state, _user_visible_message, file_context)
+    persisted_user_message = _message_for_persistence(_user_visible_message, resolved_file_context)
     brain_name = _get_brain_name()
     adapter = get_brain_adapter(brain_name, _get_execution_profile(brain_name))
     logger.info("[%s] stream_message brain=%s history=%d msg_len=%d file_ctx=%s",
@@ -1174,6 +1720,7 @@ async def stream_message(
     final_response: str | None = None
     _ack_seen = False  # tracks whether brain has emitted an [ACK] block
     _accumulated_deltas = ""  # accumulates delta text to detect [ACK]
+    _tool_extractor = ToolMarkerExtractor()  # phone-tools marker extraction (see class docstring)
 
     def _raw_emit(event_type: str, payload: str | None = None) -> None:
         item = (event_type, payload)
@@ -1192,6 +1739,61 @@ async def stream_message(
             _accumulated_deltas += payload
             if not _ack_seen and "[/ACK]" in _accumulated_deltas:
                 _ack_seen = True
+            # Phone tools: extract [[CLIENT_TOOL:...]] markers and emit them as
+            # structured client_tool_call SSE events; forward only the
+            # sanitized text to the client so markers don't appear in the
+            # chat bubble. _accumulated_deltas retains the raw text (with
+            # markers) for history persistence so Jane's mind can see her
+            # own prior emissions when continuing a draft state machine.
+            visible, tool_calls = _tool_extractor.feed(payload)
+            for tc in tool_calls:
+                logger.info("[%s] Emitting client_tool_call: tool=%s call_id=%s",
+                            session_id[:12], tc.get("tool", "?"), tc.get("call_id", "?")[:12])
+                _raw_emit("client_tool_call", json.dumps(tc, ensure_ascii=True))
+            if visible:
+                _raw_emit("delta", visible)
+            return
+        if event_type == "done":
+            # Final flush of any buffered tool markers at stream end.
+            visible_tail, tail_calls = _tool_extractor.flush()
+            for tc in tail_calls:
+                logger.info("[%s] Emitting client_tool_call (flush): tool=%s call_id=%s",
+                            session_id[:12], tc.get("tool", "?"), tc.get("call_id", "?")[:12])
+                _raw_emit("client_tool_call", json.dumps(tc, ensure_ascii=True))
+            if visible_tail:
+                _raw_emit("delta", visible_tail)
+
+            # Opus music fallback: if Opus emitted [MUSIC_PLAY:<query>] with a
+            # non-UUID query (track name, artist), intercept it, create the
+            # playlist on the fly, and replace the query with the real UUID.
+            # Gemma normally handles this via the MUSIC_PLAY short-circuit, but
+            # if Gemma misclassified or was skipped, Opus writes the raw marker
+            # and the Android client would 404 on /api/playlists/<track name>.
+            import re as _re_local
+            _music_re = _re_local.compile(r"\[MUSIC_PLAY:([^\]]+)\]")
+            _music_match = _music_re.search(payload or "")
+            if _music_match:
+                _music_query = _music_match.group(1).strip()
+                # UUIDs from Gemma's path are hex strings (16 chars). Non-UUID
+                # means Opus used a query string — create the playlist now.
+                if not _re_local.match(r"^[0-9a-f]{16}$", _music_query):
+                    logger.info("[%s] Opus music fallback: creating playlist for query '%s'",
+                                session_id[:12], _music_query[:60])
+                    try:
+                        from jane_web.main import create_music_playlist_from_query
+                        _fb_playlist = create_music_playlist_from_query(_music_query)
+                        if _fb_playlist:
+                            _old_marker = _music_match.group(0)
+                            _new_marker = f"[MUSIC_PLAY:{_fb_playlist['id']}]"
+                            payload = payload.replace(_old_marker, _new_marker)
+                            logger.info("[%s] Opus music fallback: replaced with playlist id=%s (%d tracks)",
+                                        session_id[:12], _fb_playlist['id'], len(_fb_playlist.get('tracks', [])))
+                        else:
+                            logger.info("[%s] Opus music fallback: no matches for '%s'",
+                                        session_id[:12], _music_query[:60])
+                    except Exception as _fb_err:
+                        logger.warning("[%s] Opus music fallback failed: %s", session_id[:12], _fb_err)
+
         # If gemma router already emitted an ack, suppress Claude's [ACK] block.
         # If gemma didn't handle it (delegate/unknown), let Claude provide its own ack.
         _raw_emit(event_type, payload)
@@ -1200,11 +1802,37 @@ async def stream_message(
     emit("status", "Reviewing the current thread and loading session context.")
     await asyncio.sleep(0)  # flush start+status immediately so UI isn't blank
 
+    # Gemma classification runs on EVERY message (text AND voice) because it
+    # handles music routing (MUSIC_PLAY → playlist creation) and self-handle
+    # (trivia, weather, greetings) which are valuable regardless of input
+    # method. What changes between text and voice mode is whether the DELEGATE
+    # ACK is emitted:
+    #   - Voice mode: ack is emitted (fills the silence gap while Opus thinks)
+    #   - Text mode: ack is SUPPRESSED (user sees typing indicator instead)
+    #
+    # Pre-dispatch filters (e.g., open SMS draft) skip classification entirely
+    # because the message MUST reach Opus for the draft state machine.
+    _suppress_delegate_ack = not tts_enabled  # text mode: classify but don't ack
+    _skip_initial_ack = False
+    try:
+        from jane.tool_loader import should_skip_initial_ack
+        _skip_initial_ack = should_skip_initial_ack(state.history)
+    except Exception as _tool_err:
+        logger.warning("tool_loader pre-dispatch filter failed: %s", _tool_err)
+    if _skip_initial_ack:
+        logger.info("[%s] pre-dispatch filter matched — skipping classification entirely",
+                    session_id[:12])
+
     # Gemma4 router: classify prompt and short-circuit if self-handleable.
     # Runs async with a 2s timeout — on timeout/error, falls through to Claude.
+    # Skipped entirely when an SMS draft is open (see _skip_initial_ack above)
+    # so edit instructions like "make it 30" route straight to Jane's mind.
     _gemma_short_circuit = False
     _gemma_delegate_ack = None  # quick ack emitted by Gemma when delegating to Claude
     try:
+        if _skip_initial_ack:
+            # Fall-through sentinel: raise a silent skip marker caught below.
+            raise _SkipRouterSignal()
         from jane_web.gemma_router import classify_prompt, ROUTER_MODEL
         _router_history = [{"role": h["role"], "content": h.get("content", "")}
                            for h in state.history[-10:]
@@ -1230,13 +1858,20 @@ async def stream_message(
         else:
             logger.info("[%s] Gemma router: %s → Claude", session_id[:12], _classification)
             _gemma_delegate_ack = _router_response  # None if gemma4 didn't produce one
-            if _gemma_delegate_ack:
+            if _gemma_delegate_ack and not _suppress_delegate_ack:
+                # Voice mode: emit the ack so the user hears something while Opus thinks.
                 _raw_emit("model", ROUTER_MODEL)
                 _raw_emit("ack", _gemma_delegate_ack)
                 _ack_seen = True  # suppress Claude's [ACK] block since Gemma already acked
                 logger.info("[%s] Gemma router: delegate ack emitted: %s", session_id[:12], _gemma_delegate_ack[:60])
+            elif _gemma_delegate_ack and _suppress_delegate_ack:
+                # Text mode: classification happened (for routing) but ack is suppressed.
+                # Don't set _ack_seen — let Claude produce its own [ACK] naturally.
+                logger.info("[%s] Gemma router: delegate (ack suppressed, text mode): %s", session_id[:12], _gemma_delegate_ack[:60])
             else:
                 logger.info("[%s] Gemma router: no ack — letting Claude handle it", session_id[:12])
+    except _SkipRouterSignal:
+        pass  # intentional skip (open SMS draft); no warning
     except Exception as _router_err:
         logger.warning("[%s] Gemma router failed: %s — letting Claude handle ack", session_id[:12], _router_err)
 
@@ -1274,11 +1909,22 @@ async def stream_message(
     brain_stop = asyncio.Event()
 
     async def _emit_keepalive(stop: asyncio.Event, interval: float = 15.0) -> None:
-        """Send periodic heartbeat events to keep the HTTP stream alive through proxies/tunnels."""
+        """Send periodic heartbeat events to keep the HTTP stream alive through
+        proxies, mobile NATs, Cloudflare, etc.
+
+        Previously this emitted an empty-string payload. Some middleboxes
+        (especially mobile carrier NATs) buffer or drop empty-data SSE events
+        at the chunked-encoding boundary, meaning the keepalive never reaches
+        the client and the connection silently ages out of the client's read
+        timeout. We now include a small non-empty payload (timestamp +
+        sequence number) so every heartbeat guarantees real bytes on the wire.
+        """
+        _seq = 0
         while not stop.is_set():
             await asyncio.sleep(interval)
             if not stop.is_set():
-                emit("heartbeat", "")
+                _seq += 1
+                emit("heartbeat", f"{int(time.time())}:{_seq}")
 
     async def run_pipeline_async() -> None:
         nonlocal final_response

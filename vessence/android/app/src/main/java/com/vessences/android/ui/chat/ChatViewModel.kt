@@ -9,7 +9,7 @@ import com.vessences.android.data.repository.ChatBackend
 import com.vessences.android.data.repository.ChatRepository
 import com.vessences.android.data.repository.AnnouncementPoller
 import com.vessences.android.data.repository.LiveBroadcastListener
-import com.vessences.android.voice.AndroidTtsManager
+import com.vessences.android.voice.HybridTtsManager
 import com.vessences.android.data.repository.VoiceSettingsRepository
 import com.vessences.android.notifications.ChatNotificationManager
 import com.vessences.android.util.ChatPersistence
@@ -69,7 +69,17 @@ class ChatViewModel(
     private var currentStreamJob: Job? = null
     private val liveListener = LiveBroadcastListener(viewModelScope, sessionId.take(12))
     private val announcementPoller = AnnouncementPoller(viewModelScope)
-    private val tts = AndroidTtsManager(appContext)
+    private val tts = HybridTtsManager(appContext)
+
+    // Jane Phone Tools (Phase 1 scaffolding): dispatcher + action queue.
+    // The dispatcher's handler registry is empty in Phase 1; Phase 2 populates
+    // it with contacts / SMS / messages handlers. Feature-flag-gated via
+    // Constants.PREF_PHONE_TOOLS_ENABLED (default OFF) so this scaffolding
+    // ships with zero user-visible change.
+    private val toolActionQueue: com.vessences.android.tools.ActionQueue =
+        com.vessences.android.tools.ActionQueue().also { it.attachTts(tts.localTts) }
+    private val toolDispatcher: com.vessences.android.tools.ClientToolDispatcher =
+        com.vessences.android.tools.ClientToolDispatcher(toolActionQueue)
 
     /** Emits a playlist ID when Jane responds with [MUSIC_PLAY:id]. UI observes and navigates. */
     private val _musicPlayRequest = MutableStateFlow<String?>(null)
@@ -324,7 +334,13 @@ class ChatViewModel(
                     }
                 }
 
-                val flow = repo.streamChat(backend, text, sessionId, resolvedFileContext, ttsEnabled = fromVoice)
+                // Phone tools: drain any pending tool results and prepend them
+                // as [TOOL_RESULT:{json}] markers so Jane's mind sees what the
+                // last phone-tool invocation did. jane_proxy strips these from
+                // the user-visible bubble before showing the persisted message.
+                val outgoingText = prependPendingToolResults(text)
+
+                val flow = repo.streamChat(backend, outgoingText, sessionId, resolvedFileContext, ttsEnabled = fromVoice)
                 var accumulated = ""
                 var statusLog = mutableListOf<String>()
                 // Incremental ACK parser state
@@ -391,6 +407,16 @@ class ChatViewModel(
                                 updateAiMessage(currentMsgId, event.data.ifEmpty { "⚠️ Provider error." }, isStreaming = false)
                             }
                             onSendComplete(fromVoice, null)
+                        }
+                        "client_tool_call" -> {
+                            // Jane Phone Tools: server-extracted [[CLIENT_TOOL:...]] marker
+                            // arriving as a structured SSE event. Dispatcher gates on the
+                            // PREF_PHONE_TOOLS_ENABLED feature flag (default OFF in Phase 1).
+                            try {
+                                toolDispatcher.dispatchRaw(event.data, appContext)
+                            } catch (e: Exception) {
+                                android.util.Log.w("ChatVM", "tool dispatch failed: ${e.message}")
+                            }
                         }
                         "ack" -> {
                             // Quick ack from gemma4 — speak it for immediate feedback.
@@ -891,6 +917,46 @@ class ChatViewModel(
         }
     }
 
+    /**
+     * Drain any queued phone-tool results and prepend them as
+     * `[TOOL_RESULT:{json}]` markers on the outgoing user message.
+     *
+     * If tool handlers are still in-flight (async on Dispatchers.Default),
+     * waits up to 5 seconds for them to complete before draining. This
+     * prevents the race condition where a handler hasn't finished by the
+     * time the user sends their next message, causing silent result loss.
+     *
+     * The server's _extract_tool_results helper in jane_proxy.py strips these
+     * from the user-visible bubble before persistence but passes the parsed
+     * results into Jane's mind's context for the next turn, so she stays in
+     * sync with what actually happened on the phone.
+     */
+    private suspend fun prependPendingToolResults(text: String): String {
+        val results = com.vessences.android.tools.PendingToolResultBuffer.awaitAndDrainAll()
+        if (results.isEmpty()) return text
+        val gson = com.google.gson.Gson()
+        val sb = StringBuilder()
+        for (r in results) {
+            val obj = com.google.gson.JsonObject()
+            obj.addProperty("tool", r.tool)
+            obj.addProperty("call_id", r.callId)
+            obj.addProperty("status", r.status)
+            obj.addProperty("message", r.message)
+            if (r.data != null) obj.add("data", r.data)
+            if (r.extra.isNotEmpty()) {
+                val ex = com.google.gson.JsonObject()
+                for ((k, v) in r.extra) ex.addProperty(k, v)
+                obj.add("extra", ex)
+            }
+            // Server regex requires the marker payload to be compact JSON on
+            // one line and match `\[TOOL_RESULT:(\{.*?\})\]\s*` at the head.
+            val json = gson.toJson(obj).replace("\n", " ").replace("\r", "")
+            sb.append("[TOOL_RESULT:").append(json).append("] ")
+        }
+        sb.append(text)
+        return sb.toString()
+    }
+
     override fun onCleared() {
         // Force-save messages before cleanup (catches mid-stream navigation)
         val messages = _state.value.messages
@@ -901,6 +967,7 @@ class ChatViewModel(
         voiceController?.release()
         tts.shutdown()
         liveListener.stop()
+        toolDispatcher.shutdown()  // cancel any in-flight phone-tool handlers
         announcementPoller.stop()
         if (backend == ChatBackend.JANE) {
             viewModelScope.launch { repo.endJaneSession(sessionId) }

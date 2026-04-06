@@ -1,0 +1,147 @@
+#!/usr/bin/env bash
+# Vessence pre-commit hook — enforce tool / kernel isolation.
+#
+# Purpose: prevent a single commit from touching BOTH a tool folder under
+# `tools/<name>/` AND kernel paths that must stay tool-agnostic. The goal is
+# that any future tool is authored entirely inside its own folder; kernel
+# code (jane/, jane_web/, android/app/src/main/java/com/vessences/android/**)
+# may only be edited by commits that touch NO tool code at all.
+#
+# Exit codes:
+#   0 — clean, commit proceeds
+#   1 — isolation violation, commit blocked
+#
+# To install: `git config core.hooksPath scripts/hooks` from the repo root.
+#
+# Bypass (use sparingly — only for legitimate kernel changes that happen to
+# also need a tool file touched): `git commit --no-verify`. Prefer splitting
+# the commit into separate tool + kernel commits instead.
+
+set -euo pipefail
+
+# Path to this script so we can look up companion scripts.
+HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+
+# The git repo root is ~/ambient, and the Vessence codebase is a subdirectory
+# at vessence/. So paths in `git diff --cached` look like:
+#   vessence/jane/...             — kernel Python
+#   vessence/jane_web/...          — kernel Python
+#   vessence/android/app/src/main/java/com/vessences/android/...  — kernel Kotlin
+#   tools/<name>/...               — tools (top-level, sibling of vessence/)
+#   platforms/<name>/...           — shared libs (reserved for future use)
+KERNEL_PATHS=(
+    "vessence/jane/"
+    "vessence/jane_web/"
+    "vessence/android/app/src/main/java/com/vessences/android/"
+    "vessence/android/app/src/main/AndroidManifest.xml"
+    "vessence/android/app/build.gradle.kts"
+)
+
+# Which paths count as "tool" — changes here must be self-contained.
+TOOLS_PREFIX="tools/"
+PLATFORMS_PREFIX="platforms/"  # reserved for shared phone libs etc.
+
+# Collect the staged file list (git diff against the index).
+STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACMR)
+
+if [ -z "${STAGED_FILES}" ]; then
+    exit 0
+fi
+
+touched_tools=()       # list of tool folder names touched
+touched_kernel=0       # 0/1 flag
+touched_kernel_files=()
+
+is_tool_file() {
+    local f="$1"
+    [[ "$f" == ${TOOLS_PREFIX}* ]] || return 1
+    # tools/<name>/...  — extract the <name> segment
+    local rest="${f#${TOOLS_PREFIX}}"
+    local name="${rest%%/*}"
+    [[ -n "$name" && "$name" != "$rest" ]] || return 1
+    echo "$name"
+    return 0
+}
+
+is_kernel_file() {
+    local f="$1"
+    # Exclude tool and platform files up front.
+    [[ "$f" == ${TOOLS_PREFIX}* ]] && return 1
+    [[ "$f" == ${PLATFORMS_PREFIX}* ]] && return 1
+    # Match against kernel prefixes.
+    for prefix in "${KERNEL_PATHS[@]}"; do
+        if [[ "$f" == ${prefix}* ]]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+while IFS= read -r file; do
+    [ -z "$file" ] && continue
+    if tool_name=$(is_tool_file "$file"); then
+        # Add to touched_tools if not already present.
+        found=0
+        for t in "${touched_tools[@]:-}"; do
+            [ "$t" = "$tool_name" ] && found=1 && break
+        done
+        if [ "$found" -eq 0 ]; then
+            touched_tools+=("$tool_name")
+        fi
+    elif is_kernel_file "$file"; then
+        touched_kernel=1
+        touched_kernel_files+=("$file")
+    fi
+done <<< "$STAGED_FILES"
+
+# Rule: a commit MAY touch kernel OR tool, but not both.
+if [ "$touched_kernel" -eq 1 ] && [ "${#touched_tools[@]}" -gt 0 ]; then
+    echo ""
+    echo "================================================================="
+    echo "❌ VESSENCE TOOL/KERNEL ISOLATION VIOLATION"
+    echo "================================================================="
+    echo ""
+    echo "This commit touches BOTH tool files and kernel code. Per the"
+    echo "Vessence architecture (see configs/jane_phone_tools_v1_design.md"
+    echo "and memory topic project_architecture/tool_packaging), every tool"
+    echo "must be self-contained inside its own tools/<name>/ folder."
+    echo ""
+    echo "Tools touched:"
+    for t in "${touched_tools[@]}"; do
+        echo "  - tools/$t/"
+    done
+    echo ""
+    echo "Kernel files touched:"
+    for f in "${touched_kernel_files[@]}"; do
+        echo "  - $f"
+    done
+    echo ""
+    echo "FIX OPTIONS:"
+    echo "  1. Move the kernel change into a separate commit (most common)."
+    echo "  2. If the kernel change is a generic loader/dispatcher improvement"
+    echo "     that is NOT tool-specific, commit it alone first, then commit"
+    echo "     the tool change second."
+    echo "  3. If the tool-specific code MUST live in the kernel (rare — almost"
+    echo "     always a sign of a design bug), bypass with --no-verify and note"
+    echo "     the reason in the commit message."
+    echo ""
+    echo "Commit blocked."
+    echo "================================================================="
+    exit 1
+fi
+
+# Second rule: a single commit should not touch TWO different tools at once.
+# This keeps tool commits focused and makes per-tool history clean.
+if [ "${#touched_tools[@]}" -gt 1 ]; then
+    echo ""
+    echo "⚠  VESSENCE: commit touches ${#touched_tools[@]} tools:"
+    for t in "${touched_tools[@]}"; do
+        echo "    - tools/$t/"
+    done
+    echo "   Consider splitting into per-tool commits for clean history."
+    echo "   (This is a warning only, not a block.)"
+    echo ""
+fi
+
+exit 0

@@ -43,7 +43,7 @@ class VoiceController(
     private val onTranscriptReady: (String) -> Unit,
 ) {
     private val appContext = context.applicationContext
-    private val tts = AndroidTtsManager(appContext)
+    private val tts = HybridTtsManager(appContext)
     private val voiceSettings = VoiceSettingsRepository(appContext)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 

@@ -47,8 +47,8 @@ def log_activity(description: str, category: str = "general") -> dict:
 
     entries.append(entry)
 
-    # Keep only the most recent 500 entries to avoid unbounded growth
-    entries = entries[-500:]
+    # Keep only the most recent 200 entries to avoid unbounded growth
+    entries = entries[-200:]
 
     with open(log_path, "w", encoding="utf-8") as f:
         json.dump(entries, f, indent=2, ensure_ascii=False)

@@ -29,7 +29,9 @@ def clean_temp_files():
                 print(f"Failed to remove {f}: {e}")
 
 def rotate_logs():
-    log_files = glob.glob(os.path.join(LOGS_DIR, "**/*.log"), recursive=True)
+    log_files = []
+    for pattern in LOG_PATTERNS:
+        log_files.extend(glob.glob(os.path.join(LOGS_DIR, "**", pattern), recursive=True))
     for log_f in log_files:
         if os.path.getsize(log_f) > (MAX_LOG_SIZE_MB * 1024 * 1024):
             try:

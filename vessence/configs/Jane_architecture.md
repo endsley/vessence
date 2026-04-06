@@ -25,10 +25,18 @@ Vessence is a self-hosted personal AI platform centered on a single live agent i
 │  └─────┬──────┘  └──────┬───────┘  └───────────────────────┘│
 │        │                │                                     │
 ├────────┴────────────────┴─────────────────────────────────────┤
-│                      STANDING BRAIN LAYER                     │
+│            JANE'S INITIAL ACK (fast front half)               │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐     │
+│  │  Gemma4  │  │  Haiku   │  │  Gemini  │  │ GPT-5-   │     │
+│  │  (local) │  │   4.5    │  │  Flash   │  │  nano    │     │
+│  └──────────┘  └──────────┘  └──────────┘  └──────────┘     │
+│   Speaks first · triages · self-handles trivia ·             │
+│   emits ETA hint · otherwise delegates to Jane's mind        │
+├───────────────────────────────────────────────────────────────┤
+│      JANE'S MIND (deep reasoning — "standing brain")          │
 │  ┌──────────┐  ┌──────────┐  ┌──────────┐                   │
 │  │  Claude  │  │  Gemini  │  │  OpenAI  │   (3 persistent   │
-│  │   CLI    │  │   CLI    │  │  Codex   │    CLI processes)  │
+│  │  Opus    │  │   Pro    │  │  Codex   │    CLI processes)  │
 │  └──────────┘  └──────────┘  └──────────┘                   │
 │                                                               │
 ├───────────────────────────────────────────────────────────────┤
@@ -48,6 +56,50 @@ Vessence is a self-hosted personal AI platform centered on a single live agent i
 - **Jane** — The unified technical and personal brain. She is both the permanent continuity layer (long-term memory, project architecture, reasoning) and the runtime vessel (pluggable essences, tool execution, multimodal interaction).
 
 Historical `Amber` references in the repository describe older architecture or legacy implementation paths. They do not represent a second current agent identity.
+
+### 1a. Roles vs models
+
+Jane is one agent from the user's point of view, but her execution is split across two pluggable model slots. A "role" is what a slot does for Jane; a "model" is whatever LLM is currently filling that slot. Swapping models must never change the role vocabulary we use with the user.
+
+```
+                ┌─────────────────────────┐
+                │          Jane           │
+                │  (one agent, one soul)  │
+                └───────────┬─────────────┘
+                            │
+           ┌────────────────┴────────────────┐
+           │                                 │
+┌──────────▼──────────┐            ┌─────────▼──────────┐
+│  Jane's initial ack │            │    Jane's mind     │
+│  (fast, ~1-2s)      │            │  (deep reasoning)  │
+├─────────────────────┤            ├────────────────────┤
+│ • Haiku 4.5         │            │ • Claude Opus 4.6  │
+│ • Gemini Flash      │            │ • Gemini 2.5 Pro   │
+│ • GPT-5-nano        │            │ • GPT-5.4          │
+│ • Gemma4 (local)    │            │                    │
+│   (any tiny model)  │            │  (any frontier)    │
+└─────────────────────┘            └────────────────────┘
+   Speaks first,                     Writes code,
+   triages, self-handles             does research,
+   trivia/nonsense,                  runs tools,
+   emits ETA hints,                  answers hard things.
+   otherwise delegates →             Long-lived CLI
+                                     ("standing brain").
+```
+
+| Role | What it does | Default model (per provider stack) |
+|---|---|---|
+| **Jane's initial ack** | The fast front half. Speaks first within ~1–2s. Classifies each turn as SELF_HANDLE / MUSIC_PLAY / DELEGATE. Self-handles trivia, greetings, weather, unit conversions, obvious STT garbage (with a "was that meant for me?" check-in), and music routing. Otherwise emits a contextual ack with a verbal ETA hint (TRIVIAL / MEDIUM / BIG) and hands off to Jane's mind. Never tries to answer anything hard. | **Claude stack:** `claude-haiku-4-5-20251001` · **Gemini stack:** `gemini-2.5-flash` · **OpenAI stack:** `gpt-5-nano` · **Local/no-cloud:** `gemma4:e4b` via Ollama (current default, fallback) |
+| **Jane's mind** (a.k.a. "the standing brain") | The deep reasoner. Writes code, does research, runs tools, maintains long-running projects, replies to anything that wasn't self-handled. Implemented as a long-lived CLI process kept warm to skip cold-start ("standing brain"). | **Claude stack:** `claude-opus-4-6` · **Gemini stack:** `gemini-2.5-pro` · **OpenAI stack:** `gpt-5.4` |
+
+**Vocabulary rules:**
+- User-facing (Android UI, web UI, spoken output): always just **"Jane"**. The user should not have to know which slot handled which turn.
+- Internal (code, docs, this architecture reference, debugging): say **"Jane's initial ack"** and **"Jane's mind"**. The term **"standing brain"** stays in use but refers specifically to the *infrastructure* — the long-lived CLI process that hosts Jane's mind — not the role itself.
+- Python symbols (`StandingBrainManager`, `standing_brain.py`, `GEMMA_ROUTER_MODEL` env var) are infra names and stay as-is; renaming them is churn without upside.
+
+**Default selection policy:** A new user inherits the initial-ack model that is provider-matched to whichever stack is configured for Jane's mind, so the ack latency stays tight by default. Customizing the initial-ack model independently of Jane's mind is a planned user setting, not the default path.
+
+**Pluggability status (2026-04-05):** Jane's mind slot is fully pluggable today via `jane/standing_brain.py` (`ALL_PROVIDERS = ("claude", "gemini", "openai")` with env-var overrides). Jane's initial ack slot is currently hardcoded to Ollama/gemma4:e4b in `jane_web/gemma_router.py:23`; turning it into a real provider-dispatching slot (Ollama, Anthropic, Google, OpenAI) is a pending refactor.
 
 
 ---

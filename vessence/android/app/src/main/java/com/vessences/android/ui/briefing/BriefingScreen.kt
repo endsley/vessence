@@ -45,8 +45,11 @@ import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -118,13 +121,142 @@ fun BriefingScreen(
 
             // Category filter chips
             TopicChips(
-                topics = listOf("All") + state.categories,
-                selected = state.selectedCategory,
-                onSelect = { viewModel.selectCategory(it) },
+                topics = run {
+                    // Shared first (from backend), then All, then rest
+                    val rest = state.categories.filter { it != "Shared" }
+                    val tabs = mutableListOf<String>()
+                    if ("Shared" in state.categories) tabs.add("Shared")
+                    tabs.add("All")
+                    tabs.addAll(rest)
+                    tabs
+                },
+                selected = if (state.viewingSaved) "" else state.selectedCategory,
+                onSelect = {
+                    if (state.viewingSaved) viewModel.toggleSavedView()
+                    viewModel.selectCategory(it)
+                },
+                trailingContent = {
+                    // Saved chip
+                    FilterChip(
+                        selected = state.viewingSaved,
+                        onClick = { viewModel.toggleSavedView() },
+                        label = {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    if (state.viewingSaved) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
+                                    "Saved",
+                                    modifier = Modifier.size(14.dp),
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Saved", fontSize = 12.sp)
+                            }
+                        },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = Color(0xFFF59E0B),
+                            selectedLabelColor = Color.White,
+                            containerColor = SlateCard,
+                            labelColor = Color(0xFFF59E0B),
+                        ),
+                        border = FilterChipDefaults.filterChipBorder(
+                            borderColor = Color(0xFFF59E0B).copy(alpha = 0.5f),
+                            selectedBorderColor = Color(0xFFF59E0B),
+                            enabled = true,
+                            selected = state.viewingSaved,
+                        ),
+                    )
+                },
             )
 
+            // Saved articles view
+            if (state.viewingSaved) {
+                // Category filter for saved articles
+                if (state.savedCategories.isNotEmpty()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
+                            .padding(horizontal = 12.dp, vertical = 2.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        FilterChip(
+                            selected = state.savedFilterCategory == null,
+                            onClick = { viewModel.loadSavedArticles(null) },
+                            label = { Text("All Saved", fontSize = 11.sp) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = Color(0xFFF59E0B),
+                                selectedLabelColor = Color.White,
+                                containerColor = SlateCard,
+                                labelColor = SlateMuted,
+                            ),
+                            border = FilterChipDefaults.filterChipBorder(
+                                borderColor = SlateSubtle,
+                                selectedBorderColor = Color(0xFFF59E0B),
+                                enabled = true,
+                                selected = state.savedFilterCategory == null,
+                            ),
+                        )
+                        state.savedCategories.forEach { cat ->
+                            FilterChip(
+                                selected = state.savedFilterCategory == cat,
+                                onClick = { viewModel.loadSavedArticles(cat) },
+                                label = { Text(cat, fontSize = 11.sp) },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = Color(0xFFF59E0B),
+                                    selectedLabelColor = Color.White,
+                                    containerColor = SlateCard,
+                                    labelColor = SlateMuted,
+                                ),
+                                border = FilterChipDefaults.filterChipBorder(
+                                    borderColor = SlateSubtle,
+                                    selectedBorderColor = Color(0xFFF59E0B),
+                                    enabled = true,
+                                    selected = state.savedFilterCategory == cat,
+                                ),
+                            )
+                        }
+                    }
+                }
+
+                if (state.savedArticles.isEmpty()) {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(Icons.Default.BookmarkBorder, "No saved", tint = SlateMuted, modifier = Modifier.size(32.dp))
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text("No saved articles yet", color = SlateMuted, fontSize = 14.sp)
+                            Text("Tap the bookmark icon on any article to save it", color = SlateSubtle, fontSize = 11.sp)
+                        }
+                    }
+                } else {
+                    LazyVerticalGrid(
+                        columns = GridCells.Fixed(2),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        items(state.savedArticles, key = { it.articleId }) { saved ->
+                            saved.article?.let { article ->
+                                ArticleCard(
+                                    article = article,
+                                    imageUrl = viewModel.getImageUrl(article.id),
+                                    isSaved = true,
+                                    onExpand = { bottomSheetArticle = article },
+                                    onSpeakBrief = { viewModel.speakArticle(article, "brief") },
+                                    onSpeakFull = { viewModel.speakArticle(article, "full") },
+                                    onDismiss = {},
+                                    onSave = {},
+                                    onUnsave = { viewModel.unsaveArticle(article.id) },
+                                    savedCategories = emptyList(),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
             // Error state
-            if (state.error != null && state.articles.isEmpty()) {
+            else if (state.error != null && state.articles.isEmpty()) {
                 Box(
                     modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center,
@@ -398,6 +530,7 @@ private fun TopicChips(
     topics: List<String>,
     selected: String,
     onSelect: (String) -> Unit,
+    trailingContent: @Composable (() -> Unit)? = null,
 ) {
     Row(
         modifier = Modifier
@@ -431,6 +564,7 @@ private fun TopicChips(
                 ),
             )
         }
+        trailingContent?.invoke()
     }
 }
 
@@ -613,6 +747,7 @@ private fun ArticleCard(
 
                 // Action row: Open in browser | Expand | Save | Archive
                 var showSaveMenu by remember { mutableStateOf(false) }
+                var newGroupName by remember { mutableStateOf("") }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -640,13 +775,45 @@ private fun ArticleCard(
                         }
                         androidx.compose.material3.DropdownMenu(
                             expanded = showSaveMenu,
-                            onDismissRequest = { showSaveMenu = false },
+                            onDismissRequest = { showSaveMenu = false; newGroupName = "" },
                         ) {
                             savedCategories.forEach { cat ->
                                 androidx.compose.material3.DropdownMenuItem(
                                     text = { Text(cat, fontSize = 13.sp) },
                                     onClick = { onSave(cat); showSaveMenu = false },
                                 )
+                            }
+                            HorizontalDivider(color = SlateSubtle.copy(alpha = 0.5f))
+                            Row(
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                OutlinedTextField(
+                                    value = newGroupName,
+                                    onValueChange = { newGroupName = it },
+                                    placeholder = { Text("New group...", fontSize = 12.sp) },
+                                    singleLine = true,
+                                    modifier = Modifier.width(120.dp).height(40.dp),
+                                    textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp, color = Color.White),
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedBorderColor = Violet500,
+                                        unfocusedBorderColor = SlateSubtle,
+                                        cursorColor = Violet500,
+                                    ),
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                TextButton(
+                                    onClick = {
+                                        if (newGroupName.isNotBlank()) {
+                                            onSave(newGroupName.trim())
+                                            showSaveMenu = false
+                                            newGroupName = ""
+                                        }
+                                    },
+                                    enabled = newGroupName.isNotBlank(),
+                                ) {
+                                    Text("+", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                                }
                             }
                         }
                     }
