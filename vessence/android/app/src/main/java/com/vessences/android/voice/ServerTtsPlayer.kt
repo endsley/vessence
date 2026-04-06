@@ -2,6 +2,7 @@ package com.vessences.android.voice
 
 import android.media.MediaPlayer
 import android.util.Log
+import com.vessences.android.data.api.ApiClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
@@ -33,20 +34,23 @@ class ServerTtsPlayer(private val cacheDir: File) {
          * Direct URL to the TTS server. Uses local network IP since the TTS server
          * is not behind the Cloudflare tunnel. Change this if your server IP changes.
          */
-        private const val TTS_BASE_URL = "http://192.168.86.21:8095"
-        private const val TTS_GENERATE_PATH = "/tts/generate"
-        private const val TTS_HEALTH_PATH = "/tts/health"
+        // Route through jane-web proxy (works on any network via Cloudflare tunnel)
+        private const val TTS_GENERATE_PATH = "/api/tts-server/generate"
+        private const val TTS_HEALTH_PATH = "/api/tts-server/health"
+
+        private fun getBaseUrl(): String = ApiClient.getJaneBaseUrl().trimEnd('/')
     }
 
-    private val httpClient = OkHttpClient.Builder()
+    // Use ApiClient's OkHttp (carries auth cookies) with adjusted timeouts
+    private val httpClient = ApiClient.getOkHttpClient().newBuilder()
         .connectTimeout(3, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
         .writeTimeout(5, TimeUnit.SECONDS)
         .build()
 
-    private val healthClient = OkHttpClient.Builder()
+    private val healthClient = ApiClient.getOkHttpClient().newBuilder()
         .connectTimeout(2, TimeUnit.SECONDS)
-        .readTimeout(2, TimeUnit.SECONDS)
+        .readTimeout(3, TimeUnit.SECONDS)
         .build()
 
     private val cancelled = AtomicBoolean(false)
@@ -56,7 +60,7 @@ class ServerTtsPlayer(private val cacheDir: File) {
     private fun isModelWarm(): Boolean {
         return try {
             val request = Request.Builder()
-                .url("$TTS_BASE_URL$TTS_HEALTH_PATH")
+                .url("${getBaseUrl()}$TTS_HEALTH_PATH")
                 .get()
                 .build()
             val response = healthClient.newCall(request).execute()
@@ -77,17 +81,18 @@ class ServerTtsPlayer(private val cacheDir: File) {
 
     private fun triggerWarmUp() {
         if (warmingUp.getAndSet(true)) return
+        // Use httpClient (already has auth cookies) with extended timeout
+        val warmClient = ApiClient.getOkHttpClient().newBuilder()
+            .connectTimeout(5, TimeUnit.SECONDS)
+            .readTimeout(120, TimeUnit.SECONDS)
+            .build()
         Thread {
             try {
                 Log.d(TAG, "Triggering XTTS-v2 warm-up...")
                 val request = Request.Builder()
-                    .url("$TTS_BASE_URL$TTS_GENERATE_PATH")
+                    .url("${getBaseUrl()}$TTS_GENERATE_PATH")
                     .post("""{"text":"warm"}""".toByteArray()
                         .toRequestBody("application/json".toMediaType()))
-                    .build()
-                val warmClient = OkHttpClient.Builder()
-                    .connectTimeout(5, TimeUnit.SECONDS)
-                    .readTimeout(120, TimeUnit.SECONDS)
                     .build()
                 val resp = warmClient.newCall(request).execute()
                 resp.close()
@@ -125,7 +130,7 @@ class ServerTtsPlayer(private val cacheDir: File) {
             return@withContext false
         }
 
-        val url = "$TTS_BASE_URL$TTS_GENERATE_PATH"
+        val url = "${getBaseUrl()}$TTS_GENERATE_PATH"
         val jsonBody = """{"text":${escapeJson(text)}}"""
         val request = Request.Builder()
             .url(url)

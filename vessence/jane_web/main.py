@@ -93,8 +93,8 @@ try:
     ANDROID_VERSION = _version_data["version_name"]
     _ANDROID_VERSION_CODE = _version_data["version_code"]
 except FileNotFoundError:
-    ANDROID_VERSION = "0.1.99"
-    _ANDROID_VERSION_CODE = 212
+    ANDROID_VERSION = "0.1.102"
+    _ANDROID_VERSION_CODE = 215
 
 # Startup validation: ensure the APK for the advertised version actually exists
 _expected_apk = MARKETING_DOWNLOADS_DIR / f"vessences-android-v{ANDROID_VERSION}.apk"
@@ -899,6 +899,36 @@ def _split_tts_chunks(text: str, max_chars: int = 150) -> list[str]:
     if current:
         chunks.append(current)
     return chunks or [text[:max_chars]]
+
+
+# ─── XTTS-v2 TTS proxy — forwards to standalone tts_server on port 8095 ───────
+# These proxy endpoints let Android reach the TTS server through the existing
+# Cloudflare tunnel (jane.vessences.com) instead of requiring local network access.
+import httpx
+
+_tts_proxy_client = httpx.AsyncClient(base_url="http://127.0.0.1:8095", timeout=60.0)
+
+@app.get("/api/tts-server/health")
+async def tts_proxy_health(_=Depends(require_auth)):
+    resp = await _tts_proxy_client.get("/tts/health")
+    return Response(content=resp.content, status_code=resp.status_code,
+                    media_type=resp.headers.get("content-type", "application/json"))
+
+@app.post("/api/tts-server/generate")
+async def tts_proxy_generate(request: Request, _=Depends(require_auth)):
+    body = await request.body()
+    resp = await _tts_proxy_client.post("/tts/generate", content=body,
+                                        headers={"Content-Type": "application/json"})
+    return Response(content=resp.content, status_code=resp.status_code,
+                    media_type=resp.headers.get("content-type", "audio/wav"))
+
+@app.post("/api/tts-server/stream")
+async def tts_proxy_stream(request: Request, _=Depends(require_auth)):
+    body = await request.body()
+    resp = await _tts_proxy_client.post("/tts/stream", content=body,
+                                        headers={"Content-Type": "application/json"})
+    return Response(content=resp.content, status_code=resp.status_code,
+                    media_type=resp.headers.get("content-type", "application/octet-stream"))
 
 
 # Limit TTS to 1 concurrent Docker container to prevent RAM/CPU exhaustion
