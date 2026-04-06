@@ -1841,6 +1841,7 @@ async def stream_message(
     # so edit instructions like "make it 30" route straight to Jane's mind.
     _gemma_short_circuit = False
     _gemma_delegate_ack = None  # quick ack emitted by Gemma when delegating to Claude
+    _shopping_list_active = False  # set by shopping_list classification
     try:
         if _skip_initial_ack:
             # Fall-through sentinel: raise a silent skip marker caught below.
@@ -1864,6 +1865,45 @@ async def stream_message(
                 _gemma_short_circuit = True
             else:
                 logger.info("[%s] Music query had no matches — letting Claude respond", session_id[:12])
+        elif _classification == "shopping_list":
+            # Shopping list intent — handle add/remove directly, delegate queries to brain.
+            logger.info("[%s] Gemma router: shopping_list action='%s'", session_id[:12], _router_response)
+            from agent_skills.shopping_list import add_item, remove_item, clear_list, get_all_lists, format_for_context as _fmt_shopping
+            _action = (_router_response or "").lower().strip()
+            if _action.startswith("add "):
+                _item = _action[4:].strip()
+                # Detect store name: "add X to costco" or "add X to the costco list"
+                _store = "default"
+                for _kw in (" to costco", " to the costco", " to walmart", " to the walmart",
+                            " to grocery", " to the grocery", " to target", " to the target"):
+                    if _kw in _item.lower():
+                        _store = _kw.split("to ")[-1].strip().rstrip(" list").strip()
+                        _item = _item[:_item.lower().index(_kw)].strip()
+                        break
+                _updated = add_item(_item, _store)
+                _list_display = ", ".join(_updated) if _updated else "(empty)"
+                _router_response = f"Added **{_item}** to the {_store} list. Current list: {_list_display}"
+                _gemma_short_circuit = True
+            elif _action.startswith("remove "):
+                _item = _action[7:].strip()
+                _store = "default"
+                for _kw in (" from costco", " from the costco", " from walmart", " from grocery"):
+                    if _kw in _item.lower():
+                        _store = _kw.split("from ")[-1].strip().rstrip(" list").strip()
+                        _item = _item[:_item.lower().index(_kw)].strip()
+                        break
+                _updated = remove_item(_item, _store)
+                _list_display = ", ".join(_updated) if _updated else "(empty)"
+                _router_response = f"Removed **{_item}** from the {_store} list. Current list: {_list_display}"
+                _gemma_short_circuit = True
+            elif _action.startswith("clear"):
+                _store = _action.replace("clear", "").strip() or "default"
+                clear_list(_store)
+                _router_response = f"Cleared the {_store} shopping list."
+                _gemma_short_circuit = True
+            else:
+                # Show/check/query — delegate to brain with list in context
+                _shopping_list_active = True
         elif _classification == "self_handle" and _router_response:
             _gemma_short_circuit = True
             logger.info("[%s] Gemma router: self_handle — short-circuiting Claude", session_id[:12])
@@ -2003,6 +2043,30 @@ async def stream_message(
                     bootstrap_summary_chars=0,
                 )
                 logger.info("[%s] Standing brain turn %d — injected recent history only", session_id[:12], _sb_brain.turn_count)
+            elif _shopping_list_active:
+                # Shopping list mode: inject list data as file_context, skip ChromaDB
+                from agent_skills.shopping_list import format_for_context as _fmt_shopping
+                _shopping_ctx = _fmt_shopping()
+                _shopping_file_ctx = (
+                    f"## Shopping Lists\n{_shopping_ctx}\n\n"
+                    "You can add/remove items, show lists, or answer questions about them. "
+                    "When modifying the list, tell the user what you did and show the updated list."
+                )
+                if resolved_file_context:
+                    _shopping_file_ctx = f"{resolved_file_context}\n\n{_shopping_file_ctx}"
+                request_ctx = await build_jane_context_async(
+                    message,
+                    list(state.history),
+                    file_context=_shopping_file_ctx,
+                    conversation_summary=summary_text,
+                    session_id=session_id,
+                    enable_memory_retrieval=False,  # skip ChromaDB for speed
+                    memory_summary_fallback=state.bootstrap_memory_summary or "",
+                    platform=platform,
+                    tts_enabled=tts_enabled,
+                    on_status=lambda s: emit("status", s),
+                )
+                logger.info("[%s] Shopping list context injected, ChromaDB skipped", session_id[:12])
             else:
                 _memory_fallback = state.bootstrap_memory_summary or get_prefetch_result(session_id)
                 request_ctx = await build_jane_context_async(

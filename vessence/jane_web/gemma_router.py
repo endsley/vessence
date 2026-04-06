@@ -150,7 +150,7 @@ _PERSONAL_INFO = """User info:
 SYSTEM_PROMPT = f"""You are a prompt router. Classify each user message into exactly one category.
 
 ALWAYS output exactly two lines in this format:
-CLASSIFICATION: SELF_HANDLE or MUSIC_PLAY or DELEGATE_OPUS
+CLASSIFICATION: SELF_HANDLE or MUSIC_PLAY or SHOPPING_LIST or DELEGATE_OPUS
 RESPONSE: <your response>
 
 NEVER skip these two lines. NEVER output just the answer without the CLASSIFICATION/RESPONSE wrapper.
@@ -169,6 +169,14 @@ MUSIC_PLAY — ONLY when the message STARTS WITH or clearly leads with one of th
 "play a random song" → RESPONSE: random
 DELEGATE instead (NOT MUSIC_PLAY): "do we have X", "what songs by X", "any X songs", "how many", "is there", "list", "show me", "add X to playlist", "what about X", "songs by X" without play verb. If unsure whether it's a play command or a question, ALWAYS delegate.
 
+SHOPPING_LIST — any message about shopping lists, grocery lists, or buying items at stores.
+Includes: adding items, removing items, asking what's on the list, clearing the list, asking about specific items, any store-specific list (Costco, Walmart, grocery, etc.), questions about items on the list.
+"add eggs to the shopping list" → RESPONSE: add eggs
+"what's on my Costco list?" → RESPONSE: show costco
+"did I put milk on the list?" → RESPONSE: check milk
+"remove bread from the list" → RESPONSE: remove bread
+RESPONSE = the action (add/remove/show/check/clear) + item/store if applicable.
+
 DELEGATE_OPUS — everything else. When in doubt, ALWAYS delegate.
 RESPONSE = one short sentence acknowledging what the user asked + a time hint ("one sec" / "give me a minute" / "this'll take a bit"). Reference a specific noun from their message. No generic phrases.
 
@@ -182,11 +190,19 @@ User: "play some shakira"
 CLASSIFICATION: MUSIC_PLAY
 RESPONSE: shakira
 
+User: "add milk to the shopping list"
+CLASSIFICATION: SHOPPING_LIST
+RESPONSE: add milk
+
+User: "what do I need from Costco?"
+CLASSIFICATION: SHOPPING_LIST
+RESPONSE: show costco
+
 User: "can you fix the auth bug"
 CLASSIFICATION: DELEGATE_OPUS
 RESPONSE: Looking into the auth bug — give me a minute."""
 
-_CLASSIFY_RE = re.compile(r"CLASSIFICATION:\s*(SELF_HANDLE|MUSIC_PLAY|DELEGATE_OPUS)", re.IGNORECASE)
+_CLASSIFY_RE = re.compile(r"CLASSIFICATION:\s*(SELF_HANDLE|MUSIC_PLAY|SHOPPING_LIST|DELEGATE_OPUS)", re.IGNORECASE)
 _RESPONSE_RE = re.compile(r"RESPONSE:\s*(.*)", re.DOTALL)
 
 # Weather keywords — if detected, inject cached weather data into gemma's context
@@ -726,6 +742,11 @@ async def classify_prompt(
             resp_match = _RESPONSE_RE.search(content)
             query = resp_match.group(1).strip().rstrip('"').strip() if resp_match else None
             return ("music_play", query or None)
+
+        if classification == "SHOPPING_LIST":
+            resp_match = _RESPONSE_RE.search(content)
+            action = resp_match.group(1).strip().rstrip('"').strip() if resp_match else None
+            return ("shopping_list", action or None)
 
         if classification == "DELEGATE_OPUS":
             resp_match = _RESPONSE_RE.search(content)
