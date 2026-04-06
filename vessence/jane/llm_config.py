@@ -1,8 +1,4 @@
-# llm_config.py — Backward-compatibility shim.
-# All values now live in config.py. Import from there directly in new code.
-from jane.config import (
-    LOCAL_LLM_MODEL,
-    OLLAMA_BASE_URL      as LOCAL_LLM_BASE_URL,
-    LOCAL_LLM_MODEL_LITELLM,
-    LIBRARIAN_MODEL,
-)
+"""Compatibility shim — moved to llm_brain/v1/llm_config.py"""
+import sys, os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from llm_brain.v1.llm_config import *  # noqa: F401,F403

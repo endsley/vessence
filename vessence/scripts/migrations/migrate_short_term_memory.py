@@ -31,7 +31,7 @@ with silence_stderr_fd():
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from jane.config import VECTOR_DB_SHORT_TERM, CHROMA_COLLECTION_SHORT_TERM
-from agent_skills.memory.v1.conversation_manager import ConversationManager
+from memory.v1.conversation_manager import ConversationManager
 
 
 def migrate_short_term_memory(limit: int | None = None) -> dict:

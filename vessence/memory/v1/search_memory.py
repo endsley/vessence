@@ -9,8 +9,8 @@ _REQUIRED_PYTHON = os.environ.get('ADK_VENV_PYTHON', 'python3')
 if os.path.exists(_REQUIRED_PYTHON) and sys.executable != _REQUIRED_PYTHON:
     os.execv(_REQUIRED_PYTHON, [_REQUIRED_PYTHON] + sys.argv)
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
-from agent_skills.memory.v1.memory_retrieval import build_memory_sections
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from memory.v1.memory_retrieval import build_memory_sections
 
 
 def search_memory(query):

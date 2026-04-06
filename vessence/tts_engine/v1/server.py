@@ -16,8 +16,8 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse, Response
 from pydantic import BaseModel
 
-from tts_server.config import PORT, HOST, SAMPLE_RATE, DEFAULT_SPEAKER, DEFAULT_LANGUAGE, MAX_TEXT_LENGTH
-from tts_server.model_manager import manager
+from tts_engine.v1.config import PORT, HOST, SAMPLE_RATE, DEFAULT_SPEAKER, DEFAULT_LANGUAGE, MAX_TEXT_LENGTH
+from tts_engine.v1.model_manager import manager
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelname)s: %(message)s")
 logger = logging.getLogger("tts_server")

@@ -65,7 +65,7 @@ def _run_task(
 ) -> None:
     """Execute the task in a background thread and post announcements."""
     from jane.automation_runner import run_automation_prompt, AutomationError
-    from jane.context_builder import build_jane_context
+    from context_builder.v1.context_builder import build_jane_context
 
     # Announce start
     _write_announcement({

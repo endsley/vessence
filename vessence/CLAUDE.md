@@ -6,7 +6,7 @@ Identity, context, and memory are injected automatically via hooks. This file co
 
 All memories go to ChromaDB only (no .md files). Use:
 ```
-$VESSENCE_HOME/agent_skills/memory/v1/add_fact.py "fact here" --topic <topic> [--subtopic <subtopic>]
+$VESSENCE_HOME/memory/v1/add_fact.py "fact here" --topic <topic> [--subtopic <subtopic>]
 ```
 Do NOT use Claude Code's auto-memory (.md files). ChromaDB is the single source of truth, shared across CLI, web, and Android.
 

@@ -3,7 +3,7 @@ import sys
 import os
 import asyncio
 sys.path.append('/home/chieh/vessence')
-from agent_skills.memory.v1.local_vector_memory import LocalVectorMemoryService
+from memory.v1.local_vector_memory import LocalVectorMemoryService
 
 async def check_memory():
     db_path = '/home/chieh/ambient/vector_db'

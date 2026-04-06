@@ -1,5 +1,5 @@
 from google.adk.cli.service_registry import get_service_registry
-from agent_skills.memory.v1.local_vector_memory import LocalVectorMemoryService
+from memory.v1.local_vector_memory import LocalVectorMemoryService
 
 def local_vector_memory_factory(uri: str, **kwargs):
     return LocalVectorMemoryService(uri=uri, **kwargs)

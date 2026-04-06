@@ -40,7 +40,7 @@ with _silence():
     import chromadb
 import datetime
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from jane.config import get_chroma_client, VECTOR_DB_USER_MEMORIES, CHROMA_COLLECTION_USER_MEMORIES
 
 

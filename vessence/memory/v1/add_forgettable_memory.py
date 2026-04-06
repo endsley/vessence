@@ -47,7 +47,7 @@ os.environ["ORT_LOGGING_LEVEL"] = "3"
 with silence_stderr_fd():
     import chromadb
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from jane.config import get_chroma_client, SHORT_TERM_TTL_DAYS as DEFAULT_TTL_DAYS, VECTOR_DB_SHORT_TERM as SHORT_TERM_DB_PATH, CHROMA_COLLECTION_SHORT_TERM
 
 

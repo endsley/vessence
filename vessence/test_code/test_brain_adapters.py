@@ -4,8 +4,8 @@ import time
 
 import pytest
 
-from jane.brain_adapters import BrainAdapter, BrainAdapterError, ExecutionProfile, build_execution_profile, resolve_timeout_seconds, _resolve_idle_timeout
-from jane.persistent_gemini import GeminiPersistentSession
+from llm_brain.v1.brain_adapters import BrainAdapter, BrainAdapterError, ExecutionProfile, build_execution_profile, resolve_timeout_seconds, _resolve_idle_timeout
+from llm_brain.v1.persistent_gemini import GeminiPersistentSession
 
 
 class SilentAdapter(BrainAdapter):

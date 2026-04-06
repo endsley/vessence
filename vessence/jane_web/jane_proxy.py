@@ -11,12 +11,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import AsyncIterator
 
-from agent_skills.memory.v1.conversation_manager import ConversationManager
-from agent_skills.memory.v1.memory_retrieval import build_memory_sections, invalidate_memory_summary_cache
-from jane.brain_adapters import BrainAdapterError, ExecutionProfile, build_execution_profile, get_brain_adapter, resolve_timeout_seconds
-from jane.context_builder import build_jane_context_async
+from memory.v1.conversation_manager import ConversationManager
+from memory.v1.memory_retrieval import build_memory_sections, invalidate_memory_summary_cache
+from llm_brain.v1.brain_adapters import BrainAdapterError, ExecutionProfile, build_execution_profile, get_brain_adapter, resolve_timeout_seconds
+from context_builder.v1.context_builder import build_jane_context_async
 from jane.config import ENV_FILE_PATH, LOGS_DIR
-from jane.persistent_gemini import get_gemini_persistent_manager
+from llm_brain.v1.persistent_gemini import get_gemini_persistent_manager
 from jane.session_summary import format_session_summary, load_session_summary, update_session_summary_async
 from jane_web.broadcast import StreamBroadcaster
 
@@ -707,7 +707,7 @@ def _prune_stale_sessions(now: float | None = None) -> None:
 
 async def _execute_brain_sync(session_id: str, brain_name: str, adapter, request_ctx) -> str:
     if _use_gemini_api(brain_name):
-        from jane.gemini_api_brain import get_gemini_api_brain
+        from llm_brain.v1.gemini_api_brain import get_gemini_api_brain
         brain = get_gemini_api_brain()
         return await brain.send_streaming(
             session_id=session_id,
@@ -724,7 +724,7 @@ async def _execute_brain_sync(session_id: str, brain_name: str, adapter, request
             timeout_seconds=_get_execution_profile(brain_name).timeout_seconds,
         )
     if _use_persistent_claude(brain_name):
-        from jane.persistent_claude import get_claude_persistent_manager
+        from llm_brain.v1.persistent_claude import get_claude_persistent_manager
         manager = get_claude_persistent_manager()
         profile = _get_execution_profile(brain_name)
         # First turn sends full context; subsequent turns only send the new message
@@ -751,7 +751,7 @@ async def _execute_brain_sync(session_id: str, brain_name: str, adapter, request
             yolo=profile.mode == "yolo",
         )
     if _use_persistent_codex(brain_name):
-        from jane.persistent_codex import get_codex_persistent_manager
+        from llm_brain.v1.persistent_codex import get_codex_persistent_manager
         manager = get_codex_persistent_manager()
         profile = _get_execution_profile(brain_name)
         session = await manager.get(session_id)
@@ -776,7 +776,7 @@ async def _execute_brain_sync(session_id: str, brain_name: str, adapter, request
 
 async def _execute_brain_stream(session_id: str, brain_name: str, adapter, request_ctx, emit) -> str:
     if _use_gemini_api(brain_name):
-        from jane.gemini_api_brain import get_gemini_api_brain
+        from llm_brain.v1.gemini_api_brain import get_gemini_api_brain
         brain = get_gemini_api_brain()
         return await brain.send_streaming(
             session_id=session_id,
@@ -797,7 +797,7 @@ async def _execute_brain_stream(session_id: str, brain_name: str, adapter, reque
             timeout_seconds=_get_execution_profile(brain_name).timeout_seconds,
         )
     if _use_persistent_claude(brain_name):
-        from jane.persistent_claude import get_claude_persistent_manager
+        from llm_brain.v1.persistent_claude import get_claude_persistent_manager
         manager = get_claude_persistent_manager()
         profile = _get_execution_profile(brain_name)
         session = await manager.get(session_id)
@@ -824,7 +824,7 @@ async def _execute_brain_stream(session_id: str, brain_name: str, adapter, reque
             yolo=profile.mode == "yolo",
         )
     if _use_persistent_codex(brain_name):
-        from jane.persistent_codex import get_codex_persistent_manager
+        from llm_brain.v1.persistent_codex import get_codex_persistent_manager
         manager = get_codex_persistent_manager()
         profile = _get_execution_profile(brain_name)
         session = await manager.get(session_id)
@@ -1016,14 +1016,14 @@ def end_session(session_id: str) -> None:
     brain_name = _get_brain_name()
     if _use_gemini_api(brain_name):
         try:
-            from jane.gemini_api_brain import get_gemini_api_brain
+            from llm_brain.v1.gemini_api_brain import get_gemini_api_brain
             get_gemini_api_brain().remove_session(session_id)
             logger.info("[%s] Removed Gemini API brain session", _session_log_id(session_id))
         except Exception:
             logger.exception("[%s] Failed to remove Gemini API brain session", _session_log_id(session_id))
     if _use_persistent_codex(brain_name):
         try:
-            from jane.persistent_codex import get_codex_persistent_manager
+            from llm_brain.v1.persistent_codex import get_codex_persistent_manager
             manager = get_codex_persistent_manager()
             try:
                 loop = asyncio.get_running_loop()
@@ -1043,7 +1043,7 @@ def end_session(session_id: str) -> None:
             logger.exception("[%s] Failed to end persistent Codex session", _session_log_id(session_id))
     if _use_persistent_claude(brain_name):
         try:
-            from jane.persistent_claude import get_claude_persistent_manager
+            from llm_brain.v1.persistent_claude import get_claude_persistent_manager
             manager = get_claude_persistent_manager()
             try:
                 loop = asyncio.get_running_loop()
@@ -1251,7 +1251,7 @@ async def send_message(user_id: str, session_id: str, message: str, file_context
     _log_stage(session_id, "session_summary_load", stage_start, summary_chars=len(summary_text or ""))
     await _await_prewarm_if_running(session_id, state)
     # Standing brain cache: skip context build on turn 2+ (brain remembers)
-    from jane.standing_brain import get_standing_brain_manager
+    from llm_brain.v1.standing_brain import get_standing_brain_manager
     _sb_mgr = get_standing_brain_manager()
     _sb_bp = _sb_mgr.brain
     _skip_ctx = (
@@ -1260,7 +1260,7 @@ async def send_message(user_id: str, session_id: str, message: str, file_context
 
     stage_start = time.perf_counter()
     if _skip_ctx:
-        from jane.context_builder import JaneRequestContext, _format_recent_history
+        from context_builder.v1.context_builder import JaneRequestContext, _format_recent_history
         # Standing brain already has session context from turn 1's system prompt.
         # Only inject [Recent exchanges] for pronoun resolution; skip [Session context]
         # to avoid accumulating duplicate summaries across turns.
@@ -1846,7 +1846,7 @@ async def stream_message(
         if _skip_initial_ack:
             # Fall-through sentinel: raise a silent skip marker caught below.
             raise _SkipRouterSignal()
-        from jane_web.gemma_router import classify_prompt, ROUTER_MODEL
+        from intent_classifier.v1.gemma_router import classify_prompt, ROUTER_MODEL
         _router_history = [{"role": h["role"], "content": h.get("content", "")}
                            for h in state.history[-10:]
                            if h.get("role") in ("user", "assistant") and isinstance(h.get("content"), str)]
@@ -2019,7 +2019,7 @@ async def stream_message(
 
             # Standing brain with existing session: skip expensive context build
             # (context was sent on first turn, CLI remembers it)
-            from jane.standing_brain import get_standing_brain_manager
+            from llm_brain.v1.standing_brain import get_standing_brain_manager
             manager = get_standing_brain_manager()
             _sb_brain = manager.brain
             _skip_context = (
@@ -2031,7 +2031,7 @@ async def stream_message(
 
             ctx_stage_start = time.perf_counter()
             if _skip_context:
-                from jane.context_builder import JaneRequestContext, _format_recent_history, TTS_SPOKEN_BLOCK_INSTRUCTION
+                from context_builder.v1.context_builder import JaneRequestContext, _format_recent_history, TTS_SPOKEN_BLOCK_INSTRUCTION
                 safety_parts = []
                 recent = _format_recent_history(list(state.history), max_turns=6, max_chars=2400)
                 if recent:
@@ -2105,7 +2105,7 @@ async def stream_message(
                 )
 
             # If Gemma already emitted a quick ack, inject context so Claude follows up naturally
-            from jane.context_builder import JaneRequestContext as _JRC
+            from context_builder.v1.context_builder import JaneRequestContext as _JRC
             if _gemma_delegate_ack and request_ctx:
                 _ack_note = f'\n\n[ALREADY SPOKEN] A brief acknowledgment was already spoken to the user: "{_gemma_delegate_ack}" — do NOT repeat it or generate your own [ACK] block. Continue naturally from where that ack left off.'
                 if request_ctx.transcript:

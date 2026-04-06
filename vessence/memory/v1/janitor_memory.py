@@ -11,7 +11,7 @@ import requests
 from pathlib import Path
 from dotenv import load_dotenv
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from jane.config import (
     get_chroma_client,
     ENV_FILE_PATH, VECTOR_DB_USER_MEMORIES, VECTOR_DB_SHORT_TERM,
@@ -173,7 +173,7 @@ def backfill_thematic_archival(max_sessions: int = 2):
     if not os.path.exists(SHORT_TERM_DB_PATH):
         return
     try:
-        from agent_skills.memory.v1.conversation_manager import ConversationManager
+        from memory.v1.conversation_manager import ConversationManager
         st_client = get_chroma_client(path=SHORT_TERM_DB_PATH)
         st_collection = st_client.get_collection(name="short_term_memory")
 

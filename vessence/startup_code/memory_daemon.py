@@ -85,8 +85,8 @@ def _store_cache(query: str, query_embedding: list[float], summary: str) -> None
 @app.on_event("startup")
 async def load_models():
     """Pre-load the ONNX embedding model and ChromaDB imports on startup."""
-    from agent_skills.memory.v1.memory_retrieval import _embed_query_text, build_memory_sections  # noqa: F401
-    import agent_skills.memory.v1.search_memory as search_memory  # noqa: F401
+    from memory.v1.memory_retrieval import _embed_query_text, build_memory_sections  # noqa: F401
+    import memory.v1.search_memory as search_memory  # noqa: F401
     from jane.config import VECTOR_DB_DIR  # noqa: F401
 
     # Warm up the ONNX model so first real query is fast
@@ -97,7 +97,7 @@ async def load_models():
 @app.get("/query")
 async def query_memory(q: str, essence_path: str = ""):
     """Query ChromaDB memory stores and return formatted memory sections."""
-    from agent_skills.memory.v1.memory_retrieval import _embed_query_text, build_memory_sections
+    from memory.v1.memory_retrieval import _embed_query_text, build_memory_sections
 
     query = q.strip() or "session start"
 

@@ -34,7 +34,7 @@ from jane.config import (
 from jane.tts import TTSEngine
 
 if TYPE_CHECKING:
-	from agent_skills.memory.v1.conversation_manager import ConversationManager
+	from memory.v1.conversation_manager import ConversationManager
 
 logging.basicConfig(
 	level=logging.INFO,
@@ -112,7 +112,7 @@ class JaneSessionWrapper:
 			shutil.rmtree(db_path)
 
 		try:
-			from agent_skills.memory.v1.conversation_manager import ConversationManager
+			from memory.v1.conversation_manager import ConversationManager
 			self.conv_manager = await self.loop.run_in_executor(None, ConversationManager, self.session_id)
 		except Exception as e:
 			logger.error(f"Failed to initialize ConversationManager: {e}")

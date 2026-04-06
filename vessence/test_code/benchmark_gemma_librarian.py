@@ -10,7 +10,7 @@ sys.path.insert(0, "/home/chieh/ambient/vessence")
 
 import ollama
 
-from agent_skills.memory.v1.memory_retrieval import build_memory_sections
+from memory.v1.memory_retrieval import build_memory_sections
 from jane.config import LIBRARIAN_MODEL
 
 

@@ -6,7 +6,7 @@ import time
 import threading
 import numpy as np
 
-from tts_server.config import MODEL_NAME, DEFAULT_SPEAKER, DEFAULT_LANGUAGE, SAMPLE_RATE, IDLE_TIMEOUT_SECONDS
+from tts_engine.v1.config import MODEL_NAME, DEFAULT_SPEAKER, DEFAULT_LANGUAGE, SAMPLE_RATE, IDLE_TIMEOUT_SECONDS
 
 logger = logging.getLogger("tts_server.model")
 

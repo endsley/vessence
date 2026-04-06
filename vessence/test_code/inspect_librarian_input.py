@@ -7,7 +7,7 @@ from pathlib import Path
 
 sys.path.insert(0, "/home/chieh/ambient/vessence")
 
-from agent_skills.memory.v1.memory_retrieval import build_memory_sections
+from memory.v1.memory_retrieval import build_memory_sections
 
 
 def build_prompts(query: str, sections: list[str], conversation_summary: str, assistant_name: str) -> tuple[str, str]:

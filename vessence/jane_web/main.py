@@ -321,7 +321,7 @@ async def startup():
 async def _start_standing_brains():
     """Start the standing brain CLI process at service startup."""
     try:
-        from jane.standing_brain import get_standing_brain_manager
+        from llm_brain.v1.standing_brain import get_standing_brain_manager
         manager = get_standing_brain_manager()
         await manager.start()
         health = await manager.health_check()
@@ -383,7 +383,7 @@ async def _reap_stale_sessions_loop():
     while True:
         await asyncio.sleep(600)  # every 10 minutes
         try:
-            from jane.persistent_claude import get_claude_persistent_manager
+            from llm_brain.v1.persistent_claude import get_claude_persistent_manager
             manager = get_claude_persistent_manager()
             reaped = await manager.reap_stale_sessions()
             if reaped:
@@ -392,7 +392,7 @@ async def _reap_stale_sessions_loop():
             _logger.warning("Claude session reaper error (non-fatal): %s", e)
         # Also reap stale Gemini persistent sessions
         try:
-            from jane.persistent_gemini import get_gemini_persistent_manager
+            from llm_brain.v1.persistent_gemini import get_gemini_persistent_manager
             gm = get_gemini_persistent_manager(os.environ.get("VESSENCE_HOME", ""))
             gemini_reaped = await gm.reap_stale_sessions()
             if gemini_reaped:
@@ -420,7 +420,7 @@ async def shutdown():
 
     # Claude: force-kill all subprocesses without acquiring locks
     try:
-        from jane.persistent_claude import get_claude_persistent_manager
+        from llm_brain.v1.persistent_claude import get_claude_persistent_manager
         killed = get_claude_persistent_manager().force_shutdown_all()
         _logger.info("Claude cleanup: killed %d processes", killed)
     except Exception as e:
@@ -428,7 +428,7 @@ async def shutdown():
 
     # Gemini: shutdown PTY sessions
     try:
-        from jane.persistent_gemini import get_gemini_persistent_manager
+        from llm_brain.v1.persistent_gemini import get_gemini_persistent_manager
         manager = get_gemini_persistent_manager(os.environ.get("VESSENCE_HOME", ""))
         for sid in list(getattr(manager, '_sessions', {}).keys()):
             try:
@@ -440,7 +440,7 @@ async def shutdown():
 
     # Standing Brain: kill all tiers in parallel
     try:
-        from jane.standing_brain import get_standing_brain_manager
+        from llm_brain.v1.standing_brain import get_standing_brain_manager
         await get_standing_brain_manager().shutdown()
     except Exception as e:
         _logger.warning(f"Standing Brain cleanup error (non-fatal): {e}")
@@ -1331,7 +1331,7 @@ async def save_model_settings(request: Request, _=Depends(require_auth)):
 
     # Restart the standing brain so it picks up the new model
     try:
-        from jane.standing_brain import get_standing_brain_manager
+        from llm_brain.v1.standing_brain import get_standing_brain_manager
         manager = get_standing_brain_manager()
         if manager._started:
             await manager.shutdown()
@@ -2092,7 +2092,7 @@ async def switch_provider(body: SwitchProviderRequest, request: Request):
     if new_provider not in ("claude", "gemini", "openai"):
         return JSONResponse({"ok": False, "error": f"Unknown provider: {new_provider}"}, status_code=400)
 
-    from jane.standing_brain import get_standing_brain_manager
+    from llm_brain.v1.standing_brain import get_standing_brain_manager
     manager = get_standing_brain_manager()
 
     _logger.info("Provider switch requested: → %s (session=%s, ip=%s)",
@@ -2112,7 +2112,7 @@ async def switch_provider(body: SwitchProviderRequest, request: Request):
 async def current_provider():
     """Return the currently active provider, model, and all available providers."""
     import shutil
-    from jane.standing_brain import get_standing_brain_manager, _PROVIDER
+    from llm_brain.v1.standing_brain import get_standing_brain_manager, _PROVIDER
     manager = get_standing_brain_manager()
     health = await manager.health_check()
     available = []
@@ -2490,7 +2490,7 @@ async def jane_init_session(body: SessionControl, request: Request):
         from jane_proxy import _get_brain_name, _use_persistent_claude, _use_persistent_codex, _get_execution_profile
     except ImportError:
         from .jane_proxy import _get_brain_name, _use_persistent_claude, _use_persistent_codex, _get_execution_profile
-    from jane.context_builder import build_jane_context_async
+    from context_builder.v1.context_builder import build_jane_context_async
 
     brain_name = _get_brain_name()
     if not (_use_persistent_claude(brain_name) or _use_persistent_codex(brain_name)):
@@ -2498,11 +2498,11 @@ async def jane_init_session(body: SessionControl, request: Request):
         return JSONResponse({"status": "skipped", "greeting": "Hey! What's on your mind?"})
 
     if _use_persistent_claude(brain_name):
-        from jane.persistent_claude import get_claude_persistent_manager
+        from llm_brain.v1.persistent_claude import get_claude_persistent_manager
         manager = get_claude_persistent_manager()
         init_status = "Sending init prompt to Claude..."
     else:
-        from jane.persistent_codex import get_codex_persistent_manager
+        from llm_brain.v1.persistent_codex import get_codex_persistent_manager
         manager = get_codex_persistent_manager()
         init_status = "Sending init prompt to Codex..."
     session = await manager.get(body.session_id or session_id)
@@ -2774,7 +2774,7 @@ async def invalidate_essence_cache(_=Depends(require_auth)):
 def _invalidate_essence_context_cache():
     """Clear essence-related entries from the context builder's in-memory cache."""
     try:
-        from jane.context_builder import _context_cache
+        from context_builder.v1.context_builder import _context_cache
         for key in ["essence_personality", "essence_tools"]:
             _context_cache.pop(key, None)
     except Exception:

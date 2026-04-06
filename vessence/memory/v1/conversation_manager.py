@@ -36,7 +36,7 @@ with silence_stderr_fd():
 import litellm
 import tiktoken
 from chromadb.utils import embedding_functions
-sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from jane.config import (
     get_chroma_client,
     LOCAL_LLM_MODEL_LITELLM, OLLAMA_BASE_URL as LOCAL_LLM_BASE_URL,

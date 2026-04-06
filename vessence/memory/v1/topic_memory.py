@@ -26,7 +26,7 @@ logger = logging.getLogger("topic_memory")
 os.environ.setdefault("ORT_LOGGING_LEVEL", "3")
 os.environ.setdefault("ONNXRUNTIME_EXECUTION_PROVIDERS", '["CPUExecutionProvider"]')
 
-sys.path.insert(0, str(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
+sys.path.insert(0, str(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from jane.config import (
     get_chroma_client,
