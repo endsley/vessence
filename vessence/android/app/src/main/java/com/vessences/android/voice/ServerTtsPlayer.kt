@@ -1,5 +1,6 @@
 package com.vessences.android.voice
 
+import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
@@ -165,10 +166,17 @@ class ServerTtsPlayer {
                 return@withContext false
             }
 
+            // Log full response details for diagnostics
+            val contentType = response.header("Content-Type", "") ?: ""
+            val contentLength = response.header("Content-Length", "unknown")
+            Log.d(TAG, "Response: ${response.code}, Content-Type=$contentType, Content-Length=$contentLength")
+            Log.d(TAG, "Response headers: ${response.headers.names().joinToString { "$it=${response.header(it)}" }}")
+
             // Verify content type is binary, not HTML/JSON error
-            val contentType = response.header("Content-Type", "")
-            if (contentType?.contains("text/html") == true || contentType?.contains("application/json") == true) {
-                Log.w(TAG, "Server returned $contentType instead of audio")
+            if (contentType.contains("text/html") || contentType.contains("application/json")) {
+                // Try to read and log the error body
+                val errorBody = try { response.body?.string()?.take(200) } catch (_: Exception) { null }
+                Log.w(TAG, "Server returned $contentType instead of audio: $errorBody")
                 response.close()
                 return@withContext false
             }
@@ -213,15 +221,27 @@ class ServerTtsPlayer {
             read += n
         }
 
+        // Diagnostic: log raw header bytes
+        val headerHex = headerBuf.joinToString("") { "%02x".format(it) }
+        Log.d(TAG, "Raw header bytes: $headerHex")
+
+        // Check if header looks like ASCII (HTML/JSON error page)
+        val looksLikeText = headerBuf.all { it in 0x20..0x7e || it == 0x0a.toByte() || it == 0x0d.toByte() }
+        if (looksLikeText) {
+            val asText = String(headerBuf, Charsets.US_ASCII)
+            Log.e(TAG, "Header looks like ASCII text, not PCM: '$asText'")
+            return false
+        }
+
         val bb = ByteBuffer.wrap(headerBuf).order(ByteOrder.LITTLE_ENDIAN)
         val sampleRate = bb.getInt()
         val channels = bb.getInt()
         val bitsPerSample = bb.getInt()
 
-        Log.d(TAG, "PCM header: rate=$sampleRate ch=$channels bits=$bitsPerSample")
+        Log.d(TAG, "PCM header parsed: rate=$sampleRate ch=$channels bits=$bitsPerSample")
 
         if (sampleRate !in 8000..48000 || channels !in 1..2 || bitsPerSample != 16) {
-            Log.e(TAG, "Invalid PCM header — likely received error page instead of audio")
+            Log.e(TAG, "Invalid PCM header values — expected 24000/1/16, got $sampleRate/$channels/$bitsPerSample")
             return false
         }
 
@@ -269,10 +289,42 @@ class ServerTtsPlayer {
         // Use even-sized buffer to guarantee 16-bit sample alignment
         val readBuf = ByteArray(4096)
         var totalBytes = 0
+        var firstChunkLogged = false
+
+        // Diagnostic: save raw PCM to file for offline inspection
+        val diagFile = try {
+            java.io.File(
+                android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS),
+                "tts_diag_${System.currentTimeMillis()}.raw"
+            ).also { it.parentFile?.mkdirs() }
+        } catch (_: Exception) { null }
+        val diagStream = try { diagFile?.outputStream() } catch (_: Exception) { null }
+
         try {
+            // Write header to diag file too
+            diagStream?.write(headerBuf)
+
             while (!cancelled.get()) {
                 val n = stream.read(readBuf)
                 if (n <= 0) break
+
+                // Diagnostic: log first chunk as hex (first 64 bytes)
+                if (!firstChunkLogged) {
+                    val previewLen = minOf(n, 64)
+                    val hex = readBuf.take(previewLen).joinToString("") { "%02x".format(it) }
+                    Log.d(TAG, "First PCM chunk: $n bytes, first ${previewLen}b hex: $hex")
+
+                    // Check if it looks like int16 PCM (should have values in typical speech range)
+                    if (previewLen >= 4) {
+                        val sample0 = ByteBuffer.wrap(readBuf, 0, 2).order(ByteOrder.LITTLE_ENDIAN).short
+                        val sample1 = ByteBuffer.wrap(readBuf, 2, 2).order(ByteOrder.LITTLE_ENDIAN).short
+                        Log.d(TAG, "First two PCM samples: $sample0, $sample1")
+                    }
+                    firstChunkLogged = true
+                }
+
+                // Save to diagnostic file
+                try { diagStream?.write(readBuf, 0, n) } catch (_: Exception) {}
 
                 // Ensure we only write even number of bytes (16-bit PCM alignment)
                 val writeLen = if (n % 2 != 0) n - 1 else n
@@ -289,7 +341,7 @@ class ServerTtsPlayer {
             if (!cancelled.get() && totalBytes > 0) {
                 track.stop()
             }
-            Log.d(TAG, "Playback complete: $totalBytes bytes")
+            Log.d(TAG, "Playback complete: $totalBytes bytes, diag file: ${diagFile?.absolutePath}")
             return totalBytes > 0 && !cancelled.get()
         } catch (e: Exception) {
             if (!cancelled.get()) {
@@ -297,6 +349,7 @@ class ServerTtsPlayer {
             }
             return false
         } finally {
+            try { diagStream?.close() } catch (_: Exception) {}
             if (currentTrack.compareAndSet(track, null)) {
                 try { track.release() } catch (_: Exception) {}
             }
