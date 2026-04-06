@@ -101,6 +101,18 @@ class ServerTtsPlayer(private val cacheDir: File) {
     }
 
     /**
+     * Trigger warm-up if model isn't loaded. Call this early (e.g., when text streaming starts)
+     * so the model is ready by the time speak() is called.
+     */
+    fun ensureWarm() {
+        Thread {
+            if (!isModelWarm()) {
+                triggerWarmUp()
+            }
+        }.start()
+    }
+
+    /**
      * Generate TTS audio via /tts/generate (WAV), save to temp file, play with MediaPlayer.
      * Returns true if audio played successfully, false if server unreachable/cold/error.
      */

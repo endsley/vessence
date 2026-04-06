@@ -28,6 +28,16 @@ class HybridTtsManager(context: Context) {
 
     private val serverTts = ServerTtsPlayer(context.applicationContext.cacheDir)
 
+    /**
+     * Call early during text streaming to pre-warm the model.
+     * This way the model is hot by the time speak() is called.
+     */
+    fun ensureWarm() {
+        if (USE_SERVER_TTS) {
+            serverTts.ensureWarm()
+        }
+    }
+
     suspend fun speak(text: String) {
         if (text.isBlank()) return
 

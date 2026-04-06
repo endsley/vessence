@@ -367,6 +367,8 @@ class ChatViewModel(
                             if (event.data.isNotEmpty()) {
                                 statusLog.add(event.data)
                                 updateAiMessage(currentMsgId, accumulated, isStreaming = true, status = "Working…", statusLog = statusLog.toList())
+                                // Pre-warm TTS model as soon as we know Jane is working
+                                if (fromVoice) tts.ensureWarm()
                                 // Give Compose a chance to render status updates before the next
                                 // event arrives — without this, IO-thread StateFlow conflation
                                 // can swallow the status phase entirely when deltas follow fast.
