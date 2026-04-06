@@ -1865,6 +1865,28 @@ async def stream_message(
                 _gemma_short_circuit = True
             else:
                 logger.info("[%s] Music query had no matches — letting Claude respond", session_id[:12])
+        elif _classification == "read_messages":
+            # Fast-path: emit client_tool_call directly to the phone — no LLM needed.
+            # The phone's MessagesReadRecentHandler reads from its local buffer and speaks.
+            logger.info("[%s] Gemma router: read_messages action='%s'", session_id[:12], _router_response)
+            import json as _json
+            _msg_action = (_router_response or "read_recent").strip()
+            # Parse optional sender filter: "read_recent spouse" → filter by sender
+            _sender_filter = ""
+            if " " in _msg_action:
+                _sender_filter = _msg_action.split(" ", 1)[1].strip()
+            _tool_args = {"limit": 5}
+            if _sender_filter:
+                _tool_args["sender_filter"] = _sender_filter
+            _tool_call_json = _json.dumps({
+                "tool": "messages.read_recent",
+                "args": _tool_args,
+                "call_id": f"fast_{int(time.time()*1000)}",
+            })
+            _raw_emit("ack", "Checking your messages...")
+            _raw_emit("client_tool_call", _tool_call_json)
+            _router_response = "I've asked your phone to read your recent messages."
+            _gemma_short_circuit = True
         elif _classification == "shopping_list":
             # Shopping list intent — handle add/remove directly, delegate queries to brain.
             logger.info("[%s] Gemma router: shopping_list action='%s'", session_id[:12], _router_response)

@@ -150,7 +150,7 @@ _PERSONAL_INFO = """User info:
 SYSTEM_PROMPT = f"""You are a prompt router. Classify each user message into exactly one category.
 
 ALWAYS output exactly two lines in this format:
-CLASSIFICATION: SELF_HANDLE or MUSIC_PLAY or SHOPPING_LIST or DELEGATE_OPUS
+CLASSIFICATION: SELF_HANDLE or MUSIC_PLAY or SHOPPING_LIST or READ_MESSAGES or DELEGATE_OPUS
 RESPONSE: <your response>
 
 NEVER skip these two lines. NEVER output just the answer without the CLASSIFICATION/RESPONSE wrapper.
@@ -177,6 +177,14 @@ Includes: adding items, removing items, asking what's on the list, clearing the 
 "remove bread from the list" → RESPONSE: remove bread
 RESPONSE = the action (add/remove/show/check/clear) + item/store if applicable.
 
+READ_MESSAGES — user wants to check, read, or hear their text messages/notifications.
+"read my texts" → RESPONSE: read_recent
+"any new messages?" → RESPONSE: read_recent
+"what did spouse text me?" → RESPONSE: read_recent spouse
+"do I have any unread messages?" → RESPONSE: read_recent
+"check my notifications" → RESPONSE: read_recent
+RESPONSE = read_recent + optional sender name filter.
+
 DELEGATE_OPUS — everything else. When in doubt, ALWAYS delegate.
 RESPONSE = one short sentence acknowledging what the user asked + a time hint ("one sec" / "give me a minute" / "this'll take a bit"). Reference a specific noun from their message. No generic phrases.
 
@@ -198,11 +206,19 @@ User: "what do I need from Costco?"
 CLASSIFICATION: SHOPPING_LIST
 RESPONSE: show costco
 
+User: "read my texts"
+CLASSIFICATION: READ_MESSAGES
+RESPONSE: read_recent
+
+User: "any messages from spouse?"
+CLASSIFICATION: READ_MESSAGES
+RESPONSE: read_recent spouse
+
 User: "can you fix the auth bug"
 CLASSIFICATION: DELEGATE_OPUS
 RESPONSE: Looking into the auth bug — give me a minute."""
 
-_CLASSIFY_RE = re.compile(r"CLASSIFICATION:\s*(SELF_HANDLE|MUSIC_PLAY|SHOPPING_LIST|DELEGATE_OPUS)", re.IGNORECASE)
+_CLASSIFY_RE = re.compile(r"CLASSIFICATION:\s*(SELF_HANDLE|MUSIC_PLAY|SHOPPING_LIST|READ_MESSAGES|DELEGATE_OPUS)", re.IGNORECASE)
 _RESPONSE_RE = re.compile(r"RESPONSE:\s*(.*)", re.DOTALL)
 
 # Weather keywords — if detected, inject cached weather data into gemma's context
@@ -747,6 +763,11 @@ async def classify_prompt(
             resp_match = _RESPONSE_RE.search(content)
             action = resp_match.group(1).strip().rstrip('"').strip() if resp_match else None
             return ("shopping_list", action or None)
+
+        if classification == "READ_MESSAGES":
+            resp_match = _RESPONSE_RE.search(content)
+            action = resp_match.group(1).strip().rstrip('"').strip() if resp_match else None
+            return ("read_messages", action or None)
 
         if classification == "DELEGATE_OPUS":
             resp_match = _RESPONSE_RE.search(content)
