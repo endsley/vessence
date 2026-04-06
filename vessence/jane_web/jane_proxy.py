@@ -1670,7 +1670,11 @@ async def stream_message(
     state = _get_session(session_id)
     # Serialize requests per session — prevents conversation offset bug where
     # concurrent requests race on history, causing Jane to answer the wrong question.
-    await state.request_gate.acquire()
+    # Timeout after 90s to prevent permanent deadlock if a previous request got stuck.
+    try:
+        await asyncio.wait_for(state.request_gate.acquire(), timeout=90)
+    except asyncio.TimeoutError:
+        logger.warning("[%s] Session request_gate timed out after 90s — proceeding without lock", session_id[:12])
     # Phone tools: extract any [TOOL_RESULT:{json}] markers the Android client
     # prepended to this user turn. Strip them from the user-visible bubble
     # (via persisted_user_message) but prepend a formatted context block onto
