@@ -343,6 +343,10 @@ For each answer, store it immediately using:
 8. **Anything else** — "Anything else you'd like me to remember about you?"
    - Store with appropriate topic
 
+9. **Help the network** — "One last thing — Vessence uses a peer relay network so everyone can access their Jane from their phone. Would you like your machine to help relay encrypted traffic for other users when it's idle? You'd be helping the community, and it uses minimal resources. Your machine would only forward encrypted data — it can't read anyone else's messages. (y/n)"
+   - If yes: set `RELAY_NODE=true` in `vessence-data/.env`
+   - If no: set `RELAY_NODE=false`
+
 ### After the interview:
 
 Tell the user:
@@ -352,6 +356,121 @@ Tell the user:
 > Try opening http://localhost:8081 in your browser to chat with me through the web interface. Everything is set up and ready to go."
 
 **Verification:** The web UI loads, the user can send a message, and Jane responds with awareness of the onboarding facts (e.g., uses their name).
+
+---
+
+## Phase 11: Auto-Start on Boot
+
+Set up Jane to start automatically when the computer boots, so the user never has to manually start the server.
+
+Detect the OS and configure accordingly:
+
+### Linux (systemd):
+
+```bash
+mkdir -p ~/.config/systemd/user
+
+cat > ~/.config/systemd/user/jane-web.service << EOF
+[Unit]
+Description=Jane Web Server
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=$(pwd)/vessence
+ExecStart=$(pwd)/venv/bin/python -m uvicorn jane_web.main:app --host 0.0.0.0 --port 8081
+Restart=always
+RestartSec=5
+Environment=VESSENCE_HOME=$(pwd)/vessence
+Environment=VESSENCE_DATA_HOME=$(pwd)/vessence-data
+Environment=VAULT_HOME=$(pwd)/vault
+
+[Install]
+WantedBy=default.target
+EOF
+
+systemctl --user daemon-reload
+systemctl --user enable jane-web.service
+systemctl --user start jane-web.service
+loginctl enable-linger $(whoami)
+```
+
+If `RELAY_NODE=true` in `.env`, also create a relay service:
+
+```bash
+cat > ~/.config/systemd/user/jane-relay.service << EOF
+[Unit]
+Description=Vessence Relay Client
+After=jane-web.service
+
+[Service]
+Type=simple
+WorkingDirectory=$(pwd)/vessence
+ExecStart=$(pwd)/venv/bin/python relay_client.py --auto --relay-node
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target
+EOF
+
+systemctl --user enable jane-relay.service
+systemctl --user start jane-relay.service
+```
+
+### macOS (launchd):
+
+```bash
+cat > ~/Library/LaunchAgents/com.vessence.jane-web.plist << EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key><string>com.vessence.jane-web</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>$(pwd)/venv/bin/python</string>
+        <string>-m</string>
+        <string>uvicorn</string>
+        <string>jane_web.main:app</string>
+        <string>--host</string>
+        <string>0.0.0.0</string>
+        <string>--port</string>
+        <string>8081</string>
+    </array>
+    <key>WorkingDirectory</key><string>$(pwd)/vessence</string>
+    <key>RunAtLoad</key><true/>
+    <key>KeepAlive</key><true/>
+    <key>StandardOutPath</key><string>$(pwd)/vessence-data/logs/jane-web.log</string>
+    <key>StandardErrorPath</key><string>$(pwd)/vessence-data/logs/jane-web.log</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>VESSENCE_HOME</key><string>$(pwd)/vessence</string>
+        <key>VESSENCE_DATA_HOME</key><string>$(pwd)/vessence-data</string>
+        <key>VAULT_HOME</key><string>$(pwd)/vault</string>
+    </dict>
+</dict>
+</plist>
+EOF
+
+launchctl load ~/Library/LaunchAgents/com.vessence.jane-web.plist
+```
+
+### Windows (Task Scheduler via PowerShell):
+
+Tell the user to open PowerShell as Administrator and run:
+
+```powershell
+$action = New-ScheduledTaskAction -Execute "$(pwd)\venv\Scripts\python.exe" -Argument "-m uvicorn jane_web.main:app --host 0.0.0.0 --port 8081" -WorkingDirectory "$(pwd)\vessence"
+$trigger = New-ScheduledTaskTrigger -AtLogon
+$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
+Register-ScheduledTask -TaskName "JaneWebServer" -Action $action -Trigger $trigger -Settings $settings -Description "Vessence Jane Web Server"
+```
+
+**Verification:** Reboot the machine (or log out and back in on Linux/Mac). After boot, verify:
+```bash
+curl -s http://localhost:8081/health
+```
 
 ---
 
