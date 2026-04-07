@@ -679,16 +679,18 @@
             Infinite AI personas.
           </h1>
           <p class="hero-copy" id="hero-simple">
-            Vessence is an open-source platform you run on your own machine. Clone the repo, open your favorite
-            AI CLI, and it sets itself up. Load an essence — tax accountant, tutor, researcher — and Jane becomes
-            that role. Everything stays on your computer, private and yours. Free forever.
+            Vessence is an open-source wrapper around Claude Code, Gemini, and Codex. It simplifies the agent development process.
+            You start with your default agent, Jane. By describing to her the abilities you wish she would have, you can develop
+            your own agent capabilities (tools) and agent personas (essences). An example of a tool would be the ability to verbally
+            ask your agent to send a text message, turn on a light, or play a song. An example of a persona (essence) would be a
+            tax accountant that walks through your taxes and helps you prepare the document. You don't have to develop your own
+            tools or personas — you can simply download what other people have done.
           </p>
           <p class="hero-copy" id="hero-technical" style="display:none;">
-            Vessence is an open-source, self-hosted platform for building, running, and sharing AI-powered personas called <strong>essences</strong>.
-            Clone the repo, open any AI CLI (Claude Code, Gemini CLI, or Codex), and the bootstrap file handles setup automatically — Python deps, ChromaDB, API keys, server launch.
-            Jane is your AI agent with ChromaDB memory that grows with you. Load an essence and Jane becomes that persona:
-            Jane the accountant, Jane the tutor, Jane the researcher. The marketplace supports three models: buy (download),
-            rent (hosted access), or free. Skills are reusable tool modules that essence builders can compose into their creations.
+            Vessence provides a unified marketplace for people to share their tools and essences. You can simply download these
+            tools into your Jane's brain. To get the Vessence server running on your computer, you download one of
+            Claude Code, Gemini CLI, or Codex, then download the Vessence package from Git. In your CLI prompt, you simply
+            ask it to read the JANE_BOOTSTRAP.md file inside Vessence, and everything should be set up for you.
           </p>
           <div class="explain-toggle">
             <button id="toggle-explain" onclick="toggleExplain()">
@@ -700,15 +702,16 @@
             <a class="button button-primary" href="https://github.com/endsley/vessence" target="_blank" rel="noreferrer">View on GitHub</a>
             <a class="button button-secondary" href="/install.html">Getting Started</a>
           </div>
-          <p class="micro-note">One prompt. Any AI CLI. Your CLI clones the repo, reads the bootstrap, and becomes Jane.</p>
+          <p class="micro-note">Download Claude Code, Gemini CLI, or Codex. Clone the repo. Ask your CLI to read JANE_BOOTSTRAP.md. Done.</p>
         </div>
 
         <div class="download-card">
           <div class="section-label">The System</div>
           <h3>Vessence is the platform.</h3>
           <p>
-            Vessence is a self-hosted platform that runs on your machine. It includes Jane (your AI agent),
-            ChromaDB memory, and an essence loader. Clone the repo and let your AI CLI handle the rest.
+            Vessence provides a unified marketplace for people to share their tools and essences.
+            Download tools into Jane's brain and extend her capabilities instantly. Clone the repo,
+            open your AI CLI, and let the bootstrap handle the rest.
           </p>
           <div class="stats">
             <div class="stat">
