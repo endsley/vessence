@@ -1,8 +1,39 @@
-google-adk
+# Core web server
+fastapi
+uvicorn[standard]
+jinja2
+aiofiles
+starlette
+
+# LLM interface
+litellm
+tiktoken
+
+# Vector memory
 chromadb
-discord.py
+
+# Configuration
 python-dotenv
-httpx
-aiosqlite
 pydantic
+
+# HTTP client
+httpx
+
+# Database
+aiosqlite
+
+# Image processing
+pillow
+
+# Authentication
+pyotp
+authlib
+
+# TTS (CLI voice)
 edge-tts
+
+# Google ADK (agent framework)
+google-adk
+
+# Discord bridge (optional)
+discord.py

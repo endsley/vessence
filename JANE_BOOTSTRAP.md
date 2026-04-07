@@ -2,6 +2,8 @@
 
 **You are an AI CLI assistant helping a new user set up Vessence.** Follow these phases in order. Each phase has verification steps — do not proceed until verification passes. All paths are relative to this repository root (the directory containing this file).
 
+**What is Vessence?** Vessence is an open-source wrapper around Claude Code, Gemini CLI, and Codex that simplifies AI agent development. You start with a default agent called Jane. By describing abilities you want, you develop tools (capabilities like sending texts, controlling lights, playing music) and essences (personas like a tax accountant or fitness coach). You can also download tools and essences that others have built from the Vessence marketplace.
+
 ---
 
 ## Architecture Overview
@@ -10,8 +12,8 @@ Before you begin, understand what you are setting up:
 
 - **Jane** — An AI assistant persona powered by whichever CLI brain the user chooses (Gemini, Claude, or OpenAI).
 - **Vault** — Personal file storage (documents, photos, music).
-- **Essences** — Specialized AI agent plugins (e.g., tax accountant, fitness coach). Each essence gives Jane domain expertise.
-- **Tools** — Capability plugins (daily briefing, music player, etc.) that extend what Jane can do.
+- **Essences** — Specialized AI personas (e.g., tax accountant, fitness coach). Each essence gives Jane domain expertise. Think of them as downloadable "brains" that transform Jane into a specialist.
+- **Tools** — Capability plugins (daily briefing, music player, SMS, smart home control, etc.) that extend what Jane can do. Tools are shared across all essences.
 - **Memory** — ChromaDB vector database with 3 tiers:
   - `user_memories` — Facts about the user (starts empty, grows over time).
   - `long_term_knowledge` — Jane's accumulated knowledge and behavioral rules.
@@ -186,7 +188,41 @@ Update `JANE_BRAIN` in `vessence-data/.env` to match.
 
 ---
 
-## Phase 7: Start Jane Web Server
+## Phase 7: Link Agent Configuration
+
+The CLI needs to load Vessence's agent instructions so it behaves as Jane. This makes the user's CLI automatically follow Jane's protocols, memory system, and operational rules.
+
+### For Claude Code users:
+
+Create or update the project-level CLAUDE.md to source Vessence's config. The Vessence repo already ships a `vessence/CLAUDE.md` — symlink it to the repo root:
+
+```bash
+ln -sf vessence/CLAUDE.md ./CLAUDE.md
+```
+
+### For Gemini CLI users:
+
+```bash
+ln -sf vessence/GEMINI.md ./GEMINI.md
+```
+
+### For Codex users:
+
+```bash
+ln -sf vessence/AGENTS.md ./AGENTS.md
+```
+
+This ensures that every time the user opens their CLI in this directory, the agent automatically loads Jane's identity, memory hooks, and operational rules.
+
+**Verification:** The symlink exists and points to the correct file:
+```bash
+ls -la ./CLAUDE.md ./GEMINI.md ./AGENTS.md 2>/dev/null
+```
+At least one of these should be a symlink pointing into `vessence/`.
+
+---
+
+## Phase 8: Start Jane Web Server
 
 Start the web server:
 
@@ -208,7 +244,7 @@ Should return a 200 response. If it fails, check `vessence-data/logs/jane-web.lo
 
 ---
 
-## Phase 8: Remote Access (Guided — User Does This)
+## Phase 9: Remote Access (Guided — User Does This)
 
 Tell the user:
 
@@ -227,7 +263,7 @@ Do not attempt to install or configure Cloudflare automatically. This step requi
 
 ---
 
-## Phase 9: User Onboarding
+## Phase 10: User Onboarding
 
 Now that Jane is running, introduce the user to their new assistant:
 
