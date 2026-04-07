@@ -41,12 +41,12 @@ OS=$(uname -s)
 ### Linux (Debian/Ubuntu):
 ```bash
 sudo apt update
-sudo apt install -y python3 python3-venv python3-pip nodejs npm git curl
+sudo apt install -y python3 python3-venv python3-pip python3-dev build-essential nodejs npm git curl
 ```
 
 ### Linux (Fedora/RHEL):
 ```bash
-sudo dnf install -y python3 python3-pip nodejs npm git curl
+sudo dnf install -y python3 python3-pip python3-devel gcc gcc-c++ nodejs npm git curl
 ```
 
 ### macOS:
@@ -98,7 +98,10 @@ Create the data directories that are gitignored:
 mkdir -p vessence-data/memory/v1/vector_db
 mkdir -p vessence-data/logs
 mkdir -p vessence-data/credentials
-mkdir -p vault
+mkdir -p vessence-data/data
+mkdir -p vessence-data/briefings
+mkdir -p vessence-data/briefing_saved
+mkdir -p vault/documents
 mkdir -p essences
 mkdir -p tools
 ```
@@ -154,36 +157,46 @@ Walk the user through filling in the required values. Ask them one at a time:
 
 1. **`USER_NAME`** — What should Jane call you? (Their first name.)
 
-2. **`GOOGLE_API_KEY`** — Required for Gemini mode (the default and free option).
-   - Get one free at: https://aistudio.google.com -> Get API key -> Create API key
-   - Looks like: `AIzaSy...` (39 characters)
+2. **API key for their chosen provider.** Ask: "Which AI provider do you want to use? Gemini (free), Claude, or OpenAI?"
+   - If **Gemini** (default, free): set `GOOGLE_API_KEY`
+     - Get one free at: https://aistudio.google.com -> Get API key -> Create API key
+     - Looks like: `AIzaSy...` (39 characters)
+   - If **Claude**: set `ANTHROPIC_API_KEY`
+     - Get at: https://console.anthropic.com/settings/keys
+     - Looks like: `sk-ant-...`
+   - If **OpenAI**: set `OPENAI_API_KEY`
+     - Get at: https://platform.openai.com/api-keys
+     - Looks like: `sk-...`
 
-3. **`SESSION_SECRET_KEY`** — Generate automatically, do not ask the user:
+   The API key is used for both Jane's main brain AND the fast initial-ack router. No local model (Ollama) is needed.
+
+3. **`JANE_BRAIN`** — Set this based on their choice above: `gemini`, `claude`, or `openai`.
+
+4. **`SESSION_SECRET_KEY`** — Generate automatically, do not ask the user:
    ```bash
    ./venv/bin/python -c "import secrets; print(secrets.token_hex(32))"
    ```
    Write the output into the `.env` file.
 
 ### Optional values (tell the user they can fill these in later):
-
-- `ANTHROPIC_API_KEY` — For Claude mode. Get at: https://console.anthropic.com
-- `OPENAI_API_KEY` — For OpenAI mode. Get at: https://platform.openai.com/api-keys
 - `DISCORD_TOKEN` — For Discord integration. Get at: https://discord.com/developers
 - `VAULT_PASSWORD` — Web UI login password. Leave blank to be prompted on first login.
 
-**Verification:** The `.env` file exists at `vessence-data/.env` and contains non-empty values for `USER_NAME`, `GOOGLE_API_KEY`, and `SESSION_SECRET_KEY`.
+Also clean up Docker-specific defaults that shipped in `.env.example`:
+```bash
+# Remove or comment out these Docker-only values:
+sed -i 's/^CHROMADB_HOST=.*/# CHROMADB_HOST=/' vessence-data/.env
+sed -i 's/^CHROMADB_PORT=.*/# CHROMADB_PORT=/' vessence-data/.env
+sed -i 's|^LOCAL_LLM_BASE_URL=.*|LOCAL_LLM_BASE_URL=http://localhost:11434|' vessence-data/.env
+```
+
+**Verification:** The `.env` file exists at `vessence-data/.env` and contains non-empty values for `USER_NAME`, `JANE_BRAIN`, the matching API key, and `SESSION_SECRET_KEY`.
 
 ---
 
 ## Phase 6: Install CLI Brain
 
-Jane's intelligence comes from whichever AI CLI the user is running. Detect which one is available and set `JANE_BRAIN` in the `.env` file:
-
-- If the user is running **Claude Code** → set `JANE_BRAIN=claude`
-- If the user is running **Gemini CLI** → set `JANE_BRAIN=gemini`
-- If the user is running **Codex CLI** → set `JANE_BRAIN=openai`
-
-If multiple are available, ask the user which they prefer. If none are globally installed, install the one matching the API key they provided:
+The user is already running an AI CLI (that's how they're reading this file). Detect which one and install the matching CLI if needed:
 
 ```bash
 # Gemini (default — free tier available):

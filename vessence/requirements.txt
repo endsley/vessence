@@ -18,6 +18,7 @@ pydantic
 
 # HTTP client
 httpx
+aiohttp
 
 # Database
 aiosqlite

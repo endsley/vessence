@@ -239,12 +239,12 @@ WEB_CHAT_MODEL = os.environ.get("JANE_BRAIN_WEB_MODEL", SMART_MODEL)
 
 # Legacy aliases (backward compat)
 OLLAMA_BASE_URL       = os.getenv("LOCAL_LLM_BASE_URL", "http://localhost:11434")
-# Local LLM tasks (summarizer, librarian, archivist triage) use Ollama.
-# These must default to an actual Ollama model, NOT the provider's cheap model.
-_DEFAULT_LOCAL_MODEL = "gemma4:e4b"
-LOCAL_LLM_MODEL       = os.getenv("LOCAL_LLM_MODEL", _DEFAULT_LOCAL_MODEL)
+# Local LLM tasks default to the provider's cheap model via CLI — no Ollama
+# required. Users with Ollama can override via LOCAL_LLM_MODEL env var.
+_DEFAULT_LOCAL_MODEL = os.getenv("LOCAL_LLM_MODEL", CHEAP_MODEL)
+LOCAL_LLM_MODEL       = _DEFAULT_LOCAL_MODEL
 LOCAL_LLM_MODEL_LITELLM = f"ollama/{LOCAL_LLM_MODEL}" if "/" not in LOCAL_LLM_MODEL else LOCAL_LLM_MODEL
-ARCHIVIST_MODEL       = os.getenv("ARCHIVIST_MODEL", _DEFAULT_LOCAL_MODEL)
+ARCHIVIST_MODEL       = os.getenv("ARCHIVIST_MODEL", CHEAP_MODEL)
 ARCHIVIST_MODEL_LITELLM = f"ollama/{ARCHIVIST_MODEL}" if "/" not in ARCHIVIST_MODEL else ARCHIVIST_MODEL
 ARCHIVIST_SMART_MODEL = os.getenv("ARCHIVIST_SMART_MODEL", CHEAP_MODEL)
 ARCHIVIST_SMART_MODEL_LITELLM = f"ollama/{ARCHIVIST_SMART_MODEL}" if "/" not in ARCHIVIST_SMART_MODEL else ARCHIVIST_SMART_MODEL

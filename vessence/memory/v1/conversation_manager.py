@@ -658,16 +658,12 @@ class ConversationManager:
 
     def _generate_summary(self, content: str) -> str:
         try:
-            response = litellm.completion(
-                model=ARCHIVIST_MODEL,
-                messages=[
-                    {"role": "system", "content": "Summarize key facts and decisions from this conversation excerpt. Neutral, 3rd person."},
-                    {"role": "user", "content": content}
-                ],
-                stream=False,
-                timeout=60,
+            from agent_skills.claude_cli_llm import completion
+            prompt = (
+                "Summarize key facts and decisions from this conversation excerpt. "
+                "Neutral, 3rd person.\n\n" + content
             )
-            return response.choices[0].message.content
+            return completion(prompt, max_tokens=300, timeout=60)
         except Exception as e:
             logger.warning("Error generating summary: %s", e)
             return "Summary generation failed."
