@@ -265,21 +265,50 @@ Do not attempt to install or configure Cloudflare automatically. This step requi
 
 ## Phase 10: User Onboarding
 
-Now that Jane is running, introduce the user to their new assistant:
+Now that Jane is running, introduce yourself as Jane and run a getting-to-know-you interview. This is how Jane builds her initial memory of the user. Ask these questions **one at a time** in a warm, conversational tone. Do not dump all questions at once.
 
-1. Ask the user their name (if not already captured in Phase 5) and store it as a memory:
-   ```bash
-   ./venv/bin/python vessence/memory/v1/add_fact.py "User's name is <NAME>" --topic user_profile
-   ```
+For each answer, store it immediately using:
+```bash
+./venv/bin/python vessence/memory/v1/add_fact.py "<fact>" --topic <topic> --subtopic <subtopic>
+```
 
-2. Ask if they have any basic preferences (e.g., communication style, interests) and store each as a memory:
-   ```bash
-   ./venv/bin/python vessence/memory/v1/add_fact.py "<preference>" --topic user_profile --subtopic preferences
-   ```
+### Interview questions (ask in this order):
 
-3. Confirm Jane is responding correctly by directing the user to open http://localhost:8081 in their browser.
+1. **Name** — "What's your name? What should I call you?"
+   - Store: topic=`identity`, subtopic=`name`
+   - Also update `USER_NAME` in `vessence-data/.env` if different from Phase 5
 
-**Verification:** The web UI loads, the user can send a message, and Jane responds.
+2. **Profession** — "What do you do for work?"
+   - Store: topic=`identity`, subtopic=`profession`
+
+3. **Interests** — "What are your hobbies or interests outside of work?"
+   - Store each interest: topic=`interests`
+
+4. **Communication style** — "How do you like me to talk to you? For example: brief and direct, detailed explanations, casual, formal?"
+   - Store: topic=`preferences`, subtopic=`communication_style`
+
+5. **Family** — "Do you have family or pets you'd like me to know about? (Totally optional — skip if you prefer.)"
+   - Store each: topic=`family`
+   - Respect if they decline — say "No problem, we can always add that later."
+
+6. **Location** — "What city or timezone are you in? This helps me with weather, time-based reminders, and local info."
+   - Store: topic=`identity`, subtopic=`location`
+
+7. **Goals** — "Is there anything specific you'd like me to help you with? Any projects you're working on?"
+   - Store each: topic=`projects`
+
+8. **Anything else** — "Anything else you'd like me to remember about you?"
+   - Store with appropriate topic
+
+### After the interview:
+
+Tell the user:
+
+> "Great, I've got all of that saved. I'll remember everything across sessions — web, CLI, and Android all share the same memory. You can always tell me new things and I'll remember them, or ask me to forget something.
+>
+> Try opening http://localhost:8081 in your browser to chat with me through the web interface. Everything is set up and ready to go."
+
+**Verification:** The web UI loads, the user can send a message, and Jane responds with awareness of the onboarding facts (e.g., uses their name).
 
 ---
 
