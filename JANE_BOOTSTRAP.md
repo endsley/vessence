@@ -30,29 +30,43 @@ Before you begin, understand what you are setting up:
 
 ---
 
-## Phase 1: System Requirements Check
+## Phase 1: System Requirements — Auto-Install
 
-Verify the following are installed and meet minimum versions:
+Detect the operating system and install missing dependencies automatically. Do not ask the user — just install them.
 
+```bash
+OS=$(uname -s)
+```
+
+### Linux (Debian/Ubuntu):
+```bash
+sudo apt update
+sudo apt install -y python3 python3-venv python3-pip nodejs npm git curl
+```
+
+### Linux (Fedora/RHEL):
+```bash
+sudo dnf install -y python3 python3-pip nodejs npm git curl
+```
+
+### macOS:
+```bash
+# Install Homebrew if missing
+command -v brew >/dev/null || /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+brew install python node git
+```
+
+### WSL:
+Same as Linux (Debian/Ubuntu) above.
+
+After installing, verify versions:
 ```bash
 python3 --version   # Must be 3.11+
 node --version      # Must be 22+
 git --version       # Any recent version
 ```
 
-Detect the operating system:
-```bash
-uname -s   # Expected: Linux, Darwin (macOS), or Linux under WSL
-```
-
-If on WSL, confirm:
-```bash
-cat /proc/version   # Should contain "Microsoft" or "WSL"
-```
-
-**Verification:** All three tools are installed and meet version requirements. Report the OS to the user.
-
-**If any requirement is missing:** Tell the user exactly what to install and how, then wait for them to confirm before proceeding.
+**If a version is too old**, upgrade it automatically using the appropriate package manager. Only ask the user if `sudo` requires a password and the CLI cannot proceed.
 
 ---
 
