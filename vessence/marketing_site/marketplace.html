@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Vessence Marketplace | Browse & Share AI Essences</title>
-  <meta name="description" content="Browse, download, and share AI essences on the Vessence Marketplace. Free and premium personas for productivity, entertainment, education, and more." />
+  <meta name="description" content="Browse, download, and share AI essences on the Vessence Marketplace. Free AI personas for productivity, entertainment, education, and more." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Cormorant+Garamond:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
@@ -715,8 +715,8 @@
         description: "Adaptive learning assistant that creates flashcards, schedules reviews using spaced repetition, and tracks your knowledge gaps.",
         fullDescription: "Study Coach implements evidence-based learning techniques including spaced repetition, active recall, and interleaving. Feed it your textbooks or notes, and it generates flashcard decks, schedules optimal review sessions, and identifies your weakest areas. Supports any subject from languages to medicine.",
         category: "education",
-        price: 299,
-        priceLabel: "$2.99",
+        price: 0,
+        priceLabel: "Free",
         included: false,
         rating: 4.7,
         downloads: 890,
@@ -734,8 +734,8 @@
         description: "Logs workouts, suggests routines based on your goals, and tracks progress with natural language updates.",
         fullDescription: "Fitness Companion turns conversational updates into structured workout logs. Tell it what you did at the gym, and it tracks sets, reps, and progression. It suggests routines based on your goals (strength, endurance, flexibility), adapts when you miss sessions, and celebrates milestones. No spreadsheets needed.",
         category: "lifestyle",
-        price: 199,
-        priceLabel: "$1.99",
+        price: 0,
+        priceLabel: "Free",
         included: false,
         rating: 4.4,
         downloads: 650,
@@ -753,8 +753,8 @@
         description: "Learns your dietary preferences and pantry contents to suggest meals, generate grocery lists, and store your favorite recipes.",
         fullDescription: "Recipe Brain builds a model of your food preferences, dietary restrictions, and what's in your pantry. Ask it 'What can I make with chicken and broccoli?' and get tailored suggestions. It stores your favorite recipes, generates grocery lists, and even plans weekly meal schedules. Supports any cuisine or dietary style.",
         category: "lifestyle",
-        price: 149,
-        priceLabel: "$1.49",
+        price: 0,
+        priceLabel: "Free",
         included: false,
         rating: 4.3,
         downloads: 430,
@@ -772,8 +772,8 @@
         description: "Personalized programming tutor that adapts to your skill level, reviews your code, and teaches through interactive challenges.",
         fullDescription: "Code Mentor is an adaptive programming tutor that assesses your skill level and teaches accordingly. It reviews code snippets you share, explains concepts with analogies, and generates interactive challenges. Supports Python, JavaScript, Rust, Go, and more. Progress is tracked across sessions so it always picks up where you left off.",
         category: "education",
-        price: 499,
-        priceLabel: "$4.99",
+        price: 0,
+        priceLabel: "Free",
         included: false,
         rating: 4.9,
         downloads: 1200,
@@ -791,8 +791,8 @@
         description: "Collaborative storytelling essence. Build worlds, develop characters, and write narratives together in an evolving shared universe.",
         fullDescription: "Story Weaver is a creative writing partner that helps you build fictional worlds, develop characters, and write narratives. It remembers your universe's lore, maintains character consistency, and can generate plot suggestions when you're stuck. Perfect for novelists, game masters, and anyone who loves storytelling.",
         category: "entertainment",
-        price: 349,
-        priceLabel: "$3.49",
+        price: 0,
+        priceLabel: "Free",
         included: false,
         rating: 4.6,
         downloads: 780,
@@ -916,8 +916,7 @@
         `;
       } else {
         actionsEl.innerHTML = `
-          <div class="button button-primary">Buy for ${e.priceLabel}</div>
-          <div class="button button-secondary">Try Demo</div>
+          <div class="button button-primary">Download Free</div>
         `;
       }
 
