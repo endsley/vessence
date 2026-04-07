@@ -682,21 +682,31 @@
             Vessence is an open-source wrapper around Claude Code, Gemini, and Codex. It simplifies the agent development process.
             You start with your default agent, Jane. By describing to her the abilities you wish she would have, you can develop
             your own agent capabilities (tools) and agent personas (essences). An example of a tool would be the ability to verbally
-            ask your agent to send a text message, turn on a light, or play a song. An example of a persona (essence) would be a
+            ask your agent to send a text msg, turn on a light, or play a song. An example of a persona (essence) would be a
             tax accountant that would walk through your taxes and help you prepare the document. You do not have to develop your own
             tools or personas, you can simply download what other people have done.
           </p>
           <p class="hero-copy">
             Vessence provides a unified marketplace for people to share their tools and essences. And you can simply download these
             tools into your Jane's brain. To get the Vessence server running on your computer, you simply download one of
-            Claude Code, Gemini CLI, or Codex, then you download the Vessence package from Git. In your CLI prompt, you simply
-            ask it to read the JANE_BOOTSTRAP.md file inside Vessence, and everything should be set up for you.
+            Claude Code, Gemini CLI, or Codex, then you use the prompt:
           </p>
+          <div class="terminal" style="cursor:pointer;margin:16px 0" onclick="navigator.clipboard.writeText('Clone https://github.com/endsley/vessence into ~/ambient, then read JANE_BOOTSTRAP.md and follow every phase to completion.'); this.querySelector('.copy-toast').style.opacity=1; setTimeout(()=>this.querySelector('.copy-toast').style.opacity=0, 1500)">
+            <div class="terminal-head">
+              <span class="terminal-dot"></span>
+              <span class="terminal-dot"></span>
+              <span class="terminal-dot"></span>
+              <span class="copy-toast" style="margin-left:auto;font-size:0.7rem;color:var(--accent);opacity:0;transition:opacity 0.3s">Copied!</span>
+            </div>
+            <div class="terminal-body" style="font-size:0.88rem">
+              <div style="color:var(--accent)">Clone https://github.com/endsley/vessence into ~/ambient, then read JANE_BOOTSTRAP.md and follow every phase to completion.</div>
+            </div>
+          </div>
+          <p style="font-size:0.78rem;color:#7f9893;margin:0 0 16px">Click the box to copy. Paste it into your CLI and everything will be set up for you.</p>
           <div class="hero-actions">
             <a class="button button-primary" href="https://github.com/endsley/vessence" target="_blank" rel="noreferrer">View on GitHub</a>
             <a class="button button-secondary" href="/install.html">Getting Started</a>
           </div>
-          <p class="micro-note">Download Claude Code, Gemini CLI, or Codex. Clone the repo. Ask your CLI to read JANE_BOOTSTRAP.md. Done.</p>
         </div>
 
         <div class="download-card">
