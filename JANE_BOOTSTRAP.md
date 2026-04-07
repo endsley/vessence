@@ -271,22 +271,38 @@ Should return a 200 response. If it fails, check `vessence-data/logs/jane-web.lo
 
 ---
 
-## Phase 9: Remote Access (Guided — User Does This)
+## Phase 9: Remote Access
 
-Tell the user:
+This gives the user a permanent public URL so the Android app (or any device outside the local network) can reach their Jane server.
 
-> Your server is running locally at http://localhost:8081. To access Jane from your phone or another device, you can set up a Cloudflare Tunnel:
->
-> 1. Create a free account at https://dash.cloudflare.com
-> 2. Go to Zero Trust -> Networks -> Tunnels -> Create tunnel
-> 3. Install `cloudflared` on this machine (instructions at https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/)
-> 4. Create a tunnel pointing to `localhost:8081`
-> 5. Your public URL will be something like `jane.yourdomain.com`
-> 6. Put this URL in the Android app's settings
->
-> This step is optional. Skip it if you only want to use Jane on this machine.
+Ask the user: "Do you want to access Jane from your phone or other devices outside your home network?"
 
-Do not attempt to install or configure Cloudflare automatically. This step requires the user's own domain and Cloudflare account.
+If **yes**, run the Vessence relay client:
+
+```bash
+cd vessence && ../venv/bin/python relay_client.py --auto
+```
+
+This will:
+1. Ask them to pick a username (e.g., `alice`)
+2. Ask for a password (for re-authentication)
+3. Register their permanent URL: `https://alice.vessences.com`
+4. Connect the tunnel
+
+The relay client stays running and maintains the connection. To run it in the background:
+
+```bash
+cd vessence && nohup ../venv/bin/python relay_client.py --auto > ../vessence-data/logs/relay.log 2>&1 &
+```
+
+Tell the user their permanent URL and that they should enter it in the Android app's settings.
+
+If **no**, skip this phase. Jane still works locally at `http://localhost:8081`.
+
+**Verification:** If they registered, confirm the URL is reachable:
+```bash
+curl -s https://USERNAME.vessences.com/health
+```
 
 ---
 
