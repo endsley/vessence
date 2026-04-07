@@ -28,6 +28,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.launch
+import android.os.PowerManager
 import java.util.UUID
 import java.util.concurrent.ConcurrentLinkedQueue
 
@@ -81,6 +82,23 @@ class ChatViewModel(
         com.vessences.android.tools.ActionQueue().also { it.attachTts(tts.localTts) }
     private val toolDispatcher: com.vessences.android.tools.ClientToolDispatcher =
         com.vessences.android.tools.ClientToolDispatcher(toolActionQueue)
+
+    // Wake lock to keep network alive during chat streaming when screen is off
+    private var streamWakeLock: PowerManager.WakeLock? = null
+
+    private fun acquireStreamWakeLock() {
+        if (streamWakeLock?.isHeld == true) return
+        val pm = appContext.getSystemService(Context.POWER_SERVICE) as PowerManager
+        streamWakeLock = pm.newWakeLock(
+            PowerManager.PARTIAL_WAKE_LOCK,
+            "vessence:chat_streaming",
+        ).apply { acquire(10 * 60 * 1000L) } // 10 min safety timeout
+    }
+
+    private fun releaseStreamWakeLock() {
+        streamWakeLock?.let { if (it.isHeld) it.release() }
+        streamWakeLock = null
+    }
 
     /** Emits a playlist ID when Jane responds with [MUSIC_PLAY:id]. UI observes and navigates. */
     private val _musicPlayRequest = MutableStateFlow<String?>(null)
@@ -269,6 +287,7 @@ class ChatViewModel(
     fun cancelCurrentResponse() {
         currentStreamJob?.cancel()
         currentStreamJob = null
+        releaseStreamWakeLock()
         // Finalize any streaming AI message
         val msgs = _state.value.messages
         val updatedMsgs = msgs.map { msg ->
@@ -311,6 +330,7 @@ class ChatViewModel(
             error = null,
         )
 
+        acquireStreamWakeLock()
         currentStreamJob = viewModelScope.launch(Dispatchers.IO) {
             var gotDone = false
             // Sentence-level TTS: accumulate text, fire TTS per sentence during streaming
@@ -619,6 +639,8 @@ class ChatViewModel(
                 }
                 _state.value = _state.value.copy(isSending = false)
                 processNextInQueue()
+            } finally {
+                releaseStreamWakeLock()
             }
         }
     }

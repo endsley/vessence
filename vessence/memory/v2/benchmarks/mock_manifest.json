@@ -1,0 +1,54 @@
+{
+  "50": {
+    "compact": {
+      "file": "tree_index_compact_50.txt",
+      "chars": 2810,
+      "lines": 69
+    },
+    "flat": {
+      "file": "tree_index_flat_50.txt",
+      "chars": 3425,
+      "lines": 50
+    },
+    "leaf_count": 50
+  },
+  "100": {
+    "compact": {
+      "file": "tree_index_compact_100.txt",
+      "chars": 6961,
+      "lines": 119
+    },
+    "flat": {
+      "file": "tree_index_flat_100.txt",
+      "chars": 8434,
+      "lines": 100
+    },
+    "leaf_count": 100
+  },
+  "200": {
+    "compact": {
+      "file": "tree_index_compact_200.txt",
+      "chars": 15659,
+      "lines": 219
+    },
+    "flat": {
+      "file": "tree_index_flat_200.txt",
+      "chars": 18916,
+      "lines": 200
+    },
+    "leaf_count": 200
+  },
+  "300": {
+    "compact": {
+      "file": "tree_index_compact_300.txt",
+      "chars": 24457,
+      "lines": 319
+    },
+    "flat": {
+      "file": "tree_index_flat_300.txt",
+      "chars": 29540,
+      "lines": 300
+    },
+    "leaf_count": 300
+  }
+}

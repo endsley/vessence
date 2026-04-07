@@ -53,7 +53,7 @@ object ContactsSmsHandler : ClientToolHandler {
     private const val TAG = "ContactsSmsHandler"
 
     /** Suffix appended to every outgoing SMS body so recipients know the
-     *  message came through Jane (not a direct text from Chieh's thumbs). */
+     *  message came through Jane (not a direct text from the user's thumbs). */
     private const val SIGNATURE = " — via Jane"
 
     /**
@@ -256,7 +256,7 @@ object ContactsSmsHandler : ClientToolHandler {
             _preview.value = DraftPreview(draftId, contact.displayName, body)
         }
         // No handler TTS — Jane's response text already contains the draft
-        // read-back (e.g., "To spouse: be home in 20.") which gets spoken
+        // read-back (e.g., "To <contact>: be home in 20.") which gets spoken
         // via the normal chat TTS path. Handler TTS was redundant and caused
         // a deadlock when chat TTS flushed the handler's utterance mid-play.
         return ToolActionStatus.Running("draft open")

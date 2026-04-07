@@ -43,7 +43,7 @@ USB/
 
 ### Every run (`usb_sync.py`):
 
-1. **Find USB mount** — same detection logic as before (`/media/chieh/*`, `/run/media/chieh/*`)
+1. **Find USB mount** — same detection logic as before (`/media/$USER/*`, `/run/media/$USER/*`)
 2. **Rsync each source → `current/ambient/` or `current/system/`** with:
    - `--archive` (preserve permissions/timestamps)
    - `--delete` (remove files deleted from source)

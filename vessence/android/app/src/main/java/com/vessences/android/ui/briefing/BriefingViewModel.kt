@@ -21,6 +21,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.resume
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -57,10 +58,21 @@ class BriefingViewModel(application: Application) : AndroidViewModel(application
     private var readAllJob: Job? = null
 
     private val appContext = application.applicationContext
+    private val articlesCacheFile = File(application.filesDir, "briefing_articles_cache.json")
 
     init {
         // Cleanup old cached audio on startup
         com.vessences.android.util.BriefingAudioCache.cleanupOldFiles(appContext)
+        // Load cached articles immediately so UI has content before network fetch
+        loadCachedArticles()?.let { (articles, categories) ->
+            val effectiveCategory = if ("Shared" in categories) "Shared" else "All"
+            _state.value = _state.value.copy(
+                articles = articles,
+                categories = categories,
+                selectedCategory = effectiveCategory,
+                lastUpdated = "cached",
+            )
+        }
         refresh()
         fetchArchiveDates()
         fetchSavedArticleIds()
@@ -75,6 +87,9 @@ class BriefingViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch {
             _state.value = _state.value.copy(isLoading = true, error = null)
             try {
+                // Remember previously cached IDs before fetching
+                val previousIds = _state.value.articles.map { it.id }.toSet()
+
                 val (articles, categories) = fetchArticles()
                 val topics = fetchTopics()
                 val timestamp = SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date())
@@ -88,12 +103,15 @@ class BriefingViewModel(application: Application) : AndroidViewModel(application
                     isLoading = false,
                     lastUpdated = timestamp,
                 )
-                // WiFi: prefetch all audio in background
-                if (com.vessences.android.util.BriefingAudioCache.isOnWifi(appContext) && articles.isNotEmpty()) {
+                // Save fresh articles to disk cache
+                saveCachedArticles(articles, categories)
+                // WiFi: prefetch audio only for NEW articles (not already cached)
+                val newArticleIds = articles.map { it.id }.filter { it !in previousIds }
+                if (com.vessences.android.util.BriefingAudioCache.isOnWifi(appContext) && newArticleIds.isNotEmpty()) {
                     launch {
                         com.vessences.android.util.BriefingAudioCache.prefetchAll(
                             appContext,
-                            articles.map { it.id },
+                            newArticleIds,
                         )
                     }
                 }
@@ -363,6 +381,36 @@ class BriefingViewModel(application: Application) : AndroidViewModel(application
                 tts.speak(text)
             }
             _state.value = _state.value.copy(readAllActive = false, isSpeaking = false)
+        }
+    }
+
+    private fun loadCachedArticles(): Pair<List<BriefingArticle>, List<String>>? {
+        return try {
+            if (!articlesCacheFile.exists()) return null
+            val json = articlesCacheFile.readText()
+            val parsed = gson.fromJson(json, com.google.gson.JsonObject::class.java)
+            val cardsArray = parsed.getAsJsonArray("articles") ?: return null
+            val articles: List<BriefingArticle> = gson.fromJson(
+                cardsArray, object : TypeToken<List<BriefingArticle>>() {}.type
+            )
+            val categoriesArray = parsed.getAsJsonArray("categories")
+            val categories: List<String> = if (categoriesArray != null) {
+                gson.fromJson(categoriesArray, object : TypeToken<List<String>>() {}.type)
+            } else emptyList()
+            if (articles.isEmpty()) null else Pair(articles, categories)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    private fun saveCachedArticles(articles: List<BriefingArticle>, categories: List<String>) {
+        try {
+            val obj = com.google.gson.JsonObject()
+            obj.add("articles", gson.toJsonTree(articles))
+            obj.add("categories", gson.toJsonTree(categories))
+            articlesCacheFile.writeText(gson.toJson(obj))
+        } catch (e: Exception) {
+            // Silently ignore cache write failures
         }
     }
 

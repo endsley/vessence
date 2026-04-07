@@ -379,7 +379,7 @@ When Jane runs as a Claude Code session (CLI), hooks inject context and gate too
 | `claude_smart_context.py` | `startup_code/` | Classifies prompt intent via `_classify_prompt_profile()`, injects only needed context sections (800-2000 tokens vs. 25,000 before). Replaced 3 legacy hooks. |
 | `memory_hook.sh` | `~/.claude/hooks/` | Queries ChromaDB via daemon (port 8083, ~0.5s) or subprocess fallback (~3s). Skips short anaphoric prompts (≤8 words with pronouns). Deduplicates across session. |
 | `jane_context_hook.sh` | `~/.claude/hooks/` | Injects precomputed `jane_context.txt` (rebuilt nightly at 3:15 AM by `regenerate_jane_context.py`) |
-| `identity_hook.sh` | `~/.claude/hooks/` | Injects compact Jane/Chieh identity from `jane_identity_compact.md` (rebuilt at 3:00 AM) |
+| `identity_hook.sh` | `~/.claude/hooks/` | Injects compact Jane/user identity from `jane_identity_compact.md` (rebuilt at 3:00 AM) |
 | `prompt_queue_hook.sh` | `~/.claude/hooks/` | Processes next item from prompt queue if active |
 | `idle_state_hook.sh` | `~/.claude/hooks/` | Idle detection and state management |
 

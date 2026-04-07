@@ -6,14 +6,14 @@ Created: 2026-04-06
 ---
 
 ## Problem
-When Jane drafts an SMS (e.g., "text spouse I miss you"), the chat bubble shows raw tool call markup:
-"To spouse: I miss you already. [CLIENT_TOOL:contacts.sms_draft: {"query": "spouse", "body": ...}]"
+When Jane drafts an SMS (e.g., "text [contact] I miss you"), the chat bubble shows raw tool call markup:
+"To [contact]: I miss you already. [CLIENT_TOOL:contacts.sms_draft: {"query": "[contact]", "body": ...}]"
 
 This is not user-friendly and breaks conversational flow, especially with TTS.
 
 ## Goal
 Chat bubble should show something like:
-"Here's the message to spouse: *I miss you already.* Ready to send?"
+"Here's the message to [contact]: *I miss you already.* Ready to send?"
 
 The tool call still executes (the `client_tool_call` SSE event handles that), but the visible text should be clean and conversational.
 

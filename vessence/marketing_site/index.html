@@ -6,7 +6,7 @@
   <title>Vessences | Build, Run, and Share AI Personas</title>
   <meta
     name="description"
-    content="Vessence is a self-hosted platform for AI personas called essences. Buy, rent, or build your own — a tax accountant, a tutor, a researcher. Free for local use. Marketplace for essences and reusable skills."
+    content="Vessence is an open-source, self-hosted platform for AI personas called essences. Clone the repo, let your AI CLI set it up, and run AI personas that remember you. Free forever."
   />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -655,13 +655,13 @@
       </a>
       <div class="top-links">
         <a href="#agents">Jane</a>
-        <a href="#download">Download</a>
+        <a href="#download">Get Started</a>
         <a href="/install.html">Install Guide</a>
         <a href="#apps">Apps</a>
         <a href="/marketplace.html">Marketplace</a>
-        <a href="#authorization">Authorization</a>
         <a href="#faq">FAQ</a>
-        <a class="button button-primary" href="#download">Get Vessences</a>
+        <a href="https://github.com/endsley/vessence" target="_blank" rel="noreferrer" style="display:inline-flex;align-items:center;gap:6px"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>GitHub</a>
+        <a class="button button-primary" href="https://github.com/endsley/vessence" target="_blank" rel="noreferrer">View on GitHub</a>
       </div>
     </div>
   </div>
@@ -672,20 +672,21 @@
         <div>
           <div class="eyebrow">
             <span class="eyebrow-dot"></span>
-            AI personas you can build, load, and share
+            Open Source
           </div>
           <h1>
             One platform.<br />
             Infinite AI personas.
           </h1>
           <p class="hero-copy" id="hero-simple">
-            Vessence gives you AI personas that actually remember you. Load an essence — tax accountant, tutor,
-            researcher — and Jane becomes that role. Buy ready-made essences, rent hosted ones, or build your own.
-            Free for local use. Everything stays on your computer, private and yours.
+            Vessence is an open-source platform you run on your own machine. Clone the repo, open your favorite
+            AI CLI, and it sets itself up. Load an essence — tax accountant, tutor, researcher — and Jane becomes
+            that role. Everything stays on your computer, private and yours. Free forever.
           </p>
           <p class="hero-copy" id="hero-technical" style="display:none;">
-            Vessence is a self-hosted Docker platform for building, running, and trading AI-powered personas called <strong>essences</strong>.
-            Jane is your AI agent backed by Claude, with ChromaDB memory that grows with you. Load an essence and Jane becomes that persona:
+            Vessence is an open-source, self-hosted platform for building, running, and sharing AI-powered personas called <strong>essences</strong>.
+            Clone the repo, open any AI CLI (Claude Code, Gemini CLI, or Codex), and the bootstrap file handles setup automatically — Python deps, ChromaDB, API keys, server launch.
+            Jane is your AI agent with ChromaDB memory that grows with you. Load an essence and Jane becomes that persona:
             Jane the accountant, Jane the tutor, Jane the researcher. The marketplace supports three models: buy (download),
             rent (hosted access), or free. Skills are reusable tool modules that essence builders can compose into their creations.
           </p>
@@ -696,19 +697,18 @@
             </button>
           </div>
           <div class="hero-actions">
-            <a class="button button-primary" href="#download">Install Vessence</a>
-            <a class="button button-secondary" href="#apps">Get the Apps</a>
+            <a class="button button-primary" href="https://github.com/endsley/vessence" target="_blank" rel="noreferrer">View on GitHub</a>
+            <a class="button button-secondary" href="/install.html">Getting Started</a>
           </div>
-          <p class="micro-note">Vessence is the platform. Essences are the personas. Free for local use — pay only for the relay service if you want remote access.</p>
+          <p class="micro-note">One prompt. Any AI CLI. Your CLI clones the repo, reads the bootstrap, and becomes Jane.</p>
         </div>
 
         <div class="download-card">
           <div class="section-label">The System</div>
           <h3>Vessence is the platform.</h3>
           <p>
-            Vessence runs as a Docker stack on your machine. It includes Jane (your AI agent),
-            ChromaDB memory, and an essence loader. Buy essences from the marketplace, rent hosted ones from creators,
-            or build your own.
+            Vessence is a self-hosted platform that runs on your machine. It includes Jane (your AI agent),
+            ChromaDB memory, and an essence loader. Clone the repo and let your AI CLI handle the rest.
           </p>
           <div class="stats">
             <div class="stat">
@@ -724,29 +724,28 @@
               <span>Buy, rent, or share essences and skills. Sellers set their own prices.</span>
             </div>
             <div class="stat">
-              <strong>Free</strong>
-              <span>Local use is free forever. Pay only for the relay service (vessences.com routing).</span>
+              <strong>Open Source</strong>
+              <span>Free forever. Clone, run, modify. No Docker required.</span>
             </div>
           </div>
           <div class="hero-actions" style="flex-wrap:wrap;gap:10px">
-            <a class="button button-primary" href="/downloads/vessence-windows-installer.zip" data-vault-download="vessence-windows-installer.zip">&#x1f5b3; Windows</a>
-            <a class="button button-primary" href="/downloads/vessence-mac-installer.zip" data-vault-download="vessence-mac-installer.zip">&#xf8ff; Mac</a>
-            <a class="button button-primary" href="/downloads/vessence-linux-installer.zip" data-vault-download="vessence-linux-installer.zip">&#x1f427; Linux</a>
-            <a class="button button-secondary" href="/docker-compose.yml" data-vault-download="docker-compose.yml">Raw docker-compose.yml</a>
+            <a class="button button-primary" href="https://github.com/endsley/vessence" target="_blank" rel="noreferrer">View on GitHub</a>
+            <a class="button button-secondary" href="/downloads/vessences-android.apk" data-vault-download="vessences-android.apk">Android APK</a>
           </div>
-          <div class="terminal">
-            <div class="terminal-head">
-              <span class="terminal-dot"></span>
-              <span class="terminal-dot"></span>
-              <span class="terminal-dot"></span>
+          <div style="margin-top:16px">
+            <p style="font-size:0.82rem;color:var(--muted);margin:0 0 8px">Paste this into your AI CLI:</p>
+            <div class="terminal" style="cursor:pointer" onclick="navigator.clipboard.writeText('Clone https://github.com/endsley/vessence into ~/ambient, then read JANE_BOOTSTRAP.md and follow every phase to completion.'); this.querySelector('.copy-toast').style.opacity=1; setTimeout(()=>this.querySelector('.copy-toast').style.opacity=0, 1500)">
+              <div class="terminal-head">
+                <span class="terminal-dot"></span>
+                <span class="terminal-dot"></span>
+                <span class="terminal-dot"></span>
+                <span class="copy-toast" style="margin-left:auto;font-size:0.7rem;color:var(--accent);opacity:0;transition:opacity 0.3s">Copied!</span>
+              </div>
+              <div class="terminal-body" style="font-size:0.88rem">
+                <div style="color:var(--accent)">Clone https://github.com/endsley/vessence into ~/ambient, then read JANE_BOOTSTRAP.md and follow every phase to completion.</div>
+              </div>
             </div>
-            <div class="terminal-body">
-              <div><span class="prompt">$</span> <span class="cmd">docker compose up</span></div>
-              <div>Pulling <span class="good">vessence/jane</span> ... <span class="good">done</span></div>
-              <div>Pulling <span class="good">vessence/vault</span> ... <span class="good">done</span></div>
-              <div>Starting onboarding wizard ... <span class="good">ready</span></div>
-              <div>Opening <span class="cmd">http://localhost:3000</span></div>
-            </div>
+            <p style="font-size:0.78rem;color:#7f9893;margin:6px 0 0">Works with Claude Code, Gemini CLI, or Codex. Click to copy.</p>
           </div>
         </div>
       </div>
@@ -784,7 +783,7 @@
           </article>
         </div>
         <div class="notice">
-          <strong>These are not separate products.</strong> They all connect to the same Vessence system. Install Vessence with Docker first, then use any combination of these to interact with it.
+          <strong>These are not separate products.</strong> They all connect to the same Vessence system. Set up Vessence first, then use any combination of these to interact with it.
         </div>
         <!-- Download buttons are now inside each card above -->
       </div>
@@ -836,13 +835,13 @@
         <div class="section-label">Architecture</div>
         <h2 class="section-title">One system, multiple interfaces.</h2>
         <p class="section-copy">
-          Vessence is the backend — essence runtime, memory, and storage running in Docker on your machine.
+          Vessence is the backend — essence runtime, memory, and storage running on your machine as a self-hosted platform.
           You interact with it through whichever interface fits the moment.
         </p>
         <div class="feature-grid">
           <article class="card">
             <h3>Vessence (the system)</h3>
-            <p>The Docker stack: Jane agent, ChromaDB memory, essence loader, and marketplace connection. This is the core — everything else connects to it.</p>
+            <p>The self-hosted platform: Python server, Jane agent, ChromaDB memory, essence loader, and marketplace connection. This is the core — everything else connects to it.</p>
           </article>
           <article class="card">
             <h3>Web interfaces</h3>
@@ -963,36 +962,31 @@
 
     <section class="section" id="download">
       <div class="shell">
-        <div class="section-label">Install Vessence</div>
-        <h2 class="section-title">Step 1: Install the system. Step 2: Connect with any app.</h2>
+        <div class="section-label">Get Started</div>
+        <h2 class="section-title">One prompt. That's it.</h2>
         <p class="section-copy">
-          Vessence is the system that runs on your machine. The apps are just different ways to talk to it.
-          Install Vessence first, then use whichever interface you prefer — browser, phone, or desktop.
+          Open any AI CLI — Claude Code, Gemini, or Codex — and paste one prompt.
+          Your CLI clones the repo, reads the bootstrap file, installs everything, and becomes Jane.
         </p>
 
         <div class="steps">
           <article class="card">
             <strong>Step 1</strong>
-            <h3>Install &amp; Start Docker</h3>
-            <p>Docker is the only prerequisite. Download Docker Desktop, install it, then <strong>open Docker Desktop and wait until it says &ldquo;Docker Desktop is running&rdquo;</strong> before moving to Step 2.</p>
-            <a class="button button-secondary" href="https://www.docker.com/products/docker-desktop/" target="_blank" rel="noreferrer">Get Docker Desktop</a>
+            <h3>Paste one prompt</h3>
+            <p>Open your AI CLI and paste:</p>
+            <div class="code-block" style="margin-top:12px;font-size:0.85rem">Clone https://github.com/endsley/vessence into ~/ambient, then read JANE_BOOTSTRAP.md and follow every phase to completion.</div>
+            <p style="margin-top:8px;font-size:0.82rem;opacity:0.8">Works with Claude Code, Gemini CLI, or Codex.</p>
           </article>
           <article class="card">
             <strong>Step 2</strong>
-            <h3>Download for your OS</h3>
-            <p>Download the installer for your platform, extract, and run the install script. The onboarding wizard opens automatically.</p>
-            <p style="margin-top:6px;font-size:0.82rem;opacity:0.8"><strong>Windows users:</strong> After extracting, right-click the .bat file &rarr; Properties &rarr; check &ldquo;Unblock&rdquo; &rarr; OK, then double-click to run.</p>
-            <div class="hero-actions" style="flex-wrap:wrap;gap:8px">
-              <a class="button button-primary" href="/downloads/vessence-windows-installer.zip" data-vault-download="vessence-windows-installer.zip">Windows</a>
-              <a class="button button-primary" href="/downloads/vessence-mac-installer.zip" data-vault-download="vessence-mac-installer.zip">Mac</a>
-              <a class="button button-primary" href="/downloads/vessence-linux-installer.zip" data-vault-download="vessence-linux-installer.zip">Linux</a>
-            </div>
-            <p style="margin-top:8px;font-size:0.85rem;opacity:0.7">Advanced: <a href="/docker-compose.yml" data-vault-download="docker-compose.yml" style="color:inherit;text-decoration:underline">Raw docker-compose.yml</a></p>
+            <h3>Your CLI does the rest</h3>
+            <p>The CLI reads <code>JANE_BOOTSTRAP.md</code> and handles everything automatically — clones the repo, creates a Python venv, installs dependencies, seeds ChromaDB with Jane's knowledge, walks you through API key setup, and starts the server.</p>
+            <p style="margin-top:6px;font-size:0.82rem;opacity:0.8">No manual install steps. The AI does the installing.</p>
           </article>
           <article class="card">
             <strong>Step 3</strong>
             <h3>Connect from any device</h3>
-            <p>Use the web browser immediately, or install a native app for Android or Linux desktop.</p>
+            <p>Access Jane at <code>http://localhost:8081</code> in your browser. For remote access from your phone or other devices, set up a <strong>Cloudflare Tunnel</strong> to expose your local server securely.</p>
             <div class="hero-actions">
               <a class="button button-secondary" href="/downloads/vessences-android.apk" data-vault-download="vessences-android.apk">Android App</a>
               <a class="button button-secondary" href="/downloads/ambient-app-linux-x64.tar.gz" data-vault-download="ambient-app-linux-x64.tar.gz">Linux App</a>
@@ -1004,23 +998,30 @@
           <article class="card">
             <h3>What's inside Vessence</h3>
             <p>
-              One Docker stack with everything the system needs. The apps connect to this — they don't replace it.
+              One self-hosted platform with everything the system needs. The apps connect to this — they don't replace it.
             </p>
-            <div class="code-block">docker compose up</div>
+            <div class="code-block">git clone https://github.com/endsley/vessence</div>
             <ul class="download-list">
               <li>
                 <div>
-                  <strong>Jane</strong>
+                  <strong>Jane (Python server)</strong>
                   <small>Your AI agent — load any essence and she becomes that persona. Also handles coding, research, and essence creation.</small>
                 </div>
-                <span>Container</span>
+                <span>Core</span>
               </li>
               <li>
                 <div>
-                  <strong>Vault + ChromaDB</strong>
-                  <small>Files, media, long-term memory, and retrieval substrate.</small>
+                  <strong>ChromaDB Memory</strong>
+                  <small>Vector memory database for long-term knowledge and retrieval.</small>
                 </div>
-                <span>Container</span>
+                <span>Core</span>
+              </li>
+              <li>
+                <div>
+                  <strong>Essence Loader</strong>
+                  <small>Load, swap, and manage AI personas. Build your own or install from the marketplace.</small>
+                </div>
+                <span>Core</span>
               </li>
             </ul>
           </article>
@@ -1035,14 +1036,14 @@
               <li>
                 <div>
                   <strong>Web Browser</strong>
-                  <small>No install. Open vault.localhost or jane.localhost on any device on your network.</small>
+                  <small>No install. Open localhost:8081 on any device on your network.</small>
                 </div>
                 <span>Built-in</span>
               </li>
               <li>
                 <div>
                   <strong>Android App</strong>
-                  <small>Native chat with Jane, push notifications, camera attachments.</small>
+                  <small>Native chat with Jane, push notifications, camera attachments. Connects via Cloudflare Tunnel.</small>
                 </div>
                 <a class="button button-secondary" style="min-height:36px;padding:0 14px;font-size:0.85rem" href="/downloads/vessences-android.apk" data-vault-download="vessences-android.apk">APK</a>
               </li>
@@ -1051,7 +1052,7 @@
                   <strong>Linux Desktop App</strong>
                   <small>Native Flutter app with streaming chat, markdown rendering, conversation history.</small>
                 </div>
-                <a class="button button-secondary" style="min-height:36px;padding:0 14px;font-size:0.85rem" href="/downloads/ambient-app-linux-x64.tar.gz" data-vault-download="ambient-app-linux-x64.tar.gz">tar.gz</a>
+                <a class="button button-secondary" style="min-height:36px;padding:0 14px;font-size:0.85rem" href="/downloads/ambient-app-linux-x64.tar.gz" data-vault-download="ambient-app-linux-x64.tar.gz">Linux App</a>
               </li>
             </ul>
           </article>
@@ -1065,16 +1066,16 @@
         <h2 class="section-title">What users usually ask first.</h2>
         <div class="faq-grid">
           <article class="card">
-            <h3>Does this run on my machine?</h3>
-            <p>Yes. The intended default is Docker-based self-hosting on your own hardware. One-click installers for Windows, Mac, and Linux.</p>
+            <h3>Is this self-hosted?</h3>
+            <p>Yes. Vessence is fully open source and runs on your own machine. No Docker needed — just clone the repo and let your AI CLI set it up. Your data never leaves your computer.</p>
+          </article>
+          <article class="card">
+            <h3>What AI CLI do I need?</h3>
+            <p>Any of the major ones: <strong>Claude Code</strong>, <strong>Gemini CLI</strong>, or <strong>Codex</strong>. The bootstrap file (<code>JANE_BOOTSTRAP.md</code>) is CLI-agnostic — it works with whichever one you prefer.</p>
           </article>
           <article class="card">
             <h3>What does it cost?</h3>
-            <p>Vessence is free for local use. You only pay for the relay service if you want remote access via vessences.com. Essences on the marketplace can be free, paid, or rental — sellers set their own prices.</p>
-          </article>
-          <article class="card">
-            <h3>What are the three marketplace models?</h3>
-            <p><strong>Buy:</strong> download and own the essence. <strong>Rent:</strong> access a creator-hosted essence without downloading. <strong>Free:</strong> community essences at no cost.</p>
+            <p>Vessence is free and open source. You bring your own API key (Google Gemini free tier works). Essences on the marketplace can be free, paid, or rental — sellers set their own prices.</p>
           </article>
           <article class="card">
             <h3>What makes this different from a normal assistant?</h3>
@@ -1085,8 +1086,8 @@
             <p>Essences are complete AI personas. Skills are reusable tool modules (file search, TTS, calendar) that essence builders can compose into their creations. Both are sold on the marketplace.</p>
           </article>
           <article class="card">
-            <h3>Do essences get updates?</h3>
-            <p>No. Essences are immutable products — no versioning, no forced updates. If the domain changes (e.g. new tax year), you buy a new essence. Simple and predictable.</p>
+            <h3>How do I access it from my phone?</h3>
+            <p>Set up a <strong>Cloudflare Tunnel</strong> to securely expose your local server. Then install the Android APK and point it at your tunnel URL. Full guide in the install docs.</p>
           </article>
         </div>
       </div>
@@ -1096,16 +1097,17 @@
       <div class="shell">
         <div class="cta-card">
           <div class="section-label">Start Here</div>
-          <h2 class="cta-title">Install the system. Connect from any device.</h2>
+          <h2 class="cta-title">One prompt. That's the entire install.</h2>
           <p class="section-copy">
-            Vessence is one platform for all your AI personas. Free for local use.
-            Install it once with Docker, load your first essence, and connect from any device.
+            Open any AI CLI and paste one prompt. It clones the repo, reads the bootstrap, and becomes Jane.
+            Free and open source forever.
           </p>
-          <div class="hero-actions">
-            <a class="button button-primary" href="/downloads/vessence-docker-package.zip" data-vault-download="vessence-docker-package.zip">Install Vessence (Docker)</a>
+          <div class="code-block" style="max-width:700px;margin:0 auto 18px;font-size:0.9rem;line-height:1.7;cursor:pointer;text-align:left" onclick="navigator.clipboard.writeText('Clone https://github.com/endsley/vessence into ~/ambient, then read JANE_BOOTSTRAP.md and follow every phase to completion.')">
+            Clone https://github.com/endsley/vessence into ~/ambient, then read JANE_BOOTSTRAP.md and follow every phase to completion.
+          </div>
+          <div class="hero-actions" style="justify-content:center">
+            <a class="button button-primary" href="https://github.com/endsley/vessence" target="_blank" rel="noreferrer">View on GitHub</a>
             <a class="button button-secondary" href="/downloads/vessences-android.apk" data-vault-download="vessences-android.apk">Android App</a>
-            <a class="button button-secondary" href="/downloads/ambient-app-linux-x64.tar.gz" data-vault-download="ambient-app-linux-x64.tar.gz">Linux App</a>
-            <!-- GitHub button hidden until repo is set up -->
           </div>
         </div>
       </div>
@@ -1114,17 +1116,15 @@
 
   <footer class="footer">
     <div class="shell footer-inner">
-      <div>Vessence — your AI personas, private and portable. Free for local use.</div>
-      <div><a href="/downloads/vessence-docker-package.zip" data-vault-download="vessence-docker-package.zip">Install Vessence</a> · <a href="/downloads/vessences-android.apk" data-vault-download="vessences-android.apk">Android App</a> · <a href="/downloads/ambient-app-linux-x64.tar.gz" data-vault-download="ambient-app-linux-x64.tar.gz">Linux App</a></div>
+      <div>Vessence — your AI personas, private and portable. Open source, free forever.</div>
+      <div><a href="https://github.com/endsley/vessence" target="_blank" rel="noreferrer">GitHub</a> · <a href="/install.html">Install Guide</a> · <a href="/downloads/vessences-android.apk" data-vault-download="vessences-android.apk">Android App</a></div>
     </div>
   </footer>
   <script>
     for (const link of document.querySelectorAll("[data-vault-download]")) {
       const filename = link.dataset.vaultDownload;
       if (!filename) continue;
-      link.href = filename === "docker-compose.yml"
-        ? "/docker-compose.yml"
-        : `/downloads/${encodeURIComponent(filename)}`;
+      link.href = `/downloads/${encodeURIComponent(filename)}`;
     }
   </script>
   <script>

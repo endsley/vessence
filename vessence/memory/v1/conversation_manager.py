@@ -43,9 +43,11 @@ from jane.config import (
     VAULT_DIR as VAULT_PATH,
     VECTOR_DB_LONG_TERM  as LONG_TERM_MEMORY_PATH,
     VECTOR_DB_SHORT_TERM as SHORT_TERM_MEMORY_PATH,
+    VECTOR_DB_USER_MEMORIES as USER_MEMORIES_PATH,
     LEDGER_DB_PATH, IDLE_TIMEOUT_SECS as IDLE_TIMEOUT_SECONDS,
     SHORT_TERM_TTL_DAYS, SHORT_TERM_MAX_THEMES, CONTEXT_COMPACTION_RATIO,
     CHROMA_COLLECTION_SHORT_TERM, CHROMA_COLLECTION_LONG_TERM,
+    CHROMA_COLLECTION_USER_MEMORIES,
     ARCHIVIST_MODEL_LITELLM, ARCHIVIST_SMART_MODEL_LITELLM,
     ARCHIVIST_SMART_AFTER_HOUR, ARCHIVIST_SMART_IDLE_SECS,
     LOGS_DIR,
@@ -133,6 +135,15 @@ class ConversationManager:
             self.long_term_collection = self.long_term_db_client.get_or_create_collection(
                 name=CHROMA_COLLECTION_LONG_TERM,
                 embedding_function=embedding_functions.DefaultEmbeddingFunction()
+            )
+
+        # 4. Initialize user_memories (shared across all agents)
+        os.makedirs(USER_MEMORIES_PATH, exist_ok=True)
+        with silence_stderr_fd():
+            self.user_memories_client = get_chroma_client(path=USER_MEMORIES_PATH)
+            self.user_memories_collection = self.user_memories_client.get_or_create_collection(
+                name=CHROMA_COLLECTION_USER_MEMORIES,
+                metadata={"hnsw:space": "cosine"}
             )
 
         logger.info("ConversationManager for session '%s' initialized.", self.session_id)
@@ -260,7 +271,11 @@ class ConversationManager:
             "Identify the 'Arcs of Lasting Value'—the meaningful developments that should be remembered "
             "long-term. Ignore greetings, noise, and transient state.\n\n"
             "Categories to search for (The Sweet 16):\n"
-            "1. Identity Evolution (User preferences, family, life events)\n"
+            "1. Identity Evolution (ANYTHING about the user as a person: name, profession, "
+            "employer, office location, family members, pets, hobbies, personal interests, "
+            "health, lifestyle, personal preferences, life events, relationships, "
+            "businesses they own, personal history. If in doubt whether something is about "
+            "the user vs. the system, and it describes WHO the user IS, use this category.)\n"
             "2. Architectural Milestones (System design changes, new components)\n"
             "3. Project State (Ground truth of active projects)\n"
             "4. Debugging Wisdom (Root causes, fix patterns, why things failed)\n"
@@ -292,6 +307,8 @@ class ConversationManager:
                 category = arc.get("category", "General")
                 content = arc.get("content", "")
                 if content:
+                    # Post-classification: catch user-personal arcs the LLM miscategorized
+                    category = self._reclassify_if_user_identity(category, content)
                     full_memory = f"Theme: {theme}\nCategory: {category}\n\n{content}"
                     self._promote_to_long_term(full_memory, category=category)
             logger.info("Thematic archival complete: %d arcs stored.", len(arcs))
@@ -460,15 +477,56 @@ class ConversationManager:
             logger.warning("Triage failed: %s", e)
             return "Retry"
 
+    # Keyword signals that an arc is about the user as a person, not the system.
+    _USER_IDENTITY_SIGNALS = re.compile(
+        r"\b(?:user(?:'s| is| has| was| lives| works| owns| prefers| enjoys| likes)"
+        r"|(?:wife|husband|spouse|daughter|son|child|parent|family|pet|dog|cat)"
+        r"|(?:professor|teacher|doctor|clinic|office|employer|workplace)"
+        r"|(?:hobby|hobbies|born|birthday|age|hometown|home address)"
+        r"|(?:favorite (?:food|restaurant|color|music|sport|game|movie|book))"
+        r"|(?:personal preference|life event|relationship|married|wedding))\b",
+        re.IGNORECASE,
+    )
+
+    @classmethod
+    def _reclassify_if_user_identity(cls, category: str, content: str) -> str:
+        """If the LLM miscategorized a user-personal arc, reclassify it."""
+        if category == "Identity Evolution":
+            return category  # already correct
+        matches = cls._USER_IDENTITY_SIGNALS.findall(content)
+        if len(matches) >= 2:
+            logger.info(
+                "Reclassified arc from '%s' → 'Identity Evolution' "
+                "(matched %d user-identity signals).", category, len(matches),
+            )
+            return "Identity Evolution"
+        return category
+
+    # Categories whose arcs describe the *user* rather than the system.
+    # These are routed to the shared user_memories collection so all agents
+    # (Jane, Amber, etc.) can access them — and they carry a user_id for
+    # future multi-user support.
+    _USER_MEMORY_CATEGORIES = frozenset({"Identity Evolution"})
+
     def _promote_to_long_term(self, content: str, category: str = "General"):
         """
-        Writes a single memory entry to the long-term ChromaDB collection.
+        Writes a single memory entry to the appropriate ChromaDB collection.
+        User-identity arcs go to user_memories (shared); everything else goes
+        to long_term_knowledge (Jane-only).
         Uses Sonnet to decide if the new memory should be merged into an existing
         entry or added as a new one.
         """
+        # Pick the right target collection
+        if category in self._USER_MEMORY_CATEGORIES:
+            target_collection = self.user_memories_collection
+            is_user_memory = True
+        else:
+            target_collection = self.long_term_collection
+            is_user_memory = False
+
         try:
             # 1. Fetch top 2 nearest neighbors in this category
-            existing = self.long_term_collection.query(
+            existing = target_collection.query(
                 query_texts=[content],
                 n_results=2,
                 where={"topic": category},
@@ -511,28 +569,38 @@ class ConversationManager:
                     best_match_id = result["target_id"]
                     new_doc = result["merged_content"]
                     logger.info("Intelligent MERGE: Integrating new memory into ID: %s", best_match_id)
-                    self.long_term_collection.update(
+                    merge_meta = {
+                        "source": "conversation_archivist",
+                        "session_id": self.session_id,
+                        "topic": category,
+                        "timestamp": datetime.datetime.utcnow().isoformat(),
+                        "status": "updated_thematic",
+                    }
+                    if is_user_memory:
+                        merge_meta["user_id"] = os.environ.get("USER_NAME", "user")
+                        merge_meta["memory_type"] = "long_term"
+                        merge_meta["author"] = "archivist"
+                    target_collection.update(
                         ids=[best_match_id],
                         documents=[new_doc],
-                        metadatas=[{
-                            "source": "conversation_archivist",
-                            "session_id": self.session_id,
-                            "topic": category,
-                            "timestamp": datetime.datetime.utcnow().isoformat(),
-                            "status": "updated_thematic"
-                        }]
+                        metadatas=[merge_meta]
                     )
                     return
 
             # 3. If NEW or no matches found, add as a fresh entry
-            self.long_term_collection.add(
+            new_meta = {
+                "source": "conversation_archivist",
+                "session_id": self.session_id,
+                "topic": category,
+                "timestamp": datetime.datetime.utcnow().isoformat(),
+            }
+            if is_user_memory:
+                new_meta["user_id"] = os.environ.get("USER_NAME", "user")
+                new_meta["memory_type"] = "long_term"
+                new_meta["author"] = "archivist"
+            target_collection.add(
                 documents=[content],
-                metadatas=[{
-                    "source": "conversation_archivist",
-                    "session_id": self.session_id,
-                    "topic": category,
-                    "timestamp": datetime.datetime.utcnow().isoformat(),
-                }],
+                metadatas=[new_meta],
                 ids=[str(uuid.uuid4())]
             )
         except Exception as e:
@@ -971,7 +1039,7 @@ class ConversationManager:
         # --- assistant filler (no recall value) ---
         if role == "assistant":
             _filler_pats = [
-                r"^hey chieh[!.,]?\s*(i.m here|going well|what.s up|what do you)",
+                r"^hey \w+[!.,]?\s*(i.m here|going well|what.s up|what do you)",
                 r"^(i.m here|here)\.\s*what do you",
                 r"^jane here\.\s*(what|i.ll)",
                 r"^doing well\.?\s*(in the workspace|ready)",

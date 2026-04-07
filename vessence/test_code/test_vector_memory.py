@@ -10,10 +10,10 @@ try:
     
     # Search for spouse
     results = collection.query(
-        query_texts=["wife spouse"],
+        query_texts=["spouse"],
         n_results=5
     )
-    
+
     print("Vector Memory Search Results for 'spouse':")
     if results['documents'] and results['documents'][0]:
         for doc in results['documents'][0]:

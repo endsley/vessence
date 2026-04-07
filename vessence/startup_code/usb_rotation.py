@@ -18,10 +18,11 @@ from datetime import datetime
 from pathlib import Path
 
 # ─── USB Detection ────────────────────────────────────────────────────────────
-_DEFAULT_USB = '/media/chieh/USB DISK'
+_USER = os.environ.get("USER", os.environ.get("LOGNAME", "user"))
+_DEFAULT_USB = f'/media/{_USER}/USB DISK'
 
 def find_usb_mount():
-    candidates = glob.glob('/media/chieh/*') + glob.glob('/run/media/chieh/*')
+    candidates = glob.glob(f'/media/{_USER}/*') + glob.glob(f'/run/media/{_USER}/*')
     for path in candidates:
         if os.path.ismount(path):
             return path
@@ -232,7 +233,7 @@ bash /home/chieh/vessence/startup_code/reliable_start.sh
 curl http://localhost:8000/health
 
 # Check memories are intact (ChromaDB):
-/home/chieh/google-adk-env/adk-venv/bin/python /home/chieh/vessence/agent_skills/search_memory.py "Chieh"
+/home/chieh/google-adk-env/adk-venv/bin/python /home/chieh/vessence/agent_skills/search_memory.py "session start"
 
 # Check Jane's memory is intact:
 ls /home/chieh/.claude/projects/-home-chieh/memory/

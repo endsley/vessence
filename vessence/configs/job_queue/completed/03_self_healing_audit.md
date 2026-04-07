@@ -15,7 +15,7 @@ The current nightly audit (`agent_skills/nightly_audit.py`, runs at 1 AM) does t
 
 The problem: **it stops at diagnosis.** The report lists real issues (stale docs, wrong paths, undocumented crons, dead code) but nobody acts on them. The March 22 audit found 5 actionable issues — none were fixed automatically.
 
-This violates a core mandate from Chieh: "When Jane discovers a bug or problem, she must IMMEDIATELY and AUTOMATICALLY: 1) Identify the permanent root-cause solution, 2) Implement the fix, 3) Write defensive code to prevent the same class of bug from recurring."
+This violates a core mandate from the user: "When Jane discovers a bug or problem, she must IMMEDIATELY and AUTOMATICALLY: 1) Identify the permanent root-cause solution, 2) Implement the fix, 3) Write defensive code to prevent the same class of bug from recurring."
 
 ## Design
 
@@ -133,10 +133,10 @@ The saved report should now include:
 - If the structured JSON approach doesn't work reliably, fall back to regex parsing of the free-text report
 - If a fix introduces a regression, the verification pass should catch it and roll back
 - Consider rate-limiting fixes per night (e.g., max 10 auto-fixes) to avoid runaway changes
-- Log every fix to a persistent audit trail so Chieh can review what was changed
+- Log every fix to a persistent audit trail so the user can review what was changed
 
 ## Notes
 - The automation runner (`jane/automation_runner.py`) is what executes the LLM call — check its timeout and model settings
-- Category C items should be surfaced prominently — consider adding them to the work log or a "needs attention" file that Chieh sees
+- Category C items should be surfaced prominently — consider adding them to the work log or a "needs attention" file that the user sees
 - The nightly audit already has access to `run_automation_prompt()` — the fix executor can use the same mechanism for complex fixes that need LLM reasoning
 - Backup files before any modification — store in `logs/audits/backups/YYYY-MM-DD/`

@@ -1,0 +1,1503 @@
+{
+  "compact_50": {
+    "leaf_count": 50,
+    "format": "compact",
+    "index_chars": 2810,
+    "index_tokens_est": 702,
+    "model": "gemma4:e4b",
+    "avg_latency_ms": 6160,
+    "avg_classification_score": 0.75,
+    "tests": [
+      {
+        "test_id": "simple_recall",
+        "prompt": "What's my work schedule like?",
+        "avg_latency_ms": 5520,
+        "avg_classification_score": 1.0,
+        "rounds": [
+          {
+            "elapsed_ms": 8829,
+            "prompt_tokens_est": 835,
+            "response_tokens_est": 49,
+            "total_tokens_est": 884,
+            "classified_leaves": [],
+            "grep_keywords": [],
+            "ack": "",
+            "raw_response": "```json\n{\n  \"classified_leaves\": [\n    \"user_info/work/meetings.md\",\n    \"user_info/personal/daily_routine.md\",\n    \"user_info/work/projects.md\"\n  ],\n  \"grep_keywords\": [\n    \"work schedule\",\n    \"",
+            "error": "JSON parse failed: ```json\n{\n  \"classified_leaves\": [\n    \"user_info/work/meetings.md\",\n    \"user_info/personal/daily_routine.md\",\n    \"user_info/work/projects.md\"\n  ],\n  \"grep_keywords\": [\n    \"work schedule\",\n    \"",
+            "evaluation": {
+              "score": 0.0,
+              "hits": 0,
+              "misses": 2
+            }
+          },
+          {
+            "elapsed_ms": 5687,
+            "prompt_tokens_est": 835,
+            "response_tokens_est": 80,
+            "total_tokens_est": 915,
+            "classified_leaves": [
+              "user_info/work/meetings.md",
+              "user_info/work/projects.md",
+              "user_info/work/role.md"
+            ],
+            "grep_keywords": [
+              "schedule",
+              "meetings",
+              "work hours"
+            ],
+            "ack": "I can check your work schedule by looking at your recorded meetings and project commitments.",
+            "raw_response": "```json\n{\n  \"classified_leaves\": [\n    \"user_info/work/meetings.md\",\n    \"user_info/work/projects.md\",\n    \"user_info/work/role.md\"\n  ],\n  \"grep_keywords\": [\n    \"schedule\",\n    \"meetings\",\n    \"work hours\"\n  ],\n  \"ack\": \"I can check your work schedule by looking at your recorded meetings and project commitments.\"\n}\n```",
+            "error": null,
+            "evaluation": {
+              "score": 1.0,
+              "hits": 2,
+              "misses": 0,
+              "classified": [
+                "user_info/work/meetings.md",
+                "user_info/work/projects.md",
+                "user_info/work/role.md"
+              ],
+              "expected": [
+                "user_info/work",
+                "user_info/personal/daily_routine"
+              ]
+            }
+          },
+          {
+            "elapsed_ms": 5353,
+            "prompt_tokens_est": 835,
+            "response_tokens_est": 76,
+            "total_tokens_est": 911,
+            "classified_leaves": [
+              "user_info/work/meetings.md",
+              "user_info/personal/daily_routine.md"
+            ],
+            "grep_keywords": [
+              "work schedule",
+              "meetings",
+              "daily routine"
+            ],
+            "ack": "I can check your stored information regarding your work meetings and general daily routine.",
+            "raw_response": "```json\n{\n  \"classified_leaves\": [\n    \"user_info/work/meetings.md\",\n    \"user_info/personal/daily_routine.md\"\n  ],\n  \"grep_keywords\": [\n    \"work schedule\",\n    \"meetings\",\n    \"daily routine\"\n  ],\n  \"ack\": \"I can check your stored information regarding your work meetings and general daily routine.\"\n}\n```",
+            "error": null,
+            "evaluation": {
+              "score": 1.0,
+              "hits": 2,
+              "misses": 0,
+              "classified": [
+                "user_info/work/meetings.md",
+                "user_info/personal/daily_routine.md"
+              ],
+              "expected": [
+                "user_info/work",
+                "user_info/personal/daily_routine"
+              ]
+            }
+          }
+        ],
+        "error_count": 1
+      },
+      {
+        "test_id": "cross_domain",
+        "prompt": "How does the memory system work and what changes have we discussed?",
+        "avg_latency_ms": 6275,
+        "avg_classification_score": 0.67,
+        "rounds": [
+          {
+            "elapsed_ms": 6170,
+            "prompt_tokens_est": 844,
+            "response_tokens_est": 91,
+            "total_tokens_est": 935,
+            "classified_leaves": [
+              "vessence/architecture/memory_system.md",
+              "topics/decisions_made.md",
+              "topics/recent_discussions.md"
+            ],
+            "grep_keywords": [
+              "memory system",
+              "decisions made",
+              "changes discussed"
+            ],
+            "ack": "I can certainly review the memory system architecture and summarize the key decisions we have discussed.",
+            "raw_response": "```json\n{\n  \"classified_leaves\": [\n    \"vessence/architecture/memory_system.md\",\n    \"topics/decisions_made.md\",\n    \"topics/recent_discussions.md\"\n  ],\n  \"grep_keywords\": [\n    \"memory system\",\n    \"decisions made\",\n    \"changes discussed\"\n  ],\n  \"ack\": \"I can certainly review the memory system architecture and summarize the key decisions we have discussed.\"\n}\n```",
+            "error": null,
+            "evaluation": {
+              "score": 1.0,
+              "hits": 2,
+              "misses": 0,
+              "classified": [
+                "vessence/architecture/memory_system.md",
+                "topics/decisions_made.md",
+                "topics/recent_discussions.md"
+              ],
+              "expected": [
+                "vessence/architecture/memory_system",
+                "conversations/topics"
+              ]
+            }
+          },
+          {
+            "elapsed_ms": 6648,
+            "prompt_tokens_est": 844,
+            "response_tokens_est": 0,
+            "total_tokens_est": 844,
+            "classified_leaves": [],
+            "grep_keywords": [],
+            "ack": "",
+            "raw_response": "",
+            "error": null,
+            "evaluation": {
+              "score": 0.0,
+              "hits": 0,
+              "misses": 2
+            }
+          },
+          {
+            "elapsed_ms": 6009,
+            "prompt_tokens_est": 844,
+            "response_tokens_est": 94,
+            "total_tokens_est": 938,
+            "classified_leaves": [
+              "vessence/architecture/memory_system.md",
+              "topics/decisions_made.md",
+              "topics/recent_discussions.md"
+            ],
+            "grep_keywords": [
+              "memory system",
+              "how it works",
+              "decisions made"
+            ],
+            "ack": "I can certainly provide details on the memory system architecture and summarize the recent decisions we have discussed.",
+            "raw_response": "```json\n{\n  \"classified_leaves\": [\n    \"vessence/architecture/memory_system.md\",\n    \"topics/decisions_made.md\",\n    \"topics/recent_discussions.md\"\n  ],\n  \"grep_keywords\": [\n    \"memory system\",\n    \"how it works\",\n    \"decisions made\"\n  ],\n  \"ack\": \"I can certainly provide details on the memory system architecture and summarize the recent decisions we have discussed.\"\n}\n```",
+            "error": null,
+            "evaluation": {
+              "score": 1.0,
+              "hits": 2,
+              "misses": 0,
+              "classified": [
+                "vessence/architecture/memory_system.md",
+                "topics/decisions_made.md",
+                "topics/recent_discussions.md"
+              ],
+              "expected": [
+                "vessence/architecture/memory_system",
+                "conversations/topics"
+              ]
+            }
+          }
+        ],
+        "error_count": 0
+      },
+      {
+        "test_id": "specific_lookup",
+        "prompt": "What's Bob's phone number?",
+        "avg_latency_ms": 6401,
+        "avg_classification_score": 1.0,
+        "rounds": [
+          {
+            "elapsed_ms": 7765,
+            "prompt_tokens_est": 834,
+            "response_tokens_est": 60,
+            "total_tokens_est": 894,
+            "classified_leaves": [],
+            "grep_keywords": [],
+            "ack": "",
+            "raw_response": "```json\n{\n  \"classified_leaves\": [\n    \"user_info/contacts.md\",\n    \"user_info/friends.md\",\n    \"user_info/family.md\"\n  ],\n  \"grep_keywords\": [\n    \"Bob\",\n    \"phone number\",\n    \"contact\"\n  ],\n  \"ack\": \"I can search your stored contacts and",
+            "error": "JSON parse failed: ```json\n{\n  \"classified_leaves\": [\n    \"user_info/contacts.md\",\n    \"user_info/friends.md\",\n    \"user_info/family.md\"\n  ],\n  \"grep_keywords\": [\n    \"Bob\",\n    \"phone number\",\n    \"contact\"\n  ],\n  \"ack",
+            "evaluation": {
+              "score": 0.0,
+              "hits": 0,
+              "misses": 2
+            }
+          },
+          {
+            "elapsed_ms": 6201,
+            "prompt_tokens_est": 834,
+            "response_tokens_est": 74,
+            "total_tokens_est": 908,
+            "classified_leaves": [
+              "user_info/relationships/contacts.md",
+              "user_info/work/colleagues.md",
+              "user_info/personal/preferences.md"
+            ],
+            "grep_keywords": [
+              "Bob",
+              "phone number",
+              "contact"
+            ],
+            "ack": "I will search your memory for Bob's contact details.",
+            "raw_response": "```json\n{\n  \"classified_leaves\": [\n    \"user_info/relationships/contacts.md\",\n    \"user_info/work/colleagues.md\",\n    \"user_info/personal/preferences.md\"\n  ],\n  \"grep_keywords\": [\n    \"Bob\",\n    \"phone number\",\n    \"contact\"\n  ],\n  \"ack\": \"I will search your memory for Bob's contact details.\"\n}\n```",
+            "error": null,
+            "evaluation": {
+              "score": 1.0,
+              "hits": 2,
+              "misses": 0,
+              "classified": [
+                "user_info/relationships/contacts.md",
+                "user_info/work/colleagues.md",
+                "user_info/personal/preferences.md"
+              ],
+              "expected": [
+                "user_info/relationships",
+                "user_info/work/colleagues"
+              ]
+            }
+          },
+          {
+            "elapsed_ms": 6602,
+            "prompt_tokens_est": 834,
+            "response_tokens_est": 79,
+            "total_tokens_est": 913,
+            "classified_leaves": [
+              "user_info/relationships/contacts.md",
+              "user_info/work/colleagues.md",
+              "user_info/relationships/family.md"
+            ],
+            "grep_keywords": [
+              "Bob",
+              "phone number",
+              "contact"
+            ],
+            "ack": "I can search your memory for Bob's phone number using your contact records.",
+            "raw_response": "```json\n{\n  \"classified_leaves\": [\n    \"user_info/relationships/contacts.md\",\n    \"user_info/work/colleagues.md\",\n    \"user_info/relationships/family.md\"\n  ],\n  \"grep_keywords\": [\n    \"Bob\",\n    \"phone number\",\n    \"contact\"\n  ],\n  \"ack\": \"I can search your memory for Bob's phone number using your contact records.\"\n}",
+            "error": null,
+            "evaluation": {
+              "score": 1.0,
+              "hits": 2,
+              "misses": 0,
+              "classified": [
+                "user_info/relationships/contacts.md",
+                "user_info/work/colleagues.md",
+                "user_info/relationships/family.md"
+              ],
+              "expected": [
+                "user_info/relationships",
+                "user_info/work/colleagues"
+              ]
+            }
+          }
+        ],
+        "error_count": 1
+      },
+      {
+        "test_id": "technical",
+        "prompt": "Show me how to set up the Docker deployment",
+        "avg_latency_ms": 6311,
+        "avg_classification_score": 0.5,
+        "rounds": [
+          {
+            "elapsed_ms": 6582,
+            "prompt_tokens_est": 838,
+            "response_tokens_est": 84,
+            "total_tokens_est": 922,
+            "classified_leaves": [
+              "vessence/deployment/docker.md",
+              "vessence/architecture/web_server.md",
+              "vessence/config/environment.md"
+            ],
+            "grep_keywords": [
+              "docker",
+              "deployment",
+              "setup"
+            ],
+            "ack": "I can certainly help you review the steps and configurations needed for a Docker deployment.",
+            "raw_response": "```json\n{\n  \"classified_leaves\": [\n    \"vessence/deployment/docker.md\",\n    \"vessence/architecture/web_server.md\",\n    \"vessence/config/environment.md\"\n  ],\n  \"grep_keywords\": [\n    \"docker\",\n    \"deployment\",\n    \"setup\"\n  ],\n  \"ack\": \"I can certainly help you review the steps and configurations needed for a Docker deployment.\"\n}\n```",
+            "error": null,
+            "evaluation": {
+              "score": 0.5,
+              "hits": 1,
+              "misses": 1,
+              "classified": [
+                "vessence/deployment/docker.md",
+                "vessence/architecture/web_server.md",
+                "vessence/config/environment.md"
+              ],
+              "expected": [
+                "vessence/deployment/docker",
+                "knowledge/technical/devops"
+              ]
+            }
+          },
+          {
+            "elapsed_ms": 5902,
+            "prompt_tokens_est": 838,
+            "response_tokens_est": 84,
+            "total_tokens_est": 922,
+            "classified_leaves": [
+              "vessence/deployment/docker.md",
+              "vessence/architecture/web_server.md",
+              "vessence/config/environment.md"
+            ],
+            "grep_keywords": [
+              "Docker",
+              "deployment",
+              "container setup"
+            ],
+            "ack": "I can certainly help you find the documentation on setting up the Docker deployment.",
+            "raw_response": "```json\n{\n  \"classified_leaves\": [\n    \"vessence/deployment/docker.md\",\n    \"vessence/architecture/web_server.md\",\n    \"vessence/config/environment.md\"\n  ],\n  \"grep_keywords\": [\n    \"Docker\",\n    \"deployment\",\n    \"container setup\"\n  ],\n  \"ack\": \"I can certainly help you find the documentation on setting up the Docker deployment.\"\n}\n```",
+            "error": null,
+            "evaluation": {
+              "score": 0.5,
+              "hits": 1,
+              "misses": 1,
+              "classified": [
+                "vessence/deployment/docker.md",
+                "vessence/architecture/web_server.md",
+                "vessence/config/environment.md"
+              ],
+              "expected": [
+                "vessence/deployment/docker",
+                "knowledge/technical/devops"
+              ]
+            }
+          },
+          {
+            "elapsed_ms": 6450,
+            "prompt_tokens_est": 838,
+            "response_tokens_est": 88,
+            "total_tokens_est": 926,
+            "classified_leaves": [
+              "vessence/deployment/docker.md",
+              "vessence/config/environment.md",
+              "vessence/architecture/web_server.md"
+            ],
+            "grep_keywords": [
+              "Docker setup",
+              "deployment guide",
+              "containerization"
+            ],
+            "ack": "I can certainly help you find the documentation on setting up your Docker deployment.",
+            "raw_response": "```json\n{\n  \"classified_leaves\": [\n    \"vessence/deployment/docker.md\",\n    \"vessence/config/environment.md\",\n    \"vessence/architecture/web_server.md\"\n  ],\n  \"grep_keywords\": [\n    \"Docker setup\",\n    \"deployment guide\",\n    \"containerization\"\n  ],\n  \"ack\": \"I can certainly help you find the documentation on setting up your Docker deployment.\"\n}\n```",
+            "error": null,
+            "evaluation": {
+              "score": 0.5,
+              "hits": 1,
+              "misses": 1,
+              "classified": [
+                "vessence/deployment/docker.md",
+                "vessence/config/environment.md",
+                "vessence/architecture/web_server.md"
+              ],
+              "expected": [
+                "vessence/deployment/docker",
+                "knowledge/technical/devops"
+              ]
+            }
+          }
+        ],
+        "error_count": 0
+      },
+      {
+        "test_id": "vague",
+        "prompt": "Tell me about that thing we talked about yesterday",
+        "avg_latency_ms": -1,
+        "avg_classification_score": 0.0,
+        "rounds": [
+          {
+            "elapsed_ms": 6792,
+            "prompt_tokens_est": 840,
+            "response_tokens_est": 24,
+            "total_tokens_est": 864,
+            "classified_leaves": [],
+            "grep_keywords": [],
+            "ack": "",
+            "raw_response": "```json\n{\n  \"classified_leaves\": [\n    \"topics/recent_discussions.md\",\n    \"conversations/patterns/",
+            "error": "JSON parse failed: ```json\n{\n  \"classified_leaves\": [\n    \"topics/recent_discussions.md\",\n    \"conversations/patterns/",
+            "evaluation": {
+              "score": 0.0,
+              "hits": 0,
+              "misses": 1
+            }
+          },
+          {
+            "elapsed_ms": 6834,
+            "prompt_tokens_est": 840,
+            "response_tokens_est": 17,
+            "total_tokens_est": 857,
+            "classified_leaves": [],
+            "grep_keywords": [],
+            "ack": "",
+            "raw_response": "```json\n{\n  \"classified_leaves\": [\n    \"conversations/topics/recent_dis",
+            "error": "JSON parse failed: ```json\n{\n  \"classified_leaves\": [\n    \"conversations/topics/recent_dis",
+            "evaluation": {
+              "score": 0.0,
+              "hits": 0,
+              "misses": 1
+            }
+          },
+          {
+            "elapsed_ms": 6999,
+            "prompt_tokens_est": 840,
+            "response_tokens_est": 40,
+            "total_tokens_est": 880,
+            "classified_leaves": [],
+            "grep_keywords": [],
+            "ack": "",
+            "raw_response": "```json\n{\n  \"classified_leaves\": [\n    \"topics/recent_discussions.md\",\n    \"conversations/patterns/common_requests.md\",\n    \"topics/decisions_made.md\"\n  ],\n  \"grep",
+            "error": "JSON parse failed: ```json\n{\n  \"classified_leaves\": [\n    \"topics/recent_discussions.md\",\n    \"conversations/patterns/common_requests.md\",\n    \"topics/decisions_made.md\"\n  ],\n  \"grep",
+            "evaluation": {
+              "score": 0.0,
+              "hits": 0,
+              "misses": 1
+            }
+          }
+        ],
+        "error_count": 3
+      }
+    ]
+  },
+  "compact_100": {
+    "leaf_count": 100,
+    "format": "compact",
+    "index_chars": 6961,
+    "index_tokens_est": 1740,
+    "model": "gemma4:e4b",
+    "avg_latency_ms": 6509,
+    "avg_classification_score": 0.7,
+    "tests": [
+      {
+        "test_id": "simple_recall",
+        "prompt": "What's my work schedule like?",
+        "avg_latency_ms": 6635,
+        "avg_classification_score": 1.0,
+        "rounds": [
+          {
+            "elapsed_ms": 7231,
+            "prompt_tokens_est": 1872,
+            "response_tokens_est": 82,
+            "total_tokens_est": 1954,
+            "classified_leaves": [
+              "user_info/personal/daily_routine.md",
+              "user_info/work/meetings.md",
+              "user_info/work/role.md"
+            ],
+            "grep_keywords": [
+              "schedule",
+              "routine",
+              "meeting"
+            ],
+            "ack": "I can certainly look up your work schedule by checking your daily routines and meeting details.",
+            "raw_response": "```json\n{\n  \"classified_leaves\": [\n    \"user_info/personal/daily_routine.md\",\n    \"user_info/work/meetings.md\",\n    \"user_info/work/role.md\"\n  ],\n  \"grep_keywords\": [\n    \"schedule\",\n    \"routine\",\n    \"meeting\"\n  ],\n  \"ack\": \"I can certainly look up your work schedule by checking your daily routines and meeting details.\"\n}\n```",
+            "error": null,
+            "evaluation": {
+              "score": 1.0,
+              "hits": 2,
+              "misses": 0,
+              "classified": [
+                "user_info/personal/daily_routine.md",
+                "user_info/work/meetings.md",
+                "user_info/work/role.md"
+              ],
+              "expected": [
+                "user_info/work",
+                "user_info/personal/daily_routine"
+              ]
+            }
+          },
+          {
+            "elapsed_ms": 6719,
+            "prompt_tokens_est": 1872,
+            "response_tokens_est": 77,
+            "total_tokens_est": 1949,
+            "classified_leaves": [
+              "user_info/work/meetings.md",
+              "user_info/personal/daily_routine.md"
+            ],
+            "grep_keywords": [
+              "schedule",
+              "meeting",
+              "routine"
+            ],
+            "ack": "I can help you review your work and personal schedules by checking your meeting notes and daily routines.",
+            "raw_response": "```json\n{\n  \"classified_leaves\": [\n    \"user_info/work/meetings.md\",\n    \"user_info/personal/daily_routine.md\"\n  ],\n  \"grep_keywords\": [\n    \"schedule\",\n    \"meeting\",\n    \"routine\"\n  ],\n  \"ack\": \"I can help you review your work and personal schedules by checking your meeting notes and daily routines.\"\n}\n```",
+            "error": null,
+            "evaluation": {
+              "score": 1.0,
+              "hits": 2,
+              "misses": 0,
+              "classified": [
+                "user_info/work/meetings.md",
+                "user_info/personal/daily_routine.md"
+              ],
+              "expected": [
+                "user_info/work",
+                "user_info/personal/daily_routine"
+              ]
+            }
+          },
+          {
+            "elapsed_ms": 5957,
+            "prompt_tokens_est": 1872,
+            "response_tokens_est": 84,
+            "total_tokens_est": 1956,
+            "classified_leaves": [
+              "user_info/work/meetings.md",
+              "user_info/personal/daily_routine.md",
+              "conversations/patterns/workflow_prefs.md"
+            ],
+            "grep_keywords": [
+              "schedule",
+              "meeting",
+              "routine"
+            ],
+            "ack": "I can check your stored information regarding your work schedule and daily routines.",
+            "raw_response": "```json\n{\n  \"classified_leaves\": [\n    \"user_info/work/meetings.md\",\n    \"user_info/personal/daily_routine.md\",\n    \"conversations/patterns/workflow_prefs.md\"\n  ],\n  \"grep_keywords\": [\n    \"schedule\",\n    \"meeting\",\n    \"routine\"\n  ],\n  \"ack\": \"I can check your stored information regarding your work schedule and daily routines.\"\n}\n```",
+            "error": null,
+            "evaluation": {
+              "score": 1.0,
+              "hits": 2,
+              "misses": 0,
+              "classified": [
+                "user_info/work/meetings.md",
+                "user_info/personal/daily_routine.md",
+                "conversations/patterns/workflow_prefs.md"
+              ],
+              "expected": [
+                "user_info/work",
+                "user_info/personal/daily_routine"
+              ]
+            }
+          }
+        ],
+        "error_count": 0
+      },
+      {
+        "test_id": "cross_domain",
+        "prompt": "How does the memory system work and what changes have we discussed?",
+        "avg_latency_ms": 6916,
+        "avg_classification_score": 0.0,
+        "rounds": [
+          {
+            "elapsed_ms": 6916,
+            "prompt_tokens_est": 1882,
+            "response_tokens_est": 0,
+            "total_tokens_est": 1882,
+            "classified_leaves": [],
+            "grep_keywords": [],
+            "ack": "",
+            "raw_response": "",
+            "error": null,
+            "evaluation": {
+              "score": 0.0,
+              "hits": 0,
+              "misses": 2
+            }
+          },
+          {
+            "elapsed_ms": 6921,
+            "prompt_tokens_est": 1882,
+            "response_tokens_est": 30,
+            "total_tokens_est": 1912,
+            "classified_leaves": [],
+            "grep_keywords": [],
+            "ack": "",
+            "raw_response": "```json\n{\n  \"classified_leaves\": [\n    \"vessence/architecture/memory_system.md\",\n    \"conversations/recent_discussions.md",
+            "error": "JSON parse failed: ```json\n{\n  \"classified_leaves\": [\n    \"vessence/architecture/memory_system.md\",\n    \"conversations/recent_discussions.md",
+            "evaluation": {
+              "score": 0.0,
+              "hits": 0,
+              "misses": 2
+            }
+          },
+          {
+            "elapsed_ms": 6887,
+            "prompt_tokens_est": 1882,
+            "response_tokens_est": 59,
+            "total_tokens_est": 1941,
+            "classified_leaves": [],
+            "grep_keywords": [],
+            "ack": "",
+            "raw_response": "```json\n{\n  \"classified_leaves\": [\n    \"vessence/architecture/memory_system.md\",\n    \"conversations/recent_discussions.md\",\n    \"vessence/architecture/recent_project_guide_30.md\"\n  ],\n  \"grep_keywords\": [\n    \"memory system\",\n    \"how it",
+            "error": "JSON parse failed: ```json\n{\n  \"classified_leaves\": [\n    \"vessence/architecture/memory_system.md\",\n    \"conversations/recent_discussions.md\",\n    \"vessence/architecture/recent_project_guide_30.md\"\n  ],\n  \"grep_keywords",
+            "evaluation": {
+              "score": 0.0,
+              "hits": 0,
+              "misses": 2
+            }
+          }
+        ],
+        "error_count": 2
+      },
+      {
+        "test_id": "specific_lookup",
+        "prompt": "What's Bob's phone number?",
+        "avg_latency_ms": 6884,
+        "avg_classification_score": 0.0,
+        "rounds": [
+          {
+            "elapsed_ms": 6864,
+            "prompt_tokens_est": 1872,
+            "response_tokens_est": 39,
+            "total_tokens_est": 1911,
+            "classified_leaves": [],
+            "grep_keywords": [],
+            "ack": "",
+            "raw_response": "```json\n{\n  \"classified_leaves\": [\n    \"user_info/relationships/contacts.md\",\n    \"user_info/personal/background.md\"\n  ],\n  \"grep_keywords\": [\n    \"Bob\",\n    \"",
+            "error": "JSON parse failed: ```json\n{\n  \"classified_leaves\": [\n    \"user_info/relationships/contacts.md\",\n    \"user_info/personal/background.md\"\n  ],\n  \"grep_keywords\": [\n    \"Bob\",\n    \"",
+            "evaluation": {
+              "score": 0.0,
+              "hits": 0,
+              "misses": 2
+            }
+          },
+          {
+            "elapsed_ms": 6884,
+            "prompt_tokens_est": 1872,
+            "response_tokens_est": 0,
+            "total_tokens_est": 1872,
+            "classified_leaves": [],
+            "grep_keywords": [],
+            "ack": "",
+            "raw_response": "",
+            "error": null,
+            "evaluation": {
+              "score": 0.0,
+              "hits": 0,
+              "misses": 2
+            }
+          },
+          {
+            "elapsed_ms": 6782,
+            "prompt_tokens_est": 1872,
+            "response_tokens_est": 51,
+            "total_tokens_est": 1923,
+            "classified_leaves": [],
+            "grep_keywords": [],
+            "ack": "",
+            "raw_response": "```json\n{\n  \"classified_leaves\": [\n    \"user_info/relationships/contacts.md\",\n    \"user_info/personal/background.md\",\n    \"user_info/relationships/friends.md\"\n  ],\n  \"grep_keywords\": [\n    \"Bob\",\n    \"phone",
+            "error": "JSON parse failed: ```json\n{\n  \"classified_leaves\": [\n    \"user_info/relationships/contacts.md\",\n    \"user_info/personal/background.md\",\n    \"user_info/relationships/friends.md\"\n  ],\n  \"grep_keywords\": [\n    \"Bob\",\n    ",
+            "evaluation": {
+              "score": 0.0,
+              "hits": 0,
+              "misses": 2
+            }
+          }
+        ],
+        "error_count": 2
+      },
+      {
+        "test_id": "technical",
+        "prompt": "Show me how to set up the Docker deployment",
+        "avg_latency_ms": 5855,
+        "avg_classification_score": 1.0,
+        "rounds": [
+          {
+            "elapsed_ms": 5572,
+            "prompt_tokens_est": 1876,
+            "response_tokens_est": 79,
+            "total_tokens_est": 1955,
+            "classified_leaves": [
+              "vessence/deployment/docker.md",
+              "vessence/deployment/draft_deploy_notes_44.md",
+              "technical/devops.md"
+            ],
+            "grep_keywords": [
+              "Docker",
+              "deployment",
+              "setup"
+            ],
+            "ack": "I can certainly help you find the steps for setting up the Docker deployment.",
+            "raw_response": "```json\n{\n  \"classified_leaves\": [\n    \"vessence/deployment/docker.md\",\n    \"vessence/deployment/draft_deploy_notes_44.md\",\n    \"technical/devops.md\"\n  ],\n  \"grep_keywords\": [\n    \"Docker\",\n    \"deployment\",\n    \"setup\"\n  ],\n  \"ack\": \"I can certainly help you find the steps for setting up the Docker deployment.\"\n}\n```",
+            "error": null,
+            "evaluation": {
+              "score": 1.0,
+              "hits": 2,
+              "misses": 0,
+              "classified": [
+                "vessence/deployment/docker.md",
+                "vessence/deployment/draft_deploy_notes_44.md",
+                "technical/devops.md"
+              ],
+              "expected": [
+                "vessence/deployment/docker",
+                "knowledge/technical/devops"
+              ]
+            }
+          },
+          {
+            "elapsed_ms": 6139,
+            "prompt_tokens_est": 1876,
+            "response_tokens_est": 77,
+            "total_tokens_est": 1953,
+            "classified_leaves": [
+              "vessence/deployment/docker.md",
+              "technical/devops.md",
+              "vessence/deployment/updates.md"
+            ],
+            "grep_keywords": [
+              "Docker",
+              "deployment",
+              "setup"
+            ],
+            "ack": "I can help you find the instructions for setting up the Docker deployment process.",
+            "raw_response": "```json\n{\n  \"classified_leaves\": [\n    \"vessence/deployment/docker.md\",\n    \"technical/devops.md\",\n    \"vessence/deployment/updates.md\"\n  ],\n  \"grep_keywords\": [\n    \"Docker\",\n    \"deployment\",\n    \"setup\"\n  ],\n  \"ack\": \"I can help you find the instructions for setting up the Docker deployment process.\"\n}\n```",
+            "error": null,
+            "evaluation": {
+              "score": 1.0,
+              "hits": 2,
+              "misses": 0,
+              "classified": [
+                "vessence/deployment/docker.md",
+                "technical/devops.md",
+                "vessence/deployment/updates.md"
+              ],
+              "expected": [
+                "vessence/deployment/docker",
+                "knowledge/technical/devops"
+              ]
+            }
+          },
+          {
+            "elapsed_ms": 6847,
+            "prompt_tokens_est": 1876,
+            "response_tokens_est": 43,
+            "total_tokens_est": 1919,
+            "classified_leaves": [],
+            "grep_keywords": [],
+            "ack": "",
+            "raw_response": "```json\n{\n  \"classified_leaves\": [\n    \"vessence/deployment/docker.md\",\n    \"vessence/deployment/draft_deploy_notes_44.md\",\n    \"vessence/deployment/updates.md\"\n  ],\n  \"grep_",
+            "error": "JSON parse failed: ```json\n{\n  \"classified_leaves\": [\n    \"vessence/deployment/docker.md\",\n    \"vessence/deployment/draft_deploy_notes_44.md\",\n    \"vessence/deployment/updates.md\"\n  ],\n  \"grep_",
+            "evaluation": {
+              "score": 0.0,
+              "hits": 0,
+              "misses": 2
+            }
+          }
+        ],
+        "error_count": 1
+      },
+      {
+        "test_id": "vague",
+        "prompt": "Tell me about that thing we talked about yesterday",
+        "avg_latency_ms": 6559,
+        "avg_classification_score": 0.67,
+        "rounds": [
+          {
+            "elapsed_ms": 6470,
+            "prompt_tokens_est": 1878,
+            "response_tokens_est": 87,
+            "total_tokens_est": 1965,
+            "classified_leaves": [
+              "conversations/recent_discussions.md",
+              "topics/recent_discussions.md",
+              "vessence/features/recent_meeting_summary_29.md"
+            ],
+            "grep_keywords": [
+              "yesterday",
+              "discussed",
+              "recent"
+            ],
+            "ack": "I can check our recent discussions to remind you about what we talked about yesterday.",
+            "raw_response": "```json\n{\n  \"classified_leaves\": [\n    \"conversations/recent_discussions.md\",\n    \"topics/recent_discussions.md\",\n    \"vessence/features/recent_meeting_summary_29.md\"\n  ],\n  \"grep_keywords\": [\n    \"yesterday\",\n    \"discussed\",\n    \"recent\"\n  ],\n  \"ack\": \"I can check our recent discussions to remind you about what we talked about yesterday.\"\n}\n```",
+            "error": null,
+            "evaluation": {
+              "score": 1.0,
+              "hits": 1,
+              "misses": 0,
+              "classified": [
+                "conversations/recent_discussions.md",
+                "topics/recent_discussions.md",
+                "vessence/features/recent_meeting_summary_29.md"
+              ],
+              "expected": [
+                "conversations/topics/recent_discussions"
+              ]
+            }
+          },
+          {
+            "elapsed_ms": 6853,
+            "prompt_tokens_est": 1878,
+            "response_tokens_est": 0,
+            "total_tokens_est": 1878,
+            "classified_leaves": [],
+            "grep_keywords": [],
+            "ack": "",
+            "raw_response": "",
+            "error": null,
+            "evaluation": {
+              "score": 0.0,
+              "hits": 0,
+              "misses": 1
+            }
+          },
+          {
+            "elapsed_ms": 6355,
+            "prompt_tokens_est": 1878,
+            "response_tokens_est": 90,
+            "total_tokens_est": 1968,
+            "classified_leaves": [
+              "conversations/topics/recent_discussions.md",
+              "conversations/patterns/common_requests.md",
+              "user_info/work/meetings.md"
+            ],
+            "grep_keywords": [
+              "yesterday",
+              "recent discussion",
+              "talked about"
+            ],
+            "ack": "I can check our recent discussions to remind you about what we talked about yesterday.",
+            "raw_response": "```json\n{\n  \"classified_leaves\": [\n    \"conversations/topics/recent_discussions.md\",\n    \"conversations/patterns/common_requests.md\",\n    \"user_info/work/meetings.md\"\n  ],\n  \"grep_keywords\": [\n    \"yesterday\",\n    \"recent discussion\",\n    \"talked about\"\n  ],\n  \"ack\": \"I can check our recent discussions to remind you about what we talked about yesterday.\"\n}\n```",
+            "error": null,
+            "evaluation": {
+              "score": 1.0,
+              "hits": 1,
+              "misses": 0,
+              "classified": [
+                "conversations/topics/recent_discussions.md",
+                "conversations/patterns/common_requests.md",
+                "user_info/work/meetings.md"
+              ],
+              "expected": [
+                "conversations/topics/recent_discussions"
+              ]
+            }
+          }
+        ],
+        "error_count": 0
+      }
+    ]
+  },
+  "compact_200": {
+    "leaf_count": 200,
+    "format": "compact",
+    "index_chars": 15659,
+    "index_tokens_est": 3914,
+    "model": "gemma4:e4b",
+    "avg_latency_ms": 7325,
+    "avg_classification_score": 0.11,
+    "tests": [
+      {
+        "test_id": "simple_recall",
+        "prompt": "What's my work schedule like?",
+        "avg_latency_ms": 7044,
+        "avg_classification_score": 0.5,
+        "rounds": [
+          {
+            "elapsed_ms": 8474,
+            "prompt_tokens_est": 4047,
+            "response_tokens_est": 29,
+            "total_tokens_est": 4076,
+            "classified_leaves": [],
+            "grep_keywords": [],
+            "ack": "",
+            "raw_response": "```json\n{\n  \"classified_leaves\": [\n    \"user_info/personal/daily_routine.md\",\n    \"user_info/work/meetings.md\",\n    \"v",
+            "error": "JSON parse failed: ```json\n{\n  \"classified_leaves\": [\n    \"user_info/personal/daily_routine.md\",\n    \"user_info/work/meetings.md\",\n    \"v",
+            "evaluation": {
+              "score": 0.0,
+              "hits": 0,
+              "misses": 2
+            }
+          },
+          {
+            "elapsed_ms": 7231,
+            "prompt_tokens_est": 4047,
+            "response_tokens_est": 0,
+            "total_tokens_est": 4047,
+            "classified_leaves": [],
+            "grep_keywords": [],
+            "ack": "",
+            "raw_response": "",
+            "error": null,
+            "evaluation": {
+              "score": 0.0,
+              "hits": 0,
+              "misses": 2
+            }
+          },
+          {
+            "elapsed_ms": 6858,
+            "prompt_tokens_est": 4047,
+            "response_tokens_est": 83,
+            "total_tokens_est": 4130,
+            "classified_leaves": [
+              "user_info/personal/daily_routine.md",
+              "user_info/work/meetings.md",
+              "conversations/workflow_prefs.md"
+            ],
+            "grep_keywords": [
+              "schedule",
+              "routine",
+              "meeting"
+            ],
+            "ack": "I can check your stored information regarding your daily routine and work meeting schedules.",
+            "raw_response": "```json\n{\n  \"classified_leaves\": [\n    \"user_info/personal/daily_routine.md\",\n    \"user_info/work/meetings.md\",\n    \"conversations/workflow_prefs.md\"\n  ],\n  \"grep_keywords\": [\n    \"schedule\",\n    \"routine\",\n    \"meeting\"\n  ],\n  \"ack\": \"I can check your stored information regarding your daily routine and work meeting schedules.\"\n}\n```",
+            "error": null,
+            "evaluation": {
+              "score": 1.0,
+              "hits": 2,
+              "misses": 0,
+              "classified": [
+                "user_info/personal/daily_routine.md",
+                "user_info/work/meetings.md",
+                "conversations/workflow_prefs.md"
+              ],
+              "expected": [
+                "user_info/work",
+                "user_info/personal/daily_routine"
+              ]
+            }
+          }
+        ],
+        "error_count": 1
+      },
+      {
+        "test_id": "cross_domain",
+        "prompt": "How does the memory system work and what changes have we discussed?",
+        "avg_latency_ms": 7340,
+        "avg_classification_score": 0.0,
+        "rounds": [
+          {
+            "elapsed_ms": 7340,
+            "prompt_tokens_est": 4056,
+            "response_tokens_est": 0,
+            "total_tokens_est": 4056,
+            "classified_leaves": [],
+            "grep_keywords": [],
+            "ack": "",
+            "raw_response": "",
+            "error": null,
+            "evaluation": {
+              "score": 0.0,
+              "hits": 0,
+              "misses": 2
+            }
+          },
+          {
+            "elapsed_ms": 7925,
+            "prompt_tokens_est": 4056,
+            "response_tokens_est": 12,
+            "total_tokens_est": 4068,
+            "classified_leaves": [],
+            "grep_keywords": [],
+            "ack": "",
+            "raw_response": "```json\n{\n  \"classified_leaves\": [\n    \"vessence/",
+            "error": "JSON parse failed: ```json\n{\n  \"classified_leaves\": [\n    \"vessence/",
+            "evaluation": {
+              "score": 0.0,
+              "hits": 0,
+              "misses": 2
+            }
+          },
+          {
+            "elapsed_ms": 7959,
+            "prompt_tokens_est": 4056,
+            "response_tokens_est": 41,
+            "total_tokens_est": 4097,
+            "classified_leaves": [],
+            "grep_keywords": [],
+            "ack": "",
+            "raw_response": "```json\n{\n  \"classified_leaves\": [\n    \"vessence/architecture/memory_system.md\",\n    \"topics/recent_discussions.md\",\n    \"vessence/config/important_review_summary_37",
+            "error": "JSON parse failed: ```json\n{\n  \"classified_leaves\": [\n    \"vessence/architecture/memory_system.md\",\n    \"topics/recent_discussions.md\",\n    \"vessence/config/important_review_summary_37",
+            "evaluation": {
+              "score": 0.0,
+              "hits": 0,
+              "misses": 2
+            }
+          }
+        ],
+        "error_count": 2
+      },
+      {
+        "test_id": "specific_lookup",
+        "prompt": "What's Bob's phone number?",
+        "avg_latency_ms": 7662,
+        "avg_classification_score": 0.0,
+        "rounds": [
+          {
+            "elapsed_ms": 7892,
+            "prompt_tokens_est": 4046,
+            "response_tokens_est": 0,
+            "total_tokens_est": 4046,
+            "classified_leaves": [],
+            "grep_keywords": [],
+            "ack": "",
+            "raw_response": "",
+            "error": null,
+            "evaluation": {
+              "score": 0.0,
+              "hits": 0,
+              "misses": 2
+            }
+          },
+          {
+            "elapsed_ms": 7432,
+            "prompt_tokens_est": 4046,
+            "response_tokens_est": 0,
+            "total_tokens_est": 4046,
+            "classified_leaves": [],
+            "grep_keywords": [],
+            "ack": "",
+            "raw_response": "",
+            "error": null,
+            "evaluation": {
+              "score": 0.0,
+              "hits": 0,
+              "misses": 2
+            }
+          },
+          {
+            "elapsed_ms": 7262,
+            "prompt_tokens_est": 4046,
+            "response_tokens_est": 36,
+            "total_tokens_est": 4082,
+            "classified_leaves": [],
+            "grep_keywords": [],
+            "ack": "",
+            "raw_response": "```json\n{\n  \"classified_leaves\": [\n    \"user_info/relationships/contacts.md\",\n    \"user_info/personal/background.md\",\n    \"user_info/relationships",
+            "error": "JSON parse failed: ```json\n{\n  \"classified_leaves\": [\n    \"user_info/relationships/contacts.md\",\n    \"user_info/personal/background.md\",\n    \"user_info/relationships",
+            "evaluation": {
+              "score": 0.0,
+              "hits": 0,
+              "misses": 2
+            }
+          }
+        ],
+        "error_count": 1
+      },
+      {
+        "test_id": "technical",
+        "prompt": "Show me how to set up the Docker deployment",
+        "avg_latency_ms": 7153,
+        "avg_classification_score": 0.0,
+        "rounds": [
+          {
+            "elapsed_ms": 7153,
+            "prompt_tokens_est": 4050,
+            "response_tokens_est": 0,
+            "total_tokens_est": 4050,
+            "classified_leaves": [],
+            "grep_keywords": [],
+            "ack": "",
+            "raw_response": "",
+            "error": null,
+            "evaluation": {
+              "score": 0.0,
+              "hits": 0,
+              "misses": 2
+            }
+          },
+          {
+            "elapsed_ms": 7059,
+            "prompt_tokens_est": 4050,
+            "response_tokens_est": 6,
+            "total_tokens_est": 4056,
+            "classified_leaves": [],
+            "grep_keywords": [],
+            "ack": "",
+            "raw_response": "```json\n{\n  \"classified_",
+            "error": "JSON parse failed: ```json\n{\n  \"classified_",
+            "evaluation": {
+              "score": 0.0,
+              "hits": 0,
+              "misses": 2
+            }
+          },
+          {
+            "elapsed_ms": 7142,
+            "prompt_tokens_est": 4050,
+            "response_tokens_est": 60,
+            "total_tokens_est": 4110,
+            "classified_leaves": [],
+            "grep_keywords": [],
+            "ack": "",
+            "raw_response": "```json\n{\n  \"classified_leaves\": [\n    \"vessence/deployment/docker.md\",\n    \"conversations/patterns/core_deploy_notes_141.md\",\n    \"external/links/core_deploy_config_55.md\"\n  ],\n  \"grep_keywords\": [\n    \"Docker\",\n    \"deployment\",\n    \"setup\"",
+            "error": "JSON parse failed: ```json\n{\n  \"classified_leaves\": [\n    \"vessence/deployment/docker.md\",\n    \"conversations/patterns/core_deploy_notes_141.md\",\n    \"external/links/core_deploy_config_55.md\"\n  ],\n  \"grep_keywords\": [\n ",
+            "evaluation": {
+              "score": 0.0,
+              "hits": 0,
+              "misses": 2
+            }
+          }
+        ],
+        "error_count": 2
+      },
+      {
+        "test_id": "vague",
+        "prompt": "Tell me about that thing we talked about yesterday",
+        "avg_latency_ms": 7340,
+        "avg_classification_score": 0.0,
+        "rounds": [
+          {
+            "elapsed_ms": 7328,
+            "prompt_tokens_est": 4052,
+            "response_tokens_est": 0,
+            "total_tokens_est": 4052,
+            "classified_leaves": [],
+            "grep_keywords": [],
+            "ack": "",
+            "raw_response": "",
+            "error": null,
+            "evaluation": {
+              "score": 0.0,
+              "hits": 0,
+              "misses": 1
+            }
+          },
+          {
+            "elapsed_ms": 7468,
+            "prompt_tokens_est": 4052,
+            "response_tokens_est": 0,
+            "total_tokens_est": 4052,
+            "classified_leaves": [],
+            "grep_keywords": [],
+            "ack": "",
+            "raw_response": "",
+            "error": null,
+            "evaluation": {
+              "score": 0.0,
+              "hits": 0,
+              "misses": 1
+            }
+          },
+          {
+            "elapsed_ms": 7226,
+            "prompt_tokens_est": 4052,
+            "response_tokens_est": 0,
+            "total_tokens_est": 4052,
+            "classified_leaves": [],
+            "grep_keywords": [],
+            "ack": "",
+            "raw_response": "",
+            "error": null,
+            "evaluation": {
+              "score": 0.0,
+              "hits": 0,
+              "misses": 1
+            }
+          }
+        ],
+        "error_count": 0
+      }
+    ]
+  },
+  "compact_300": {
+    "leaf_count": 300,
+    "format": "compact",
+    "index_chars": 24457,
+    "index_tokens_est": 6114,
+    "model": "gemma4:e4b",
+    "avg_latency_ms": 7124,
+    "avg_classification_score": 0.18,
+    "tests": [
+      {
+        "test_id": "simple_recall",
+        "prompt": "What's my work schedule like?",
+        "avg_latency_ms": 7234,
+        "avg_classification_score": 0.0,
+        "rounds": [
+          {
+            "elapsed_ms": 12090,
+            "prompt_tokens_est": 6246,
+            "response_tokens_est": 33,
+            "total_tokens_est": 6279,
+            "classified_leaves": [],
+            "grep_keywords": [],
+            "ack": "",
+            "raw_response": "```json\n{\n  \"classified_leaves\": [\n    \"personal/daily_routine.md\",\n    \"work/meetings.md\",\n    \"reviewed_meeting_tracker_186.md\"\n  ],",
+            "error": "JSON parse failed: ```json\n{\n  \"classified_leaves\": [\n    \"personal/daily_routine.md\",\n    \"work/meetings.md\",\n    \"reviewed_meeting_tracker_186.md\"\n  ],",
+            "evaluation": {
+              "score": 0.0,
+              "hits": 0,
+              "misses": 2
+            }
+          },
+          {
+            "elapsed_ms": 7234,
+            "prompt_tokens_est": 6246,
+            "response_tokens_est": 0,
+            "total_tokens_est": 6246,
+            "classified_leaves": [],
+            "grep_keywords": [],
+            "ack": "",
+            "raw_response": "",
+            "error": null,
+            "evaluation": {
+              "score": 0.0,
+              "hits": 0,
+              "misses": 2
+            }
+          },
+          {
+            "elapsed_ms": 7245,
+            "prompt_tokens_est": 6246,
+            "response_tokens_est": 48,
+            "total_tokens_est": 6294,
+            "classified_leaves": [],
+            "grep_keywords": [],
+            "ack": "",
+            "raw_response": "```json\n{\n  \"classified_leaves\": [\n    \"work/meetings.md\",\n    \"personal/daily_routine.md\",\n    \"work/role.md\"\n  ],\n  \"grep_keywords\": [\n    \"schedule\",\n    \"routine\",\n    \"meeting\"\n  ],\n  \"ack\":",
+            "error": "JSON parse failed: ```json\n{\n  \"classified_leaves\": [\n    \"work/meetings.md\",\n    \"personal/daily_routine.md\",\n    \"work/role.md\"\n  ],\n  \"grep_keywords\": [\n    \"schedule\",\n    \"routine\",\n    \"meeting\"\n  ],\n  \"ack\":",
+            "evaluation": {
+              "score": 0.0,
+              "hits": 0,
+              "misses": 2
+            }
+          }
+        ],
+        "error_count": 2
+      },
+      {
+        "test_id": "cross_domain",
+        "prompt": "How does the memory system work and what changes have we discussed?",
+        "avg_latency_ms": 7241,
+        "avg_classification_score": 0.0,
+        "rounds": [
+          {
+            "elapsed_ms": 7287,
+            "prompt_tokens_est": 6256,
+            "response_tokens_est": 0,
+            "total_tokens_est": 6256,
+            "classified_leaves": [],
+            "grep_keywords": [],
+            "ack": "",
+            "raw_response": "",
+            "error": null,
+            "evaluation": {
+              "score": 0.0,
+              "hits": 0,
+              "misses": 2
+            }
+          },
+          {
+            "elapsed_ms": 7178,
+            "prompt_tokens_est": 6256,
+            "response_tokens_est": 0,
+            "total_tokens_est": 6256,
+            "classified_leaves": [],
+            "grep_keywords": [],
+            "ack": "",
+            "raw_response": "",
+            "error": null,
+            "evaluation": {
+              "score": 0.0,
+              "hits": 0,
+              "misses": 2
+            }
+          },
+          {
+            "elapsed_ms": 7259,
+            "prompt_tokens_est": 6256,
+            "response_tokens_est": 0,
+            "total_tokens_est": 6256,
+            "classified_leaves": [],
+            "grep_keywords": [],
+            "ack": "",
+            "raw_response": "",
+            "error": null,
+            "evaluation": {
+              "score": 0.0,
+              "hits": 0,
+              "misses": 2
+            }
+          }
+        ],
+        "error_count": 0
+      },
+      {
+        "test_id": "specific_lookup",
+        "prompt": "What's Bob's phone number?",
+        "avg_latency_ms": 7121,
+        "avg_classification_score": 0.0,
+        "rounds": [
+          {
+            "elapsed_ms": 7043,
+            "prompt_tokens_est": 6246,
+            "response_tokens_est": 0,
+            "total_tokens_est": 6246,
+            "classified_leaves": [],
+            "grep_keywords": [],
+            "ack": "",
+            "raw_response": "",
+            "error": null,
+            "evaluation": {
+              "score": 0.0,
+              "hits": 0,
+              "misses": 2
+            }
+          },
+          {
+            "elapsed_ms": 7200,
+            "prompt_tokens_est": 6246,
+            "response_tokens_est": 0,
+            "total_tokens_est": 6246,
+            "classified_leaves": [],
+            "grep_keywords": [],
+            "ack": "",
+            "raw_response": "",
+            "error": null,
+            "evaluation": {
+              "score": 0.0,
+              "hits": 0,
+              "misses": 2
+            }
+          },
+          {
+            "elapsed_ms": 7214,
+            "prompt_tokens_est": 6246,
+            "response_tokens_est": 54,
+            "total_tokens_est": 6300,
+            "classified_leaves": [],
+            "grep_keywords": [],
+            "ack": "",
+            "raw_response": "```json\n{\n  \"classified_leaves\": [\n    \"relationships/contacts.md\",\n    \"relationships/family.md\",\n    \"personal/background.md\"\n  ],\n  \"grep_keywords\": [\n    \"Bob\",\n    \"phone number\",\n    \"contact\"\n  ],\n  \"ack\": \"I can",
+            "error": "JSON parse failed: ```json\n{\n  \"classified_leaves\": [\n    \"relationships/contacts.md\",\n    \"relationships/family.md\",\n    \"personal/background.md\"\n  ],\n  \"grep_keywords\": [\n    \"Bob\",\n    \"phone number\",\n    \"contact\"\n ",
+            "evaluation": {
+              "score": 0.0,
+              "hits": 0,
+              "misses": 2
+            }
+          }
+        ],
+        "error_count": 1
+      },
+      {
+        "test_id": "technical",
+        "prompt": "Show me how to set up the Docker deployment",
+        "avg_latency_ms": 6574,
+        "avg_classification_score": 1.0,
+        "rounds": [
+          {
+            "elapsed_ms": 6097,
+            "prompt_tokens_est": 6250,
+            "response_tokens_est": 78,
+            "total_tokens_est": 6328,
+            "classified_leaves": [
+              "deployment/docker.md",
+              "technical/devops.md",
+              "conversations/reviewed_deploy_spec_236.md"
+            ],
+            "grep_keywords": [
+              "Docker",
+              "deployment",
+              "setup"
+            ],
+            "ack": "I can certainly help you find the instructions for setting up the Docker deployment.",
+            "raw_response": "```json\n{\n  \"classified_leaves\": [\n    \"deployment/docker.md\",\n    \"technical/devops.md\",\n    \"conversations/reviewed_deploy_spec_236.md\"\n  ],\n  \"grep_keywords\": [\n    \"Docker\",\n    \"deployment\",\n    \"setup\"\n  ],\n  \"ack\": \"I can certainly help you find the instructions for setting up the Docker deployment.\"\n}\n```",
+            "error": null,
+            "evaluation": {
+              "score": 1.0,
+              "hits": 2,
+              "misses": 0,
+              "classified": [
+                "deployment/docker.md",
+                "technical/devops.md",
+                "conversations/reviewed_deploy_spec_236.md"
+              ],
+              "expected": [
+                "vessence/deployment/docker",
+                "knowledge/technical/devops"
+              ]
+            }
+          },
+          {
+            "elapsed_ms": 7052,
+            "prompt_tokens_est": 6250,
+            "response_tokens_est": 86,
+            "total_tokens_est": 6336,
+            "classified_leaves": [
+              "deployment/docker.md",
+              "technical/devops.md",
+              "deployment/reviewed_deploy_guide_62.md"
+            ],
+            "grep_keywords": [
+              "Docker",
+              "deployment",
+              "container"
+            ],
+            "ack": "I can help you find the documentation on setting up Docker deployments using the relevant guides and specifications.",
+            "raw_response": "```json\n{\n  \"classified_leaves\": [\n    \"deployment/docker.md\",\n    \"technical/devops.md\",\n    \"deployment/reviewed_deploy_guide_62.md\"\n  ],\n  \"grep_keywords\": [\n    \"Docker\",\n    \"deployment\",\n    \"container\"\n  ],\n  \"ack\": \"I can help you find the documentation on setting up Docker deployments using the relevant guides and specifications.\"\n}\n```",
+            "error": null,
+            "evaluation": {
+              "score": 1.0,
+              "hits": 2,
+              "misses": 0,
+              "classified": [
+                "deployment/docker.md",
+                "technical/devops.md",
+                "deployment/reviewed_deploy_guide_62.md"
+              ],
+              "expected": [
+                "vessence/deployment/docker",
+                "knowledge/technical/devops"
+              ]
+            }
+          },
+          {
+            "elapsed_ms": 7558,
+            "prompt_tokens_est": 6250,
+            "response_tokens_est": 64,
+            "total_tokens_est": 6314,
+            "classified_leaves": [],
+            "grep_keywords": [],
+            "ack": "",
+            "raw_response": "```json\n{\n  \"classified_leaves\": [\n    \"deployment/docker.md\",\n    \"technical/devops.md\",\n    \"deployment/reviewed_deploy_guide_62.md\"\n  ],\n  \"grep_keywords\": [\n    \"Docker\",\n    \"deployment\",\n    \"setup\"\n  ],\n  \"ack\": \"I can help you find the documentation",
+            "error": "JSON parse failed: ```json\n{\n  \"classified_leaves\": [\n    \"deployment/docker.md\",\n    \"technical/devops.md\",\n    \"deployment/reviewed_deploy_guide_62.md\"\n  ],\n  \"grep_keywords\": [\n    \"Docker\",\n    \"deployment\",\n    \"se",
+            "evaluation": {
+              "score": 0.0,
+              "hits": 0,
+              "misses": 2
+            }
+          }
+        ],
+        "error_count": 1
+      },
+      {
+        "test_id": "vague",
+        "prompt": "Tell me about that thing we talked about yesterday",
+        "avg_latency_ms": 7338,
+        "avg_classification_score": 0.0,
+        "rounds": [
+          {
+            "elapsed_ms": 7433,
+            "prompt_tokens_est": 6252,
+            "response_tokens_est": 0,
+            "total_tokens_est": 6252,
+            "classified_leaves": [],
+            "grep_keywords": [],
+            "ack": "",
+            "raw_response": "",
+            "error": null,
+            "evaluation": {
+              "score": 0.0,
+              "hits": 0,
+              "misses": 1
+            }
+          },
+          {
+            "elapsed_ms": 7331,
+            "prompt_tokens_est": 6252,
+            "response_tokens_est": 0,
+            "total_tokens_est": 6252,
+            "classified_leaves": [],
+            "grep_keywords": [],
+            "ack": "",
+            "raw_response": "",
+            "error": null,
+            "evaluation": {
+              "score": 0.0,
+              "hits": 0,
+              "misses": 1
+            }
+          },
+          {
+            "elapsed_ms": 7252,
+            "prompt_tokens_est": 6252,
+            "response_tokens_est": 0,
+            "total_tokens_est": 6252,
+            "classified_leaves": [],
+            "grep_keywords": [],
+            "ack": "",
+            "raw_response": "",
+            "error": null,
+            "evaluation": {
+              "score": 0.0,
+              "hits": 0,
+              "misses": 1
+            }
+          }
+        ],
+        "error_count": 0
+      }
+    ]
+  }
+}

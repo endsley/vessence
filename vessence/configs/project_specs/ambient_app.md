@@ -129,7 +129,7 @@ dev_dependencies:
 ### 4.2 Visual Theme
 
 > **🔬 Research Note (2026-04-03 — auto):**
-> Here's the technical note, Chieh.
+> Here's the technical note.
 > 
 > ---
 > 
@@ -2578,7 +2578,7 @@ tts = TTS("tts_models/multilingual/multi-dataset/xtts_v2").to("cuda")
 
 # Pre-compute and cache speaker embedding (run once)
 SPEAKER_EMBEDDING = None
-REFERENCE_AUDIO = "/home/chieh/ambient/vault/audio/amber_voice_reference.wav"
+REFERENCE_AUDIO = os.path.expanduser("~/ambient/vault/audio/amber_voice_reference.wav")
 
 @app.on_event("startup")
 def preload_speaker():
@@ -2930,7 +2930,7 @@ def test_daemon_process_starts_and_stops():
     """ambient_standby.py should start, run for 2 seconds, and exit cleanly on SIGTERM."""
     import subprocess, signal, time
     proc = subprocess.Popen(
-        ["python", "/home/chieh/vessence/agent_skills/ambient_standby.py", "--test-mode"],
+        ["python", "$VESSENCE_HOME/agent_skills/ambient_standby.py", "--test-mode"],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE
     )
     time.sleep(2)
@@ -3369,7 +3369,7 @@ class FakeAudioService implements AudioService {
 
 ## 10. Open Questions (Must Answer Before Coding)
 
-> **Visual / UI questions are not listed here.** All visual defaults (font: Inter 15px, accent: light green #86EFAC matching Chieh's preference, avatar: illustrated amber-toned circle, dark theme: ChatGPT-style #212121, code theme: VS Code Dark+, animations: Claude.ai-style smooth, density: comfortable, timestamps: hover-only, avatar: first-in-group only) are set to current industry best practice and made adjustable via `ThemeConfig` in settings. Change later if needed — no approval required.
+> **Visual / UI questions are not listed here.** All visual defaults (font: Inter 15px, accent: light green #86EFAC matching the user's preference, avatar: illustrated amber-toned circle, dark theme: ChatGPT-style #212121, code theme: VS Code Dark+, animations: Claude.ai-style smooth, density: comfortable, timestamps: hover-only, avatar: first-in-group only) are set to current industry best practice and made adjustable via `ThemeConfig` in settings. Change later if needed — no approval required.
 
 ---
 
@@ -3380,7 +3380,7 @@ class FakeAudioService implements AudioService {
 ---
 
 ### B. Network & Discovery
-3. **Remote access:** Tailscale mesh VPN (recommended — zero-config, works through NAT) vs Cloudflare Tunnel vs local-only? Each has trade-offs for latency, setup complexity, and whether Chieh wants Amber accessible from, e.g., Northeastern campus.
+3. **Remote access:** Tailscale mesh VPN (recommended — zero-config, works through NAT) vs Cloudflare Tunnel vs local-only? Each has trade-offs for latency, setup complexity, and whether the user wants Amber accessible from, e.g., a remote campus.
 4. **Server discovery:** Auto-detect Amber via mDNS/Bonjour on local network, or enter the IP once manually in settings? mDNS requires a running Avahi daemon on the Linux server.
 
 ---
@@ -3394,26 +3394,26 @@ class FakeAudioService implements AudioService {
 6. **History location:** Device-local SQLite (each device keeps its own history, simpler, no sync) vs server-side DB shared across devices (requires a sync API on the server side). Affects Phase 1 architecture significantly.
 7. **Multiple conversations or one thread?** Sidebar with named conversations (ChatGPT-style) vs a single continuous infinite scroll (iMessage-style). Determines whether conversations need titles, creation timestamps, and a delete flow.
 8. **Conversation title generation:** When a new conversation starts, auto-generate a title from the first message (requires a second LLM call) vs user types a title manually vs just use the date/time as default?
-9. **Context sent per message:** When Chieh sends a message in an existing conversation, does the app send the full conversation history to ADK each time (for continuity), or only the new message and rely on the ADK session to hold context? What is the max history depth to send before truncating?
-10. **Message editing:** Can Chieh edit a sent message? If yes, does re-submitting the edit re-run Amber's response and discard everything after that point (like Claude.ai), or append a new exchange below?
+9. **Context sent per message:** When the user sends a message in an existing conversation, does the app send the full conversation history to ADK each time (for continuity), or only the new message and rely on the ADK session to hold context? What is the max history depth to send before truncating?
+10. **Message editing:** Can the user edit a sent message? If yes, does re-submitting the edit re-run Amber's response and discard everything after that point (like Claude.ai), or append a new exchange below?
 11. **Message deletion:** Can individual messages be deleted from the local history? Does deleting a user message also delete the paired Amber response?
 12. **Conversation export:** Should the app support exporting a conversation as plain text, markdown, or PDF? If yes, triggered from where (long-press, overflow menu)?
-13. **Cross-device sync:** If Chieh runs the app on both Linux desktop and Android, should conversations sync between devices? If yes, what is the sync mechanism (server push, manual pull, realtime WebSocket)?
+13. **Cross-device sync:** If the user runs the app on both Linux desktop and Android, should conversations sync between devices? If yes, what is the sync mechanism (server push, manual pull, realtime WebSocket)?
 
 ---
 
 ### E. Input Behavior
 14. **Send key:** Enter to send (like most chat apps) vs Shift+Enter to send / Enter for newline (like Slack)? On mobile, the on-screen keyboard Send button always sends regardless.
 15. **Input history:** Arrow-up to recall the last sent message (like a terminal) — useful for quick edits and retries?
-16. **Drag-and-drop / paste images:** Can Chieh paste a screenshot or drag an image file into the input bar to send it to Amber? If yes, Amber must be multimodal — is she configured for image input?
-17. **File attachments:** Can Chieh attach files (PDFs, code files, etc.) from the app directly? Or is file sending Discord-only for now?
-18. **Input bar max height:** As Chieh types a long message, does the input bar expand to show the full text (up to ~6 lines), then scroll — or is it always single-line with horizontal scroll?
+16. **Drag-and-drop / paste images:** Can the user paste a screenshot or drag an image file into the input bar to send it to Amber? If yes, Amber must be multimodal — is she configured for image input?
+17. **File attachments:** Can the user attach files (PDFs, code files, etc.) from the app directly? Or is file sending Discord-only for now?
+18. **Input bar max height:** As the user types a long message, does the input bar expand to show the full text (up to ~6 lines), then scroll — or is it always single-line with horizontal scroll?
 
 ---
 
 ### F. Amber Response Behavior
 19. **Streaming in Phase 1?** ADK `/run_sse` is already implemented and tested. Starting with streaming in Phase 1 gives a significantly better first impression. Tradeoff: slightly more complex than a simple `/run` call. Recommendation: yes, Phase 1.
-20. **Mid-stream cancellation:** Can Chieh tap a Stop button to cancel Amber's response mid-stream? If yes, is the partial response kept in history or discarded?
+20. **Mid-stream cancellation:** Can the user tap a Stop button to cancel Amber's response mid-stream? If yes, is the partial response kept in history or discarded?
 21. **Error display:** If ADK returns an error (timeout, 5xx, malformed JSON), should the app show the raw error message in the chat bubble, a friendly "Amber had a problem, try again" message with a Retry button, or both?
 22. **Offline / server-down behavior:** When the Amber server is unreachable, should the app show a persistent offline banner, queue messages for retry when back online, or immediately return an error bubble? Queuing is friendlier but complex.
 23. **Amber thinking steps visibility:** ADK can return intermediate "thinking" steps before the final answer. Should these be visible in the UI (collapsed by default, expandable like Claude.ai's reasoning), or hidden entirely?
@@ -3424,12 +3424,12 @@ class FakeAudioService implements AudioService {
 
 ### G. Voice Behavior
 26. **TTS engine:** XTTS v2 (local, voice cloning, ~300ms first-chunk latency) vs ElevenLabs (cloud, best quality, API cost) vs Piper TTS (CPU-only, ~50ms, robotic but fast)? Can be set per-device in settings.
-27. **Amber's voice:** Use a built-in XTTS speaker embedding, or record a custom voice sample to clone? Custom voice requires ~30s of clean audio from Chieh/you.
-28. **Voice input language:** English-only (faster-whisper `base.en` model, ~80ms) or multilingual (faster-whisper `small`, ~200ms, supports Mandarin if Chieh speaks it)?
+27. **Amber's voice:** Use a built-in XTTS speaker embedding, or record a custom voice sample to clone? Custom voice requires ~30s of clean audio from the user.
+28. **Voice input language:** English-only (faster-whisper `base.en` model, ~80ms) or multilingual (faster-whisper `small`, ~200ms, supports Mandarin if the user speaks it)?
 29. **Voice mode activation:** Full-duplex (always listening after wake word, can interrupt Amber mid-speech) vs push-to-talk (hold a button)? Full-duplex requires echo cancellation to avoid Amber's TTS output triggering the STT.
-30. **Auto-send after STT:** When voice input finishes (detected by VAD silence), does it auto-send immediately, or show the transcribed text in the input bar for Chieh to review and confirm first?
+30. **Auto-send after STT:** When voice input finishes (detected by VAD silence), does it auto-send immediately, or show the transcribed text in the input bar for the user to review and confirm first?
 31. **TTS for all messages:** Does Amber speak every response aloud when voice mode is on, or only responses to voice-initiated messages? Long code/technical responses may be awkward to hear.
-32. **Interruption behavior:** If Chieh speaks while Amber is talking, does the app immediately stop playback and process the new input, or finish the current sentence first?
+32. **Interruption behavior:** If the user speaks while Amber is talking, does the app immediately stop playback and process the new input, or finish the current sentence first?
 33. **Voice mode on Android background:** When the app is backgrounded on Android, does the wake word listener keep running (requires a foreground service with persistent notification), or suspend until app is foregrounded?
 
 ---
@@ -3437,14 +3437,14 @@ class FakeAudioService implements AudioService {
 ### H. Wake Word
 34. **Wake phrase:** "Amber", "Hey Amber", or a custom phrase? Custom requires re-training a Porcupine keyword model (free, ~5 min online tool). "Amber" alone may have false triggers from ambient speech.
 35. **Platform priority:** Linux desktop wake word first, or Android? The two use different microphone APIs (ALSA/PulseAudio vs Android AudioRecord).
-36. **Linux microphone:** Use system default input device, or let Chieh pick a specific device in settings (important if there are multiple mics or a USB headset)?
+36. **Linux microphone:** Use system default input device, or let the user pick a specific device in settings (important if there are multiple mics or a USB headset)?
 37. **Post-response return to standby:** After Amber finishes speaking, how long does the app stay in "active listening" mode before returning to wake-word-only standby? Options: immediate, 10s, 30s, configurable.
-38. **Visual wake word feedback:** When the wake word is detected, show a visual indicator (pulsing mic icon, status bar change) so Chieh knows Amber heard him without audio feedback?
+38. **Visual wake word feedback:** When the wake word is detected, show a visual indicator (pulsing mic icon, status bar change) so the user knows Amber is listening without audio feedback?
 
 ---
 
 ### I. Device Control (Phase 5)
-39. **App control scope:** All installed apps visible in a launcher grid, or a curated allow-list Chieh configures? Full list is simpler to build but cluttered. Allow-list is safer and cleaner.
+39. **App control scope:** All installed apps visible in a launcher grid, or a curated allow-list the user configures? Full list is simpler to build but cluttered. Allow-list is safer and cleaner.
 40. **Screenshot stream in-app:** Show Amber a live screenshot feed so she can assist with what's on screen, or only on explicit "take screenshot" command? Live feed has privacy/battery implications on Android.
 41. **Computer control confirmation:** When Amber executes a computer action (click, type, run command), should the app show a preview step ("Amber wants to click X — Allow?") or execute immediately? Immediate is faster but less safe.
 
@@ -3461,7 +3461,7 @@ class FakeAudioService implements AudioService {
 ### K. Multi-User & Sessions
 46. **ADK session lifecycle:** The ADK session ID persists Amber's context. Should the app create one session per conversation (clean context per chat) or one long-running session across all conversations? One-per-conversation is cleaner but loses cross-conversation awareness unless history is explicitly re-injected.
 47. **Session recovery after crash:** If the app crashes mid-conversation, should it try to resume the same ADK session (may have stale state) or start a fresh session and re-inject the last N messages as context?
-48. **Multi-user:** Is this single-user (Chieh only) for now, or should the app support spouse or Emily having their own conversation history on the same device?
+48. **Multi-user:** Is this single-user for now, or should the app support other family members having their own conversation history on the same device?
 
 ---
 
@@ -3602,7 +3602,7 @@ For Ambient's requirements (Linux + Windows + macOS + Android, connecting to a l
 |---|---|
 | **All four targets stable** | Only framework where Linux, Windows, macOS, and Android are all stable and actively maintained by the core team. |
 | **Android maturity** | Android is Flutter's home turf — Tauri's Android is newer and less battle-tested. |
-| **Dart ≈ good enough** | Chieh already has the spec moving in this direction. Dart is straightforward for someone with CS/ML background. |
+| **Dart ≈ good enough** | The user already has the spec moving in this direction. Dart is straightforward for someone with CS/ML background. |
 | **Canonical precedent** | Ubuntu installer is Flutter — proves Linux desktop viability for production software. |
 | **Single rendering engine** | Impeller ensures pixel-identical UI across all four platforms — no WebView inconsistency. |
 | **HTTP/SSE/WebSocket** | `http`, `dio`, and `web_socket_channel` packages are mature — connecting to a local ADK server is straightforward. |
@@ -4118,14 +4118,14 @@ Place a reference WAV in `voices/`:
 
 ```bash
 # Quick prep with ffmpeg
-ffmpeg -i raw_sample.mp3 -ac 1 -ar 24000 -acodec pcm_s16le voices/chieh.wav
+ffmpeg -i raw_sample.mp3 -ac 1 -ar 24000 -acodec pcm_s16le voices/$USER.wav
 ```
 
 The server caches speaker latents at startup. Adding a new voice at runtime:
 
 ```bash
-curl -X POST http://localhost:8200/voices/chieh \
-  --data-binary @voices/chieh.wav
+curl -X POST http://localhost:8200/voices/$USER \
+  --data-binary @voices/$USER.wav
 ```
 
 ---
@@ -4170,7 +4170,7 @@ def speak(text: str, voice: str = "default", language: str = "en") -> bytes:
     return resp.content
 
 # ── Usage ──
-wav = speak("Hello Chieh, the backup completed successfully.", voice="chieh")
+wav = speak("Hello, the backup completed successfully.", voice="default")
 
 # Play directly (Linux)
 import subprocess, tempfile, os
@@ -4207,9 +4207,9 @@ After=network.target
 
 [Service]
 Type=simple
-User=chieh
-WorkingDirectory=/home/chieh/ambient/vessence
-ExecStart=/home/chieh/ambient/vessence/.venv/bin/uvicorn xtts_server:app --host 127.0.0.1 --port 8200 --workers 1
+User=%i
+WorkingDirectory=%h/ambient/vessence
+ExecStart=%h/ambient/vessence/.venv/bin/uvicorn xtts_server:app --host 127.0.0.1 --port 8200 --workers 1
 Restart=on-failure
 RestartSec=5
 Environment=CUDA_VISIBLE_DEVICES=0
@@ -4545,10 +4545,10 @@ docker run -d \
   serve
 
 # Create a user
-docker exec headscale headscale users create chieh
+docker exec headscale headscale users create $USER
 
 # Generate a pre-auth key
-docker exec headscale headscale preauthkeys create --user chieh --reusable --expiration 365d
+docker exec headscale headscale preauthkeys create --user $USER --reusable --expiration 365d
 ```
 
 Then on each client:
@@ -5254,7 +5254,7 @@ tts = F5TTS(model_type="F5-TTS", ckpt_file="", vocab_file="")  # auto-downloads
 tts.infer(
     ref_file="amber_voice_ref.wav",     # <12s reference clip
     ref_text="transcript of the clip",   # or omit to use built-in Whisper ASR
-    gen_text="Hello Chieh, what are we working on today?",
+    gen_text="Hello, what are we working on today?",
     file_wave="output.wav",
     seed=-1,  # random
 )
@@ -5613,10 +5613,10 @@ You need a public domain with TLS (Let's Encrypt) for initial device registratio
 sudo systemctl enable --now headscale
 
 # Create a user
-headscale users create chieh
+headscale users create $USER
 
 # Generate a pre-auth key
-headscale preauthkeys create --user chieh --reusable --expiration 24h
+headscale preauthkeys create --user $USER --reusable --expiration 24h
 # → outputs a key like: xxxxxxxxxxxxxxxx
 ```
 

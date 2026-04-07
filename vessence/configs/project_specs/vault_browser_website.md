@@ -7,7 +7,7 @@
 
 ## Overview
 
-A Google Drive-style personal file browser for Chieh's vault (`/home/chieh/vessence/vault/`), hosted on this machine and made publicly accessible via Cloudflare Quick Tunnel. All file operations are done by talking to Amber in a chat panel — the UI reflects changes automatically. Built mobile-first and fully responsive.
+A Google Drive-style personal file browser for the user's vault (`/home/chieh/vessence/vault/`), hosted on this machine and made publicly accessible via Cloudflare Quick Tunnel. All file operations are done by talking to Amber in a chat panel — the UI reflects changes automatically. Built mobile-first and fully responsive.
 
 ---
 
@@ -55,7 +55,7 @@ A Google Drive-style personal file browser for Chieh's vault (`/home/chieh/vesse
 1. User visits the site → redirected to `/login`
 2. User clicks "Send me a code"
 3. Server generates a 6-digit OTP, valid for **2 minutes**
-4. Amber sends it to Chieh's private Discord channel: `"🔐 Vault login code: 483921 (expires in 2 min)"`
+4. Amber sends it to the user's private Discord channel: `"🔐 Vault login code: 483921 (expires in 2 min)"`
 5. User enters the code → server validates
 6. On success: session cookie set (1 week for trusted devices, session-only for new devices)
 7. On failure: attempt counter incremented
@@ -63,7 +63,7 @@ A Google Drive-style personal file browser for Chieh's vault (`/home/chieh/vesse
 ### Failed Attempt Lockout
 - **5 failed attempts** → 30-minute lockout
 - During lockout, login form is disabled with countdown timer
-- Chieh can ask Amber to unlock: `"Amber, unlock the vault"` → Amber clears the lockout
+- The user can ask Amber to unlock: `"Amber, unlock the vault"` → Amber clears the lockout
 - Lockout is per-IP
 
 ### Trusted Device Flow
@@ -82,13 +82,13 @@ A Google Drive-style personal file browser for Chieh's vault (`/home/chieh/vesse
 - Untrusted: browser session (expires on close)
 - Session stored server-side in SQLite with device fingerprint
 
-### Sharing (with spouse)
-1. Chieh asks Amber: *"Share the images folder with spouse"*
-2. Amber asks Chieh to confirm and generates a 6-digit share code
-3. Chieh gives spouse the current tunnel URL + the share code
-4. spouse visits the URL, enters the share code → gains access to that folder + all subfolders
-5. Share links do not expire automatically — Chieh revokes them via Amber or the settings page
-6. spouse uses Amber with Chieh's full memory (single-user for now; multi-user identity deferred)
+### Sharing (with another user)
+1. The user asks Amber: *"Share the images folder with [person]"*
+2. Amber asks the user to confirm and generates a 6-digit share code
+3. The user gives the recipient the current tunnel URL + the share code
+4. The recipient visits the URL, enters the share code → gains access to that folder + all subfolders
+5. Share links do not expire automatically — the user revokes them via Amber or the settings page
+6. The recipient uses Amber with the user's full memory (single-user for now; multi-user identity deferred)
 
 ---
 
@@ -163,15 +163,15 @@ Opens as a right-side panel (or modal on mobile) when clicking a file:
 ### Layout
 - Full-height chat panel with message history
 - Input bar at bottom
-- Current file context banner at top when launched from a file (e.g. "📎 Talking about: spouse_portrait.jpg")
+- Current file context banner at top when launched from a file (e.g. "📎 Talking about: family_photo.jpg")
 
 ### Amber Capabilities via Chat
 Amber understands and can perform (non-exhaustive):
-- `"Rename this to spouse_birthday.jpg"` → renames file on disk + updates ChromaDB path
-- `"Update the description to: portrait of spouse at her birthday dinner"` → updates ChromaDB, logs to short-term memory
+- `"Rename this to birthday_dinner.jpg"` → renames file on disk + updates ChromaDB path
+- `"Update the description to: portrait at birthday dinner"` → updates ChromaDB, logs to short-term memory
 - `"Create a playlist of all jazz tracks in the audio folder"` → creates named playlist, saves to permanent memory
 - `"What files do I have in the images folder?"` → Amber lists and can display inline
-- `"Share the vacation folder with spouse"` → Amber prompts confirm, generates share code
+- `"Share the vacation folder with [person]"` → Amber prompts confirm, generates share code
 - `"What's the current vault URL?"` → Amber reports the active Cloudflare Quick Tunnel URL
 - `"Unlock the vault"` → clears login lockout
 - Amber can display images inline in the chat panel
@@ -223,10 +223,10 @@ No operation buttons in the Vault UI (no rename button, no delete button, no mov
 ## Sharing
 
 - Amber generates a 6-digit share code for a file or folder (including all subfolders)
-- Share code stored in `vault_web.db` with: path, code, created_at, created_for ("spouse")
-- No automatic expiry — Chieh revokes via Amber: `"Revoke spouse's access to the vacation folder"`
+- Share code stored in `vault_web.db` with: path, code, created_at, created_for (recipient name)
+- No automatic expiry — the user revokes via Amber: `"Revoke [person]'s access to the vacation folder"`
 - Settings page `/settings/shares` shows all active shares with revoke button
-- Recipient (spouse) enters share code at `/share` → session with access scoped to that path only
+- The recipient enters share code at `/share` → session with access scoped to that path only
 
 ---
 
@@ -240,7 +240,7 @@ No operation buttons in the Vault UI (no rename button, no delete button, no mov
 ### URL Discovery
 - `cloudflared` prints the assigned URL to its log at startup
 - Amber has a skill to read that log and report the current URL
-- Chieh asks: `"Amber, what's the vault URL?"` → Amber reads the log and replies
+- The user asks: `"Amber, what's the vault URL?"` → Amber reads the log and replies
 
 ---
 
@@ -281,18 +281,18 @@ No operation buttons in the Vault UI (no rename button, no delete button, no mov
 
 ## Deferred (Phase 2)
 
-- Multi-user identity (spouse gets her own Amber memory, separate from Chieh's)
+- Multi-user identity (each user gets their own Amber memory)
 - File upload from browser
 - Delete files from browser
 - Move files between folders
-- Persistent domain name (when Chieh buys a domain)
-- Notifications to Discord when spouse opens a shared link
+- Persistent domain name (when the user buys a domain)
+- Notifications to Discord when a share recipient opens a shared link
 
 ---
 
 ## Open Questions / Assumptions
 
-- Amber chat proxy: POSTs to Amber ADK API at `http://localhost:8000/run` with `user_id=chieh`
-- Chieh's Discord channel ID for OTP: loaded from `config.py / .env`
+- Amber chat proxy: POSTs to Amber ADK API at `http://localhost:8000/run` with `user_id=default`
+- Discord channel ID for OTP: loaded from `config.py / .env`
 - vault_web.db location: `/home/chieh/vessence/vault_web/vault_web.db`
 - FastAPI port: 8080

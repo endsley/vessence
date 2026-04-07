@@ -93,8 +93,8 @@ try:
     ANDROID_VERSION = _version_data["version_name"]
     _ANDROID_VERSION_CODE = _version_data["version_code"]
 except FileNotFoundError:
-    ANDROID_VERSION = "0.1.106"
-    _ANDROID_VERSION_CODE = 219
+    ANDROID_VERSION = "0.1.110"
+    _ANDROID_VERSION_CODE = 223
 
 # Startup validation: ensure the APK for the advertised version actually exists
 _expected_apk = MARKETING_DOWNLOADS_DIR / f"vessences-android-v{ANDROID_VERSION}.apk"
@@ -2810,18 +2810,18 @@ def _briefing_tools():
 
 
 @app.get("/api/briefing/articles")
-async def get_briefing_articles(topic: Optional[str] = None, category: Optional[str] = None, _=Depends(require_auth)):
-    """Get latest briefing articles. Filter by topic name or category."""
+async def get_briefing_articles(topic: Optional[str] = None, view: Optional[str] = None, _=Depends(require_auth)):
+    """Get latest briefing articles. Optional filters: topic name, or view='saved'."""
     bt = _briefing_tools()
     result = bt.get_briefing_cards()
     if result.get("status") != "ok":
         return result
     cards = result["cards"]
-    if category and category != "All":
-        cards = [c for c in cards if category in c.get("categories", [])]
+    if view == "saved":
+        cards = [c for c in cards if c.get("state") == "saved"]
     elif topic:
         cards = [c for c in cards if c.get("topic", "").lower() == topic.lower()]
-    return {"status": "ok", "cards": cards, "card_count": len(cards), "categories": result.get("categories", [])}
+    return {"status": "ok", "cards": cards, "card_count": len(cards)}
 
 
 @app.get("/api/briefing/article/{article_id}")
@@ -2836,7 +2836,21 @@ async def get_briefing_article_detail(article_id: str, _=Depends(require_auth)):
 
 @app.get("/api/briefing/audio/{article_id}/{summary_type}")
 async def briefing_audio(article_id: str, summary_type: str = "brief", _=Depends(require_auth)):
-    """Serve pre-generated TTS audio for a briefing article (Opus/OGG preferred, WAV fallback)."""
+    """Serve pre-generated TTS audio for a briefing article (Opus/OGG preferred, WAV fallback).
+    Returns 503 if system load is too high (protects TTS/CPU-heavy workloads)."""
+    # Gate on system load — reject bulk downloads when the machine is busy
+    try:
+        load_1min = os.getloadavg()[0]
+        cpu_count = os.cpu_count() or 1
+        if load_1min / cpu_count > 0.8:
+            return JSONResponse(
+                status_code=503,
+                content={"detail": "Server busy", "load": round(load_1min, 2)},
+                headers={"Retry-After": "60"},
+            )
+    except OSError:
+        pass  # getloadavg not available on this platform
+
     audio_dir = os.path.join(
         os.environ.get("TOOLS_DIR",
                        os.path.join(os.environ.get("AMBIENT_BASE", os.path.expanduser("~/ambient")), "tools")),
@@ -2883,12 +2897,10 @@ async def delete_briefing_topic(topic_name: str, _=Depends(require_auth)):
 
 
 # ── Background shared-article processor ──────────────────────────────────────
-_shared_queue_processor_task: Optional[asyncio.Task] = None
 
 
 async def _resume_shared_queue_if_needed():
-    """On startup, check if there are unprocessed shared articles and resume processing."""
-    global _shared_queue_processor_task
+    """On startup, check if there are unprocessed shared articles and spawn processor."""
     await asyncio.sleep(30)  # let the server finish warming up first
     try:
         queue_file = os.path.join(os.path.dirname(_BRIEFING_FUNCTIONS_DIR), "working_files", "shared_queue.json")
@@ -2899,86 +2911,42 @@ async def _resume_shared_queue_if_needed():
         unprocessed = [e for e in queue if not e.get("processed")]
         if not unprocessed:
             return
-        _logger.info("Found %d unprocessed shared articles on startup — resuming queue processor", len(unprocessed))
-        if _shared_queue_processor_task is None or _shared_queue_processor_task.done():
-            _shared_queue_processor_task = asyncio.create_task(_process_shared_queue_draining())
-            _background_tasks.add(_shared_queue_processor_task)
-            _shared_queue_processor_task.add_done_callback(_background_tasks.discard)
+        _logger.info("Found %d unprocessed shared articles on startup — spawning processor", len(unprocessed))
+        _spawn_shared_article_processor()
     except Exception:
         _logger.exception("Failed to check shared queue on startup")
-_RESOURCE_POLL_INTERVAL = 30    # seconds between resource re-checks when busy
-_RESOURCE_MAX_WAIT = 3600       # give up after 1 hour total
 
 
-def _check_resources_available() -> bool:
-    """Check if system load is below 60% across CPU, GPU, RAM, VRAM."""
-    try:
-        _skills_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "agent_skills")
-        if _skills_dir not in sys.path:
-            sys.path.insert(0, _skills_dir)
-        from system_load import has_ample_resources
-        return has_ample_resources(threshold_pct=60)
-    except Exception:
-        return True  # if check fails, proceed
+_SHARED_ARTICLE_PROCESSOR = os.path.normpath(
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..",
+                 "..", "tools", "daily_briefing", "functions", "process_shared_articles.py")
+)
 
 
-async def _process_shared_queue_draining():
-    """Process queued articles one at a time, checking resources before each.
+def _spawn_shared_article_processor():
+    """Spawn the article processor as a fully detached subprocess.
 
-    Starts immediately on article submission. Between each article, re-checks
-    that system load is below 60%. If busy, polls every 30s until resources
-    free up (up to 1 hour total wait).
+    Uses a file lock internally, so it's safe to call multiple times —
+    duplicate spawns exit immediately. The subprocess survives server restarts.
     """
-    loop = asyncio.get_running_loop()
-    if _BRIEFING_FUNCTIONS_DIR not in sys.path:
-        sys.path.insert(0, _BRIEFING_FUNCTIONS_DIR)
-    import run_briefing as _rb
-
-    total_processed = 0
-    waited_total = 0
-
-    while True:
-        # Wait for resources before processing the next article
-        while not _check_resources_available():
-            if waited_total >= _RESOURCE_MAX_WAIT:
-                _logger.info("Resources busy for %ds — sleeping 10min before retrying (%d processed so far)",
-                             waited_total, total_processed)
-                await asyncio.sleep(600)  # sleep 10 minutes then reset wait timer
-                waited_total = 0
-                continue
-            _logger.debug("System busy (>60%%) — rechecking in %ds (waited %ds total)",
-                          _RESOURCE_POLL_INTERVAL, waited_total)
-            await asyncio.sleep(_RESOURCE_POLL_INTERVAL)
-            waited_total += _RESOURCE_POLL_INTERVAL
-
-        # Process exactly one article
-        try:
-            result = await loop.run_in_executor(None, _rb.process_one_queued_article)
-        except Exception:
-            _logger.exception("Error processing queued article")
-            return
-
-        if not result.get("processed"):
-            # Queue is empty
-            if total_processed:
-                _logger.info("Queue drained — %d article(s) processed", total_processed)
-            return
-
-        total_processed += 1
-        waited_total = 0  # reset wait timer after successful processing
-        remaining = result.get("remaining", 0)
-        _logger.info("Processed article %s — %d remaining in queue",
-                      result.get("article_id", "?"), remaining)
-
-        if remaining == 0:
-            _logger.info("Queue drained — %d article(s) processed", total_processed)
-            return
+    import subprocess
+    python = sys.executable
+    try:
+        proc = subprocess.Popen(
+            [python, _SHARED_ARTICLE_PROCESSOR],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL,
+            start_new_session=True,  # fully detached from server process
+        )
+        _logger.info("Spawned detached article processor (pid=%d)", proc.pid)
+    except Exception:
+        _logger.exception("Failed to spawn article processor")
 
 
 @app.post("/api/briefing/articles/submit")
 async def submit_briefing_article(request: Request, _=Depends(require_auth)):
     """Accept a shared article URL and queue it for processing."""
-    global _shared_queue_processor_task
     body = await request.json()
     url = body.get("url", "").strip()
     if not url or not re.match(r'^https?://', url):
@@ -2986,16 +2954,25 @@ async def submit_briefing_article(request: Request, _=Depends(require_auth)):
     bt = _briefing_tools()
     result = bt.submit_article(url)
 
-    # Spawn background processor if none is already running
-    if _shared_queue_processor_task is None or _shared_queue_processor_task.done():
-        _shared_queue_processor_task = asyncio.create_task(_process_shared_queue_draining())
-        _background_tasks.add(_shared_queue_processor_task)
-        _shared_queue_processor_task.add_done_callback(_background_tasks.discard)
-        _logger.info("Spawned background shared-queue processor for URL: %s", url)
-    else:
-        _logger.info("Background shared-queue processor already running — skipping spawn for URL: %s", url)
+    # Spawn detached processor subprocess — survives server restarts.
+    # The processor uses a file lock so only one instance runs at a time.
+    _spawn_shared_article_processor()
 
     return result
+
+
+@app.post("/api/briefing/processor-status")
+async def briefing_processor_status(request: Request):
+    """Callback from the detached article processor after each article."""
+    body = await request.json()
+    aid = body.get("article_id", "?")
+    remaining = body.get("remaining", 0)
+    drained = body.get("queue_drained", False)
+    if drained:
+        _logger.info("Article processor finished — queue drained (last article: %s)", aid)
+    else:
+        _logger.info("Article processor update: %s done, %d remaining", aid, remaining)
+    return {"status": "ok"}
 
 
 @app.post("/api/briefing/fetch")

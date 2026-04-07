@@ -13,10 +13,8 @@ client = get_chroma_client(path=db_path)
 collection = client.get_collection(name="user_memories")
 
 new_facts = [
-    "The user is a Professor of AI and Machine Learning at Northeastern University.",
-    # Personal facts moved to user_profile.md under the runtime data root.
-    
-    "The user owns the clinic, but is not the REDACTED_PROFESSION; he is an AI/ML Professor."
+    # Personal identity facts are stored in ChromaDB user_memories.
+    # This script is no longer needed — use add_fact.py instead.
 ]
 
 for fact in new_facts:

@@ -1,7 +1,7 @@
 # Jane Phone Tools v1 — Design Spec
 
 **Status:** draft, pending review
-**Author:** Jane (Claude Opus 4.6) at Chieh's direction
+**Author:** Jane (Claude Opus 4.6) at the user's direction
 **Date:** 2026-04-05
 **Target platform:** Android only (no web counterpart in v1)
 
@@ -9,10 +9,10 @@
 
 ## 1. Goal
 
-Give Jane three new capabilities that run on Chieh's Android phone:
+Give Jane three new capabilities that run on the user's Android phone:
 
 1. **Call a contact by name** — voice-triggered phone call with a 10-second verbal cancel window.
-2. **Text a contact** — multi-turn back-and-forth SMS draft loop where Jane reads the message back, Chieh edits it verbally, and approves before sending.
+2. **Text a contact** — multi-turn back-and-forth SMS draft loop where Jane reads the message back, the user edits it verbally, and approves before sending.
 3. **Read recent messages aloud** — Jane reads the latest messaging-category notifications (SMS, WhatsApp, Signal, iMessage relay, etc.) via on-device TTS.
 
 All capabilities are phone-only in v1. The web Jane UI does not reflect them. There is no Android → server round-trip for any v1 feature — all state lives either on the device (operational state) or in Jane's conversation turn history (semantic state).
@@ -23,7 +23,7 @@ All capabilities are phone-only in v1. The web Jane UI does not reflect them. Th
 
 | Layer | Role | Language |
 |---|---|---|
-| **Jane's mind** (Opus standing brain) | Decides *when* to invoke a tool, composes message bodies from indirect requests ("ask my wife when she's coming back" → "Hey, when are you coming back?"), runs the SMS draft state machine across turns | Prompt-instructed only, no code |
+| **Jane's mind** (Opus standing brain) | Decides *when* to invoke a tool, composes message bodies from indirect requests ("ask my spouse when they're coming back" → "Hey, when are you coming back?"), runs the SMS draft state machine across turns | Prompt-instructed only, no code |
 | **Server bridge** (`jane_web/jane_proxy.py`) | Extracts `[[CLIENT_TOOL:…]]` markers from Jane's streaming output, emits structured SSE events, strips markers from the user-visible stream, bypasses the Gemma initial-ack layer when an SMS draft is open | Python |
 | **Wire protocol** | One new SSE event type `client_tool_call` carrying a structured JSON payload `{tool, args, call_id}` | JSON-over-NDJSON |
 | **Android dispatcher** | Parses the structured event, dedupes by `call_id`, dispatches to the right handler | Kotlin |
@@ -47,12 +47,12 @@ All capabilities are phone-only in v1. The web Jane UI does not reflect them. Th
       "name": "contacts.call",
       "description": "Initiate a phone call to a contact, resolved locally by name. A 10-second verbal countdown gives the user a chance to cancel before the call is placed.",
       "args_schema": {
-        "query": {"type": "string", "required": true, "description": "The contact's name as the user referred to them (e.g., 'spouse', 'mom', 'Dr. Chen'). Android resolves this locally."}
+        "query": {"type": "string", "required": true, "description": "The contact's name as the user referred to them (e.g., 'Mom', 'Dr. Chen', 'John'). Android resolves this locally."}
       },
       "emit_format": "[[CLIENT_TOOL:contacts.call:{\"query\":\"<name>\"}]]",
       "examples": [
-        {"input": "call spouse", "emit": "[[CLIENT_TOOL:contacts.call:{\"query\":\"spouse\"}]]"},
-        {"input": "dial my wife", "emit": "[[CLIENT_TOOL:contacts.call:{\"query\":\"spouse\"}]]", "note": "resolved via memory: wife → spouse"},
+        {"input": "call Spouse", "emit": "[[CLIENT_TOOL:contacts.call:{\"query\":\"Spouse\"}]]"},
+        {"input": "dial my wife", "emit": "[[CLIENT_TOOL:contacts.call:{\"query\":\"Spouse\"}]]", "note": "resolved via memory: wife → spouse's name"},
         {"input": "get mom on the phone", "emit": "[[CLIENT_TOOL:contacts.call:{\"query\":\"mom\"}]]"}
       ]
     },
@@ -65,8 +65,8 @@ All capabilities are phone-only in v1. The web Jane UI does not reflect them. Th
       },
       "emit_format": "[[CLIENT_TOOL:contacts.sms_draft:{\"query\":\"<name>\",\"body\":\"<body>\"}]]",
       "examples": [
-        {"input": "text spouse I'll be home in 20", "emit": "[[CLIENT_TOOL:contacts.sms_draft:{\"query\":\"spouse\",\"body\":\"I'll be home in 20\"}]]"},
-        {"input": "ask my wife when she's coming back", "emit": "[[CLIENT_TOOL:contacts.sms_draft:{\"query\":\"spouse\",\"body\":\"Hey, when are you coming back?\"}]]"},
+        {"input": "text Spouse I'll be home in 20", "emit": "[[CLIENT_TOOL:contacts.sms_draft:{\"query\":\"Spouse\",\"body\":\"I'll be home in 20\"}]]"},
+        {"input": "ask my spouse when they're coming back", "emit": "[[CLIENT_TOOL:contacts.sms_draft:{\"query\":\"Spouse\",\"body\":\"Hey, when are you coming back?\"}]]"},
         {"input": "let mom know I landed safely", "emit": "[[CLIENT_TOOL:contacts.sms_draft:{\"query\":\"mom\",\"body\":\"Hi mom, I landed safely.\"}]]"},
         {"input": "tell dad happy birthday", "emit": "[[CLIENT_TOOL:contacts.sms_draft:{\"query\":\"dad\",\"body\":\"Happy birthday, dad!\"}]]"}
       ]
@@ -102,7 +102,7 @@ All capabilities are phone-only in v1. The web Jane UI does not reflect them. Th
       "examples": [
         {"input": "nevermind", "emit": "[[CLIENT_TOOL:contacts.sms_cancel:{}]]"},
         {"input": "cancel", "emit": "[[CLIENT_TOOL:contacts.sms_cancel:{}]]"},
-        {"input": "actually call her instead", "emit_sequence": ["[[CLIENT_TOOL:contacts.sms_cancel:{}]]", "[[CLIENT_TOOL:contacts.call:{\"query\":\"spouse\"}]]"]}
+        {"input": "actually call her instead", "emit_sequence": ["[[CLIENT_TOOL:contacts.sms_cancel:{}]]", "[[CLIENT_TOOL:contacts.call:{\"query\":\"Spouse\"}]]"]}
       ]
     },
     {
@@ -458,7 +458,7 @@ First-launch UX: one explanation screen describing what Jane will do with each, 
 - Direct hands-free SMS auto-send without verbal confirm (v1 always loops).
 - Proactive reading of incoming messages (v1 is user-pull only via `messages.read_recent`).
 - Jane summarizing or triaging messages (v1 reads raw).
-- Memory-aware contact disambiguation ("you usually text spouse H, not spouse R").
+- Memory-aware contact disambiguation ("you usually text Contact A, not Contact B").
 - On-device Compose picker for ambiguous contact names (v1 asks the user to be more specific verbally).
 - AccessibilityService / UI Automator based automation of third-party messaging apps (WhatsApp, Signal, Slack).
 - Android → server round-trip tool-result reporting.
@@ -577,7 +577,7 @@ Instead of a boolean, returns the draft_id so the server can log which draft is 
 2. **Phase 2** — Android handlers: all three tool handlers + contacts resolver + draft preview state. Still flag-gated OFF.
 3. **Phase 3** — Notification listener + read_recent handler. Still flag-gated OFF.
 4. **Phase 4** — Server: extractor + feedback channel + draft-scan helper + prompt block + MCP file. Server side is ready, but without flag-on Android cannot receive tool calls.
-5. **Phase 5** — Flip the feature flag, version bump, deploy APK, restart jane-web, end-to-end test on Chieh's phone.
+5. **Phase 5** — Flip the feature flag, version bump, deploy APK, restart jane-web, end-to-end test on the user's phone.
 
 This ordering guarantees no "silent Jane" window where the server emits strip-from-UI markers that no handler receives.
 
@@ -629,9 +629,9 @@ if (body.isBlank() ||
 ### R10. Ambiguous-contact flow uses the feedback channel
 
 When `ContactsResolver.resolveExact` returns `Multiple`:
-1. Handler enumerates candidates via TTS: "I found two spouses — spouse Hernandez and spouse Martinez. Which one?"
+1. Handler enumerates candidates via TTS: "I found two contacts with that name — Contact A and Contact B. Which one?"
 2. Handler emits a `ToolResult` to `PendingToolResultBuffer` with `status: "needs_user"`, `tool: "contacts.call"`, `reason: "ambiguous", candidates: [...]`.
-3. On Chieh's next turn, Jane's mind sees the result in her context and can ask a specific clarifying question or re-emit the marker with the disambiguated name.
+3. On the user's next turn, Jane's mind sees the result in her context and can ask a specific clarifying question or re-emit the marker with the disambiguated name.
 
 ---
 

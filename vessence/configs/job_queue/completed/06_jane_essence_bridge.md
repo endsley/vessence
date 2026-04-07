@@ -8,7 +8,7 @@ Created: 2026-03-22
 Allow users to configure and interact with any loaded essence by talking to Jane. Jane should be able to invoke essence tools (add_topic, remove_topic, etc.) on the user's behalf through natural conversation.
 
 ## Context
-Essences like Daily Briefing have their own tools defined in `functions/custom_tools.py`. These tools exist as standalone Python functions but are not callable by Jane. When Chieh says "add AI research to my daily briefing," Jane currently can't do anything about it.
+Essences like Daily Briefing have their own tools defined in `functions/custom_tools.py`. These tools exist as standalone Python functions but are not callable by Jane. When the user says "add AI research to my daily briefing," Jane currently can't do anything about it.
 
 Key files:
 - `essences/daily_briefing/functions/custom_tools.py` — has `add_topic()`, `remove_topic()`, `list_topics()`, `fetch_topic_news()`

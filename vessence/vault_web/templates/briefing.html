@@ -28,6 +28,7 @@
       50% { box-shadow: 0 0 0 10px rgba(139,92,246,0); }
     }
     .card-dismissed { opacity: 0.45; filter: grayscale(0.5); }
+    .card-saved { border-color: #8b5cf6; box-shadow: 0 0 0 1px rgba(139,92,246,0.3); }
   </style>
 </head>
 <body class="min-h-screen" x-data="briefingApp()" x-init="init()" x-cloak>
@@ -149,27 +150,24 @@
         <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
         </svg>
-        <input type="text" x-model="searchQuery" @keydown.enter="searchArticles()" @input="if(!searchQuery) { searchResults = null; }"
+        <input type="text" x-model="searchQuery" @keydown.enter="searchArticles()" @input="if(!searchQuery) { searchResults = null; currentPage = 1; }"
           placeholder="Search past articles..."
           class="w-full pl-10 pr-10 py-2 bg-slate-900 border border-slate-700 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500 transition"/>
-        <button x-show="searchQuery" @click="searchQuery = ''; searchResults = null;"
+        <button x-show="searchQuery" @click="searchQuery = ''; searchResults = null; currentPage = 1;"
           class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white transition">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
         </button>
       </div>
 
-      <!-- Category filter pills -->
+      <!-- View tabs: All News / Saved -->
       <div class="flex flex-wrap gap-2 items-center">
-        <template x-for="cat in tabCategories" :key="cat">
-          <button @click="activeCategory = cat; loadArticles()"
-            :class="activeCategory === cat ? 'bg-violet-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700 border border-slate-700'"
-            class="px-3 py-1 rounded-full text-xs font-medium transition"
-            x-text="cat">
-          </button>
-        </template>
-        <!-- Saved articles -->
-        <button @click="toggleSavedView()"
-          :class="viewingSaved ? 'bg-amber-600 text-white' : 'bg-slate-800 text-amber-400 hover:text-amber-300 hover:bg-slate-700 border border-slate-700'"
+        <button @click="activeView = 'all'; currentPage = 1; loadArticles()"
+          :class="activeView === 'all' ? 'bg-violet-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700 border border-slate-700'"
+          class="px-3 py-1 rounded-full text-xs font-medium transition">
+          All News
+        </button>
+        <button @click="activeView = 'saved'; currentPage = 1; loadArticles()"
+          :class="activeView === 'saved' ? 'bg-violet-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700 border border-slate-700'"
           class="px-3 py-1 rounded-full text-xs font-medium transition flex items-center gap-1">
           <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"/>
@@ -178,7 +176,7 @@
         </button>
 
         <!-- Show/Hide dismissed toggle -->
-        <button @click="showDismissed = !showDismissed"
+        <button @click="showDismissed = !showDismissed; currentPage = 1"
           :class="showDismissed ? 'bg-slate-700 text-slate-300' : 'bg-slate-800 text-slate-500 border border-slate-700'"
           class="ml-auto px-3 py-1 rounded-full text-xs font-medium transition flex items-center gap-1">
           <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -320,9 +318,9 @@
 
     <!-- Article card grid -->
     <div x-show="!loading && !viewingSaved && displayArticles.length > 0" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-      <template x-for="article in displayArticles" :key="article.id">
+      <template x-for="article in paginatedArticles" :key="article.id">
         <div class="bg-slate-900 rounded-2xl border border-slate-800 overflow-hidden card-hover flex flex-col"
-          :class="article.dismissed ? 'card-dismissed' : ''"
+          :class="{ 'card-dismissed': article.dismissed, 'card-saved': article.state === 'saved' }"
           <!-- Image -->
           <div class="relative aspect-video overflow-hidden">
             <template x-if="article.image_url">
@@ -440,6 +438,27 @@
           </div>
         </div>
       </template>
+    </div>
+
+    <!-- Pagination controls -->
+    <div x-show="!loading && !viewingSaved && displayArticles.length > pageSize" class="flex items-center justify-center gap-4 mt-6 mb-4">
+      <button @click="currentPage = Math.max(1, currentPage - 1); window.scrollTo({top: 0, behavior: 'smooth'})"
+        :disabled="currentPage <= 1"
+        class="px-4 py-2 rounded-lg text-sm font-medium transition"
+        :class="currentPage <= 1 ? 'text-slate-600 bg-slate-800/50 cursor-not-allowed' : 'text-white bg-slate-800 hover:bg-slate-700 border border-slate-700'">
+        &larr; Prev
+      </button>
+      <span class="text-sm text-slate-400">
+        Page <span class="text-white font-medium" x-text="currentPage"></span>
+        of <span class="text-white font-medium" x-text="totalPages"></span>
+        <span class="text-slate-600 ml-2">(<span x-text="displayArticles.length"></span> articles)</span>
+      </span>
+      <button @click="currentPage = Math.min(totalPages, currentPage + 1); window.scrollTo({top: 0, behavior: 'smooth'})"
+        :disabled="currentPage >= totalPages"
+        class="px-4 py-2 rounded-lg text-sm font-medium transition"
+        :class="currentPage >= totalPages ? 'text-slate-600 bg-slate-800/50 cursor-not-allowed' : 'text-white bg-slate-800 hover:bg-slate-700 border border-slate-700'">
+        Next &rarr;
+      </button>
     </div>
   </main>
 
@@ -694,17 +713,7 @@
       return {
         articles: [],
         topics: [],
-        categories: [],
-        activeCategory: 'Shared',
-        get tabCategories() {
-          // Shared first (from backend), then All, then remaining categories
-          const rest = this.categories.filter(c => c !== 'Shared');
-          const tabs = [];
-          if (this.categories.includes('Shared')) tabs.push('Shared');
-          tabs.push('All');
-          tabs.push(...rest);
-          return tabs;
-        },
+        activeView: 'all',
         searchQuery: '',
         searchResults: null,
         loading: true,
@@ -717,6 +726,8 @@
         newTopicPriority: 'normal',
         expandedArticle: null,
         showDismissed: false,
+        currentPage: 1,
+        pageSize: 20,
         _readAllIndex: 0,
         _readAllStop: false,
         // Audio player view
@@ -738,10 +749,24 @@
           if (!this.showDismissed) {
             list = list.filter(a => !a.dismissed);
           } else {
-            // Sort: non-dismissed first, dismissed at the bottom
-            list = [...list].sort((a, b) => (a.dismissed === b.dismissed) ? 0 : a.dismissed ? 1 : -1);
+            // Sort by state: new first, saved second, archived last
+            const stateOrder = { 'new': 0, 'saved': 1, 'archived': 2 };
+            list = [...list].sort((a, b) => {
+              const sa = stateOrder[a.state || 'new'] || 0;
+              const sb = stateOrder[b.state || 'new'] || 0;
+              return sa - sb;
+            });
           }
           return list;
+        },
+
+        get totalPages() {
+          return Math.max(1, Math.ceil(this.displayArticles.length / this.pageSize));
+        },
+
+        get paginatedArticles() {
+          const start = (this.currentPage - 1) * this.pageSize;
+          return this.displayArticles.slice(start, start + this.pageSize);
         },
 
         // Color palette for topics
@@ -757,6 +782,32 @@
         },
 
         async init() {
+          // Check sessionStorage for a recent cache (< 30 min)
+          const cached = sessionStorage.getItem('briefing_cache');
+          if (cached) {
+            try {
+              const c = JSON.parse(cached);
+              if (c.cachedAt && (Date.now() - c.cachedAt) < 30 * 60 * 1000) {
+                this.articles = c.articles || [];
+                this.lastUpdated = c.lastUpdated || '';
+                this.loading = false;
+                // Load topics + saved categories, then mark saved on cached articles
+                Promise.all([this.loadTopics(), this.loadSavedCategories()]).then(async () => {
+                  try {
+                    const r = await fetch('/api/briefing/saved');
+                    if (r.ok) {
+                      const d = await r.json();
+                      const m = {};
+                      (d.articles || []).forEach(s => { m[s.article_id] = s.category; });
+                      this.articles.forEach(a => { if (m[a.id]) { a._saved = true; a._savedCategory = m[a.id]; } });
+                    }
+                  } catch (e) { /* ignore */ }
+                });
+                this.loadArticles();  // background refresh (non-blocking)
+                return;
+              }
+            } catch (e) { /* ignore corrupt cache */ }
+          }
           await Promise.all([this.loadTopics(), this.loadArticles(), this.loadSavedCategories()]);
           this.loading = false;
         },
@@ -764,7 +815,7 @@
         async loadArticles() {
           try {
             const params = new URLSearchParams();
-            if (this.activeCategory && this.activeCategory !== 'All') params.set('category', this.activeCategory);
+            if (this.activeView === 'saved') params.set('view', 'saved');
             const [articlesRes, savedRes] = await Promise.all([
               fetch('/api/briefing/articles?' + params.toString()),
               fetch('/api/briefing/saved'),
@@ -772,12 +823,15 @@
             if (articlesRes.ok) {
               const data = await articlesRes.json();
               this.articles = data.cards || data.articles || [];
-              this.categories = data.categories || [];
-              // Fall back to All if Shared has no articles
-              if (this.activeCategory === 'Shared' && !this.categories.includes('Shared')) {
-                this.activeCategory = 'All';
-              }
               if (data.last_updated) this.lastUpdated = data.last_updated;
+              // Cache to sessionStorage
+              try {
+                sessionStorage.setItem('briefing_cache', JSON.stringify({
+                  articles: this.articles,
+                  lastUpdated: this.lastUpdated,
+                  cachedAt: Date.now()
+                }));
+              } catch (e) { /* quota exceeded — ignore */ }
             }
             // Mark saved articles
             if (savedRes.ok) {
@@ -905,6 +959,7 @@
             if (r.ok) {
               const data = await r.json();
               this.searchResults = data.articles || data || [];
+              this.currentPage = 1;
             }
           } catch (e) {
             console.error('Failed to search:', e);

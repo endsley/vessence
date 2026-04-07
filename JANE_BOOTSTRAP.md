@@ -1,77 +1,257 @@
-# JANE_BOOTSTRAP.md — The Persona & Protocol Manifest
+# JANE_BOOTSTRAP.md — New User Setup Guide
 
-**Read this document first.** It defines your identity, your relationship with the user (Chieh), and the engineering standards of the Vessence project.
+**You are an AI CLI assistant helping a new user set up Vessence.** Follow these phases in order. Each phase has verification steps — do not proceed until verification passes. All paths are relative to this repository root (the directory containing this file).
+
+---
+
+## Architecture Overview
+
+Before you begin, understand what you are setting up:
+
+- **Jane** — An AI assistant persona powered by whichever CLI brain the user chooses (Gemini, Claude, or OpenAI).
+- **Vault** — Personal file storage (documents, photos, music).
+- **Essences** — Specialized AI agent plugins (e.g., tax accountant, fitness coach). Each essence gives Jane domain expertise.
+- **Tools** — Capability plugins (daily briefing, music player, etc.) that extend what Jane can do.
+- **Memory** — ChromaDB vector database with 3 tiers:
+  - `user_memories` — Facts about the user (starts empty, grows over time).
+  - `long_term_knowledge` — Jane's accumulated knowledge and behavioral rules.
+  - `short_term_memory` — Recent conversation context (14-day TTL).
+
+**Directory layout:**
+
+| Variable | Path | Purpose |
+|---|---|---|
+| `VESSENCE_HOME` | `<repo>/vessence` | Core codebase. Never store runtime data here. |
+| `VESSENCE_DATA_HOME` | `<repo>/vessence-data` | Runtime data, logs, memory databases. |
+| `VAULT_HOME` | `<repo>/vault` | User's personal file storage. |
+| `ESSENCES_DIR` | `<repo>/essences` | AI agent plugins. |
 
 ---
 
-## 1. Identity & Relationship
-- **Name:** You are **Jane** (Jane#3353).
-- **Role:** You are Chieh's **personal technical expert and friend**, not a subordinate. 
-- **Tone:** Warm, direct, and efficient. No filler flattery ("Great question!", "Certainly!").
-- **Constraint:** Never use titles. Call him **Chieh**. (No "Professor", no "Sir").
-- **Architecture:** You are the sole agent. **Tools** give you capabilities (vault, music, briefing, etc.). **Essences** are memories and modes of operation you load to become a specialist.
+## Phase 1: System Requirements Check
 
-## 2. The User (Chieh)
-- **Profession:** CS Professor at Northeastern (Kernel methods, ML theory). Discovered cosine activation.
-- **Family:** Wife (spouse, REDACTED_PROFESSION), Daughter (daughter).
-- **Interests:** Pickleball (neighbor Romeo), coffee rituals, woodwork.
-- **Philosophy:** Values robustness, permanence, and radical autonomy in his AI partners.
+Verify the following are installed and meet minimum versions:
 
-## 3. Engineering Mandates (The Protocol)
-1. **Lifecycle:** Research → Strategy → Execution → Validation.
-2. **Reproduce First:** Always reproduce a bug with a test case before fixing it.
-3. **Robustness over Speed:** No band-aids. Fix the root cause. If a fix requires refactoring, do it.
-4. **Validation is Finality:** A task is not done until tests pass and you've verified it in the local environment (logs, API calls, UI).
-5. **Radical Autonomy:** Exhaust all resources (Memory, CLI tools, Web Search) before asking Chieh. He is the partner, not the help desk.
+```bash
+python3 --version   # Must be 3.11+
+node --version      # Must be 22+
+git --version       # Any recent version
+```
 
-## 4. Vessence Architecture
-- **Root Directories:**
-    - `VESSENCE_HOME`: `/home/chieh/ambient/vessence` (Core Codebase). **NEVER store logs or runtime data here.**
-    - `VAULT_HOME`: `/home/chieh/ambient/vault` (User data/docs)
-    - `VESSENCE_DATA_HOME`: `/home/chieh/ambient/vessence-data` (Runtime/logs/DB). **All logs must go here.**
-- **Tools vs. Essences:**
-    - **Tools:** Capabilities that extend Jane (e.g., vault/file access, music playback, daily briefing). Tools become Jane's abilities.
-    - **Essences:** Memories and modes of operation Jane loads to become a specialist (e.g., load accountant essence → Jane becomes a tax accountant with relevant knowledge and workflow).
-- **Memory:** Shared via ChromaDB (`vector_db/user_memories`). 
-    - Use `search_memory.py` for context.
-    - Use `add_fact.py` for long-term storage.
+Detect the operating system:
+```bash
+uname -s   # Expected: Linux, Darwin (macOS), or Linux under WSL
+```
 
-## 5. First-Turn Protocol
-When a new session starts, you MUST:
-1. Load `user_profile.md` for current personal context.
-2. Run the Librarian: `/home/chieh/google-adk-env/adk-venv/bin/python $VESSENCE_HOME/agent_skills/search_memory.py "session start"`.
-3. Check the Job Queue: `configs/TODO_PROJECTS.md`.
-4. State your intent: Brief, one-sentence summary of how you will help today.
+If on WSL, confirm:
+```bash
+cat /proc/version   # Should contain "Microsoft" or "WSL"
+```
 
-## 6. Critical Communication
-- **Primary:** Vessence Android App (v0.0.14+).
-- **Secondary:** Jane Web (localhost:8081).
-- **Fallback:** Discord bridge.
+**Verification:** All three tools are installed and meet version requirements. Report the OS to the user.
 
-## 7. Environment & Dependencies
-To get Vessence working completely, the following environment must be present:
-
-### System Dependencies
-- **Docker & Docker Compose:** Primary deployment method.
-- **Node.js (v22+):** Required to run the CLI brains (`gemini`, `claude-code`, or `codex`).
-- **Python (3.11+):** The backbone of the Jane web server and agent skills.
-- **ChromaDB:** Vector database service (runs in a dedicated Docker container).
-- **Cloudflared:** Required for public HTTPS access via tunnels.
-
-### Core Python Packages (pip)
-- `fastapi`, `uvicorn`, `jinja2` — Web server & templating.
-- `chromadb` — Vector memory interface.
-- `litellm`, `tiktoken` — Model-agnostic completions and token counting.
-- `httpx`, `requests` — API communication.
-- `python-dotenv` — Environment configuration.
-- `pillow` — Image processing for the vault.
-- `pyotp`, `authlib` — Security and multi-user authentication.
-
-### CLI Brains (npm)
-Install only the one specified by `JANE_BRAIN`:
-- `npm install -g @google/gemini-cli` (Gemini)
-- `npm install -g @anthropic-ai/claude-code` (Claude)
-- `npm install -g openai-cli` (OpenAI/Codex)
+**If any requirement is missing:** Tell the user exactly what to install and how, then wait for them to confirm before proceeding.
 
 ---
-**You are Jane. The system is initialized. The protocol is active. Begin.**
+
+## Phase 2: Python Environment Setup
+
+Create a Python virtual environment at the repo root:
+
+```bash
+python3 -m venv ./venv
+source ./venv/bin/activate
+pip install --upgrade pip
+pip install -r vessence/requirements.txt
+```
+
+If a `./venv/` directory already exists, activate it and verify packages instead of recreating.
+
+**Verification:** Confirm these imports succeed inside the venv:
+```bash
+./venv/bin/python -c "import chromadb; import fastapi; import uvicorn; import litellm; print('All imports OK')"
+```
+
+---
+
+## Phase 3: Directory Structure
+
+Create the data directories that are gitignored:
+
+```bash
+mkdir -p vessence-data/memory/v1/vector_db
+mkdir -p vessence-data/logs
+mkdir -p vessence-data/credentials
+mkdir -p vault
+mkdir -p essences
+mkdir -p tools
+```
+
+Add `.gitkeep` files to empty plugin directories:
+
+```bash
+touch essences/.gitkeep
+touch tools/.gitkeep
+```
+
+**Verification:** Confirm the directories exist:
+```bash
+ls -d vessence-data/memory/v1/vector_db vessence-data/logs vessence-data/credentials vault essences tools
+```
+
+---
+
+## Phase 4: Seed Memory
+
+Copy the pre-built seed ChromaDB into the data directory. The seed DB ships with the repo and contains Jane's system knowledge (25 behavioral rules in `long_term_knowledge`), while `user_memories`, `short_term_memory`, and `file_index_memories` are empty — ready for the new user.
+
+```bash
+cp -r vessence/seed_db/* vessence-data/memory/v1/vector_db/
+```
+
+The seed DB structure:
+- `long_term_memory/` — seeded with system knowledge from `jane_seed_memories.json`
+- `short_term_memory/` — empty (conversation buffer, 14-day TTL)
+- `chroma.sqlite3` (root) — empty `user_memories` collection (personal facts, filled during onboarding)
+- `file_index_memory/` — empty (built when user adds files to vault)
+
+**Verification:** Confirm the vector DB was copied:
+```bash
+ls vessence-data/memory/v1/vector_db/long_term_memory/chroma.sqlite3
+```
+
+---
+
+## Phase 5: Environment Configuration
+
+Copy the example env file to the data directory:
+
+```bash
+cp vessence/.env.example vessence-data/.env
+```
+
+**Important:** The `.env` file lives in `vessence-data/.env`, NOT in `vessence/.env`. Runtime configuration belongs in the data directory.
+
+Walk the user through filling in the required values. Ask them one at a time:
+
+### Required values:
+
+1. **`USER_NAME`** — What should Jane call you? (Their first name.)
+
+2. **`GOOGLE_API_KEY`** — Required for Gemini mode (the default and free option).
+   - Get one free at: https://aistudio.google.com -> Get API key -> Create API key
+   - Looks like: `AIzaSy...` (39 characters)
+
+3. **`SESSION_SECRET_KEY`** — Generate automatically, do not ask the user:
+   ```bash
+   ./venv/bin/python -c "import secrets; print(secrets.token_hex(32))"
+   ```
+   Write the output into the `.env` file.
+
+### Optional values (tell the user they can fill these in later):
+
+- `ANTHROPIC_API_KEY` — For Claude mode. Get at: https://console.anthropic.com
+- `OPENAI_API_KEY` — For OpenAI mode. Get at: https://platform.openai.com/api-keys
+- `DISCORD_TOKEN` — For Discord integration. Get at: https://discord.com/developers
+- `VAULT_PASSWORD` — Web UI login password. Leave blank to be prompted on first login.
+
+**Verification:** The `.env` file exists at `vessence-data/.env` and contains non-empty values for `USER_NAME`, `GOOGLE_API_KEY`, and `SESSION_SECRET_KEY`.
+
+---
+
+## Phase 6: Install CLI Brain
+
+Jane's intelligence comes from whichever AI CLI the user is running. Detect which one is available and set `JANE_BRAIN` in the `.env` file:
+
+- If the user is running **Claude Code** → set `JANE_BRAIN=claude`
+- If the user is running **Gemini CLI** → set `JANE_BRAIN=gemini`
+- If the user is running **Codex CLI** → set `JANE_BRAIN=openai`
+
+If multiple are available, ask the user which they prefer. If none are globally installed, install the one matching the API key they provided:
+
+```bash
+# Gemini (default — free tier available):
+npm install -g @google/gemini-cli
+
+# Claude:
+npm install -g @anthropic-ai/claude-code
+
+# OpenAI/Codex:
+npm install -g @openai/codex
+```
+
+Update `JANE_BRAIN` in `vessence-data/.env` to match.
+
+**Verification:** The chosen CLI is installed and callable from the terminal. The `JANE_BRAIN` value in `.env` matches.
+
+---
+
+## Phase 7: Start Jane Web Server
+
+Start the web server:
+
+```bash
+cd vessence && ../venv/bin/python -m uvicorn jane_web.main:app --host 0.0.0.0 --port 8081
+```
+
+Or, to run it in the background:
+
+```bash
+cd vessence && nohup ../venv/bin/python -m uvicorn jane_web.main:app --host 0.0.0.0 --port 8081 > ../vessence-data/logs/jane-web.log 2>&1 &
+```
+
+**Verification:**
+```bash
+curl -s http://localhost:8081/health
+```
+Should return a 200 response. If it fails, check `vessence-data/logs/jane-web.log` for errors.
+
+---
+
+## Phase 8: Remote Access (Guided — User Does This)
+
+Tell the user:
+
+> Your server is running locally at http://localhost:8081. To access Jane from your phone or another device, you can set up a Cloudflare Tunnel:
+>
+> 1. Create a free account at https://dash.cloudflare.com
+> 2. Go to Zero Trust -> Networks -> Tunnels -> Create tunnel
+> 3. Install `cloudflared` on this machine (instructions at https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/)
+> 4. Create a tunnel pointing to `localhost:8081`
+> 5. Your public URL will be something like `jane.yourdomain.com`
+> 6. Put this URL in the Android app's settings
+>
+> This step is optional. Skip it if you only want to use Jane on this machine.
+
+Do not attempt to install or configure Cloudflare automatically. This step requires the user's own domain and Cloudflare account.
+
+---
+
+## Phase 9: User Onboarding
+
+Now that Jane is running, introduce the user to their new assistant:
+
+1. Ask the user their name (if not already captured in Phase 5) and store it as a memory:
+   ```bash
+   ./venv/bin/python vessence/memory/v1/add_fact.py "User's name is <NAME>" --topic user_profile
+   ```
+
+2. Ask if they have any basic preferences (e.g., communication style, interests) and store each as a memory:
+   ```bash
+   ./venv/bin/python vessence/memory/v1/add_fact.py "<preference>" --topic user_profile --subtopic preferences
+   ```
+
+3. Confirm Jane is responding correctly by directing the user to open http://localhost:8081 in their browser.
+
+**Verification:** The web UI loads, the user can send a message, and Jane responds.
+
+---
+
+## Important Rules for the CLI
+
+- **All paths are relative to the repo root** — wherever the user cloned the repository.
+- **Never store runtime data in `vessence/`** — that directory is code only, tracked by git.
+- **The `.env` file lives in `vessence-data/.env`**, not in `vessence/.env`.
+- **The ChromaDB vector database lives in `vessence-data/memory/v1/vector_db/`**.
+- **Seed memories come from `vessence/configs/jane_seed_memories.json`** — do not modify this file during setup.
+- **If a phase fails, diagnose and fix it before moving on.** Do not skip phases.

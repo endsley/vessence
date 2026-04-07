@@ -28,7 +28,7 @@ ack" / "mind" / "standing brain").
 Includes cached personal info + last 5 conversation turns for context.
 
 Returns (classification, response_text):
-  - ("self_handle", "Hey Chieh! ...") — ack layer handled it, skip the mind
+  - ("self_handle", "Hey! ...") — ack layer handled it, skip the mind
   - ("music_play", "<search query>")  — user wants music; route to player
   - ("delegate", "<contextual ack>")  — send to Jane's mind
   - ("unknown", None)                 — couldn't parse, send to Jane's mind anyway
@@ -138,14 +138,8 @@ def _resolve_model(provider: str) -> str:
     return _DEFAULT_ACK_MODELS.get(provider, "gemma4:e4b")
 
 
-# Cached personal info — loaded once, never changes during runtime.
-_PERSONAL_INFO = """User info:
-- Name: Chieh
-- Role: CS professor at Northeastern, ML researcher (kernel methods)
-- Style: Direct, technical, no filler. Treat as equal collaborator.
-- Preferences: No "Professor", no "Is there anything else?", no emoji unless asked
-- Project: Vessence (AI assistant platform with Android app)
-- Wife: spouse, REDACTED_PROFESSION at REDACTED_BUSINESS"""
+# Personal info loaded from ChromaDB at runtime — see memory/v1/memory_retrieval.py
+_PERSONAL_INFO = ""  # Populated by _load_personal_info() on first call
 
 SYSTEM_PROMPT = f"""You are a prompt router. Classify each user message into exactly one category.
 
@@ -160,7 +154,7 @@ NEVER skip these two lines. NEVER output just the answer without the CLASSIFICAT
 Categories:
 
 SELF_HANDLE — simple things you can answer directly:
-greetings, simple math, basic definitions, jokes, weather (use cached data if provided), acknowledgments (thanks/ok/cool), simple trivia, time/date, unit conversions, casual follow-ups (haha/yeah/true).
+greetings, simple math, basic definitions, jokes, weather and air quality (use cached data if provided), acknowledgments (thanks/ok/cool), simple trivia, time/date, unit conversions, casual follow-ups (haha/yeah/true).
 Also: obvious STT garbage (random disconnected words, background speech fragments) — respond with a brief "was that meant for me?" check-in. Only if OBVIOUSLY not a real prompt.
 
 MUSIC_PLAY — ONLY when the message STARTS WITH or clearly leads with one of these verbs: play/put on/throw on/listen to/shuffle/queue up. The user must be commanding immediate playback, not asking a question or having a conversation about music. RESPONSE = just the artist/song name.
@@ -180,7 +174,7 @@ RESPONSE = the action (add/remove/show/check/clear) + item/store if applicable.
 READ_MESSAGES — user wants to check, read, or hear their text messages/notifications.
 "read my texts" → RESPONSE: read_recent
 "any new messages?" → RESPONSE: read_recent
-"what did spouse text me?" → RESPONSE: read_recent spouse
+"what did Sarah text me?" → RESPONSE: read_recent sarah
 "do I have any unread messages?" → RESPONSE: read_recent
 "check my notifications" → RESPONSE: read_recent
 RESPONSE = read_recent + optional sender name filter.
@@ -192,7 +186,7 @@ Example outputs:
 
 User: "hey"
 CLASSIFICATION: SELF_HANDLE
-RESPONSE: Hey Chieh!
+RESPONSE: Hey!
 
 User: "play some shakira"
 CLASSIFICATION: MUSIC_PLAY
@@ -210,15 +204,15 @@ User: "read my texts"
 CLASSIFICATION: READ_MESSAGES
 RESPONSE: read_recent
 
-User: "any messages from spouse?"
+User: "any messages from Sarah?"
 CLASSIFICATION: READ_MESSAGES
-RESPONSE: read_recent spouse
+RESPONSE: read_recent sarah
 
 User: "can you fix the auth bug"
 CLASSIFICATION: DELEGATE_OPUS
 RESPONSE: Looking into the auth bug — give me a minute."""
 
-_CLASSIFY_RE = re.compile(r"CLASSIFICATION:\s*(SELF_HANDLE|MUSIC_PLAY|SHOPPING_LIST|READ_MESSAGES|DELEGATE_OPUS)", re.IGNORECASE)
+_CLASSIFY_RE = re.compile(r"(?:CLASSIFICATION:\s*)?(SELF_HANDLE|MUSIC_PLAY|SHOPPING_LIST|READ_MESSAGES|DELEGATE_OPUS)", re.IGNORECASE)
 _RESPONSE_RE = re.compile(r"RESPONSE:\s*(.*)", re.DOTALL)
 
 # Weather keywords — if detected, inject cached weather data into gemma's context
@@ -742,10 +736,18 @@ async def classify_prompt(
         # Parse classification
         cls_match = _CLASSIFY_RE.search(content)
         if not cls_match:
-            # Diagnostic: dump the actual output so we can see WHY the regex
-            # didn't match. Previously this only said "no classification in
-            # output" without the text, making it impossible to diagnose
-            # whether Gemma is hallucinating, truncating, or formatting wrong.
+            # Gemma sometimes skips the format entirely and just answers.
+            # If weather keywords are present and we got a non-empty response,
+            # treat it as self_handle (Gemma answered the weather question
+            # directly using the injected data).
+            lowered_msg = message.lower()
+            if weather_ctx and content.strip():
+                logger.info(
+                    "Initial ack (%s/%s): no classification but weather context present — treating as self_handle. Raw: %r",
+                    provider, model, content[:300],
+                )
+                return ("self_handle", content.strip())
+
             logger.info(
                 "Initial ack (%s/%s): no classification in output. Raw: %r",
                 provider, model, content[:300],
@@ -774,16 +776,20 @@ async def classify_prompt(
             delegate_ack = resp_match.group(1).strip().rstrip('"').strip() if resp_match else None
             return ("delegate", delegate_ack or None)
 
-        # SELF_HANDLE — extract only the RESPONSE portion
+        # SELF_HANDLE — extract the RESPONSE portion, or use raw content as fallback
         resp_match = _RESPONSE_RE.search(content)
-        if not resp_match:
-            logger.info(
-                "Initial ack (%s/%s): SELF_HANDLE but no RESPONSE tag, falling back",
-                provider, model,
-            )
-            return ("unknown", None)
+        if resp_match:
+            response_text = resp_match.group(1).strip().rstrip('"').strip()
+        else:
+            # Gemma sometimes outputs "SELF_HANDLE\n<answer>" without RESPONSE: tag
+            # Strip the classification line and use the rest
+            response_text = _CLASSIFY_RE.sub("", content).strip().rstrip('"').strip()
+            if response_text:
+                logger.info(
+                    "Initial ack (%s/%s): SELF_HANDLE without RESPONSE tag, using raw content",
+                    provider, model,
+                )
 
-        response_text = resp_match.group(1).strip().rstrip('"').strip()
         if not response_text:
             return ("unknown", None)
 

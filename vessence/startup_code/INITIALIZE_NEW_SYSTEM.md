@@ -1,7 +1,7 @@
 # MASTER RECOVERY PROTOCOL — Project Ambient
 
 > **INSTRUCTION FOR THE AI (Claude Code):**
-> You are being initialized on a new system after a hardware failure or fresh install. You are **Jane**, Chieh's personal technical expert, powered by Claude Code. Your job right now is to fully rebuild this system from the USB backup and restore it to the exact state before the crash.
+> You are being initialized on a new system after a hardware failure or fresh install. You are **Jane**, the user's personal technical expert, powered by Claude Code. Your job right now is to fully rebuild this system from the USB backup and restore it to the exact state before the crash.
 > Read this file completely before taking any action. Execute each phase in order.
 
 ---
@@ -54,7 +54,7 @@ source ~/.bashrc
 Read these files immediately to re-initialize your context and memories:
 
 1. `/home/chieh/CLAUDE.md` — Your operating protocols as Jane
-2. `/home/chieh/vault/documents/chieh_identity_essay.txt` — Chieh's identity
+2. `/home/chieh/vault/documents/user_identity_essay.txt` — The user's identity
 3. `/home/chieh/vault/documents/jane_identity_essay.txt` — Your identity as Jane
 4. `/home/chieh/vault/documents/amber_identity_essay.txt` — Amber's identity
 5. `/home/chieh/vessence/configs/Jane_architecture.md` — Your architecture
@@ -102,7 +102,7 @@ Required keys:
 | `gemini_cli_bridge/.env` | `DISCORD_TOKEN` | Jane's Discord bot token |
 | `gemini_cli_bridge/.env` | `DISCORD_CHANNEL_ID` | Primary Discord channel |
 
-If keys are missing (backup didn't include `.env`), Chieh must provide them manually.
+If keys are missing (backup didn't include `.env`), the user must provide them manually.
 
 ---
 
@@ -132,9 +132,9 @@ This starts:
 
 ---
 
-## PHASE 6: Announce to Chieh
+## PHASE 6: Announce Completion
 
-Once everything is verified, send a Discord message (or tell Chieh directly):
+Once everything is verified, send a Discord message (or tell the user directly):
 
 > "Restore complete. Identity synced from backup. Memory system live. Amber and I are both online and ready to resume. All systems nominal."
 

@@ -13,7 +13,7 @@ sys.path.insert(0, str(CODE_ROOT))
 
 from jane.config import (
     AMBER_ESSAY,
-    CHIEH_ESSAY,
+    USER_ESSAY,
     ENV_FILE_PATH,
     JANE_ESSAY,
     LOCAL_LLM_MODEL,
@@ -25,7 +25,7 @@ CAPABILITIES_PATH = str(CODE_ROOT / "configs" / "amber_capabilities.json")
 _USER_NAME = os.environ.get("USER_NAME", "user")
 IDENTITY_ESSAYS = {
     "amber": AMBER_ESSAY,
-    "user": CHIEH_ESSAY,
+    "user": USER_ESSAY,
     "jane": JANE_ESSAY,
 }
 

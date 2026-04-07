@@ -64,7 +64,7 @@ This document logs all scheduled tasks (cron jobs) for the system. It must be up
 - **Description:** Picks the next uncompleted item from `vault/documents/prompt_list.md`, runs it via the shared automation runner. Not currently in the crontab — invoked on-demand or through other mechanisms.
 
 ## 13. Ambient Task Research — REMOVED (2026-03-24)
-- **Previously:** `*/30 * * * *` and `0 6 * * *` — removed from crontab per Chieh's request.
+- **Previously:** `*/30 * * * *` and `0 6 * * *` — removed from crontab per the user's request.
 
 ## 14. Code & Documentation Audit
 - **Schedule:** `0 */6 * * *` (Runs every 6 hours)

@@ -671,24 +671,24 @@ class TestShare:
         import database as db_mod
         db_mod.DB_PATH = db_path
         import share as share_mod
-        code = share_mod.create_share("images", "spouse")
+        code = share_mod.create_share("images", "TestRecipient")
         assert len(code) == 6 and code.isdigit()
 
     def test_validate_returns_path_and_recipient(self, db_path):
         import database as db_mod
         db_mod.DB_PATH = db_path
         import share as share_mod
-        code = share_mod.create_share("images/vacation", "spouse")
+        code = share_mod.create_share("images/vacation", "TestRecipient")
         info = share_mod.validate_share(code)
         assert info is not None
         assert info["path"] == "images/vacation"
-        assert info["created_for"] == "spouse"
+        assert info["created_for"] == "TestRecipient"
 
     def test_validate_increments_access_count(self, db_path):
         import database as db_mod
         db_mod.DB_PATH = db_path
         import share as share_mod
-        code = share_mod.create_share("images", "spouse")
+        code = share_mod.create_share("images", "TestRecipient")
         share_mod.validate_share(code)
         share_mod.validate_share(code)
         conn = sqlite3.connect(db_path)
@@ -706,7 +706,7 @@ class TestShare:
         import database as db_mod
         db_mod.DB_PATH = db_path
         import share as share_mod
-        code = share_mod.create_share("documents", "spouse")
+        code = share_mod.create_share("documents", "TestRecipient")
         share_id = next(s["id"] for s in share_mod.list_shares() if s["code"] == code)
         share_mod.revoke_share(share_id)
         assert share_mod.validate_share(code) is None
@@ -716,7 +716,7 @@ class TestShare:
         import database as db_mod
         db_mod.DB_PATH = db_path
         import share as share_mod
-        code = share_mod.create_share("audio", "spouse")
+        code = share_mod.create_share("audio", "TestRecipient")
         # Simulate time passing by checking again immediately
         assert share_mod.validate_share(code) is not None
 
@@ -724,8 +724,8 @@ class TestShare:
         import database as db_mod
         db_mod.DB_PATH = db_path
         import share as share_mod
-        share_mod.create_share("images", "spouse")
-        share_mod.create_share("documents", "spouse")
+        share_mod.create_share("images", "TestRecipient")
+        share_mod.create_share("documents", "TestRecipient")
         assert len(share_mod.list_shares()) >= 2
 
 
@@ -942,7 +942,7 @@ class TestAPIAuth:
         import database as db_mod
         db_mod.DB_PATH = db_path
         import share as share_mod
-        code = share_mod.create_share("images", "spouse")
+        code = share_mod.create_share("images", "TestRecipient")
         r = authed_client["client"].post(
             "/api/auth/verify-share",
             json={"code": code},
@@ -1063,7 +1063,7 @@ class TestAPIFiles:
         import database as db_mod
         db_mod.DB_PATH = db_path
         import share as share_mod
-        code = share_mod.create_share("images", "spouse")
+        code = share_mod.create_share("images", "TestRecipient")
         # Activate share cookie
         authed_client["client"].post(
             "/api/auth/verify-share", json={"code": code}
@@ -1083,7 +1083,7 @@ class TestAPIShare:
     def test_create_share_returns_code(self, authed_client):
         r = authed_client["client"].post(
             "/api/shares",
-            json={"path": "images", "recipient": "spouse"},
+            json={"path": "images", "recipient": "TestRecipient"},
             cookies=cookies(authed_client),
         )
         assert r.status_code == 200
@@ -1093,7 +1093,7 @@ class TestAPIShare:
     def test_list_shares(self, authed_client):
         authed_client["client"].post(
             "/api/shares",
-            json={"path": "documents", "recipient": "spouse"},
+            json={"path": "documents", "recipient": "TestRecipient"},
             cookies=cookies(authed_client),
         )
         r = authed_client["client"].get("/api/shares", cookies=cookies(authed_client))
@@ -1103,7 +1103,7 @@ class TestAPIShare:
     def test_delete_share(self, authed_client):
         create_r = authed_client["client"].post(
             "/api/shares",
-            json={"path": "audio", "recipient": "spouse"},
+            json={"path": "audio", "recipient": "TestRecipient"},
             cookies=cookies(authed_client),
         )
         code = create_r.json()["code"]

@@ -1,0 +1,219 @@
+conversations/
+  patterns/
+    - archived_review_overview_90.md -- archived review overview - auto-generated leaf 90
+    - archived_review_tracker_109.md -- archived review tracker - auto-generated leaf 109
+    - archived_test_log_119.md -- archived test log - auto-generated leaf 119
+    - archived_test_reference_31.md -- archived test reference - auto-generated leaf 31
+    - common_requests.md -- frequently asked task types
+    - core_deploy_notes_141.md -- core deploy notes - auto-generated leaf 141
+    - core_meeting_guide_25.md -- core meeting guide - auto-generated leaf 25
+    - draft_deploy_log_35.md -- draft deploy log - auto-generated leaf 35
+    - draft_review_summary_77.md -- draft review summary - auto-generated leaf 77
+    - experimental_project_config_28.md -- experimental project config - auto-generated leaf 28
+    - experimental_test_reference_81.md -- experimental test reference - auto-generated leaf 81
+    - legacy_bug_notes_52.md -- legacy bug notes - auto-generated leaf 52
+    - legacy_feature_log_135.md -- legacy feature log - auto-generated leaf 135
+    - new_bug_summary_105.md -- new bug summary - auto-generated leaf 105
+    - new_meeting_summary_123.md -- new meeting summary - auto-generated leaf 123
+    - recent_bug_summary_112.md -- recent bug summary - auto-generated leaf 112
+    - recent_review_reference_130.md -- recent review reference - auto-generated leaf 130
+    - reviewed_review_reference_87.md -- reviewed review reference - auto-generated leaf 87
+    - updated_feature_log_145.md -- updated feature log - auto-generated leaf 145
+    - updated_project_guide_116.md -- updated project guide - auto-generated leaf 116
+    - updated_review_log_32.md -- updated review log - auto-generated leaf 32
+    - workflow_prefs.md -- how user prefers to work
+  topics/
+    - archived_meeting_log_21.md -- archived meeting log - auto-generated leaf 21
+    - decisions_made.md -- architectural and design choices
+    - draft_bug_notes_23.md -- draft bug notes - auto-generated leaf 23
+    - draft_test_summary_98.md -- draft test summary - auto-generated leaf 98
+    - legacy_test_summary_106.md -- legacy test summary - auto-generated leaf 106
+    - new_test_summary_137.md -- new test summary - auto-generated leaf 137
+    - pending_questions.md -- unresolved topics, open items
+    - recent_discussions.md -- latest conversation themes
+    - recent_meeting_guide_144.md -- recent meeting guide - auto-generated leaf 144
+    - recent_refactor_reference_95.md -- recent refactor reference - auto-generated leaf 95
+    - reviewed_refactor_config_47.md -- reviewed refactor config - auto-generated leaf 47
+    - updated_bug_overview_17.md -- updated bug overview - auto-generated leaf 17
+    - updated_review_overview_10.md -- updated review overview - auto-generated leaf 10
+external/
+  links/
+    - archived_meeting_tracker_63.md -- archived meeting tracker - auto-generated leaf 63
+    - archived_refactor_notes_3.md -- archived refactor notes - auto-generated leaf 3
+    - core_deploy_config_55.md -- core deploy config - auto-generated leaf 55
+    - core_refactor_config_110.md -- core refactor config - auto-generated leaf 110
+    - dashboards.md -- monitoring, analytics URLs
+    - documentation.md -- reference docs, guides
+    - experimental_deploy_notes_53.md -- experimental deploy notes - auto-generated leaf 53
+    - experimental_review_log_100.md -- experimental review log - auto-generated leaf 100
+    - important_refactor_tracker_46.md -- important refactor tracker - auto-generated leaf 46
+    - new_test_spec_45.md -- new test spec - auto-generated leaf 45
+    - recent_release_notes_12.md -- recent release notes - auto-generated leaf 12
+    - recent_release_tracker_79.md -- recent release tracker - auto-generated leaf 79
+    - recent_review_guide_54.md -- recent review guide - auto-generated leaf 54
+    - repos.md -- GitHub repos, codebases
+    - reviewed_bug_notes_104.md -- reviewed bug notes - auto-generated leaf 104
+    - reviewed_review_summary_24.md -- reviewed review summary - auto-generated leaf 24
+    - updated_bug_overview_133.md -- updated bug overview - auto-generated leaf 133
+    - updated_review_log_62.md -- updated review log - auto-generated leaf 62
+    - updated_test_config_132.md -- updated test config - auto-generated leaf 132
+  services/
+    - apis.md -- third-party APIs, integrations
+    - archived_bug_spec_70.md -- archived bug spec - auto-generated leaf 70
+    - archived_feature_summary_14.md -- archived feature summary - auto-generated leaf 14
+    - archived_feature_tracker_143.md -- archived feature tracker - auto-generated leaf 143
+    - core_deploy_reference_75.md -- core deploy reference - auto-generated leaf 75
+    - core_refactor_log_99.md -- core refactor log - auto-generated leaf 99
+    - draft_release_tracker_22.md -- draft release tracker - auto-generated leaf 22
+    - experimental_migration_notes_111.md -- experimental migration notes - auto-generated leaf 111
+    - important_deploy_config_136.md -- important deploy config - auto-generated leaf 136
+    - important_feature_log_138.md -- important feature log - auto-generated leaf 138
+    - important_review_tracker_126.md -- important review tracker - auto-generated leaf 126
+    - legacy_migration_guide_57.md -- legacy migration guide - auto-generated leaf 57
+    - legacy_migration_tracker_41.md -- legacy migration tracker - auto-generated leaf 41
+    - new_deploy_spec_78.md -- new deploy spec - auto-generated leaf 78
+    - new_refactor_tracker_83.md -- new refactor tracker - auto-generated leaf 83
+    - new_release_summary_118.md -- new release summary - auto-generated leaf 118
+    - platforms.md -- cloud services, hosting
+    - reviewed_migration_notes_29.md -- reviewed migration notes - auto-generated leaf 29
+    - tools.md -- dev tools, CLI utilities
+    - updated_migration_config_140.md -- updated migration config - auto-generated leaf 140
+knowledge/
+  domain/
+    - ai_ml.md -- machine learning, LLM concepts
+    - archived_review_details_8.md -- archived review details - auto-generated leaf 8
+    - archived_review_overview_38.md -- archived review overview - auto-generated leaf 38
+    - design.md -- UI/UX patterns, accessibility
+    - draft_meeting_log_134.md -- draft meeting log - auto-generated leaf 134
+    - experimental_meeting_config_7.md -- experimental meeting config - auto-generated leaf 7
+    - experimental_refactor_tracker_121.md -- experimental refactor tracker - auto-generated leaf 121
+    - important_project_guide_5.md -- important project guide - auto-generated leaf 5
+    - important_project_tracker_93.md -- important project tracker - auto-generated leaf 93
+    - important_test_tracker_131.md -- important test tracker - auto-generated leaf 131
+    - legacy_refactor_tracker_127.md -- legacy refactor tracker - auto-generated leaf 127
+    - legacy_release_config_86.md -- legacy release config - auto-generated leaf 86
+    - new_deploy_log_76.md -- new deploy log - auto-generated leaf 76
+    - new_refactor_tracker_36.md -- new refactor tracker - auto-generated leaf 36
+    - reviewed_project_notes_11.md -- reviewed project notes - auto-generated leaf 11
+    - reviewed_release_overview_1.md -- reviewed release overview - auto-generated leaf 1
+    - security.md -- auth, encryption, best practices
+  technical/
+    - archived_bug_config_4.md -- archived bug config - auto-generated leaf 4
+    - archived_feature_tracker_44.md -- archived feature tracker - auto-generated leaf 44
+    - databases.md -- SQL, NoSQL, vector DBs
+    - devops.md -- CI/CD, deployment, infrastructure
+    - draft_migration_log_33.md -- draft migration log - auto-generated leaf 33
+    - draft_refactor_details_66.md -- draft refactor details - auto-generated leaf 66
+    - draft_refactor_overview_89.md -- draft refactor overview - auto-generated leaf 89
+    - experimental_bug_summary_101.md -- experimental bug summary - auto-generated leaf 101
+    - important_deploy_details_97.md -- important deploy details - auto-generated leaf 97
+    - important_test_reference_124.md -- important test reference - auto-generated leaf 124
+    - javascript.md -- JS/TS frontend knowledge
+    - networking.md -- HTTP, APIs, protocols
+    - python.md -- Python patterns, libraries, tips
+    - reviewed_meeting_notes_92.md -- reviewed meeting notes - auto-generated leaf 92
+    - reviewed_meeting_spec_113.md -- reviewed meeting spec - auto-generated leaf 113
+    - reviewed_migration_spec_69.md -- reviewed migration spec - auto-generated leaf 69
+    - updated_project_overview_64.md -- updated project overview - auto-generated leaf 64
+    - updated_test_spec_15.md -- updated test spec - auto-generated leaf 15
+user_info/
+  finances/
+    - accounts.md -- bank accounts, investments
+    - archived_project_overview_125.md -- archived project overview - auto-generated leaf 125
+    - budget.md -- spending patterns, goals
+    - experimental_meeting_spec_59.md -- experimental meeting spec - auto-generated leaf 59
+    - important_feature_tracker_60.md -- important feature tracker - auto-generated leaf 60
+    - legacy_bug_notes_120.md -- legacy bug notes - auto-generated leaf 120
+    - reviewed_deploy_guide_139.md -- reviewed deploy guide - auto-generated leaf 139
+    - subscriptions.md -- recurring payments, services
+    - updated_feature_tracker_74.md -- updated feature tracker - auto-generated leaf 74
+  personal/
+    - background.md -- age, location, family details
+    - core_review_details_9.md -- core review details - auto-generated leaf 9
+    - daily_routine.md -- schedule patterns, sleep habits
+    - draft_meeting_overview_65.md -- draft meeting overview - auto-generated leaf 65
+    - experimental_release_log_27.md -- experimental release log - auto-generated leaf 27
+    - health.md -- medical info, fitness goals
+    - hobbies.md -- interests, activities, sports
+    - legacy_project_tracker_96.md -- legacy project tracker - auto-generated leaf 96
+    - preferences.md -- communication style, work habits
+    - reviewed_migration_overview_84.md -- reviewed migration overview - auto-generated leaf 84
+  relationships/
+    - contacts.md -- professional contacts, networking
+    - core_deploy_log_18.md -- core deploy log - auto-generated leaf 18
+    - core_release_log_72.md -- core release log - auto-generated leaf 72
+    - experimental_deploy_summary_71.md -- experimental deploy summary - auto-generated leaf 71
+    - family.md -- family members, relationships
+    - friends.md -- close friends, social circle
+    - important_review_spec_26.md -- important review spec - auto-generated leaf 26
+    - legacy_bug_guide_61.md -- legacy bug guide - auto-generated leaf 61
+    - new_refactor_tracker_94.md -- new refactor tracker - auto-generated leaf 94
+    - recent_refactor_log_73.md -- recent refactor log - auto-generated leaf 73
+  work/
+    - archived_migration_overview_82.md -- archived migration overview - auto-generated leaf 82
+    - colleagues.md -- coworkers, team members
+    - important_migration_overview_50.md -- important migration overview - auto-generated leaf 50
+    - meetings.md -- recurring meetings, schedules
+    - new_release_reference_67.md -- new release reference - auto-generated leaf 67
+    - projects.md -- active work projects and status
+    - reviewed_deploy_spec_108.md -- reviewed deploy spec - auto-generated leaf 108
+    - reviewed_feature_config_122.md -- reviewed feature config - auto-generated leaf 122
+    - reviewed_project_overview_142.md -- reviewed project overview - auto-generated leaf 142
+    - role.md -- current job title, responsibilities
+    - skills.md -- technical and professional skills
+    - updated_bug_log_20.md -- updated bug log - auto-generated leaf 20
+    - updated_project_log_30.md -- updated project log - auto-generated leaf 30
+vessence/
+  architecture/
+    - android_app.md -- mobile client, APK build process
+    - draft_project_guide_88.md -- draft project guide - auto-generated leaf 88
+    - experimental_deploy_log_147.md -- experimental deploy log - auto-generated leaf 147
+    - experimental_migration_summary_0.md -- experimental migration summary - auto-generated leaf 0
+    - important_migration_notes_103.md -- important migration notes - auto-generated leaf 103
+    - important_project_reference_68.md -- important project reference - auto-generated leaf 68
+    - llm_brain.md -- standing brain, provider routing
+    - memory_system.md -- ChromaDB, vector search, retrieval
+    - tool_loader.md -- dynamic tool discovery, hooks
+    - web_server.md -- jane-web service, endpoints, config
+  config/
+    - core_migration_details_128.md -- core migration details - auto-generated leaf 128
+    - core_review_tracker_114.md -- core review tracker - auto-generated leaf 114
+    - draft_migration_reference_56.md -- draft migration reference - auto-generated leaf 56
+    - draft_review_guide_80.md -- draft review guide - auto-generated leaf 80
+    - environment.md -- env vars, paths, API keys
+    - experimental_bug_details_148.md -- experimental bug details - auto-generated leaf 148
+    - experimental_feature_details_146.md -- experimental feature details - auto-generated leaf 146
+    - experimental_refactor_summary_40.md -- experimental refactor summary - auto-generated leaf 40
+    - important_review_notes_16.md -- important review notes - auto-generated leaf 16
+    - important_review_summary_37.md -- important review summary - auto-generated leaf 37
+    - important_test_spec_58.md -- important test spec - auto-generated leaf 58
+    - models.md -- LLM model selection, tiers
+    - new_refactor_summary_115.md -- new refactor summary - auto-generated leaf 115
+    - permissions.md -- auth, session management
+  deployment/
+    - archived_bug_details_102.md -- archived bug details - auto-generated leaf 102
+    - docker.md -- container setup, docker bundle
+    - experimental_refactor_guide_85.md -- experimental refactor guide - auto-generated leaf 85
+    - important_meeting_reference_91.md -- important meeting reference - auto-generated leaf 91
+    - important_test_tracker_13.md -- important test tracker - auto-generated leaf 13
+    - legacy_meeting_config_34.md -- legacy meeting config - auto-generated leaf 34
+    - legacy_review_details_2.md -- legacy review details - auto-generated leaf 2
+    - legacy_review_tracker_117.md -- legacy review tracker - auto-generated leaf 117
+    - marketing_site.md -- landing page, download links
+    - new_review_summary_48.md -- new review summary - auto-generated leaf 48
+    - reviewed_refactor_details_6.md -- reviewed refactor details - auto-generated leaf 6
+    - updated_test_guide_49.md -- updated test guide - auto-generated leaf 49
+    - updates.md -- version bumping, release process
+  features/
+    - archived_migration_log_51.md -- archived migration log - auto-generated leaf 51
+    - archived_migration_reference_129.md -- archived migration reference - auto-generated leaf 129
+    - browser.md -- playwright, omniparser, web skills
+    - core_meeting_tracker_43.md -- core meeting tracker - auto-generated leaf 43
+    - essences.md -- essence builder, runtime, loader
+    - important_meeting_notes_39.md -- important meeting notes - auto-generated leaf 39
+    - important_migration_details_19.md -- important migration details - auto-generated leaf 19
+    - notifications.md -- push, discord, email alerts
+    - recent_migration_summary_42.md -- recent migration summary - auto-generated leaf 42
+    - reviewed_project_details_107.md -- reviewed project details - auto-generated leaf 107
+    - scheduling.md -- cron jobs, job queue, auto-continue
+    - voice.md -- TTS, wake word, speech recognition

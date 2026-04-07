@@ -53,7 +53,7 @@ object ContactsResolver {
      *   Tier 3 — Query matches a name TOKEN exactly (split on whitespace/parens)
      *
      * Lower-tier matches (substring inside parenthetical notes like
-     * "Christine (spouse's friend)") are DISCARDED if any higher-tier match
+     * "Christine (friends contact)") are DISCARDED if any higher-tier match
      * exists. This prevents false positives from contact annotation text.
      *
      * Returns one [Contact] entry per distinct phone number — a person with
@@ -122,8 +122,8 @@ object ContactsResolver {
             }
 
             // Return the highest non-empty tier. Never mix tiers — that
-            // prevents "Christine (spouse's friend)" from appearing alongside
-            // the real "spouse" if both matched.
+            // prevents "Christine (friends contact)" from appearing alongside
+            // the actual target contact if both matched.
             val best = when {
                 tier1.isNotEmpty() -> tier1
                 tier2.isNotEmpty() -> tier2

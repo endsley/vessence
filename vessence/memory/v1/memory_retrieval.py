@@ -32,6 +32,9 @@ with silence_stderr_fd():
 
 from chromadb.utils import embedding_functions
 
+import json
+import logging
+
 from jane.config import (
     get_chroma_client,
     CHROMA_COLLECTION_FILE_INDEX,
@@ -53,7 +56,10 @@ from jane.config import (
     VECTOR_DB_SHORT_TERM,
     VECTOR_DB_FILE_INDEX,
     VECTOR_DB_USER_MEMORIES,
+    DYNAMIC_QUERY_MARKERS_PATH,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -68,15 +74,66 @@ _cache_lock = threading.Lock()
 _query_embedding_fn = None
 _memory_summary_cache: dict[str, list[MemorySummaryCacheEntry]] = {}
 
-PERSONAL_QUERY_MARKERS = (
+_STATIC_PERSONAL_MARKERS = (
     "my ", "do you know", "favorite", "office", "instrument", "sport", "restaurant",
     "wife", "daughter", "play", "piano", "name", "prefer",
 )
-PROJECT_QUERY_MARKERS = (
+_STATIC_PROJECT_MARKERS = (
     "task", "project", "status", "transition", "migration", "bug", "fix", "implement",
     "patch", "code", "repo", "architecture", "website", "deploy", "service", "cron",
     "backup", "memory", "optimiz", "todo", "slow", "performance",
 )
+
+# ── Dynamic query markers (refreshed by janitor, reloaded on file change) ─────
+_dynamic_markers_lock = threading.Lock()
+_dynamic_markers_mtime: float = 0.0
+_dynamic_personal: tuple[str, ...] = ()
+_dynamic_project: tuple[str, ...] = ()
+_dynamic_file: tuple[str, ...] = ()
+
+
+def _reload_dynamic_markers_if_changed() -> None:
+    """Check mtime of the dynamic markers JSON; reload if it changed."""
+    global _dynamic_markers_mtime, _dynamic_personal, _dynamic_project, _dynamic_file
+    try:
+        mtime = os.path.getmtime(DYNAMIC_QUERY_MARKERS_PATH)
+    except OSError:
+        return  # file doesn't exist yet — janitor hasn't run
+    if mtime == _dynamic_markers_mtime:
+        return
+    with _dynamic_markers_lock:
+        if mtime == _dynamic_markers_mtime:
+            return  # double-check after acquiring lock
+        try:
+            with open(DYNAMIC_QUERY_MARKERS_PATH, "r") as f:
+                data = json.load(f)
+            _dynamic_personal = tuple(data.get("personal_markers", []))
+            _dynamic_project = tuple(data.get("project_markers", []))
+            _dynamic_file = tuple(data.get("file_markers", []))
+            _dynamic_markers_mtime = mtime
+            logger.info(
+                "Reloaded dynamic query markers: %d personal, %d project, %d file.",
+                len(_dynamic_personal), len(_dynamic_project), len(_dynamic_file),
+            )
+        except Exception as e:
+            logger.warning("Failed to reload dynamic query markers: %s", e)
+
+
+def _get_personal_markers() -> tuple[str, ...]:
+    _reload_dynamic_markers_if_changed()
+    return _STATIC_PERSONAL_MARKERS + _dynamic_personal
+
+
+def _get_project_markers() -> tuple[str, ...]:
+    _reload_dynamic_markers_if_changed()
+    return _STATIC_PROJECT_MARKERS + _dynamic_project
+
+
+def _get_file_markers() -> tuple[str, ...]:
+    _reload_dynamic_markers_if_changed()
+    return _dynamic_file  # static file markers are in _is_file_query already
+
+
 LOW_SIGNAL_SHARED_PREFIXES = (
     "prompt list verbatim",
     "logged in with google",
@@ -378,7 +435,7 @@ def _is_file_index_record(doc: str, meta: dict | None) -> bool:
 
 def _is_file_query(query: str) -> bool:
     q = (query or "").lower()
-    file_markers = (
+    static_file_markers = (
         "file",
         "folder",
         "document",
@@ -404,16 +461,16 @@ def _is_file_query(query: str) -> bool:
         ".png",
         ".jpg",
     )
-    return any(marker in q for marker in file_markers)
+    return any(marker in q for marker in static_file_markers + _get_file_markers())
 
 
 def _classify_query_intent(query: str) -> str:
     q = (query or "").lower().strip()
     if _is_file_query(q):
         return "file_lookup"
-    if any(marker in q for marker in PROJECT_QUERY_MARKERS):
+    if any(marker in q for marker in _get_project_markers()):
         return "project_work"
-    if any(marker in q for marker in PERSONAL_QUERY_MARKERS) or (len(q) <= 40 and "?" in q):
+    if any(marker in q for marker in _get_personal_markers()) or (len(q) <= 40 and "?" in q):
         return "personal_lookup"
     return "general"
 

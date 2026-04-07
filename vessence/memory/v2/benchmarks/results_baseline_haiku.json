@@ -1,0 +1,111 @@
+{
+  "model": "claude-haiku-4-5-20251001",
+  "overall_avg_latency_ms": 7142,
+  "tests": [
+    {
+      "prompt": "What's my work schedule like?",
+      "avg_latency_ms": 7736,
+      "rounds": [
+        {
+          "elapsed_ms": 9173,
+          "prompt_tokens_est": 61,
+          "error": null
+        },
+        {
+          "elapsed_ms": 6657,
+          "prompt_tokens_est": 61,
+          "error": null
+        },
+        {
+          "elapsed_ms": 7379,
+          "prompt_tokens_est": 61,
+          "error": null
+        }
+      ]
+    },
+    {
+      "prompt": "How does the memory system work and what changes have we discussed?",
+      "avg_latency_ms": 7661,
+      "rounds": [
+        {
+          "elapsed_ms": 6852,
+          "prompt_tokens_est": 70,
+          "error": null
+        },
+        {
+          "elapsed_ms": 7646,
+          "prompt_tokens_est": 70,
+          "error": null
+        },
+        {
+          "elapsed_ms": 8485,
+          "prompt_tokens_est": 70,
+          "error": null
+        }
+      ]
+    },
+    {
+      "prompt": "What's Bob's phone number?",
+      "avg_latency_ms": 6264,
+      "rounds": [
+        {
+          "elapsed_ms": 6551,
+          "prompt_tokens_est": 60,
+          "error": null
+        },
+        {
+          "elapsed_ms": 6143,
+          "prompt_tokens_est": 60,
+          "error": null
+        },
+        {
+          "elapsed_ms": 6098,
+          "prompt_tokens_est": 60,
+          "error": null
+        }
+      ]
+    },
+    {
+      "prompt": "Show me how to set up the Docker deployment",
+      "avg_latency_ms": 7094,
+      "rounds": [
+        {
+          "elapsed_ms": 7505,
+          "prompt_tokens_est": 64,
+          "error": null
+        },
+        {
+          "elapsed_ms": 7680,
+          "prompt_tokens_est": 64,
+          "error": null
+        },
+        {
+          "elapsed_ms": 6098,
+          "prompt_tokens_est": 64,
+          "error": null
+        }
+      ]
+    },
+    {
+      "prompt": "Tell me about that thing we talked about yesterday",
+      "avg_latency_ms": 6956,
+      "rounds": [
+        {
+          "elapsed_ms": 6739,
+          "prompt_tokens_est": 66,
+          "error": null
+        },
+        {
+          "elapsed_ms": 7344,
+          "prompt_tokens_est": 66,
+          "error": null
+        },
+        {
+          "elapsed_ms": 6787,
+          "prompt_tokens_est": 66,
+          "error": null
+        }
+      ]
+    }
+  ]
+}

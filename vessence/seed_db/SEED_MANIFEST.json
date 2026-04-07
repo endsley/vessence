@@ -1,0 +1,23 @@
+{
+  "built_at": "2026-04-07T17:12:26.430552",
+  "seed_file": "configs/jane_seed_memories.json",
+  "seed_count": 25,
+  "collections": {
+    "long_term_knowledge": {
+      "path": "long_term_memory/",
+      "count": 25
+    },
+    "short_term_memory": {
+      "path": "short_term_memory/",
+      "count": 0
+    },
+    "user_memories": {
+      "path": "./",
+      "count": 0
+    },
+    "file_index_memories": {
+      "path": "file_index_memory/",
+      "count": 0
+    }
+  }
+}

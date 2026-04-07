@@ -5,10 +5,10 @@ Status: partial (temporal smoothing implemented, Whisper stage-2 deferred)
 Created: 2026-04-03
 
 ## Description
-The current hey_jane.onnx model triggers on background speech from other people because it was only trained on Chieh's voice + TTS voices with Gaussian noise. It needs negative examples of real human speech and positive examples of Chieh's voice mixed with background conversation.
+The current hey_jane.onnx model triggers on background speech from other people because it was only trained on the user's voice + TTS voices with Gaussian noise. It needs negative examples of real human speech and positive examples of the user's voice mixed with background conversation.
 
 ### What to add:
-1. **Positive: Chieh's voice + background speech** — mix the 11 real "hey jane" recordings with speech command samples, podcast-style audio, and conversational background at various SNRs (5-20dB)
+1. **Positive: the user's voice + background speech** — mix the 11 real "hey jane" recordings with speech command samples, podcast-style audio, and conversational background at various SNRs (5-20dB)
 2. **Negative: Other people speaking naturally** — download LibriSpeech or similar dataset, extract clips of general conversation as negatives
 3. **Negative: Other people saying "hey jane"** — the edge-tts voices already cover this, but add more variety
 4. **Negative: Background conversation without trigger word** — long-form speech clips (podcasts, TV dialogue)

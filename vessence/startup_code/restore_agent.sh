@@ -1,5 +1,5 @@
 #!/bin/bash
-# restore_agent.sh - Advanced System Provisioner for Chieh's AI Agent
+# restore_agent.sh - Advanced System Provisioner for the AI Agent
 # Run this after restoring from USB backup to fully rebuild the system.
 set -e
 
@@ -126,5 +126,5 @@ echo ""
 echo "Next steps:"
 echo "  1. Fill in .env files with API keys (see step 6 warnings above)"
 echo "  2. Run: bash /home/chieh/vessence/startup_code/start_all_bots.sh"
-echo "  3. Tell Chieh: 'Restore complete. Ready to resume.'"
+echo "  3. Restore complete. Ready to resume."
 echo "-------------------------------------------------------"

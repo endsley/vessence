@@ -145,7 +145,7 @@ fun TtsVoicePickerSheet(
                             IconButton(
                                 onClick = {
                                     tts?.voice = voice
-                                    tts?.speak("Hi Chieh, this is how I sound.", TextToSpeech.QUEUE_FLUSH, null, "preview")
+                                    tts?.speak("Hi, this is how I sound.", TextToSpeech.QUEUE_FLUSH, null, "preview")
                                 },
                                 modifier = Modifier.size(32.dp),
                             ) {

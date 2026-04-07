@@ -58,6 +58,7 @@ LOGS_DIR        = f"{VESSENCE_DATA_HOME}/logs"
 CONFIGS_DIR     = f"{VESSENCE_HOME}/configs"
 AMBER_DIR       = f"{VESSENCE_HOME}/amber"
 DATA_DIR        = f"{VESSENCE_DATA_HOME}/data"
+DYNAMIC_QUERY_MARKERS_PATH = f"{VESSENCE_DATA_HOME}/data/dynamic_query_markers.json"
 CREDENTIALS_DIR = f"{VESSENCE_DATA_HOME}/credentials"
 ENV_FILE_PATH   = f"{VESSENCE_DATA_HOME}/.env"
 
@@ -100,7 +101,6 @@ _USER_NAME   = os.environ.get("USER_NAME", "user")
 USER_ESSAY   = f"{VAULT_DIR}/documents/{_USER_NAME}_identity_essay.txt"
 JANE_ESSAY   = f"{VAULT_DIR}/documents/jane_identity_essay.txt"
 AMBER_ESSAY  = f"{VAULT_DIR}/documents/amber_identity_essay.txt"
-CHIEH_ESSAY  = USER_ESSAY
 
 # ── State / session files ─────────────────────────────────────────────────────
 USER_STATE_PATH   = f"{AGENT_ROOT}/user_state.json"
@@ -149,7 +149,6 @@ DISCORD_API_BASE      = "https://discord.com/api/v10"
 DISCORD_MAX_MSG_LEN   = 2000
 DISCORD_SAFE_CHUNK    = 1900   # leave headroom for Discord's limit
 OWNER_USER_ID         = os.environ.get("OWNER_USER_ID", "")
-CHIEH_USER_ID         = OWNER_USER_ID
 
 # Progress-snippet settings for the Jane bridge
 DISCORD_PROGRESS_INTERVAL  = 25   # seconds between progress updates

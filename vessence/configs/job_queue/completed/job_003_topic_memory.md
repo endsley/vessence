@@ -40,4 +40,4 @@ Replace the current per-turn short-term memory writes with topic-based rolling s
 - No cold-start latency issues (Haiku, not local LLM)
 
 ## Result
-[ACK]Got it — working on this now.[/ACK]  Here's where we're at, Chieh. The MMD trigger word project is in Phase 2 of 5. Phase 1 is done — you've got 11 positive "hey jane" samples and 60 synthetic negatives collected, and the model is enrolled and saved. The threshold auto-calibration is working to
+[ACK]Got it — working on this now.[/ACK]  Here's where we're at. The MMD trigger word project is in Phase 2 of 5. Phase 1 is done — you've got 11 positive "hey jane" samples and 60 synthetic negatives collected, and the model is enrolled and saved. The threshold auto-calibration is working to

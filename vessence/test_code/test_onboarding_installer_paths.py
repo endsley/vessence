@@ -6,7 +6,7 @@ from onboarding import main as onboarding_main
 def test_settings_page_uses_direct_local_urls_when_no_domain(tmp_path, monkeypatch):
     env_path = tmp_path / ".env"
     profile_path = tmp_path / "user_profile.md"
-    env_path.write_text("USER_NAME=Chieh\nJANE_BRAIN=claude\n", encoding="utf-8")
+    env_path.write_text("USER_NAME=TestUser\nJANE_BRAIN=claude\n", encoding="utf-8")
     profile_path.write_text("# User Profile\n", encoding="utf-8")
 
     monkeypatch.setattr(onboarding_main, "ENV_FILE", env_path)
@@ -24,7 +24,7 @@ def test_settings_page_uses_direct_local_urls_when_no_domain(tmp_path, monkeypat
 def test_preset_claude_brain_defaults_to_account_auth_on_setup(tmp_path, monkeypatch):
     env_path = tmp_path / ".env"
     profile_path = tmp_path / "user_profile.md"
-    env_path.write_text("JANE_BRAIN=claude\nUSER_NAME=Chieh\n", encoding="utf-8")
+    env_path.write_text("JANE_BRAIN=claude\nUSER_NAME=TestUser\n", encoding="utf-8")
 
     monkeypatch.setattr(onboarding_main, "ENV_FILE", env_path)
     monkeypatch.setattr(onboarding_main, "PROFILE", profile_path)
@@ -44,7 +44,7 @@ def test_preset_claude_brain_defaults_to_account_auth_on_setup(tmp_path, monkeyp
 def test_preset_gemini_brain_defaults_to_api_key_on_setup(tmp_path, monkeypatch):
     env_path = tmp_path / ".env"
     profile_path = tmp_path / "user_profile.md"
-    env_path.write_text("JANE_BRAIN=gemini\nUSER_NAME=Chieh\n", encoding="utf-8")
+    env_path.write_text("JANE_BRAIN=gemini\nUSER_NAME=TestUser\n", encoding="utf-8")
 
     monkeypatch.setattr(onboarding_main, "ENV_FILE", env_path)
     monkeypatch.setattr(onboarding_main, "PROFILE", profile_path)

@@ -16,7 +16,7 @@ class AmberVoiceTester(discord.Client):
             return
 
         print("Step 1: Asking Amber to speak...")
-        await channel.send("Amber, please say 'Hello Chieh, your voice system is working perfectly' out loud using your new voice.")
+        await channel.send("Amber, please say 'Hello, your voice system is working perfectly' out loud using your new voice.")
         
     async def on_message(self, message):
         if message.author.id != AMBER_ID:

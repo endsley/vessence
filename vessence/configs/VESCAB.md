@@ -9,7 +9,7 @@ Official terminology for the Vessence platform. When we refer to these terms, th
 | Term | Definition |
 |---|---|
 | **Vessence** | The platform. Name from "Vessel + Essence" — a container that holds someone's digital essence. The north star: a digital clone and living memory. |
-| **Jane** | The permanent builder agent. Handles reasoning, code, architecture, research. Chieh's technical partner. One Jane per Vessence instance. |
+| **Jane** | The permanent builder agent. Handles reasoning, code, architecture, research. The user's technical partner. One Jane per Vessence instance. |
 | **Amber** | The universal runtime agent. Takes on essence roles ("Amber the briefer", "Amber the librarian"). Powered by Gemini Flash via Google ADK. The user-facing companion. |
 | **Vault** | The file storage system. Physical files live here — PDFs, images, audio, documents. Accessed via web file browser (Life Librarian essence) or API. Path: `$VAULT_HOME`. |
 | **ChromaDB** | The memory system. Facts, preferences, conversation history, searchable knowledge stored as vector embeddings. "The soul of the product." Shared across Jane, Amber, CLI, web, and Android. |
@@ -71,7 +71,7 @@ Official terminology for the Vessence platform. When we refer to these terms, th
 |---|---|
 | **Relay** | Server at `relay.vessences.com` that routes traffic between users' Docker instances and their mobile/remote clients. Users don't need Cloudflare or Tailscale. Cost: ~$20/month per 1000 users. |
 | **Keepalive Cron** | `*/5 * * * *` cron that checks if Jane web server is running and restarts it if not. Replaced the full bot watchdog after Discord was disconnected. |
-| **Identity Hook** | `~/.claude/hooks/identity_hook.sh` — CLI-only hook that injects compact Jane/Chieh identity into every prompt. Compressed from 17.8KB to 1.3KB on 2026-03-22. |
+| **Identity Hook** | `~/.claude/hooks/identity_hook.sh` — CLI-only hook that injects compact Jane/user identity into every prompt. Compressed from 17.8KB to 1.3KB on 2026-03-22. |
 | **Onboarding** | First-run setup wizard (port 3000). Collects user name, brain choice, API keys. Writes `.env` file and seeds initial ChromaDB memories. |
 
 ## Commands

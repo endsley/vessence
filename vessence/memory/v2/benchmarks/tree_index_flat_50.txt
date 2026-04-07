@@ -1,0 +1,50 @@
+1. conversations/patterns/common_requests.md -- frequently asked task types
+2. conversations/patterns/workflow_prefs.md -- how user prefers to work
+3. conversations/topics/decisions_made.md -- architectural and design choices
+4. conversations/topics/pending_questions.md -- unresolved topics, open items
+5. conversations/topics/recent_discussions.md -- latest conversation themes
+6. external/links/dashboards.md -- monitoring, analytics URLs
+7. external/links/documentation.md -- reference docs, guides
+8. external/links/repos.md -- GitHub repos, codebases
+9. external/services/apis.md -- third-party APIs, integrations
+10. external/services/platforms.md -- cloud services, hosting
+11. external/services/tools.md -- dev tools, CLI utilities
+12. knowledge/domain/ai_ml.md -- machine learning, LLM concepts
+13. knowledge/domain/design.md -- UI/UX patterns, accessibility
+14. knowledge/domain/security.md -- auth, encryption, best practices
+15. knowledge/technical/databases.md -- SQL, NoSQL, vector DBs
+16. knowledge/technical/devops.md -- CI/CD, deployment, infrastructure
+17. knowledge/technical/javascript.md -- JS/TS frontend knowledge
+18. knowledge/technical/networking.md -- HTTP, APIs, protocols
+19. knowledge/technical/python.md -- Python patterns, libraries, tips
+20. user_info/finances/accounts.md -- bank accounts, investments
+21. user_info/finances/budget.md -- spending patterns, goals
+22. user_info/finances/subscriptions.md -- recurring payments, services
+23. user_info/personal/background.md -- age, location, family details
+24. user_info/personal/daily_routine.md -- schedule patterns, sleep habits
+25. user_info/personal/health.md -- medical info, fitness goals
+26. user_info/personal/hobbies.md -- interests, activities, sports
+27. user_info/personal/preferences.md -- communication style, work habits
+28. user_info/relationships/contacts.md -- professional contacts, networking
+29. user_info/relationships/family.md -- family members, relationships
+30. user_info/relationships/friends.md -- close friends, social circle
+31. user_info/work/colleagues.md -- coworkers, team members
+32. user_info/work/meetings.md -- recurring meetings, schedules
+33. user_info/work/projects.md -- active work projects and status
+34. user_info/work/role.md -- current job title, responsibilities
+35. user_info/work/skills.md -- technical and professional skills
+36. vessence/architecture/android_app.md -- mobile client, APK build process
+37. vessence/architecture/llm_brain.md -- standing brain, provider routing
+38. vessence/architecture/memory_system.md -- ChromaDB, vector search, retrieval
+39. vessence/architecture/tool_loader.md -- dynamic tool discovery, hooks
+40. vessence/architecture/web_server.md -- jane-web service, endpoints, config
+41. vessence/config/environment.md -- env vars, paths, API keys
+42. vessence/config/models.md -- LLM model selection, tiers
+43. vessence/config/permissions.md -- auth, session management
+44. vessence/deployment/docker.md -- container setup, docker bundle
+45. vessence/deployment/marketing_site.md -- landing page, download links
+46. vessence/deployment/updates.md -- version bumping, release process
+47. vessence/features/browser.md -- playwright, omniparser, web skills
+48. vessence/features/essences.md -- essence builder, runtime, loader
+49. vessence/features/notifications.md -- push, discord, email alerts
+50. vessence/features/voice.md -- TTS, wake word, speech recognition

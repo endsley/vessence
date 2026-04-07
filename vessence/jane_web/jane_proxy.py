@@ -536,6 +536,17 @@ CODE_MAP_KEYWORDS = (
     "wife",
     "love",
     "version",
+    # Auto-evolved from daily conversations
+    "currently",
+    "gemma",
+    "xtps",
+    "single",
+    "using",
+    "warmed",
+    "initial",
+    "sync",
+    "push",
+    "button",
 )
 
 
@@ -1221,6 +1232,34 @@ async def send_message(user_id: str, session_id: str, message: str, file_context
     _sync_broadcaster = StreamBroadcaster(broadcast_user_id, session_id, platform or "", message)
     _sync_broadcaster.start()
     state = _get_session(session_id)
+    # Serialize requests per session — prevents conversation desync where
+    # concurrent requests race on history, causing Jane to answer the wrong question.
+    # Previously only the stream path had this gate; the sync path was unprotected.
+    _gate_acquired = False
+    try:
+        await asyncio.wait_for(state.request_gate.acquire(), timeout=90)
+        _gate_acquired = True
+    except asyncio.TimeoutError:
+        logger.warning("[%s] Session request_gate timed out after 90s (sync) — failing request to prevent desync", session_id[:12])
+        _sync_broadcaster.error("Request serialization timeout")
+        return {"text": "⚠️ Jane is busy with another request. Please try again in a moment.", "files": []}
+
+    try:
+        return await _send_message_inner(
+            state, session_id, message, file_context, platform, tts_enabled,
+            _sync_broadcaster, broadcast_user_id, request_start,
+        )
+    finally:
+        if _gate_acquired:
+            state.request_gate.release()
+
+
+async def _send_message_inner(
+    state, session_id: str, message: str, file_context: str,
+    platform: str, tts_enabled: bool, _sync_broadcaster, broadcast_user_id: str,
+    request_start: float,
+) -> dict:
+    """Inner send_message logic, always runs under request_gate."""
     # Phone tools: extract any [TOOL_RESULT:{json}] markers the Android client
     # prepended. Same treatment as the stream path — strip from user-visible
     # bubble, prepend a [PHONE TOOL RESULTS] block onto the brain-visible
@@ -1265,7 +1304,7 @@ async def send_message(user_id: str, session_id: str, message: str, file_context
         # Only inject [Recent exchanges] for pronoun resolution; skip [Session context]
         # to avoid accumulating duplicate summaries across turns.
         safety_parts = []
-        recent = _format_recent_history(state.history, max_turns=6, max_chars=2400)
+        recent = _format_recent_history(list(state.history), max_turns=6, max_chars=2400)
         if recent:
             safety_parts.append(f"[Recent exchanges]\n{recent}")
         safety_ctx = "\n\n".join(safety_parts)
@@ -1283,23 +1322,17 @@ async def send_message(user_id: str, session_id: str, message: str, file_context
         logger.info("[%s] Standing brain turn %d — injected recent history only", session_id[:12], _sb_bp.turn_count)
     else:
         _memory_fallback = state.bootstrap_memory_summary or get_prefetch_result(session_id)
-        try:
-            request_ctx = await build_jane_context_async(
-                message,
-                state.history,
-                file_context=resolved_file_context,
-                conversation_summary=summary_text,
-                session_id=session_id,
-                enable_memory_retrieval=True,
-                memory_summary_fallback=_memory_fallback,
-                platform=platform,
-                tts_enabled=tts_enabled,
-            )
-        except Exception as exc:
-            logger.exception("[%s] Context build failed (sync)", session_id[:12])
-            _log_stage(session_id, "context_build_error", stage_start, error=type(exc).__name__)
-            _sync_broadcaster.error(str(exc))
-            return {"text": f"⚠️ Jane could not prepare context for this request: {exc}", "files": []}
+        request_ctx = await build_jane_context_async(
+            message,
+            list(state.history),  # snapshot: prevent race if another request mutates history
+            file_context=resolved_file_context,
+            conversation_summary=summary_text,
+            session_id=session_id,
+            enable_memory_retrieval=True,
+            memory_summary_fallback=_memory_fallback,
+            platform=platform,
+            tts_enabled=tts_enabled,
+        )
     if request_ctx.retrieved_memory_summary:
         state.bootstrap_memory_summary = request_ctx.retrieved_memory_summary
     state.bootstrap_complete = True
@@ -1323,27 +1356,11 @@ async def send_message(user_id: str, session_id: str, message: str, file_context
         resolved_file_context,
     )
 
-    try:
-        stage_start = time.perf_counter()
-        response = await _execute_brain_sync(session_id, brain_name, adapter, request_ctx)
-        elapsed_ms = int((time.perf_counter() - stage_start) * 1000)
-        logger.info("[%s] Brain responded (sync) in %dms, %d chars", session_id[:12], elapsed_ms, len(response or ""))
-        _log_stage(session_id, "brain_execute", stage_start, response_chars=len(response or ""))
-    except BrainAdapterError as exc:
-        logger.error("[%s] BrainAdapterError (sync): %s", session_id[:12], exc)
-        _log_stage(session_id, "brain_execute_error", stage_start, error="BrainAdapterError")
-        _sync_broadcaster.error(str(exc))
-        return {"text": f"⚠️ Jane is unavailable: {exc}", "files": []}
-    except (ConnectionError, OSError) as exc:
-        logger.warning("[%s] Connection error (sync): %s", session_id[:12], exc)
-        _log_stage(session_id, "brain_execute_error", stage_start, error="ConnectionError")
-        _sync_broadcaster.error(str(exc))
-        return {"text": "⚠️ Connection lost. Please try again.", "files": []}
-    except Exception as exc:
-        logger.exception("[%s] Brain execution failed (sync)", session_id[:12])
-        _log_stage(session_id, "brain_execute_error", stage_start, error=type(exc).__name__)
-        _sync_broadcaster.error(str(exc))
-        return {"text": f"⚠️ Error contacting Jane: {exc}", "files": []}
+    stage_start = time.perf_counter()
+    response = await _execute_brain_sync(session_id, brain_name, adapter, request_ctx)
+    elapsed_ms = int((time.perf_counter() - stage_start) * 1000)
+    logger.info("[%s] Brain responded (sync) in %dms, %d chars", session_id[:12], elapsed_ms, len(response or ""))
+    _log_stage(session_id, "brain_execute", stage_start, response_chars=len(response or ""))
 
     user_turn = {"role": "user", "content": persisted_user_message}
     assistant_turn = {"role": "assistant", "content": response}
@@ -1539,7 +1556,7 @@ def _pick_ack(user_message: str) -> str:
             "Hey!",
             "Hi there!",
             "Hey, what's up?",
-            "Hey Chieh!",
+            "Hey!",
             "What's up?",
             "Hi! What can I help with?",
             "Hey! Good to hear from you.",
@@ -1671,10 +1688,14 @@ async def stream_message(
     # Serialize requests per session — prevents conversation offset bug where
     # concurrent requests race on history, causing Jane to answer the wrong question.
     # Timeout after 90s to prevent permanent deadlock if a previous request got stuck.
+    _gate_acquired = False
     try:
         await asyncio.wait_for(state.request_gate.acquire(), timeout=90)
+        _gate_acquired = True
     except asyncio.TimeoutError:
-        logger.warning("[%s] Session request_gate timed out after 90s — proceeding without lock", session_id[:12])
+        logger.warning("[%s] Session request_gate timed out after 90s (stream) — failing request to prevent desync", session_id[:12])
+        yield json.dumps({"type": "error", "error": "Jane is busy with another request. Please try again."})
+        return
     # Phone tools: extract any [TOOL_RESULT:{json}] markers the Android client
     # prepended to this user turn. Strip them from the user-visible bubble
     # (via persisted_user_message) but prepend a formatted context block onto
@@ -1871,7 +1892,7 @@ async def stream_message(
             logger.info("[%s] Gemma router: read_messages action='%s'", session_id[:12], _router_response)
             import json as _json
             _msg_action = (_router_response or "read_recent").strip()
-            # Parse optional sender filter: "read_recent spouse" → filter by sender
+            # Parse optional sender filter: "read_recent sarah" → filter by sender
             _sender_filter = ""
             if " " in _msg_action:
                 _sender_filter = _msg_action.split(" ", 1)[1].strip()
@@ -1972,7 +1993,9 @@ async def stream_message(
         while not queue.empty():
             evt_type, evt_payload = queue.get_nowait()
             yield json.dumps({"type": evt_type, "data": evt_payload}, ensure_ascii=True) + "\n"
-        state.request_gate.release()
+        if _gate_acquired:
+            state.request_gate.release()
+            _gate_acquired = False
         return
 
     # Register emitter with permission broker so tool-approval requests
@@ -2352,7 +2375,9 @@ async def stream_message(
     # Always persist if we got a response, even if client disconnected
     if final_response is None:
         logger.warning("[%s] Stream finished without final response payload", _session_log_id(session_id))
-        state.request_gate.release()
+        if _gate_acquired:
+            state.request_gate.release()
+            _gate_acquired = False
         return
 
     user_turn = {"role": "user", "content": persisted_user_message}
@@ -2380,7 +2405,9 @@ async def stream_message(
     logger.info("[%s] Stream request complete in %dms, response=%d chars, %d intermediary steps",
                 session_id[:12], total_ms, len(final_response or ""), len(_intermediary_steps))
     _log_stage(session_id, "request_total", request_start, mode="stream")
-    state.request_gate.release()
+    if _gate_acquired:
+        state.request_gate.release()
+        _gate_acquired = False
 
 
 def _log_chat_to_work_log(user_message: str, response: str) -> None:

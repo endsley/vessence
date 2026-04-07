@@ -5,13 +5,13 @@ Priority: 2
 Created: 2026-03-22
 
 ## Objective
-Build a prompt queue management UI as a panel/section inside the Jane chat page, so Chieh can view, reorder, and delete queued prompts without editing the raw markdown file.
+Build a prompt queue management UI as a panel/section inside the Jane chat page, so the user can view, reorder, and delete queued prompts without editing the raw markdown file.
 
 ## Context
 The prompt queue (`vault/documents/prompt_list.md`) is the autonomous task queue that Jane processes via `prompt_queue_runner.py`. Currently:
 - **Backend logic exists**: `prompt_queue_runner.py` has `load_prompts()`, `delete_prompt()`, `_renumber_prompts()`
 - **No dedicated UI**: the only way to manage the queue is editing the raw markdown file through the vault file editor
-- **Chieh wants**: a panel inside the Jane chat page (option B) with drag-to-reorder and one-click delete
+- **The user wants**: a panel inside the Jane chat page (option B) with drag-to-reorder and one-click delete
 
 ## Design
 

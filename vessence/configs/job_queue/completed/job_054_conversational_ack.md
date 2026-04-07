@@ -10,7 +10,7 @@ Add [ACK] tags to Jane's system prompt so the brain outputs a brief contextual a
 ### Spec
 See `configs/specs/conversational_tts_ack.md`
 
-### Key decisions (from discussion with Chieh):
+### Key decisions (from discussion with the user):
 1. Visual ack shown for ALL users (not TTS-only) — gives sense of response time
 2. Personalized — brain uses user's name and references the actual topic
 3. No separate LLM call — single prompt, brain outputs [ACK] first then [RESPONSE]

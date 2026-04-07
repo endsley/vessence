@@ -115,7 +115,7 @@ Generated: {now} | Auto-updated nightly by startup_code/regenerate_jane_context.
 === ENVIRONMENT ===
 - ChromaDB: $VESSENCE_DATA_HOME/vector_db (collection: user_memories)
 - Vault: $VAULT_HOME/
-- Identity essays: $VAULT_HOME/documents/{{chieh,jane}}_identity_essay.txt
+- Identity essays: $VAULT_HOME/documents/{{user,jane}}_identity_essay.txt
 
 === MEMORY SYSTEM ===
 - Memory injection: automatic via UserPromptSubmit hooks (claude_smart_context.py + memory_hook.sh)

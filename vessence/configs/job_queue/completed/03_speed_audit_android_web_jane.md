@@ -7,7 +7,7 @@ Created: 2026-03-27
 Perform a deep audit of the Vessence runtime and identify the 5 highest-impact improvements to reduce response latency for Jane on Android and web.
 
 ## Context
-Chieh wants a high-value latency audit, not a shallow list of generic ideas. The goal is to inspect the real Vessence request path end to end and surface the changes with the best expected payoff for user-perceived speed.
+The user wants a high-value latency audit, not a shallow list of generic ideas. The goal is to inspect the real Vessence request path end to end and surface the changes with the best expected payoff for user-perceived speed.
 
 This audit must focus on the live Jane stack used by web and Android, including:
 - request intake and SSE streaming

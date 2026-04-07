@@ -1,0 +1,100 @@
+1. conversations/patterns/common_requests.md -- frequently asked task types
+2. conversations/patterns/core_feature_tracker_43.md -- core feature tracker - auto-generated leaf 43
+3. conversations/patterns/draft_bug_notes_22.md -- draft bug notes - auto-generated leaf 22
+4. conversations/patterns/draft_refactor_summary_38.md -- draft refactor summary - auto-generated leaf 38
+5. conversations/patterns/experimental_project_overview_1.md -- experimental project overview - auto-generated leaf 1
+6. conversations/patterns/workflow_prefs.md -- how user prefers to work
+7. conversations/topics/decisions_made.md -- architectural and design choices
+8. conversations/topics/draft_bug_overview_36.md -- draft bug overview - auto-generated leaf 36
+9. conversations/topics/draft_release_notes_7.md -- draft release notes - auto-generated leaf 7
+10. conversations/topics/new_refactor_log_9.md -- new refactor log - auto-generated leaf 9
+11. conversations/topics/pending_questions.md -- unresolved topics, open items
+12. conversations/topics/recent_discussions.md -- latest conversation themes
+13. external/links/archived_bug_overview_27.md -- archived bug overview - auto-generated leaf 27
+14. external/links/archived_deploy_overview_8.md -- archived deploy overview - auto-generated leaf 8
+15. external/links/core_test_reference_15.md -- core test reference - auto-generated leaf 15
+16. external/links/dashboards.md -- monitoring, analytics URLs
+17. external/links/documentation.md -- reference docs, guides
+18. external/links/draft_test_details_12.md -- draft test details - auto-generated leaf 12
+19. external/links/repos.md -- GitHub repos, codebases
+20. external/links/reviewed_bug_config_6.md -- reviewed bug config - auto-generated leaf 6
+21. external/services/apis.md -- third-party APIs, integrations
+22. external/services/archived_migration_notes_35.md -- archived migration notes - auto-generated leaf 35
+23. external/services/legacy_feature_notes_41.md -- legacy feature notes - auto-generated leaf 41
+24. external/services/legacy_refactor_reference_42.md -- legacy refactor reference - auto-generated leaf 42
+25. external/services/platforms.md -- cloud services, hosting
+26. external/services/recent_feature_summary_13.md -- recent feature summary - auto-generated leaf 13
+27. external/services/tools.md -- dev tools, CLI utilities
+28. knowledge/domain/ai_ml.md -- machine learning, LLM concepts
+29. knowledge/domain/core_feature_config_46.md -- core feature config - auto-generated leaf 46
+30. knowledge/domain/design.md -- UI/UX patterns, accessibility
+31. knowledge/domain/experimental_deploy_log_11.md -- experimental deploy log - auto-generated leaf 11
+32. knowledge/domain/important_feature_log_37.md -- important feature log - auto-generated leaf 37
+33. knowledge/domain/security.md -- auth, encryption, best practices
+34. knowledge/technical/archived_project_tracker_23.md -- archived project tracker - auto-generated leaf 23
+35. knowledge/technical/databases.md -- SQL, NoSQL, vector DBs
+36. knowledge/technical/devops.md -- CI/CD, deployment, infrastructure
+37. knowledge/technical/experimental_refactor_spec_32.md -- experimental refactor spec - auto-generated leaf 32
+38. knowledge/technical/important_test_tracker_24.md -- important test tracker - auto-generated leaf 24
+39. knowledge/technical/javascript.md -- JS/TS frontend knowledge
+40. knowledge/technical/legacy_test_summary_0.md -- legacy test summary - auto-generated leaf 0
+41. knowledge/technical/networking.md -- HTTP, APIs, protocols
+42. knowledge/technical/python.md -- Python patterns, libraries, tips
+43. knowledge/technical/recent_meeting_config_39.md -- recent meeting config - auto-generated leaf 39
+44. knowledge/technical/reviewed_bug_tracker_31.md -- reviewed bug tracker - auto-generated leaf 31
+45. knowledge/technical/updated_meeting_notes_45.md -- updated meeting notes - auto-generated leaf 45
+46. user_info/finances/accounts.md -- bank accounts, investments
+47. user_info/finances/budget.md -- spending patterns, goals
+48. user_info/finances/reviewed_release_tracker_3.md -- reviewed release tracker - auto-generated leaf 3
+49. user_info/finances/subscriptions.md -- recurring payments, services
+50. user_info/finances/updated_migration_log_34.md -- updated migration log - auto-generated leaf 34
+51. user_info/personal/background.md -- age, location, family details
+52. user_info/personal/core_release_reference_16.md -- core release reference - auto-generated leaf 16
+53. user_info/personal/daily_routine.md -- schedule patterns, sleep habits
+54. user_info/personal/health.md -- medical info, fitness goals
+55. user_info/personal/hobbies.md -- interests, activities, sports
+56. user_info/personal/important_deploy_summary_47.md -- important deploy summary - auto-generated leaf 47
+57. user_info/personal/preferences.md -- communication style, work habits
+58. user_info/relationships/contacts.md -- professional contacts, networking
+59. user_info/relationships/core_bug_spec_19.md -- core bug spec - auto-generated leaf 19
+60. user_info/relationships/core_test_details_18.md -- core test details - auto-generated leaf 18
+61. user_info/relationships/family.md -- family members, relationships
+62. user_info/relationships/friends.md -- close friends, social circle
+63. user_info/relationships/legacy_refactor_details_17.md -- legacy refactor details - auto-generated leaf 17
+64. user_info/relationships/new_project_notes_21.md -- new project notes - auto-generated leaf 21
+65. user_info/relationships/recent_test_spec_28.md -- recent test spec - auto-generated leaf 28
+66. user_info/work/colleagues.md -- coworkers, team members
+67. user_info/work/core_feature_overview_5.md -- core feature overview - auto-generated leaf 5
+68. user_info/work/important_refactor_log_40.md -- important refactor log - auto-generated leaf 40
+69. user_info/work/legacy_deploy_summary_48.md -- legacy deploy summary - auto-generated leaf 48
+70. user_info/work/meetings.md -- recurring meetings, schedules
+71. user_info/work/projects.md -- active work projects and status
+72. user_info/work/reviewed_bug_summary_2.md -- reviewed bug summary - auto-generated leaf 2
+73. user_info/work/role.md -- current job title, responsibilities
+74. user_info/work/skills.md -- technical and professional skills
+75. vessence/architecture/android_app.md -- mobile client, APK build process
+76. vessence/architecture/llm_brain.md -- standing brain, provider routing
+77. vessence/architecture/memory_system.md -- ChromaDB, vector search, retrieval
+78. vessence/architecture/recent_project_guide_30.md -- recent project guide - auto-generated leaf 30
+79. vessence/architecture/tool_loader.md -- dynamic tool discovery, hooks
+80. vessence/architecture/web_server.md -- jane-web service, endpoints, config
+81. vessence/config/environment.md -- env vars, paths, API keys
+82. vessence/config/experimental_migration_summary_14.md -- experimental migration summary - auto-generated leaf 14
+83. vessence/config/legacy_project_overview_33.md -- legacy project overview - auto-generated leaf 33
+84. vessence/config/models.md -- LLM model selection, tiers
+85. vessence/config/permissions.md -- auth, session management
+86. vessence/deployment/core_migration_spec_25.md -- core migration spec - auto-generated leaf 25
+87. vessence/deployment/docker.md -- container setup, docker bundle
+88. vessence/deployment/draft_deploy_notes_44.md -- draft deploy notes - auto-generated leaf 44
+89. vessence/deployment/important_test_config_20.md -- important test config - auto-generated leaf 20
+90. vessence/deployment/important_test_overview_10.md -- important test overview - auto-generated leaf 10
+91. vessence/deployment/marketing_site.md -- landing page, download links
+92. vessence/deployment/updated_review_overview_4.md -- updated review overview - auto-generated leaf 4
+93. vessence/deployment/updates.md -- version bumping, release process
+94. vessence/features/browser.md -- playwright, omniparser, web skills
+95. vessence/features/essences.md -- essence builder, runtime, loader
+96. vessence/features/notifications.md -- push, discord, email alerts
+97. vessence/features/recent_meeting_summary_29.md -- recent meeting summary - auto-generated leaf 29
+98. vessence/features/reviewed_release_log_26.md -- reviewed release log - auto-generated leaf 26
+99. vessence/features/scheduling.md -- cron jobs, job queue, auto-continue
+100. vessence/features/voice.md -- TTS, wake word, speech recognition

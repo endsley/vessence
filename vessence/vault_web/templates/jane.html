@@ -307,6 +307,16 @@
       <button @click="clearSession()" class="text-slate-400 hover:text-white transition px-2.5 py-1.5 rounded-lg hover:bg-slate-800 text-xs font-medium" title="New Session">
         New Session
       </button>
+      <!-- Cancel / Stop button — visible only while Jane is responding -->
+      <button x-show="typing" x-cloak
+        @click="cancelResponse()"
+        class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition text-red-400 hover:text-white bg-red-600/15 hover:bg-red-600/30 border border-red-500/30 hover:border-red-500/50 animate-pulse"
+        title="Stop response (Esc)">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"/>
+        </svg>
+        <span>Stop</span>
+      </button>
       <button @click="settingsOpen = !settingsOpen; if (settingsOpen) loadModelSettings()" class="text-slate-400 hover:text-white transition p-1.5 rounded-lg hover:bg-slate-800" :class="settingsOpen ? 'text-violet-400 bg-slate-800' : ''" title="Jane Settings">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
@@ -1321,6 +1331,14 @@
             }
             active.status = '';
             this.$nextTick(() => this.scrollBottom());
+          } else if (event.type === 'error') {
+            // Server-side error — display as the response text
+            const active = getActive();
+            active.text = event.error || event.data || '⚠️ Something went wrong. Please try again.';
+            active.streamingText = '';
+            active.status = '';
+            this.$nextTick(() => this.scrollBottom());
+            return true;  // terminal event
           } else if (event.type === 'provider_error') {
             const active = getActive();
             try {
@@ -1800,12 +1818,24 @@
         stopSpeech() {
           if (!this.speechSupported) return;
           window.speechSynthesis.cancel();
+          // Also cancel any in-progress server response (like pressing Escape)
+          if (this.typing) this.cancelResponse();
           this.resetSpeechState();
         },
 
         resetSpeechState() {
           this.isSpeaking = false;
           this.currentSpeechText = '';
+          // Re-kick mic listening after TTS ends — browsers often kill
+          // SpeechRecognition while SpeechSynthesis is active, so the
+          // normal rec.onend auto-restart may never fire.
+          if (this.micEnabled && !this._micRecognition) {
+            setTimeout(() => {
+              if (this.micEnabled && !this._micRecognition) {
+                this._startMicListening();
+              }
+            }, 300);
+          }
         },
 
         async respondPermission(requestId, approved) {

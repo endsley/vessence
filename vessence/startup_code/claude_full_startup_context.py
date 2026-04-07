@@ -16,7 +16,7 @@ VAULT_ROOT = Path(VAULT_DIR)
 
 DOCS = [
     ("User Profile", DATA_ROOT / "user_profile.md"),
-    ("User Identity Essay", VAULT_ROOT / "documents" / "chieh_identity_essay.txt"),
+    ("User Identity Essay", VAULT_ROOT / "documents" / "user_identity_essay.txt"),
     ("Jane Identity Essay", VAULT_ROOT / "documents" / "jane_identity_essay.txt"),
     ("Amber Identity Essay", VAULT_ROOT / "documents" / "amber_identity_essay.txt"),
     ("Jane Architecture", VESSENCE_ROOT / "configs" / "Jane_architecture.md"),

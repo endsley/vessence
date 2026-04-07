@@ -36,29 +36,52 @@ object BriefingAudioCache {
     }
 
     fun getCachedFile(context: Context, articleId: String, summaryType: String = "brief"): File? {
-        val file = File(getCacheDir(context), "${articleId}_${summaryType}.wav")
-        return if (file.exists() && file.length() > 0) file else null
+        // Prefer .ogg (Opus), fall back to .wav
+        val oggFile = File(getCacheDir(context), "${articleId}_${summaryType}.ogg")
+        if (oggFile.exists() && oggFile.length() > 0) return oggFile
+        val wavFile = File(getCacheDir(context), "${articleId}_${summaryType}.wav")
+        if (wavFile.exists() && wavFile.length() > 0) return wavFile
+        return null
     }
 
     /**
-     * Download a single audio file to cache. Returns the local file or null.
+     * Download a single audio file to cache. Returns the local file, null on
+     * normal failure, or throws ServerBusyException on 503 so callers can
+     * stop hammering the server.
      */
+    class ServerBusyException(val retryAfterSecs: Int = 60) : Exception("Server busy (503)")
+
     suspend fun downloadToCache(
         context: Context,
         articleId: String,
         summaryType: String = "brief",
     ): File? = withContext(Dispatchers.IO) {
-        val cacheFile = File(getCacheDir(context), "${articleId}_${summaryType}.wav")
-        if (cacheFile.exists() && cacheFile.length() > 0) return@withContext cacheFile
+        // Check if already cached (either extension)
+        val existing = getCachedFile(context, articleId, summaryType)
+        if (existing != null) return@withContext existing
 
         try {
             val url = "${ApiClient.getJaneBaseUrl()}/api/briefing/audio/$articleId/$summaryType"
             val request = Request.Builder().url(url).build()
             val response = ApiClient.getOkHttpClient().newCall(request).execute()
+            if (response.code == 503) {
+                // Server is under heavy load — stop prefetching
+                val retryAfter = response.header("Retry-After")?.toIntOrNull() ?: 60
+                response.close()
+                throw ServerBusyException(retryAfter)
+            }
             if (!response.isSuccessful) {
                 response.close()
                 return@withContext null
             }
+            // Determine file extension from Content-Type header
+            val contentType = response.header("Content-Type") ?: ""
+            val ext = when {
+                contentType.contains("audio/wav") || contentType.contains("audio/wave") -> ".wav"
+                contentType.contains("audio/ogg") || contentType.contains("audio/opus") -> ".ogg"
+                else -> ".ogg" // Default to .ogg (server prefers Opus)
+            }
+            val cacheFile = File(getCacheDir(context), "${articleId}_${summaryType}$ext")
             response.body?.byteStream()?.use { input ->
                 cacheFile.outputStream().use { output ->
                     input.copyTo(output)
@@ -74,14 +97,13 @@ object BriefingAudioCache {
             }
         } catch (e: Exception) {
             Log.w(TAG, "Download failed for $articleId: ${e.message}")
-            cacheFile.delete()
             null
         }
     }
 
     /**
      * Prefetch audio for a list of article IDs. Call on WiFi only.
-     * Returns count of successfully cached files.
+     * Stops early if the server returns 503 (busy). Returns count cached.
      */
     suspend fun prefetchAll(
         context: Context,
@@ -90,8 +112,13 @@ object BriefingAudioCache {
     ): Int = withContext(Dispatchers.IO) {
         var cached = 0
         for (id in articleIds) {
-            val result = downloadToCache(context, id, summaryType)
-            if (result != null) cached++
+            try {
+                val result = downloadToCache(context, id, summaryType)
+                if (result != null) cached++
+            } catch (e: ServerBusyException) {
+                Log.i(TAG, "Server busy — pausing prefetch (retry after ${e.retryAfterSecs}s). Cached $cached so far.")
+                break
+            }
         }
         Log.d(TAG, "Prefetched $cached/${articleIds.size} audio files")
         cached

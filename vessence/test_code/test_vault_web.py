@@ -326,7 +326,7 @@ class TestShareAPI:
 
     def test_create_share(self):
         r = self.s.post(BASE + "/api/shares",
-                       json={"path": "images", "recipient": "spouse"})
+                       json={"path": "images", "recipient": "TestRecipient"})
         data = r.json()
         assert data["ok"] is True
         assert "code" in data
@@ -368,7 +368,7 @@ class TestShareAPI:
     def test_share_scoped_file_access(self):
         """Share code grants access to its path but not outside."""
         r = self.s.post(BASE + "/api/shares",
-                       json={"path": "images", "recipient": "spouse"})
+                       json={"path": "images", "recipient": "TestRecipient"})
         code = r.json()["code"]
 
         # Unauthenticated session with share cookie

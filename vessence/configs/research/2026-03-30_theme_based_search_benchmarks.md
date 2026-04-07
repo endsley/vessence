@@ -26,7 +26,7 @@ We ran a comprehensive benchmark across 64 varied prompts (approx. 4 per Sweet 1
 ### Key Findings from Benchmarking:
 - **Zero-Shot Complexity**: Categorizing intent into 16 abstract buckets is difficult for small models. Even with descriptions, the best local model (Gemma3:12b) missed ~11% of intents.
 - **Latency Penalty**: Adding ~2 seconds of "thinking" time before even starting the memory search makes the overall user experience feel sluggish.
-- **Critical Failure Risk**: If the classifier misses a theme (e.g., fails to link "Emily" to "Identity Evolution"), the memory is hidden from the agent entirely, leading to "hallucinated" forgetfulness.
+- **Critical Failure Risk**: If the classifier misses a theme (e.g., fails to link a family member's name to "Identity Evolution"), the memory is hidden from the agent entirely, leading to "hallucinated" forgetfulness.
 
 ## 4. Final Conclusion
 **Decision: Retain Wide-Open Parallel Search.**

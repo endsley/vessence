@@ -6,7 +6,7 @@ Model: opus
 Created: 2026-03-24
 
 ## Objective
-Audit all ChromaDB entries and separate universal Jane behavioral habits (ship with every install) from Chieh's personal data (never ship). Package the universal habits as a seed file that gets loaded into ChromaDB on first boot.
+Audit all ChromaDB entries and separate universal Jane behavioral habits (ship with every install) from the developer's personal data (never ship). Package the universal habits as a seed file that gets loaded into ChromaDB on first boot.
 
 ## Two categories
 
@@ -33,7 +33,7 @@ Audit all ChromaDB entries and separate universal Jane behavioral habits (ship w
    - `short_term_memory` (ephemeral)
 2. For each entry in permanent/long-term, classify as:
    - `jane_default` — universal behavioral habit, good for any user
-   - `personal` — specific to Chieh, never ship
+   - `personal` — specific to the developer, never ship
    - `project` — Vessence project decisions, not relevant to new users
 3. Extract all `jane_default` entries into `configs/jane_seed_memories.json`:
    ```json
@@ -55,7 +55,7 @@ Audit all ChromaDB entries and separate universal Jane behavioral habits (ship w
 - `configs/jane_seed_memories.json` contains only universal habits (no names, no personal facts)
 - Fresh ChromaDB install loads seed memories on first boot
 - Jane behaves well out of the box (uses good debugging habits, communication style)
-- Zero personal data from Chieh in the seed file
+- Zero personal data from the developer in the seed file
 
 ## Files Involved
 - `configs/jane_seed_memories.json` (new — seed data)
@@ -64,8 +64,8 @@ Audit all ChromaDB entries and separate universal Jane behavioral habits (ship w
 - All ChromaDB collections — audit source
 
 ## Notes
-- The seed memories should be generic enough for ANY user, not just Chieh's preferences
-- Example: "warm, friendly, efficient" is a good default. "Do NOT call Chieh Professor" is personal.
+- The seed memories should be generic enough for ANY user, not just the developer's preferences
+- Example: "warm, friendly, efficient" is a good default. Personal address preferences are user-specific.
 - The onboarding interview will layer user-specific personality on top of these defaults
 - Seed file should be version-controlled and updated as we discover new good habits
 - Keep seed file small — maybe 20-30 entries max. Quality over quantity.

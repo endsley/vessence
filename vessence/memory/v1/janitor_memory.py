@@ -15,10 +15,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from jane.config import (
     get_chroma_client,
     ENV_FILE_PATH, VECTOR_DB_USER_MEMORIES, VECTOR_DB_SHORT_TERM,
+    VECTOR_DB_LONG_TERM, VECTOR_DB_FILE_INDEX,
     CHROMA_COLLECTION_USER_MEMORIES, CHROMA_COLLECTION_SHORT_TERM,
+    CHROMA_COLLECTION_LONG_TERM, CHROMA_COLLECTION_FILE_INDEX,
     FORGETTABLE_MAX_AGE_DAYS, JANITOR_REPORT, LOGS_DIR,
     JANITOR_LLM_MODEL, OPENAI_API_URL,
     FALLBACK_GEMINI_MODEL, FALLBACK_OPENAI_MODEL, VAULT_DIR,
+    DYNAMIC_QUERY_MARKERS_PATH,
 )
 
 load_dotenv(ENV_FILE_PATH)
@@ -288,6 +291,71 @@ def dedup_cross_session_themes(similarity_threshold: float = 0.10):
         logger.warning(f"Cross-session theme dedup failed: {e}")
 
 
+def refresh_dynamic_query_markers() -> dict:
+    """Scan all ChromaDB collections, extract unique topic/subtopic values,
+    and write them to a JSON file grouped by intent category.
+
+    Mapping:
+      user_memories topics/subtopics  → personal_markers
+      long_term_knowledge topics      → project_markers
+      file_index_memories topics      → file_markers
+      short_term_memory topics        → project_markers (recent work context)
+    """
+    # Topics in user_memories that are genuinely about the user's identity,
+    # not project/technical knowledge that happens to be in the shared collection.
+    _PERSONAL_TOPIC_ALLOWLIST = {
+        "identity", "identity evolution", "family", "personal", "preferences",
+        "location", "office_location", "office_setup", "social", "neighbors",
+        "interests", "music", "research", "activities", "feedback",
+        "communication", "communication_style", "user",
+    }
+
+    def _extract_labels(db_path: str, collection_name: str) -> set[str]:
+        """Return unique topic and subtopic values from a collection."""
+        labels = set()
+        try:
+            client = get_chroma_client(path=db_path)
+            coll = client.get_collection(name=collection_name)
+            results = coll.get(include=["metadatas"])
+            for meta in results["metadatas"]:
+                for key in ("topic", "subtopic"):
+                    val = (meta.get(key) or "").strip()
+                    if val and val.lower() not in ("general", "unknown", ""):
+                        labels.add(val.lower())
+        except Exception as e:
+            logger.warning(f"Could not scan {collection_name}: {e}")
+        return labels
+
+    all_user_topics = _extract_labels(VECTOR_DB_USER_MEMORIES, CHROMA_COLLECTION_USER_MEMORIES)
+    # Only promote user_memories topics that are genuinely personal
+    personal = all_user_topics & _PERSONAL_TOPIC_ALLOWLIST
+    # The rest are project-ish topics that happen to live in the shared collection
+    project = (all_user_topics - personal)
+    project |= _extract_labels(VECTOR_DB_LONG_TERM, CHROMA_COLLECTION_LONG_TERM)
+    project |= _extract_labels(VECTOR_DB_SHORT_TERM, CHROMA_COLLECTION_SHORT_TERM)
+    file = _extract_labels(VECTOR_DB_FILE_INDEX, CHROMA_COLLECTION_FILE_INDEX)
+
+    markers = {
+        "personal_markers": sorted(personal),
+        "project_markers": sorted(project),
+        "file_markers": sorted(file),
+        "updated_at": datetime.datetime.utcnow().isoformat(),
+    }
+
+    try:
+        os.makedirs(os.path.dirname(DYNAMIC_QUERY_MARKERS_PATH), exist_ok=True)
+        with open(DYNAMIC_QUERY_MARKERS_PATH, "w") as f:
+            json.dump(markers, f, indent=2)
+        logger.info(
+            "Dynamic query markers refreshed: %d personal, %d project, %d file.",
+            len(personal), len(project), len(file),
+        )
+    except Exception as e:
+        logger.warning(f"Could not write dynamic query markers: {e}")
+
+    return markers
+
+
 def run_janitor(max_sessions: int = 2, max_topics: int = 3):
     # Load gate: wait until CPU/memory is acceptable
     try:
@@ -476,6 +544,9 @@ FACTS FOR TOPIC '{topic}':
             f.write(json.dumps(history_entry) + "\n")
     except Exception as e:
         logger.warning(f"Could not write consolidation history: {e}")
+
+    # Final step: refresh dynamic query markers from all collections
+    refresh_dynamic_query_markers()
 
     logger.info(f"Janitor finished. Reduced {total_reduced} facts ({len(merge_log)} merges) across {len(topic_groups)} topics.")
 

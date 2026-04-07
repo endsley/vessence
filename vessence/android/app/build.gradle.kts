@@ -27,9 +27,9 @@ android {
     signingConfigs {
         create("release") {
             storeFile = file("${rootProject.projectDir}/vessence-release.jks")
-            storePassword = "REDACTED_PASSWORD"
+            storePassword = System.getenv("VESSENCE_KEYSTORE_PASSWORD") ?: ""
             keyAlias = "vessence"
-            keyPassword = "REDACTED_PASSWORD"
+            keyPassword = System.getenv("VESSENCE_KEY_PASSWORD") ?: ""
         }
     }
 

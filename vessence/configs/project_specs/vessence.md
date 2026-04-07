@@ -28,7 +28,7 @@ ChromaDB is the soul of the product. The chat interface, the vault, the Discord/
 - **One API key by default** — everything runs on Google Gemini (free tier covers most personal use)
 - **One command to start** — `docker compose up` spins up the full core stack
 - **No personal data** — ships with zero vault files, zero memories, zero identity essays
-- **Full capability parity** — users get the complete system, nothing stripped except Chieh's personal data
+- **Full capability parity** — users get the complete system, nothing stripped except the developer's personal data
 - **Blank-slate identity** — guided onboarding interview generates personalized identity essays on first run
 - **Personal data separation** — all user-specific data lives in `user_profile.md`, never hardcoded in agent config files
 
@@ -54,7 +54,7 @@ ChromaDB is the soul of the product. The chat interface, the vault, the Discord/
 - Kokoro TTS — too complex to set up, not essential for core experience
 - OmniParser computer vision / screen control — too complex, not essential
 - Screen dimmer — too hardware-specific, not essential
-- Chieh's vault files, identity essays, ChromaDB data
+- The developer's vault files, identity essays, ChromaDB data
 - `user_profile.md` (personal — gitignored, each user fills in their own copy)
 
 ---
@@ -165,7 +165,7 @@ The GitHub repo remains public for contributors and power users who want to self
 - Launch Docker Desktop and wait for "Running" status
 
 **Step 2 — Download one file**
-- Go to `github.com/chieh/vessence` (or `vessence.ai` when live)
+- Go to `github.com/endsley/vessence` (or `vessence.ai` when live)
 - Download `docker-compose.yml` — one click, ~20 lines
 
 **Step 3 — Start Vessence via Docker Desktop GUI**
@@ -542,7 +542,7 @@ Before first public release, audit and remove all personal data:
 - [ ] Remove all `.env` files (keep `.env.example` with annotated placeholders)
 - [ ] Audit all Python files for hardcoded personal values:
   - [ ] `screen_dimmer.py` — Medford MA coordinates (excluded from Vessence anyway)
-  - [ ] Any hardcoded names (spouse, Emily, Chieh, etc.)
+  - [ ] Any hardcoded personal names
   - [ ] Any hardcoded paths that assume `/home/chieh/`
 - [ ] Replace `/home/chieh/` paths with environment variable `$AMBIENT_HOME`
 - [ ] Remove `how_to_restore_jane.md` personal restore instructions
@@ -552,7 +552,7 @@ Before first public release, audit and remove all personal data:
 
 ## Key Open Questions
 
-1. **Repo name:** `chieh/vessence` or `chieh/project-ambient`?
+1. **Repo name:** `endsley/vessence` or `endsley/project-ambient`?
 2. **License:** MIT (fully open) or source-available with attribution?
 3. **Hosted option?** Should there be a "Vessence Cloud" where users don't need to self-host at all?
 4. **Identity interview:** How deep? Just name + relationship status, or full personality/preference session?

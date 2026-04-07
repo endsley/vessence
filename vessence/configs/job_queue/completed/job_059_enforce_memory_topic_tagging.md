@@ -21,4 +21,4 @@ This was identified during a memory retrieval gap analysis. A memory about "swit
 - No topic-less entries remain in short_term_memory or user_memories collections
 
 ## Result
-[ACK]Okay Chieh, a new task: enforcing memory topic tagging. Let me get the details and figure out a plan.[/ACK]This is a critical piece of the memory system. If turns are saved without a topic, they become invisible to the topic-based retrieval system. I'll investigate `conversation_manager.py` to
+[ACK]Okay, a new task: enforcing memory topic tagging. Let me get the details and figure out a plan.[/ACK]This is a critical piece of the memory system. If turns are saved without a topic, they become invisible to the topic-based retrieval system. I'll investigate `conversation_manager.py` to

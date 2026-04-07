@@ -4,7 +4,7 @@ Status: complete
 Completed: 2026-03-24 15:00 UTC
 Notes: Root cause was corrupt JSON in latest_briefing.json — line 78 had a missing closing quote ("Europe, instead of "Europe",). This caused json.JSONDecodeError → HTTP 500 on /api/briefing/articles. Fixed the data file and added defensive JSON parsing (strict=False + control char cleanup) to _load_briefing() to prevent future occurrences. Affects both web and Android since they share the same API.
 Blocked: 2026-03-24 12:10 UTC
-Notes: Code review shows Android briefing code is structurally correct — fetches from /api/briefing/articles, parses cards/categories, model fields match with @SerializedName. 71 articles exist on disk. API requires auth (returns 401 without session cookie). Server is healthy. Cannot reproduce without the physical Android device. Likely causes: (1) Auth session expired on Android — user needs to re-login, (2) Server URL changed after power shutdown — check ApiClient.getJaneBaseUrl(), (3) Network/tunnel issue. Need Chieh to check: what error does the app show? Is it "Failed to load briefing" or a blank screen?
+Notes: Code review shows Android briefing code is structurally correct — fetches from /api/briefing/articles, parses cards/categories, model fields match with @SerializedName. 71 articles exist on disk. API requires auth (returns 401 without session cookie). Server is healthy. Cannot reproduce without the physical Android device. Likely causes: (1) Auth session expired on Android — user needs to re-login, (2) Server URL changed after power shutdown — check ApiClient.getJaneBaseUrl(), (3) Network/tunnel issue. Need the user to check: what error does the app show? Is it "Failed to load briefing" or a blank screen?
 Priority: 1
 Model: opus
 Created: 2026-03-24

@@ -6,7 +6,7 @@ assignments (`amber/agent.py` with qwen_agent, deepseek hot-swap, etc.) were
 retired when Jane became the sole agent. Current live models: Claude Opus 4.6
 for Jane's main brain, gemma4:e4b for the prompt router (see gemma_router.py),
 and optional qwen3 for local fallback research.
-**Maintainer:** Chieh
+**Maintainer:** The user
 
 This document describes every LLM used across the Project Ambient system, which model is assigned to which role, and the reasoning behind each assignment. The system uses a deliberate two-tier local LLM strategy alongside cloud models, each chosen for their specific strengths.
 
@@ -56,7 +56,7 @@ This document describes every LLM used across the Project Ambient system, which 
 ### 1. Jane's Primary Brain — `claude-sonnet-4-6` (Claude Code)
 
 **File:** `gemini_cli_bridge/bridge.py` → `claude -p` CLI (replaced `gemini --prompt`)
-**When:** Every time Chieh sends a message to Jane via Discord, or interacts with Jane directly in the terminal.
+**When:** Every time the user sends a message to Jane via Discord, or interacts with Jane directly in the terminal.
 **Why:** Claude Code (Sonnet 4.6) replaced Gemini CLI as Jane's primary intelligence. It is the strongest available model for code comprehension, multi-step reasoning, and systems work. It natively has access to file tools (Read, Write, Edit, Bash, Grep, Glob) without requiring a subprocess PTY wrapper. Its `/home/chieh/CLAUDE.md` system prompt is loaded at every session, giving Jane a consistent identity and initialization sequence.
 
 **Memory injection:** The `~/.claude/settings.json` UserPromptSubmit hook fires `memory_hook.sh` before every response. This queries ChromaDB via `search_memory.py`, synthesizes with `qwen2.5-coder:14b` (local Ollama), and injects the result as `[Librarian Context]` — exactly replicating the behavior Jane had under Gemini CLI.
@@ -107,7 +107,7 @@ Using qwen2.5-coder:14b locally here is important: these operations run frequent
 ### 5. Research Synthesis — `qwen2.5-coder:14b` (local Ollama)
 
 **Files:** `agent_skills/research_assistant.py`, `agent_skills/research_analyzer.py`
-**When:** Invoked by Amber's `TechnicalResearchTool` when Chieh asks for technical research. Raw web search data (up to 15,000 characters) is passed in for analysis.
+**When:** Invoked by Amber's `TechnicalResearchTool` when the user asks for technical research. Raw web search data (up to 15,000 characters) is passed in for analysis.
 **Why:** Analyzing conflicting technical sources, extracting root causes, and identifying the highest-confidence fix from noisy web data is a reasoning-heavy task. qwen2.5-coder:14b's reasoning capability makes it well-suited for:
   - Weighing conflicting documentation sources
   - Identifying the most recent or authoritative answer
@@ -126,7 +126,7 @@ Running this locally avoids sending potentially sensitive technical context to a
   - **Tier 2 (local DeepSeek-R1)**: If the DeepSeek API is unavailable (e.g., no internet, API key issue), the local model keeps the system operational even during complete internet outages.
   - **Tier 3 (`gpt-4o`, API)**: Last resort. The most capable and most expensive cloud option, used only when both local and DeepSeek are down.
 
-**Notification:** All three tiers prepend a clear `⚠️ Claude is unavailable` warning to their responses so Chieh always knows he is not talking to the primary brain.
+**Notification:** All three tiers prepend a clear `⚠️ Claude is unavailable` warning to their responses so the user always knows he is not talking to the primary brain.
 
 ---
 
@@ -193,7 +193,7 @@ The system previously used `qwen2.5-coder:14b`. Migrated to **`qwen2.5-coder:14b
 
 Several critical operations are intentionally routed to local models rather than cloud APIs:
 
-1. **Memory operations** contain personal facts about Chieh, spouse, and Emily. These should not leave the machine.
+1. **Memory operations** contain personal facts about the user and their family. These should not leave the machine.
 2. **Research synthesis** may involve proprietary technical context.
 3. **Cost**: Memory is queried before *every* response. At cloud API rates, this would be prohibitively expensive at scale.
 4. **Latency**: Local inference (especially with GPU) is fast enough for background tasks and acceptable for interactive fallback.
@@ -201,7 +201,7 @@ Several critical operations are intentionally routed to local models rather than
 
 ### The Fallback Hierarchy Principle
 
-The fallback chain is designed so that at no point does the system silently degrade. Every fallback tier announces itself with a `⚠️ Claude is unavailable` prefix. This is intentional: Chieh should always know whether he is talking to his primary brain (Claude Code) or an emergency substitute, so he can calibrate his expectations accordingly.
+The fallback chain is designed so that at no point does the system silently degrade. Every fallback tier announces itself with a `⚠️ Claude is unavailable` prefix. This is intentional: the user should always know whether he is talking to his primary brain (Claude Code) or an emergency substitute, so he can calibrate his expectations accordingly.
 
 ---
 

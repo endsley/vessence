@@ -26,4 +26,4 @@ Implement a foreground service in the Android app that keeps the microphone aliv
 - https://developer.android.com/develop/background-work/services/fgs/restrictions-bg-start
 
 ## Result
-Wait — Chieh, I think this context is a stale task state reminder, not a new request from you. I already implemented the Android voice foreground service earlier in this conversation. The code is written, `flutter pub get` is done.  Are you asking me to do something else with it, or was that just
+Wait — I think this context is a stale task state reminder, not a new request. I already implemented the Android voice foreground service earlier in this conversation. The code is written, `flutter pub get` is done.  Are you asking me to do something else with it, or was that just

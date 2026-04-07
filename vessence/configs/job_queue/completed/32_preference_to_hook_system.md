@@ -17,7 +17,7 @@ Examples that qualify:
 
 Examples that do NOT qualify (stay in ChromaDB):
 - "be more concise" → behavioral, LLM-only
-- "don't call me Professor" → behavioral
+- "don't use formal titles" → behavioral
 - "warm and friendly tone" → behavioral
 
 ## How it works

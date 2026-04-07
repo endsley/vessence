@@ -12,7 +12,7 @@ Add a fast triage layer (Gemma3:4b locally, Haiku for Docker) that classifies ev
 
 ## Classifier Model
 - Local: `gemma3:4b` via Ollama (env var `INTENT_CLASSIFIER_MODEL`, default `claude-haiku-4-5-20251001`)
-- Chieh's machine: set `INTENT_CLASSIFIER_MODEL=gemma3:4b` in local .env
+- Local machine: set `INTENT_CLASSIFIER_MODEL=gemma3:4b` in local .env
 
 ## 4 Classification Levels
 
@@ -76,7 +76,7 @@ Gemma classifies: greeting / simple / medium / hard  (<200ms)
 ```
 You are Jane, a technical partner and friend. Classify this message and respond.
 
-User: Chieh (CS professor, friend)
+User: the user (friend)
 Time: 8:42 PM EDT, Friday
 Last seen: 3 hours ago
 Background: 2 jobs queued, briefing just finished

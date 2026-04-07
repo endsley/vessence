@@ -13,7 +13,7 @@ Add a TTS voice selection screen in the Android app's Settings where users can p
 - New section: "Voice Settings"
 - List all available TTS voices from the device's `TextToSpeech` engine
 - Each voice shows: name, language, locale, quality label (if available)
-- Tap a voice → plays a short preview sentence ("Hi Chieh, this is how I sound.")
+- Tap a voice → plays a short preview sentence ("Hi, this is how I sound.")
 - Radio button or checkmark to select the active voice
 - Selected voice saved to SharedPreferences + synced to server via `/api/app/settings`
 

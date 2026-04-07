@@ -89,8 +89,8 @@ Take the Tax Accountant essence from empty skeleton to fully functional AI agent
 
 ## Phase 5: Calculation + Form Generation Testing
 1. Create a test tax scenario with known correct answers:
-   - W-2 income: $X from Northeastern
-   - Schedule C: REDACTED_BUSINESS income/expenses
+   - W-2 income: $X from employer
+   - Schedule C: self-employment income/expenses
    - Investment income: capital gains, Ethereum
    - Itemized vs standard deduction comparison
 2. Run tax_calculator.py with test data → verify federal + MA calculations

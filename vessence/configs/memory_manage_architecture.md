@@ -18,9 +18,9 @@ This is the most fundamental decision in the memory system. Every piece of infor
 - Fact (a sentence or paragraph of knowledge) → ChromaDB
 
 **Examples:**
-- Research paper Chieh sends → Vault (`/vault/pdf/`). The paper's key insight → ChromaDB.
-- Voice clip → Vault (`/vault/audio/`). "Chieh prefers Kokoro TTS voice X" → ChromaDB.
-- Chieh's teaching statement → Vault (`/vault/documents/`). "Chieh's teaching philosophy emphasizes..." → ChromaDB.
+- Research paper the user sends → Vault (`/vault/pdf/`). The paper's key insight → ChromaDB.
+- Voice clip → Vault (`/vault/audio/`). "the user prefers Kokoro TTS voice X" → ChromaDB.
+- the user's teaching statement → Vault (`/vault/documents/`). "the user's teaching philosophy emphasizes..." → ChromaDB.
 - What we built in a session → ChromaDB (history/fact). The code artifact itself → filesystem (not vault unless explicitly saved).
 
 ---
@@ -254,7 +254,7 @@ To prevent the Long-Term Memory DB from becoming bloated with redundant or outda
 
 6.  **Image Vault Clustering** (`cluster_vault_images()`): After memory consolidation, the janitor reorganizes the flat `vault/images/` directory into a named-subfolder tree.
     *   **Scope**: Only files sitting directly in `vault/images/` root are eligible. Files already inside a subfolder are untouched (avoiding double-moves on repeat runs).
-    *   **LLM proposal**: Builds a manifest of each flat image filename + its ChromaDB description, then asks Gemini to assign each image to a sensible subfolder path (e.g., `people/spouse`, `people/emily`, `agents`, `clinic`). Max 2–3 levels; lowercase underscored names.
+    *   **LLM proposal**: Builds a manifest of each flat image filename + its ChromaDB description, then asks Gemini to assign each image to a sensible subfolder path (e.g., `people/family`, `people/friends`, `agents`, `work`). Max 2–3 levels; lowercase underscored names.
     *   **Move**: `shutil.move()`. Collision-safe: if the destination filename exists, a short UUID hex suffix is appended.
     *   **ChromaDB path update**: Every ChromaDB entry whose document text or `file_path` metadata references the old filename/path is updated via `col.update()` to reflect the new `images/<subfolder>/<filename>` location.
     *   **Report fields**: `images_moved`, `folders_created`, `reasoning` are added to `janitor_report.json`.

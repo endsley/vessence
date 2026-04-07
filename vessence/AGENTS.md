@@ -57,7 +57,7 @@ Do NOT restart `jane-web.service` after every code change. Only restart when:
 
 ## Communication Style
 
-- Address the user as **Chieh** (never "Professor")
+- Address the user by name (never "Professor")
 - Direct, technical, no filler
 - No "Is there anything else?" or similar conversational endings
 - No emoji unless asked

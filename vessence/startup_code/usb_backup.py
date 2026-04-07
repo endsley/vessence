@@ -105,7 +105,7 @@ def main():
             return
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    backup_filename = f"chieh_agent_backup_{timestamp}.tar.gz"
+    backup_filename = f"vessence_backup_{timestamp}.tar.gz"
     dest_path = os.path.join(selected['path'], backup_filename)
 
     print(f"\nStarting backup to: {dest_path}")
@@ -116,10 +116,11 @@ def main():
         print("Error: None of the source directories exist. Nothing to back up.", file=sys.stderr)
         return
 
-    source_dirs_relative = [os.path.relpath(p, '/home/chieh') for p in existing_source_paths]
+    _home = os.path.expanduser("~")
+    source_dirs_relative = [os.path.relpath(p, _home) for p in existing_source_paths]
 
     try:
-        cmd = ['tar', '-czvf', dest_path, '--exclude=my_agent/logs', '--exclude=my_agent/*.log', '-C', '/home/chieh'] + source_dirs_relative
+        cmd = ['tar', '-czvf', dest_path, '--exclude=my_agent/logs', '--exclude=my_agent/*.log', '-C', _home] + source_dirs_relative
         subprocess.run(cmd, check=True, capture_output=True, text=True)
         print(f"\nSUCCESS! Backup completed: {dest_path}")
         print("You can now safely unmount the USB drive.")

@@ -12,7 +12,7 @@ Run a full briefing fetch for all 14 topics, including the 8 newly added ones, u
 ## New Topics to Fetch
 - Rheumatoid Arthritis (Health)
 - Local News — Medford MA, Boston (Local)
-- Northeastern University (Education)
+- University News (Education)
 - BMNR — brain-machine neural recording (Tech)
 - Ethereum (Finance)
 - Health Tracking Devices (Health)
@@ -39,7 +39,7 @@ Run a full briefing fetch for all 14 topics, including the 8 newly added ones, u
 ## Completion Notes
 - Briefing fetched at 2026-03-23T13:35:00Z with BRIEFING_EXPAND_KEYWORDS=1
 - 31 articles across all 14 topics (93 total cached on disk from multiple runs)
-- All 8 new topics returned articles: RA (2), Local News (1), Northeastern (4), BMNR (4), Ethereum (3), Health Tracking (1), ML (5), Bike Paths (2)
+- All 8 new topics returned articles: RA (2), Local News (1), University News (4), BMNR (4), Ethereum (3), Health Tracking (1), ML (5), Bike Paths (2)
 - Original 6 topics also returned: NVIDIA (2), Gemini (1), Claude/Anthropic (3), OpenAI (1), Iran (1), Longevity (1)
 - Note: essences/ folder was renamed to tools/ by a parallel job; paths updated accordingly
 - Article count (31) is below the expected ~70; some topics only returned 1 article, likely due to Google News RSS feed limits for niche queries

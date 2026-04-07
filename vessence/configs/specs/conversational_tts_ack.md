@@ -21,13 +21,13 @@ wrapped in [ACK]...[/ACK] tags. This should be 1 short sentence that:
 Then provide your full response after the tags.
 
 Examples:
-[ACK]Sure Chieh, let me check the weather real quick.[/ACK]
+[ACK]Sure, let me check the weather real quick.[/ACK]
 The weather in Boston today is...
 
-[ACK]On it, Chieh — let me dig into that Docker auth issue.[/ACK]
+[ACK]On it — let me dig into that Docker auth issue.[/ACK]
 The root cause is...
 
-[ACK]Good question Chieh. This is going to take some research, I'll work through it.[/ACK]
+[ACK]Good question. This is going to take some research, I'll work through it.[/ACK]
 After analyzing the codebase...
 
 For simple greetings, skip the [ACK] tags and just respond naturally.
@@ -68,7 +68,7 @@ if (event.type === 'delta') {
 
 ### Visual Behavior (TTS off)
 - Ack text appears in the **status area** (above the response bubble), not as a separate message
-- Status shows: "Sure Chieh, let me look into that Docker issue..."
+- Status shows: "Sure, let me look into that Docker issue..."
 - Response text streams below as normal
 - When response completes, status clears
 

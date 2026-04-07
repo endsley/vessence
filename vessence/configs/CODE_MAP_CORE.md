@@ -435,7 +435,7 @@ _Auto-generated on 2026-04-05 01:57 UTC by `generate_code_map.py`_
   USER_ESSAY = ... → L100
   JANE_ESSAY = ... → L101
   AMBER_ESSAY = ... → L102
-  CHIEH_ESSAY = ... → L103
+  USER_ESSAY = ... → L100
   USER_STATE_PATH = ... → L106
   IDLE_STATE_PATH = ... → L107
   ACTIVE_QUEUE_PATH = ... → L108

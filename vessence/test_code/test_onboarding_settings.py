@@ -20,8 +20,8 @@ def test_first_run_setup_persists_google_oauth_fields(tmp_path, monkeypatch):
             "google_api_key": "AIzaSy12345678901234567890123456789012345",
             "google_client_id": "client-id.apps.googleusercontent.com",
             "google_client_secret": "secret-value",
-            "allowed_google_emails": "chieh@example.com",
-            "user_name": "Chieh",
+            "allowed_google_emails": "user@example.com",
+            "user_name": "TestUser",
             "jane_brain": "gemini",
         },
     )
@@ -32,7 +32,7 @@ def test_first_run_setup_persists_google_oauth_fields(tmp_path, monkeypatch):
     contents = env_path.read_text()
     assert "GOOGLE_CLIENT_ID=client-id.apps.googleusercontent.com" in contents
     assert "GOOGLE_CLIENT_SECRET=secret-value" in contents
-    assert "ALLOWED_GOOGLE_EMAILS=chieh@example.com" in contents
+    assert "ALLOWED_GOOGLE_EMAILS=user@example.com" in contents
 
 
 def test_quick_setup_creates_minimal_profile_and_completes_onboarding(tmp_path, monkeypatch):
@@ -74,7 +74,7 @@ def test_first_run_setup_rejects_partial_google_oauth_config(tmp_path, monkeypat
         json={
             "google_api_key": "AIzaSy12345678901234567890123456789012345",
             "google_client_id": "client-id.apps.googleusercontent.com",
-            "user_name": "Chieh",
+            "user_name": "TestUser",
             "jane_brain": "gemini",
         },
     )
@@ -95,7 +95,7 @@ def test_settings_save_persists_google_oauth_fields(tmp_path, monkeypatch):
         json={
             "google_client_id": "client-id.apps.googleusercontent.com",
             "google_client_secret": "secret-value",
-            "allowed_google_emails": "chieh@example.com",
+            "allowed_google_emails": "user@example.com",
         },
     )
 
@@ -105,7 +105,7 @@ def test_settings_save_persists_google_oauth_fields(tmp_path, monkeypatch):
     contents = env_path.read_text()
     assert "GOOGLE_CLIENT_ID=client-id.apps.googleusercontent.com" in contents
     assert "GOOGLE_CLIENT_SECRET=secret-value" in contents
-    assert "ALLOWED_GOOGLE_EMAILS=chieh@example.com" in contents
+    assert "ALLOWED_GOOGLE_EMAILS=user@example.com" in contents
 
 
 def test_settings_page_reports_google_oauth_configured(tmp_path, monkeypatch):
@@ -115,11 +115,11 @@ def test_settings_page_reports_google_oauth_configured(tmp_path, monkeypatch):
         "\n".join(
             [
                 "JANE_BRAIN=gemini",
-                "USER_NAME=Chieh",
+                "USER_NAME=TestUser",
                 "CLOUDFLARE_DOMAIN=vessences.com",
                 "GOOGLE_CLIENT_ID=client-id.apps.googleusercontent.com",
                 "GOOGLE_CLIENT_SECRET=secret-value",
-                "ALLOWED_GOOGLE_EMAILS=chieh@example.com",
+                "ALLOWED_GOOGLE_EMAILS=user@example.com",
             ]
         )
         + "\n"
@@ -134,14 +134,14 @@ def test_settings_page_reports_google_oauth_configured(tmp_path, monkeypatch):
 
     assert response.status_code == 200
     assert "Configured" in response.text
-    assert "chieh@example.com" in response.text
+    assert "user@example.com" in response.text
     assert "vessences.com" in response.text
 
 
 def test_root_stays_on_setup_until_interview_is_complete(tmp_path, monkeypatch):
     env_path = tmp_path / ".env"
     profile_path = tmp_path / "user_profile.md"
-    env_path.write_text("JANE_BRAIN=claude\nUSER_NAME=Chieh\n")
+    env_path.write_text("JANE_BRAIN=claude\nUSER_NAME=TestUser\n")
 
     monkeypatch.setattr(onboarding_main, "ENV_FILE", env_path)
     monkeypatch.setattr(onboarding_main, "PROFILE", profile_path)
@@ -158,7 +158,7 @@ def test_root_stays_on_setup_until_interview_is_complete(tmp_path, monkeypatch):
 def test_success_redirects_back_to_setup_until_onboarding_complete(tmp_path, monkeypatch):
     env_path = tmp_path / ".env"
     profile_path = tmp_path / "user_profile.md"
-    env_path.write_text("JANE_BRAIN=claude\nUSER_NAME=Chieh\n")
+    env_path.write_text("JANE_BRAIN=claude\nUSER_NAME=TestUser\n")
 
     monkeypatch.setattr(onboarding_main, "ENV_FILE", env_path)
     monkeypatch.setattr(onboarding_main, "PROFILE", profile_path)

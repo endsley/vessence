@@ -1,0 +1,69 @@
+conversations/
+  patterns/
+    - common_requests.md -- frequently asked task types
+    - workflow_prefs.md -- how user prefers to work
+  topics/
+    - decisions_made.md -- architectural and design choices
+    - pending_questions.md -- unresolved topics, open items
+    - recent_discussions.md -- latest conversation themes
+external/
+  links/
+    - dashboards.md -- monitoring, analytics URLs
+    - documentation.md -- reference docs, guides
+    - repos.md -- GitHub repos, codebases
+  services/
+    - apis.md -- third-party APIs, integrations
+    - platforms.md -- cloud services, hosting
+    - tools.md -- dev tools, CLI utilities
+knowledge/
+  domain/
+    - ai_ml.md -- machine learning, LLM concepts
+    - design.md -- UI/UX patterns, accessibility
+    - security.md -- auth, encryption, best practices
+  technical/
+    - databases.md -- SQL, NoSQL, vector DBs
+    - devops.md -- CI/CD, deployment, infrastructure
+    - javascript.md -- JS/TS frontend knowledge
+    - networking.md -- HTTP, APIs, protocols
+    - python.md -- Python patterns, libraries, tips
+user_info/
+  finances/
+    - accounts.md -- bank accounts, investments
+    - budget.md -- spending patterns, goals
+    - subscriptions.md -- recurring payments, services
+  personal/
+    - background.md -- age, location, family details
+    - daily_routine.md -- schedule patterns, sleep habits
+    - health.md -- medical info, fitness goals
+    - hobbies.md -- interests, activities, sports
+    - preferences.md -- communication style, work habits
+  relationships/
+    - contacts.md -- professional contacts, networking
+    - family.md -- family members, relationships
+    - friends.md -- close friends, social circle
+  work/
+    - colleagues.md -- coworkers, team members
+    - meetings.md -- recurring meetings, schedules
+    - projects.md -- active work projects and status
+    - role.md -- current job title, responsibilities
+    - skills.md -- technical and professional skills
+vessence/
+  architecture/
+    - android_app.md -- mobile client, APK build process
+    - llm_brain.md -- standing brain, provider routing
+    - memory_system.md -- ChromaDB, vector search, retrieval
+    - tool_loader.md -- dynamic tool discovery, hooks
+    - web_server.md -- jane-web service, endpoints, config
+  config/
+    - environment.md -- env vars, paths, API keys
+    - models.md -- LLM model selection, tiers
+    - permissions.md -- auth, session management
+  deployment/
+    - docker.md -- container setup, docker bundle
+    - marketing_site.md -- landing page, download links
+    - updates.md -- version bumping, release process
+  features/
+    - browser.md -- playwright, omniparser, web skills
+    - essences.md -- essence builder, runtime, loader
+    - notifications.md -- push, discord, email alerts
+    - voice.md -- TTS, wake word, speech recognition

@@ -22,7 +22,7 @@ object RecentMessagesBuffer {
      *   the notification's android.text extra.
      * @property timestamp When the message arrived (epoch ms).
      * @property packageName Originating app package — used by the read handler
-     *   to allow/deny lists if Chieh wants to filter per-app later.
+     *   to allow/deny lists if the user wants to filter per-app later.
      * @property sbnKey Unique notification key, used for deduping updates to
      *   the same notification (many apps update in-place when a reply arrives).
      */

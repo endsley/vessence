@@ -69,7 +69,7 @@ Add `audio_url` field to each article card:
 ### Step 6: Optional — Voice cloning
 - Place a reference voice sample at `essences/daily_briefing/knowledge/reference_voice.wav`
 - XTTS-v2 will clone that voice for all briefing audio
-- Could use Chieh's voice or a preferred narrator voice
+- Could use a custom voice or a preferred narrator voice
 
 ### Step 7: Cleanup cron
 Audio files older than 2 days get deleted by `cleanup_old_audio()` which runs at the start of each briefing fetch.

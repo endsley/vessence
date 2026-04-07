@@ -2,7 +2,7 @@
 
 ## Overview
 
-Custom wake word detector using kernel methods (no neural networks). Designed by Chieh, implemented in Python, intended for eventual port to Android (Kotlin).
+Custom wake word detector using kernel methods (no neural networks). Implemented in Python, intended for eventual port to Android (Kotlin).
 
 **Location:** `~/ambient/vessence/wake_word/`
 
@@ -88,7 +88,7 @@ Random Fourier Features (sklearn RBFSampler)
 ### Enrollment (Training)
 
 ```
-11 recorded samples of "Hey Jane" (Chieh's voice)
+11 recorded samples of "Hey Jane" (the user's voice)
     │
     ▼
 Augment (×50): noise mixing (white/pink/brown/hum/babble + real speech),
@@ -305,7 +305,7 @@ Per check (at 6 checks/sec):
 
 ## Known Limitations
 
-1. **Single speaker** — only Chieh's voice enrolled
+1. **Single speaker** — only the user's voice enrolled
 2. **Batch/incremental parity** — small feature differences due to framing alignment (cosine sim ~0.1, needs fix)
 3. **Synthetic augmentation only** — no room impulse responses or codec artifacts
 4. **No Android port yet** — Python prototype, needs Kotlin reimplementation
