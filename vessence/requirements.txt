@@ -20,6 +20,9 @@ pydantic
 httpx
 aiohttp
 
+# E2E encryption (relay tunnel)
+pynacl
+
 # Database
 aiosqlite
 
