@@ -678,26 +678,20 @@
             One platform.<br />
             Infinite AI personas.
           </h1>
-          <p class="hero-copy" id="hero-simple">
+          <p class="hero-copy">
             Vessence is an open-source wrapper around Claude Code, Gemini, and Codex. It simplifies the agent development process.
             You start with your default agent, Jane. By describing to her the abilities you wish she would have, you can develop
             your own agent capabilities (tools) and agent personas (essences). An example of a tool would be the ability to verbally
             ask your agent to send a text message, turn on a light, or play a song. An example of a persona (essence) would be a
-            tax accountant that walks through your taxes and helps you prepare the document. You don't have to develop your own
-            tools or personas — you can simply download what other people have done.
+            tax accountant that would walk through your taxes and help you prepare the document. You do not have to develop your own
+            tools or personas, you can simply download what other people have done.
           </p>
-          <p class="hero-copy" id="hero-technical" style="display:none;">
-            Vessence provides a unified marketplace for people to share their tools and essences. You can simply download these
-            tools into your Jane's brain. To get the Vessence server running on your computer, you download one of
-            Claude Code, Gemini CLI, or Codex, then download the Vessence package from Git. In your CLI prompt, you simply
+          <p class="hero-copy">
+            Vessence provides a unified marketplace for people to share their tools and essences. And you can simply download these
+            tools into your Jane's brain. To get the Vessence server running on your computer, you simply download one of
+            Claude Code, Gemini CLI, or Codex, then you download the Vessence package from Git. In your CLI prompt, you simply
             ask it to read the JANE_BOOTSTRAP.md file inside Vessence, and everything should be set up for you.
           </p>
-          <div class="explain-toggle">
-            <button id="toggle-explain" onclick="toggleExplain()">
-              <span id="toggle-label">Technical</span>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>
-            </button>
-          </div>
           <div class="hero-actions">
             <a class="button button-primary" href="https://github.com/endsley/vessence" target="_blank" rel="noreferrer">View on GitHub</a>
             <a class="button button-secondary" href="/install.html">Getting Started</a>
@@ -1128,17 +1122,6 @@
       const filename = link.dataset.vaultDownload;
       if (!filename) continue;
       link.href = `/downloads/${encodeURIComponent(filename)}`;
-    }
-  </script>
-  <script>
-    function toggleExplain() {
-      const simple = document.getElementById('hero-simple');
-      const tech = document.getElementById('hero-technical');
-      const label = document.getElementById('toggle-label');
-      const isSimple = simple.style.display !== 'none';
-      simple.style.display = isSimple ? 'none' : '';
-      tech.style.display = isSimple ? '' : 'none';
-      label.textContent = isSimple ? 'Simple' : 'Technical';
     }
   </script>
 </body>
