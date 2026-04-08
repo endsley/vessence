@@ -161,6 +161,9 @@ def validate_session(session_id: str, device_fingerprint: str) -> bool:
         if datetime.datetime.utcnow() > expires:
             conn.execute("DELETE FROM sessions WHERE id=?", (session_id,))
             return False
+        # Verify device fingerprint matches the one used at session creation
+        if row["device_fingerprint"] and device_fingerprint != row["device_fingerprint"]:
+            return False
         conn.execute(
             "UPDATE sessions SET last_used=CURRENT_TIMESTAMP WHERE id=?", (session_id,)
         )
@@ -243,6 +246,9 @@ def revoke_device(device_id: str):
 
 def device_fingerprint_from_request(request) -> str:
     ua = request.headers.get("user-agent", "")
-    ip = request.client.host
+    # Use real client IP behind reverse proxies (Cloudflare, nginx)
+    ip = (request.headers.get("CF-Connecting-IP")
+          or request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+          or request.client.host)
     raw = f"{ip}:{ua}"
     return hashlib.sha256(raw.encode()).hexdigest()[:32]

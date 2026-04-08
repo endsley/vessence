@@ -93,7 +93,11 @@ fun WorkLogScreen(
                         override fun shouldOverrideUrlLoading(
                             view: WebView?,
                             request: WebResourceRequest?,
-                        ): Boolean = false
+                        ): Boolean {
+                            val url = request?.url?.toString() ?: return true
+                            // Only allow navigation within the configured base URL
+                            return !url.startsWith(baseUrl)
+                        }
                     }
                     // Load with cookie header in case WebView cookie sync missed
                     val headers = mutableMapOf<String, String>()

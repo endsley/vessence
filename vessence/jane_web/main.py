@@ -172,7 +172,12 @@ _INSTALLER_GLOBS = {
 }
 
 app = FastAPI(title="Jane")
-app.add_middleware(SessionMiddleware, secret_key=os.getenv("SESSION_SECRET_KEY", "changeme"))
+_session_secret = os.getenv("SESSION_SECRET_KEY", "")
+if not _session_secret or _session_secret in ("changeme", "changeme-generate-a-real-secret"):
+    import secrets as _secrets
+    _session_secret = _secrets.token_hex(32)
+    _logger.warning("SESSION_SECRET_KEY not set — using auto-generated key (sessions won't persist across restarts)")
+app.add_middleware(SessionMiddleware, secret_key=_session_secret)
 app.mount("/static", StaticFiles(directory=VAULT_WEB_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=VAULT_WEB_DIR / "templates")
 
@@ -514,16 +519,24 @@ def get_session_id(request: Request) -> Optional[str]:
 
 
 def _is_local_browser_access(request: Request) -> bool:
-    host = (request.headers.get("host") or request.url.hostname or "").split(",")[0].strip().lower()
-    host = host.split(":")[0]
-    return host in ("localhost", "127.0.0.1", "::1")
+    """Check if request is truly local (not proxied through Cloudflare)."""
+    # If CF-Connecting-IP is present, traffic came through Cloudflare — not local
+    if request.headers.get("cf-connecting-ip"):
+        return False
+    client_host = request.client.host if request.client else ""
+    return client_host in ("127.0.0.1", "::1")
 
 
 def require_auth(request: Request):
-    # Allow internal requests from localhost (prompt queue runner, cron jobs)
-    client_host = request.client.host if request.client else ""
-    if client_host in ("127.0.0.1", "::1", "localhost") or _is_local_browser_access(request):
-        return request.query_params.get("session_id") or "internal"
+    # If traffic came through Cloudflare, never allow localhost bypass
+    if request.headers.get("cf-connecting-ip"):
+        # Must have valid session — no localhost bypass
+        pass
+    else:
+        # True local access (no Cloudflare header) — check actual client IP
+        client_host = request.client.host if request.client else ""
+        if client_host in ("127.0.0.1", "::1"):
+            return request.query_params.get("session_id") or "internal"
     session_id = get_session_id(request)
     fp = device_fingerprint_from_request(request)
     if not session_id or not validate_session(session_id, fp):
@@ -645,10 +658,10 @@ async def index(request: Request):
             },
         )
         if get_session_id(request) != session_id:
-            response.set_cookie(SESSION_COOKIE, session_id, httponly=True, samesite="lax",
+            response.set_cookie(SESSION_COOKIE, session_id, httponly=True, secure=True, samesite="lax",
                                 max_age=60 * 60 * 24 * 30)
         if trusted_device_id and get_trusted_device_cookie_id(request) != trusted_device_id:
-            response.set_cookie(TRUSTED_DEVICE_COOKIE, trusted_device_id, httponly=True, samesite="lax",
+            response.set_cookie(TRUSTED_DEVICE_COOKIE, trusted_device_id, httponly=True, secure=True, samesite="lax",
                                 max_age=60 * 60 * 24 * 30)
         return response
     return templates.TemplateResponse("login.html", _login_context(request))
@@ -673,10 +686,10 @@ async def vault_page(request: Request):
             },
         )
         if get_session_id(request) != session_id:
-            response.set_cookie(SESSION_COOKIE, session_id, httponly=True, samesite="lax",
+            response.set_cookie(SESSION_COOKIE, session_id, httponly=True, secure=True, samesite="lax",
                                 max_age=60 * 60 * 24 * 30)
         if trusted_device_id and get_trusted_device_cookie_id(request) != trusted_device_id:
-            response.set_cookie(TRUSTED_DEVICE_COOKIE, trusted_device_id, httponly=True, samesite="lax",
+            response.set_cookie(TRUSTED_DEVICE_COOKIE, trusted_device_id, httponly=True, secure=True, samesite="lax",
                                 max_age=60 * 60 * 24 * 30)
         return response
     return templates.TemplateResponse("login.html", _login_context(request))
@@ -708,10 +721,10 @@ async def chat_page(request: Request):
             },
         )
         if get_session_id(request) != session_id:
-            response.set_cookie(SESSION_COOKIE, session_id, httponly=True, samesite="lax",
+            response.set_cookie(SESSION_COOKIE, session_id, httponly=True, secure=True, samesite="lax",
                                 max_age=60 * 60 * 24 * 30)
         if trusted_device_id and get_trusted_device_cookie_id(request) != trusted_device_id:
-            response.set_cookie(TRUSTED_DEVICE_COOKIE, trusted_device_id, httponly=True, samesite="lax",
+            response.set_cookie(TRUSTED_DEVICE_COOKIE, trusted_device_id, httponly=True, secure=True, samesite="lax",
                                 max_age=60 * 60 * 24 * 30)
         return response
     return templates.TemplateResponse("login.html", _login_context(request))
@@ -759,8 +772,8 @@ async def briefing_page(request: Request, _=Depends(require_auth)):
 
 
 @app.post("/api/crash-report")
-async def receive_crash_report(request: Request):
-    body = await request.body()
+async def receive_crash_report(request: Request, _=Depends(require_auth)):
+    body = (await request.body())[:10000]
     report = body.decode("utf-8", errors="replace")
     crash_file = Path(LOGS_DIR) / "android_crashes.log"
     with open(crash_file, "a") as f:
@@ -770,7 +783,7 @@ async def receive_crash_report(request: Request):
 
 
 @app.post("/api/device-diagnostics")
-async def receive_device_diagnostics(request: Request):
+async def receive_device_diagnostics(request: Request, _=Depends(require_auth)):
     """Receive diagnostic data from Android: wake word status, mic state, errors, scores, etc."""
     import json as _json
     body = await request.json()
@@ -1110,9 +1123,9 @@ async def auth_google_callback(request: Request):
     session_id = create_session(fp, trusted=True, user_id=email)
     prewarm_session(session_id)
     resp = RedirectResponse(url="/")
-    resp.set_cookie(SESSION_COOKIE, session_id, httponly=True, samesite="lax",
+    resp.set_cookie(SESSION_COOKIE, session_id, httponly=True, secure=True, samesite="lax",
                     max_age=60 * 60 * 24 * 30)  # 30 days
-    resp.set_cookie(TRUSTED_DEVICE_COOKIE, trusted_device_id, httponly=True, samesite="lax",
+    resp.set_cookie(TRUSTED_DEVICE_COOKIE, trusted_device_id, httponly=True, secure=True, samesite="lax",
                     max_age=60 * 60 * 24 * 30)
     return resp
 
@@ -1148,9 +1161,9 @@ async def auth_google_token(request: Request):
     session_id = create_session(fp, trusted=True, user_id=email)
     prewarm_session(session_id)
     resp = JSONResponse({"ok": True, "session_id": session_id, "trusted_device_id": trusted_device_id})
-    resp.set_cookie(SESSION_COOKIE, session_id, httponly=True, samesite="lax",
+    resp.set_cookie(SESSION_COOKIE, session_id, httponly=True, secure=True, samesite="lax",
                     max_age=60 * 60 * 24 * 30)
-    resp.set_cookie(TRUSTED_DEVICE_COOKIE, trusted_device_id, httponly=True, samesite="lax",
+    resp.set_cookie(TRUSTED_DEVICE_COOKIE, trusted_device_id, httponly=True, secure=True, samesite="lax",
                     max_age=60 * 60 * 24 * 30)
     return resp
 
@@ -1161,7 +1174,7 @@ async def verify_share(request: Request, body: dict, response: Response):
     share = validate_share(code)
     if not share:
         return JSONResponse({"ok": False, "error": "Invalid share code"}, status_code=400)
-    response.set_cookie("share_code", code, httponly=True, samesite="lax")
+    response.set_cookie("share_code", code, httponly=True, secure=True, samesite="lax")
     return {"ok": True, "path": share["path"]}
 
 
@@ -1183,9 +1196,9 @@ async def verify_totp_login(request: Request, body: dict):
     prewarm_session(session_id)
 
     response = JSONResponse({"ok": True})
-    response.set_cookie(SESSION_COOKIE, session_id, httponly=True, samesite="lax",
+    response.set_cookie(SESSION_COOKIE, session_id, httponly=True, secure=True, samesite="lax",
                         max_age=60 * 60 * 24 * 30)
-    response.set_cookie(TRUSTED_DEVICE_COOKIE, trusted_device_id, httponly=True, samesite="lax",
+    response.set_cookie(TRUSTED_DEVICE_COOKIE, trusted_device_id, httponly=True, secure=True, samesite="lax",
                         max_age=60 * 60 * 24 * 30)
     return response
 
@@ -1218,10 +1231,10 @@ async def check_auth(request: Request):
     session_id, trusted_device_id = get_or_bootstrap_session(request)
     response = JSONResponse({"authenticated": bool(session_id)})
     if session_id and get_session_id(request) != session_id:
-        response.set_cookie(SESSION_COOKIE, session_id, httponly=True, samesite="lax",
+        response.set_cookie(SESSION_COOKIE, session_id, httponly=True, secure=True, samesite="lax",
                             max_age=60 * 60 * 24 * 30)
     if trusted_device_id and get_trusted_device_cookie_id(request) != trusted_device_id:
-        response.set_cookie(TRUSTED_DEVICE_COOKIE, trusted_device_id, httponly=True, samesite="lax",
+        response.set_cookie(TRUSTED_DEVICE_COOKIE, trusted_device_id, httponly=True, secure=True, samesite="lax",
                             max_age=60 * 60 * 24 * 30)
     return response
 
@@ -1851,10 +1864,10 @@ async def upload_single_file(
         "mime": mime,
     })
     if get_session_id(request) != session_id:
-        response.set_cookie(SESSION_COOKIE, session_id, httponly=True, samesite="lax",
+        response.set_cookie(SESSION_COOKIE, session_id, httponly=True, secure=True, samesite="lax",
                             max_age=60 * 60 * 24 * 30)
     if trusted_device_id and get_trusted_device_cookie_id(request) != trusted_device_id:
-        response.set_cookie(TRUSTED_DEVICE_COOKIE, trusted_device_id, httponly=True, samesite="lax",
+        response.set_cookie(TRUSTED_DEVICE_COOKIE, trusted_device_id, httponly=True, secure=True, samesite="lax",
                             max_age=60 * 60 * 24 * 30)
     return response
 
@@ -2041,10 +2054,10 @@ async def _handle_jane_chat(body: ChatMessage, request: Request):
     result = await send_message(user_id, session_id, body.message, body.file_context, platform=body.platform, tts_enabled=body.tts_enabled or False)
     response = JSONResponse({"response": result.get("text", ""), "files": result.get("files", [])})
     if get_session_id(request) != session_id:
-        response.set_cookie(SESSION_COOKIE, session_id, httponly=True, samesite="lax",
+        response.set_cookie(SESSION_COOKIE, session_id, httponly=True, secure=True, samesite="lax",
                             max_age=60 * 60 * 24 * 30)
     if trusted_device_id and get_trusted_device_cookie_id(request) != trusted_device_id:
-        response.set_cookie(TRUSTED_DEVICE_COOKIE, trusted_device_id, httponly=True, samesite="lax",
+        response.set_cookie(TRUSTED_DEVICE_COOKIE, trusted_device_id, httponly=True, secure=True, samesite="lax",
                             max_age=60 * 60 * 24 * 30)
     return response
 
@@ -2068,10 +2081,10 @@ async def jane_end_session(body: SessionControl, request: Request):
     end_session(session_id)
     response = JSONResponse({"ok": True})
     if get_session_id(request) != session_id:
-        response.set_cookie(SESSION_COOKIE, session_id, httponly=True, samesite="lax",
+        response.set_cookie(SESSION_COOKIE, session_id, httponly=True, secure=True, samesite="lax",
                             max_age=60 * 60 * 24 * 30)
     if trusted_device_id and get_trusted_device_cookie_id(request) != trusted_device_id:
-        response.set_cookie(TRUSTED_DEVICE_COOKIE, trusted_device_id, httponly=True, samesite="lax",
+        response.set_cookie(TRUSTED_DEVICE_COOKIE, trusted_device_id, httponly=True, secure=True, samesite="lax",
                             max_age=60 * 60 * 24 * 30)
     return response
 
@@ -2365,10 +2378,10 @@ async def _handle_jane_chat_stream(body: ChatMessage, request: Request):
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
         if get_session_id(request) != session_id:
-            response.set_cookie(SESSION_COOKIE, session_id, httponly=True, samesite="lax",
+            response.set_cookie(SESSION_COOKIE, session_id, httponly=True, secure=True, samesite="lax",
                                 max_age=60 * 60 * 24 * 30)
         if trusted_device_id and get_trusted_device_cookie_id(request) != trusted_device_id:
-            response.set_cookie(TRUSTED_DEVICE_COOKIE, trusted_device_id, httponly=True, samesite="lax",
+            response.set_cookie(TRUSTED_DEVICE_COOKIE, trusted_device_id, httponly=True, secure=True, samesite="lax",
                                 max_age=60 * 60 * 24 * 30)
         return response
 
@@ -2412,10 +2425,10 @@ async def _handle_jane_chat_stream(body: ChatMessage, request: Request):
         },
     )
     if get_session_id(request) != session_id:
-        response.set_cookie(SESSION_COOKIE, session_id, httponly=True, samesite="lax",
+        response.set_cookie(SESSION_COOKIE, session_id, httponly=True, secure=True, samesite="lax",
                             max_age=60 * 60 * 24 * 30)
     if trusted_device_id and get_trusted_device_cookie_id(request) != trusted_device_id:
-        response.set_cookie(TRUSTED_DEVICE_COOKIE, trusted_device_id, httponly=True, samesite="lax",
+        response.set_cookie(TRUSTED_DEVICE_COOKIE, trusted_device_id, httponly=True, secure=True, samesite="lax",
                             max_age=60 * 60 * 24 * 30)
     return response
 
@@ -2827,6 +2840,8 @@ async def get_briefing_articles(topic: Optional[str] = None, view: Optional[str]
 @app.get("/api/briefing/article/{article_id}")
 async def get_briefing_article_detail(article_id: str, _=Depends(require_auth)):
     """Get full article detail with comprehensive summary."""
+    if not re.match(r'^[a-zA-Z0-9_-]+$', article_id):
+        raise HTTPException(status_code=400, detail="Invalid article_id")
     bt = _briefing_tools()
     result = bt.get_article_detail(article_id)
     if result.get("status") == "error":
@@ -2838,6 +2853,10 @@ async def get_briefing_article_detail(article_id: str, _=Depends(require_auth)):
 async def briefing_audio(article_id: str, summary_type: str = "brief", _=Depends(require_auth)):
     """Serve pre-generated TTS audio for a briefing article (Opus/OGG preferred, WAV fallback).
     Returns 503 if system load is too high (protects TTS/CPU-heavy workloads)."""
+    if not re.match(r'^[a-zA-Z0-9_-]+$', article_id):
+        raise HTTPException(status_code=400, detail="Invalid article_id")
+    if not re.match(r'^[a-zA-Z0-9_-]+$', summary_type):
+        raise HTTPException(status_code=400, detail="Invalid summary_type")
     # Gate on system load — reject bulk downloads when the machine is busy
     try:
         load_1min = os.getloadavg()[0]
@@ -2987,6 +3006,8 @@ async def trigger_briefing_fetch(_=Depends(require_auth)):
 
 @app.post("/api/briefing/article/{article_id}/dismiss")
 async def dismiss_briefing_article(article_id: str, _=Depends(require_auth)):
+    if not re.match(r'^[a-zA-Z0-9_-]+$', article_id):
+        raise HTTPException(status_code=400, detail="Invalid article_id")
     """Mark an article as dismissed ('heard it')."""
     bt = _briefing_tools()
     return bt.dismiss_article(article_id)
@@ -2994,6 +3015,8 @@ async def dismiss_briefing_article(article_id: str, _=Depends(require_auth)):
 
 @app.delete("/api/briefing/article/{article_id}/dismiss")
 async def undismiss_briefing_article(article_id: str, _=Depends(require_auth)):
+    if not re.match(r'^[a-zA-Z0-9_-]+$', article_id):
+        raise HTTPException(status_code=400, detail="Invalid article_id")
     """Un-dismiss an article."""
     bt = _briefing_tools()
     return bt.undismiss_article(article_id)
@@ -3086,6 +3109,8 @@ async def list_saved_articles(category: str = None, _=Depends(require_auth)):
 
 @app.delete("/api/briefing/saved/{article_id}")
 async def unsave_briefing_article(article_id: str, _=Depends(require_auth)):
+    if not re.match(r'^[a-zA-Z0-9_-]+$', article_id):
+        raise HTTPException(status_code=400, detail="Invalid article_id")
     """Remove an article from saved collection."""
     saved_file = _SAVED_ARTICLES_DIR / "saved.json"
     if not saved_file.exists():
@@ -3123,6 +3148,8 @@ async def search_briefing_articles(q: str, _=Depends(require_auth)):
 @app.get("/api/briefing/image/{article_id}")
 async def get_briefing_image(article_id: str):
     """Serve a cached article image."""
+    if not re.match(r'^[a-zA-Z0-9_-]+$', article_id):
+        raise HTTPException(status_code=400, detail="Invalid article_id")
     images_dir = Path(os.environ.get("TOOLS_DIR",
                       os.path.join(os.path.expanduser("~"), "ambient", "skills"))) / "daily_briefing" / "essence_data" / "images"
     # Try common extensions
@@ -3147,6 +3174,8 @@ async def list_briefing_archive(_=Depends(require_auth)):
 @app.get("/api/briefing/archive/{date}")
 async def get_archived_briefing(date: str, _=Depends(require_auth)):
     """Get a specific archived briefing by date."""
+    if not re.match(r'^\d{4}-\d{2}-\d{2}$', date):
+        raise HTTPException(status_code=400, detail="Invalid date format")
     archive_dir = Path(os.path.expanduser("~/ambient/vessence-data/briefings"))
     file_path = archive_dir / f"{date}.json"
     if not file_path.exists():
@@ -3218,6 +3247,8 @@ async def tax_calculate(_=Depends(require_auth)):
 @app.get("/api/tax/forms/{form_name}")
 async def tax_get_form(form_name: str, _=Depends(require_auth)):
     """Get a generated tax form."""
+    if not re.match(r'^[a-zA-Z0-9_-]+$', form_name):
+        raise HTTPException(status_code=400, detail="Invalid form name")
     output_dir = os.path.join(_TAX_ESSENCE_DIR, "working_files", "output")
     # Find the most recent file matching form_name
     if os.path.isdir(output_dir):
@@ -3243,7 +3274,8 @@ async def tax_upload_document(file: UploadFile = File(...), doc_type: str = Form
     """Upload a tax document for processing."""
     uploads_dir = os.path.join(_TAX_ESSENCE_DIR, "user_data", "uploads")
     os.makedirs(uploads_dir, exist_ok=True)
-    file_path = os.path.join(uploads_dir, file.filename)
+    safe_name = os.path.basename(file.filename or "upload")
+    file_path = os.path.join(uploads_dir, safe_name)
     async with aiofiles.open(file_path, 'wb') as out_file:
         content = await file.read()
         await out_file.write(content)
@@ -4030,7 +4062,7 @@ async def cli_login_code(request: Request):
         token_data = _urlencode({
             "grant_type": "authorization_code",
             "client_id": "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com",
-            "client_secret": "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",
+            "client_secret": os.getenv("GEMINI_CLI_OAUTH_SECRET", ""),
             "code": auth_code,
             "code_verifier": _gemini_oauth_verifier,
             "redirect_uri": "https://codeassist.google.com/authcode",
@@ -4068,7 +4100,7 @@ async def cli_login_code(request: Request):
         creds = {
             "type": "authorized_user",
             "client_id": "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com",
-            "client_secret": "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",
+            "client_secret": os.getenv("GEMINI_CLI_OAUTH_SECRET", ""),
             "refresh_token": tokens.get("refresh_token", ""),
         }
         creds_path.write_text(json.dumps(creds), encoding="utf-8")

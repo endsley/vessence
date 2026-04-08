@@ -80,3 +80,14 @@ wake_word/model.npz
 *.onnx.data
 /tmp/
 vessence/marketing_site/.*.swp
+
+# Private keys and certificates
+*.pem
+*.key
+*.p12
+*.keystore
+
+# Editor swap files
+*.swp
+*.swo
+*~

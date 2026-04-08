@@ -809,6 +809,10 @@
 
     let currentCategory = "all";
 
+    function escapeHtml(s) {
+        return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
     // ── Render Grid ──
     function renderGrid(items) {
       const grid = document.getElementById("essenceGrid");
@@ -822,10 +826,10 @@
             ? '<span class="card-tag tag-included">Included</span>'
             : '<span class="card-tag tag-premium">Premium</span>'}
           <div class="card-icon" style="background: ${e.iconBg}">${e.icon}</div>
-          <div class="card-name">${e.name}</div>
-          <div class="card-desc">${e.description}</div>
+          <div class="card-name">${escapeHtml(e.name)}</div>
+          <div class="card-desc">${escapeHtml(e.description)}</div>
           <div class="card-meta">
-            <span class="card-price ${e.price === 0 ? 'free' : ''}">${e.priceLabel}</span>
+            <span class="card-price ${e.price === 0 ? 'free' : ''}">${escapeHtml(e.priceLabel)}</span>
             <div class="card-stats">
               <span>${renderStars(e.rating)} ${e.rating}</span>
               <span>${formatNumber(e.downloads)} installs</span>
@@ -899,10 +903,10 @@
         reviewsEl.innerHTML = `<h3>Reviews</h3>` + e.reviews.map(r => `
           <div class="review">
             <div class="review-header">
-              <span class="review-author">${r.author}</span>
+              <span class="review-author">${escapeHtml(r.author)}</span>
               <span class="review-stars">${"&#9733;".repeat(r.stars)}${"&#9734;".repeat(5 - r.stars)}</span>
             </div>
-            <div class="review-text">${r.text}</div>
+            <div class="review-text">${escapeHtml(r.text)}</div>
           </div>
         `).join("");
       } else {

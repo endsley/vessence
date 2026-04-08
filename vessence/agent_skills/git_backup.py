@@ -28,10 +28,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger("GitBackup")
 
-def run_cmd(cmd, cwd=REPO_DIR):
-    result = subprocess.run(cmd, shell=True, capture_output=True, text=True, cwd=cwd)
+def run_cmd(cmd_list, cwd=REPO_DIR):
+    if isinstance(cmd_list, str):
+        cmd_list = cmd_list.split()
+    result = subprocess.run(cmd_list, shell=False, capture_output=True, text=True, cwd=cwd)
     if result.returncode != 0:
-        logger.error(f"Command failed: {cmd}\nError: {result.stderr}")
+        logger.error(f"Command failed: {cmd_list}\nError: {result.stderr}")
         return None
     return result.stdout.strip()
 
@@ -71,16 +73,16 @@ def main():
         return
 
     # Add all changes
-    run_cmd("git add .")
-    
+    run_cmd(["git", "add", "."])
+
     # Check if there are staged changes
-    status = run_cmd("git status --porcelain")
+    status = run_cmd(["git", "status", "--porcelain"])
     if not status:
         logger.info("No changes to backup.")
         return
-    
+
     # Get diff for summary
-    diff = run_cmd("git diff --cached")
+    diff = run_cmd(["git", "diff", "--cached"])
     
     # Get Qwen summary
     summary = get_commit_summary(diff)
@@ -98,12 +100,12 @@ def main():
     
     # Push
     # Find current branch
-    branch = run_cmd("git rev-parse --abbrev-ref HEAD")
+    branch = run_cmd(["git", "rev-parse", "--abbrev-ref", "HEAD"])
     if not branch:
         branch = "master"
-        
+
     logger.info(f"Pushing to {REMOTE_NAME} branch {branch}...")
-    push_res = run_cmd(f"git push {REMOTE_NAME} {branch}")
+    push_res = run_cmd(["git", "push", REMOTE_NAME, branch])
     if push_res is None:
         logger.error("!!! ALERT: Git push failed. Backup not synced to peer.")
         # Optional: send alert if push fails (already logged as ERROR)

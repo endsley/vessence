@@ -533,13 +533,12 @@ async def _call_google(
             "thinkingConfig": {"thinkingBudget": 0},
         },
     }
-    url = (
-        f"https://generativelanguage.googleapis.com/v1beta/models/"
-        f"{model}:generateContent?key={api_key}"
-    )
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+    headers = {"x-goog-api-key": api_key, "Content-Type": "application/json"}
     session = _get_session()
     async with session.post(
         url,
+        headers=headers,
         json=payload,
         timeout=aiohttp.ClientTimeout(total=timeout_s),
     ) as resp:
