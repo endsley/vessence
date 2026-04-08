@@ -15,6 +15,7 @@ Config stored in ~/.vessence-relay.json
 
 import argparse
 import asyncio
+import base64
 import json
 import logging
 import os
@@ -144,7 +145,8 @@ async def forward_to_jane(request_data: dict,
     method = request_data.get("method", "GET")
     path = request_data.get("path", "/")
     headers = request_data.get("headers", {})
-    body = request_data.get("body", "")
+    body_b64 = request_data.get("body_b64", "")
+    body = base64.b64decode(body_b64) if body_b64 else b""
 
     url = f"{LOCAL_JANE}{path}"
     skip_headers = {"host", "connection", "upgrade", "transfer-encoding"}
@@ -154,7 +156,7 @@ async def forward_to_jane(request_data: dict,
     try:
         async with session.request(
             method=method, url=url, headers=clean_headers,
-            data=body.encode("utf-8") if body else None,
+            data=body if body else None,
             timeout=aiohttp.ClientTimeout(total=25),
             ssl=False,
         ) as resp:
@@ -164,7 +166,7 @@ async def forward_to_jane(request_data: dict,
                 "request_id": request_data["request_id"],
                 "status": resp.status,
                 "headers": dict(resp.headers),
-                "body": resp_body.decode("utf-8", errors="replace"),
+                "body_b64": base64.b64encode(resp_body).decode("ascii"),
             }
     except Exception as e:
         logger.error("Error forwarding to Jane: %s", e)
