@@ -35,8 +35,15 @@ object MessagesReadRecentHandler : ClientToolHandler {
         queue: ActionQueue,
     ): ToolActionStatus {
         if (!NotificationSafety.isListenerEnabled(ctx)) {
-            queue.speak("I need notification access to read your messages. Open Jane's settings and turn on notification access.")
-            return ToolActionStatus.NeedsUser("notification listener access not granted")
+            queue.speak("I need notification access to read your messages. Opening the settings now.")
+            try {
+                val intent = android.content.Intent(android.provider.Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
+                intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                ctx.startActivity(intent)
+            } catch (e: Exception) {
+                queue.speak("Please open Settings, then Notifications, then Notification access, and enable Jane.")
+            }
+            return ToolActionStatus.NeedsUser("notification listener access not granted — settings opened")
         }
         if (!VessenceNotificationListener.connected.value) {
             queue.speak("Notification access is on but the listener is still starting up. Give it a moment and try again.")
