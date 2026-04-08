@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>My Account — Vessences</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #071119;
+      --bg-soft: #10202c;
+      --panel: rgba(12, 27, 36, 0.72);
+      --line: rgba(167, 216, 214, 0.14);
+      --text: #edf7f4;
+      --muted: #9db8b4;
+      --accent: #a7d8d6;
+      --accent-strong: #6ec5be;
+      --accent-warm: #f3c58b;
+      --danger: #ff6b6b;
+      --radius: 16px;
+      --max: 720px;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Manrope", sans-serif;
+      color: var(--text);
+      background: linear-gradient(180deg, #081018 0%, #061018 35%, #07131d 100%);
+      min-height: 100vh;
+    }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    .shell { width: min(var(--max), calc(100vw - 32px)); margin: 0 auto; }
+
+    /* Nav */
+    .nav { padding: 18px 0; display: flex; align-items: center; justify-content: space-between; }
+    .brand { display: inline-flex; align-items: center; gap: 10px; font-weight: 800; color: var(--text); text-decoration: none; }
+    .brand-mark { width: 34px; height: 34px; border-radius: 50%; overflow: hidden; border: 2px solid rgba(167,216,214,0.3); }
+    .brand-mark img { width: 100%; height: 100%; object-fit: cover; }
+    .nav-links { display: flex; gap: 16px; align-items: center; font-size: 0.9rem; }
+    .nav-links a { color: var(--muted); }
+
+    /* Cards */
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 28px;
+      margin-bottom: 20px;
+    }
+    .card h2 { margin: 0 0 6px; font-size: 1.2rem; }
+    .card p { color: var(--muted); font-size: 0.9rem; line-height: 1.6; margin: 0 0 16px; }
+    .card h3 { margin: 20px 0 8px; font-size: 1rem; color: var(--accent); }
+
+    /* Forms */
+    .field { margin-bottom: 16px; }
+    .field label { display: block; font-size: 0.85rem; color: var(--muted); margin-bottom: 6px; }
+    .field input, .field select {
+      width: 100%; padding: 10px 14px; border: 1px solid var(--line);
+      border-radius: 8px; background: var(--bg-soft); color: var(--text);
+      font-size: 0.95rem; font-family: inherit;
+    }
+    .field input:focus, .field select:focus { outline: none; border-color: var(--accent); }
+    .field .hint { font-size: 0.78rem; color: var(--muted); margin-top: 4px; }
+
+    /* Buttons */
+    .btn {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 10px 20px; border-radius: 8px; border: none;
+      font-size: 0.95rem; font-family: inherit; cursor: pointer;
+      transition: background 0.2s;
+    }
+    .btn-primary { background: var(--accent-strong); color: #071119; font-weight: 600; }
+    .btn-primary:hover { background: var(--accent); }
+    .btn-secondary { background: rgba(167,216,214,0.12); color: var(--accent); }
+    .btn-secondary:hover { background: rgba(167,216,214,0.2); }
+    .btn-danger { background: rgba(255,107,107,0.15); color: var(--danger); }
+    .btn-danger:hover { background: rgba(255,107,107,0.25); }
+    .btn-google {
+      background: #fff; color: #333; font-weight: 500;
+      padding: 12px 28px; font-size: 1rem; border-radius: 8px;
+    }
+    .btn-google:hover { background: #f0f0f0; }
+
+    /* Status badges */
+    .badge { display: inline-block; padding: 3px 10px; border-radius: 6px; font-size: 0.75rem; font-weight: 600; }
+    .badge-ok { background: rgba(110,197,190,0.2); color: var(--accent-strong); }
+    .badge-off { background: rgba(255,107,107,0.15); color: var(--danger); }
+
+    /* Section spacing */
+    .page-header { padding: 40px 0 20px; }
+    .page-header h1 { font-size: 1.6rem; margin: 0 0 6px; }
+    .page-header p { color: var(--muted); margin: 0; }
+
+    /* Signed-out state */
+    .signin-card { text-align: center; padding: 60px 28px; }
+    .signin-card h2 { font-size: 1.4rem; margin-bottom: 12px; }
+    .signin-card p { margin-bottom: 28px; }
+
+    /* Sub-domain display */
+    .subdomain-display {
+      background: var(--bg-soft); border: 1px solid var(--line);
+      border-radius: 8px; padding: 12px 16px; font-family: monospace;
+      font-size: 0.95rem; color: var(--accent); margin-bottom: 16px;
+    }
+
+    .settings-grid { display: grid; gap: 20px; }
+    .divider { border: none; border-top: 1px solid var(--line); margin: 24px 0; }
+
+    .footer { padding: 40px 0; text-align: center; font-size: 0.82rem; color: var(--muted); }
+  </style>
+</head>
+<body>
+
+  <!-- Nav -->
+  <div class="shell">
+    <nav class="nav">
+      <a class="brand" href="/">
+        <span class="brand-mark"><img src="/assets/jane-logo.png" alt="Jane"></span>
+        <span>Vessences</span>
+      </a>
+      <div class="nav-links">
+        <a href="/">Home</a>
+        <a href="/install.html">Install</a>
+        <a href="/marketplace.html">Marketplace</a>
+      </div>
+    </nav>
+  </div>
+
+  <div class="shell">
+    <!-- Signed-out state -->
+    <div id="signed-out">
+      <div class="page-header">
+        <h1>My Account</h1>
+        <p>Sign in with Google to manage your Vessence settings.</p>
+      </div>
+
+      <div class="card signin-card">
+        <h2>Welcome to Vessence</h2>
+        <p>Sign in to register your subdomain, manage your skills and essences, and access your Jane remotely.</p>
+        <button class="btn btn-google" onclick="signIn()">
+          <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
+          Sign in with Google
+        </button>
+        <p style="font-size:0.8rem; margin-top:16px;">No account needed — signing in with Google creates one automatically.</p>
+      </div>
+    </div>
+
+    <!-- Signed-in state -->
+    <div id="signed-in" style="display:none">
+      <div class="page-header">
+        <h1>My Account</h1>
+        <p>Signed in as <strong id="user-email"></strong></p>
+      </div>
+
+      <!-- Remote Access -->
+      <div class="card">
+        <h2>Remote Access</h2>
+        <p>Your permanent URL for accessing Jane from your phone or any browser.</p>
+
+        <div id="subdomain-section">
+          <div id="has-subdomain" style="display:none">
+            <div class="subdomain-display" id="subdomain-url"></div>
+            <p style="font-size:0.85rem">
+              Status: <span class="badge" id="tunnel-status"></span>
+            </p>
+            <p class="hint">Enter this URL in your Vessence Android/iOS app settings. Your Jane server must be running with the relay client connected.</p>
+          </div>
+
+          <div id="no-subdomain">
+            <p>You haven't registered a subdomain yet. Pick one to get your permanent URL.</p>
+            <div class="field">
+              <label>Choose your subdomain</label>
+              <div style="display:flex; gap:8px; align-items:center">
+                <input type="text" id="subdomain-input" placeholder="your-name" style="flex:1" />
+                <span style="color:var(--muted)">.vessences.com</span>
+              </div>
+              <div class="hint">3-30 characters, letters and hyphens only.</div>
+            </div>
+            <button class="btn btn-primary" onclick="registerSubdomain()">Register Subdomain</button>
+            <p id="subdomain-error" style="color:var(--danger); font-size:0.85rem; margin-top:8px; display:none"></p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Installed Skills -->
+      <div class="card">
+        <h2>My Skills</h2>
+        <p>Skills you've installed from the marketplace or built yourself.</p>
+        <div id="skills-list">
+          <p style="color:var(--muted); font-style:italic">No skills installed yet. Browse the <a href="/marketplace.html">marketplace</a> to find skills.</p>
+        </div>
+      </div>
+
+      <!-- Installed Essences -->
+      <div class="card">
+        <h2>My Essences</h2>
+        <p>Essences you've downloaded or created.</p>
+        <div id="essences-list">
+          <p style="color:var(--muted); font-style:italic">No custom essences yet. Visit the <a href="/marketplace.html">marketplace</a> or ask Jane to build one.</p>
+        </div>
+      </div>
+
+      <!-- Account Settings -->
+      <div class="card">
+        <h2>Settings</h2>
+
+        <h3>Display Name</h3>
+        <div class="field">
+          <input type="text" id="display-name" placeholder="How Jane addresses you" />
+        </div>
+        <button class="btn btn-secondary" onclick="saveName()">Save Name</button>
+
+        <hr class="divider">
+
+        <h3>Relay Preferences</h3>
+        <div class="field">
+          <label style="display:flex; align-items:center; gap:8px; cursor:pointer">
+            <input type="checkbox" id="relay-opt-in" />
+            Help the Vessence network by relaying traffic for other users
+          </label>
+          <div class="hint">Your machine forwards encrypted data it cannot read. Uses minimal resources.</div>
+        </div>
+        <button class="btn btn-secondary" onclick="saveRelay()">Save Preference</button>
+
+        <hr class="divider">
+
+        <h3>Danger Zone</h3>
+        <p>Permanently delete your account, subdomain, and all associated data.</p>
+        <button class="btn btn-danger" onclick="deleteAccount()">Delete My Account</button>
+      </div>
+
+      <!-- Sign Out -->
+      <div style="text-align:center; padding:20px 0">
+        <button class="btn btn-secondary" onclick="signOut()">Sign Out</button>
+      </div>
+    </div>
+  </div>
+
+  <footer class="footer">
+    <div class="shell">
+      Vessence — your AI personas, private and portable. Open source, free forever.
+    </div>
+  </footer>
+
+  <script>
+    // ── State ──
+    const RELAY_API = 'https://relay.vessences.com';
+    let currentUser = null;
+
+    // ── Google Sign-In ──
+    // In production, this would use Google Identity Services (GSI).
+    // For now, simulate with localStorage for the page structure.
+
+    function signIn() {
+      // Production: redirect to Google OAuth
+      window.location.href = RELAY_API + '/auth/google?from=account';
+    }
+
+    function signOut() {
+      localStorage.removeItem('vessence_user');
+      currentUser = null;
+      showSignedOut();
+    }
+
+    function showSignedOut() {
+      document.getElementById('signed-out').style.display = '';
+      document.getElementById('signed-in').style.display = 'none';
+    }
+
+    function showSignedIn(user) {
+      document.getElementById('signed-out').style.display = 'none';
+      document.getElementById('signed-in').style.display = '';
+      document.getElementById('user-email').textContent = user.email;
+
+      if (user.subdomain) {
+        document.getElementById('has-subdomain').style.display = '';
+        document.getElementById('no-subdomain').style.display = 'none';
+        document.getElementById('subdomain-url').textContent = 'https://' + user.subdomain + '.vessences.com';
+
+        // Check tunnel status
+        fetch(RELAY_API + '/api/route/' + user.subdomain)
+          .then(r => r.json())
+          .then(data => {
+            const badge = document.getElementById('tunnel-status');
+            if (data.online) {
+              badge.textContent = 'Online';
+              badge.className = 'badge badge-ok';
+            } else {
+              badge.textContent = 'Offline';
+              badge.className = 'badge badge-off';
+            }
+          })
+          .catch(() => {
+            const badge = document.getElementById('tunnel-status');
+            badge.textContent = 'Unknown';
+            badge.className = 'badge badge-off';
+          });
+      } else {
+        document.getElementById('has-subdomain').style.display = 'none';
+        document.getElementById('no-subdomain').style.display = '';
+      }
+
+      if (user.display_name) {
+        document.getElementById('display-name').value = user.display_name;
+      }
+      if (user.relay_enabled) {
+        document.getElementById('relay-opt-in').checked = true;
+      }
+    }
+
+    // ── Subdomain Registration ──
+    async function registerSubdomain() {
+      const input = document.getElementById('subdomain-input');
+      const errorEl = document.getElementById('subdomain-error');
+      const subdomain = input.value.trim().toLowerCase();
+
+      if (!subdomain || subdomain.length < 3) {
+        errorEl.textContent = 'Subdomain must be at least 3 characters.';
+        errorEl.style.display = '';
+        return;
+      }
+
+      try {
+        const resp = await fetch(RELAY_API + '/api/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            username: subdomain,
+            password: crypto.randomUUID(),  // auto-generated, user uses Google OAuth
+            google_email: currentUser.email,
+          }),
+        });
+        const data = await resp.json();
+        if (resp.ok) {
+          currentUser.subdomain = subdomain;
+          currentUser.token = data.token;
+          localStorage.setItem('vessence_user', JSON.stringify(currentUser));
+          errorEl.style.display = 'none';
+          showSignedIn(currentUser);
+        } else {
+          errorEl.textContent = data.error || 'Registration failed.';
+          errorEl.style.display = '';
+        }
+      } catch (e) {
+        errorEl.textContent = 'Could not reach the relay server.';
+        errorEl.style.display = '';
+      }
+    }
+
+    // ── Settings ──
+    function saveName() {
+      const name = document.getElementById('display-name').value.trim();
+      if (currentUser) {
+        currentUser.display_name = name;
+        localStorage.setItem('vessence_user', JSON.stringify(currentUser));
+        alert('Name saved.');
+      }
+    }
+
+    function saveRelay() {
+      const checked = document.getElementById('relay-opt-in').checked;
+      if (currentUser) {
+        currentUser.relay_enabled = checked;
+        localStorage.setItem('vessence_user', JSON.stringify(currentUser));
+        alert('Relay preference saved.');
+      }
+    }
+
+    function deleteAccount() {
+      if (!confirm('Are you sure you want to delete your account? This cannot be undone.')) return;
+      if (!confirm('This will permanently delete your subdomain and all data. Type "delete" to confirm.')) return;
+      // Production: call DELETE /api/account
+      localStorage.removeItem('vessence_user');
+      currentUser = null;
+      showSignedOut();
+      alert('Account deleted.');
+    }
+
+    // ── Init ──
+    (function init() {
+      const stored = localStorage.getItem('vessence_user');
+      if (stored) {
+        try {
+          currentUser = JSON.parse(stored);
+          showSignedIn(currentUser);
+        } catch {
+          showSignedOut();
+        }
+      } else {
+        // Check URL params for OAuth callback
+        const params = new URLSearchParams(window.location.search);
+        const email = params.get('email');
+        const subdomain = params.get('subdomain');
+        if (email) {
+          currentUser = { email, subdomain: subdomain || '', display_name: '', relay_enabled: false };
+          localStorage.setItem('vessence_user', JSON.stringify(currentUser));
+          window.history.replaceState({}, '', '/account.html');
+          showSignedIn(currentUser);
+        } else {
+          showSignedOut();
+        }
+      }
+    })();
+  </script>
+</body>
+</html>
