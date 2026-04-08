@@ -57,11 +57,22 @@ if [ -n "$OLD_PID" ]; then
     sleep 2
 fi
 
-# Source .env BEFORE starting the new server so it inherits all env vars
+# Source .env BEFORE starting the new server so it inherits all env vars.
+# Use python to parse it safely (handles unquoted values with spaces/commas).
 if [ -f "$ENV_FILE" ]; then
-    set -a
-    source "$ENV_FILE"
-    set +a
+    eval "$("$PYTHON" -c "
+import sys
+for line in open('$ENV_FILE'):
+    line = line.strip()
+    if not line or line.startswith('#') or '=' not in line:
+        continue
+    key, _, val = line.partition('=')
+    key = key.strip()
+    if key:
+        # Shell-escape the value
+        val = val.replace(\"'\", \"'\\\"'\\\"'\")
+        print(f\"export {key}='{val}'\")
+")"
     log "Loaded environment from $ENV_FILE"
 fi
 
