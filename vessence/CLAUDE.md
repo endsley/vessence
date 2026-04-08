@@ -98,6 +98,53 @@ At the end of EVERY response, run:
 ```
 If `should_continue` is true: display `**[Auto-continuing → Job #N]:** [text]` and execute `run job queue:`. Repeat until false. If false, stop silently.
 
+## Text Message (SMS) Protocols
+
+### Sending Messages
+
+When the user says "tell X something", "text X", "message X", or "let X know", this ALWAYS means send a text message via SMS. Follow this exact flow:
+
+1. **If the user included the message** (e.g., "tell Kathia I'll be late"):
+   - Draft the SMS: `[CLIENT_TOOL:contacts.sms_draft:{"query":"Kathia","body":"I'll be late","draft_id":"<unique_id>"}]`
+   - Read the message back verbally: "Here's your message to Kathia: 'I'll be late.' Ready to send?"
+   - Wait for confirmation.
+
+2. **If the user did NOT include the message** (e.g., "tell Kathia something" or "text Kathia"):
+   - Ask: "What would you like me to say to Kathia?"
+   - Wait for the message content, then go to step 1.
+
+3. **On confirmation ("yes", "send it", "go ahead")**:
+   - Send: `[CLIENT_TOOL:contacts.sms_send:{"draft_id":"<same_id>"}]`
+   - Confirm: "Message sent to Kathia."
+
+4. **On rejection ("no", "change it", "not that")**:
+   - Ask: "What would you like the message to say instead?"
+   - When they give a new message, update the draft: `[CLIENT_TOOL:contacts.sms_draft_update:{"draft_id":"<same_id>","body":"<new message>"}]`
+   - Read it back again and ask for confirmation. Repeat until they approve.
+
+5. **On cancel ("never mind", "forget it")**:
+   - Cancel: `[CLIENT_TOOL:contacts.sms_cancel:{"draft_id":"<same_id>"}]`
+   - Confirm: "Draft cancelled."
+
+**NEVER send a message without explicit confirmation.** Always read it back first.
+
+### Reading Messages
+
+When the user asks "read my messages", "any new texts?", "what did X text me?", or "how many unread messages?":
+
+1. Fetch unread messages: `[CLIENT_TOOL:messages.fetch_unread:{"limit":10}]`
+2. Wait for the tool result — it will contain message data (sender, body, timestamp, app).
+3. Analyze the messages yourself:
+   - Count them: "You have 5 unread messages."
+   - Classify each as **important** or **spam/unimportant**:
+     - Important: personal messages from contacts, messages that need a response
+     - Spam/unimportant: promotions, marketing, automated notifications, OTP codes, delivery updates
+   - Report: "3 look important and 2 are spam. The important ones are from Kathia, your mom, and your coworker. Want me to read them?"
+4. If the user says yes, read the important messages one by one with sender name.
+5. If they ask about a specific person, filter and read only those.
+
+**Do NOT just say "I've asked your phone to read your messages." YOU must read and analyze them.**
+
 ## Preference Enforcement
 
 When the user states a preference that can be enforced by code (format, display, workflow — NOT behavioral/tone):
