@@ -687,7 +687,6 @@
       </a>
       <div class="top-links">
         <a href="#agents">Jane</a>
-        <a href="#download">Get Started</a>
         <a href="/install.html">Install Guide</a>
         <a href="#apps">Apps</a>
         <a href="/marketplace.html">Marketplace</a>
@@ -920,131 +919,6 @@
       </div>
     </section>
 
-    <section class="section">
-      <div class="shell">
-        <div class="section-label">Why It Exists</div>
-        <h2 class="section-title">Your AI personas. Private, portable, yours forever.</h2>
-        <p class="section-copy">
-          Vessence is built so your AI personas and their memory stay under your control. No subscriptions to lose access,
-          no cloud lock-in. Essences are immutable products — like buying a new edition of a textbook when things change.
-          Simple, predictable, and entirely yours.
-        </p>
-        <div class="feature-grid">
-          <article class="card">
-            <h3>Private by default</h3>
-            <p>Vessence runs on your own machine. Your files, memory, and conversations never leave your control.</p>
-          </article>
-          <article class="card">
-            <h3>Free for local use</h3>
-            <p>Run Vessence locally at no cost. The only paid service is the relay (vessences.com routing) for remote access. Essences can be free or paid separately.</p>
-          </article>
-          <article class="card">
-            <h3>No update treadmill</h3>
-            <p>Essences are immutable — no forced updates, no migration headaches. If the domain changes, buy a new essence for the new year. Like a new edition of a textbook.</p>
-          </article>
-        </div>
-      </div>
-    </section>
-
-    <section class="section" id="download">
-      <div class="shell">
-        <div class="section-label">Get Started</div>
-        <h2 class="section-title">One prompt. That's it.</h2>
-        <p class="section-copy">
-          Open any AI CLI — Claude Code, Gemini, or Codex — and paste one prompt.
-          Your CLI clones the repo, reads the bootstrap file, installs everything, and becomes Jane.
-        </p>
-
-        <div class="steps">
-          <article class="card">
-            <strong>Step 1</strong>
-            <h3>Paste one prompt</h3>
-            <p>Open your AI CLI and paste:</p>
-            <div class="code-block" style="margin-top:12px;font-size:0.85rem">Clone https://github.com/endsley/vessence into ~/ambient, then read JANE_BOOTSTRAP.md and follow every phase to completion.</div>
-            <p style="margin-top:8px;font-size:0.82rem;opacity:0.8">Works with Claude Code, Gemini CLI, or Codex.</p>
-          </article>
-          <article class="card">
-            <strong>Step 2</strong>
-            <h3>Your CLI does the rest</h3>
-            <p>The CLI reads <code>JANE_BOOTSTRAP.md</code> and handles everything automatically — clones the repo, creates a Python venv, installs dependencies, seeds ChromaDB with Jane's knowledge, walks you through API key setup, and starts the server.</p>
-            <p style="margin-top:6px;font-size:0.82rem;opacity:0.8">No manual install steps. The AI does the installing.</p>
-          </article>
-          <article class="card">
-            <strong>Step 3</strong>
-            <h3>Connect from any device</h3>
-            <p>Access Jane at <code>http://localhost:8081</code> in your browser. For remote access from your phone or other devices, set up a <strong>Cloudflare Tunnel</strong> to expose your local server securely.</p>
-            <div class="hero-actions">
-              <a class="button button-secondary" href="/downloads/vessences-android.apk" data-vault-download="vessences-android.apk">Android App</a>
-              <a class="button button-secondary" href="/downloads/ambient-app-linux-x64.tar.gz" data-vault-download="ambient-app-linux-x64.tar.gz">Linux App</a>
-            </div>
-          </article>
-        </div>
-
-        <div class="download-panel">
-          <article class="card">
-            <h3>What's inside Vessence</h3>
-            <p>
-              One self-hosted platform with everything the system needs. The apps connect to this — they don't replace it.
-            </p>
-            <div class="code-block">git clone https://github.com/endsley/vessence</div>
-            <ul class="download-list">
-              <li>
-                <div>
-                  <strong>Jane (Python server)</strong>
-                  <small>Your AI agent — load any essence and she becomes that persona. Also handles coding, research, and essence creation.</small>
-                </div>
-                <span>Core</span>
-              </li>
-              <li>
-                <div>
-                  <strong>ChromaDB Memory</strong>
-                  <small>Vector memory database for long-term knowledge and retrieval.</small>
-                </div>
-                <span>Core</span>
-              </li>
-              <li>
-                <div>
-                  <strong>Essence Loader</strong>
-                  <small>Load, swap, and manage AI personas. Build your own or install from the marketplace.</small>
-                </div>
-                <span>Core</span>
-              </li>
-            </ul>
-          </article>
-
-          <article class="card">
-            <h3>Apps (interfaces to Vessence)</h3>
-            <p>
-              These are optional. They connect to your running Vessence — they are not separate products.
-              You can use just the browser, or add native apps for a better experience on specific devices.
-            </p>
-            <ul class="download-list">
-              <li>
-                <div>
-                  <strong>Web Browser</strong>
-                  <small>No install. Open localhost:8081 on any device on your network.</small>
-                </div>
-                <span>Built-in</span>
-              </li>
-              <li>
-                <div>
-                  <strong>Android App</strong>
-                  <small>Native chat with Jane, push notifications, camera attachments. Connects via Cloudflare Tunnel.</small>
-                </div>
-                <a class="button button-secondary" style="min-height:36px;padding:0 14px;font-size:0.85rem" href="/downloads/vessences-android.apk" data-vault-download="vessences-android.apk">APK</a>
-              </li>
-              <li>
-                <div>
-                  <strong>Linux Desktop App</strong>
-                  <small>Native Flutter app with streaming chat, markdown rendering, conversation history.</small>
-                </div>
-                <a class="button button-secondary" style="min-height:36px;padding:0 14px;font-size:0.85rem" href="/downloads/ambient-app-linux-x64.tar.gz" data-vault-download="ambient-app-linux-x64.tar.gz">Linux App</a>
-              </li>
-            </ul>
-          </article>
-        </div>
-      </div>
-    </section>
 
     <section class="section" id="faq">
       <div class="shell">
