@@ -1,0 +1,82 @@
+# Secrets and Credentials
+.env
+adc.json
+api_keys.json
+credentials/
+user_profile.md
+
+# Large Binary Directories
+vault/
+vector_db/
+runtime/
+data/
+logs/
+
+# Tool and Report Directories
+.adk/
+janitor_report.json
+
+# Python specific
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+omniparser_venv/
+
+# Log files
+*.log
+*.db
+*.sqlite
+*.sqlite3
+
+# Models (keep only essential wake word models)
+models/
+hey_jarvis_v0.1.onnx
+
+# Android secrets & machine-specific config
+android/local.properties
+android/*.jks
+android/**/*.jks
+
+# Build artifacts
+android/app/build/
+android/.gradle/
+*.apk
+*.idsig
+
+# Wake word voice samples (biometric data)
+wake_word/samples/*.wav
+
+# Distribution / installer binaries (NEVER commit)
+dist/
+marketing_site/downloads/*.apk
+marketing_site/downloads/*.zip
+marketing_site/downloads/*.tar.gz
+marketing_site/downloads/vessence-mac-staging/
+
+# Old Flutter app (replaced by native Android)
+ambient_app/
+
+# Session/runtime databases
+*.db
+amber/.adk/
+
+# Old/unused ONNX models
+hey_jarvis_v0.1.onnx
+hey_jane_v5_backup.onnx
+
+# Wake word training data (large)
+wake_word/samples_augmented/
+wake_word/negatives/
+wake_word/downloads/
+wake_word/model.npz
+
+# Seed DB — allow the pre-built ChromaDB for distribution
+!seed_db/
+!seed_db/**
+
+# Temp files
+*.wav.data
+*.onnx.data
+/tmp/
+vessence/marketing_site/.*.swp
