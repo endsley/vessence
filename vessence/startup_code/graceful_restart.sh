@@ -152,7 +152,7 @@ while true; do
     fi
 
     ACTIVE=$(curl -s "http://localhost:$PROXY_PORT/proxy/status" 2>/dev/null \
-        | python3 -c "import sys,json; print(json.load(sys.stdin).get('active_requests',0))" 2>/dev/null || echo "0")
+        | python3 -c "import sys,json; print(json.load(sys.stdin).get('drain_active',0))" 2>/dev/null || echo "0")
 
     if [ "$ACTIVE" = "0" ]; then
         log "All in-flight requests drained."

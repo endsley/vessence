@@ -94,6 +94,9 @@ class ProxyState:
         self.switched_at: float = time.time()
         self.total_requests: int = 0
         self.active_requests: int = 0
+        # Per-port active request counters for drain monitoring
+        self._port_active: dict[int, int] = defaultdict(int)
+        self._previous_port: int | None = None
         self._lock = asyncio.Lock()
 
     @property
@@ -103,11 +106,18 @@ class ProxyState:
     async def switch(self, new_port: int) -> int:
         async with self._lock:
             old = self.upstream_port
+            self._previous_port = old
             self.upstream_port = new_port
             self.switched_at = time.time()
             logger.info("Switched upstream %d -> %d", old, new_port)
             self._persist()
             return old
+
+    def drain_active(self) -> int:
+        """Return active requests on the PREVIOUS upstream (for drain monitoring)."""
+        if self._previous_port is not None:
+            return self._port_active.get(self._previous_port, 0)
+        return 0
 
     def _persist(self):
         try:
@@ -159,6 +169,8 @@ async def handle_status(request: web.Request) -> web.Response:
         "switched_at": state.switched_at,
         "total_requests": state.total_requests,
         "active_requests": state.active_requests,
+        "drain_active": state.drain_active(),
+        "previous_port": state._previous_port,
     })
 
 
@@ -192,6 +204,8 @@ async def proxy_handler(request: web.Request) -> web.StreamResponse:
     state.total_requests += 1
     state.active_requests += 1
     upstream = state.upstream_url
+    upstream_port = state.upstream_port
+    state._port_active[upstream_port] += 1
     target_url = f"{upstream}{request.path_qs}"
 
     # Build forwarded headers
@@ -264,6 +278,7 @@ async def proxy_handler(request: web.Request) -> web.StreamResponse:
         )
     finally:
         state.active_requests -= 1
+        state._port_active[upstream_port] = max(0, state._port_active.get(upstream_port, 1) - 1)
 
 
 async def _proxy_websocket(
