@@ -55,8 +55,45 @@ logging.getLogger("jane.proxy").setLevel(logging.DEBUG)
 _logger = logging.getLogger("jane.web")
 _logger.info("=== Jane Web starting (PID %d) ===", os.getpid())
 
+from collections import defaultdict
+from time import monotonic
+
 from dotenv import load_dotenv
 from jane.config import ENV_FILE_PATH, VAULT_DIR, TOOLS_DIR, ESSENCES_DIR, VESSENCE_DATA_HOME, ADD_FACT_SCRIPT, ADK_VENV_PYTHON, LOGS_DIR, PROMPT_LIST_PATH
+
+
+# ── Rate Limiting ────────────────────────────────────────────────────────────
+
+class RateLimiter:
+    """Simple in-memory sliding-window rate limiter."""
+
+    def __init__(self):
+        self._hits: dict[str, list[float]] = defaultdict(list)
+        self._last_cleanup: float = monotonic()
+
+    def check(self, key: str, max_requests: int, window_seconds: float) -> bool:
+        now = monotonic()
+        # Periodic cleanup of stale keys (every 60s)
+        if now - self._last_cleanup > 60:
+            self._cleanup(now)
+        cutoff = now - window_seconds
+        timestamps = [t for t in self._hits[key] if t > cutoff]
+        if len(timestamps) >= max_requests:
+            self._hits[key] = timestamps
+            return False
+        timestamps.append(now)
+        self._hits[key] = timestamps
+        return True
+
+    def _cleanup(self, now: float):
+        """Remove keys with no recent activity to prevent memory growth."""
+        stale_keys = [k for k, v in self._hits.items() if not v or v[-1] < now - 120]
+        for k in stale_keys:
+            del self._hits[k]
+        self._last_cleanup = now
+
+
+_rate_limiter = RateLimiter()
 
 load_dotenv(ENV_FILE_PATH)
 
@@ -195,6 +232,54 @@ def _touch_idle_state():
     except Exception:
         pass
 
+# ── Rate-limiting middleware ──────────────────────────────────────────────────
+# Applied per-IP with different limits depending on the endpoint category.
+# Localhost (prompt queue runner, internal tools) is always exempt.
+
+_RATE_LIMIT_CHAT_PATHS = frozenset({"/api/jane/chat/stream", "/api/jane/chat"})
+_RATE_LIMIT_AUTH_PATHS = frozenset({
+    "/auth/google", "/auth/google/callback",
+    "/api/auth/google-token", "/api/auth/verify-otp",
+    "/api/auth/verify-share", "/api/auth/check",
+    "/api/auth/is-new-device", "/api/cli-login",
+    "/api/cli-login/code",
+})
+_RATE_LIMIT_UPLOAD_PATHS = frozenset({"/api/files/upload", "/api/tax/upload"})
+
+
+def _rate_limit_category(path: str) -> tuple[str, int, float]:
+    """Return (category_suffix, max_requests, window_seconds) for a path."""
+    if path in _RATE_LIMIT_CHAT_PATHS:
+        return ("chat", 30, 60)
+    if path in _RATE_LIMIT_AUTH_PATHS:
+        return ("auth", 10, 60)
+    if path in _RATE_LIMIT_UPLOAD_PATHS:
+        return ("upload", 20, 60)
+    if path.startswith("/api/"):
+        return ("api", 60, 60)
+    # HTML pages and static assets are not rate-limited
+    return ("", 0, 0)
+
+
+@app.middleware("http")
+async def rate_limit_middleware(request: Request, call_next):
+    ip = _client_ip(request)
+    # Exempt localhost (internal services like prompt queue runner)
+    if ip in ("127.0.0.1", "::1", "localhost"):
+        return await call_next(request)
+    path = request.url.path
+    category, max_req, window = _rate_limit_category(path)
+    if category and max_req > 0:
+        key = f"rl:{category}:{ip}"
+        if not _rate_limiter.check(key, max_req, window):
+            _logger.warning("Rate limited %s on %s (%s)", ip, path, category)
+            return JSONResponse(
+                {"error": "Rate limit exceeded. Please slow down."},
+                status_code=429,
+            )
+    return await call_next(request)
+
+
 @app.middleware("http")
 async def cache_control_middleware(request: Request, call_next):
     response = await call_next(request)
@@ -245,7 +330,13 @@ def _session_log_id(session_id: Optional[str]) -> str:
 
 
 def _client_ip(request: Request) -> str:
-    return getattr(request.client, "host", "unknown") or "unknown"
+    """Get the real client IP, respecting Cloudflare and reverse proxy headers."""
+    return (
+        request.headers.get("CF-Connecting-IP")
+        or request.headers.get("X-Real-IP")
+        or (request.client.host if request.client else None)
+        or "unknown"
+    )
 
 
 def _login_context(request: Request, **extra):
@@ -2339,6 +2430,12 @@ def _check_instant_command(message: str, platform: str = "web") -> str | None:
 
 # ─── Chat Stream ─────────────────────────────────────────────────────────────
 
+# Per-IP concurrent SSE stream limit — prevents a single IP from consuming
+# all available CLI brain slots.
+_active_streams: dict[str, int] = defaultdict(int)
+_MAX_STREAMS_PER_IP = 3
+
+
 async def _handle_jane_chat_stream(body: ChatMessage, request: Request):
     # Allow internal requests from localhost (prompt queue runner)
     client_host = request.client.host if request.client else ""
@@ -2362,6 +2459,16 @@ async def _handle_jane_chat_stream(body: ChatMessage, request: Request):
         _session_log_id(body.session_id),
         _client_ip(request),
     )
+
+    # ── Concurrent stream limit per IP ──────────────────────────────────────
+    stream_ip = _client_ip(request)
+    if stream_ip not in ("127.0.0.1", "::1", "localhost"):
+        if _active_streams[stream_ip] >= _MAX_STREAMS_PER_IP:
+            _logger.warning("Concurrent stream limit hit for %s (%d active)", stream_ip, _active_streams[stream_ip])
+            return JSONResponse(
+                {"error": "Too many concurrent streams. Please close a tab and try again."},
+                status_code=429,
+            )
 
     # ── Instant commands: bypass all LLM processing for pure data lookups ──
     raw_message = (body.message or "").strip()
@@ -2409,6 +2516,9 @@ async def _handle_jane_chat_stream(body: ChatMessage, request: Request):
 
     # ── Normal streaming flow ─────────────────────────────────────────────
     async def event_stream():
+        # Track concurrent streams per IP
+        _active_streams[stream_ip] = _active_streams.get(stream_ip, 0) + 1
+        _logger.debug("Stream opened for %s (now %d active)", stream_ip, _active_streams[stream_ip])
         user_id = get_session_user(session_id) or _default_user_id()
         _logger.info(
             "Starting jane stream generator session=%s user=%s",
@@ -2436,6 +2546,10 @@ async def _handle_jane_chat_stream(body: ChatMessage, request: Request):
             yield json.dumps({"type": "error", "data": f"⚠️ Could not reach Jane: {exc}"}) + "\n"
             return
         finally:
+            _active_streams[stream_ip] = max(0, _active_streams.get(stream_ip, 1) - 1)
+            if _active_streams.get(stream_ip, 0) == 0:
+                _active_streams.pop(stream_ip, None)
+            _logger.debug("Stream closed for %s (now %d active)", stream_ip, _active_streams.get(stream_ip, 0))
             _logger.info("Jane stream generator closed session=%s", _session_log_id(session_id))
 
     response = StreamingResponse(

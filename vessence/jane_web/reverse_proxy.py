@@ -27,10 +27,58 @@ import sys
 import time
 from pathlib import Path
 
+from collections import defaultdict
+from time import monotonic as _monotonic
+
 import aiohttp
 from aiohttp import web
 
 logger = logging.getLogger("jane.reverse_proxy")
+
+
+# ── Proxy-level rate limiting ────────────────────────────────────────────────
+# Catches all traffic before it reaches the application. This is the first
+# line of defense against DDoS / credential-stuffing.
+
+class _ProxyRateLimiter:
+    """Simple in-memory sliding-window rate limiter for the reverse proxy."""
+
+    def __init__(self):
+        self._hits: dict[str, list[float]] = defaultdict(list)
+        self._last_cleanup: float = _monotonic()
+
+    def check(self, key: str, max_requests: int, window_seconds: float) -> bool:
+        now = _monotonic()
+        if now - self._last_cleanup > 60:
+            self._cleanup(now)
+        cutoff = now - window_seconds
+        timestamps = [t for t in self._hits[key] if t > cutoff]
+        if len(timestamps) >= max_requests:
+            self._hits[key] = timestamps
+            return False
+        timestamps.append(now)
+        self._hits[key] = timestamps
+        return True
+
+    def _cleanup(self, now: float):
+        stale = [k for k, v in self._hits.items() if not v or v[-1] < now - 120]
+        for k in stale:
+            del self._hits[k]
+        self._last_cleanup = now
+
+
+_proxy_rate_limiter = _ProxyRateLimiter()
+_PROXY_MAX_REQUESTS_PER_MINUTE = 100
+
+
+def _get_proxy_client_ip(request: web.Request) -> str:
+    """Extract the real client IP from proxy headers or the transport."""
+    return (
+        request.headers.get("CF-Connecting-IP")
+        or request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+        or request.remote
+        or "unknown"
+    )
 
 STATE_FILE = Path(os.environ.get("VESSENCE_DATA_HOME", Path.home() / "ambient" / "vessence-data")) / "proxy_state.json"
 
@@ -131,6 +179,16 @@ HOP_BY_HOP = frozenset({
 
 async def proxy_handler(request: web.Request) -> web.StreamResponse:
     """Forward every request to the active upstream."""
+    # ── Global rate limiting (per IP) ─────────────────────────────────────
+    client_ip = _get_proxy_client_ip(request)
+    if client_ip not in ("127.0.0.1", "::1", "localhost"):
+        if not _proxy_rate_limiter.check(f"proxy:{client_ip}", _PROXY_MAX_REQUESTS_PER_MINUTE, 60):
+            logger.warning("Proxy rate limit hit for %s on %s", client_ip, request.path)
+            return web.json_response(
+                {"error": "Rate limit exceeded. Please slow down."},
+                status=429,
+            )
+
     state.total_requests += 1
     state.active_requests += 1
     upstream = state.upstream_url
@@ -141,7 +199,7 @@ async def proxy_handler(request: web.Request) -> web.StreamResponse:
         k: v for k, v in request.headers.items()
         if k.lower() not in HOP_BY_HOP
     }
-    headers["X-Forwarded-For"] = request.remote or "unknown"
+    headers["X-Forwarded-For"] = client_ip
     headers["X-Forwarded-Proto"] = request.scheme
 
     try:

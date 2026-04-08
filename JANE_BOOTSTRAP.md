@@ -4,6 +4,8 @@
 
 **What is Vessence?** Vessence is an open-source wrapper around Claude Code, Gemini CLI, and Codex that simplifies AI agent development. You start with a default agent called Jane. By describing abilities you want, you develop skills (capabilities like sending texts, controlling lights, playing music) and essences (personas like a tax accountant or fitness coach). You can also download skills and essences that others have built from the Vessence marketplace.
 
+**Windows users:** WSL2 is required. Native Windows (PowerShell/cmd) is not supported for Phases 1-10. Install WSL2 first: https://learn.microsoft.com/en-us/windows/wsl/install
+
 ---
 
 ## Architecture Overview
@@ -77,6 +79,8 @@ python3 --version   # Must be 3.11+
 node --version      # Must be 22+
 git --version       # Any recent version
 ```
+
+**Recommended: Python 3.11 or 3.12.** Python 3.13+ may have compatibility issues with some native packages (chromadb, tiktoken). If you have 3.13+, proceed but be prepared for potential build errors.
 
 **If a version is too old**, upgrade it automatically using the appropriate package manager. Only ask the user if `sudo` requires a password and the CLI cannot proceed.
 
@@ -169,22 +173,7 @@ Walk the user through filling in the required values. Ask them one at a time:
 
 1. **`USER_NAME`** — What should Jane call you? (Their first name.)
 
-2. **API key for their chosen provider.** Ask: "Which AI provider do you want to use? Gemini (free), Claude, or OpenAI?"
-   - If **Gemini** (default, free): set `GOOGLE_API_KEY`
-     - Get one free at: https://aistudio.google.com -> Get API key -> Create API key
-     - Looks like: `AIzaSy...` (39 characters)
-   - If **Claude**: set `ANTHROPIC_API_KEY`
-     - Get at: https://console.anthropic.com/settings/keys
-     - Looks like: `sk-ant-...`
-   - If **OpenAI**: set `OPENAI_API_KEY`
-     - Get at: https://platform.openai.com/api-keys
-     - Looks like: `sk-...`
-
-   The API key is used for both Jane's main brain AND the fast initial-ack router. No local model (Ollama) is needed.
-
-3. **`JANE_BRAIN`** — Set this based on their choice above: `gemini`, `claude`, or `openai`.
-
-4. **`SESSION_SECRET_KEY`** — Generate automatically, do not ask the user:
+2. **`SESSION_SECRET_KEY`** — Generate automatically, do not ask the user:
    ```bash
    ./venv/bin/python -c "import secrets; print(secrets.token_hex(32))"
    ```
@@ -231,7 +220,7 @@ print('Docker-specific defaults cleaned.')
 "
 ```
 
-**Verification:** The `.env` file exists at `vessence-data/.env` and contains non-empty values for `USER_NAME`, `JANE_BRAIN`, the matching API key, and `SESSION_SECRET_KEY`.
+**Verification:** The `.env` file exists at `vessence-data/.env` and contains non-empty values for `USER_NAME` and `SESSION_SECRET_KEY`.
 
 ---
 
@@ -250,6 +239,8 @@ fi
 ```
 
 Write the detected value to `.env`. If none is found, ask the user which to install.
+
+**Note:** The user's CLI subscription handles authentication. No separate API key is needed — Jane piggybacks on the same CLI binary that is running this bootstrap.
 
 **Verification:** The `JANE_BRAIN` value in `.env` matches the detected CLI.
 
@@ -431,9 +422,28 @@ EnvironmentFile=$(pwd)/vessence-data/.env
 WantedBy=default.target
 EOF
 
+cat > ~/.config/systemd/user/jane-proxy.service << EOF
+[Unit]
+Description=Jane Reverse Proxy (zero-downtime deploy)
+After=network.target
+
+[Service]
+Type=simple
+Environment=PYTHONPATH=$(pwd)/vessence
+WorkingDirectory=$(pwd)/vessence
+ExecStart=$(pwd)/venv/bin/python jane_web/reverse_proxy.py --listen-port 8080 --upstream-port 8081
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+EOF
+
 systemctl --user daemon-reload
 systemctl --user enable jane-web.service
 systemctl --user start jane-web.service
+systemctl --user enable jane-proxy.service
+systemctl --user start jane-proxy.service
 loginctl enable-linger $(whoami)
 ```
 
@@ -518,6 +528,21 @@ systemctl --user status jane-web.service   # Linux
 launchctl list | grep vessence             # macOS
 ```
 A reboot test is recommended later but not required now.
+
+---
+
+## Updating Vessence
+
+To update Jane with the latest improvements:
+
+```bash
+cd ~/ambient
+git pull origin master
+./venv/bin/pip install -r vessence/requirements.txt
+bash vessence/startup_code/graceful_restart.sh
+```
+
+This pulls the latest code, updates dependencies, and restarts Jane with zero downtime.
 
 ---
 

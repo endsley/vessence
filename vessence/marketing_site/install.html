@@ -493,11 +493,11 @@
       <!-- Remote access -->
       <div class="setup-card" style="margin-bottom:32px">
         <h2>Optional: Remote access from your phone</h2>
-        <p style="color:var(--muted);margin:0 0 12px">Vessence runs on your machine. To access it from your phone or another device, set up a <a href="https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/" style="color:var(--accent);text-decoration:underline">Cloudflare Tunnel</a>:</p>
+        <p style="color:var(--muted);margin:0 0 12px">Vessence runs on your machine. To access it from your phone or another device, register a subdomain at vessences.com for remote access:</p>
         <div class="code-block">
-          <span class="prompt">$</span> <span class="cmd">cloudflared tunnel --url http://localhost:8081</span>
+          <span class="prompt">$</span> <span class="cmd">cd vessence && ../venv/bin/python relay_client.py --auto</span>
         </div>
-        <p style="font-size:0.85rem;color:var(--muted);margin:8px 0 0">This gives you a public HTTPS URL. Put it in the Android app settings to connect from your phone.</p>
+        <p style="font-size:0.85rem;color:var(--muted);margin:8px 0 0">This registers a permanent URL like <code>https://yourname.vessences.com</code>. Put it in the Android app settings to connect from your phone.</p>
       </div>
 
       <!-- What the bootstrap sets up -->
@@ -537,7 +537,7 @@
             </div>
             <div class="after-item">
               <strong>Android App</strong>
-              <code>Connects via Cloudflare Tunnel</code>
+              <code>Connects via relay URL</code>
               <span>Native chat, notifications, camera</span>
             </div>
             <div class="after-item">
@@ -554,7 +554,7 @@
         <div class="info-card">
           <h2>Android App</h2>
           <p style="color:var(--muted);line-height:1.7;margin:0 0 14px">
-            The Android app connects to your Vessence server via the Cloudflare Tunnel URL you set up in step 4.
+            The Android app connects to your Vessence server via your relay URL (e.g., yourname.vessences.com).
             It provides native chat with Jane, push notifications, camera capture, and file attachments.
           </p>
           <div class="download-btn-row">

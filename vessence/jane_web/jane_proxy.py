@@ -7,6 +7,7 @@ import os
 import threading
 import time
 import traceback
+from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import AsyncIterator
