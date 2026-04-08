@@ -178,21 +178,28 @@ This script handles everything atomically: bumps `version.json`, updates `main.p
 
 After the script completes, restart the web server so the update endpoint serves the new version:
 ```bash
-systemctl --user restart jane-web.service
+bash $VESSENCE_HOME/startup_code/graceful_restart.sh
 ```
 
 ## Server Restart Policy
 
-Do NOT restart `jane-web.service` after every code change. Batch changes and only restart when:
+Do NOT restart after every code change. Batch changes and only restart when:
 1. The user explicitly asks for a restart
 2. You have accumulated 10+ file changes since the last restart
 
 Track your change count mentally within the session. When you hit 10, restart and reset the count.
 
-**When restarting, always announce it in bold before executing**, e.g.:
-> **Restarting jane-web.service now** — reason.
+**ALWAYS use the graceful restart script** — never use `systemctl --user restart jane-web.service` directly:
+```bash
+bash $VESSENCE_HOME/startup_code/graceful_restart.sh
+```
 
-This prevents the user from being caught off guard by Jane going briefly offline.
+This performs a **zero-downtime restart**: starts a new server on an alternate port, warms up the CLI brain, switches the reverse proxy, drains in-flight requests, then stops the old server. Jane stays online the entire time.
+
+**When restarting, always announce it in bold before executing**, e.g.:
+> **Restarting Jane now (zero-downtime)** — reason.
+
+Only use `systemctl --user restart jane-web.service` in emergencies (server completely unresponsive).
 
 **Build-only tasks NEVER trigger a restart.** These operations package files from disk and have zero dependency on the running service:
 - `build_docker_bundle.py` (installer zips)
