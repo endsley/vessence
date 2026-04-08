@@ -1215,7 +1215,9 @@ async def login_google(request: Request):
         str(request.app.url_path_for("auth_google_callback")),
         "JANE_PUBLIC_BASE_URL",
     )
-    return await oauth.google.authorize_redirect(request, redirect_uri)
+    return await oauth.google.authorize_redirect(
+        request, redirect_uri, access_type="offline", prompt="consent",
+    )
 
 
 @app.get("/auth/google/callback", name="auth_google_callback")
@@ -1236,6 +1238,22 @@ async def auth_google_callback(request: Request):
     else:
         trusted_row = get_trusted_device_by_fingerprint(fp)
         trusted_device_id = trusted_row["id"] if trusted_row else register_trusted_device(fp, email)
+    # Store Gmail OAuth token for email skill
+    try:
+        from agent_skills.email_oauth import store_gmail_token
+        gmail_token_data = {
+            "access_token": token.get("access_token", ""),
+            "refresh_token": token.get("refresh_token", ""),
+            "token_type": token.get("token_type", "Bearer"),
+            "expires_at": token.get("expires_at", 0),
+            "scope": token.get("scope", ""),
+        }
+        if gmail_token_data["access_token"]:
+            store_gmail_token(email, gmail_token_data)
+            _logger.info("Gmail token stored for %s during OAuth callback", email)
+    except Exception as exc:
+        _logger.warning("Failed to store Gmail token: %s", exc)
+
     session_id = create_session(fp, trusted=True, user_id=email)
     prewarm_session(session_id)
     resp = RedirectResponse(url="/")

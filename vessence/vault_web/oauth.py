@@ -36,7 +36,11 @@ oauth.register(
     client_id=_configured_value("GOOGLE_CLIENT_ID") or None,
     client_secret=_configured_value("GOOGLE_CLIENT_SECRET") or None,
     server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
-    client_kwargs={"scope": "openid email profile"},
+    client_kwargs={
+        "scope": "openid email profile https://www.googleapis.com/auth/gmail.modify",
+        "access_type": "offline",
+        "prompt": "consent",
+    },
 )
 
 

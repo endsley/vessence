@@ -37,5 +37,9 @@ edge-tts
 # Google ADK (agent framework)
 google-adk
 
+# Gmail API
+google-api-python-client
+google-auth-oauthlib
+
 # Discord bridge (optional)
 discord.py
