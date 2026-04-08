@@ -597,6 +597,9 @@ async def health():
 async def warmup_brain(request: Request):
     """Warm up the standing brain CLI process. Called by graceful_restart.sh
     before switching the proxy upstream. Read-only — no ChromaDB writes."""
+    client_ip = _client_ip(request) if hasattr(request, 'headers') else ""
+    if client_ip not in ("127.0.0.1", "::1", "localhost", "unknown"):
+        return JSONResponse({"error": "localhost only"}, status_code=403)
     try:
         from llm_brain.v1.standing_brain import get_standing_brain_manager
         manager = get_standing_brain_manager()
@@ -1161,7 +1164,7 @@ async def update_app_settings(request: Request, _=Depends(require_auth)):
 
 
 @app.post("/api/app/installed")
-async def report_app_installed(request: Request):
+async def report_app_installed(request: Request, _=Depends(require_auth)):
     """Called by the Android app after installing a new version. Logs to work log."""
     try:
         body = await request.json()
@@ -2235,7 +2238,7 @@ async def switch_provider(body: SwitchProviderRequest, request: Request):
 
 
 @app.get("/api/jane/current-provider")
-async def current_provider():
+async def current_provider(_=Depends(require_auth)):
     """Return the currently active provider, model, and all available providers."""
     import shutil
     from llm_brain.v1.standing_brain import get_standing_brain_manager, _PROVIDER
@@ -2588,7 +2591,7 @@ async def permission_request_endpoint(request: Request):
 
 
 @app.post("/api/jane/permission/respond")
-async def permission_respond_endpoint(request: Request):
+async def permission_respond_endpoint(request: Request, _=Depends(require_auth)):
     """Called by the web frontend when user clicks approve/deny."""
     from jane_web.permission_broker import get_permission_broker
     body = await request.json()
@@ -2602,7 +2605,7 @@ async def permission_respond_endpoint(request: Request):
 
 
 @app.get("/api/jane/permission/pending")
-async def permission_pending_endpoint(request: Request):
+async def permission_pending_endpoint(request: Request, _=Depends(require_auth)):
     """Return all pending permission requests (for page reload recovery)."""
     from jane_web.permission_broker import get_permission_broker
     broker = get_permission_broker()
@@ -3119,6 +3122,9 @@ async def submit_briefing_article(request: Request, _=Depends(require_auth)):
 @app.post("/api/briefing/processor-status")
 async def briefing_processor_status(request: Request):
     """Callback from the detached article processor after each article."""
+    client_ip = _client_ip(request) if hasattr(request, 'headers') else ""
+    if client_ip not in ("127.0.0.1", "::1", "localhost", "unknown"):
+        return JSONResponse({"error": "localhost only"}, status_code=403)
     body = await request.json()
     aid = body.get("article_id", "?")
     remaining = body.get("remaining", 0)
@@ -4281,16 +4287,21 @@ async def cli_login_code(request: Request):
 
 
 @app.get("/api/cli-login/status")
-async def cli_login_status():
+async def cli_login_status(request: Request):
     """Check if the CLI login completed."""
     global _cli_login_process, _cli_login_authenticated
     provider = (_cli_login_provider or os.environ.get("JANE_BRAIN", "gemini")).lower()
     if _cli_login_authenticated:
-        return JSONResponse({"authenticated": True, "debug": _cli_login_debug_snapshot(provider)})
-    if _provider_auth_status(provider):
+        response_data = {"authenticated": True, "debug": _cli_login_debug_snapshot(provider)}
+    elif _provider_auth_status(provider):
         _cli_login_authenticated = True
-        return JSONResponse({"authenticated": True, "debug": _cli_login_debug_snapshot(provider)})
-    if _cli_login_process and _cli_login_process.poll() is not None:
+        response_data = {"authenticated": True, "debug": _cli_login_debug_snapshot(provider)}
+    elif _cli_login_process and _cli_login_process.poll() is not None:
         _cli_login_authenticated = _cli_login_process.returncode == 0 or _provider_auth_status(provider)
-        return JSONResponse({"authenticated": _cli_login_authenticated, "debug": _cli_login_debug_snapshot(provider)})
-    return JSONResponse({"authenticated": False, "debug": _cli_login_debug_snapshot(provider)})
+        response_data = {"authenticated": _cli_login_authenticated, "debug": _cli_login_debug_snapshot(provider)}
+    else:
+        response_data = {"authenticated": False, "debug": _cli_login_debug_snapshot(provider)}
+    if _client_ip(request) not in ("127.0.0.1", "::1", "localhost"):
+        # Don't leak debug info to non-local requests
+        response_data.pop("debug", None)
+    return JSONResponse(response_data)
