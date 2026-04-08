@@ -42,11 +42,23 @@ OS=$(uname -s)
 ```bash
 sudo apt update
 sudo apt install -y python3 python3-venv python3-pip python3-dev build-essential nodejs npm git curl
+
+# Node from default repos may be too old — install Node 22 via NodeSource
+if ! node --version 2>/dev/null | grep -qE '^v(2[2-9]|[3-9])'; then
+    curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+    sudo apt install -y nodejs
+fi
 ```
 
 ### Linux (Fedora/RHEL):
 ```bash
 sudo dnf install -y python3 python3-pip python3-devel gcc gcc-c++ nodejs npm git curl
+
+# Node from default repos may be too old — install Node 22 via NodeSource
+if ! node --version 2>/dev/null | grep -qE '^v(2[2-9]|[3-9])'; then
+    curl -fsSL https://rpm.nodesource.com/setup_22.x | sudo bash -
+    sudo dnf install -y nodejs
+fi
 ```
 
 ### macOS:
@@ -178,40 +190,68 @@ Walk the user through filling in the required values. Ask them one at a time:
    ```
    Write the output into the `.env` file.
 
+For each value, use Python to update the line in `vessence-data/.env`. Example: to set `USER_NAME`, replace the line starting with `USER_NAME=` with `USER_NAME=<value>`.
+
+Write the required values to the `.env` file:
+```bash
+./venv/bin/python -c "
+import pathlib, secrets, re
+env_path = pathlib.Path('vessence-data/.env')
+text = env_path.read_text()
+
+# These values should be set by the CLI after asking the user:
+# USER_NAME=<name>
+# JANE_BRAIN=<gemini|claude|openai>
+# The matching API key (GOOGLE_API_KEY, ANTHROPIC_API_KEY, or OPENAI_API_KEY)
+
+# Auto-generate SESSION_SECRET_KEY
+secret = secrets.token_hex(32)
+text = re.sub(r'^SESSION_SECRET_KEY=.*', f'SESSION_SECRET_KEY={secret}', text, flags=re.M)
+
+env_path.write_text(text)
+print(f'SESSION_SECRET_KEY generated.')
+"
+```
+
 ### Optional values (tell the user they can fill these in later):
 - `DISCORD_TOKEN` — For Discord integration. Get at: https://discord.com/developers
 - `VAULT_PASSWORD` — Web UI login password. Leave blank to be prompted on first login.
 
 Also clean up Docker-specific defaults that shipped in `.env.example`:
 ```bash
-# Remove or comment out these Docker-only values:
-sed -i 's/^CHROMADB_HOST=.*/# CHROMADB_HOST=/' vessence-data/.env
-sed -i 's/^CHROMADB_PORT=.*/# CHROMADB_PORT=/' vessence-data/.env
-sed -i 's|^LOCAL_LLM_BASE_URL=.*|LOCAL_LLM_BASE_URL=http://localhost:11434|' vessence-data/.env
+./venv/bin/python -c "
+import re, pathlib
+env = pathlib.Path('vessence-data/.env')
+text = env.read_text()
+text = re.sub(r'^CHROMADB_HOST=.*', '# CHROMADB_HOST=', text, flags=re.M)
+text = re.sub(r'^CHROMADB_PORT=.*', '# CHROMADB_PORT=', text, flags=re.M)
+text = re.sub(r'^LOCAL_LLM_BASE_URL=.*', 'LOCAL_LLM_BASE_URL=http://localhost:11434', text, flags=re.M)
+env.write_text(text)
+print('Docker-specific defaults cleaned.')
+"
 ```
 
 **Verification:** The `.env` file exists at `vessence-data/.env` and contains non-empty values for `USER_NAME`, `JANE_BRAIN`, the matching API key, and `SESSION_SECRET_KEY`.
 
 ---
 
-## Phase 6: Install CLI Brain
+## Phase 6: Detect CLI Brain
 
-The user is already running an AI CLI (that's how they're reading this file). Detect which one and install the matching CLI if needed:
+Jane's web and Android interface uses the same CLI that is reading this file. Detect which CLI is available and set `JANE_BRAIN` in the `.env` file:
 
 ```bash
-# Gemini (default — free tier available):
-npm install -g @google/gemini-cli
-
-# Claude:
-npm install -g @anthropic-ai/claude-code
-
-# OpenAI/Codex:
-npm install -g @openai/codex
+if command -v claude &>/dev/null; then
+    BRAIN=claude
+elif command -v gemini &>/dev/null; then
+    BRAIN=gemini
+elif command -v codex &>/dev/null; then
+    BRAIN=openai
+fi
 ```
 
-Update `JANE_BRAIN` in `vessence-data/.env` to match.
+Write the detected value to `.env`. If none is found, ask the user which to install.
 
-**Verification:** The chosen CLI is installed and callable from the terminal. The `JANE_BRAIN` value in `.env` matches.
+**Verification:** The `JANE_BRAIN` value in `.env` matches the detected CLI.
 
 ---
 
@@ -251,23 +291,18 @@ At least one of these should be a symlink pointing into `vessence/`.
 
 ## Phase 8: Start Jane Web Server
 
-Start the web server:
+Start the web server to verify it works:
 
 ```bash
-cd vessence && ../venv/bin/python -m uvicorn jane_web.main:app --host 0.0.0.0 --port 8081
-```
-
-Or, to run it in the background:
-
-```bash
-cd vessence && nohup ../venv/bin/python -m uvicorn jane_web.main:app --host 0.0.0.0 --port 8081 > ../vessence-data/logs/jane-web.log 2>&1 &
-```
-
-**Verification:**
-```bash
+cd vessence && timeout 10 ../venv/bin/python -m uvicorn jane_web.main:app --host 0.0.0.0 --port 8081 &
+sleep 5
 curl -s http://localhost:8081/health
+kill %1 2>/dev/null
 ```
-Should return a 200 response. If it fails, check `vessence-data/logs/jane-web.log` for errors.
+
+If the health check returns a 200 response, the server is working. Phase 11 will set up persistent auto-start.
+
+If it fails, check for errors in the output.
 
 ---
 
@@ -363,6 +398,11 @@ Tell the user:
 
 Set up Jane to start automatically when the computer boots, so the user never has to manually start the server.
 
+```bash
+# Ensure we're in the repo root
+cd $(git rev-parse --show-toplevel 2>/dev/null || echo ~/ambient)
+```
+
 Detect the OS and configure accordingly:
 
 ### Linux (systemd):
@@ -384,6 +424,8 @@ RestartSec=5
 Environment=VESSENCE_HOME=$(pwd)/vessence
 Environment=VESSENCE_DATA_HOME=$(pwd)/vessence-data
 Environment=VAULT_HOME=$(pwd)/vault
+Environment=ESSENCES_DIR=$(pwd)/essences
+EnvironmentFile=$(pwd)/vessence-data/.env
 
 [Install]
 WantedBy=default.target
@@ -448,6 +490,7 @@ cat > ~/Library/LaunchAgents/com.vessence.jane-web.plist << EOF
         <key>VESSENCE_HOME</key><string>$(pwd)/vessence</string>
         <key>VESSENCE_DATA_HOME</key><string>$(pwd)/vessence-data</string>
         <key>VAULT_HOME</key><string>$(pwd)/vault</string>
+        <key>ESSENCES_DIR</key><string>$(pwd)/essences</string>
     </dict>
 </dict>
 </plist>
@@ -455,6 +498,8 @@ EOF
 
 launchctl load ~/Library/LaunchAgents/com.vessence.jane-web.plist
 ```
+
+**Note:** The application loads additional environment variables from `vessence-data/.env` at startup via python-dotenv.
 
 ### Windows (Task Scheduler via PowerShell):
 
@@ -467,10 +512,12 @@ $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoi
 Register-ScheduledTask -TaskName "JaneWebServer" -Action $action -Trigger $trigger -Settings $settings -Description "Vessence Jane Web Server"
 ```
 
-**Verification:** Reboot the machine (or log out and back in on Linux/Mac). After boot, verify:
+**Verification:** Check the service is running:
 ```bash
-curl -s http://localhost:8081/health
+systemctl --user status jane-web.service   # Linux
+launchctl list | grep vessence             # macOS
 ```
+A reboot test is recommended later but not required now.
 
 ---
 

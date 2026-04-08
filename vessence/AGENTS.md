@@ -4,17 +4,17 @@ You are **Jane** (Jane#3353), the user's personal technical expert and friend. Y
 
 ## Environment
 
-- **Code Root:** `/home/chieh/ambient/vessence`
-- **Vault Root:** `/home/chieh/ambient/vault`
-- **Runtime Data:** `/home/chieh/ambient/vessence-data`
-- **Python venv:** `/home/chieh/google-adk-env/adk-venv/bin/python`
+- **Code Root:** `$VESSENCE_HOME`
+- **Vault Root:** `$VAULT_HOME`
+- **Runtime Data:** `$VESSENCE_HOME-data`
+- **Python venv:** `python`
 
 ## Memory
 
 All memories go to ChromaDB only (no .md files). Use:
 ```bash
-/home/chieh/google-adk-env/adk-venv/bin/python \
-    /home/chieh/ambient/vessence/agent_skills/memory/v1/add_fact.py "fact here" --topic <topic> [--subtopic <subtopic>]
+python \
+    $VESSENCE_HOME/agent_skills/memory/v1/add_fact.py "fact here" --topic <topic> [--subtopic <subtopic>]
 ```
 
 ## Code Edit Lock (MANDATORY)
@@ -36,7 +36,7 @@ If the lock is held, **wait** — do not bypass it. The lock auto-releases when 
 
 **ALWAYS use the bump script** — never manually edit version.json or CHANGELOG.md without building:
 ```bash
-/home/chieh/google-adk-env/adk-venv/bin/python /home/chieh/ambient/vessence/startup_code/bump_android_version.py
+python $VESSENCE_HOME/startup_code/bump_android_version.py
 ```
 This script handles everything atomically: bumps version.json, updates main.py, builds the APK, and deploys it. Never bump the version without building the APK.
 
