@@ -91,6 +91,37 @@
       object-fit: cover;
     }
 
+    .hero-details {
+      margin: 8px 0;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 0;
+      background: var(--panel);
+    }
+    .hero-details summary {
+      padding: 14px 18px;
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 0.95rem;
+      color: var(--accent);
+      list-style: none;
+    }
+    .hero-details summary::-webkit-details-marker { display: none; }
+    .hero-details summary::before {
+      content: "▸ ";
+      display: inline;
+    }
+    .hero-details[open] summary::before {
+      content: "▾ ";
+    }
+    .hero-details p {
+      padding: 0 18px 16px;
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.9rem;
+      line-height: 1.7;
+    }
+
     .top-links {
       display: flex;
       align-items: center;
@@ -676,17 +707,39 @@
             Open Source
           </div>
           <h1>
-            One platform.<br />
-            Infinite AI personas.
+            Jane is a vessel<br />
+            you put essence into.
           </h1>
           <p class="hero-copy">
-            Vessence is an open-source wrapper around Claude Code, Gemini, and Codex. It simplifies the agent development process.
-            You start with your default agent, Jane. By describing to her the abilities you wish she would have, you can develop
-            your own agent capabilities (tools) and agent personas (essences). An example of a tool would be the ability to verbally
-            ask your agent to send a text msg, turn on a light, or play a song. An example of a persona (essence) would be a
-            tax accountant that would walk through your taxes and help you prepare the document. You do not have to develop your own
-            tools or personas, you can simply download what other people have done.
+            Project Vessence revolves around an AI agent named Jane that you run locally on your computer.
+            Although Jane's brain lives on your computer, you have access to communicate with Jane remotely on your phone or in a browser.
+            When you download the phone app, it communicates with Jane's brain on your computer remotely while having control over your device.
+            For example, Jane on your phone would have the ability to read and text messages and email.
+            On your phone, you can voice-activate Jane to ask her about the weather, play some music, and answer various questions.
+            When Jane is on your phone, your phone acts like Amazon's Alexa.
           </p>
+
+          <details class="hero-details">
+            <summary>What are Tools?</summary>
+            <p>
+              The various abilities Jane possesses are called tools. By describing what you want, you can work together
+              with Jane to build new tools. Tools are transferable, so if one person builds a tool, they can put
+              it on the Vessence website so others can also have the same tool.
+              For example, the ability to generate a PDF file on your phone is a tool.
+            </p>
+          </details>
+
+          <details class="hero-details">
+            <summary>What are Essences?</summary>
+            <p>
+              The various personas Jane can take on are called essences. An essence is a personality with a set of memories
+              and tools combined together. Jane can take on various personas by downloading essences others have already designed,
+              or by talking to Jane you can create new essences yourself.
+              For example, a tax accountant is an essence. An essence allows Jane to perform a job that a person would perform
+              (like helping you do your taxes). When Jane takes on an essence, Jane gains all the operational workflow and
+              memories of a tax accountant.
+            </p>
+          </details>
           <div class="hero-actions">
             <a class="button button-primary" href="https://github.com/endsley/vessence" target="_blank" rel="noreferrer">View on GitHub</a>
             <a class="button button-secondary" href="/install.html">Getting Started</a>
