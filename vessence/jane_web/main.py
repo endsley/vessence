@@ -502,6 +502,28 @@ async def health():
     return {"status": "ok", "service": "jane", "brain": brain}
 
 
+@app.post("/api/jane/warmup")
+async def warmup_brain(request: Request):
+    """Warm up the standing brain CLI process. Called by graceful_restart.sh
+    before switching the proxy upstream. Read-only — no ChromaDB writes."""
+    try:
+        from llm_brain.v1.standing_brain import get_standing_brain_manager
+        manager = get_standing_brain_manager()
+        if not manager._started:
+            manager.start()
+        # Wait for the brain to be alive (up to 30s)
+        for _ in range(30):
+            if manager.brain and manager.brain.alive:
+                break
+            await asyncio.sleep(1)
+        if manager.brain and manager.brain.alive:
+            return JSONResponse({"status": "warm", "model": manager.brain.model})
+        return JSONResponse({"status": "starting"}, status_code=202)
+    except Exception as e:
+        _logger.warning("Warmup failed: %s", e)
+        return JSONResponse({"status": "error", "detail": str(e)}, status_code=500)
+
+
 @app.get("/sw.js")
 async def service_worker():
     return FileResponse(str(STATIC_DIR / "chat-sw.js"), media_type="application/javascript")

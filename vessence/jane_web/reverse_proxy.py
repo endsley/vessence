@@ -21,6 +21,7 @@ import argparse
 import asyncio
 import json
 import logging
+import os
 import signal
 import sys
 import time
@@ -30,6 +31,8 @@ import aiohttp
 from aiohttp import web
 
 logger = logging.getLogger("jane.reverse_proxy")
+
+STATE_FILE = Path(os.environ.get("VESSENCE_DATA_HOME", Path.home() / "ambient" / "vessence-data")) / "proxy_state.json"
 
 # ---------------------------------------------------------------------------
 # State
@@ -55,7 +58,15 @@ class ProxyState:
             self.upstream_port = new_port
             self.switched_at = time.time()
             logger.info("Switched upstream %d -> %d", old, new_port)
+            self._persist()
             return old
+
+    def _persist(self):
+        try:
+            STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+            STATE_FILE.write_text(json.dumps({"upstream_port": self.upstream_port}))
+        except Exception as e:
+            logger.warning("Failed to persist proxy state: %s", e)
 
 
 state = ProxyState()
@@ -241,6 +252,14 @@ async def _proxy_websocket(
 # ---------------------------------------------------------------------------
 
 def create_app(upstream_port: int = 8081) -> web.Application:
+    # Restore persisted state if available
+    try:
+        if STATE_FILE.exists():
+            saved = json.loads(STATE_FILE.read_text())
+            upstream_port = saved.get("upstream_port", upstream_port)
+            logger.info("Restored persisted upstream port: %d", upstream_port)
+    except Exception:
+        pass
     state.upstream_port = upstream_port
 
     app = web.Application()
