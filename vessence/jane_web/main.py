@@ -2060,22 +2060,23 @@ async def delete_playlist_route(playlist_id: str, _=Depends(require_auth)):
 
 
 def _cleanup_temporary_playlists():
-    """Delete all Jane-generated temporary playlists from the database.
+    """Delete old Jane-generated temporary playlists from the database.
 
     Jane creates playlists named "Random Mix" or "Playing: <query>" via voice
     commands. These are meant to be ephemeral — played once and discarded.
-    Without cleanup they accumulate indefinitely. This function purges them
-    before a new one is created so there's never more than one temporary
-    playlist alive at a time.
+    Without cleanup they accumulate indefinitely.
 
-    User-created playlists (saved/renamed via the Music Playlist essence)
-    are never touched because they don't match the naming pattern.
+    Keeps playlists created in the last 5 minutes so the Android app has
+    time to fetch them before they're deleted.
     """
+    import datetime as _dt
     try:
         from vault_web.playlists import list_playlists, delete_playlist as _del
+        cutoff = (_dt.datetime.now() - _dt.timedelta(minutes=5)).strftime("%Y-%m-%d %H:%M:%S")
         for p in list_playlists():
             name = p.get("name", "")
-            if name == "Random Mix" or name.startswith("Playing:"):
+            created = p.get("created_at", "")
+            if (name == "Random Mix" or name.startswith("Playing:")) and created < cutoff:
                 _del(p["id"])
     except Exception as e:
         _logger.warning("temporary playlist cleanup failed: %s", e)
