@@ -299,7 +299,7 @@ All overridable via env vars (`BRAIN_LIGHT_*`, `BRAIN_MEDIUM_*`, `BRAIN_HEAVY_*`
 
 ## 6. Essence Platform
 
-Essences are pluggable AI personas that run through the platform. Each defines its own knowledge, tools, personality, and UI.
+Essences are pluggable AI personas that run through the platform. Each defines its own knowledge, skills, personality, and UI.
 
 ### 6.1 Essence Folder Structure
 
@@ -665,7 +665,7 @@ First-run wizard at `localhost:3000`: system check → setup form → identity i
 | `~/ambient/vessence-data/` | `VESSENCE_DATA_HOME` | Runtime data, logs, credentials, vector DBs (not git-tracked) |
 | `~/ambient/vault/` | `VAULT_HOME` | User files (PDFs, images, audio, documents) |
 | `~/ambient/essences/` | `ESSENCES_DIR` | Essence definitions |
-| `~/ambient/tools/` | `TOOLS_DIR` | Tool implementations |
+| `~/ambient/skills/` | `SKILLS_DIR` | Skill implementations |
 
 ### 12.2 Code Repository (`VESSENCE_HOME`)
 

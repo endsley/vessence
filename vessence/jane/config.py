@@ -30,21 +30,19 @@ def _resolve_roots() -> tuple[str, str, str, str]:
         else:
             data_root = default_data_root
 
-    tools_root = os.environ.get("TOOLS_DIR",
-                                  os.environ.get("ESSENCES_DIR",  # legacy env var
-                                                  os.path.join(ambient_base, "tools")))
+    tools_root = os.environ.get("SKILLS_DIR",
+                                  os.environ.get("TOOLS_DIR",  # legacy env var
+                                                  os.path.join(ambient_base, "skills")))
     essences_root = os.path.join(ambient_base, "essences")
 
     vault_root = os.environ.get("VAULT_HOME", os.path.join(ambient_base, "vault"))
     return code_root, data_root, vault_root, tools_root, essences_root
 
 # ── Root paths ────────────────────────────────────────────────────────────────
-VESSENCE_HOME, VESSENCE_DATA_HOME, VAULT_DIR, TOOLS_DIR, ESSENCES_DIR = _resolve_roots()
+VESSENCE_HOME, VESSENCE_DATA_HOME, VAULT_DIR, SKILLS_DIR, ESSENCES_DIR = _resolve_roots()
 
-# Legacy alias — code that imported ESSENCES_DIR expecting the *tools* folder
-# should migrate to TOOLS_DIR. During transition both exist; ESSENCES_DIR now
-# points at ~/ambient/essences/ (true AI agents), TOOLS_DIR at ~/ambient/tools/.
-# For backward compat, most loader code uses TOOLS_DIR internally.
+# Legacy alias — code that imported TOOLS_DIR should migrate to SKILLS_DIR.
+TOOLS_DIR = SKILLS_DIR  # backward compat
 HOME_DIR = str(Path.home())
 USER_NAME = os.environ.get("USER_NAME", "the user")
 

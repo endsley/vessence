@@ -506,7 +506,7 @@ def _get_active_essence_personality() -> str:
     ambient_base = os.environ.get("AMBIENT_BASE", os.path.expanduser("~/ambient"))
     tools_dir = os.environ.get("TOOLS_DIR",
                                os.environ.get("ESSENCES_DIR",
-                                               os.path.join(ambient_base, "tools")))
+                                               os.path.join(ambient_base, "skills")))
     essences_dir = os.path.join(ambient_base, "essences")
     parts = []
     for name in active_list:
@@ -546,7 +546,7 @@ def _get_active_essence_chromadb_path() -> str | None:
     ambient_base = os.environ.get("AMBIENT_BASE", os.path.expanduser("~/ambient"))
     tools_dir = os.environ.get("TOOLS_DIR",
                                os.environ.get("ESSENCES_DIR",
-                                               os.path.join(ambient_base, "tools")))
+                                               os.path.join(ambient_base, "skills")))
     essences_dir = os.path.join(ambient_base, "essences")
     # Return the first active essence's ChromaDB path (check tools/ then essences/)
     for name in active_list:
@@ -566,7 +566,7 @@ def _get_essence_tools_description() -> str:
     ambient_base = os.environ.get("AMBIENT_BASE", os.path.expanduser("~/ambient"))
     tools_dir = os.environ.get("TOOLS_DIR",
                                os.environ.get("ESSENCES_DIR",
-                                               os.path.join(ambient_base, "tools")))
+                                               os.path.join(ambient_base, "skills")))
     essences_dir = os.path.join(ambient_base, "essences")
 
     # Collect entries from both directories

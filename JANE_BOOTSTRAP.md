@@ -2,7 +2,7 @@
 
 **You are an AI CLI assistant helping a new user set up Vessence.** Follow these phases in order. Each phase has verification steps — do not proceed until verification passes. All paths are relative to this repository root (the directory containing this file).
 
-**What is Vessence?** Vessence is an open-source wrapper around Claude Code, Gemini CLI, and Codex that simplifies AI agent development. You start with a default agent called Jane. By describing abilities you want, you develop tools (capabilities like sending texts, controlling lights, playing music) and essences (personas like a tax accountant or fitness coach). You can also download tools and essences that others have built from the Vessence marketplace.
+**What is Vessence?** Vessence is an open-source wrapper around Claude Code, Gemini CLI, and Codex that simplifies AI agent development. You start with a default agent called Jane. By describing abilities you want, you develop skills (capabilities like sending texts, controlling lights, playing music) and essences (personas like a tax accountant or fitness coach). You can also download skills and essences that others have built from the Vessence marketplace.
 
 ---
 
@@ -13,7 +13,7 @@ Before you begin, understand what you are setting up:
 - **Jane** — An AI assistant persona powered by whichever CLI brain the user chooses (Gemini, Claude, or OpenAI).
 - **Vault** — Personal file storage (documents, photos, music).
 - **Essences** — Specialized AI personas (e.g., tax accountant, fitness coach). Each essence gives Jane domain expertise. Think of them as downloadable "brains" that transform Jane into a specialist.
-- **Tools** — Capability plugins (daily briefing, music player, SMS, smart home control, etc.) that extend what Jane can do. Tools are shared across all essences.
+- **Skills** — Capability plugins (daily briefing, music player, SMS, smart home control, etc.) that extend what Jane can do. Skills are shared across all essences.
 - **Memory** — ChromaDB vector database with 3 tiers:
   - `user_memories` — Facts about the user (starts empty, grows over time).
   - `long_term_knowledge` — Jane's accumulated knowledge and behavioral rules.
@@ -115,19 +115,19 @@ mkdir -p vessence-data/briefings
 mkdir -p vessence-data/briefing_saved
 mkdir -p vault/documents
 mkdir -p essences
-mkdir -p tools
+mkdir -p skills
 ```
 
 Add `.gitkeep` files to empty plugin directories:
 
 ```bash
 touch essences/.gitkeep
-touch tools/.gitkeep
+touch skills/.gitkeep
 ```
 
 **Verification:** Confirm the directories exist:
 ```bash
-ls -d vessence-data/memory/v1/vector_db vessence-data/logs vessence-data/credentials vault essences tools
+ls -d vessence-data/memory/v1/vector_db vessence-data/logs vessence-data/credentials vault essences skills
 ```
 
 ---

@@ -30,7 +30,7 @@ logger = logging.getLogger("essence_scheduler")
 
 TOOLS_DIR = os.environ.get("TOOLS_DIR",
                            os.environ.get("ESSENCES_DIR",
-                                          os.path.join(os.environ.get("AMBIENT_BASE", os.path.expanduser("~/ambient")), "tools")))
+                                          os.path.join(os.environ.get("AMBIENT_BASE", os.path.expanduser("~/ambient")), "skills")))
 STATE_FILE = os.path.join(os.environ.get("VESSENCE_DATA_HOME", os.path.expanduser("~/ambient/vessence-data")), "data", "essence_scheduler_state.json")
 PYTHON_BIN = os.environ.get("PYTHON_BIN", sys.executable)
 IDLE_THRESHOLD_SECONDS = 900

@@ -230,7 +230,7 @@ def _load_all_mcps() -> dict[str, dict]:
         return _MCP_CACHE
     import json as _json
     from pathlib import Path
-    tools_dir = Path(os.environ.get("TOOLS_DIR", os.path.expanduser("~/ambient/tools")))
+    tools_dir = Path(os.environ.get("TOOLS_DIR", os.path.expanduser("~/ambient/skills")))
     essences_dir = Path(os.environ.get("ESSENCES_DIR", os.path.expanduser("~/ambient/essences")))
     mcps = {}
     for base in (tools_dir, essences_dir):

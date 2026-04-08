@@ -2136,7 +2136,7 @@ async def call_essence_tool(essence_name: str, tool_name: str, request: Request,
     """Generic endpoint to invoke any essence tool by name."""
     ambient_base = os.environ.get("AMBIENT_BASE", os.path.expanduser("~/ambient"))
     search_dirs = [
-        os.environ.get("TOOLS_DIR", os.path.join(ambient_base, "tools")),
+        os.environ.get("TOOLS_DIR", os.path.join(ambient_base, "skills")),
         os.path.join(ambient_base, "essences"),
     ]
     tools_path = os.path.join(search_dirs[0], essence_name.lower().replace(" ", "_"), "functions", "custom_tools.py")
@@ -2195,7 +2195,7 @@ async def serve_essence_page(essence_name: str, request: Request, _=Depends(requ
     """Serve an essence's UI — or redirect to Jane's chat for essence-type items."""
     ambient_base = os.environ.get("AMBIENT_BASE", os.path.expanduser("~/ambient"))
     search_dirs = [
-        os.environ.get("TOOLS_DIR", os.path.join(ambient_base, "tools")),
+        os.environ.get("TOOLS_DIR", os.path.join(ambient_base, "skills")),
         os.path.join(ambient_base, "essences"),
     ]
     # Find the essence folder across both directories
@@ -2796,7 +2796,7 @@ def _log_work_activity(description: str, category: str = "general") -> None:
 
 _BRIEFING_FUNCTIONS_DIR = os.path.join(
     os.environ.get("TOOLS_DIR",
-                   os.path.join(os.path.expanduser("~"), "ambient", "tools")),
+                   os.path.join(os.path.expanduser("~"), "ambient", "skills")),
     "daily_briefing", "functions"
 )
 
@@ -2853,7 +2853,7 @@ async def briefing_audio(article_id: str, summary_type: str = "brief", _=Depends
 
     audio_dir = os.path.join(
         os.environ.get("TOOLS_DIR",
-                       os.path.join(os.environ.get("AMBIENT_BASE", os.path.expanduser("~/ambient")), "tools")),
+                       os.path.join(os.environ.get("AMBIENT_BASE", os.path.expanduser("~/ambient")), "skills")),
         "daily_briefing", "essence_data", "audio"
     )
     # Prefer Opus/OGG, fall back to legacy WAV
@@ -2919,7 +2919,7 @@ async def _resume_shared_queue_if_needed():
 
 _SHARED_ARTICLE_PROCESSOR = os.path.normpath(
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "..",
-                 "..", "tools", "daily_briefing", "functions", "process_shared_articles.py")
+                 "..", "skills", "daily_briefing", "functions", "process_shared_articles.py")
 )
 
 
@@ -3023,7 +3023,7 @@ async def save_briefing_article(request: Request, _=Depends(require_auth)):
     # Find article data from current briefing articles cache
     article_data = None
     articles_dir = Path(os.environ.get("TOOLS_DIR",
-                        os.path.join(os.path.expanduser("~"), "ambient", "tools"))) / "daily_briefing" / "essence_data" / "articles"
+                        os.path.join(os.path.expanduser("~"), "ambient", "skills"))) / "daily_briefing" / "essence_data" / "articles"
     article_file = articles_dir / f"{article_id}.json"
     if article_file.exists():
         async with aiofiles.open(article_file, "r") as f:
@@ -3124,7 +3124,7 @@ async def search_briefing_articles(q: str, _=Depends(require_auth)):
 async def get_briefing_image(article_id: str):
     """Serve a cached article image."""
     images_dir = Path(os.environ.get("TOOLS_DIR",
-                      os.path.join(os.path.expanduser("~"), "ambient", "tools"))) / "daily_briefing" / "essence_data" / "images"
+                      os.path.join(os.path.expanduser("~"), "ambient", "skills"))) / "daily_briefing" / "essence_data" / "images"
     # Try common extensions
     for ext in (".jpg", ".jpeg", ".png", ".webp", ".gif"):
         img_path = images_dir / f"{article_id}{ext}"

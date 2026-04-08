@@ -63,7 +63,7 @@ def _get_tools_dir() -> str:
     ambient_base = os.environ.get("AMBIENT_BASE", os.path.join(home, "ambient"))
     return os.environ.get("TOOLS_DIR",
                           os.environ.get("ESSENCES_DIR",
-                                         os.path.join(ambient_base, "tools")))
+                                         os.path.join(ambient_base, "skills")))
 
 
 def _get_essences_dir() -> str:

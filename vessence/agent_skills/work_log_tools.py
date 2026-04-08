@@ -17,7 +17,7 @@ def _get_activity_log_path() -> str:
     ambient_base = os.environ.get("AMBIENT_BASE", os.path.join(home, "ambient"))
     essences_dir = os.environ.get("TOOLS_DIR",
                                   os.environ.get("ESSENCES_DIR",
-                                                  os.path.join(ambient_base, "tools")))
+                                                  os.path.join(ambient_base, "skills")))
     log_dir = os.path.join(essences_dir, "work_log", "user_data")
     os.makedirs(log_dir, exist_ok=True)
     return os.path.join(log_dir, "activity_log.json")

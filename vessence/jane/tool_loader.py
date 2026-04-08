@@ -1,9 +1,9 @@
 """Dynamic loader for the tools/ + platforms/ directory structure.
 
 A "tool" is a self-contained capability that Jane can invoke. Each tool lives
-in its own folder at ~/ambient/tools/<name>/ with this layout:
+in its own folder at ~/ambient/skills/<name>/ with this layout:
 
-    tools/<name>/
+    skills/<name>/
       mcp.json                 — declarative tool catalog (required)
       prompt.md                — system prompt section injected into Jane's
                                  context builder (required)
@@ -78,7 +78,7 @@ class LoadedTool:
 
 
 _TOOLS_DIR_ENV = "JANE_TOOLS_DIR"
-_DEFAULT_TOOLS_DIR = Path.home() / "ambient" / "tools"
+_DEFAULT_TOOLS_DIR = Path.home() / "ambient" / "skills"
 
 _loaded_tools: list[LoadedTool] | None = None
 
