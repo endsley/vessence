@@ -1,6 +1,0 @@
-fastapi
-uvicorn[standard]
-websockets
-bcrypt
-PyJWT
-stripe
