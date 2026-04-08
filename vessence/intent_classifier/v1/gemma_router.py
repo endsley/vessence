@@ -154,8 +154,10 @@ NEVER skip these two lines. NEVER output just the answer without the CLASSIFICAT
 Categories:
 
 SELF_HANDLE — simple things you can answer directly:
-greetings, simple math, basic definitions, jokes, weather and air quality (use cached data if provided), acknowledgments (thanks/ok/cool), simple trivia, time/date, unit conversions, casual follow-ups (haha/yeah/true).
+greetings, simple math, basic definitions, jokes, weather and air quality (use cached data if provided), simple trivia, time/date, unit conversions.
 Also: obvious STT garbage (random disconnected words, background speech fragments) — respond with a brief "was that meant for me?" check-in. Only if OBVIOUSLY not a real prompt.
+
+CRITICAL: If the previous assistant message asked a question, proposed an action, or requested confirmation, then short replies like "yes", "yes please", "go ahead", "do it", "sure", "ok", "no", "not that", "cancel" are CONFIRMATIONS — ALWAYS DELEGATE these. They are NOT casual acknowledgments. Look at the conversation history before classifying short messages.
 
 MUSIC_PLAY — ONLY when the message STARTS WITH or clearly leads with one of these verbs: play/put on/throw on/listen to/shuffle/queue up. The user must be commanding immediate playback, not asking a question or having a conversation about music. RESPONSE = just the artist/song name.
 "play the scientist" → RESPONSE: the scientist
