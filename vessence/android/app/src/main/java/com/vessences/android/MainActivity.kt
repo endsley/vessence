@@ -66,13 +66,22 @@ class MainActivity : ComponentActivity() {
         sttLauncher.launch(intent)
     }
 
-    companion object {
-        @Volatile var instance: MainActivity? = null
-    }
+    private var permissionsRequested = false
 
     override fun onResume() {
         super.onResume()
         ChatNotificationManager.isAppInForeground = true
+        // Request permissions after the activity is fully visible so the
+        // dialog reliably appears on first launch (not swallowed by the
+        // installer activity still being in the foreground).
+        if (!permissionsRequested) {
+            permissionsRequested = true
+            window.decorView.post {
+                requestNotificationPermissionIfNeeded()
+                requestPhoneToolsPermissionsIfNeeded()
+                promptNotificationListenerIfNeeded()
+            }
+        }
         // Start wake word listening only if not in an active voice conversation
         // (STT popup returning triggers onResume — don't restart listening mid-conversation)
         val voiceSettings = com.vessences.android.data.repository.VoiceSettingsRepository(this)
@@ -119,8 +128,6 @@ class MainActivity : ComponentActivity() {
                 window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             }
         } catch (_: Exception) {}
-        requestNotificationPermissionIfNeeded()
-        requestPhoneToolsPermissionsIfNeeded()
         handleIncomingShareIntent(intent)
         handleNotificationIntent(intent)
 
@@ -229,13 +236,58 @@ class MainActivity : ComponentActivity() {
      */
     private fun requestPhoneToolsPermissionsIfNeeded() {
         val needed = listOf(
+            Manifest.permission.RECORD_AUDIO,
             Manifest.permission.READ_CONTACTS,
             Manifest.permission.CALL_PHONE,
             Manifest.permission.SEND_SMS,
+            Manifest.permission.READ_SMS,
         ).filter {
             ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
         }
         if (needed.isEmpty()) return
         phoneToolsPermissionLauncher.launch(needed.toTypedArray())
+    }
+
+    /**
+     * Check if the NotificationListener service is enabled. If not, show a
+     * dialog explaining why it's needed and deep-link to the system settings.
+     * Only prompts once — tracks via SharedPreferences so we don't nag.
+     */
+    private fun promptNotificationListenerIfNeeded() {
+        // Check if already enabled
+        if (com.vessences.android.notifications.NotificationSafety.isListenerEnabled(this)) return
+
+        // Check if we already prompted (don't nag on every launch)
+        val prefs = getSharedPreferences(com.vessences.android.util.Constants.PREFS_NAME, MODE_PRIVATE)
+        val prompted = prefs.getBoolean(PREF_NOTIFICATION_LISTENER_PROMPTED, false)
+        if (prompted) return
+
+        // Mark as prompted
+        prefs.edit().putBoolean(PREF_NOTIFICATION_LISTENER_PROMPTED, true).apply()
+
+        // Show explanation dialog with deep-link to settings
+        android.app.AlertDialog.Builder(this)
+            .setTitle("Enable Message Reading")
+            .setMessage(
+                "Jane needs Notification Access to read your text messages and help you triage them.\n\n" +
+                "Tap \"Open Settings\" below, then find and enable Jane in the list."
+            )
+            .setPositiveButton("Open Settings") { _, _ ->
+                try {
+                    val intent = android.content.Intent(
+                        android.provider.Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS
+                    )
+                    startActivity(intent)
+                } catch (e: Exception) {
+                    android.util.Log.w("MainActivity", "Could not open notification listener settings", e)
+                }
+            }
+            .setNegativeButton("Later", null)
+            .show()
+    }
+
+    companion object {
+        @Volatile var instance: MainActivity? = null
+        private const val PREF_NOTIFICATION_LISTENER_PROMPTED = "notification_listener_prompted"
     }
 }

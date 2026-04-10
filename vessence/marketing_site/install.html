@@ -558,7 +558,7 @@
             It provides native chat with Jane, push notifications, camera capture, and file attachments.
           </p>
           <div class="download-btn-row">
-            <a class="button button-primary" href="/downloads/vessences-android.apk" data-vault-download="vessences-android.apk">Download Android APK</a>
+            <a class="button button-primary" href="https://jane.vessences.com/downloads/vessences-android-v0.2.2.apk" data-vault-download="android-latest">Download Android APK</a>
             <a class="button button-secondary" href="https://github.com/endsley/vessence" target="_blank" rel="noreferrer">View on GitHub</a>
           </div>
         </div>
@@ -575,11 +575,24 @@
   </footer>
 
   <script>
-    for (const link of document.querySelectorAll("[data-vault-download]")) {
-      const filename = link.dataset.vaultDownload;
-      if (!filename) continue;
-      link.href = `/downloads/${encodeURIComponent(filename)}`;
-    }
+    (async () => {
+      try {
+        const resp = await fetch("https://jane.vessences.com/api/app/latest-version");
+        if (resp.ok) {
+          const data = await resp.json();
+          if (data.download_url) {
+            for (const link of document.querySelectorAll('[data-vault-download="android-latest"]')) {
+              link.href = `https://jane.vessences.com${data.download_url}`;
+            }
+          }
+        }
+      } catch (_) {}
+      for (const link of document.querySelectorAll("[data-vault-download]")) {
+        const filename = link.dataset.vaultDownload;
+        if (!filename || filename === "android-latest") continue;
+        link.href = `/downloads/${encodeURIComponent(filename)}`;
+      }
+    })();
   </script>
 </body>
 </html>

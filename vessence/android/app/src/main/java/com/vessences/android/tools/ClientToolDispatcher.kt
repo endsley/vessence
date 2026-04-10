@@ -61,6 +61,7 @@ class ClientToolDispatcher(
         }
         register(MessagesReadRecentHandler)
         register(MessagesFetchUnreadHandler)
+        register(MessagesReadInboxHandler)
     }
 
     /** Register a handler under its [ClientToolHandler.name]. */

@@ -411,7 +411,13 @@ def _extract_tool_results(user_message: str) -> tuple[str, list[dict]]:
     return cleaned, results
 
 
-_DELIM_OPEN = "[PHONE TOOL RESULTS — results from tools that ran on the Android client since the last turn. Use these to decide your next action; do not quote them back to the user literally.]"
+_DELIM_OPEN = (
+    "[PHONE TOOL RESULTS — results from tools that ran on the Android client since the last turn. "
+    "Use these as background context, but ALWAYS prioritize the user's current message below. "
+    "If the user has moved on to a new topic, respond to THEIR message first — "
+    "do not fixate on stale tool results. Only mention tool results if they are "
+    "directly relevant to what the user is asking NOW.]"
+)
 _DELIM_CLOSE = "[END PHONE TOOL RESULTS]"
 
 
@@ -481,6 +487,72 @@ def _format_tool_results_for_brain(results: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def _execute_email_tool_serverside(tc: dict) -> str:
+    """Execute an email.* tool call server-side and return a human-readable
+    result string. Called from the emit() function when the brain emits
+    [[CLIENT_TOOL:email.*:...]] markers — these are intercepted before reaching
+    the Android client because email is a server-side capability (Gmail API).
+
+    Returns a short status string (or empty string on failure) that gets
+    appended to the visible delta stream.
+    """
+    tool = tc.get("tool", "")
+    args = tc.get("args", {})
+    try:
+        if tool == "email.read_inbox":
+            from agent_skills.email_tools import read_inbox
+            limit = args.get("limit", 10)
+            query = args.get("query", "is:unread")
+            emails = read_inbox(limit=limit, query=query)
+            if not emails:
+                return "\n\nNo unread emails found."
+            lines = [f"\n\nFound {len(emails)} email(s):\n"]
+            for e in emails:
+                status = "NEW" if e.get("is_unread") else "read"
+                lines.append(f"- [{status}] From: {e['sender']} — {e['subject']}")
+                if e.get("snippet"):
+                    lines.append(f"  Preview: {e['snippet'][:150]}")
+            return "\n".join(lines)
+        elif tool == "email.read":
+            from agent_skills.email_tools import read_email
+            msg_id = args.get("message_id", "")
+            if not msg_id:
+                return "\n\nError: no message_id provided."
+            email_data = read_email(msg_id)
+            body = (email_data.get("body") or "")[:2000]
+            return (
+                f"\n\nEmail from {email_data.get('sender', '?')}:\n"
+                f"Subject: {email_data.get('subject', '?')}\n"
+                f"Date: {email_data.get('date', '?')}\n\n"
+                f"{body}"
+            )
+        elif tool == "email.search":
+            from agent_skills.email_tools import search_emails
+            query = args.get("query", "")
+            limit = args.get("limit", 10)
+            emails = search_emails(query=query, limit=limit)
+            if not emails:
+                return f"\n\nNo emails found for query: {query}"
+            lines = [f"\n\nSearch results ({len(emails)} emails):\n"]
+            for e in emails:
+                lines.append(f"- From: {e['sender']} — {e['subject']}")
+            return "\n".join(lines)
+        elif tool == "email.send":
+            # Send requires confirmation — don't auto-execute, just note it
+            return "\n\n[Email send requires user confirmation — not auto-executed]"
+        elif tool == "email.delete":
+            return "\n\n[Email delete requires user confirmation — not auto-executed]"
+        else:
+            logger.warning("Unknown email tool: %s", tool)
+            return ""
+    except RuntimeError as e:
+        logger.warning("Email tool %s failed (no credentials): %s", tool, e)
+        return f"\n\nGmail is not set up yet. Please sign in with Google on the Vessence web UI to enable email."
+    except Exception as e:
+        logger.error("Email tool %s failed: %s", tool, e)
+        return f"\n\nEmail error: {e}"
+
+
 CODE_MAP_KEYWORDS = (
     # Code navigation
     "function", "class", "file", "route", "endpoint", "handler",
@@ -548,6 +620,8 @@ CODE_MAP_KEYWORDS = (
     "sync",
     "push",
     "button",
+    # Auto-evolved from daily conversations
+    "play",
 )
 
 
@@ -1781,9 +1855,19 @@ async def stream_message(
             # own prior emissions when continuing a draft state machine.
             visible, tool_calls = _tool_extractor.feed(payload)
             for tc in tool_calls:
-                logger.info("[%s] Emitting client_tool_call: tool=%s call_id=%s",
-                            session_id[:12], tc.get("tool", "?"), tc.get("call_id", "?")[:12])
-                _raw_emit("client_tool_call", json.dumps(tc, ensure_ascii=True))
+                _tc_tool = tc.get("tool", "")
+                if _tc_tool.startswith("email."):
+                    # Email tools are server-side — do NOT send to Android client.
+                    # Execute server-side and inject result as visible text.
+                    logger.info("[%s] Intercepting server-side email tool: %s",
+                                session_id[:12], _tc_tool)
+                    _email_result_text = _execute_email_tool_serverside(tc)
+                    if _email_result_text:
+                        visible = (visible or "") + _email_result_text
+                else:
+                    logger.info("[%s] Emitting client_tool_call: tool=%s call_id=%s",
+                                session_id[:12], _tc_tool, tc.get("call_id", "?")[:12])
+                    _raw_emit("client_tool_call", json.dumps(tc, ensure_ascii=True))
             if visible:
                 _raw_emit("delta", visible)
             return
@@ -1791,9 +1875,17 @@ async def stream_message(
             # Final flush of any buffered tool markers at stream end.
             visible_tail, tail_calls = _tool_extractor.flush()
             for tc in tail_calls:
-                logger.info("[%s] Emitting client_tool_call (flush): tool=%s call_id=%s",
-                            session_id[:12], tc.get("tool", "?"), tc.get("call_id", "?")[:12])
-                _raw_emit("client_tool_call", json.dumps(tc, ensure_ascii=True))
+                _tc_tool = tc.get("tool", "")
+                if _tc_tool.startswith("email."):
+                    logger.info("[%s] Intercepting server-side email tool (flush): %s",
+                                session_id[:12], _tc_tool)
+                    _email_result_text = _execute_email_tool_serverside(tc)
+                    if _email_result_text:
+                        visible_tail = (visible_tail or "") + _email_result_text
+                else:
+                    logger.info("[%s] Emitting client_tool_call (flush): tool=%s call_id=%s",
+                                session_id[:12], _tc_tool, tc.get("call_id", "?")[:12])
+                    _raw_emit("client_tool_call", json.dumps(tc, ensure_ascii=True))
             if visible_tail:
                 _raw_emit("delta", visible_tail)
 
@@ -1830,6 +1922,17 @@ async def stream_message(
 
         # If gemma router already emitted an ack, suppress Claude's [ACK] block.
         # If gemma didn't handle it (delegate/unknown), let Claude provide its own ack.
+
+        # Strip [[CLIENT_TOOL:...]] markers from the done payload so Android
+        # TTS never speaks raw tool syntax.  Delta events are already stripped
+        # by _tool_extractor above, but the done event carries the full raw
+        # response text — Android uses done.data for TTS when present.
+        if event_type == "done" and payload and "[[CLIENT_TOOL:" in payload:
+            _done_extractor = ToolMarkerExtractor()
+            _done_visible, _ = _done_extractor.feed(payload)
+            _done_tail, _ = _done_extractor.flush()
+            payload = _done_visible + _done_tail
+
         _raw_emit(event_type, payload)
 
     emit("start")
@@ -1874,36 +1977,119 @@ async def stream_message(
                            if h.get("role") in ("user", "assistant") and isinstance(h.get("content"), str)]
         _classification, _router_response = await classify_prompt(message, _router_history)
         if _classification == "music_play" and _router_response:
-            # Gemma4 extracted a music play query — create playlist via shared helper
-            logger.info("[%s] Gemma router: music_play query='%s'", session_id[:12], _router_response)
-            from jane_web.main import create_music_playlist_from_query
-            playlist = create_music_playlist_from_query(_router_response)
-            if playlist is not None:
-                track_count = len(playlist.get("tracks", []))
-                _router_response = (
-                    f"{playlist['name']} ({track_count} track{'s' if track_count != 1 else ''}). "
-                    f"[MUSIC_PLAY:{playlist['id']}]"
-                )
-                _gemma_short_circuit = True
-            else:
-                logger.info("[%s] Music query had no matches — letting Claude respond", session_id[:12])
+            # Music: delegate to Opus for nuanced handling (e.g., "play something
+            # relaxing", "skip the piano tutorials"). Server pre-creates the playlist
+            # so Opus can reference it, but Opus decides the response.
+            logger.info("[%s] Gemma router: music_play query='%s' → delegating to Opus",
+                        session_id[:12], _router_response)
+            _gemma_delegate_ack = f"Playing {_router_response}..."
+            _gemma_short_circuit = False
+            try:
+                from jane_web.main import create_music_playlist_from_query
+                playlist = create_music_playlist_from_query(_router_response)
+                if playlist is not None and len(playlist.get("tracks", [])) > 0:
+                    track_count = len(playlist["tracks"])
+                    track_names = ", ".join(t.get("title", t.get("path", "?")) for t in playlist["tracks"][:10])
+                    _music_ctx = (
+                        f"\n\n[MUSIC DATA — playlist created server-side]\n"
+                        f"Playlist ID: {playlist['id']}\n"
+                        f"Name: {playlist['name']}\n"
+                        f"Tracks ({track_count}): {track_names}\n"
+                        f"[END MUSIC DATA]\n\n"
+                        f"To play this playlist, include [MUSIC_PLAY:{playlist['id']}] in your response.\n"
+                        f"Tell the user what you're playing. If tracks include duplicates or "
+                        f"unwanted versions (e.g., tutorials vs originals), mention it."
+                    )
+                    message = message + _music_ctx
+                else:
+                    message = message + "\n\n[MUSIC DATA]\nNo matching tracks found for this query.\n[END MUSIC DATA]\nTell the user you couldn't find matching music."
+            except Exception as _music_err:
+                logger.warning("[%s] Music playlist creation failed: %s", session_id[:12], _music_err)
+                message = message + f"\n\n[MUSIC ERROR]\nFailed to search music library: {_music_err}\n[END MUSIC ERROR]"
         elif _classification == "read_messages":
-            # Delegate to Jane's brain — she needs to see message content to
-            # count, classify (spam vs important), and summarize.
-            # Emit fetch_unread tool call so message data rides back with the
-            # next brain response, then let the brain analyze it.
-            logger.info("[%s] Gemma router: read_messages → delegating to brain with fetch_unread",
+            # Read messages: emit tool call to Android and SHORT-CIRCUIT.
+            # Don't invoke the brain yet — it has no data to work with.
+            # The Android app (v0.2.2+) will:
+            #   1. Run MessagesReadInboxHandler
+            #   2. Wait for the result
+            #   3. Auto-send a follow-up with the tool results
+            #   4. The brain gets the data on the follow-up turn
+            logger.info("[%s] Gemma router: read_messages → emitting tool call + short-circuit",
                         session_id[:12])
             import json as _json
             _tool_call_json = _json.dumps({
-                "tool": "messages.fetch_unread",
-                "args": {"limit": 10},
+                "tool": "messages.read_inbox",
+                "args": {"limit": 20},
                 "call_id": f"fast_{int(time.time()*1000)}",
             })
             _raw_emit("client_tool_call", _tool_call_json)
-            # Generate a contextual ack but do NOT short-circuit — let the brain handle it.
-            _gemma_delegate_ack = "Let me check your messages..."
+            _router_response = "Checking your messages..."
+            _gemma_short_circuit = True
+        elif _classification == "read_email":
+            # Email is server-side (not a phone tool). Fetch emails here and
+            # inject them into the brain context so Jane can respond with actual
+            # email content in a single turn — no CLIENT_TOOL round-trip needed.
+            logger.info("[%s] Gemma router: read_email → fetching server-side",
+                        session_id[:12])
+            _gemma_delegate_ack = "Let me check your email..."
             _gemma_short_circuit = False
+            _email_data_ctx = ""
+            try:
+                from agent_skills.email_tools import read_inbox as _read_inbox
+                # Parse limit and query from router response
+                _email_resp = (_router_response or "").lower().strip()
+                _email_limit = 10
+                _email_query = "is:unread"
+                # Check for number in response (e.g., "read_email 3")
+                import re as _email_re
+                _limit_match = _email_re.search(r"\b(\d+)\b", _email_resp)
+                if _limit_match:
+                    _email_limit = min(int(_limit_match.group(1)), 20)
+                # Check for sender filter (e.g., "from:bob")
+                _from_match = _email_re.search(r"from:(\S+)", _email_resp)
+                if _from_match:
+                    _email_query = f"from:{_from_match.group(1)}"
+                _emails = _read_inbox(limit=_email_limit, query=_email_query)
+                if _emails:
+                    import json as _ej
+                    _email_data_ctx = (
+                        "\n\n[EMAIL INBOX DATA — fetched server-side just now]\n"
+                        + _ej.dumps(_emails, indent=2, default=str)
+                        + "\n[END EMAIL INBOX DATA]\n\n"
+                        "Summarize these emails for the user. Triage: personal/important emails first, "
+                        "skip spam/promos. Quote sender and subject. If the user asked about a specific "
+                        "sender or count, honor that."
+                    )
+                else:
+                    _email_data_ctx = (
+                        "\n\n[EMAIL INBOX DATA — fetched server-side just now]\n"
+                        "No unread emails found.\n"
+                        "[END EMAIL INBOX DATA]\n\n"
+                        "Tell the user their inbox is clear."
+                    )
+                logger.info("[%s] Fetched %d emails server-side", session_id[:12], len(_emails))
+            except RuntimeError as _email_err:
+                # No Gmail credentials — tell the brain so it can explain
+                _email_data_ctx = (
+                    "\n\n[EMAIL ERROR]\n"
+                    f"Gmail is not set up yet: {_email_err}\n"
+                    "Tell the user they need to sign in with Google on the Vessence web UI "
+                    "to enable email access. The sign-in page is at their Jane web URL.\n"
+                    "[END EMAIL ERROR]"
+                )
+                logger.warning("[%s] Email fetch failed (no credentials): %s",
+                               session_id[:12], _email_err)
+            except Exception as _email_err:
+                _email_data_ctx = (
+                    "\n\n[EMAIL ERROR]\n"
+                    f"Failed to fetch emails: {_email_err}\n"
+                    "Apologize and suggest trying again.\n"
+                    "[END EMAIL ERROR]"
+                )
+                logger.error("[%s] Email fetch failed: %s", session_id[:12], _email_err)
+            # Inject email data into the brain message
+            if _email_data_ctx:
+                message = message + _email_data_ctx
         elif _classification == "shopping_list":
             # Shopping list intent — handle add/remove directly, delegate queries to brain.
             logger.info("[%s] Gemma router: shopping_list action='%s'", session_id[:12], _router_response)
@@ -2036,6 +2222,20 @@ async def stream_message(
             emit("status", "Loading memory and building context...")
             request_ctx = None
 
+            # ── Map Gemma classification → intent_level + tool_context ──
+            # This determines how heavy the context build is. Tool turns get
+            # minimal context (no memory, no history) + only the relevant tool
+            # rules. Data turns (read email/messages) get pre-fetched data but
+            # no tool protocols. Full turns get everything.
+            from context_builder.v1.context_builder import CLASSIFICATION_TO_INTENT
+            _intent_level, _tool_context = CLASSIFICATION_TO_INTENT.get(
+                (_classification or "").lower(),
+                (None, None),  # default: full context
+            )
+            if _intent_level:
+                logger.info("[%s] Intent mapping: %s → intent_level=%s",
+                            session_id[:12], _classification, _intent_level)
+
             # Standing brain with existing session: skip expensive context build
             # (context was sent on first turn, CLI remembers it)
             from llm_brain.v1.standing_brain import get_standing_brain_manager
@@ -2052,14 +2252,39 @@ async def stream_message(
             if _skip_context:
                 from context_builder.v1.context_builder import JaneRequestContext, _format_recent_history, TTS_SPOKEN_BLOCK_INSTRUCTION
                 safety_parts = []
-                recent = _format_recent_history(list(state.history), max_turns=6, max_chars=2400)
-                if recent:
-                    safety_parts.append(f"[Recent exchanges]\n{recent}")
+                # For tool_mode/data_mode, skip recent history — it's not needed
+                # for mechanical tool execution and wastes tokens.
+                if _intent_level in ("tool_mode", "data_mode"):
+                    pass  # no recent history for tool turns
+                else:
+                    recent = _format_recent_history(list(state.history), max_turns=6, max_chars=2400)
+                    if recent:
+                        safety_parts.append(f"[Recent exchanges]\n{recent}")
+                # Retrieve fresh memory from ChromaDB for EVERY standing brain turn
+                # (not just turn 1). Without this, Jane has no memory of who the user
+                # is, their preferences, or context — making her feel "dumb."
+                if _intent_level not in ("tool_mode", "data_mode", "greeting"):
+                    try:
+                        from context_builder.v1.context_builder import _safe_get_memory_summary
+                        _sb_memory = _safe_get_memory_summary(
+                            message,
+                            session_id=session_id,
+                            fallback_summary=state.bootstrap_memory_summary or "",
+                        )
+                        if _sb_memory and _sb_memory != "No relevant context found.":
+                            safety_parts.append(f"[Retrieved Memory]\n{_sb_memory}")
+                            if not state.bootstrap_memory_summary:
+                                state.bootstrap_memory_summary = _sb_memory
+                    except Exception as _mem_err:
+                        logger.warning("[%s] Standing brain memory retrieval failed: %s", session_id[:12], _mem_err)
                 # Re-inject TTS instruction on every turn when TTS is active,
                 # since the standing brain only got the system prompt on turn 1
                 # and the user may have toggled TTS on mid-session.
                 if tts_enabled:
                     safety_parts.append(f"[TTS MODE ACTIVE]\n{TTS_SPOKEN_BLOCK_INSTRUCTION}")
+                # Inject tool-specific context for tool_mode turns
+                if _tool_context:
+                    safety_parts.append(_tool_context)
                 safety_ctx = "\n\n".join(safety_parts)
                 user_msg, _cm_loaded = _maybe_prepend_code_map(message)
                 if _cm_loaded:
@@ -2110,16 +2335,20 @@ async def stream_message(
                 logger.info("[%s] Shopping list context injected, ChromaDB skipped", session_id[:12])
             else:
                 _memory_fallback = state.bootstrap_memory_summary or get_prefetch_result(session_id)
+                # For tool_mode/data_mode, skip memory retrieval entirely
+                _enable_memory = _intent_level not in ("tool_mode", "data_mode", "greeting")
                 request_ctx = await build_jane_context_async(
                     message,
                     list(state.history),  # snapshot copy — prevents race with concurrent writes
                     file_context=resolved_file_context,
                     conversation_summary=summary_text,
                     session_id=session_id,
-                    enable_memory_retrieval=True,
+                    enable_memory_retrieval=_enable_memory,
                     memory_summary_fallback=_memory_fallback,
                     platform=platform,
                     tts_enabled=tts_enabled,
+                    intent_level=_intent_level,
+                    tool_context=_tool_context,
                     on_status=lambda s: emit("status", s),
                 )
 

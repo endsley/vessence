@@ -142,7 +142,7 @@ def _resolve_model(provider: str) -> str:
 _PERSONAL_INFO = ""  # Populated by _load_personal_info() on first call
 
 SYSTEM_PROMPT = f"""Classify each message. Output exactly two lines:
-CLASSIFICATION: SELF_HANDLE or MUSIC_PLAY or SHOPPING_LIST or READ_MESSAGES or DELEGATE_OPUS
+CLASSIFICATION: SELF_HANDLE or MUSIC_PLAY or SHOPPING_LIST or READ_MESSAGES or READ_EMAIL or DELEGATE_OPUS
 RESPONSE: <response>
 
 {_PERSONAL_INFO}
@@ -151,25 +151,40 @@ SELF_HANDLE — greetings, simple math, jokes, weather (use cached data), trivia
 STT garbage → "was that meant for me?"
 IMPORTANT: If prior assistant message asked a question or proposed an action, short replies (yes/no/sure/ok/go ahead/do it/yes please/cancel) are CONFIRMATIONS → DELEGATE, not self-handle.
 
-MUSIC_PLAY — starts with: play/put on/throw on/listen to/shuffle. RESPONSE = artist/song name.
-Questions about music (do we have/what songs/list/show) → DELEGATE.
+MUSIC_PLAY — ONLY when the user's FIRST WORD is: play/put/throw/listen/shuffle.
+RESPONSE = just the artist or song name (nothing else).
+If the message is a QUESTION about music (why/how/what/check/is/are/can/do/where) → DELEGATE, NOT music_play.
+If the message contains words like: why, check, problem, empty, broken, think, wrong, fix → DELEGATE, NOT music_play.
 
 SHOPPING_LIST — add/remove/show/check items on shopping/grocery lists. RESPONSE = action + item.
 
-READ_MESSAGES — check/read text messages. RESPONSE = read_recent [+ sender].
+READ_MESSAGES — check/read text messages. RESPONSE = read_inbox [+ sender].
 
-DELEGATE_OPUS — everything else. SMS, email, calls, files, code, complex questions.
+READ_EMAIL — check/read/search email or inbox. RESPONSE = read_email [+ query].
+Examples: "check my email", "read my inbox", "any new emails", "read email from Bob".
+NOT for sending email — that's DELEGATE_OPUS.
+
+DELEGATE_OPUS — everything else. SMS, calls, files, code, complex questions, complaints, follow-ups.
 Never say "I can't do that" — DELEGATE. Jane CAN do it.
 RESPONSE = short ack referencing their topic + time hint.
 
 Examples:
 User: "hey" → SELF_HANDLE / Hey!
 User: "play shakira" → MUSIC_PLAY / shakira
+User: "play sky full of stars" → MUSIC_PLAY / sky full of stars
+User: "why is the playlist empty" → DELEGATE_OPUS / Checking the playlist — one sec.
+User: "I don't think this is working" → DELEGATE_OPUS / Let me look into that.
+User: "can you check why there were no songs" → DELEGATE_OPUS / Investigating the music issue.
 User: "add milk to the list" → SHOPPING_LIST / add milk
-User: "read my texts" → READ_MESSAGES / read_recent
-User: "fix the auth bug" → DELEGATE_OPUS / Looking into the auth bug — one sec."""
+User: "read my texts" → READ_MESSAGES / read_inbox
+User: "check my email" → READ_EMAIL / read_email
+User: "any new emails" → READ_EMAIL / read_email
+User: "read the top 3 emails" → READ_EMAIL / read_email 3
+User: "email from Bob" → READ_EMAIL / read_email from:bob
+User: "fix the auth bug" → DELEGATE_OPUS / Looking into the auth bug — one sec.
+User: "call my wife" → DELEGATE_OPUS / Calling now."""
 
-_CLASSIFY_RE = re.compile(r"(?:CLASSIFICATION:\s*)?(SELF_HANDLE|MUSIC_PLAY|SHOPPING_LIST|READ_MESSAGES|DELEGATE_OPUS)", re.IGNORECASE)
+_CLASSIFY_RE = re.compile(r"(?:CLASSIFICATION:\s*)?(SELF_HANDLE|MUSIC_PLAY|SHOPPING_LIST|READ_MESSAGES|READ_EMAIL|DELEGATE_OPUS)", re.IGNORECASE)
 _RESPONSE_RE = re.compile(r"RESPONSE:\s*(.*)", re.DOTALL)
 
 # Weather keywords — if detected, inject cached weather data into gemma's context
@@ -363,6 +378,9 @@ async def _call_ollama(
         "keep_alive": -1,
         "options": {
             "temperature": 0.1,
+            # Gemma4 supports 128K context. We set 32K here to give headroom
+            # for future prompt expansion without wasting VRAM on the full 128K.
+            "num_ctx": 32768,
             # Classification output is CLASSIFICATION: X\nRESPONSE: one short sentence
             # — never more than ~60 tokens. Capping tight makes cold-starts fast.
             "num_predict": 80,
@@ -713,6 +731,29 @@ async def classify_prompt(
         classification = cls_match.group(1).upper()
 
         if classification == "MUSIC_PLAY":
+            # Hard guard: only accept MUSIC_PLAY if the user's message contains
+            # a play-like verb. Gemma4 often misclassifies follow-up questions
+            # as music requests, so we also reject messages with question words.
+            _msg_lower = message.strip().lower()
+            _play_prefixes = ("play ", "put on ", "throw on ", "listen to ", "shuffle ")
+            # Also accept polite phrasings like "can you play", "please play", etc.
+            _polite_play_re = re.compile(
+                r"^(?:can you|could you|would you|please|hey jane|jane)?\s*"
+                r"(?:please\s+)?"
+                r"(?:play|put on|throw on|listen to|shuffle)\s",
+                re.IGNORECASE,
+            )
+            _question_words = ("why ", "how ", "what ", "check ", "is ", "are ", "do ", "where ", "fix ")
+            _has_play = any(_msg_lower.startswith(p) for p in _play_prefixes) or bool(_polite_play_re.match(_msg_lower))
+            _is_question = any(_msg_lower.startswith(q) for q in _question_words)
+            if not _has_play or _is_question:
+                logger.info(
+                    "Initial ack (%s/%s): MUSIC_PLAY overridden → DELEGATE (message doesn't start with play verb: %r)",
+                    provider, model, message[:80],
+                )
+                resp_match = _RESPONSE_RE.search(content)
+                ack = resp_match.group(1).strip() if resp_match else "One sec."
+                return ("delegate", ack)
             resp_match = _RESPONSE_RE.search(content)
             query = resp_match.group(1).strip().rstrip('"').strip() if resp_match else None
             return ("music_play", query or None)

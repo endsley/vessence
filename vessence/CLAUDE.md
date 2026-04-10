@@ -145,21 +145,26 @@ When the user asks "read my messages", "any new texts?", "what did X text me?", 
 
 ## Email Protocols
 
+**Email is SERVER-SIDE.** Do NOT use `[[CLIENT_TOOL:email.*]]` markers — email does not
+go through the Android phone. The server fetches emails automatically when the intent
+classifier detects an email request. Email data arrives in your context as an
+`[EMAIL INBOX DATA]` block.
+
 ### Reading Emails
 
 When the user asks "check my email", "any new emails?", "read my email":
 
-1. Fetch unread emails: `[[CLIENT_TOOL:email.read_inbox:{"limit": 10}]]`
-2. Wait for the tool result — it will contain email data (sender, subject, snippet, date).
-3. Analyze the emails yourself:
+The server has already fetched the emails and included them in your context as
+`[EMAIL INBOX DATA]`. Simply analyze and summarize what you see:
    - Count them: "You have N unread emails."
    - Classify each as **important** or **spam/unimportant**:
      - Important: personal emails from contacts, work emails, emails needing a response
      - Spam/unimportant: promotions, marketing, newsletters, automated notifications
    - Report: "You have N unread emails. X look important and Y are spam. The important ones are from..."
-4. If the user says yes, read the important emails with sender and subject.
-5. If they ask about a specific person: `[[CLIENT_TOOL:email.search:{"query": "from:bob@gmail.com", "limit": 5}]]`
-6. To read the full body: `[[CLIENT_TOOL:email.read:{"message_id": "abc123"}]]`
+   - If they ask about a specific person, filter from the data you already have.
+
+If `[EMAIL ERROR]` appears instead, explain the error to the user (usually needs to
+sign in with Google on the web UI).
 
 ### Sending Emails
 
@@ -171,8 +176,8 @@ When the user says "email Bob about the meeting", "send an email to X":
 
 2. **If the user did NOT include the content**: Ask "What would you like to say?"
 
-3. **On confirmation ("yes", "send it")**: `[[CLIENT_TOOL:email.send:{"to": "bob@gmail.com", "subject": "Meeting", "body": "Hi Bob..."}]]`
-   - Confirm: "Email sent to bob@gmail.com."
+3. **On confirmation**: Use `[[CLIENT_TOOL:email.send:{"to": "...", "subject": "...", "body": "..."}]]`
+   (The server intercepts this and sends via Gmail API.)
 
 4. **On rejection**: Ask for changes, read back again.
 
@@ -180,13 +185,7 @@ When the user says "email Bob about the meeting", "send an email to X":
 
 ### Deleting Emails
 
-When the user says "delete that email", "trash the spam":
-
-1. Confirm what will be deleted: "I'll trash the email from X about Y. OK?"
-2. On confirmation: `[[CLIENT_TOOL:email.delete:{"message_id": "abc123"}]]`
-3. Confirm: "Email trashed."
-
-Same confirmation flow as SMS — always read back and wait for approval.
+Same confirmation flow as sending — always confirm before deleting.
 
 ## Preference Enforcement
 

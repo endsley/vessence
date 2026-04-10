@@ -114,52 +114,66 @@ When a user sends a message through any interface, this is the complete flow:
 - Instant commands (`show job queue`, `my commands`) bypass LLM entirely (<100ms)
 - Task classifier checks if this is a "big task" to offload to background queue
 
-### Phase 2: Intent Classification
-- **Gemma3:4b** classifies message into: `greeting` / `simple` / `medium` / `hard`
-- Pre-warmed at startup for <2ms classification (vs 29s cold)
-- Classification determines brain tier AND context depth
+### Phase 2: Intent Classification + Context Assembly (Gemma Router)
+- **Gemma4:e4b** (`intent_classifier/v1/gemma_router.py`) classifies each message into an intent:
+  - `SELF_HANDLE` → greetings, math, trivia (minimal context)
+  - `MUSIC_PLAY` → server creates playlist, short-circuits (no Opus needed)
+  - `SHOPPING_LIST` → server injects list data, Opus responds
+  - `READ_MESSAGES` → server emits `messages.read_inbox` tool call to Android
+  - `READ_EMAIL` → server pre-fetches inbox via Gmail API server-side
+  - `DELEGATE_OPUS` → everything else (SMS, calls, complex questions, code)
+- Pre-warmed at startup via Ollama `keep_alive: -1` (~300ms classification)
+- Classification determines **two things**: quick ack content AND context depth
 
-### Phase 2.1: Quick Acknowledgment (`jane_web/jane_proxy.py`)
-- **Categorized messages** (matching one of 12 categories) skip the ack — Opus answers directly
-- **Uncategorized messages** get an Opus-generated quick ack streamed immediately while context assembly runs in parallel
-- `_pick_ack()` selects from ~200 ack responses across 12 categories (greetings, encouragement, curiosity, etc.)
+**Architecture principle (2026-04-09):** Gemma is the **router + context assembler**, not just a classifier.
+- For READ operations, the server pre-fetches data BEFORE Opus runs and injects it into context
+- For WRITE operations (SMS, calls), only the specific tool's protocol (~200 tokens) is injected
+- Opus never sees protocols for tools it won't use on this turn
+- This keeps context O(1) per turn regardless of how many tools Jane has
 
-### Phase 3: Context Assembly (`jane/context_builder.py`)
-- **`_classify_prompt_profile()`** selects what context to inject:
-  - `greeting` → no memory, no task state (minimal)
-  - `simple` → user background only
-  - `file_lookup` → vault file context included
-  - `project_work` → full context + tools
-  - `factual_personal` → memory + background
-  - `casual_followup` → conversation summary only
-- **Parallel assembly** (async):
-  - Memory retrieval via daemon (`127.0.0.1:8083/query`, ~200ms) or direct ChromaDB fallback (~2s)
-  - Task state from `current_task_state.json`
-  - Personal facts from `user_profile_facts.json`
-  - Research offload (web search via Ollama, if needed)
-- **System prompt sections** built in order:
+### Phase 2.1: Quick Acknowledgment
+- Gemma generates a brief ack ("Let me check your messages...") emitted immediately via SSE
+- Ack covers the latency of server pre-fetch + Opus thinking
+- In voice mode: ack is spoken via TTS. In text mode: suppressed (typing indicator instead).
+
+### Phase 3: Context Assembly (`context_builder/v1/context_builder.py`)
+- **Gemma classification → intent_level mapping** (`CLASSIFICATION_TO_INTENT`):
+  - `self_handle` → `greeting` intent (no memory, no tools, no history)
+  - `read_messages` → `data_mode` (no memory, no tools; data pre-fetched by server)
+  - `read_email` → `data_mode` (same — email data injected into message)
+  - `delegate_opus` → full profile (memory, history, all tool protocols)
+- **`_classify_prompt_profile()`** selects what context to inject based on intent_level:
+  - `tool_mode` → no memory, no history, only the specific tool's rules (~200 tokens)
+  - `data_mode` → no memory, no history, no tools (data already in message)
+  - `greeting` → no memory, no tools, no history
+  - `None` (full) → memory + history + tools + task state + conversation summary
+- **System prompt sections** (for full profile):
   1. Base Jane identity
   2. Active essence personality (if loaded)
   3. Essence tools catalog
   4. User background (selective)
   5. Current task state
   6. Conversation summary (last 6 turns, max 2400 chars)
-  7. Retrieved memory (ChromaDB results, max 6000 chars)
-  8. Research brief
+  7. Retrieved memory (ChromaDB, max 6000 chars) — **skipped for tool_mode/data_mode/greeting**
+  8. Tool protocols — **only injected for full profile; specific tool context for tool_mode**
   9. Active file context
 
 ### Phase 4: Brain Routing (`jane_web/jane_proxy.py`)
 - **Standing brain optimization:** If brain is alive AND turn count > 0, skip expensive context rebuild — brain already has context from prior turns. Only inject new message + recent history.
-- **Tier routing** based on Gemma classification:
-  - `greeting` / `simple` → haiku (slim context)
-  - `medium` → sonnet (full context)
-  - `hard` → opus (full context + tools)
+  - For `tool_mode`/`data_mode` turns: even recent history is skipped — only tool context + user message.
+- **Single model** for all turns: Claude Opus via standing CLI brain. No tier routing.
 - Provider-specific execution path selected by explicit branch in `jane_proxy.py`:
   - `claude` → `persistent_claude.py`
   - `gemini` → `persistent_gemini.py`
   - `codex` → `persistent_codex.py`
   - fallback / non-persistent providers → `brain_adapters.py`
 - The internal provider protocols differ, but Jane web normalizes them into the same outward event contract for clients.
+
+### Phase 4.1: Tool Call Follow-Up (Android only)
+- When a `client_tool_call` SSE event fires (e.g., `messages.read_inbox`), Android runs the handler
+- After the brain's "done" event, if a tool call was dispatched, Android waits up to 10s for the handler to finish
+- Tool results are auto-sent as a follow-up message so Opus can respond with actual data in one conversational turn
+- This prevents the dead-end where STT re-launches before the user has heard anything
 
 ### Phase 5: Streaming Response
 - Brain outputs chunks → `jane_proxy.py` emits SSE events to client:

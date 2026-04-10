@@ -1,7 +1,7 @@
 ---
 Title: Clean up SMS/tool call display in chat bubbles
 Priority: 2
-Status: pending
+Status: completed
 Created: 2026-04-06
 ---
 

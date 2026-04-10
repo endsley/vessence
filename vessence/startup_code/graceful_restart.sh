@@ -1,20 +1,22 @@
 #!/bin/bash
 # graceful_restart.sh — Zero-downtime restart for Jane Web Server
 #
-# Flow:
-#   1. Determine which port the current server is on (8081 or 8083)
-#   2. Start a NEW server on the alternate port
-#   3. Wait for the new server's /health to return 200
-#   4. Warm up the new CLI brain (POST /api/jane/warmup)
-#   5. Tell the reverse proxy to switch upstream to the new port
-#   6. Poll proxy active_requests until old requests drain (up to 60s)
-#   7. Kill the old server
+# Design: Ping-pong between two ports (8081 and 8084).
+#   1. Detect which port is currently active
+#   2. Start a NEW server on the OTHER port
+#   3. Wait for health + warm up the CLI brain
+#   4. Switch the proxy (instant — zero user-facing downtime)
+#   5. Kill the old server
 #
-# Prerequisites:
-#   - jane-proxy.service must be running (reverse_proxy.py on port 8080)
-#   - jane-web.service must be running (uvicorn on port 8081 or 8083)
+# The user is NEVER offline. The proxy always points at a warm server.
+# The switch itself is a single HTTP call — effectively instant.
 #
-# Note: Port 8082 is reserved for the relay server. We use 8083 as the alternate.
+# Port reservations:
+#   8080 — reverse proxy (always running)
+#   8081 — jane-web slot A
+#   8082 — relay server (reserved)
+#   8083 — memory daemon (reserved)
+#   8084 — jane-web slot B
 #
 # Usage:
 #   bash startup_code/graceful_restart.sh
@@ -29,36 +31,33 @@ VAULT_HOME="/home/chieh/ambient/vault"
 ENV_FILE="$VESSENCE_DATA_HOME/.env"
 
 HEALTH_TIMEOUT=30    # seconds to wait for new server health
-DRAIN_TIMEOUT=60     # seconds to wait for old server to drain
 WARMUP_TIMEOUT=60    # seconds to wait for CLI brain warmup
 
 log() { echo "[$(date '+%H:%M:%S')] $*"; }
 
-# ── Step 1: Determine current and next port ──
+# ── Step 1: Detect current active port ──
 log "Checking current upstream..."
-CURRENT_PORT=$(curl -s http://localhost:$PROXY_PORT/proxy/status 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin)['upstream_port'])" 2>/dev/null || echo "8081")
+CURRENT_PORT=$(curl -s http://localhost:$PROXY_PORT/proxy/status 2>/dev/null \
+    | python3 -c "import sys,json; print(json.load(sys.stdin)['upstream_port'])" 2>/dev/null \
+    || echo "8081")
 
 if [ "$CURRENT_PORT" = "8081" ]; then
-    NEXT_PORT=8083
+    NEXT_PORT=8084
 else
     NEXT_PORT=8081
 fi
 
-log "Current server: port $CURRENT_PORT -> New server: port $NEXT_PORT"
+log "Active: port $CURRENT_PORT → Starting new server on port $NEXT_PORT"
 
-# ── Step 2: Start the new server ──
-log "Starting new server on port $NEXT_PORT..."
-
-# Check if anything is already on the next port and kill it
+# ── Step 2: Clear the target port ──
 OLD_PID=$(lsof -ti:$NEXT_PORT 2>/dev/null || true)
 if [ -n "$OLD_PID" ]; then
-    log "Killing stale process(es) on port $NEXT_PORT (PIDs: $OLD_PID)"
-    kill $OLD_PID 2>/dev/null || true
-    sleep 2
+    log "Killing stale process on port $NEXT_PORT (PID: $OLD_PID)"
+    kill -9 $OLD_PID 2>/dev/null || true
+    sleep 1
 fi
 
-# Source .env BEFORE starting the new server so it inherits all env vars.
-# Use python to parse it safely (handles unquoted values with spaces/commas).
+# ── Step 3: Load environment ──
 if [ -f "$ENV_FILE" ]; then
     eval "$("$PYTHON" -c "
 import sys
@@ -69,14 +68,19 @@ for line in open('$ENV_FILE'):
     key, _, val = line.partition('=')
     key = key.strip()
     if key:
-        # Shell-escape the value
         val = val.replace(\"'\", \"'\\\"'\\\"'\")
         print(f\"export {key}='{val}'\")
 ")"
-    log "Loaded environment from $ENV_FILE"
 fi
 
-# Start new server with same environment as the systemd service
+# ── Step 3.5: Force fresh Python code ──
+# Touch all .py files to update mtime (Claude Code edits preserve original
+# timestamps, which tricks Python into using stale .pyc bytecache).
+find "$VESSENCE_HOME" -name "*.py" -newer "$VESSENCE_HOME/startup_code/graceful_restart.sh" -exec touch {} + 2>/dev/null || true
+find "$VESSENCE_HOME" -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
+log "Cleared Python bytecache and refreshed file timestamps."
+
+# ── Step 4: Start new server ──
 AMBIENT_BASE="$HOME/ambient" \
 VESSENCE_HOME="$VESSENCE_HOME" \
 VESSENCE_DATA_HOME="$VESSENCE_DATA_HOME" \
@@ -92,8 +96,8 @@ nohup "$PYTHON" -m uvicorn jane_web.main:app \
 NEW_PID=$!
 log "New server PID: $NEW_PID"
 
-# ── Step 3: Wait for health check ──
-log "Waiting for new server health check..."
+# ── Step 5: Wait for health ──
+log "Waiting for new server to be healthy..."
 HEALTH_OK=false
 for i in $(seq 1 $HEALTH_TIMEOUT); do
     if curl -sf "http://localhost:$NEXT_PORT/health" > /dev/null 2>&1; then
@@ -104,90 +108,68 @@ for i in $(seq 1 $HEALTH_TIMEOUT); do
 done
 
 if [ "$HEALTH_OK" = false ]; then
-    log "ERROR: New server failed to start within ${HEALTH_TIMEOUT}s. Aborting."
+    log "ERROR: New server failed to start within ${HEALTH_TIMEOUT}s. Aborting — old server still active."
     kill "$NEW_PID" 2>/dev/null || true
     exit 1
 fi
 
 log "New server is healthy."
 
-# ── Step 4: Warm up the CLI brain ──
-log "Warming up CLI brain on new server..."
-
+# ── Step 6: Warm up the CLI brain ──
+log "Warming up CLI brain..."
 WARMUP_RESPONSE=$(curl -sf --max-time "$WARMUP_TIMEOUT" \
     -X POST "http://localhost:$NEXT_PORT/api/jane/warmup" \
     -H "Content-Type: application/json" \
-    2>/dev/null || echo "warmup_endpoint_missing")
+    2>/dev/null || echo "warmup_failed")
 
-if [ "$WARMUP_RESPONSE" = "warmup_endpoint_missing" ]; then
-    log "No warmup endpoint — waiting 10s for CLI brain startup..."
-    sleep 10
+if [ "$WARMUP_RESPONSE" = "warmup_failed" ]; then
+    log "WARNING: Brain warmup failed or timed out. Switching anyway."
 else
-    log "CLI brain warmup response: $WARMUP_RESPONSE"
+    log "Brain warm: $WARMUP_RESPONSE"
 fi
 
-# ── Step 5: Switch the proxy upstream ──
-log "Switching proxy upstream $CURRENT_PORT -> $NEXT_PORT..."
-
+# ── Step 7: Switch proxy (instant — this is the zero-downtime moment) ──
+log "Switching proxy: $CURRENT_PORT → $NEXT_PORT"
 SWITCH_RESULT=$(curl -sf -X POST "http://localhost:$PROXY_PORT/proxy/switch" \
     -H "Content-Type: application/json" \
     -d "{\"port\": $NEXT_PORT}" 2>/dev/null)
 
 if echo "$SWITCH_RESULT" | python3 -c "import sys,json; d=json.load(sys.stdin); assert d['new_port']==$NEXT_PORT" 2>/dev/null; then
-    log "Proxy switched to port $NEXT_PORT."
+    log "Proxy switched to port $NEXT_PORT. New server is now live."
 else
     log "ERROR: Proxy switch failed. Response: $SWITCH_RESULT"
-    log "Keeping old server running. Kill new server manually (PID $NEW_PID)."
+    log "Old server on $CURRENT_PORT is still active. Kill new server manually (PID $NEW_PID)."
     exit 1
 fi
 
-# ── Step 6: Drain old server (poll active_requests) ──
-log "Draining old server on port $CURRENT_PORT (up to ${DRAIN_TIMEOUT}s)..."
-DRAIN_START=$(date +%s)
-while true; do
-    ELAPSED=$(( $(date +%s) - DRAIN_START ))
-    if [ "$ELAPSED" -ge "$DRAIN_TIMEOUT" ]; then
-        log "Drain timeout reached (${DRAIN_TIMEOUT}s). Proceeding with shutdown."
-        break
-    fi
+# ── Step 8: Kill old server (grace period for in-flight requests) ──
+log "Giving old server 5s grace period for in-flight requests..."
+sleep 5
 
-    ACTIVE=$(curl -s "http://localhost:$PROXY_PORT/proxy/status" 2>/dev/null \
-        | python3 -c "import sys,json; print(json.load(sys.stdin).get('drain_active',0))" 2>/dev/null || echo "0")
+# Stop systemd service ONLY if it's actually running and managing the OLD port.
+# Don't stop it blindly — it might already be dead, and the stop signal
+# can accidentally kill our new nohup server if systemd adopted its PID.
+if systemctl --user is-active jane-web.service >/dev/null 2>&1; then
+    log "Stopping systemd jane-web.service (was managing old server)..."
+    systemctl --user stop jane-web.service 2>/dev/null || true
+fi
 
-    if [ "$ACTIVE" = "0" ]; then
-        log "All in-flight requests drained."
-        break
-    fi
-
-    log "  $ACTIVE active request(s) remaining... waiting"
-    sleep 2
-done
-
-# ── Step 7: Kill old server ──
 OLD_SERVER_PID=$(lsof -ti:$CURRENT_PORT 2>/dev/null || true)
 if [ -n "$OLD_SERVER_PID" ]; then
-    log "Stopping old server (PIDs: $OLD_SERVER_PID)..."
+    log "Stopping old server on port $CURRENT_PORT (PID: $OLD_SERVER_PID)"
     kill $OLD_SERVER_PID 2>/dev/null || true
-    # Wait for graceful shutdown
-    for i in $(seq 1 10); do
-        REMAINING=$(lsof -ti:$CURRENT_PORT 2>/dev/null || true)
-        if [ -z "$REMAINING" ]; then
-            break
-        fi
-        sleep 1
-    done
+    sleep 2
     # Force kill if still alive
     REMAINING=$(lsof -ti:$CURRENT_PORT 2>/dev/null || true)
     if [ -n "$REMAINING" ]; then
-        log "Force-killing old server..."
         kill -9 $REMAINING 2>/dev/null || true
     fi
 fi
 
+# ── Done ──
 log "=== Zero-downtime restart complete ==="
 log "  Active server: port $NEXT_PORT (PID $NEW_PID)"
-log "  Proxy: port $PROXY_PORT -> $NEXT_PORT"
-log "  Old server: stopped"
-
-# Verify final state
-curl -sf "http://localhost:$PROXY_PORT/health" > /dev/null && log "Health check through proxy: OK" || log "WARNING: Health check through proxy failed"
+log "  Proxy: port $PROXY_PORT"
+curl -sf "http://localhost:$PROXY_PORT/health" > /dev/null \
+    && log "Health check: OK" \
+    || log "WARNING: Health check failed"

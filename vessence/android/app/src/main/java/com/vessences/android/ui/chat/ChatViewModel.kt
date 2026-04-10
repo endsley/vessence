@@ -375,6 +375,7 @@ class ChatViewModel(
                 var ackSpoken = false
                 var currentMsgId = aiMsg.id
                 var files = emptyList<com.vessences.android.data.model.StreamEvent.FileRef>()
+                var toolCallDispatched = false  // track if a tool call fired this turn
 
                 flow.catch { e ->
                     val msg = e.message ?: ""
@@ -441,6 +442,7 @@ class ChatViewModel(
                             // PREF_PHONE_TOOLS_ENABLED feature flag (default OFF in Phase 1).
                             try {
                                 toolDispatcher.dispatchRaw(event.data, appContext)
+                                toolCallDispatched = true
                             } catch (e: Exception) {
                                 android.util.Log.w("ChatVM", "tool dispatch failed: ${e.message}")
                             }
@@ -500,6 +502,9 @@ class ChatViewModel(
                                 .replace(Regex("<spoken>[\\s\\S]*?</spoken>", RegexOption.IGNORE_CASE), "")
                                 .replace(Regex("<visual>([\\s\\S]*?)</visual>", RegexOption.IGNORE_CASE)) { it.groupValues[1] }
                                 .replace(Regex("</?(?:spoken|visual|think|thinking|artifact)>", RegexOption.IGNORE_CASE), "")
+                                // Strip leaked [[CLIENT_TOOL:...]] markers during streaming
+                                .replace(Regex("\\[\\[CLIENT_TOOL:[a-z][a-z0-9_.]*:\\{[\\s\\S]*?\\}\\]\\]"), "")
+                                .trim()
                             val ackStatus = if (statusLog.isNotEmpty()) statusLog.last() else null
 
                             // Sentence-level TTS: detect complete sentences and submit for generation
@@ -513,6 +518,7 @@ class ChatViewModel(
                                 // Feed raw text (without markup) into sentence buffer
                                 val cleanDelta = event.data
                                     .replace(Regex("</?(?:spoken|visual|think|thinking|artifact)>", RegexOption.IGNORE_CASE), "")
+                                    .replace(Regex("\\[\\[CLIENT_TOOL:[a-z][a-z0-9_.]*:\\{[\\s\\S]*?\\}\\]\\]"), "")
                                 sentenceBuffer.append(cleanDelta)
                                 // Extract complete sentences (ending with . ! ?)
                                 val sentenceRegex = Regex("([^.!?]+[.!?])\\s*")
@@ -545,6 +551,13 @@ class ChatViewModel(
                             // Strip [ACK] tags (already spoken during streaming)
                             val ackRegex = Regex("\\[ACK\\][\\s\\S]*?\\[/ACK\\]\\s*")
                             rawText = rawText.replace(ackRegex, "").trim()
+                            // Strip any leaked [[CLIENT_TOOL:...]] markers so TTS never
+                            // speaks raw tool syntax (server should strip these, but
+                            // belt-and-suspenders for edge cases).
+                            rawText = rawText.replace(
+                                Regex("\\[\\[CLIENT_TOOL:[a-z][a-z0-9_.]*:\\{[\\s\\S]*?\\}\\]\\]"),
+                                ""
+                            ).trim()
                             // TTS mode: main text is spoken-friendly; <visual> blocks are display-only
                             val visualRegex = Regex("<visual>([\\s\\S]*?)</visual>", RegexOption.IGNORE_CASE)
                             // For display: keep visual content but strip the tags; also strip legacy <spoken> tags
@@ -573,6 +586,42 @@ class ChatViewModel(
                             val hasSpokenBlock = spokenMatch != null
                             // If sentence-level TTS was active, flush remaining buffer,
                             // wait for all audio to finish, THEN reveal the text.
+                            // If a tool call was dispatched this turn (e.g., read_inbox),
+                            // wait for the handler to finish, then auto-send the tool
+                            // results as a follow-up so Jane can respond with the data.
+                            // This prevents the dead-end where STT re-launches before
+                            // the user has heard anything.
+                            if (toolCallDispatched && com.vessences.android.tools.PendingToolResultBuffer.inFlightHandlers.get() > 0) {
+                                android.util.Log.i("ChatVM", "Tool call in-flight — waiting for result before completing turn")
+                                // Show interim message
+                                updateAiMessage(currentMsgId, displayText.ifBlank { "Working on it..." }, isStreaming = true, status = "Waiting for phone data...")
+                                // Wait up to 10s for the tool handler to finish
+                                val toolResults = com.vessences.android.tools.PendingToolResultBuffer.awaitAndDrainAll(10_000)
+                                if (toolResults.isNotEmpty()) {
+                                    android.util.Log.i("ChatVM", "Got ${toolResults.size} tool result(s) — auto-sending follow-up")
+                                    // Build the tool result prefix
+                                    val sb = StringBuilder()
+                                    for (r in toolResults) {
+                                        val obj = com.google.gson.JsonObject()
+                                        obj.addProperty("tool", r.tool)
+                                        obj.addProperty("call_id", r.callId)
+                                        obj.addProperty("status", r.status)
+                                        obj.addProperty("message", r.message)
+                                        if (r.data != null) obj.add("data", r.data)
+                                        sb.append("[TOOL_RESULT:").append(com.google.gson.Gson().toJson(obj).replace("\n", " ")).append("] ")
+                                    }
+                                    // Auto-send a follow-up with the tool results
+                                    // This triggers a new brain turn with the data
+                                    val followUp = sb.toString() + "(tool results from previous request — please analyze and respond)"
+                                    updateAiMessage(currentMsgId, displayText.ifBlank { "Got the data, analyzing..." }, isStreaming = false)
+                                    _state.value = _state.value.copy(isSending = false)
+                                    // Re-send with tool results prepended
+                                    sendMessage(followUp, fromVoice = fromVoice)
+                                    return@collect
+                                }
+                                // If no results after 10s, fall through to normal completion
+                                android.util.Log.w("ChatVM", "Tool result wait timed out — completing normally")
+                            }
                             if (sentenceTtsActive && sentenceQueue != null) {
                                 val remaining = sentenceBuffer.toString().trim()
                                 if (remaining.length > 3) {
@@ -616,8 +665,44 @@ class ChatViewModel(
                         }
                         "error" -> {
                             gotDone = true
-                            updateAiMessage(currentMsgId, event.data, isStreaming = false)
-                            onSendComplete(fromVoice, event.data)
+                            val errorText = event.data ?: ""
+                            // Detect server-restart/busy errors and handle gracefully:
+                            // speak a friendly message, auto-retry after a delay, resume listening.
+                            val isServerBusy = errorText.contains("busy", ignoreCase = true)
+                                || errorText.contains("restarting", ignoreCase = true)
+                                || errorText.contains("unavailable", ignoreCase = true)
+                                || errorText.contains("empty response", ignoreCase = true)
+                            if (isServerBusy) {
+                                val friendlyMsg = "Jane is briefly restarting. Give me about thirty seconds and I'll be right back."
+                                updateAiMessage(currentMsgId, friendlyMsg, isStreaming = false)
+                                if (fromVoice) {
+                                    viewModelScope.launch {
+                                        tts.speak(friendlyMsg)
+                                        // Wait 30 seconds then auto-retry
+                                        kotlinx.coroutines.delay(30_000)
+                                        val retryMsg = "I'm back. Let me try that again."
+                                        viewModelScope.launch { tts.speak(retryMsg) }
+                                        // Re-launch always-listen so user can speak again
+                                        _state.value = _state.value.copy(isSending = false)
+                                        if (chatPrefs.isAutoListenEnabled()) {
+                                            com.vessences.android.MainActivity.instance?.launchStt()
+                                        }
+                                    }
+                                } else {
+                                    // Text mode: just show the message, auto-clear sending state
+                                    viewModelScope.launch {
+                                        kotlinx.coroutines.delay(30_000)
+                                        _state.value = _state.value.copy(
+                                            error = null
+                                        )
+                                    }
+                                }
+                                _state.value = _state.value.copy(isSending = false)
+                                processNextInQueue()
+                            } else {
+                                updateAiMessage(currentMsgId, errorText, isStreaming = false)
+                                onSendComplete(fromVoice, errorText)
+                            }
                         }
                     }
                 }
@@ -629,13 +714,31 @@ class ChatViewModel(
                 }
             } catch (e: Exception) {
                 val msg = e.message ?: ""
-                if (msg.contains("stream", ignoreCase = true) || msg.contains("reset", ignoreCase = true) || msg.contains("timeout", ignoreCase = true)) {
-                    updateAiMessage(aiMsg.id, "Connection interrupted. Please try again.", isStreaming = false)
+                val isTransient = msg.contains("stream", ignoreCase = true)
+                    || msg.contains("reset", ignoreCase = true)
+                    || msg.contains("timeout", ignoreCase = true)
+                    || msg.contains("refused", ignoreCase = true)
+                    || msg.contains("connect", ignoreCase = true)
+                if (isTransient) {
+                    val friendlyMsg = "Jane seems to be restarting. I'll try again in about thirty seconds."
+                    updateAiMessage(aiMsg.id, friendlyMsg, isStreaming = false)
+                    if (fromVoice) {
+                        viewModelScope.launch {
+                            tts.speak(friendlyMsg)
+                            kotlinx.coroutines.delay(30_000)
+                            val retryMsg = "I'm back. Let me try that again."
+                            viewModelScope.launch { tts.speak(retryMsg) }
+                            _state.value = _state.value.copy(isSending = false)
+                            if (chatPrefs.isAutoListenEnabled()) {
+                                com.vessences.android.MainActivity.instance?.launchStt()
+                            }
+                        }
+                    }
                 } else {
                     updateAiMessage(aiMsg.id, "Error: $msg", isStreaming = false)
-                }
-                if (fromVoice) {
-                    voiceController?.onAssistantReply("Sorry, the connection was interrupted.", chatPrefs.isAutoListenEnabled())
+                    if (fromVoice) {
+                        voiceController?.onAssistantReply("Sorry, something went wrong.", chatPrefs.isAutoListenEnabled())
+                    }
                 }
                 _state.value = _state.value.copy(isSending = false)
                 processNextInQueue()

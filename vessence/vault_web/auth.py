@@ -246,9 +246,10 @@ def revoke_device(device_id: str):
 
 def device_fingerprint_from_request(request) -> str:
     ua = request.headers.get("user-agent", "")
-    # Use real client IP behind reverse proxies (Cloudflare, nginx)
-    ip = (request.headers.get("CF-Connecting-IP")
-          or request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
-          or request.client.host)
-    raw = f"{ip}:{ua}"
+    # Fingerprint based on User-Agent ONLY — not IP.
+    # Mobile IPs change constantly (cell towers, WiFi/cellular switches),
+    # which was invalidating sessions and causing 401 storms. The trusted
+    # device cookie is the primary auth proof; the fingerprint just groups
+    # sessions by device type.
+    raw = ua
     return hashlib.sha256(raw.encode()).hexdigest()[:32]

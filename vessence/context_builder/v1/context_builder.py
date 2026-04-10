@@ -54,169 +54,85 @@ CODE_MAP_PROTOCOL = (
 )
 
 PHONE_TOOLS_PROTOCOL = (
-    "## Phone Tools (Android client only)\n"
-    "When the user is on the Android client, you have access to phone-side tools:\n"
-    "place calls, draft and send SMS through a back-and-forth loop, and read recent\n"
-    "messaging notifications aloud. You invoke them by emitting inline text markers\n"
-    "in your response. The jane_web proxy strips these markers from the user-visible\n"
-    "chat bubble and converts them into structured events the Android client dispatches.\n\n"
-    "Marker format: `[[CLIENT_TOOL:<name>:<json_args>]]`\n\n"
-    "### contacts.call — place a phone call\n"
-    "Emit when the user clearly asks to make a call. The Android client resolves\n"
-    "the contact locally and speaks a 10-second countdown before dialing. For\n"
-    "relational references ('my wife', 'mom', 'dad'), resolve to the specific\n"
-    "stored contact name using the user's personal facts.\n"
-    "  User: 'call Sarah'\n"
-    "  You:  'On it — calling Sarah now. [[CLIENT_TOOL:contacts.call:{\"query\":\"Sarah\"}]]'\n"
-    "  User: 'dial my wife'\n"
-    "  You:  'Dialing Sarah. [[CLIENT_TOOL:contacts.call:{\"query\":\"Sarah\"}]]'\n\n"
-    "### SMS draft protocol — a multi-turn state machine\n"
-    "Texting is NOT a single action. It is a stateful loop across turns:\n"
-    "  contacts.sms_draft        → open a new draft (first time)\n"
-    "  contacts.sms_draft_update → rewrite the body after an edit instruction\n"
-    "  contacts.sms_send         → commit and send\n"
-    "  contacts.sms_cancel       → abandon the draft\n\n"
-    "RULE: At most ONE open draft at a time. A draft is 'open' from when you\n"
-    "emit sms_draft until you emit sms_send or sms_cancel (or 120 seconds pass).\n\n"
-    "Open a draft for ANY texting intent — direct, indirect, or relational:\n"
-    "  Direct:      'text Sarah I'll be home in 20'\n"
-    "  Indirect:    'ask my wife when she's coming back'\n"
-    "               'let mom know I landed safely'\n"
-    "               'tell dad happy birthday'\n"
-    "For indirect phrasings, YOU compose the body in a natural concise tone —\n"
-    "the user told you intent, not exact words. For relational references, resolve\n"
-    "to a specific contact name via the user's personal facts. When unsure,\n"
-    "ASK before emitting — do not guess.\n\n"
-    "Every contacts.sms_draft needs a fresh `draft_id` (short UUID-like string\n"
-    "you generate). Echo the SAME draft_id on every subsequent update / send /\n"
-    "cancel marker for that draft so the Android client validates state.\n\n"
-    "  User: 'ask my wife when she's coming back'\n"
-    "  You:  '[[CLIENT_TOOL:contacts.sms_draft:\n"
-    "         {\"query\":\"Sarah\",\"body\":\"Hey, when are you coming back?\",\n"
-    "         \"draft_id\":\"d1a2b3c4\"}]]'\n"
-    "\n"
-    "IMPORTANT: Keep your visible text around tool markers MINIMAL. The Android\n"
-    "client already reads the draft body back via TTS — do NOT repeat it.\n"
-    "For sms_draft: just emit the marker with no or minimal preamble.\n"
-    "For sms_send: just 'Sent.' or 'Done.' — nothing more.\n"
-    "For sms_draft_update: brief acknowledgment like 'Updated.' then the marker.\n"
-    "The user is LISTENING — less is more.\n\n"
-    "After the Android client reads the body back, the user's NEXT turn will be:\n"
-    "  (a) APPROVAL     → emit contacts.sms_send with the same draft_id\n"
-    "  (b) EDIT         → emit contacts.sms_draft_update with the FULL new body\n"
-    "                     (never a diff) and the same draft_id\n"
-    "  (c) REJECT       → emit contacts.sms_cancel\n"
-    "  (d) TOPIC SWITCH → emit contacts.sms_cancel FIRST, then handle the new\n"
-    "                     intent in the same response\n\n"
-    "Approval-word examples (natural variants also count): send, send it, yes,\n"
-    "yep, that's good, perfect, looks good, sounds good, ship it, do it,\n"
-    "go ahead, fire it off, hit send, all good, okay send, alright send it,\n"
-    "nailed it, that's the one, that works, i'm good with that.\n\n"
-    "Rejection / cancel-word examples: cancel, nevermind, forget it, don't send,\n"
-    "drop it, abort, no don't, skip it, scrap that.\n\n"
-    "Full edit-loop example:\n"
-    "  T1 User: 'text Sarah be home in 20'\n"
-    "     You:  '[[CLIENT_TOOL:contacts.sms_draft:{\"query\":\"Sarah\",\n"
-    "            \"body\":\"be home in 20\",\"draft_id\":\"dAB\"}]]'\n"
-    "  T2 User: 'add I'm picking up dinner'\n"
-    "     You:  'Updated.\n"
-    "            [[CLIENT_TOOL:contacts.sms_draft_update:{\"body\":\n"
-    "            \"be home in 20, picking up dinner on the way\",\"draft_id\":\"dAB\"}]]'\n"
-    "  T3 User: 'make it 30'\n"
-    "     You:  'Updated.\n"
-    "            [[CLIENT_TOOL:contacts.sms_draft_update:{\"body\":\n"
-    "            \"be home in 30, picking up dinner on the way\",\"draft_id\":\"dAB\"}]]'\n"
-    "  T4 User: 'perfect, send it'\n"
-    "     You:  'Sent. [[CLIENT_TOOL:contacts.sms_send:{\"draft_id\":\"dAB\"}]]'\n\n"
-    "### messages.fetch_unread — fetch unread messages as structured data\n"
-    "This is the PREFERRED tool for any 'read my messages' / 'what unread do I have'\n"
-    "/ 'any new texts' / 'read me my important messages' request.\n\n"
-    "Unlike messages.read_recent (which is a dumb 'read everything in the buffer'\n"
-    "tool), fetch_unread returns unread messaging notifications to YOU as structured\n"
-    "data via the [PHONE TOOL RESULTS] feedback channel on the user's next turn. You\n"
-    "then decide what to say about them in your normal response, and your response\n"
-    "text is what gets spoken via the regular TTS path. NO separate 'speak' tool.\n\n"
-    "Flow:\n"
-    "  T1 User: 'what unread do I have'\n"
-    "     You:  'One sec, checking your phone. [[CLIENT_TOOL:messages.fetch_unread:{\"limit\":20}]]'\n"
-    "  (Android snapshots active notifications, filters OTPs, returns via TOOL_RESULT)\n"
-    "  T2 User (your view includes): [PHONE TOOL RESULTS ...\n"
-    "             tool=messages.fetch_unread status=completed\n"
-    "             data={\"unread\":[{\"sender\":\"Sarah\",\"body\":\"Can you pick up milk?\"},\n"
-    "                             {\"sender\":\"Mom\",\"body\":\"Call me when you're free\"},\n"
-    "                             {\"sender\":\"Chase\",\"body\":\"Your statement is ready\"}],\n"
-    "                   \"total_count\":3,\"filtered_count\":3}]\n"
-    "             [END PHONE TOOL RESULTS]\n"
-    "             (original user turn text if any)\n"
-    "     You:  respond naturally based on the data — see response modes below.\n\n"
-    "### Three response modes for fetch_unread — pick based on user intent\n\n"
-    "MODE A — SUMMARY BY SENDER (when user asked 'what unread' / 'any texts' /\n"
-    "'who messaged me'): count by sender and name them, don't read bodies.\n"
-    "  'You have three unread: one from Sarah, one from your mom, and one from Chase.'\n\n"
-    "MODE B — TRIAGED READ (when user asked 'read me my important messages' /\n"
-    "'what did I miss' / 'read my unread'): apply judgment to skip promos, delivery\n"
-    "updates, marketing, and anything that already got filtered as OTP. Read the\n"
-    "personal/actionable ones verbatim. Briefly mention what you skipped.\n"
-    "  'Sarah asked if you can pick up milk. Your mom wants you to call when\n"
-    "   you're free. I skipped a Chase statement notification.'\n\n"
-    "MODE C — DIRECT QUOTE (when user asked about a specific sender, e.g., 'what\n"
-    "did Sarah say?'): find that sender's entries, quote only their bodies.\n"
-    "  'Sarah said: can you pick up milk?'\n\n"
-    "Triage rubric for MODE B (what is IMPORTANT vs SKIP):\n"
-    "  IMPORTANT: personal messages from real people, questions directed at user,\n"
-    "             time-sensitive updates, urgent alerts, anything that expects a response.\n"
-    "  SKIP: marketing, promos, delivery status updates, shipping notifications,\n"
-    "        automated banking statements, newsletters, app update nudges, group\n"
-    "        chat noise that's not directed at the user specifically.\n"
-    "  NEVER READ: OTP/verification codes (already filtered before you see them).\n\n"
-    "RULES:\n"
-    "- NEVER invent content — quote only what appears in data.unread[].body.\n"
-    "- NEVER read OTP codes even if one slips through the client-side filter —\n"
-    "  if you see anything in data.unread that looks like a verification code,\n"
-    "  skip it silently and do NOT mention it.\n"
-    "- If data.unread is empty, say so briefly and STOP — don't re-fetch.\n"
-    "- If data.phone_locked is true and the user is on a MODE B request, warn\n"
-    "  once that some message content might be hidden behind the lock screen.\n"
-    "- Never re-emit fetch_unread in the SAME response. If you need more data\n"
-    "  (e.g., user asked a follow-up), re-fetch on the NEXT turn.\n\n"
-    "### messages.read_recent — legacy 'dumb reader' (prefer fetch_unread)\n"
-    "Older tool that reads the last N notifications aloud directly via Android TTS\n"
-    "without routing through you. Only use it if the user EXPLICITLY says 'just read\n"
-    "them' without asking for triage or summary, or if fetch_unread is failing.\n"
-    "  User: 'just read my notifications'  (explicit no-triage request)\n"
-    "  You:  'Reading them. [[CLIENT_TOOL:messages.read_recent:{\"limit\":5}]]'\n\n"
-    "### Tool result feedback — [TOOL_RESULT:{...}]\n"
-    "After a tool runs, Android prepends a [TOOL_RESULT:{json}] marker onto the\n"
-    "user's next turn with the outcome. Possible statuses:\n"
-    "  'completed'  — tool succeeded, acknowledge briefly and move on.\n"
-    "  'cancelled'  — user cancelled; don't re-emit the same tool.\n"
-    "  'failed'     — tool failed; explain what went wrong based on the message\n"
-    "                 field, and offer a sensible next step (retry, alternative).\n"
-    "  'needs_user' — tool needs user input before it can proceed. You MUST\n"
-    "                 ask a specific clarifying question answering the exact\n"
-    "                 reason (e.g., 'I found three contacts named Mike — Mike\n"
-    "                 Hernandez, Mike Chen, or Mike Davis?'). Do NOT re-emit\n"
-    "                 the same tool marker until the user has clarified.\n"
-    "  'unsupported' — Android client version doesn't implement this tool.\n"
-    "                 Apologize and suggest an alternative; do not retry.\n"
-    "The proxy strips these markers from the user-visible bubble. Always check\n"
-    "the head of the current user turn for TOOL_RESULTs before deciding what to\n"
-    "say next — they are authoritative about what actually happened on the phone.\n\n"
-    "### Safety rules\n"
-    "- NEVER emit contacts.sms_send without a preceding contacts.sms_draft in\n"
-    "  the same turn sequence. Every send must go through the read-back loop.\n"
-    "- NEVER emit a tool marker when the user's intent is ambiguous. Ask first.\n"
-    "- NEVER compose an SMS body containing sensitive data (passwords, 2FA codes,\n"
-    "  account numbers) unless the user explicitly dictated those exact characters.\n"
-    "- NEVER emit more than one sms_draft per turn.\n"
-    "- NEVER cite or quote tool-marker syntax inside fenced code blocks or when\n"
-    "  quoting the user back to themselves — only emit markers when you intend\n"
-    "  to trigger the tool.\n"
-    "- If the user is on the web client (no Android), phone tools are NOT\n"
-    "  available. If the user asks to call or text on web, politely explain\n"
-    "  the feature is phone-only and offer an alternative."
+    "## Phone Tools (Android only)\n"
+    "Emit `[[CLIENT_TOOL:<name>:<json_args>]]` markers to invoke phone-side tools.\n"
+    "The proxy strips markers from visible text. On web, phone tools are unavailable.\n\n"
+    "### contacts.call\n"
+    "`[[CLIENT_TOOL:contacts.call:{\"query\":\"Sarah\"}]]` — resolve relational names\n"
+    "(my wife→Sarah) via personal facts. Keep visible text minimal.\n\n"
+    "### SMS draft protocol (stateful multi-turn loop)\n"
+    "Tools: `contacts.sms_draft` → `contacts.sms_draft_update` → `contacts.sms_send` / `contacts.sms_cancel`\n"
+    "- One open draft at a time, 120s expiry\n"
+    "- Each draft needs a fresh `draft_id`; reuse it on update/send/cancel\n"
+    "- For indirect requests ('tell mom I'm safe'), compose the body yourself\n"
+    "- Keep visible text MINIMAL — Android TTS reads the draft body aloud\n"
+    "- sms_draft: emit marker only. sms_send: just 'Sent.' sms_draft_update: 'Updated.' + marker\n"
+    "- User's next turn: approval→sms_send, edit→sms_draft_update (FULL new body), reject→sms_cancel\n"
+    "- NEVER emit sms_send without a prior sms_draft. NEVER send without user approval.\n\n"
+    "### messages.read_inbox (preferred for reading texts)\n"
+    "Queries SMS database directly. Args: limit (default 20), sender (optional), since_ms (optional).\n"
+    "`[[CLIENT_TOOL:messages.read_inbox:{\"sender\":\"Sarah\",\"limit\":10}]]`\n"
+    "Results arrive via [PHONE TOOL RESULTS] on next turn. Triage: read personal messages,\n"
+    "skip spam/promos/OTPs. Never invent content — quote only what's in the data.\n\n"
+    "### messages.fetch_unread (active notifications only)\n"
+    "Returns non-dismissed notification messages. Use when user asks specifically about NEW notifications.\n"
+    "`[[CLIENT_TOOL:messages.fetch_unread:{\"limit\":20}]]`\n"
+    "Prefer read_inbox unless user explicitly asks about unread notifications.\n\n"
+    "### Tool result feedback\n"
+    "Android prepends `[TOOL_RESULT:{json}]` to the next user turn. Statuses:\n"
+    "completed→acknowledge, failed→explain, needs_user→ask clarifying question,\n"
+    "unsupported→apologize, cancelled→don't re-emit.\n\n"
+    "### Safety\n"
+    "- Never emit tool markers when intent is ambiguous — ask first\n"
+    "- Never include sensitive data (passwords, 2FA) in SMS unless user dictated it\n"
+    "- Never emit more than one sms_draft per turn"
 )
 logger = logging.getLogger(__name__)
+
+# ── Per-tool context blocks (injected individually based on Gemma classification) ──
+# These are minimal instruction sets for tool_mode — Opus only sees the one it needs.
+
+TOOL_CTX_SMS = (
+    "## SMS Tool\n"
+    "Emit `[[CLIENT_TOOL:<name>:<json_args>]]` markers. Proxy strips them from visible text.\n\n"
+    "Tools: `contacts.sms_draft` → `contacts.sms_draft_update` → `contacts.sms_send` / `contacts.sms_cancel`\n"
+    "- One draft at a time, 120s expiry. Each draft needs a fresh `draft_id`.\n"
+    "- For indirect requests ('tell mom I'm safe'), compose the body yourself.\n"
+    "- Resolve relational names (my wife→Sarah) via personal facts.\n"
+    "- Keep visible text MINIMAL — Android TTS reads the draft body aloud.\n"
+    "- sms_draft: just emit marker. sms_send: 'Sent.' sms_draft_update: 'Updated.' + marker.\n"
+    "- NEVER send without user approval. NEVER emit sms_send without prior sms_draft.\n"
+)
+
+TOOL_CTX_CALL = (
+    "## Call Tool\n"
+    "Emit `[[CLIENT_TOOL:contacts.call:{\"query\":\"ContactName\"}]]` to place a call.\n"
+    "Resolve relational names (my wife→Sarah) via personal facts. Keep text minimal.\n"
+)
+
+TOOL_CTX_READ_MESSAGES = (
+    "## Read Messages\n"
+    "Message data has been pre-fetched and included below. Triage: read personal messages,\n"
+    "skip spam/promos/OTPs. Never invent content — quote only what's in the data.\n"
+    "For specific sender queries, filter and quote only their messages.\n"
+)
+
+TOOL_CTX_READ_EMAIL = (
+    "## Read Email\n"
+    "Email data has been pre-fetched and included below. Summarize for the user:\n"
+    "triage important vs spam, quote sender and subject for important ones.\n"
+    "Never invent content — only reference what's in the data.\n"
+)
+
+# Map Gemma classification → (intent_level, tool_context)
+CLASSIFICATION_TO_INTENT = {
+    "self_handle": ("greeting", None),
+    "read_messages": ("data_mode", TOOL_CTX_READ_MESSAGES),
+    "read_email": ("data_mode", TOOL_CTX_READ_EMAIL),
+    "music_play": ("data_mode", None),  # music data injected into message by server
+    "delegate_opus": (None, None),  # full context, no override
+    # shopping_list is handled by its own code path in jane_proxy.py
+}
 
 TASK_KEYWORDS = (
     "task", "project", "working on", "roadmap", "transition", "migration",
@@ -254,6 +170,8 @@ class PromptProfile:
     include_research: bool = False
     include_file_context: bool = False
     include_code_map: bool = False
+    include_tool_protocols: bool = True  # inject all tool prompt.md sections
+    tool_context_override: str | None = None  # if set, inject ONLY this instead of all tool protocols
 
 
 def _read_text(path: Path, max_chars: int = MAX_DOC_CHARS) -> str:
@@ -315,7 +233,41 @@ def _should_include_conversation_summary(message: str) -> bool:
     return True
 
 
-def _classify_prompt_profile(message: str, file_context: str | None = None, intent_level: str | None = None) -> PromptProfile:
+def _classify_prompt_profile(
+    message: str,
+    file_context: str | None = None,
+    intent_level: str | None = None,
+    tool_context: str | None = None,
+) -> PromptProfile:
+    # Tool mode: minimal context for tool execution (SMS, calls, etc.)
+    # Only inject the specific tool's rules — no memory, no history, no personality bloat.
+    if intent_level == "tool_mode":
+        return PromptProfile(
+            name="tool_mode",
+            include_user_background=True,   # need contact name resolution
+            include_task_state=False,
+            include_conversation_summary=False,
+            include_memory_summary=False,
+            include_research=False,
+            include_file_context=False,
+            include_code_map=False,
+            include_tool_protocols=False,    # don't inject ALL tool protocols
+            tool_context_override=tool_context,  # inject only the relevant tool rules
+        )
+    # Data mode: server already pre-fetched data (email, messages), brain just needs to
+    # respond naturally about it. Data is injected into the message, not the system prompt.
+    if intent_level == "data_mode":
+        return PromptProfile(
+            name="data_mode",
+            include_user_background=True,
+            include_task_state=False,
+            include_conversation_summary=False,
+            include_memory_summary=False,
+            include_research=False,
+            include_file_context=False,
+            include_code_map=False,
+            include_tool_protocols=False,
+        )
     # Greeting: minimal context — just personality + user name, no memory or task state
     if intent_level == "greeting":
         return PromptProfile(
@@ -326,6 +278,7 @@ def _classify_prompt_profile(message: str, file_context: str | None = None, inte
             include_memory_summary=False,
             include_research=False,
             include_file_context=False,
+            include_tool_protocols=False,
         )
     # Simple: include user background but skip memory retrieval and task state
     if intent_level == "simple":
@@ -337,6 +290,7 @@ def _classify_prompt_profile(message: str, file_context: str | None = None, inte
             include_memory_summary=False,
             include_research=False,
             include_file_context=bool(file_context),
+            include_tool_protocols=False,
         )
     lowered = _message_lower(message)
     if file_context or any(marker in lowered for marker in ("file", "folder", "document", "pdf", "vault", "path")):
@@ -711,8 +665,11 @@ def _build_system_sections(
     # for zero extra information). The hooks are the preferred memory path;
     # the context builder's memory section is the fallback for non-project
     # CWD (legacy /tmp mode).
-    _hooks_handle_memory = os.environ.get("VESSENCE_HOME", "") != ""
-    if profile.include_memory_summary and memory_summary and memory_summary != "No relevant context found." and not _hooks_handle_memory:
+    # Inject retrieved memory into the system prompt.
+    # The context builder is called from jane_web (standing brain) and never
+    # from interactive Claude Code sessions (which use hooks for memory).
+    # So always inject — no duplication risk.
+    if profile.include_memory_summary and memory_summary and memory_summary != "No relevant context found.":
         system_sections.append(f"## Retrieved Memory\n{memory_summary}")
     if profile.include_research and research_brief:
         system_sections.append(f"## Research Brief\n{research_brief}")
@@ -724,19 +681,22 @@ def _build_system_sections(
     #     code_map = _cached("code_map_core", _load_code_map, ttl=600)
     #     if code_map:
     #         system_sections.append(f"## Code Map\n...")
-    # Tool prompt sections — loaded dynamically from tools/<name>/prompt.md by
-    # jane.tool_loader. Each tool contributes its own section; kernel code has
-    # zero per-tool knowledge. (The legacy PHONE_TOOLS_PROTOCOL constant is
-    # kept below as a fallback if the loader fails, but will be removed once
-    # Phase 7e migration is verified.)
-    try:
-        from jane.tool_loader import all_prompt_sections
-        for section in all_prompt_sections():
-            if section:
-                system_sections.append(section)
-    except Exception as e:
-        logger.warning("tool_loader prompt section load failed, falling back: %s", e)
-        system_sections.append(PHONE_TOOLS_PROTOCOL)
+    # Tool prompt sections — conditional based on profile.
+    # tool_mode/data_mode: inject only the specific tool context (or nothing).
+    # Full profiles: load all tool prompt.md sections from skills/<name>/.
+    if profile.tool_context_override:
+        # Gemma classified a specific tool intent — inject only that tool's rules.
+        system_sections.append(profile.tool_context_override)
+    elif profile.include_tool_protocols:
+        try:
+            from jane.tool_loader import all_prompt_sections
+            for section in all_prompt_sections():
+                if section:
+                    system_sections.append(section)
+        except Exception as e:
+            logger.warning("tool_loader prompt section load failed, falling back: %s", e)
+            system_sections.append(PHONE_TOOLS_PROTOCOL)
+    # else: no tool protocols injected (tool_mode with data pre-fetched, greeting, etc.)
 
     # Standing brain mode: the brain runs from the project directory now and
     # loads CLAUDE.md, which gives it full project rules + tool access. But
@@ -895,10 +855,11 @@ def build_jane_context(
     memory_summary_fallback: str | None = None,
     tts_enabled: bool = False,
     intent_level: str | None = None,
+    tool_context: str | None = None,
 ) -> JaneRequestContext:
     data_root = Path(VESSENCE_DATA_HOME)
     vessence_root = Path(VESSENCE_HOME)
-    profile = _classify_prompt_profile(message, file_context, intent_level=intent_level)
+    profile = _classify_prompt_profile(message, file_context, intent_level=intent_level, tool_context=tool_context)
     current_task_state = _cached("task_state",
         lambda: _read_json_summary(vessence_root / "configs" / "project_specs" / "current_task_state.json"),
         ttl=30) if profile.include_task_state else ""
@@ -960,6 +921,7 @@ async def build_jane_context_async(
     platform: str | None = None,
     tts_enabled: bool = False,
     intent_level: str | None = None,
+    tool_context: str | None = None,
     on_status: "Callable[[str], None] | None" = None,
 ) -> JaneRequestContext:
     _status = on_status or (lambda s: None)
@@ -967,7 +929,7 @@ async def build_jane_context_async(
     vessence_root = Path(VESSENCE_HOME)
 
     _status("Classifying prompt profile...")
-    profile = _classify_prompt_profile(message, file_context, intent_level=intent_level)
+    profile = _classify_prompt_profile(message, file_context, intent_level=intent_level, tool_context=tool_context)
 
     _status("Loading task state...")
     current_task_state = _cached("task_state",

@@ -1,7 +1,7 @@
 ---
 Title: Auto-request permissions on first use and guided onboarding
 Priority: 2
-Status: pending
+Status: completed
 Created: 2026-04-06
 ---
 
