@@ -1976,6 +1976,18 @@ async def stream_message(
                            for h in state.history[-10:]
                            if h.get("role") in ("user", "assistant") and isinstance(h.get("content"), str)]
         _classification, _router_response = await classify_prompt(message, _router_history)
+        # Keyword safety net: override Gemma if it misclassifies obvious intents
+        _msg_lower = (message or "").lower()
+        if _classification != "read_email" and any(kw in _msg_lower for kw in ("email", "inbox", "gmail")):
+            if any(kw in _msg_lower for kw in ("read", "check", "see", "show", "any new", "what")):
+                logger.info("[%s] Keyword override: %s → read_email", session_id[:12], _classification)
+                _classification = "read_email"
+                _router_response = "read_email"
+        if _classification != "read_messages" and any(kw in _msg_lower for kw in ("text msg", "text message", "texts", "sms")):
+            if any(kw in _msg_lower for kw in ("read", "check", "see", "show", "any new", "what")):
+                logger.info("[%s] Keyword override: %s → read_messages", session_id[:12], _classification)
+                _classification = "read_messages"
+                _router_response = "read_inbox"
         if _classification == "music_play" and _router_response:
             # Music: delegate to Opus for nuanced handling (e.g., "play something
             # relaxing", "skip the piano tutorials"). Server pre-creates the playlist
@@ -2130,8 +2142,17 @@ async def stream_message(
                 # Show/check/query — delegate to brain with list in context
                 _shopping_list_active = True
         elif _classification == "self_handle" and _router_response:
-            _gemma_short_circuit = True
-            logger.info("[%s] Gemma router: self_handle — short-circuiting Claude", session_id[:12])
+            # Only short-circuit for weather (Gemma has cached data) and STT garbage.
+            # Everything else goes to Opus for a smarter response.
+            _resp_lower = (_router_response or "").lower()
+            if "°f" in _resp_lower or "°c" in _resp_lower or "weather" in _resp_lower or "was that meant for me" in _resp_lower:
+                _gemma_short_circuit = True
+                logger.info("[%s] Gemma router: self_handle (weather/stt) — short-circuiting", session_id[:12])
+            else:
+                # Delegate to Opus for greetings, math, trivia, etc.
+                _gemma_short_circuit = False
+                _gemma_delegate_ack = _router_response
+                logger.info("[%s] Gemma router: self_handle → delegating to Opus", session_id[:12])
         else:
             logger.info("[%s] Gemma router: %s → Claude", session_id[:12], _classification)
             _gemma_delegate_ack = _router_response  # None if gemma4 didn't produce one

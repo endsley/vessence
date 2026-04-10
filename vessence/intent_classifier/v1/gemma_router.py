@@ -150,6 +150,7 @@ RESPONSE: <response>
 SELF_HANDLE — greetings, simple math, jokes, weather (use cached data), trivia, time/date.
 STT garbage → "was that meant for me?"
 IMPORTANT: If prior assistant message asked a question or proposed an action, short replies (yes/no/sure/ok/go ahead/do it/yes please/cancel) are CONFIRMATIONS → DELEGATE, not self-handle.
+NEVER classify as SELF_HANDLE if the message mentions: email, text, message, call, play, music, shopping, list. Those ALWAYS go to their specific category or DELEGATE.
 
 MUSIC_PLAY — ONLY when the user's FIRST WORD is: play/put/throw/listen/shuffle.
 RESPONSE = just the artist or song name (nothing else).
@@ -177,6 +178,8 @@ User: "I don't think this is working" → DELEGATE_OPUS / Let me look into that.
 User: "can you check why there were no songs" → DELEGATE_OPUS / Investigating the music issue.
 User: "add milk to the list" → SHOPPING_LIST / add milk
 User: "read my texts" → READ_MESSAGES / read_inbox
+User: "are you able to read my email" → READ_EMAIL / read_email
+User: "can you check my email" → READ_EMAIL / read_email
 User: "check my email" → READ_EMAIL / read_email
 User: "any new emails" → READ_EMAIL / read_email
 User: "read the top 3 emails" → READ_EMAIL / read_email 3
