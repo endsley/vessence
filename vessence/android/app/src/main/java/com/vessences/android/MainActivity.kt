@@ -45,30 +45,113 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** Global STT launcher — callable from anywhere via MainActivity.instance.launchStt() */
-    val sttLauncher = registerForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        SttResultBus.postResult(result.resultCode, result.data)
-    }
+    /** Active headless STT recognizer (main-thread only). Replaced on each call. */
+    private var activeRecognizer: android.speech.SpeechRecognizer? = null
 
+    /**
+     * Launch headless STT (no system dialog). Uses Android SpeechRecognizer directly
+     * so errors auto-dismiss without requiring a manual tap. On no-speech / error,
+     * AlwaysListening is silently restored. On success, result flows to SttResultBus.
+     */
     fun launchStt() {
         val hasMicPerm = ContextCompat.checkSelfPermission(
             this, Manifest.permission.RECORD_AUDIO
         ) == PackageManager.PERMISSION_GRANTED
-        if (!hasMicPerm) return
+        if (!hasMicPerm) {
+            com.vessences.android.voice.WakeWordBridge.sttActive = false
+            return
+        }
 
         com.vessences.android.voice.WakeWordBridge.sttActive = true
         com.vessences.android.voice.AlwaysListeningService.stop(this)
 
-        val intent = Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-            putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL, android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE, java.util.Locale.getDefault())
-            putExtra(android.speech.RecognizerIntent.EXTRA_PROMPT, "Speak your message...")
-            putExtra(android.speech.RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 4000L)
-            putExtra(android.speech.RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 6000L)
+        // SpeechRecognizer must be created on the main thread
+        runOnUiThread {
+            activeRecognizer?.destroy()
+            activeRecognizer = null
+
+            if (!android.speech.SpeechRecognizer.isRecognitionAvailable(this)) {
+                restoreAlwaysListening()
+                return@runOnUiThread
+            }
+
+            val recognizer = android.speech.SpeechRecognizer.createSpeechRecognizer(this)
+            activeRecognizer = recognizer
+
+            val intent = Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                    android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE, java.util.Locale.getDefault())
+                // Wait at least 2s for speech to start before timing out
+                putExtra(android.speech.RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 2000L)
+                putExtra(android.speech.RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 4000L)
+                putExtra(android.speech.RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 6000L)
+                putExtra(android.speech.RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+            }
+
+            var done = false
+            recognizer.setRecognitionListener(object : android.speech.RecognitionListener {
+                override fun onResults(results: android.os.Bundle?) {
+                    if (done) return; done = true
+                    activeRecognizer = null
+                    recognizer.destroy()
+                    SttResultBus.onListening?.invoke(false)
+                    val matches = results?.getStringArrayList(
+                        android.speech.SpeechRecognizer.RESULTS_RECOGNITION)
+                    val spoken = matches?.firstOrNull()?.trim()
+                    if (!spoken.isNullOrBlank()) {
+                        SttResultBus.onResult?.invoke(spoken)
+                    } else {
+                        restoreAlwaysListening()
+                    }
+                }
+
+                override fun onError(error: Int) {
+                    if (done) return; done = true
+                    activeRecognizer = null
+                    recognizer.destroy()
+                    SttResultBus.onListening?.invoke(false)
+                    // No speech or recognizer error — silently restore always-listen
+                    restoreAlwaysListening()
+                }
+
+                override fun onReadyForSpeech(params: android.os.Bundle?) {
+                    // Notify UI that we're actively listening
+                    SttResultBus.onListening?.invoke(true)
+                    // Play a short beep so the user knows it's their turn to speak
+                    try {
+                        val tg = android.media.ToneGenerator(
+                            android.media.AudioManager.STREAM_MUSIC, 60)
+                        tg.startTone(android.media.ToneGenerator.TONE_PROP_BEEP, 120)
+                        android.os.Handler(android.os.Looper.getMainLooper())
+                            .postDelayed({ tg.release() }, 300)
+                    } catch (_: Exception) {}
+                }
+                override fun onBeginningOfSpeech() {}
+                override fun onRmsChanged(rmsdB: Float) {}
+                override fun onBufferReceived(buffer: ByteArray?) {}
+                override fun onEndOfSpeech() {}
+                override fun onPartialResults(partial: android.os.Bundle?) {
+                    val preview = partial?.getStringArrayList(
+                        android.speech.SpeechRecognizer.RESULTS_RECOGNITION
+                    )?.firstOrNull()?.trim()
+                    if (!preview.isNullOrBlank()) {
+                        SttResultBus.onPartialResult?.invoke(preview)
+                    }
+                }
+                override fun onEvent(eventType: Int, params: android.os.Bundle?) {}
+            })
+
+            recognizer.startListening(intent)
         }
-        sttLauncher.launch(intent)
+    }
+
+    private fun restoreAlwaysListening() {
+        com.vessences.android.voice.WakeWordBridge.sttActive = false
+        val voiceSettings = com.vessences.android.data.repository.VoiceSettingsRepository(applicationContext)
+        if (voiceSettings.isAlwaysListeningEnabled()) {
+            com.vessences.android.voice.AlwaysListeningService.start(applicationContext)
+        }
     }
 
     private var permissionsRequested = false
@@ -294,6 +377,16 @@ class MainActivity : ComponentActivity() {
             }
             .setNegativeButton("Later", null)
             .show()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        // Clean up active recognizer to release mic on activity teardown
+        runOnUiThread {
+            activeRecognizer?.destroy()
+            activeRecognizer = null
+        }
+        if (instance === this) instance = null
     }
 
     companion object {

@@ -195,9 +195,29 @@ class ChatViewModel(
                     com.vessences.android.data.api.ApiClient.getOkHttpClient().newCall(request).execute().close()
                 } catch (_: Exception) {}
             }
-            // Wake word bridge: set flag so ChatInputRow auto-launches the system STT UI
-            // Listen for STT results from the global launcher in MainActivity
+            // Headless STT bridge: listen/partial/result callbacks for in-app voice UI
+            com.vessences.android.SttResultBus.onListening = { active ->
+                val newVoice = _state.value.voice.copy(
+                    isCapturingCommand = active,
+                    transcriptPreview = if (!active) "" else _state.value.voice.transcriptPreview,
+                    status = if (active) "Listening..." else null,
+                )
+                _state.value = _state.value.copy(voice = newVoice)
+            }
+            com.vessences.android.SttResultBus.onPartialResult = { preview ->
+                _state.value = _state.value.copy(
+                    voice = _state.value.voice.copy(transcriptPreview = preview)
+                )
+            }
             com.vessences.android.SttResultBus.onResult = { spoken ->
+                // Clear listening UI immediately
+                _state.value = _state.value.copy(
+                    voice = _state.value.voice.copy(
+                        isCapturingCommand = false,
+                        transcriptPreview = "",
+                        status = null,
+                    )
+                )
                 if (spoken != null && spoken.isNotBlank()) {
                     if (com.vessences.android.ui.chat.EndPhraseDetector.isEndPhrase(spoken)) {
                         endVoiceConversation()
@@ -769,7 +789,7 @@ class ChatViewModel(
         if (fromVoice) {
             val textToSpeak = spokenText?.takeIf { it.isNotBlank() }
                 ?: replyText?.takeIf { it.isNotBlank() }
-                ?: "I finished, check the screen for details."
+                ?: ""  // empty = silent end, no misleading "I finished" message
 
             // Check if the user's last message was a conversation-ending phrase
             val lastUserMsg = _state.value.messages.lastOrNull { it.isUser }?.text ?: ""
@@ -777,6 +797,14 @@ class ChatViewModel(
             // If music is about to play, sttActive was already cleared by endVoiceConversation()
             // in the MUSIC_PLAY handler. Treat it as a conversation-ending event — no STT re-launch.
             val musicPlaying = !com.vessences.android.voice.WakeWordBridge.sttActive
+
+            // If reply was empty (error / tool-only response), end silently — don't say anything misleading
+            if (textToSpeak.isBlank()) {
+                endVoiceConversation()
+                _state.value = _state.value.copy(isSending = false)
+                processNextInQueue()
+                return
+            }
 
             // If VoiceController is waiting for a reply, use it (handles TTS + auto re-listen)
             if (voiceController != null && voiceController.isWaitingForReply()) {

@@ -142,7 +142,7 @@ def _resolve_model(provider: str) -> str:
 _PERSONAL_INFO = ""  # Populated by _load_personal_info() on first call
 
 SYSTEM_PROMPT = f"""Classify each message. Output exactly two lines:
-CLASSIFICATION: SELF_HANDLE or MUSIC_PLAY or SHOPPING_LIST or READ_MESSAGES or READ_EMAIL or DELEGATE_OPUS
+CLASSIFICATION: SELF_HANDLE or MUSIC_PLAY or SHOPPING_LIST or READ_MESSAGES or READ_EMAIL or SYNC_MESSAGES or DELEGATE_OPUS
 RESPONSE: <response>
 
 {_PERSONAL_INFO}
@@ -150,7 +150,7 @@ RESPONSE: <response>
 SELF_HANDLE — greetings, simple math, jokes, weather (use cached data), trivia, time/date.
 STT garbage → "was that meant for me?"
 IMPORTANT: If prior assistant message asked a question or proposed an action, short replies (yes/no/sure/ok/go ahead/do it/yes please/cancel) are CONFIRMATIONS → DELEGATE, not self-handle.
-NEVER classify as SELF_HANDLE if the message mentions: email, text, message, call, play, music, shopping, list. Those ALWAYS go to their specific category or DELEGATE.
+NEVER classify as SELF_HANDLE if the message mentions: email, text, message, call, play, music, shopping, list, sync. Those ALWAYS go to their specific category or DELEGATE.
 
 MUSIC_PLAY — ONLY when the user's FIRST WORD is: play/put/throw/listen/shuffle.
 RESPONSE = just the artist or song name (nothing else).
@@ -165,6 +165,10 @@ READ_EMAIL — check/read/search email or inbox. RESPONSE = read_email [+ query]
 Examples: "check my email", "read my inbox", "any new emails", "read email from Bob".
 NOT for sending email — that's DELEGATE_OPUS.
 
+SYNC_MESSAGES — sync/resync/refresh text messages or SMS. RESPONSE = sync.
+Examples: "sync my messages", "resync my texts", "refresh my messages", "sync sms".
+NOT for reading messages — that's READ_MESSAGES. Only for explicit sync/resync requests.
+
 DELEGATE_OPUS — everything else. SMS, calls, files, code, complex questions, complaints, follow-ups.
 Never say "I can't do that" — DELEGATE. Jane CAN do it.
 RESPONSE = short ack referencing their topic + time hint.
@@ -178,6 +182,8 @@ User: "I don't think this is working" → DELEGATE_OPUS / Let me look into that.
 User: "can you check why there were no songs" → DELEGATE_OPUS / Investigating the music issue.
 User: "add milk to the list" → SHOPPING_LIST / add milk
 User: "read my texts" → READ_MESSAGES / read_inbox
+User: "sync my messages" → SYNC_MESSAGES / sync
+User: "resync my texts" → SYNC_MESSAGES / sync
 User: "are you able to read my email" → READ_EMAIL / read_email
 User: "can you check my email" → READ_EMAIL / read_email
 User: "check my email" → READ_EMAIL / read_email
@@ -187,7 +193,7 @@ User: "email from Bob" → READ_EMAIL / read_email from:bob
 User: "fix the auth bug" → DELEGATE_OPUS / Looking into the auth bug — one sec.
 User: "call my wife" → DELEGATE_OPUS / Calling now."""
 
-_CLASSIFY_RE = re.compile(r"(?:CLASSIFICATION:\s*)?(SELF_HANDLE|MUSIC_PLAY|SHOPPING_LIST|READ_MESSAGES|READ_EMAIL|DELEGATE_OPUS)", re.IGNORECASE)
+_CLASSIFY_RE = re.compile(r"(?:CLASSIFICATION:\s*)?(SELF_HANDLE|MUSIC_PLAY|SHOPPING_LIST|READ_MESSAGES|READ_EMAIL|SYNC_MESSAGES|DELEGATE_OPUS)", re.IGNORECASE)
 _RESPONSE_RE = re.compile(r"RESPONSE:\s*(.*)", re.DOTALL)
 
 # Weather keywords — if detected, inject cached weather data into gemma's context
@@ -269,11 +275,20 @@ def _load_weather_context(message: str) -> str:
         # Compact format to minimize tokens
         lines = [f"\n\nWeather for {data['location']} (fetched {data['fetched']}):"]
         c = data.get("current", {})
-        lines.append(f"Now: {c.get('temperature','?')}, feels {c.get('feels_like','?')}, {c.get('condition','?')}, humidity {c.get('humidity','?')}, wind {c.get('wind','?')}")
         aq = data.get("air_quality", {})
+        forecast = data.get("forecast", [])
+        today = forecast[0] if forecast else {}
+        lines.append(f"Now: {c.get('temperature','?')}, feels {c.get('feels_like','?')}, {c.get('condition','?')}, humidity {c.get('humidity','?')}, wind {c.get('wind','?')}")
+        lines.append(f"Today high: {today.get('high','?')}, low: {today.get('low','?')}")
         lines.append(f"Air quality: AQI {aq.get('us_aqi','?')}")
-        for day in data.get("forecast", []):
-            lines.append(f"{day['date']}: {day['high']}/{day['low']}, {day['condition']}, rain {day['precipitation']}, humidity {day['humidity']}")
+        for day in forecast[1:]:
+            lines.append(f"{day['date']}: {day['high']}/{day['low']}, {day['condition']}, rain {day['precipitation']}")
+        lines.append(
+            "\nREQUIRED FORMAT: Respond with ONLY this sentence pattern — "
+            "\"A high of [high], a low of [low], feels like [feels_like], [condition], "
+            "with an air quality of [AQI].\" "
+            "Do NOT add any other information. Do NOT mention humidity, wind, or UV."
+        )
         return "\n".join(lines)
     except Exception:
         return ""
@@ -770,6 +785,11 @@ async def classify_prompt(
             resp_match = _RESPONSE_RE.search(content)
             action = resp_match.group(1).strip().rstrip('"').strip() if resp_match else None
             return ("read_messages", action or None)
+
+        if classification == "SYNC_MESSAGES":
+            resp_match = _RESPONSE_RE.search(content)
+            action = resp_match.group(1).strip().rstrip('"').strip() if resp_match else None
+            return ("sync_messages", action or None)
 
         if classification == "DELEGATE_OPUS":
             resp_match = _RESPONSE_RE.search(content)

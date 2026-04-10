@@ -622,6 +622,11 @@ CODE_MAP_KEYWORDS = (
     "button",
     # Auto-evolved from daily conversations
     "play",
+    # Auto-evolved from daily conversations
+    "stars",
+    "full",
+    "sky",
+    "check",
 )
 
 
@@ -1983,11 +1988,16 @@ async def stream_message(
                 logger.info("[%s] Keyword override: %s → read_email", session_id[:12], _classification)
                 _classification = "read_email"
                 _router_response = "read_email"
-        if _classification != "read_messages" and any(kw in _msg_lower for kw in ("text msg", "text message", "texts", "sms")):
+        if _classification != "read_messages" and _classification != "sync_messages" and any(kw in _msg_lower for kw in ("text msg", "text message", "texts", "sms")):
             if any(kw in _msg_lower for kw in ("read", "check", "see", "show", "any new", "what")):
                 logger.info("[%s] Keyword override: %s → read_messages", session_id[:12], _classification)
                 _classification = "read_messages"
                 _router_response = "read_inbox"
+        if _classification != "sync_messages" and any(kw in _msg_lower for kw in ("sync", "resync", "re-sync")):
+            if any(kw in _msg_lower for kw in ("message", "messages", "texts", "sms", "text")):
+                logger.info("[%s] Keyword override: %s → sync_messages", session_id[:12], _classification)
+                _classification = "sync_messages"
+                _router_response = "sync"
         if _classification == "music_play" and _router_response:
             # Music: delegate to Opus for nuanced handling (e.g., "play something
             # relaxing", "skip the piano tutorials"). Server pre-creates the playlist
@@ -2104,6 +2114,21 @@ async def stream_message(
                 logger.error("[%s] SMS DB fetch failed: %s", session_id[:12], _sms_err)
             if _sms_data_ctx:
                 message = message + _sms_data_ctx
+        elif _classification == "sync_messages":
+            # Force SMS sync: inject instruction for the brain to emit
+            # [[CLIENT_TOOL:sync.force_sms:{}]] so the Android app re-syncs.
+            logger.info("[%s] Gemma router: sync_messages → delegating to brain with sync tool instruction",
+                        session_id[:12])
+            _gemma_delegate_ack = "Syncing your messages..."
+            _gemma_short_circuit = False
+            message = message + (
+                "\n\n[SYNC REQUEST]\n"
+                "The user wants to sync/resync their text messages. "
+                "Emit the sync tool marker to trigger a full SMS re-sync on their phone:\n"
+                "[[CLIENT_TOOL:sync.force_sms:{}]]\n"
+                "Tell the user you're syncing their messages now and it should take a moment.\n"
+                "[END SYNC REQUEST]"
+            )
         elif _classification == "read_email":
             # Email is server-side (not a phone tool). Fetch emails here and
             # inject them into the brain context so Jane can respond with actual

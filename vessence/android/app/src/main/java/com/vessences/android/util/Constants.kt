@@ -1,8 +1,8 @@
 package com.vessences.android.util
 
 object Constants {
-    const val DEFAULT_VAULT_BASE_URL = ""  // User must configure their own URL
-    const val DEFAULT_JANE_BASE_URL = ""  // User must configure their own URL
+    const val DEFAULT_VAULT_BASE_URL = "https://jane.vessences.com"
+    const val DEFAULT_JANE_BASE_URL = "https://jane.vessences.com"
     const val USER_AGENT = "VessencesAndroid/1.0"
     const val PREFS_NAME = "vessences_prefs"
     const val PREF_SERVER_URL = "server_url"

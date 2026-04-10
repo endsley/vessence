@@ -34,8 +34,6 @@ object ContactsCallHandler : ClientToolHandler {
 
     override val name: String = "contacts.call"
 
-    private const val COUNTDOWN_TOTAL_SECONDS = 10
-    private const val COUNTDOWN_TICK_INTERVAL_MS = 2000L
 
     override suspend fun handle(
         call: ClientToolCall,
@@ -70,24 +68,8 @@ object ContactsCallHandler : ClientToolHandler {
             is ContactsResolver.ResolveResult.Single -> resolved.contact
         }
 
-        // Countdown loop. Tool-priority TTS interrupts any in-flight chat stream speech.
-        queue.speak("Calling ${contact.displayName} in 10 seconds. Say stop or cancel the request if you change your mind.")
-        var remaining = COUNTDOWN_TOTAL_SECONDS
-        while (remaining > 2) {
-            delay(COUNTDOWN_TICK_INTERVAL_MS)
-            remaining -= 2
-            // Only speak at 8/6/4/2 marks — not every single second.
-            if (remaining in 2..8 step 2) {
-                queue.speak("$remaining")
-            }
-        }
-        // Final short beat, then dial.
-        delay(COUNTDOWN_TICK_INTERVAL_MS)
-
-        // Final permission re-check (could have been revoked during countdown).
-        if (!hasCallPermission(ctx)) {
-            return ToolActionStatus.Failed("CALL_PHONE permission revoked during countdown")
-        }
+        // Dial immediately — user explicitly asked to call.
+        queue.speak("Calling ${contact.displayName}.")
 
         val intent = Intent(Intent.ACTION_CALL, Uri.parse("tel:${contact.phoneNumber}"))
         val launchError = queue.startActivity(ctx, intent)

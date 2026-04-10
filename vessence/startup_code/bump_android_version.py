@@ -51,15 +51,31 @@ def update_main_py(version_name: str, version_code: int):
     print(f"  Updated main.py: ANDROID_VERSION={version_name}, ANDROID_VERSION_CODE={version_code}")
 
 
+def _load_env() -> dict[str, str]:
+    """Load key=value pairs from the project .env file into a dict."""
+    env_file = Path(os.environ.get("VESSENCE_DATA_HOME", VESSENCE_HOME.parent / "vessence-data")) / ".env"
+    env = dict(os.environ)
+    if env_file.exists():
+        for line in env_file.read_text().splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, val = line.partition("=")
+            env[key.strip()] = val.strip().strip('"').strip("'")
+    return env
+
+
 def build_apk() -> Path:
     """Build the release APK and return the output path."""
     print("  Building APK...")
+    build_env = _load_env()
     result = subprocess.run(
         ["./gradlew", "assembleRelease"],
         cwd=str(ANDROID_DIR),
         capture_output=True,
         text=True,
         timeout=600,
+        env=build_env,
     )
     if result.returncode != 0:
         print(f"  BUILD FAILED:\n{result.stderr[-500:]}")
@@ -121,6 +137,27 @@ def ensure_changelog_entry(version_name: str):
     print(f"  Added changelog stub for v{version_name}")
 
 
+def update_marketing_links(version_name: str):
+    """Update marketing site HTML to point download links at the new versioned APK."""
+    import re
+    marketing_dir = VESSENCE_HOME / "marketing_site"
+    apk_url = f"https://jane.vessences.com/downloads/vessences-android-v{version_name}.apk"
+    pattern = re.compile(r'href="https://jane\.vessences\.com/downloads/vessences-android[^"]*\.apk"')
+    updated = []
+    for html_file in [marketing_dir / "index.html", marketing_dir / "install.html"]:
+        if not html_file.exists():
+            continue
+        text = html_file.read_text()
+        new_text = pattern.sub(f'href="{apk_url}"', text)
+        if new_text != text:
+            html_file.write_text(new_text)
+            updated.append(html_file.name)
+    if updated:
+        print(f"  Updated download links in {', '.join(updated)}")
+    else:
+        print(f"  Marketing links already up to date")
+
+
 def deploy_apk(apk: Path, version_name: str):
     """Copy APK to marketing downloads directory (versioned + generic)."""
     dest = DOWNLOADS_DIR / f"vessences-android-v{version_name}.apk"
@@ -165,7 +202,10 @@ def main():
     # 6. Deploy to downloads
     deploy_apk(apk, new_name)
 
-    # 7. Done
+    # 7. Update marketing site download links to point to the new versioned APK
+    update_marketing_links(new_name)
+
+    # 8. Done
     print()
     print(f"  ✓ Version {new_name} built, verified, and deployed.")
 

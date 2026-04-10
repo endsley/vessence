@@ -133,6 +133,11 @@ PHONE_TOOLS_PROTOCOL = (
     "Returns non-dismissed notification messages. Use when user asks specifically about NEW notifications.\n"
     "`[[CLIENT_TOOL:messages.fetch_unread:{\"limit\":20}]]`\n"
     "Prefer read_inbox unless user explicitly asks about unread notifications.\n\n"
+    "### sync.force_sms (force message sync)\n"
+    "Triggers a full re-sync of the last 14 days of SMS messages from the phone to the server.\n"
+    "Use when the user says 'sync my messages', 'resync texts', 'refresh my messages', etc.\n"
+    "`[[CLIENT_TOOL:sync.force_sms:{}]]`\n"
+    "No args needed. Results arrive via [TOOL_RESULT] on next turn.\n\n"
     "### Tool result feedback\n"
     "Android prepends `[TOOL_RESULT:{json}]` to the next user turn. Statuses:\n"
     "completed→acknowledge, failed→explain, needs_user→ask clarifying question,\n"
@@ -184,6 +189,7 @@ CLASSIFICATION_TO_INTENT = {
     "self_handle": ("greeting", None),
     "read_messages": ("data_mode", TOOL_CTX_READ_MESSAGES),
     "read_email": ("data_mode", TOOL_CTX_READ_EMAIL),
+    "sync_messages": ("data_mode", None),  # sync instruction injected into message by server
     "music_play": ("data_mode", None),  # music data injected into message by server
     "delegate_opus": (None, None),  # full context, no override
     # shopping_list is handled by its own code path in jane_proxy.py
