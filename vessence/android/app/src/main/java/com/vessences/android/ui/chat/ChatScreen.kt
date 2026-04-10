@@ -201,8 +201,6 @@ fun ChatScreen(
             onDismiss = { showVoicePicker = false },
         )
 
-        // Voice status banner removed — wake word status shown as icon in header
-
         // Messages
         Box(modifier = Modifier.weight(1f)) {
             ChatMessageList(
@@ -266,6 +264,9 @@ fun ChatScreen(
                 }
             }
         }
+
+        // STT listening status — shows in-app banner with real-time transcript while user speaks
+        VoiceStatusBanner(voice = state.voice, aiColor = aiColor)
 
         // Input row (includes upload progress, attachment indicator, text field, mic, send)
         ChatInputRow(
@@ -451,7 +452,7 @@ private fun LiveActivityBanner(
 }
 
 @Composable
-private fun VoiceStatusBanner(
+internal fun VoiceStatusBanner(
     voice: com.vessences.android.voice.VoiceState,
     aiColor: Color,
 ) {

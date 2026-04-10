@@ -284,10 +284,10 @@ def _load_weather_context(message: str) -> str:
         for day in forecast[1:]:
             lines.append(f"{day['date']}: {day['high']}/{day['low']}, {day['condition']}, rain {day['precipitation']}")
         lines.append(
-            "\nREQUIRED FORMAT: Respond with ONLY this sentence pattern — "
+            "\nFor RESPONSE line use EXACTLY: "
             "\"A high of [high], a low of [low], feels like [feels_like], [condition], "
             "with an air quality of [AQI].\" "
-            "Do NOT add any other information. Do NOT mention humidity, wind, or UV."
+            "No humidity, wind, or UV."
         )
         return "\n".join(lines)
     except Exception:

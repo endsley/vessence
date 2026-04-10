@@ -1,556 +1,392 @@
-# JANE_BOOTSTRAP.md — New User Setup Guide
+# JANE_BOOTSTRAP.md — Vessence Setup Guide
 
-**You are an AI CLI assistant helping a new user set up Vessence.** Follow these phases in order. Each phase has verification steps — do not proceed until verification passes. All paths are relative to this repository root (the directory containing this file).
+**You are an AI CLI assistant.** Your job right now is to help the user get their own personal Jane AI up and running. Follow every phase in order. Read through a phase completely before executing it. Explain what you're doing to the user in plain language as you go — they should never feel lost or confused.
 
-**What is Vessence?** Vessence is an open-source wrapper around Claude Code, Gemini CLI, and Codex that simplifies AI agent development. You start with a default agent called Jane. By describing abilities you want, you develop skills (capabilities like sending texts, controlling lights, playing music) and essences (personas like a tax accountant or fitness coach). You can also download skills and essences that others have built from the Vessence marketplace.
+**What is Vessence?**
+Jane is a personal AI assistant that runs entirely on the user's own computer. Their data never leaves their machine. They can chat with Jane through a web browser, through this CLI, or through a phone app. Jane remembers everything they tell her across all of those interfaces. As they use it, they can extend Jane with new skills (sending texts, controlling smart home devices, playing music) and switch between specialized personas called essences (a tax accountant, a fitness coach, etc.).
 
-**Windows users:** WSL2 is required. Native Windows (PowerShell/cmd) is not supported for Phases 1-10. Install WSL2 first: https://learn.microsoft.com/en-us/windows/wsl/install
-
----
-
-## Architecture Overview
-
-Before you begin, understand what you are setting up:
-
-- **Jane** — An AI assistant persona powered by whichever CLI brain the user chooses (Gemini, Claude, or OpenAI).
-- **Vault** — Personal file storage (documents, photos, music).
-- **Essences** — Specialized AI personas (e.g., tax accountant, fitness coach). Each essence gives Jane domain expertise. Think of them as downloadable "brains" that transform Jane into a specialist.
-- **Skills** — Capability plugins (daily briefing, music player, SMS, smart home control, etc.) that extend what Jane can do. Skills are shared across all essences.
-- **Memory** — ChromaDB vector database with 3 tiers:
-  - `user_memories` — Facts about the user (starts empty, grows over time).
-  - `long_term_knowledge` — Jane's accumulated knowledge and behavioral rules.
-  - `short_term_memory` — Recent conversation context (14-day TTL).
-
-**Directory layout:**
-
-| Variable | Path | Purpose |
-|---|---|---|
-| `VESSENCE_HOME` | `<repo>/vessence` | Core codebase. Never store runtime data here. |
-| `VESSENCE_DATA_HOME` | `<repo>/vessence-data` | Runtime data, logs, memory databases. |
-| `VAULT_HOME` | `<repo>/vault` | User's personal file storage. |
-| `ESSENCES_DIR` | `<repo>/essences` | AI agent plugins. |
+**Windows users:** WSL2 is required. Run `wsl --install` in PowerShell as Administrator, reboot, then re-run this bootstrap inside the WSL terminal.
 
 ---
 
-## Phase 1: System Requirements — Auto-Install
+## Phase 1 — Check Prerequisites
 
-Detect the operating system and install missing dependencies automatically. Do not ask the user — just install them.
+Tell the user: *"Let me check what's already installed on your system."*
+
+Run these checks:
 
 ```bash
-OS=$(uname -s)
+python3 --version
+git --version
 ```
 
-### Linux (Debian/Ubuntu):
-```bash
-sudo apt update
-sudo apt install -y python3 python3-venv python3-pip python3-dev build-essential nodejs npm git curl
+**Python 3.11 or 3.12 is required.** If Python is missing or older than 3.11, install it:
 
-# Node from default repos may be too old — install Node 22 via NodeSource
-if ! node --version 2>/dev/null | grep -qE '^v(2[2-9]|[3-9])'; then
-    curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
-    sudo apt install -y nodejs
-fi
-```
+- **Ubuntu/Debian:** `sudo apt update && sudo apt install -y python3.12 python3.12-venv python3.12-dev`
+- **Fedora/RHEL:** `sudo dnf install -y python3.12`
+- **macOS:** `brew install python@3.12` (install Homebrew first if missing: https://brew.sh)
 
-### Linux (Fedora/RHEL):
-```bash
-sudo dnf install -y python3 python3-pip python3-devel gcc gcc-c++ nodejs npm git curl
+If `git` is missing: `sudo apt install -y git` or `brew install git`
 
-# Node from default repos may be too old — install Node 22 via NodeSource
-if ! node --version 2>/dev/null | grep -qE '^v(2[2-9]|[3-9])'; then
-    curl -fsSL https://rpm.nodesource.com/setup_22.x | sudo bash -
-    sudo dnf install -y nodejs
-fi
-```
+**Python 3.13+ note:** May have compatibility issues with some packages. 3.11 or 3.12 is the sweet spot. If the user only has 3.13+, proceed anyway — it usually works fine.
 
-### macOS:
-```bash
-# Install Homebrew if missing
-command -v brew >/dev/null || /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-brew install python node git
-```
-
-### WSL:
-Same as Linux (Debian/Ubuntu) above.
-
-After installing, verify versions:
-```bash
-python3 --version   # Must be 3.11+
-node --version      # Must be 22+
-git --version       # Any recent version
-```
-
-**Recommended: Python 3.11 or 3.12.** Python 3.13+ may have compatibility issues with some native packages (chromadb, tiktoken). If you have 3.13+, proceed but be prepared for potential build errors.
-
-**If a version is too old**, upgrade it automatically using the appropriate package manager. Only ask the user if `sudo` requires a password and the CLI cannot proceed.
+After installing anything, confirm the versions look right and tell the user what was found.
 
 ---
 
-## Phase 2: Python Environment Setup
+## Phase 2 — Python Environment
 
-Create a Python virtual environment at the repo root:
+Tell the user: *"Setting up a Python environment. This keeps Vessence's packages separate from your system Python so nothing conflicts."*
 
 ```bash
+# Run from the repo root (~/ambient)
 python3 -m venv ./venv
-source ./venv/bin/activate
-pip install --upgrade pip
+source ./venv/bin/activate   # On Windows/WSL: source ./venv/Scripts/activate
+pip install --upgrade pip --quiet
 pip install -r vessence/requirements.txt
 ```
 
-If a `./venv/` directory already exists, activate it and verify packages instead of recreating.
+This installs all of Jane's server packages. It will take 1-3 minutes on first run. Let the user know it's working — show them a progress line if possible.
 
-**Verification:** Confirm these imports succeed inside the venv:
+**Verify it worked:**
 ```bash
-./venv/bin/python -c "import chromadb; import fastapi; import uvicorn; import litellm; print('All imports OK')"
+./venv/bin/python -c "import chromadb, fastapi, uvicorn; print('Environment OK')"
 ```
+
+If you see `Environment OK`, move on. If there's an import error, read the error message and fix it (usually a missing system library — tell the user what to install).
 
 ---
 
-## Phase 3: Directory Structure
+## Phase 3 — Create Data Directories
 
-Create the data directories that are gitignored:
+Tell the user: *"Creating folders for Jane's memory, logs, and your personal vault. These folders are separate from the code so updates never touch your data."*
 
 ```bash
 mkdir -p vessence-data/memory/v1/vector_db
 mkdir -p vessence-data/logs
 mkdir -p vessence-data/credentials
-mkdir -p vessence-data/data
-mkdir -p vessence-data/briefings
-mkdir -p vessence-data/briefing_saved
 mkdir -p vault/documents
 mkdir -p essences
 mkdir -p skills
+touch essences/.gitkeep skills/.gitkeep
 ```
 
-Add `.gitkeep` files to empty plugin directories:
-
-```bash
-touch essences/.gitkeep
-touch skills/.gitkeep
-```
-
-**Verification:** Confirm the directories exist:
-```bash
-ls -d vessence-data/memory/v1/vector_db vessence-data/logs vessence-data/credentials vault essences skills
-```
+No output needed — just confirm it's done.
 
 ---
 
-## Phase 4: Seed Memory
+## Phase 4 — Seed Jane's Memory
 
-Copy the pre-built seed ChromaDB into the data directory. The seed DB ships with the repo and contains Jane's system knowledge (25 behavioral rules in `long_term_knowledge`), while `user_memories`, `short_term_memory`, and `file_index_memories` are empty — ready for the new user.
+Tell the user: *"Giving Jane her starting knowledge — the rules and behaviors that define how she works. Your personal memories start empty and will grow as you use her."*
 
 ```bash
 cp -r vessence/seed_db/* vessence-data/memory/v1/vector_db/
 ```
 
-The seed DB structure:
-- `long_term_memory/` — seeded with system knowledge from `jane_seed_memories.json`
-- `short_term_memory/` — empty (conversation buffer, 14-day TTL)
-- `chroma.sqlite3` (root) — empty `user_memories` collection (personal facts, filled during onboarding)
-- `file_index_memory/` — empty (built when user adds files to vault)
-
-**Verification:** Confirm the vector DB was copied:
+**Verify:**
 ```bash
 ls vessence-data/memory/v1/vector_db/long_term_memory/chroma.sqlite3
 ```
 
+If the file exists, the seed is in place.
+
 ---
 
-## Phase 5: Environment Configuration
+## Phase 5 — Configure Jane
 
-Copy the example env file to the data directory:
+Tell the user: *"Now I need to set up your configuration file. I'll walk you through what's needed — there are only a few required things."*
 
 ```bash
 cp vessence/.env.example vessence-data/.env
 ```
 
-**Important:** The `.env` file lives in `vessence-data/.env`, NOT in `vessence/.env`. Runtime configuration belongs in the data directory.
+### Ask the user these questions (one at a time):
 
-Walk the user through filling in the required values. Ask them one at a time:
+**Question 1: Your name**
+Ask: *"What's your name? Jane will use this to address you."*
+Write their answer into `vessence-data/.env` as `USER_NAME=<their answer>`.
 
-### Required values:
+**Question 2: Which AI brain to use**
 
-1. **`USER_NAME`** — What should Jane call you? (Their first name.)
+Explain: *"Jane uses an AI CLI as her brain. I can detect which ones you have installed — let me check."*
 
-2. **`SESSION_SECRET_KEY`** — Generate automatically, do not ask the user:
-   ```bash
-   ./venv/bin/python -c "import secrets; print(secrets.token_hex(32))"
-   ```
-   Write the output into the `.env` file.
-
-For each value, use Python to update the line in `vessence-data/.env`. Example: to set `USER_NAME`, replace the line starting with `USER_NAME=` with `USER_NAME=<value>`.
-
-Write the required values to the `.env` file:
+Run:
 ```bash
-./venv/bin/python -c "
-import pathlib, secrets, re
-env_path = pathlib.Path('vessence-data/.env')
-text = env_path.read_text()
-
-# These values should be set by the CLI after asking the user:
-# USER_NAME=<name>
-# JANE_BRAIN=<gemini|claude|openai>
-# The matching API key (GOOGLE_API_KEY, ANTHROPIC_API_KEY, or OPENAI_API_KEY)
-
-# Auto-generate SESSION_SECRET_KEY
-secret = secrets.token_hex(32)
-text = re.sub(r'^SESSION_SECRET_KEY=.*', f'SESSION_SECRET_KEY={secret}', text, flags=re.M)
-
-env_path.write_text(text)
-print(f'SESSION_SECRET_KEY generated.')
-"
+which claude 2>/dev/null && echo "claude found"
+which gemini 2>/dev/null && echo "gemini found"
+which codex  2>/dev/null && echo "codex found"
 ```
 
-### Optional values (tell the user they can fill these in later):
-- `DISCORD_TOKEN` — For Discord integration. Get at: https://discord.com/developers
-- `VAULT_PASSWORD` — Web UI login password. Leave blank to be prompted on first login.
+- If **one is found**: say *"Found [name] — I'll use that."* Set `JANE_BRAIN=<name>` in `.env`. Skip to Question 3.
+- If **multiple found**: ask which they prefer.
+- If **none found**: explain the options and ask which they want to set up:
 
-Also clean up Docker-specific defaults that shipped in `.env.example`:
+  > *"Jane needs an AI CLI to think. The three options are:*
+  > - *Claude Code (from Anthropic) — best overall, requires a paid Claude subscription or API key. Install: `npm install -g @anthropic-ai/claude-code`, then run `claude` to log in.*
+  > - *Gemini CLI (from Google) — free tier available, good for most users. Install: `npm install -g @google/gemini-cli`*
+  > - *Codex (from OpenAI) — requires an OpenAI API key. Install: `npm install -g @openai/codex`*
+  >
+  > *Which would you like to use?"*
+
+  Help them install the one they choose (install Node.js first if `npm` isn't available: https://nodejs.org). After installing, ask them to log in / set up their key, then re-detect.
+
+**Question 3: API key (if needed)**
+
+- **Claude Code via subscription**: No API key needed — the CLI handles auth. Ask them to run `claude` to confirm they're logged in.
+- **Gemini CLI**: Ask: *"Do you have a Google Gemini API key? It's free — get one at https://aistudio.google.com (click 'Get API key'). It looks like `AIzaSy...`"* Write it as `GOOGLE_API_KEY=<key>`.
+- **OpenAI/Codex**: Ask for their OpenAI API key (https://platform.openai.com/api-keys). Write as `OPENAI_API_KEY=<key>`.
+
+Note: Even if using Claude Code as the brain, a `GOOGLE_API_KEY` is also useful for weather and other background services (optional).
+
+### Auto-generate the session secret:
+
 ```bash
 ./venv/bin/python -c "
-import re, pathlib
+import secrets, re, pathlib
 env = pathlib.Path('vessence-data/.env')
 text = env.read_text()
-text = re.sub(r'^CHROMADB_HOST=.*', '# CHROMADB_HOST=', text, flags=re.M)
-text = re.sub(r'^CHROMADB_PORT=.*', '# CHROMADB_PORT=', text, flags=re.M)
-text = re.sub(r'^LOCAL_LLM_BASE_URL=.*', 'LOCAL_LLM_BASE_URL=http://localhost:11434', text, flags=re.M)
+secret = secrets.token_hex(32)
+text = re.sub(r'^SESSION_SECRET_KEY=.*', f'SESSION_SECRET_KEY={secret}', text, flags=re.M)
 env.write_text(text)
-print('Docker-specific defaults cleaned.')
+print('Session secret generated.')
 "
 ```
 
-**Verification:** The `.env` file exists at `vessence-data/.env` and contains non-empty values for `USER_NAME` and `SESSION_SECRET_KEY`.
+Tell the user: *"Generated a security key for your session cookies — nothing you need to worry about."*
+
+**Verify:** `grep -E "USER_NAME|JANE_BRAIN" vessence-data/.env` shows non-empty values.
 
 ---
 
-## Phase 6: Detect CLI Brain
+## Phase 6 — Link Agent Configuration
 
-Jane's web and Android interface uses the same CLI that is reading this file. Detect which CLI is available and set `JANE_BRAIN` in the `.env` file:
+Tell the user: *"Connecting your CLI to Jane's identity and protocols. This is what makes your CLI behave as Jane rather than as a generic assistant."*
 
-```bash
-if command -v claude &>/dev/null; then
-    BRAIN=claude
-elif command -v gemini &>/dev/null; then
-    BRAIN=gemini
-elif command -v codex &>/dev/null; then
-    BRAIN=openai
-fi
-```
-
-Write the detected value to `.env`. If none is found, ask the user which to install.
-
-**Note:** The user's CLI subscription handles authentication. No separate API key is needed — Jane piggybacks on the same CLI binary that is running this bootstrap.
-
-**Verification:** The `JANE_BRAIN` value in `.env` matches the detected CLI.
-
----
-
-## Phase 7: Link Agent Configuration
-
-The CLI needs to load Vessence's agent instructions so it behaves as Jane. This makes the user's CLI automatically follow Jane's protocols, memory system, and operational rules.
-
-### For Claude Code users:
-
-Create or update the project-level CLAUDE.md to source Vessence's config. The Vessence repo already ships a `vessence/CLAUDE.md` — symlink it to the repo root:
+Based on the detected brain from Phase 5:
 
 ```bash
+# For Claude Code users:
 ln -sf vessence/CLAUDE.md ./CLAUDE.md
-```
 
-### For Gemini CLI users:
-
-```bash
+# For Gemini CLI users:
 ln -sf vessence/GEMINI.md ./GEMINI.md
-```
 
-### For Codex users:
-
-```bash
+# For Codex users:
 ln -sf vessence/AGENTS.md ./AGENTS.md
 ```
 
-This ensures that every time the user opens their CLI in this directory, the agent automatically loads Jane's identity, memory hooks, and operational rules.
-
-**Verification:** The symlink exists and points to the correct file:
+Create the hooks directory (Claude Code only):
 ```bash
-ls -la ./CLAUDE.md ./GEMINI.md ./AGENTS.md 2>/dev/null
+# Claude Code only — hooks run automatically on each session
+mkdir -p .claude/hooks
+ln -sf ../../vessence/startup_code/claude_smart_context.py .claude/hooks/context_build.py 2>/dev/null || true
 ```
-At least one of these should be a symlink pointing into `vessence/`.
+
+**Verify:** `ls -la CLAUDE.md` (or GEMINI.md / AGENTS.md) shows a symlink.
 
 ---
 
-## Phase 8: Start Jane Web Server
+## Phase 7 — Start Jane (Test Run)
 
-Start the web server to verify it works:
+Tell the user: *"Let's do a quick test to make sure everything's working before we set up auto-start."*
 
 ```bash
-cd vessence && timeout 10 ../venv/bin/python -m uvicorn jane_web.main:app --host 0.0.0.0 --port 8081 &
-sleep 5
-curl -s http://localhost:8081/health
-kill %1 2>/dev/null
+export VESSENCE_HOME=$(pwd)/vessence
+export VESSENCE_DATA_HOME=$(pwd)/vessence-data
+export VAULT_HOME=$(pwd)/vault
+export ESSENCES_DIR=$(pwd)/essences
+
+cd vessence
+../venv/bin/python -m uvicorn jane_web.main:app \
+    --host 127.0.0.1 --port 8081 --log-level warning &
+SERVER_PID=$!
+cd ..
+
+sleep 4
+HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8081/ 2>/dev/null)
+kill $SERVER_PID 2>/dev/null
+wait $SERVER_PID 2>/dev/null
 ```
 
-If the health check returns a 200 response, the server is working. Phase 11 will set up persistent auto-start.
-
-If it fails, check for errors in the output.
+- If `HTTP_STATUS` is `200` or `302`: ✓ server works. Tell the user and continue.
+- If it fails: read the server output, diagnose, and fix before moving on. Common issues: port 8081 already in use (`lsof -i :8081`), missing `.env`, import errors.
 
 ---
 
-## Phase 9: Remote Access
+## Phase 8 — Auto-Start on Boot
 
-This gives the user a permanent public URL so the Android app (or any device outside the local network) can reach their Jane server.
+Tell the user: *"Setting up Jane to start automatically when your computer boots, so it's always available."*
 
-Ask the user: "Do you want to access Jane from your phone or other devices outside your home network?"
-
-If **yes**, run the Vessence relay client:
-
+Detect the OS:
 ```bash
-cd vessence && ../venv/bin/python relay_client.py --auto
+uname -s   # Linux or Darwin (macOS)
 ```
 
-This will:
-1. Ask them to pick a username (e.g., `alice`)
-2. Ask for a password (for re-authentication)
-3. Register their permanent URL: `https://alice.vessences.com`
-4. Connect the tunnel
-
-The relay client stays running and maintains the connection. To run it in the background:
+### Linux (systemd) — most common:
 
 ```bash
-cd vessence && nohup ../venv/bin/python relay_client.py --auto > ../vessence-data/logs/relay.log 2>&1 &
-```
-
-Tell the user their permanent URL and that they should enter it in the Android app's settings.
-
-If **no**, skip this phase. Jane still works locally at `http://localhost:8081`.
-
-**Verification:** If they registered, confirm the URL is reachable:
-```bash
-curl -s https://USERNAME.vessences.com/health
-```
-
----
-
-## Phase 10: User Onboarding
-
-Now that Jane is running, introduce yourself as Jane and run a getting-to-know-you interview. This is how Jane builds her initial memory of the user. Ask these questions **one at a time** in a warm, conversational tone. Do not dump all questions at once.
-
-For each answer, store it immediately using:
-```bash
-./venv/bin/python vessence/memory/v1/add_fact.py "<fact>" --topic <topic> --subtopic <subtopic>
-```
-
-### Interview questions (ask in this order):
-
-1. **Name** — "What's your name? What should I call you?"
-   - Store: topic=`identity`, subtopic=`name`
-   - Also update `USER_NAME` in `vessence-data/.env` if different from Phase 5
-
-2. **Profession** — "What do you do for work?"
-   - Store: topic=`identity`, subtopic=`profession`
-
-3. **Interests** — "What are your hobbies or interests outside of work?"
-   - Store each interest: topic=`interests`
-
-4. **Communication style** — "How do you like me to talk to you? For example: brief and direct, detailed explanations, casual, formal?"
-   - Store: topic=`preferences`, subtopic=`communication_style`
-
-5. **Family** — "Do you have family or pets you'd like me to know about? (Totally optional — skip if you prefer.)"
-   - Store each: topic=`family`
-   - Respect if they decline — say "No problem, we can always add that later."
-
-6. **Location** — "What city or timezone are you in? This helps me with weather, time-based reminders, and local info."
-   - Store: topic=`identity`, subtopic=`location`
-
-7. **Goals** — "Is there anything specific you'd like me to help you with? Any projects you're working on?"
-   - Store each: topic=`projects`
-
-8. **Anything else** — "Anything else you'd like me to remember about you?"
-   - Store with appropriate topic
-
-9. **Help the network** — "One last thing — Vessence uses a peer relay network so everyone can access their Jane from their phone. Would you like your machine to help relay encrypted traffic for other users when it's idle? You'd be helping the community, and it uses minimal resources. Your machine would only forward encrypted data — it can't read anyone else's messages. (y/n)"
-   - If yes: set `RELAY_NODE=true` in `vessence-data/.env`
-   - If no: set `RELAY_NODE=false`
-
-### After the interview:
-
-Tell the user:
-
-> "Great, I've got all of that saved. I'll remember everything across sessions — web, CLI, and Android all share the same memory. You can always tell me new things and I'll remember them, or ask me to forget something.
->
-> Try opening http://localhost:8081 in your browser to chat with me through the web interface. Everything is set up and ready to go."
-
-**Verification:** The web UI loads, the user can send a message, and Jane responds with awareness of the onboarding facts (e.g., uses their name).
-
----
-
-## Phase 11: Auto-Start on Boot
-
-Set up Jane to start automatically when the computer boots, so the user never has to manually start the server.
-
-```bash
-# Ensure we're in the repo root
-cd $(git rev-parse --show-toplevel 2>/dev/null || echo ~/ambient)
-```
-
-Detect the OS and configure accordingly:
-
-### Linux (systemd):
-
-```bash
+REPO_ROOT=$(pwd)
 mkdir -p ~/.config/systemd/user
 
-cat > ~/.config/systemd/user/jane-web.service << EOF
+cat > ~/.config/systemd/user/jane-web.service << SVCEOF
 [Unit]
 Description=Jane Web Server
 After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=$(pwd)/vessence
-ExecStart=$(pwd)/venv/bin/python -m uvicorn jane_web.main:app --host 0.0.0.0 --port 8081
+WorkingDirectory=${REPO_ROOT}/vessence
+ExecStart=${REPO_ROOT}/venv/bin/python -m uvicorn jane_web.main:app --host 127.0.0.1 --port 8081 --log-level info
 Restart=always
 RestartSec=5
-Environment=VESSENCE_HOME=$(pwd)/vessence
-Environment=VESSENCE_DATA_HOME=$(pwd)/vessence-data
-Environment=VAULT_HOME=$(pwd)/vault
-Environment=ESSENCES_DIR=$(pwd)/essences
-EnvironmentFile=$(pwd)/vessence-data/.env
+Environment=VESSENCE_HOME=${REPO_ROOT}/vessence
+Environment=VESSENCE_DATA_HOME=${REPO_ROOT}/vessence-data
+Environment=VAULT_HOME=${REPO_ROOT}/vault
+Environment=ESSENCES_DIR=${REPO_ROOT}/essences
+EnvironmentFile=${REPO_ROOT}/vessence-data/.env
 
 [Install]
 WantedBy=default.target
-EOF
-
-cat > ~/.config/systemd/user/jane-proxy.service << EOF
-[Unit]
-Description=Jane Reverse Proxy (zero-downtime deploy)
-After=network.target
-
-[Service]
-Type=simple
-Environment=PYTHONPATH=$(pwd)/vessence
-WorkingDirectory=$(pwd)/vessence
-ExecStart=$(pwd)/venv/bin/python jane_web/reverse_proxy.py --listen-port 8080 --upstream-port 8081
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=default.target
-EOF
+SVCEOF
 
 systemctl --user daemon-reload
 systemctl --user enable jane-web.service
 systemctl --user start jane-web.service
-systemctl --user enable jane-proxy.service
-systemctl --user start jane-proxy.service
 loginctl enable-linger $(whoami)
 ```
 
-If `RELAY_NODE=true` in `.env`, also create a relay service:
-
-```bash
-cat > ~/.config/systemd/user/jane-relay.service << EOF
-[Unit]
-Description=Vessence Relay Client
-After=jane-web.service
-
-[Service]
-Type=simple
-WorkingDirectory=$(pwd)/vessence
-ExecStart=$(pwd)/venv/bin/python relay_client.py --auto --relay-node
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=default.target
-EOF
-
-systemctl --user enable jane-relay.service
-systemctl --user start jane-relay.service
-```
+**Verify:** `systemctl --user status jane-web.service` shows `active (running)`.
 
 ### macOS (launchd):
 
 ```bash
-cat > ~/Library/LaunchAgents/com.vessence.jane-web.plist << EOF
+REPO_ROOT=$(pwd)
+mkdir -p ~/Library/LaunchAgents
+
+cat > ~/Library/LaunchAgents/com.vessence.jane-web.plist << PLISTEOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key><string>com.vessence.jane-web</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>$(pwd)/venv/bin/python</string>
-        <string>-m</string>
-        <string>uvicorn</string>
-        <string>jane_web.main:app</string>
-        <string>--host</string>
-        <string>0.0.0.0</string>
-        <string>--port</string>
-        <string>8081</string>
-    </array>
-    <key>WorkingDirectory</key><string>$(pwd)/vessence</string>
-    <key>RunAtLoad</key><true/>
-    <key>KeepAlive</key><true/>
-    <key>StandardOutPath</key><string>$(pwd)/vessence-data/logs/jane-web.log</string>
-    <key>StandardErrorPath</key><string>$(pwd)/vessence-data/logs/jane-web.log</string>
-    <key>EnvironmentVariables</key>
-    <dict>
-        <key>VESSENCE_HOME</key><string>$(pwd)/vessence</string>
-        <key>VESSENCE_DATA_HOME</key><string>$(pwd)/vessence-data</string>
-        <key>VAULT_HOME</key><string>$(pwd)/vault</string>
-        <key>ESSENCES_DIR</key><string>$(pwd)/essences</string>
-    </dict>
-</dict>
-</plist>
-EOF
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.vessence.jane-web</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>${REPO_ROOT}/venv/bin/python</string>
+    <string>-m</string><string>uvicorn</string>
+    <string>jane_web.main:app</string>
+    <string>--host</string><string>127.0.0.1</string>
+    <string>--port</string><string>8081</string>
+  </array>
+  <key>WorkingDirectory</key><string>${REPO_ROOT}/vessence</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>VESSENCE_HOME</key><string>${REPO_ROOT}/vessence</string>
+    <key>VESSENCE_DATA_HOME</key><string>${REPO_ROOT}/vessence-data</string>
+    <key>VAULT_HOME</key><string>${REPO_ROOT}/vault</string>
+    <key>ESSENCES_DIR</key><string>${REPO_ROOT}/essences</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>${REPO_ROOT}/vessence-data/logs/jane-web.log</string>
+  <key>StandardErrorPath</key><string>${REPO_ROOT}/vessence-data/logs/jane-web.log</string>
+</dict></plist>
+PLISTEOF
 
 launchctl load ~/Library/LaunchAgents/com.vessence.jane-web.plist
 ```
 
-**Note:** The application loads additional environment variables from `vessence-data/.env` at startup via python-dotenv.
-
-### Windows (Task Scheduler via PowerShell):
-
-Tell the user to open PowerShell as Administrator and run:
-
-```powershell
-$action = New-ScheduledTaskAction -Execute "$(pwd)\venv\Scripts\python.exe" -Argument "-m uvicorn jane_web.main:app --host 0.0.0.0 --port 8081" -WorkingDirectory "$(pwd)\vessence"
-$trigger = New-ScheduledTaskTrigger -AtLogon
-$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
-Register-ScheduledTask -TaskName "JaneWebServer" -Action $action -Trigger $trigger -Settings $settings -Description "Vessence Jane Web Server"
-```
-
-**Verification:** Check the service is running:
-```bash
-systemctl --user status jane-web.service   # Linux
-launchctl list | grep vessence             # macOS
-```
-A reboot test is recommended later but not required now.
+**Verify:** `launchctl list | grep vessence` shows the service.
 
 ---
 
-## Updating Vessence
+## Phase 9 — Remote Access (Optional)
 
-To update Jane with the latest improvements:
+Tell the user:
 
+> *"Jane is now running locally at http://localhost:8081. If you want to access her from your phone or tablet — from anywhere, not just at home — I can set up a permanent public URL for you through the Vessences relay network.*
+>
+> *The relay forwards encrypted traffic to your machine. It never stores or reads your data. Would you like to set this up? (y/n)"*
+
+If **yes**:
 ```bash
-cd ~/ambient
-git pull origin master
-./venv/bin/pip install -r vessence/requirements.txt
-bash vessence/startup_code/graceful_restart.sh
+cd vessence && ../venv/bin/python relay_client.py --setup
 ```
 
-This pulls the latest code, updates dependencies, and restarts Jane with zero downtime.
+This will guide the user through:
+1. Picking a username (their permanent URL will be `https://USERNAME.vessences.com`)
+2. Creating a password for future logins
+3. Connecting the tunnel
+
+After setup, create a persistent service for the relay (same pattern as Phase 8, using `relay_client.py --auto` as the ExecStart).
+
+Tell the user: *"Your Jane is now accessible at https://USERNAME.vessences.com. Use that URL in the Android app settings."*
+
+If **no**: *"No problem. You can always set this up later by running `python vessence/relay_client.py --setup` from the repo root."*
 
 ---
 
-## Important Rules for the CLI
+## Phase 10 — Get to Know the User
 
-- **All paths are relative to the repo root** — wherever the user cloned the repository.
-- **Never store runtime data in `vessence/`** — that directory is code only, tracked by git.
-- **The `.env` file lives in `vessence-data/.env`**, not in `vessence/.env`.
-- **The ChromaDB vector database lives in `vessence-data/memory/v1/vector_db/`**.
-- **Seed memories come from `vessence/configs/jane_seed_memories.json`** — do not modify this file during setup.
-- **If a phase fails, diagnose and fix it before moving on.** Do not skip phases.
+Tell the user: *"Jane is running. Before you open the web UI, I'd like to ask you a few quick questions so Jane already knows you when you first meet her. You can skip anything you don't feel like answering."*
+
+Ask these **one at a time** in a warm, natural tone. For each answer, save it immediately:
+
+```bash
+./venv/bin/python vessence/agent_skills/add_fact.py "<fact>" --topic <topic>
+```
+
+1. **Name/nickname** — *"What should Jane call you?"*
+   - Save: `--topic identity --subtopic name`
+   - Also update `USER_NAME` in `vessence-data/.env` if different from Phase 5
+
+2. **Profession** — *"What do you do for work — or are you a student?"*
+   - Save: `--topic identity --subtopic profession`
+
+3. **Interests** — *"What are your hobbies or interests?"*
+   - Save each: `--topic interests`
+
+4. **How to talk** — *"How do you like to be talked to? Quick and direct? Detailed? Casual?"*
+   - Save: `--topic preferences --subtopic communication_style`
+
+5. **Location** — *"What city or timezone are you in? Useful for weather and scheduling."*
+   - Save: `--topic identity --subtopic location`
+
+6. **Goals** — *"Is there anything specific you want Jane to help you with — projects, routines, anything?"*
+   - Save: `--topic projects`
+
+7. **Optional — family** — *"Anything about your family or living situation you'd like Jane to know? Completely optional."*
+   - Save if answered: `--topic family`
+
+After the last question, say:
+
+> *"Got it — Jane knows the basics about you now. This carries across all sessions and devices. You can always tell her new things and she'll remember, or ask her to forget something.*
+>
+> **Open http://localhost:8081 in your browser to start talking to Jane.** She'll already know your name."*
+
+---
+
+## Phase 11 — Wrap Up
+
+Tell the user a brief summary of what was set up:
+
+> *"Here's what's running:*
+> - *Jane web UI: http://localhost:8081*
+> - *Brain: [their chosen CLI]*
+> - *Auto-starts on boot: yes*
+> - *Remote access: [yes at https://USERNAME.vessences.com / no, local only]*
+>
+> *A few useful things to know:*
+> - *To update Jane: `git pull && ./venv/bin/pip install -r vessence/requirements.txt` then restart*
+> - *Logs: `journalctl --user -u jane-web.service -f` (Linux) or `tail -f vessence-data/logs/jane-web.log` (macOS)*
+> - *Android app: download from https://vessences.com/downloads — enter your server URL in settings*
+>
+> *Is there anything you'd like to adjust or ask about before we finish?"*
+
+---
+
+## Rules for the CLI
+
+- **Never skip a phase if verification fails** — diagnose and fix it first.
+- **Explain what you're doing** — the user should always know what's happening and why.
+- **All runtime data goes in `vessence-data/`** — never write user data into `vessence/` (that's code only).
+- **The `.env` file lives at `vessence-data/.env`**, not `vessence/.env`.
+- **If you hit an error you can't fix**, show the user the exact error, explain what it means in plain English, and ask them to paste it into https://github.com/endsley/vessence/issues.

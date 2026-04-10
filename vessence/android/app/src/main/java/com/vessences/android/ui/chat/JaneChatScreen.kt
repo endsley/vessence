@@ -557,6 +557,9 @@ private fun ChatInputBar(
             }
         }
 
+        // STT listening status — shows real-time transcript while user speaks
+        VoiceStatusBanner(voice = chatState.voice, aiColor = Violet500)
+
         // Attached file indicator
         if (attachedFileUri != null) {
             Row(
