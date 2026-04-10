@@ -11,8 +11,63 @@ from memory.v1.memory_retrieval import build_memory_sections
 from jane.config import VESSENCE_DATA_HOME, VESSENCE_HOME
 from jane.research_router import run_research_offload, should_offload_research
 
+# Add vault_web to path for database access
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "vault_web"))
+
 
 MAX_DOC_CHARS = 4000
+
+
+# ── Contact lookup helper (used by Jane for email/phone resolution) ───────────
+
+def lookup_contact(name: str) -> list[dict]:
+    """Look up a contact by name from the synced contacts database.
+
+    Returns a list of dicts with keys: display_name, phone_number, email,
+    is_primary, contact_id. Returns empty list if no match or DB unavailable.
+    """
+    try:
+        from database import get_db
+        query = f"%{name.strip()}%"
+        with get_db() as conn:
+            rows = conn.execute(
+                "SELECT display_name, phone_number, email, is_primary, contact_id "
+                "FROM contacts WHERE display_name LIKE ? ORDER BY display_name LIMIT 20",
+                (query,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+    except Exception as e:
+        logger.warning("Contact lookup failed for '%s': %s", name, e)
+        return []
+
+
+def format_contact_info(name: str) -> str:
+    """Format contact lookup results as a human-readable string for Jane's context.
+
+    Returns empty string if no contacts found.
+    """
+    results = lookup_contact(name)
+    if not results:
+        return ""
+    lines = [f"[Contact Info for '{name}']"]
+    # Group by display_name
+    by_name: dict[str, dict] = {}
+    for r in results:
+        dn = r["display_name"]
+        if dn not in by_name:
+            by_name[dn] = {"phones": [], "emails": []}
+        if r.get("phone_number"):
+            by_name[dn]["phones"].append(r["phone_number"])
+        if r.get("email"):
+            by_name[dn]["emails"].append(r["email"])
+    for dn, info in by_name.items():
+        parts = [dn]
+        if info["phones"]:
+            parts.append(f"Phone: {', '.join(info['phones'])}")
+        if info["emails"]:
+            parts.append(f"Email: {', '.join(info['emails'])}")
+        lines.append(" | ".join(parts))
+    return "\n".join(lines)
 
 # ── In-memory cache for static context parts ─────────────────────────────────
 _context_cache: dict[str, tuple[float, object]] = {}

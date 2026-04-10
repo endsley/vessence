@@ -80,4 +80,15 @@ def init_db():
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 changed_at DATETIME DEFAULT CURRENT_TIMESTAMP
             );
+
+            CREATE TABLE IF NOT EXISTS contacts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                display_name TEXT NOT NULL,
+                phone_number TEXT,
+                email TEXT,
+                is_primary BOOLEAN DEFAULT 0,
+                contact_id TEXT,
+                synced_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(display_name, phone_number, email)
+            );
         """)

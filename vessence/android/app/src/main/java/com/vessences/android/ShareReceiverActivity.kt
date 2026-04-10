@@ -1,22 +1,26 @@
 package com.vessences.android
 
+import android.app.AlertDialog
 import android.content.Intent
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import com.vessences.android.data.api.ApiClient
 import com.vessences.android.util.Constants
-import kotlinx.coroutines.CoroutineScope
+import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 
 /**
- * Transparent activity that silently handles shared URLs.
- * POSTs the URL to the briefing article submission endpoint and shows a toast.
+ * Transparent activity that handles shared URLs with a picker dialog:
+ *   - "Summarize Now" — sends URL to Jane chat, gets immediate summary via TTS
+ *   - "Add to Briefing" — queues for daily briefing (existing behavior)
+ *
  * If the shared text is not a URL, forwards the intent to MainActivity.
  */
 class ShareReceiverActivity : ComponentActivity() {
@@ -35,7 +39,6 @@ class ShareReceiverActivity : ComponentActivity() {
             return
         }
 
-        // Extract URL from shared text (Chrome often shares "Title\nURL")
         val url = extractUrl(sharedText)
 
         if (url == null) {
@@ -51,60 +54,83 @@ class ShareReceiverActivity : ComponentActivity() {
             return
         }
 
-        // Initialize ApiClient if needed (it may not be initialized if app wasn't running)
+        // Initialize ApiClient if needed
         try {
             ApiClient.getOkHttpClient()
         } catch (_: UninitializedPropertyAccessException) {
             ApiClient.init(applicationContext)
         }
 
-        val prefs = getSharedPreferences(Constants.PREFS_NAME, MODE_PRIVATE)
-        val serverUrl = prefs.getString(Constants.PREF_JANE_URL, Constants.DEFAULT_JANE_BASE_URL)
-            ?: Constants.DEFAULT_JANE_BASE_URL
-
-        submitArticle(serverUrl, url)
+        // Show picker dialog
+        AlertDialog.Builder(this)
+            .setTitle("Share Article")
+            .setItems(arrayOf("Summarize Now", "Add to Briefing")) { _, which ->
+                when (which) {
+                    0 -> summarizeNow(url)
+                    1 -> addToBriefing(url)
+                }
+            }
+            .setOnCancelListener { finish() }
+            .show()
     }
 
     private fun extractUrl(text: String): String? {
-        // Look for an http:// or https:// URL anywhere in the text
         val urlPattern = Regex("""https?://\S+""")
         return urlPattern.find(text)?.value
     }
 
-    private fun submitArticle(serverUrl: String, url: String) {
+    /**
+     * Send the URL to Jane's chat as a message. Jane will fetch, summarize,
+     * and the response gets spoken via TTS on the chat screen.
+     */
+    private fun summarizeNow(url: String) {
+        // Open the main chat with the URL as a pre-filled message
+        val chatIntent = Intent(this, MainActivity::class.java).apply {
+            action = Intent.ACTION_SEND
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, "Summarize this article for me: $url")
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        }
+        startActivity(chatIntent)
+        Toast.makeText(this, "Sending to Jane for summary...", Toast.LENGTH_SHORT).show()
+        finish()
+    }
+
+    /**
+     * Queue the URL for the daily briefing (existing behavior).
+     */
+    private fun addToBriefing(url: String) {
+        val prefs = getSharedPreferences(Constants.PREFS_NAME, MODE_PRIVATE)
+        val serverUrl = prefs.getString(Constants.PREF_JANE_URL, Constants.DEFAULT_JANE_BASE_URL)
+            ?: Constants.DEFAULT_JANE_BASE_URL
+
         val client = ApiClient.getOkHttpClient()
         val json = JSONObject().apply { put("url", url) }
         val body = json.toString().toRequestBody("application/json".toMediaType())
         val request = Request.Builder()
             .url("${serverUrl.trimEnd('/')}/api/briefing/articles/submit")
             .post(body)
-            .header("User-Agent", Constants.USER_AGENT)
             .build()
 
-        CoroutineScope(Dispatchers.IO).launch {
-            try {
-                val response = client.newCall(request).execute()
-                val success = response.isSuccessful
-                response.close()
-                runOnUiThread {
-                    Toast.makeText(
-                        this@ShareReceiverActivity,
-                        if (success) "Article queued for briefing" else "Failed to queue article",
-                        Toast.LENGTH_SHORT
-                    ).show()
+        lifecycleScope.launch {
+            val success = try {
+                withContext(Dispatchers.IO) {
+                    val response = client.newCall(request).execute()
+                    val ok = response.isSuccessful
+                    response.close()
+                    ok
                 }
             } catch (_: Exception) {
-                runOnUiThread {
-                    Toast.makeText(
-                        this@ShareReceiverActivity,
-                        "Failed to queue article",
-                        Toast.LENGTH_SHORT
-                    ).show()
-                }
+                false
             }
-        }
 
-        // Finish immediately — the toast will persist after the activity is gone
-        finish()
+            Toast.makeText(
+                this@ShareReceiverActivity,
+                if (success) "Article queued for briefing" else "Failed to queue article",
+                Toast.LENGTH_SHORT
+            ).show()
+
+            finish()
+        }
     }
 }

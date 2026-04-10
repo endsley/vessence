@@ -204,8 +204,8 @@ try:
     ANDROID_VERSION = _version_data["version_name"]
     _ANDROID_VERSION_CODE = _version_data["version_code"]
 except FileNotFoundError:
-    ANDROID_VERSION = "0.2.2"
-    _ANDROID_VERSION_CODE = 234
+    ANDROID_VERSION = "0.2.3"
+    _ANDROID_VERSION_CODE = 235
 
 # Startup validation: ensure the APK for the advertised version actually exists
 _expected_apk = MARKETING_DOWNLOADS_DIR / f"vessences-android-v{ANDROID_VERSION}.apk"
@@ -962,6 +962,78 @@ async def receive_crash_report(request: Request, _=Depends(require_auth)):
         f.write(f"\n{'='*60}\n{report}\n")
     _logger.error("Android crash report received:\n%s", report[:500])
     return {"status": "received"}
+
+
+# ── Contacts sync ─────────────────────────────────────────────────────────────
+
+@app.post("/api/contacts/sync")
+async def sync_contacts(request: Request):
+    """Full-replace sync: delete all existing contacts and insert fresh from Android."""
+    try:
+        contacts = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON")
+    if not isinstance(contacts, list):
+        raise HTTPException(status_code=400, detail="Expected a JSON array")
+
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    with get_db() as conn:
+        # Full replace — delete all existing, insert fresh
+        conn.execute("DELETE FROM contacts")
+        for c in contacts:
+            display_name = (c.get("display_name") or "").strip()
+            if not display_name:
+                continue
+            phone_number = (c.get("phone_number") or "").strip() or None
+            email = (c.get("email") or "").strip() or None
+            is_primary = 1 if c.get("is_primary") else 0
+            contact_id = str(c.get("contact_id", "")).strip() or None
+            try:
+                conn.execute(
+                    """INSERT OR IGNORE INTO contacts
+                       (display_name, phone_number, email, is_primary, contact_id, synced_at)
+                       VALUES (?, ?, ?, ?, ?, ?)""",
+                    (display_name, phone_number, email, is_primary, contact_id, now),
+                )
+            except Exception as e:
+                _logger.warning("contacts sync row error: %s", e)
+
+    _logger.info("Contacts sync: %d contacts received (full replace)", len(contacts))
+    return {"status": "ok", "received": len(contacts)}
+
+
+@app.get("/api/contacts/search")
+async def search_contacts(q: str = ""):
+    """Search contacts by name, return aggregated per person (phones + emails merged)."""
+    if not q.strip():
+        raise HTTPException(status_code=400, detail="Query parameter 'q' is required")
+    query = f"%{q.strip()}%"
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT display_name, phone_number, email, is_primary, contact_id FROM contacts WHERE display_name LIKE ? ORDER BY display_name, is_primary DESC LIMIT 100",
+            (query,),
+        ).fetchall()
+    # Aggregate by person (contact_id or display_name)
+    people: dict[str, dict] = {}
+    for r in rows:
+        key = r["contact_id"] or r["display_name"]
+        if key not in people:
+            people[key] = {"display_name": r["display_name"], "phones": [], "emails": []}
+        if r["phone_number"] and r["phone_number"] not in people[key]["phones"]:
+            people[key]["phones"].append(r["phone_number"])
+        if r["email"] and r["email"] not in people[key]["emails"]:
+            people[key]["emails"].append(r["email"])
+    return list(people.values())
+
+
+@app.get("/api/contacts")
+async def list_contacts(request: Request, _=Depends(require_auth)):
+    """List all synced contacts."""
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT display_name, phone_number, email, is_primary, contact_id, synced_at FROM contacts ORDER BY display_name"
+        ).fetchall()
+    return [dict(r) for r in rows]
 
 
 @app.post("/api/device-diagnostics")
@@ -3207,11 +3279,6 @@ def _spawn_shared_article_processor():
 
 @app.post("/api/briefing/articles/submit")
 async def submit_briefing_article(request: Request):
-    """Accept a shared article URL and queue it for processing."""
-    # Use flexible auth (tolerates mobile IP changes via trusted-device fallback)
-    session_id, _ = get_or_bootstrap_session(request)
-    if not session_id:
-        raise HTTPException(status_code=401, detail="Not authenticated")
     body = await request.json()
     url = body.get("url", "").strip()
     if not url or not re.match(r'^https?://', url):

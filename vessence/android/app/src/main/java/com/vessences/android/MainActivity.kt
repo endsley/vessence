@@ -14,10 +14,14 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import com.vessences.android.contacts.ContactsSyncManager
 import com.vessences.android.data.api.ApiClient
 import com.vessences.android.notifications.ChatNotificationManager
 import com.vessences.android.ui.theme.ThemePreferences
 import com.vessences.android.ui.theme.VessenceTheme
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     private val notificationPermissionLauncher = registerForActivityResult(
@@ -108,6 +112,10 @@ class MainActivity : ComponentActivity() {
         CrashReporter.install(applicationContext)
         DiagnosticReporter.init(applicationContext)
         ApiClient.init(applicationContext)
+        // Sync contacts to server on startup (respects 6-hour interval)
+        CoroutineScope(Dispatchers.IO).launch {
+            try { ContactsSyncManager.syncIfNeeded(applicationContext) } catch (_: Exception) {}
+        }
         try { ChatNotificationManager(applicationContext).ensureChannels() } catch (_: Exception) {}
         // Auto-start wake word service if always-listen was enabled
         // BUT skip if this is a wake word intent — service just stopped itself on purpose
