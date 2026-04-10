@@ -717,6 +717,22 @@ def _is_local_browser_access(request: Request) -> bool:
     return client_host in ("127.0.0.1", "::1")
 
 
+def _cookie_secure_flag(request: Request) -> bool:
+    """Return True only if the request came over HTTPS (or via HTTPS proxy).
+
+    Browsers refuse to store Secure cookies over plain HTTP, which breaks
+    localhost development. This detects HTTPS via the request scheme or the
+    X-Forwarded-Proto header set by reverse proxies.
+    """
+    scheme = request.url.scheme
+    if scheme == "https":
+        return True
+    forwarded_proto = (request.headers.get("x-forwarded-proto") or "").split(",")[0].strip().lower()
+    if forwarded_proto == "https":
+        return True
+    return False
+
+
 _trusted_device_session_cache: dict[str, str] = {}  # trusted_device_id → session_id
 
 def _is_single_user_no_auth_mode() -> bool:
@@ -906,10 +922,10 @@ async def index(request: Request):
             },
         )
         if get_session_id(request) != session_id:
-            response.set_cookie(SESSION_COOKIE, session_id, httponly=True, secure=True, samesite="lax",
+            response.set_cookie(SESSION_COOKIE, session_id, httponly=True, secure=_cookie_secure_flag(request), samesite="lax",
                                 max_age=60 * 60 * 24 * 30)
         if trusted_device_id and get_trusted_device_cookie_id(request) != trusted_device_id:
-            response.set_cookie(TRUSTED_DEVICE_COOKIE, trusted_device_id, httponly=True, secure=True, samesite="lax",
+            response.set_cookie(TRUSTED_DEVICE_COOKIE, trusted_device_id, httponly=True, secure=_cookie_secure_flag(request), samesite="lax",
                                 max_age=60 * 60 * 24 * 30)
         return response
     return templates.TemplateResponse("login.html", _login_context(request))
@@ -934,10 +950,10 @@ async def vault_page(request: Request):
             },
         )
         if get_session_id(request) != session_id:
-            response.set_cookie(SESSION_COOKIE, session_id, httponly=True, secure=True, samesite="lax",
+            response.set_cookie(SESSION_COOKIE, session_id, httponly=True, secure=_cookie_secure_flag(request), samesite="lax",
                                 max_age=60 * 60 * 24 * 30)
         if trusted_device_id and get_trusted_device_cookie_id(request) != trusted_device_id:
-            response.set_cookie(TRUSTED_DEVICE_COOKIE, trusted_device_id, httponly=True, secure=True, samesite="lax",
+            response.set_cookie(TRUSTED_DEVICE_COOKIE, trusted_device_id, httponly=True, secure=_cookie_secure_flag(request), samesite="lax",
                                 max_age=60 * 60 * 24 * 30)
         return response
     return templates.TemplateResponse("login.html", _login_context(request))
@@ -969,10 +985,10 @@ async def chat_page(request: Request):
             },
         )
         if get_session_id(request) != session_id:
-            response.set_cookie(SESSION_COOKIE, session_id, httponly=True, secure=True, samesite="lax",
+            response.set_cookie(SESSION_COOKIE, session_id, httponly=True, secure=_cookie_secure_flag(request), samesite="lax",
                                 max_age=60 * 60 * 24 * 30)
         if trusted_device_id and get_trusted_device_cookie_id(request) != trusted_device_id:
-            response.set_cookie(TRUSTED_DEVICE_COOKIE, trusted_device_id, httponly=True, secure=True, samesite="lax",
+            response.set_cookie(TRUSTED_DEVICE_COOKIE, trusted_device_id, httponly=True, secure=_cookie_secure_flag(request), samesite="lax",
                                 max_age=60 * 60 * 24 * 30)
         return response
     return templates.TemplateResponse("login.html", _login_context(request))
@@ -1564,9 +1580,9 @@ async def auth_google_callback(request: Request):
     session_id = create_session(fp, trusted=True, user_id=email)
     prewarm_session(session_id)
     resp = RedirectResponse(url="/")
-    resp.set_cookie(SESSION_COOKIE, session_id, httponly=True, secure=True, samesite="lax",
+    resp.set_cookie(SESSION_COOKIE, session_id, httponly=True, secure=_cookie_secure_flag(request), samesite="lax",
                     max_age=60 * 60 * 24 * 30)  # 30 days
-    resp.set_cookie(TRUSTED_DEVICE_COOKIE, trusted_device_id, httponly=True, secure=True, samesite="lax",
+    resp.set_cookie(TRUSTED_DEVICE_COOKIE, trusted_device_id, httponly=True, secure=_cookie_secure_flag(request), samesite="lax",
                     max_age=60 * 60 * 24 * 30)
     return resp
 
@@ -1602,9 +1618,9 @@ async def auth_google_token(request: Request):
     session_id = create_session(fp, trusted=True, user_id=email)
     prewarm_session(session_id)
     resp = JSONResponse({"ok": True, "session_id": session_id, "trusted_device_id": trusted_device_id})
-    resp.set_cookie(SESSION_COOKIE, session_id, httponly=True, secure=True, samesite="lax",
+    resp.set_cookie(SESSION_COOKIE, session_id, httponly=True, secure=_cookie_secure_flag(request), samesite="lax",
                     max_age=60 * 60 * 24 * 30)
-    resp.set_cookie(TRUSTED_DEVICE_COOKIE, trusted_device_id, httponly=True, secure=True, samesite="lax",
+    resp.set_cookie(TRUSTED_DEVICE_COOKIE, trusted_device_id, httponly=True, secure=_cookie_secure_flag(request), samesite="lax",
                     max_age=60 * 60 * 24 * 30)
     return resp
 
@@ -1615,7 +1631,7 @@ async def verify_share(request: Request, body: dict, response: Response):
     share = validate_share(code)
     if not share:
         return JSONResponse({"ok": False, "error": "Invalid share code"}, status_code=400)
-    response.set_cookie("share_code", code, httponly=True, secure=True, samesite="lax")
+    response.set_cookie("share_code", code, httponly=True, secure=_cookie_secure_flag(request), samesite="lax")
     return {"ok": True, "path": share["path"]}
 
 
@@ -1637,9 +1653,9 @@ async def verify_totp_login(request: Request, body: dict):
     prewarm_session(session_id)
 
     response = JSONResponse({"ok": True})
-    response.set_cookie(SESSION_COOKIE, session_id, httponly=True, secure=True, samesite="lax",
+    response.set_cookie(SESSION_COOKIE, session_id, httponly=True, secure=_cookie_secure_flag(request), samesite="lax",
                         max_age=60 * 60 * 24 * 30)
-    response.set_cookie(TRUSTED_DEVICE_COOKIE, trusted_device_id, httponly=True, secure=True, samesite="lax",
+    response.set_cookie(TRUSTED_DEVICE_COOKIE, trusted_device_id, httponly=True, secure=_cookie_secure_flag(request), samesite="lax",
                         max_age=60 * 60 * 24 * 30)
     return response
 
@@ -1672,10 +1688,10 @@ async def check_auth(request: Request):
     session_id, trusted_device_id = get_or_bootstrap_session(request)
     response = JSONResponse({"authenticated": bool(session_id)})
     if session_id and get_session_id(request) != session_id:
-        response.set_cookie(SESSION_COOKIE, session_id, httponly=True, secure=True, samesite="lax",
+        response.set_cookie(SESSION_COOKIE, session_id, httponly=True, secure=_cookie_secure_flag(request), samesite="lax",
                             max_age=60 * 60 * 24 * 30)
     if trusted_device_id and get_trusted_device_cookie_id(request) != trusted_device_id:
-        response.set_cookie(TRUSTED_DEVICE_COOKIE, trusted_device_id, httponly=True, secure=True, samesite="lax",
+        response.set_cookie(TRUSTED_DEVICE_COOKIE, trusted_device_id, httponly=True, secure=_cookie_secure_flag(request), samesite="lax",
                             max_age=60 * 60 * 24 * 30)
     return response
 
@@ -2305,10 +2321,10 @@ async def upload_single_file(
         "mime": mime,
     })
     if get_session_id(request) != session_id:
-        response.set_cookie(SESSION_COOKIE, session_id, httponly=True, secure=True, samesite="lax",
+        response.set_cookie(SESSION_COOKIE, session_id, httponly=True, secure=_cookie_secure_flag(request), samesite="lax",
                             max_age=60 * 60 * 24 * 30)
     if trusted_device_id and get_trusted_device_cookie_id(request) != trusted_device_id:
-        response.set_cookie(TRUSTED_DEVICE_COOKIE, trusted_device_id, httponly=True, secure=True, samesite="lax",
+        response.set_cookie(TRUSTED_DEVICE_COOKIE, trusted_device_id, httponly=True, secure=_cookie_secure_flag(request), samesite="lax",
                             max_age=60 * 60 * 24 * 30)
     return response
 
@@ -2512,10 +2528,10 @@ async def _handle_jane_chat(body: ChatMessage, request: Request):
     result = await send_message(user_id, session_id, body.message, body.file_context, platform=body.platform, tts_enabled=body.tts_enabled or False)
     response = JSONResponse({"response": result.get("text", ""), "files": result.get("files", [])})
     if get_session_id(request) != session_id:
-        response.set_cookie(SESSION_COOKIE, session_id, httponly=True, secure=True, samesite="lax",
+        response.set_cookie(SESSION_COOKIE, session_id, httponly=True, secure=_cookie_secure_flag(request), samesite="lax",
                             max_age=60 * 60 * 24 * 30)
     if trusted_device_id and get_trusted_device_cookie_id(request) != trusted_device_id:
-        response.set_cookie(TRUSTED_DEVICE_COOKIE, trusted_device_id, httponly=True, secure=True, samesite="lax",
+        response.set_cookie(TRUSTED_DEVICE_COOKIE, trusted_device_id, httponly=True, secure=_cookie_secure_flag(request), samesite="lax",
                             max_age=60 * 60 * 24 * 30)
     return response
 
@@ -2539,10 +2555,10 @@ async def jane_end_session(body: SessionControl, request: Request):
     end_session(session_id)
     response = JSONResponse({"ok": True})
     if get_session_id(request) != session_id:
-        response.set_cookie(SESSION_COOKIE, session_id, httponly=True, secure=True, samesite="lax",
+        response.set_cookie(SESSION_COOKIE, session_id, httponly=True, secure=_cookie_secure_flag(request), samesite="lax",
                             max_age=60 * 60 * 24 * 30)
     if trusted_device_id and get_trusted_device_cookie_id(request) != trusted_device_id:
-        response.set_cookie(TRUSTED_DEVICE_COOKIE, trusted_device_id, httponly=True, secure=True, samesite="lax",
+        response.set_cookie(TRUSTED_DEVICE_COOKIE, trusted_device_id, httponly=True, secure=_cookie_secure_flag(request), samesite="lax",
                             max_age=60 * 60 * 24 * 30)
     return response
 
@@ -2852,10 +2868,10 @@ async def _handle_jane_chat_stream(body: ChatMessage, request: Request):
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
         if get_session_id(request) != session_id:
-            response.set_cookie(SESSION_COOKIE, session_id, httponly=True, secure=True, samesite="lax",
+            response.set_cookie(SESSION_COOKIE, session_id, httponly=True, secure=_cookie_secure_flag(request), samesite="lax",
                                 max_age=60 * 60 * 24 * 30)
         if trusted_device_id and get_trusted_device_cookie_id(request) != trusted_device_id:
-            response.set_cookie(TRUSTED_DEVICE_COOKIE, trusted_device_id, httponly=True, secure=True, samesite="lax",
+            response.set_cookie(TRUSTED_DEVICE_COOKIE, trusted_device_id, httponly=True, secure=_cookie_secure_flag(request), samesite="lax",
                                 max_age=60 * 60 * 24 * 30)
         return response
 
@@ -2911,10 +2927,10 @@ async def _handle_jane_chat_stream(body: ChatMessage, request: Request):
         },
     )
     if get_session_id(request) != session_id:
-        response.set_cookie(SESSION_COOKIE, session_id, httponly=True, secure=True, samesite="lax",
+        response.set_cookie(SESSION_COOKIE, session_id, httponly=True, secure=_cookie_secure_flag(request), samesite="lax",
                             max_age=60 * 60 * 24 * 30)
     if trusted_device_id and get_trusted_device_cookie_id(request) != trusted_device_id:
-        response.set_cookie(TRUSTED_DEVICE_COOKIE, trusted_device_id, httponly=True, secure=True, samesite="lax",
+        response.set_cookie(TRUSTED_DEVICE_COOKIE, trusted_device_id, httponly=True, secure=_cookie_secure_flag(request), samesite="lax",
                             max_age=60 * 60 * 24 * 30)
     return response
 
