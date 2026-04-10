@@ -127,13 +127,34 @@ def main():
     new_env["USER_NAME"] = user_name
     print()
 
-    # ── Step 3: Optional Google OAuth (for multi-device access) ──
-    print("Step 3: Google sign-in (optional)")
-    print("  Skip this if you only access Jane locally on your computer.")
-    print("  Set this up if you want to use Jane from other devices (phone, tablet).")
+    # ── Step 3: Choose access mode ──
+    print("Step 3: How do you want to access Jane?")
     print()
-    enable_google = ask("Enable Google sign-in? (y/N)", default="N").lower().startswith("y")
-    if enable_google:
+    print("  [1] Local only — chat with Jane on this computer at http://localhost:8081")
+    print("      (no setup needed, no auth required for localhost)")
+    print()
+    print("  [2] Remote access — use Jane from your phone, tablet, or other devices")
+    print("      Requires:")
+    print("        - A permanent URL to reach your server (e.g., chieh.vessences.com)")
+    print("        - Google sign-in to verify it's you")
+    print()
+    print("      The easiest way: create a free Vessences account at")
+    print("      https://vessences.com/signup — you get a permanent subdomain")
+    print("      and the relay handles the networking automatically.")
+    print()
+    print("      Alternative: set up your own Cloudflare tunnel pointing at localhost:8081")
+    print("      (more technical — see docs/cloudflare-tunnel.md)")
+    print()
+    access_mode = ask("Choose [1] or [2]", default="1")
+
+    if access_mode == "2":
+        print()
+        print("  → Remote access selected. You'll need Google OAuth credentials.")
+        print("    1. Go to https://console.cloud.google.com/apis/credentials")
+        print("    2. Create OAuth 2.0 Client ID (type: Web application)")
+        print("    3. Add redirect URI: https://YOUR_DOMAIN/auth/google/callback")
+        print("    4. Copy the Client ID and Secret below")
+        print()
         new_env["GOOGLE_CLIENT_ID"] = ask("  Google Client ID", required=True)
         new_env["GOOGLE_CLIENT_SECRET"] = ask("  Google Client Secret", required=True)
         email = ask("  Your Google email", required=True)
@@ -163,8 +184,16 @@ def main():
     print()
     print("Next steps:")
     print(f"  1. Start the server: systemctl --user start jane-web.service")
+    print(f"     (on macOS: launchctl load ~/Library/LaunchAgents/jane-web.plist)")
+    print(f"     (on Windows: see docs/windows-setup.md)")
     print(f"  2. Open Jane: http://localhost:8081/")
-    print(f"  3. If you enabled Google sign-in, sign in at /auth/google")
+    if access_mode == "2":
+        print(f"  3. Sign in with Google at http://localhost:8081/auth/google")
+        print(f"  4. Set up your tunnel/relay so YOUR_DOMAIN points at localhost:8081")
+        print(f"     - Easiest: https://vessences.com/signup (free relay)")
+        print(f"     - Or: Cloudflare tunnel pointing at localhost:8081")
+    else:
+        print(f"  3. To enable remote access later, re-run this script")
     print()
     return 0
 
