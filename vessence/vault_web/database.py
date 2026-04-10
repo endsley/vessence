@@ -91,4 +91,16 @@ def init_db():
                 synced_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE(display_name, phone_number, email)
             );
+
+            CREATE TABLE IF NOT EXISTS synced_messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                sender TEXT NOT NULL,
+                body TEXT,
+                timestamp_ms INTEGER NOT NULL,
+                is_read BOOLEAN DEFAULT 1,
+                is_contact BOOLEAN DEFAULT 0,
+                msg_type TEXT DEFAULT 'personal',
+                synced_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(sender, timestamp_ms, body)
+            );
         """)

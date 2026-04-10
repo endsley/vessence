@@ -204,8 +204,8 @@ try:
     ANDROID_VERSION = _version_data["version_name"]
     _ANDROID_VERSION_CODE = _version_data["version_code"]
 except FileNotFoundError:
-    ANDROID_VERSION = "0.2.3"
-    _ANDROID_VERSION_CODE = 235
+    ANDROID_VERSION = "0.2.4"
+    _ANDROID_VERSION_CODE = 236
 
 # Startup validation: ensure the APK for the advertised version actually exists
 _expected_apk = MARKETING_DOWNLOADS_DIR / f"vessences-android-v{ANDROID_VERSION}.apk"
@@ -1032,6 +1032,107 @@ async def list_contacts(request: Request, _=Depends(require_auth)):
     with get_db() as conn:
         rows = conn.execute(
             "SELECT display_name, phone_number, email, is_primary, contact_id, synced_at FROM contacts ORDER BY display_name"
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+# ── SMS message sync ──────────────────────────────────────────────────────────
+
+@app.post("/api/messages/sync")
+async def sync_messages(request: Request):
+    """Full-replace sync for recent SMS messages from Android.
+
+    Accepts a JSON array of message objects with keys:
+      sender (str), body (str), timestamp_ms (int), is_read (bool)
+
+    Deletes messages older than 7 days, then upserts incoming messages
+    using the UNIQUE(sender, timestamp_ms, body) constraint.
+    """
+    try:
+        messages = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON")
+    if not isinstance(messages, list):
+        raise HTTPException(status_code=400, detail="Expected a JSON array")
+
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    inserted = 0
+    with get_db() as conn:
+        # Prune messages older than 14 days
+        fourteen_days_ago_ms = int((time.time() - 14 * 86400) * 1000)
+        conn.execute("DELETE FROM synced_messages WHERE timestamp_ms < ?", (fourteen_days_ago_ms,))
+
+        for m in messages:
+            sender = (m.get("sender") or "").strip()
+            body = (m.get("body") or "").strip()
+            timestamp_ms = m.get("timestamp_ms")
+            if not sender or not timestamp_ms:
+                continue
+            is_read = 1 if m.get("is_read", True) else 0
+            is_contact = 1 if m.get("is_contact", False) else 0
+
+            # Classify message type
+            body_lower = body.lower()
+            if is_contact:
+                msg_type = "personal"
+            elif any(kw in body_lower for kw in ("reminder", "appointment", "scheduled", "alert", "expir", "renew", "due", "payment")):
+                msg_type = "reminder"
+            elif any(kw in body_lower for kw in ("off", "deal", "sale", "promo", "free", "win", "click", "subscribe", "unsubscribe", "opt out", "reply stop")):
+                msg_type = "spam"
+            elif any(kw in body_lower for kw in ("shipped", "deliver", "tracking", "order", "package")):
+                msg_type = "notification"
+            else:
+                msg_type = "unknown"
+
+            try:
+                conn.execute(
+                    """INSERT OR IGNORE INTO synced_messages
+                       (sender, body, timestamp_ms, is_read, is_contact, msg_type, synced_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    (sender, body, timestamp_ms, is_read, is_contact, msg_type, now),
+                )
+                inserted += 1
+            except Exception as e:
+                _logger.warning("messages sync row error: %s", e)
+
+    _logger.info("Messages sync: %d/%d messages inserted", inserted, len(messages))
+    return {"status": "ok", "received": len(messages), "inserted": inserted}
+
+
+@app.get("/api/messages/search")
+async def search_messages(q: str = "", days: int = 5):
+    """Search synced SMS messages by sender name or body text.
+
+    Query params:
+      q    — search term (matches sender or body, case-insensitive)
+      days — how far back to look (default 5)
+    """
+    if not q.strip():
+        raise HTTPException(status_code=400, detail="Query parameter 'q' is required")
+    since_ms = int((time.time() - days * 86400) * 1000)
+    query = f"%{q.strip()}%"
+    with get_db() as conn:
+        rows = conn.execute(
+            """SELECT sender, body, timestamp_ms, is_read, synced_at
+               FROM synced_messages
+               WHERE timestamp_ms > ? AND (sender LIKE ? OR body LIKE ?)
+               ORDER BY timestamp_ms DESC LIMIT 100""",
+            (since_ms, query, query),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+@app.get("/api/messages/recent")
+async def recent_messages(days: int = 5, limit: int = 50):
+    """Return all recent synced messages (no search filter)."""
+    since_ms = int((time.time() - days * 86400) * 1000)
+    with get_db() as conn:
+        rows = conn.execute(
+            """SELECT sender, body, timestamp_ms, is_read, synced_at
+               FROM synced_messages
+               WHERE timestamp_ms > ?
+               ORDER BY timestamp_ms DESC LIMIT ?""",
+            (since_ms, min(limit, 200)),
         ).fetchall()
     return [dict(r) for r in rows]
 

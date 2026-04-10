@@ -91,3 +91,12 @@ vessence/marketing_site/.*.swp
 *.swp
 *.swo
 *~
+
+# Private data — never commit
+vessence-data/
+*.db
+*.sqlite
+*.sqlite3
+credentials/
+gmail_token.json
+

@@ -9,6 +9,7 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
 
 /**
  * NotificationListenerService that captures messaging-category notifications
@@ -63,6 +64,19 @@ class VessenceNotificationListener : NotificationListenerService() {
         val entries = extractMessages(sbn) ?: return
         for (entry in entries) {
             RecentMessagesBuffer.record(entry)
+        }
+        // Push new SMS to server so Jane has fresh message data.
+        // Only trigger for messaging apps (SMS, WhatsApp, etc.)
+        // Push new messages to server when a new SMS notification arrives
+        if (entries.isNotEmpty()) {
+            val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO + kotlinx.coroutines.SupervisorJob())
+            scope.launch {
+                try {
+                    com.vessences.android.contacts.SmsSyncManager.pushNewMessages(applicationContext)
+                } catch (e: Exception) {
+                    android.util.Log.d(TAG, "SMS push sync failed: ${e.message}")
+                }
+            }
         }
     }
 

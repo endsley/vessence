@@ -15,6 +15,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import com.vessences.android.contacts.ContactsSyncManager
+import com.vessences.android.contacts.SmsSyncManager
 import com.vessences.android.data.api.ApiClient
 import com.vessences.android.notifications.ChatNotificationManager
 import com.vessences.android.ui.theme.ThemePreferences
@@ -112,9 +113,10 @@ class MainActivity : ComponentActivity() {
         CrashReporter.install(applicationContext)
         DiagnosticReporter.init(applicationContext)
         ApiClient.init(applicationContext)
-        // Sync contacts to server on startup (respects 6-hour interval)
+        // Sync contacts and SMS messages to server on startup
         CoroutineScope(Dispatchers.IO).launch {
             try { ContactsSyncManager.syncIfNeeded(applicationContext) } catch (_: Exception) {}
+            try { SmsSyncManager.backfillIfNeeded(applicationContext) } catch (_: Exception) {}
         }
         try { ChatNotificationManager(applicationContext).ensureChannels() } catch (_: Exception) {}
         // Auto-start wake word service if always-listen was enabled

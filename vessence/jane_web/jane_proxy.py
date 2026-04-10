@@ -2019,24 +2019,91 @@ async def stream_message(
                 logger.warning("[%s] Music playlist creation failed: %s", session_id[:12], _music_err)
                 message = message + f"\n\n[MUSIC ERROR]\nFailed to search music library: {_music_err}\n[END MUSIC ERROR]"
         elif _classification == "read_messages":
-            # Read messages: emit tool call to Android and SHORT-CIRCUIT.
-            # Don't invoke the brain yet — it has no data to work with.
-            # The Android app (v0.2.2+) will:
-            #   1. Run MessagesReadInboxHandler
-            #   2. Wait for the result
-            #   3. Auto-send a follow-up with the tool results
-            #   4. The brain gets the data on the follow-up turn
-            logger.info("[%s] Gemma router: read_messages → emitting tool call + short-circuit",
+            # Read messages server-side from synced_messages DB (synced by Android).
+            # Same pattern as read_email: inject data into the brain context.
+            logger.info("[%s] Gemma router: read_messages → fetching from synced DB",
                         session_id[:12])
-            import json as _json
-            _tool_call_json = _json.dumps({
-                "tool": "messages.read_inbox",
-                "args": {"limit": 20},
-                "call_id": f"fast_{int(time.time()*1000)}",
-            })
-            _raw_emit("client_tool_call", _tool_call_json)
-            _router_response = "Checking your messages..."
-            _gemma_short_circuit = True
+            _gemma_delegate_ack = "Checking your messages..."
+            _gemma_short_circuit = False
+            _sms_data_ctx = ""
+            try:
+                from vault_web.database import get_db as _get_sms_db
+                import json as _sms_json
+                # Parse optional sender filter from router response
+                _sms_resp = (_router_response or "").lower().strip()
+                _sms_days = 5
+                _sms_limit = 30
+                _sender_filter = None
+                # Check for sender name in response (e.g., "read_inbox kathia")
+                import re as _sms_re
+                _sms_parts = _sms_resp.replace("read_inbox", "").replace("read_messages", "").strip()
+                if _sms_parts and not _sms_parts.isdigit():
+                    _sender_filter = _sms_parts.strip()
+                _limit_match = _sms_re.search(r"\b(\d+)\b", _sms_resp)
+                if _limit_match:
+                    _sms_limit = min(int(_limit_match.group(1)), 50)
+
+                _since_ms = int((time.time() - _sms_days * 86400) * 1000)
+                with _get_sms_db() as _sms_conn:
+                    if _sender_filter:
+                        _filter_q = f"%{_sender_filter}%"
+                        _sms_rows = _sms_conn.execute(
+                            """SELECT sender, body, timestamp_ms, is_read, is_contact, msg_type
+                               FROM synced_messages
+                               WHERE timestamp_ms > ? AND (sender LIKE ? OR body LIKE ?)
+                               ORDER BY timestamp_ms DESC LIMIT ?""",
+                            (_since_ms, _filter_q, _filter_q, _sms_limit),
+                        ).fetchall()
+                    else:
+                        _sms_rows = _sms_conn.execute(
+                            """SELECT sender, body, timestamp_ms, is_read, is_contact, msg_type
+                               FROM synced_messages
+                               WHERE timestamp_ms > ?
+                               ORDER BY timestamp_ms DESC LIMIT ?""",
+                            (_since_ms, _sms_limit),
+                        ).fetchall()
+                    _sms_list = [dict(r) for r in _sms_rows]
+
+                if _sms_list:
+                    from datetime import datetime as _dt
+                    for _m in _sms_list:
+                        try:
+                            _m["time"] = _dt.fromtimestamp(_m["timestamp_ms"] / 1000).strftime("%b %d %I:%M %p")
+                        except Exception:
+                            pass
+                    _sms_data_ctx = (
+                        "\n\n[SMS INBOX DATA — fetched from synced messages DB]\n"
+                        + _sms_json.dumps(_sms_list, indent=2, default=str)
+                        + "\n[END SMS INBOX DATA]\n\n"
+                        "Summarize these text messages. Each message has a msg_type field:\n"
+                        "- 'personal' (is_contact=true): from known contacts — read these first, they're important\n"
+                        "- 'reminder': appointments, due dates, renewals — mention briefly\n"
+                        "- 'notification': shipping, delivery, order updates — mention briefly\n"
+                        "- 'spam': promotions, deals, marketing — skip unless user asks\n"
+                        "- 'unknown': unrecognized sender — mention only if content seems important\n"
+                        "Group personal messages by sender. If the user asked about a specific person, focus on those."
+                    )
+                else:
+                    _sms_data_ctx = (
+                        "\n\n[SMS INBOX DATA — fetched from synced messages DB]\n"
+                        "No text messages found in the last 5 days.\n"
+                        "[END SMS INBOX DATA]\n\n"
+                        "Tell the user no recent text messages were found. "
+                        "If messages haven't synced yet, suggest they open the Vessence app on their phone."
+                    )
+                logger.info("[%s] Fetched %d SMS messages from synced DB%s",
+                            session_id[:12], len(_sms_list),
+                            f" (filter: {_sender_filter})" if _sender_filter else "")
+            except Exception as _sms_err:
+                _sms_data_ctx = (
+                    "\n\n[SMS ERROR]\n"
+                    f"Failed to fetch messages from DB: {_sms_err}\n"
+                    "Apologize and suggest the user open the Vessence app to trigger a sync.\n"
+                    "[END SMS ERROR]"
+                )
+                logger.error("[%s] SMS DB fetch failed: %s", session_id[:12], _sms_err)
+            if _sms_data_ctx:
+                message = message + _sms_data_ctx
         elif _classification == "read_email":
             # Email is server-side (not a phone tool). Fetch emails here and
             # inject them into the brain context so Jane can respond with actual
