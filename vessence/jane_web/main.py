@@ -719,7 +719,22 @@ def _is_local_browser_access(request: Request) -> bool:
 
 _trusted_device_session_cache: dict[str, str] = {}  # trusted_device_id → session_id
 
+def _is_single_user_no_auth_mode() -> bool:
+    """Returns True if Google OAuth is not configured — single-user fresh install mode.
+
+    In this mode, there's no auth gate (the user hasn't set up Google sign-in yet,
+    and the system is meant for a single owner running locally or behind their own
+    Cloudflare tunnel). Once GOOGLE_CLIENT_ID is set, auth is enforced normally.
+    """
+    return not os.getenv("GOOGLE_CLIENT_ID", "").strip()
+
+
 def require_auth(request: Request):
+    # Single-user mode: if Google OAuth isn't configured, this is a fresh install.
+    # Allow all requests so the user can use Jane immediately. They can enable
+    # auth later by setting GOOGLE_CLIENT_ID/SECRET/ALLOWED_GOOGLE_EMAILS.
+    if _is_single_user_no_auth_mode():
+        return "single_user"
     # Localhost bypass (internal tools, health checks, prompt queue runner)
     if not request.headers.get("cf-connecting-ip"):
         client_host = request.client.host if request.client else ""
@@ -734,7 +749,6 @@ def require_auth(request: Request):
     # Cache the created session per device to prevent session storms.
     trusted_cookie = get_trusted_device_cookie_id(request)
     if trusted_cookie:
-        # Check cache first — avoid creating duplicate sessions
         cached = _trusted_device_session_cache.get(trusted_cookie)
         if cached and validate_session(cached, fp):
             return cached
@@ -763,6 +777,15 @@ def get_trusted_device_cookie_id(request: Request) -> Optional[str]:
 
 
 def get_or_bootstrap_session(request: Request) -> tuple[Optional[str], Optional[str]]:
+    # Single-user fresh install: auto-create a session for the default user
+    if _is_single_user_no_auth_mode():
+        fp = device_fingerprint_from_request(request)
+        existing = get_session_id(request)
+        if existing and validate_session(existing, fp):
+            return existing, get_trusted_device_cookie_id(request)
+        # Create a new trusted session for this device
+        session_id = create_session(fp, trusted=True, user_id=_default_user_id())
+        return session_id, None
     session_id = get_session_id(request)
     fp = device_fingerprint_from_request(request)
     if session_id and validate_session(session_id, fp):
@@ -831,6 +854,9 @@ def get_or_bootstrap_session(request: Request) -> tuple[Optional[str], Optional[
 
 
 def check_share_or_auth(request: Request, path: str):
+    # Single-user fresh install: no auth required
+    if _is_single_user_no_auth_mode():
+        return True
     session_id = get_session_id(request)
     fp = device_fingerprint_from_request(request)
     if session_id and validate_session(session_id, fp):
