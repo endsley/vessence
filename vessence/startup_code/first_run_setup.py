@@ -67,6 +67,130 @@ def write_env(env: dict[str, str], merge: bool = True) -> None:
     print(f"  → Updated {ENV_FILE}")
 
 
+def open_browser(url: str) -> None:
+    """Open a URL in the user's default browser. Silently fails on headless systems."""
+    try:
+        import webbrowser
+        webbrowser.open(url)
+    except Exception:
+        pass
+
+
+def guide_google_oauth_setup(env: dict) -> None:
+    """Walk the user through Google OAuth setup step-by-step.
+
+    Explains why each step matters and opens browser tabs to the right pages.
+    Validates inputs and re-prompts on bad values.
+    """
+    print()
+    print("─" * 60)
+    print("  GOOGLE SIGN-IN SETUP — Why we need this")
+    print("─" * 60)
+    print()
+    print("  When you access Jane from your phone or another device, the server")
+    print("  needs to know it's really YOU and not a stranger who guessed your URL.")
+    print()
+    print("  Google sign-in is the easiest way: you click 'Sign in with Google',")
+    print("  Google verifies your identity, and tells the server 'yes, this is")
+    print("  the right person.' No passwords to remember, no extra accounts.")
+    print()
+    print("  This requires creating a free Google Cloud project (5 minutes).")
+    print("  I'll walk you through every step.")
+    print()
+    input("  Press Enter to continue... ")
+    print()
+
+    print("─" * 60)
+    print("  STEP 1: Create a Google Cloud project")
+    print("─" * 60)
+    print()
+    print("  Opening: https://console.cloud.google.com/projectcreate")
+    print()
+    print("  In the page that opens:")
+    print("    1. Project name: 'Vessence' (or anything you like)")
+    print("    2. Click CREATE")
+    print("    3. Wait ~10 seconds for the project to be created")
+    print("    4. Make sure the new project is selected at the top of the page")
+    print()
+    open_browser("https://console.cloud.google.com/projectcreate")
+    input("  Press Enter when done... ")
+    print()
+
+    print("─" * 60)
+    print("  STEP 2: Configure the OAuth consent screen")
+    print("─" * 60)
+    print()
+    print("  This is what users see when they sign in — name of your app, etc.")
+    print()
+    print("  Opening: https://console.cloud.google.com/apis/credentials/consent")
+    print()
+    print("  In the page that opens:")
+    print("    1. User Type: External → CREATE")
+    print("    2. App name: 'Vessence Jane' (or anything)")
+    print("    3. User support email: your email")
+    print("    4. Developer contact: your email")
+    print("    5. Click SAVE AND CONTINUE through Scopes (skip — leave defaults)")
+    print("    6. Test users: ADD USERS → enter your email → SAVE AND CONTINUE")
+    print("    7. Click BACK TO DASHBOARD")
+    print()
+    open_browser("https://console.cloud.google.com/apis/credentials/consent")
+    input("  Press Enter when done... ")
+    print()
+
+    print("─" * 60)
+    print("  STEP 3: Create OAuth credentials")
+    print("─" * 60)
+    print()
+    print("  Now we'll create the actual Client ID and Secret.")
+    print()
+    print("  Opening: https://console.cloud.google.com/apis/credentials")
+    print()
+    print("  In the page that opens:")
+    print("    1. Click + CREATE CREDENTIALS at the top → OAuth client ID")
+    print("    2. Application type: Web application")
+    print("    3. Name: 'Vessence Web' (or anything)")
+    print()
+    print("    4. Authorized redirect URIs — click ADD URI and add:")
+    print("       http://localhost:8081/auth/google/callback")
+    print("       (also add your remote URL if you have one, e.g.:")
+    print("        https://YOUR_DOMAIN.vessences.com/auth/google/callback)")
+    print()
+    print("    5. Click CREATE")
+    print("    6. A popup shows your Client ID and Client Secret — KEEP IT OPEN")
+    print()
+    open_browser("https://console.cloud.google.com/apis/credentials")
+    input("  Press Enter when the popup is showing... ")
+    print()
+
+    print("─" * 60)
+    print("  STEP 4: Paste your credentials below")
+    print("─" * 60)
+    print()
+    while True:
+        client_id = ask("  Client ID (ends with .apps.googleusercontent.com)", required=True)
+        if ".apps.googleusercontent.com" in client_id:
+            break
+        print("  ⚠ That doesn't look right. Client ID ends with .apps.googleusercontent.com")
+    client_secret = ask("  Client Secret (starts with GOCSPX-)", required=True)
+    print()
+    email = ask("  Your Google email (the one allowed to sign in)", required=True)
+    print()
+
+    env["GOOGLE_CLIENT_ID"] = client_id
+    env["GOOGLE_CLIENT_SECRET"] = client_secret
+    env["ALLOWED_GOOGLE_EMAILS"] = email
+    import secrets
+    env["SESSION_SECRET_KEY"] = secrets.token_hex(32)
+
+    print("─" * 60)
+    print("  ✓ Google sign-in configured!")
+    print("─" * 60)
+    print()
+    print("  After the server starts, sign in at:")
+    print("    http://localhost:8081/auth/google")
+    print()
+
+
 def ask(prompt: str, default: str = "", required: bool = False) -> str:
     """Prompt user for input with optional default."""
     while True:
@@ -148,20 +272,7 @@ def main():
     access_mode = ask("Choose [1] or [2]", default="1")
 
     if access_mode == "2":
-        print()
-        print("  → Remote access selected. You'll need Google OAuth credentials.")
-        print("    1. Go to https://console.cloud.google.com/apis/credentials")
-        print("    2. Create OAuth 2.0 Client ID (type: Web application)")
-        print("    3. Add redirect URI: https://YOUR_DOMAIN/auth/google/callback")
-        print("    4. Copy the Client ID and Secret below")
-        print()
-        new_env["GOOGLE_CLIENT_ID"] = ask("  Google Client ID", required=True)
-        new_env["GOOGLE_CLIENT_SECRET"] = ask("  Google Client Secret", required=True)
-        email = ask("  Your Google email", required=True)
-        new_env["ALLOWED_GOOGLE_EMAILS"] = email
-        # Generate session secret
-        import secrets
-        new_env["SESSION_SECRET_KEY"] = secrets.token_hex(32)
+        guide_google_oauth_setup(new_env)
     print()
 
     # ── Step 4: Optional weather location ──
