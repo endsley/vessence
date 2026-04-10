@@ -718,12 +718,31 @@ def _is_local_browser_access(request: Request) -> bool:
 
 
 def require_auth(request: Request):
-    # Simplified auth: always allow. Cloudflare tunnel is the access gate.
-    # Heavy session/fingerprint auth was causing constant 401s on Android
-    # due to mobile IP changes, server restarts wiping sessions, and
-    # fingerprint mismatches. For a single-user self-hosted system behind
-    # Cloudflare, this is the right tradeoff.
-    return "allowed"
+    # Localhost bypass (internal tools, health checks, prompt queue runner)
+    if not request.headers.get("cf-connecting-ip"):
+        client_host = request.client.host if request.client else ""
+        if client_host in ("127.0.0.1", "::1"):
+            return request.query_params.get("session_id") or "internal"
+    # Check existing session
+    session_id = get_session_id(request)
+    fp = device_fingerprint_from_request(request)
+    if session_id and validate_session(session_id, fp):
+        return session_id
+    # Fallback: trusted device cookie (handles post-restart session loss)
+    # The trusted device cookie proves this device was previously authenticated.
+    # Create a new session using the REQUEST's fingerprint (not the stored one)
+    # so subsequent validate_session calls match.
+    trusted_cookie = get_trusted_device_cookie_id(request)
+    if trusted_cookie:
+        trusted_row = get_trusted_device_by_id(trusted_cookie)
+        if trusted_row:
+            new_session = create_session(
+                fp,  # use current request fingerprint
+                trusted=True,
+                user_id=trusted_row["label"] or _default_user_id(),
+            )
+            return new_session
+    raise HTTPException(status_code=401, detail="Not authenticated")
 
 
 def _default_user_id() -> str:
@@ -807,6 +826,10 @@ def check_share_or_auth(request: Request, path: str):
     session_id = get_session_id(request)
     fp = device_fingerprint_from_request(request)
     if session_id and validate_session(session_id, fp):
+        return True
+    # Trusted device fallback (same as require_auth)
+    trusted_cookie = get_trusted_device_cookie_id(request)
+    if trusted_cookie and get_trusted_device_by_id(trusted_cookie):
         return True
     share_code = request.cookies.get("share_code")
     if share_code:
@@ -3245,11 +3268,20 @@ async def get_briefing_articles(topic: Optional[str] = None, view: Optional[str]
     if result.get("status") != "ok":
         return result
     cards = result["cards"]
+    # Populate per-card 'categories' from tags (Android app filters on this field)
+    for c in cards:
+        if not c.get("categories"):
+            c["categories"] = c.get("tags", []) or ([c["topic"]] if c.get("topic") else [])
     if view == "saved":
         cards = [c for c in cards if c.get("state") == "saved"]
     elif topic:
         cards = [c for c in cards if c.get("topic", "").lower() == topic.lower()]
-    return {"status": "ok", "cards": cards, "card_count": len(cards)}
+    # Build top-level categories list for tab navigation
+    cat_set: set[str] = set()
+    for c in cards:
+        cat_set.update(c.get("categories", []))
+    categories = sorted(cat_set)
+    return {"status": "ok", "cards": cards, "card_count": len(cards), "categories": categories}
 
 
 @app.get("/api/briefing/article/{article_id}")
