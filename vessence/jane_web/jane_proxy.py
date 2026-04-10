@@ -2237,7 +2237,9 @@ async def stream_message(
             # Only short-circuit for weather (Gemma has cached data) and STT garbage.
             # Everything else goes to Opus for a smarter response.
             _resp_lower = (_router_response or "").lower()
-            if "°f" in _resp_lower or "°c" in _resp_lower or "weather" in _resp_lower or "was that meant for me" in _resp_lower:
+            if ("°f" in _resp_lower or "°c" in _resp_lower or "weather" in _resp_lower
+                    or "a high of" in _resp_lower or "air quality" in _resp_lower
+                    or "was that meant for me" in _resp_lower):
                 _gemma_short_circuit = True
                 logger.info("[%s] Gemma router: self_handle (weather/stt) — short-circuiting", session_id[:12])
             else:

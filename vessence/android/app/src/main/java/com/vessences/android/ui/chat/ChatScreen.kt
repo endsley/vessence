@@ -466,32 +466,34 @@ internal fun VoiceStatusBanner(
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp),
+                .padding(horizontal = 12.dp),
             color = SlateCard,
             shape = RoundedCornerShape(16.dp),
         ) {
             Row(
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                modifier = Modifier.padding(horizontal = 18.dp, vertical = 16.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Icon(
                     imageVector = if (voice.isCapturingCommand) Icons.Default.Mic else Icons.Default.GraphicEq,
                     contentDescription = null,
                     tint = if (voice.isCapturingCommand) MicHot else aiColor,
+                    modifier = Modifier.size(28.dp),
                 )
-                Spacer(modifier = Modifier.width(10.dp))
+                Spacer(modifier = Modifier.width(14.dp))
                 Column {
                     Text(
                         text = voice.status ?: "Voice ready",
                         color = Color.White,
-                        fontSize = 13.sp,
+                        fontSize = 16.sp,
                         fontWeight = FontWeight.SemiBold,
                     )
                     if (voice.transcriptPreview.isNotBlank()) {
+                        Spacer(modifier = Modifier.height(4.dp))
                         Text(
                             text = voice.transcriptPreview,
                             color = SlateMuted,
-                            fontSize = 12.sp,
+                            fontSize = 15.sp,
                         )
                     }
                 }
