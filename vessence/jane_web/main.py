@@ -717,30 +717,35 @@ def _is_local_browser_access(request: Request) -> bool:
     return client_host in ("127.0.0.1", "::1")
 
 
+_trusted_device_session_cache: dict[str, str] = {}  # trusted_device_id → session_id
+
 def require_auth(request: Request):
     # Localhost bypass (internal tools, health checks, prompt queue runner)
     if not request.headers.get("cf-connecting-ip"):
         client_host = request.client.host if request.client else ""
         if client_host in ("127.0.0.1", "::1"):
             return request.query_params.get("session_id") or "internal"
-    # Check existing session
+    # Check existing session cookie
     session_id = get_session_id(request)
     fp = device_fingerprint_from_request(request)
     if session_id and validate_session(session_id, fp):
         return session_id
-    # Fallback: trusted device cookie (handles post-restart session loss)
-    # The trusted device cookie proves this device was previously authenticated.
-    # Create a new session using the REQUEST's fingerprint (not the stored one)
-    # so subsequent validate_session calls match.
+    # Fallback: trusted device cookie (handles post-restart session loss).
+    # Cache the created session per device to prevent session storms.
     trusted_cookie = get_trusted_device_cookie_id(request)
     if trusted_cookie:
+        # Check cache first — avoid creating duplicate sessions
+        cached = _trusted_device_session_cache.get(trusted_cookie)
+        if cached and validate_session(cached, fp):
+            return cached
         trusted_row = get_trusted_device_by_id(trusted_cookie)
         if trusted_row:
             new_session = create_session(
-                fp,  # use current request fingerprint
+                fp,
                 trusted=True,
                 user_id=trusted_row["label"] or _default_user_id(),
             )
+            _trusted_device_session_cache[trusted_cookie] = new_session
             return new_session
     raise HTTPException(status_code=401, detail="Not authenticated")
 
@@ -773,8 +778,11 @@ def get_or_bootstrap_session(request: Request) -> tuple[Optional[str], Optional[
     trusted_cookie_id = get_trusted_device_cookie_id(request)
     trusted_row = get_trusted_device_by_id(trusted_cookie_id) if trusted_cookie_id else None
     if trusted_row:
+        # Use the REQUEST's fingerprint (not the stored one) so subsequent
+        # validate_session calls match. The stored fingerprint may be stale
+        # (e.g., "any_fingerprint" from manual DB entries).
         session_id = create_session(
-            trusted_row["fingerprint"],
+            fp,
             trusted=True,
             user_id=trusted_row["label"] or _default_user_id(),
         )
@@ -990,7 +998,7 @@ async def receive_crash_report(request: Request, _=Depends(require_auth)):
 # ── Contacts sync ─────────────────────────────────────────────────────────────
 
 @app.post("/api/contacts/sync")
-async def sync_contacts(request: Request):
+async def sync_contacts(request: Request, _=Depends(require_auth)):
     """Full-replace sync: delete all existing contacts and insert fresh from Android."""
     try:
         contacts = await request.json()
@@ -1026,7 +1034,7 @@ async def sync_contacts(request: Request):
 
 
 @app.get("/api/contacts/search")
-async def search_contacts(q: str = ""):
+async def search_contacts(q: str = "", _=Depends(require_auth)):
     """Search contacts by name, return aggregated per person (phones + emails merged)."""
     if not q.strip():
         raise HTTPException(status_code=400, detail="Query parameter 'q' is required")
@@ -1062,7 +1070,7 @@ async def list_contacts(request: Request, _=Depends(require_auth)):
 # ── SMS message sync ──────────────────────────────────────────────────────────
 
 @app.post("/api/messages/sync")
-async def sync_messages(request: Request):
+async def sync_messages(request: Request, _=Depends(require_auth)):
     """Full-replace sync for recent SMS messages from Android.
 
     Accepts a JSON array of message objects with keys:
@@ -1123,7 +1131,7 @@ async def sync_messages(request: Request):
 
 
 @app.get("/api/messages/search")
-async def search_messages(q: str = "", days: int = 5):
+async def search_messages(q: str = "", days: int = 5, _=Depends(require_auth)):
     """Search synced SMS messages by sender name or body text.
 
     Query params:
@@ -1146,7 +1154,7 @@ async def search_messages(q: str = "", days: int = 5):
 
 
 @app.get("/api/messages/recent")
-async def recent_messages(days: int = 5, limit: int = 50):
+async def recent_messages(days: int = 5, limit: int = 50, _=Depends(require_auth)):
     """Return all recent synced messages (no search filter)."""
     since_ms = int((time.time() - days * 86400) * 1000)
     with get_db() as conn:
@@ -1161,7 +1169,7 @@ async def recent_messages(days: int = 5, limit: int = 50):
 
 
 @app.post("/api/device-diagnostics")
-async def receive_device_diagnostics(request: Request):
+async def receive_device_diagnostics(request: Request, _=Depends(require_auth)):
     """Receive diagnostic data from Android: wake word status, mic state, errors, scores, etc."""
     import json as _json
     body = await request.json()
@@ -1644,7 +1652,7 @@ async def is_new_device(request: Request):
 
 
 @app.get("/api/jane/announcements")
-async def get_announcements(since: Optional[str] = None):
+async def get_announcements(since: Optional[str] = None, _=Depends(require_auth)):
     return {"items": _read_announcements(since)}
 
 
@@ -2292,12 +2300,12 @@ async def delete_share(share_id: str, _=Depends(require_auth)):
 # ─── Playlist API ─────────────────────────────────────────────────────────────
 
 @app.get("/api/playlists")
-async def get_playlists():
+async def get_playlists(_=Depends(require_auth)):
     return list_playlists()
 
 
 @app.get("/api/playlists/{playlist_id}")
-async def get_single_playlist(playlist_id: str):
+async def get_single_playlist(playlist_id: str, _=Depends(require_auth)):
     p = get_playlist(playlist_id)
     if not p:
         raise HTTPException(status_code=404)
@@ -2817,6 +2825,11 @@ async def _handle_jane_chat_stream(body: ChatMessage, request: Request):
         return response
 
     # ── Normal streaming flow ─────────────────────────────────────────────
+    # Use the CLIENT's session_id (from body) for in-memory conversation state,
+    # not the cookie-based auth session. The Android app maintains a stable
+    # session_id ("jane_android_xxxx") across requests — using the cookie-based
+    # session would create a new conversation state on every request.
+    conversation_session_id = body.session_id or session_id
     async def event_stream():
         # Track concurrent streams per IP
         _active_streams[stream_ip] = _active_streams.get(stream_ip, 0) + 1
@@ -2824,12 +2837,12 @@ async def _handle_jane_chat_stream(body: ChatMessage, request: Request):
         user_id = get_session_user(session_id) or _default_user_id()
         _logger.info(
             "Starting jane stream generator session=%s user=%s",
-            _session_log_id(session_id),
+            _session_log_id(conversation_session_id),
             user_id,
         )
         try:
             async with asyncio.timeout(1800):  # 30 minute timeout (matches Claude idle timeout)
-                async for chunk in stream_message(user_id, session_id, body.message, body.file_context, platform=body.platform, tts_enabled=body.tts_enabled or False):
+                async for chunk in stream_message(user_id, conversation_session_id, body.message, body.file_context, platform=body.platform, tts_enabled=body.tts_enabled or False):
                     yield chunk
         except (ConnectionError, OSError) as exc:
             _logger.warning(
@@ -3411,7 +3424,7 @@ def _spawn_shared_article_processor():
 
 
 @app.post("/api/briefing/articles/submit")
-async def submit_briefing_article(request: Request):
+async def submit_briefing_article(request: Request, _=Depends(require_auth)):
     body = await request.json()
     url = body.get("url", "").strip()
     if not url or not re.match(r'^https?://', url):
