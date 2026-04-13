@@ -8,7 +8,7 @@ standing brain). It is NOT a separate agent — it is an aspect of Jane.
 The slot is pluggable across four providers — matched to whichever provider
 is currently hosting Jane's mind so the pairing stays coherent by default:
 
-  - "ollama"    → gemma4:e4b (local, no API key required; fallback default)
+  - "ollama"    → gemma4:e2b (local, no API key required; fallback default)
   - "anthropic" → claude-haiku-4-5-20251001 (pairs with Claude-Opus mind)
   - "google"    → gemini-2.5-flash         (pairs with Gemini-Pro mind)
   - "openai"    → gpt-5-nano               (pairs with OpenAI mind)
@@ -38,6 +38,8 @@ import asyncio
 import logging
 import os
 import re
+import shutil
+import subprocess
 import time
 
 import aiohttp
@@ -59,15 +61,14 @@ ROUTER_TIMEOUT = float(os.environ.get("GEMMA_ROUTER_TIMEOUT", "10.0"))
 
 # History budget for the initial-ack router. Capped by CHARACTER COUNT rather
 # than turn count because one long assistant turn can use as many tokens as
-# 5 short turns. The budget is conservative: Gemma4:e4b's format compliance
-# degrades as total context grows past ~3K chars, and the system prompt is
-# already ~1.9K chars, so we cap history at ~600 chars to stay well under
-# the reliability threshold.
-MAX_HISTORY_CHARS = 600
+# 5 short turns. Ollama (Gemma4) degrades past ~600 chars; CLI providers
+# (Haiku/Flash) handle much more — use 1500 chars when not on Ollama.
+MAX_HISTORY_CHARS_OLLAMA = 600
+MAX_HISTORY_CHARS_CLI = 1500
 
 # Per-provider default model. User can override globally via JANE_ACK_MODEL.
 _DEFAULT_ACK_MODELS = {
-    "ollama": "gemma4:e4b",
+    "ollama": "gemma4:e2b",
     "anthropic": "claude-haiku-4-5-20251001",
     "google": "gemini-2.5-flash",
     "openai": "gpt-5-nano",
@@ -80,52 +81,78 @@ _BRAIN_TO_ACK_PROVIDER = {
     "openai": "openai",
 }
 
-# API key env vars per provider. If the key for a provider isn't set, the
-# provider is considered unavailable and we fall back to ollama.
-_API_KEY_ENV = {
-    "anthropic": ("ANTHROPIC_API_KEY",),
-    "google": ("GEMINI_API_KEY", "GOOGLE_API_KEY"),
-    "openai": ("OPENAI_API_KEY",),
-}
+# All providers use CLI subprocess — no API keys required.
+_API_KEY_ENV: dict = {}
 
 _VALID_PROVIDERS = ("ollama", "anthropic", "google", "openai")
 
 
 def _provider_has_key(provider: str) -> bool:
-    """Return True if at least one API key env var for the provider is set."""
+    """Return True if this provider can be used.
+
+    All cloud providers (anthropic, google, openai) go via CLI subprocess —
+    no API keys required, just the CLI binary installed.
+    Ollama is always available (local).
+    """
     if provider == "ollama":
-        return True  # no key needed
-    for env_name in _API_KEY_ENV.get(provider, ()):
-        if os.environ.get(env_name):
-            return True
-    return False
+        return True
+    # Cloud providers: check that the CLI binary is installed
+    from jane.config import PROVIDER_CLI
+    cli = os.environ.get("PROVIDER_CLI", PROVIDER_CLI)
+    return bool(shutil.which(cli))
+
+
+def _ollama_available() -> bool:
+    """Return True if Ollama is reachable and the ack model is available."""
+    try:
+        import urllib.request
+        model = os.environ.get("JANE_ACK_MODEL") or _DEFAULT_ACK_MODELS["ollama"]
+        url = f"{OLLAMA_URL}/api/show"
+        req = urllib.request.Request(
+            url,
+            data=f'{{"name":"{model}"}}'.encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=1) as resp:
+            return resp.status == 200
+    except Exception:
+        return False
 
 
 def _resolve_provider() -> str:
     """Pick the initial-ack provider at call time.
 
     Priority:
-      1. JANE_ACK_PROVIDER env var, if valid and (for cloud providers) key is set.
-      2. Auto-pair from JANE_BRAIN, if matching API key is set.
-      3. Fallback to "ollama".
+      1. JANE_ACK_PROVIDER env var — explicit override, always respected.
+      2. Ollama, if the local server is reachable and the model is available.
+         Preferred over cloud CLIs: faster (no subprocess startup), free, local.
+      3. CLI paired with JANE_BRAIN (claude→haiku, gemini→flash, openai→gpt-5-nano).
+         Used when Ollama isn't running — e.g., a new user who only has the CLI.
+      4. Ollama as last-resort fallback (will fail fast if not running).
     """
     explicit = os.environ.get("JANE_ACK_PROVIDER", "").lower().strip()
     if explicit in _VALID_PROVIDERS:
         if _provider_has_key(explicit):
             return explicit
         logger.warning(
-            "Initial ack: JANE_ACK_PROVIDER=%s requested but no API key in env; "
-            "falling back to ollama.",
+            "Initial ack: JANE_ACK_PROVIDER=%s requested but unavailable; "
+            "falling back to auto-detect.",
             explicit,
         )
+
+    # Prefer local Ollama — fast, no subprocess, no cost
+    if _ollama_available():
         return "ollama"
 
+    # Fall back to CLI paired with the main brain
     brain = os.environ.get("JANE_BRAIN", "").lower().strip()
     paired = _BRAIN_TO_ACK_PROVIDER.get(brain)
     if paired and _provider_has_key(paired):
+        logger.info("Initial ack: Ollama unavailable — using CLI provider %s", paired)
         return paired
 
-    return "ollama"
+    return "ollama"  # last resort — will fail fast if Ollama is down
 
 
 def _resolve_model(provider: str) -> str:
@@ -135,14 +162,15 @@ def _resolve_model(provider: str) -> str:
         return override
     if provider == "ollama" and _LEGACY_OLLAMA_MODEL:
         return _LEGACY_OLLAMA_MODEL
-    return _DEFAULT_ACK_MODELS.get(provider, "gemma4:e4b")
+    return _DEFAULT_ACK_MODELS.get(provider, "gemma4:e2b")
 
 
 # Personal info loaded from ChromaDB at runtime — see memory/v1/memory_retrieval.py
 _PERSONAL_INFO = ""  # Populated by _load_personal_info() on first call
 
-SYSTEM_PROMPT = f"""Classify each message. Output exactly two lines:
+SYSTEM_PROMPT = f"""Classify each message. Output exactly three lines:
 CLASSIFICATION: SELF_HANDLE or MUSIC_PLAY or SHOPPING_LIST or READ_MESSAGES or READ_EMAIL or SYNC_MESSAGES or DELEGATE_OPUS
+CONFIDENCE: 0.0-1.0 (how certain you are this is the right classification)
 RESPONSE: <response>
 
 {_PERSONAL_INFO}
@@ -174,27 +202,34 @@ Never say "I can't do that" — DELEGATE. Jane CAN do it.
 RESPONSE = short ack referencing their topic + time hint.
 
 Examples:
-User: "hey" → SELF_HANDLE / Hey!
-User: "play shakira" → MUSIC_PLAY / shakira
-User: "play sky full of stars" → MUSIC_PLAY / sky full of stars
-User: "why is the playlist empty" → DELEGATE_OPUS / Checking the playlist — one sec.
-User: "I don't think this is working" → DELEGATE_OPUS / Let me look into that.
-User: "can you check why there were no songs" → DELEGATE_OPUS / Investigating the music issue.
-User: "add milk to the list" → SHOPPING_LIST / add milk
-User: "read my texts" → READ_MESSAGES / read_inbox
-User: "sync my messages" → SYNC_MESSAGES / sync
-User: "resync my texts" → SYNC_MESSAGES / sync
-User: "are you able to read my email" → READ_EMAIL / read_email
-User: "can you check my email" → READ_EMAIL / read_email
-User: "check my email" → READ_EMAIL / read_email
-User: "any new emails" → READ_EMAIL / read_email
-User: "read the top 3 emails" → READ_EMAIL / read_email 3
-User: "email from Bob" → READ_EMAIL / read_email from:bob
-User: "fix the auth bug" → DELEGATE_OPUS / Looking into the auth bug — one sec.
-User: "call my wife" → DELEGATE_OPUS / Calling now."""
+User: "hey" → SELF_HANDLE / 0.99 / Hey!
+User: "play shakira" → MUSIC_PLAY / 0.99 / shakira
+User: "play sky full of stars" → MUSIC_PLAY / 0.98 / sky full of stars
+User: "why is the playlist empty" → DELEGATE_OPUS / 0.95 / Checking the playlist — one sec.
+User: "I don't think this is working" → DELEGATE_OPUS / 0.90 / Let me look into that.
+User: "can you check why there were no songs" → DELEGATE_OPUS / 0.95 / Investigating the music issue.
+User: "add milk to the list" → SHOPPING_LIST / 0.99 / add milk
+User: "read my texts" → READ_MESSAGES / 0.99 / read_inbox
+User: "sync my messages" → SYNC_MESSAGES / 0.99 / sync
+User: "resync my texts" → SYNC_MESSAGES / 0.99 / sync
+User: "are you able to read my email" → READ_EMAIL / 0.97 / read_email
+User: "can you check my email" → READ_EMAIL / 0.99 / read_email
+User: "check my email" → READ_EMAIL / 0.99 / read_email
+User: "any new emails" → READ_EMAIL / 0.98 / read_email
+User: "read the top 3 emails" → READ_EMAIL / 0.99 / read_email 3
+User: "email from Bob" → READ_EMAIL / 0.95 / read_email from:bob
+User: "fix the auth bug" → DELEGATE_OPUS / 0.98 / Looking into the auth bug — one sec.
+User: "call my wife" → DELEGATE_OPUS / 0.97 / Calling now.
+User: "ok" (after Jane asked a question) → DELEGATE_OPUS / 0.70 / On it.
+User: "the weather is bad, find me a coffee shop" → DELEGATE_OPUS / 0.85 / Finding coffee shops near you."""
 
 _CLASSIFY_RE = re.compile(r"(?:CLASSIFICATION:\s*)?(SELF_HANDLE|MUSIC_PLAY|SHOPPING_LIST|READ_MESSAGES|READ_EMAIL|SYNC_MESSAGES|DELEGATE_OPUS)", re.IGNORECASE)
+_CONFIDENCE_RE = re.compile(r"CONFIDENCE:\s*([0-9]*\.?[0-9]+)", re.IGNORECASE)
 _RESPONSE_RE = re.compile(r"RESPONSE:\s*(.*)", re.DOTALL)
+
+# Below this threshold, act on the ack only — let Opus handle the actual response.
+# DELEGATE_OPUS is exempt (it always goes to Opus regardless).
+CONFIDENCE_THRESHOLD = float(os.environ.get("JANE_ACK_CONFIDENCE_THRESHOLD", "0.80"))
 
 # Weather keywords — if detected, inject cached weather data into gemma's context
 _WEATHER_KEYWORDS = {"weather", "temperature", "rain", "snow", "forecast", "humid", "air quality",
@@ -254,8 +289,86 @@ _WEATHER_CACHE = os.path.join(
 )
 
 
+_WEATHER_QUESTION_RE = re.compile(
+    r"""
+    # Direct weather questions
+    (?:what(?:'s|s| is)\s+(?:the\s+)?(?:weather|temp(?:erature)?|forecast))
+    | (?:how(?:'s|s| is)\s+(?:it|the\s+weather|the\s+temp(?:erature)?))
+    | (?:how\s+(?:hot|cold|warm|cool)\s+is\s+it)
+    | (?:(?:will|is)\s+it\s+(?:rain|snow|be\s+(?:hot|cold|warm|sunny|cloudy|rainy)))
+    | (?:(?:do|should)\s+i\s+(?:need\s+(?:a\s+)?(?:umbrella|jacket|coat|raincoat)))
+    | (?:what(?:'s|s| is)\s+the\s+(?:high|low|forecast|aqi|air\s+quality))
+    | (?:(?:any|chance\s+of)\s+(?:rain|snow|storms?))
+    | (?:weather\s+(?:today|tomorrow|this\s+week|forecast|outside|like))
+    | (?:(?:today|tomorrow)'?s?\s+weather)
+    | (?:outside\s+(?:right\s+now|today))
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
+# If any of these are present, the user wants to DO something — not just get weather info
+_WEATHER_ACTION_RE = re.compile(
+    r"\b(?:find|get|order|go|take\s+me|nearest|close\s+by|nearby|directions?|where\s+is|"
+    r"recommend|suggest|book|reserve|open\s+now|hours|map)\b",
+    re.IGNORECASE,
+)
+
+
+def _format_weather_response(message: str) -> str | None:
+    """Format a weather response directly from the cache — no LLM call needed.
+
+    Only triggers when the message is actually asking FOR weather information,
+    not merely mentioning weather as context for something else.
+    Returns a formatted response string if the cache is fresh, or None if unavailable.
+    """
+    # Must match a direct weather question pattern
+    if not _WEATHER_QUESTION_RE.search(message):
+        return None
+    # Must NOT be asking to do something else (e.g., find a shop because of weather)
+    if _WEATHER_ACTION_RE.search(message):
+        return None
+    try:
+        import json as _json
+        from pathlib import Path
+        from datetime import datetime
+        cache = Path(_WEATHER_CACHE)
+        if not cache.exists():
+            return None
+        data = _json.loads(cache.read_text())
+        fetched = datetime.strptime(data["fetched"], "%Y-%m-%d %H:%M")
+        age_hours = (datetime.now() - fetched).total_seconds() / 3600
+        if age_hours > 36:
+            return None  # stale — let the brain handle it
+        c = data.get("current", {})
+        aq = data.get("air_quality", {})
+        forecast = data.get("forecast", [])
+        today = forecast[0] if forecast else {}
+        # Determine what the user is asking about
+        wants_forecast = any(kw in lowered for kw in ("forecast", "week", "tomorrow", "weekend"))
+        wants_aqi = any(kw in lowered for kw in ("air quality", "aqi", "pollution", "pm2"))
+        lines = []
+        # Always lead with today's summary
+        high = today.get("high", c.get("temperature", "?"))
+        low = today.get("low", "?")
+        feels = c.get("feels_like", "?")
+        condition = c.get("condition", today.get("condition", "?"))
+        aqi = aq.get("us_aqi", "?")
+        lines.append(f"A high of {high}, low of {low}, feels like {feels}, {condition}. Air quality: AQI {aqi}.")
+        if wants_forecast and len(forecast) > 1:
+            lines.append("\nUpcoming:")
+            for day in forecast[1:4]:
+                lines.append(f"  {day['date']}: {day['high']}/{day['low']}, {day['condition']}")
+        elif wants_aqi:
+            pm25 = aq.get("pm2_5", "?")
+            ozone = aq.get("ozone", "?")
+            lines.append(f"PM2.5: {pm25}, Ozone: {ozone}.")
+        return " ".join(lines) if not wants_forecast else "\n".join(lines)
+    except Exception:
+        return None
+
+
 def _load_weather_context(message: str) -> str:
-    """If message mentions weather, load cached data for gemma's context."""
+    """If message mentions weather, load cached data for context (legacy — used only as fallback)."""
     lowered = message.lower()
     if not any(kw in lowered for kw in _WEATHER_KEYWORDS):
         return ""
@@ -266,29 +379,21 @@ def _load_weather_context(message: str) -> str:
         if not cache.exists():
             return ""
         data = _json.loads(cache.read_text())
-        # Check staleness (>36 hours = stale)
         from datetime import datetime
         fetched = datetime.strptime(data["fetched"], "%Y-%m-%d %H:%M")
         age_hours = (datetime.now() - fetched).total_seconds() / 3600
         if age_hours > 36:
-            return ""  # stale — let Claude handle it
-        # Compact format to minimize tokens
-        lines = [f"\n\nWeather for {data['location']} (fetched {data['fetched']}):"]
+            return ""
         c = data.get("current", {})
         aq = data.get("air_quality", {})
         forecast = data.get("forecast", [])
         today = forecast[0] if forecast else {}
+        lines = [f"\n\nWeather for {data['location']} (fetched {data['fetched']}):"]
         lines.append(f"Now: {c.get('temperature','?')}, feels {c.get('feels_like','?')}, {c.get('condition','?')}, humidity {c.get('humidity','?')}, wind {c.get('wind','?')}")
         lines.append(f"Today high: {today.get('high','?')}, low: {today.get('low','?')}")
         lines.append(f"Air quality: AQI {aq.get('us_aqi','?')}")
         for day in forecast[1:]:
             lines.append(f"{day['date']}: {day['high']}/{day['low']}, {day['condition']}, rain {day['precipitation']}")
-        lines.append(
-            "\nFor RESPONSE line use EXACTLY: "
-            "\"A high of [high], a low of [low], feels like [feels_like], [condition], "
-            "with an air quality of [AQI].\" "
-            "No humidity, wind, or UV."
-        )
         return "\n".join(lines)
     except Exception:
         return ""
@@ -306,35 +411,40 @@ def _get_session() -> aiohttp.ClientSession:
     return _session
 
 
-def _build_history(session_history: list[dict]) -> list[dict]:
+def _build_history(session_history: list[dict], provider: str = "ollama") -> list[dict]:
     """Extract recent turns from session history for router context.
 
-    Budget is capped by total CHARACTER COUNT (MAX_HISTORY_CHARS) instead of
-    turn count, because one long assistant turn can eat the whole budget.
-    Walks backwards from the most recent turn, adding entries until the
-    character budget is exhausted. Each individual entry is also capped at
-    200 chars to prevent a single monster turn from consuming everything.
+    Budget is capped by total CHARACTER COUNT instead of turn count.
+    Ollama (Gemma4) uses a tighter budget (600 chars); CLI providers
+    (Haiku/Flash) use a larger budget (1500 chars).
 
-    Returns list of {role, content} dicts in the generic OpenAI-style shape.
+    For assistant turns, truncation takes the LAST N chars so that closing
+    questions/proposals (which determine whether "ok" is a confirmation)
+    are always preserved.
+
+    Returns list of {role, content} dicts in chronological order.
     """
+    budget = MAX_HISTORY_CHARS_OLLAMA if provider == "ollama" else MAX_HISTORY_CHARS_CLI
+    # Per-entry cap: assistant turns keep the tail; user turns keep the head.
+    entry_cap = 300 if provider != "ollama" else 200
+
     messages: list[dict] = []
     chars_used = 0
-    # Walk backwards through history (most recent first).
     for entry in reversed(session_history):
         role = entry.get("role", "")
-        content = entry.get("content", "")
+        content = (entry.get("content") or "").strip()
         if role not in ("user", "assistant") or not isinstance(content, str):
             continue
-        # Cap individual entry length.
-        if len(content) > 200:
-            content = content[:200] + "..."
-        # Check budget.
+        if len(content) > entry_cap:
+            if role == "assistant":
+                content = "..." + content[-entry_cap:]  # tail — preserves the question
+            else:
+                content = content[:entry_cap] + "..."
         entry_cost = len(content)
-        if chars_used + entry_cost > MAX_HISTORY_CHARS:
+        if chars_used + entry_cost > budget:
             break
         chars_used += entry_cost
         messages.append({"role": role, "content": content})
-    # Reverse so the list is chronological (oldest first).
     messages.reverse()
     return messages
 
@@ -428,65 +538,8 @@ async def _call_anthropic(
     model: str,
     timeout_s: float,
 ) -> str:
-    """Call Anthropic Messages API."""
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-    if not api_key:
-        logger.warning("Initial ack (anthropic): ANTHROPIC_API_KEY not set")
-        return ""
-    # Anthropic expects history WITHOUT the system in the messages list; system
-    # is a separate top-level field. Roles must alternate user/assistant and
-    # the first message must be 'user'. Normalize before appending the current
-    # user turn.
-    safe_hist = _normalize_history_for_strict_providers(history)
-    # If after normalization the last entry is also 'user', merge by dropping
-    # the old one — the new message supersedes the stale pending user turn.
-    if safe_hist and safe_hist[-1].get("role") == "user":
-        safe_hist = safe_hist[:-1]
-    conv = [*safe_hist, {"role": "user", "content": message}]
-    payload = {
-        "model": model,
-        "system": system,
-        "messages": conv,
-        "max_tokens": 150,
-        "temperature": 0.1,
-    }
-    headers = {
-        "x-api-key": api_key,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json",
-    }
-    session = _get_session()
-    async with session.post(
-        "https://api.anthropic.com/v1/messages",
-        headers=headers,
-        json=payload,
-        timeout=aiohttp.ClientTimeout(total=timeout_s),
-    ) as resp:
-        if resp.status != 200:
-            body = await resp.text()
-            logger.warning(
-                "Initial ack (anthropic) HTTP %d: %s", resp.status, body[:300]
-            )
-            return ""
-        try:
-            data = await resp.json()
-        except Exception:
-            logger.warning("Initial ack (anthropic): invalid JSON response")
-            return ""
-    # Response shape: {"content": [{"type": "text", "text": "..."}, ...], ...}
-    # Harden against multiple blocks (e.g., thinking + text) and non-text items
-    # by concatenating every block whose type is "text".
-    content = data.get("content") or []
-    if isinstance(content, list):
-        parts = []
-        for blk in content:
-            if isinstance(blk, dict) and blk.get("type") == "text":
-                text = blk.get("text")
-                if isinstance(text, str):
-                    parts.append(text)
-        if parts:
-            return "".join(parts)
-    return ""
+    """Initial ack via Claude CLI (Haiku). No API key required — uses the installed CLI."""
+    return await _call_cli_subprocess(system, history, message, model, timeout_s)
 
 
 async def _call_google(
@@ -496,68 +549,8 @@ async def _call_google(
     model: str,
     timeout_s: float,
 ) -> str:
-    """Call Google Generative Language (Gemini) generateContent API."""
-    api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or ""
-    if not api_key:
-        logger.warning("Initial ack (google): GEMINI_API_KEY/GOOGLE_API_KEY not set")
-        return ""
-    # Google uses 'user' / 'model' instead of 'user' / 'assistant'. Same
-    # alternation + first-must-be-user rules as Anthropic — normalize first.
-    safe_hist = _normalize_history_for_strict_providers(history)
-    if safe_hist and safe_hist[-1].get("role") == "user":
-        safe_hist = safe_hist[:-1]
-    contents = []
-    for m in safe_hist:
-        role = "user" if m.get("role") == "user" else "model"
-        contents.append({"role": role, "parts": [{"text": m.get("content", "")}]})
-    contents.append({"role": "user", "parts": [{"text": message}]})
-    # Gemini 2.5 Flash has a "thinking" mode that consumes output tokens as
-    # internal reasoning before any visible text is emitted. With a tight
-    # maxOutputTokens, thinking can eat the entire budget and return an empty
-    # text part. Set thinkingBudget=0 to turn thinking off for this fast-path
-    # classification (we don't need the model to reason deeply for a 2-line
-    # CLASSIFICATION/RESPONSE output). Older flash models ignore the field.
-    payload = {
-        "systemInstruction": {"parts": [{"text": system}]},
-        "contents": contents,
-        "generationConfig": {
-            "temperature": 0.1,
-            "maxOutputTokens": 300,
-            "thinkingConfig": {"thinkingBudget": 0},
-        },
-    }
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-    headers = {"x-goog-api-key": api_key, "Content-Type": "application/json"}
-    session = _get_session()
-    async with session.post(
-        url,
-        headers=headers,
-        json=payload,
-        timeout=aiohttp.ClientTimeout(total=timeout_s),
-    ) as resp:
-        if resp.status != 200:
-            body = await resp.text()
-            logger.warning(
-                "Initial ack (google) HTTP %d: %s", resp.status, body[:300]
-            )
-            return ""
-        try:
-            data = await resp.json()
-        except Exception:
-            logger.warning("Initial ack (google): invalid JSON response")
-            return ""
-    # Response shape: {"candidates": [{"content": {"parts": [{"text": "..."}, ...]}}]}
-    # Concatenate every part that has text so we don't silently drop multi-part
-    # responses.
-    candidates = data.get("candidates") or []
-    if not candidates:
-        return ""
-    parts = ((candidates[0] or {}).get("content") or {}).get("parts") or []
-    if isinstance(parts, list):
-        texts = [p.get("text", "") for p in parts if isinstance(p, dict) and isinstance(p.get("text"), str)]
-        if texts:
-            return "".join(texts)
-    return ""
+    """Initial ack via Gemini CLI (Flash). No API key required — uses the installed CLI."""
+    return await _call_cli_subprocess(system, history, message, model, timeout_s)
 
 
 async def _call_openai(
@@ -567,76 +560,74 @@ async def _call_openai(
     model: str,
     timeout_s: float,
 ) -> str:
-    """Call OpenAI Chat Completions API."""
-    api_key = os.environ.get("OPENAI_API_KEY", "")
-    if not api_key:
-        logger.warning("Initial ack (openai): OPENAI_API_KEY not set")
+    """Initial ack via Codex CLI (gpt-5-nano). No API key required — uses the installed CLI."""
+    return await _call_cli_subprocess(system, history, message, model, timeout_s)
+
+
+async def _call_cli_subprocess(
+    system: str,
+    history: list[dict],
+    message: str,
+    model: str,
+    timeout_s: float,
+) -> str:
+    """Call the installed CLI binary (claude/gemini/codex) via subprocess.
+
+    Used when JANE_BRAIN is set but no API key is configured — e.g., users
+    who authenticate via Claude Pro OAuth or Gemini CLI, not raw API keys.
+    Slower than a direct API call (~3-5s startup) but works everywhere the
+    CLI is installed. Capped at 6s so it fails fast if the CLI is slow.
+    """
+    from jane.config import PROVIDER_CLI
+    cli = os.environ.get("PROVIDER_CLI", PROVIDER_CLI)
+    if not shutil.which(cli):
+        logger.debug("Initial ack CLI subprocess: binary '%s' not found", cli)
         return ""
-    messages = [
-        {"role": "system", "content": system},
-        *history,
-        {"role": "user", "content": message},
-    ]
-    # Newer OpenAI models (gpt-5-*, o1-*, o3-*) reject `max_tokens` and require
-    # `max_completion_tokens`. Older ones (gpt-4o, gpt-4, gpt-3.5) only accept
-    # `max_tokens`. Heuristic: anything that starts with "gpt-5", "o1", "o3",
-    # or "gpt-6" uses the new parameter name.
-    new_param_models = ("gpt-5", "o1", "o3", "gpt-6")
-    uses_new_param = any(model.startswith(p) for p in new_param_models)
-    payload: dict = {
-        "model": model,
-        "messages": messages,
-    }
-    # Reasoning models also reject custom temperature; only send it for classic chat models.
-    if not uses_new_param:
-        payload["temperature"] = 0.1
-        payload["max_tokens"] = 300
+
+    # Flatten system + recent history + message into a single prompt string.
+    # Keep it small — subprocess path has no streaming and we need a fast
+    # CLASSIFICATION/RESPONSE output, not a conversation.
+    # For assistant turns: take the LAST 150 chars (questions/proposals always
+    # appear at the end), not the first 150 (which may be a long preamble).
+    parts = [system.strip(), "---"]
+    for turn in (history or [])[-4:]:
+        role = turn.get("role", "user")
+        content = (turn.get("content") or "").strip()
+        if role == "assistant" and len(content) > 150:
+            content = "..." + content[-150:]
+        elif len(content) > 150:
+            content = content[:150] + "..."
+        parts.append(f"{role}: {content}")
+    parts.append(f"user: {message}")
+    full_prompt = "\n".join(parts)
+
+    # Build the CLI command (same logic as claude_cli_llm._build_command).
+    if "gemini" in cli:
+        cmd = [cli, "-p", full_prompt]
     else:
-        # Reasoning models silently eat output tokens as "reasoning tokens" —
-        # need a larger budget so the final text still fits.
-        payload["max_completion_tokens"] = 512
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
-    session = _get_session()
-    async with session.post(
-        "https://api.openai.com/v1/chat/completions",
-        headers=headers,
-        json=payload,
-        timeout=aiohttp.ClientTimeout(total=timeout_s),
-    ) as resp:
-        if resp.status != 200:
-            body = await resp.text()
-            logger.warning(
-                "Initial ack (openai) HTTP %d: %s", resp.status, body[:300]
-            )
+        # claude / codex — pass model explicitly
+        cmd = [cli, "-p", full_prompt, "--output-format", "text", "--model", model]
+
+    cap = min(timeout_s, 6.0)  # never wait more than 6s for an ack
+    loop = asyncio.get_event_loop()
+    try:
+        result = await asyncio.wait_for(
+            loop.run_in_executor(None, lambda: subprocess.run(
+                cmd, capture_output=True, text=True,
+                timeout=int(cap), env=os.environ.copy(),
+            )),
+            timeout=cap + 0.5,  # tiny buffer for thread overhead
+        )
+        if result.returncode != 0:
+            logger.debug("Initial ack CLI subprocess exit %d", result.returncode)
             return ""
-        try:
-            data = await resp.json()
-        except Exception:
-            logger.warning("Initial ack (openai): invalid JSON response")
-            return ""
-    # Response shape: {"choices": [{"message": {"content": "..."}}], ...}
-    # content can be either a plain string or (for some newer models) a list
-    # of content parts with {"type": "text", "text": "..."} blocks.
-    choices = data.get("choices") or []
-    if not choices:
+        return result.stdout.strip()
+    except asyncio.TimeoutError:
+        logger.debug("Initial ack CLI subprocess timed out (%.1fs cap)", cap)
         return ""
-    msg = (choices[0] or {}).get("message") or {}
-    content = msg.get("content")
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts = []
-        for blk in content:
-            if isinstance(blk, dict):
-                text = blk.get("text")
-                if isinstance(text, str):
-                    parts.append(text)
-        if parts:
-            return "".join(parts)
-    return ""
+    except Exception as exc:
+        logger.debug("Initial ack CLI subprocess error: %s", exc)
+        return ""
 
 
 _PROVIDER_DISPATCH = {
@@ -700,14 +691,20 @@ async def classify_prompt(
                 if summary:
                     return ("self_handle", summary)
 
-    history = _build_history(session_history or [])
+    # Weather — format directly from cache, no LLM call needed
+    weather_response = _format_weather_response(message)
+    if weather_response:
+        logger.info("Weather: answered from cache (no LLM call)")
+        return ("self_handle", weather_response)
+
+    provider = _resolve_provider()
+    history = _build_history(session_history or [], provider)
     # Inject weather data if the message mentions weather (compact format)
     weather_ctx = _load_weather_context(message)
     system = SYSTEM_PROMPT + weather_ctx if weather_ctx else SYSTEM_PROMPT
     # Weather context makes the prompt larger — allow more time
     timeout_override = ROUTER_TIMEOUT + 3.0 if weather_ctx else ROUTER_TIMEOUT
 
-    provider = _resolve_provider()
     model = _resolve_model(provider)
     client = _PROVIDER_DISPATCH.get(provider, _call_ollama)
 
@@ -747,6 +744,25 @@ async def classify_prompt(
             return ("unknown", None)
 
         classification = cls_match.group(1).upper()
+
+        # Parse confidence score (default 1.0 if missing — don't penalise old format)
+        conf_match = _CONFIDENCE_RE.search(content)
+        confidence = float(conf_match.group(1)) if conf_match else 1.0
+        logger.info(
+            "Initial ack (%s/%s): classification=%s confidence=%.2f",
+            provider, model, classification, confidence,
+        )
+
+        # Low-confidence gate: if the model isn't sure, emit the ack and let Opus answer.
+        # DELEGATE_OPUS is exempt — it already goes to Opus, no gate needed.
+        if classification != "DELEGATE_OPUS" and confidence < CONFIDENCE_THRESHOLD:
+            resp_match = _RESPONSE_RE.search(content)
+            ack = resp_match.group(1).strip().rstrip('"').strip() if resp_match else "One sec."
+            logger.info(
+                "Initial ack (%s/%s): confidence %.2f < %.2f — downgrading %s to delegate",
+                provider, model, confidence, CONFIDENCE_THRESHOLD, classification,
+            )
+            return ("delegate", ack)
 
         if classification == "MUSIC_PLAY":
             # Hard guard: only accept MUSIC_PLAY if the user's message contains

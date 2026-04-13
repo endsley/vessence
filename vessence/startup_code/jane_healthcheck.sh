@@ -27,7 +27,12 @@ fi
 ISSUES=""
 
 # ── Check 1: Jane web server responding ──
-HTTP_CODE=$(curl -s --max-time 10 -o /dev/null -w "%{http_code}" "http://localhost:8081/health" 2>/dev/null)
+# Check via the PROXY (8080), not hardcoded 8081 — during a graceful
+# restart, Jane runs on 8084 while 8081 is vacant. Checking 8081 directly
+# caused the healthcheck to trigger a systemd restart mid-ping-pong,
+# which killed the new nohup server. The proxy always points at whichever
+# port is currently active.
+HTTP_CODE=$(curl -s --max-time 10 -o /dev/null -w "%{http_code}" "http://localhost:8080/health" 2>/dev/null)
 if [ "$HTTP_CODE" != "200" ]; then
     ISSUES="${ISSUES}Jane web server is down (HTTP $HTTP_CODE). "
     if [ "$RESTART_ALLOWED" = true ]; then
@@ -105,6 +110,21 @@ MEM_DAEMON=$(curl -s --max-time 5 -o /dev/null -w "%{http_code}" "http://localho
 if [ "$MEM_DAEMON" != "200" ]; then
     ISSUES="${ISSUES}Memory daemon is down. "
     log "WARNING: Memory daemon not responding"
+fi
+
+# ── Check 8: Stuck request gate (jane_android session) ──
+# A mid-stream disconnect can lock the gate permanently, silently blocking
+# all chat. Detect and auto-fix without requiring a restart.
+ACTIVE_PORT=$(curl -s http://localhost:8080/proxy/status 2>/dev/null \
+    | python3 -c "import sys,json; print(json.load(sys.stdin)['upstream_port'])" 2>/dev/null \
+    || echo "8081")
+GATE_RESULT=$(curl -sf -X POST "http://localhost:${ACTIVE_PORT}/api/admin/reset-gate" \
+    -H "Content-Type: application/json" \
+    -d '{"session_id": "jane_android"}' 2>/dev/null || echo "")
+GATE_STATUS=$(echo "$GATE_RESULT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('status','unknown'))" 2>/dev/null || echo "unknown")
+if [ "$GATE_STATUS" = "released" ]; then
+    ISSUES="${ISSUES}jane_android gate was stuck — auto-released. "
+    log "WARNING: jane_android request_gate was stuck, auto-released"
 fi
 
 # ── Report ──

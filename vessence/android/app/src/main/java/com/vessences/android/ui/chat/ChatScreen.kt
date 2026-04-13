@@ -266,7 +266,11 @@ fun ChatScreen(
         }
 
         // STT listening status — shows in-app banner with real-time transcript while user speaks
-        VoiceStatusBanner(voice = state.voice, aiColor = aiColor)
+        VoiceStatusBanner(
+            voice = state.voice,
+            aiColor = aiColor,
+            onCancel = { viewModel.stopListeningAndReturnToWakeWord() },
+        )
 
         // Input row (includes upload progress, attachment indicator, text field, mic, send)
         ChatInputRow(
@@ -455,6 +459,7 @@ private fun LiveActivityBanner(
 internal fun VoiceStatusBanner(
     voice: com.vessences.android.voice.VoiceState,
     aiColor: Color,
+    onCancel: (() -> Unit)? = null,
 ) {
     if (
         voice.isPreparingModel ||
@@ -481,7 +486,7 @@ internal fun VoiceStatusBanner(
                     modifier = Modifier.size(28.dp),
                 )
                 Spacer(modifier = Modifier.width(14.dp))
-                Column {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = voice.status ?: "Voice ready",
                         color = Color.White,
@@ -494,6 +499,20 @@ internal fun VoiceStatusBanner(
                             text = voice.transcriptPreview,
                             color = SlateMuted,
                             fontSize = 15.sp,
+                        )
+                    }
+                }
+                if (onCancel != null && (voice.isCapturingCommand || voice.isWakeListening)) {
+                    Spacer(modifier = Modifier.width(12.dp))
+                    IconButton(
+                        onClick = onCancel,
+                        modifier = Modifier.size(48.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Cancel voice input",
+                            tint = Color(0xFFEF4444),
+                            modifier = Modifier.size(32.dp),
                         )
                     }
                 }

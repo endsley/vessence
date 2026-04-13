@@ -627,6 +627,11 @@ CODE_MAP_KEYWORDS = (
     "full",
     "sky",
     "check",
+    # Auto-evolved from daily conversations
+    "online",
+    # Auto-evolved from daily conversations
+    "skill",
+    "stage",
 )
 
 
@@ -1275,7 +1280,12 @@ def _persist_turns_async(
             logger.exception("[%s] Short-term writeback failed", session_id[:12])
             _log_stage(session_id, "short_term_writeback_async_error", stage_start, error=type(exc).__name__)
 
-        # Thematic short-term memory update (Sonnet-powered, may take 5-15s)
+        # Thematic short-term memory update (Haiku-powered, 1-3s typical).
+        # This ALSO dual-writes the Haiku-generated summary into the
+        # recent_turns FIFO (see vault_web.recent_turns) so v2's ack
+        # generator and classifier can fetch recent context cheaply
+        # without a ChromaDB similarity search. No extra LLM calls —
+        # the FIFO reuses the summary Haiku already produced for Chroma.
         try:
             stage_start = time.perf_counter()
             if conv_manager:
@@ -1971,11 +1981,188 @@ async def stream_message(
     # so edit instructions like "make it 30" route straight to Jane's mind.
     _gemma_short_circuit = False
     _gemma_delegate_ack = None  # quick ack emitted by Gemma when delegating to Claude
+    _gemma_conversation_end = False  # v2 pipeline: END_CONVERSATION signal to client
+    _gemma_client_tools = []  # v2 pipeline: client tool calls from Stage 2 fast path
     _shopping_list_active = False  # set by shopping_list classification
+    # Always initialize _classification so run_pipeline_async() can access it as a
+    # free variable even when the v2 pipeline is used and the old pipeline is skipped.
+    _classification = None
     try:
         if _skip_initial_ack:
             # Fall-through sentinel: raise a silent skip marker caught below.
             raise _SkipRouterSignal()
+        if os.environ.get("JANE_USE_V2_PIPELINE") == "1":
+            # ── v2 pipeline: Stage 1 classify → build context → Stage 2 execute ────
+            from intent_classifier.v2.classifier import stage1_classify as _s1_fn
+            from intent_classifier.v1.gemma_stage2 import stage2_execute as _s2_fn
+            ROUTER_MODEL = "embedding-v2"
+            _stage1 = await _s1_fn(message, session_id)
+            _s1_cls = _stage1.get("classification", "DELEGATE_OPUS")
+            _stage1["classification"] = _s1_cls
+            # Sync _classification so run_pipeline_async()'s CLASSIFICATION_TO_INTENT
+            # lookup works for v2 pipeline turns that delegate to Opus.
+            _classification = _s1_cls.lower()
+            # ── Build task context (fetch data for data-intensive intents) ─────────
+            _v2_task_ctx = ""
+            if _s1_cls == "READ_MESSAGES":
+                _gemma_delegate_ack = "Checking your messages..."
+                try:
+                    from vault_web.database import get_db as _v2_get_db
+                    import json as _v2j
+                    _v2_filter = _stage1.get("filter", "")
+                    _v2_since_ms = int((time.time() - 5 * 86400) * 1000)
+                    with _v2_get_db() as _v2c:
+                        if _v2_filter:
+                            _v2_fq = f"%{_v2_filter}%"
+                            _v2_rows = _v2c.execute(
+                                "SELECT sender, body, timestamp_ms, is_read, is_contact, msg_type "
+                                "FROM synced_messages WHERE timestamp_ms > ? "
+                                "AND (sender LIKE ? OR body LIKE ?) "
+                                "ORDER BY timestamp_ms DESC LIMIT 30",
+                                (_v2_since_ms, _v2_fq, _v2_fq),
+                            ).fetchall()
+                        else:
+                            _v2_rows = _v2c.execute(
+                                "SELECT sender, body, timestamp_ms, is_read, is_contact, msg_type "
+                                "FROM synced_messages WHERE timestamp_ms > ? "
+                                "ORDER BY timestamp_ms DESC LIMIT 30",
+                                (_v2_since_ms,),
+                            ).fetchall()
+                    _v2_msgs = [dict(r) for r in _v2_rows]
+                    if _v2_msgs:
+                        from datetime import datetime as _v2dt
+                        for _m2 in _v2_msgs:
+                            try:
+                                _m2["time"] = _v2dt.fromtimestamp(_m2["timestamp_ms"] / 1000).strftime("%b %d %I:%M %p")
+                            except Exception:
+                                pass
+                        _v2_task_ctx = (
+                            "[SMS INBOX DATA — fetched from synced messages DB]\n"
+                            + _v2j.dumps(_v2_msgs, indent=2, default=str)
+                            + "\n[END SMS INBOX DATA]\n\n"
+                            "msg_type guide: personal=important contacts, reminder=appointments, "
+                            "notification=shipping/delivery, spam=skip, unknown=mention if important."
+                        )
+                    else:
+                        _v2_task_ctx = "[SMS INBOX DATA]\nNo text messages found in the last 5 days.\n[END SMS INBOX DATA]"
+                    logger.info("[%s] v2 READ_MESSAGES: fetched %d msgs%s",
+                                session_id[:12], len(_v2_msgs),
+                                f" (filter: {_v2_filter})" if _v2_filter else "")
+                except Exception as _v2_sms_err:
+                    logger.error("[%s] v2 SMS fetch failed: %s", session_id[:12], _v2_sms_err)
+                    _v2_task_ctx = f"[SMS ERROR]\nFailed to fetch messages: {_v2_sms_err}\n[END SMS ERROR]"
+            elif _s1_cls == "READ_EMAIL":
+                _gemma_delegate_ack = "Let me check your email..."
+                try:
+                    from agent_skills.email_tools import read_inbox as _v2_read_inbox
+                    _v2_emails = _v2_read_inbox(limit=10, query="is:unread")
+                    if _v2_emails:
+                        import json as _v2ej
+                        _v2_task_ctx = (
+                            "[EMAIL INBOX DATA — fetched server-side]\n"
+                            + _v2ej.dumps(_v2_emails, indent=2, default=str)
+                            + "\n[END EMAIL INBOX DATA]"
+                        )
+                    else:
+                        _v2_task_ctx = "[EMAIL INBOX DATA]\nNo unread emails found.\n[END EMAIL INBOX DATA]"
+                    logger.info("[%s] v2 READ_EMAIL: fetched %d emails", session_id[:12], len(_v2_emails) if _v2_emails else 0)
+                except RuntimeError as _v2_email_err:
+                    _v2_task_ctx = f"[EMAIL ERROR]\nGmail not set up: {_v2_email_err}\n[END EMAIL ERROR]"
+                except Exception as _v2_email_err:
+                    logger.error("[%s] v2 email fetch failed: %s", session_id[:12], _v2_email_err)
+                    _v2_task_ctx = f"[EMAIL ERROR]\nFailed to fetch emails: {_v2_email_err}\n[END EMAIL ERROR]"
+            elif _s1_cls == "MUSIC_PLAY":
+                _v2_query = _stage1.get("query", "")
+                _gemma_delegate_ack = f"Playing {_v2_query}..." if _v2_query else "Playing music..."
+                try:
+                    from jane_web.main import create_music_playlist_from_query as _v2_pl_fn
+                    _v2_pl = _v2_pl_fn(_v2_query)
+                    if _v2_pl and _v2_pl.get("tracks"):
+                        _v2_tnames = ", ".join(t.get("title", t.get("path", "?")) for t in _v2_pl["tracks"][:10])
+                        _v2_task_ctx = (
+                            f"[MUSIC DATA]\n"
+                            f"Playlist ID: {_v2_pl['id']}\n"
+                            f"Name: {_v2_pl['name']}\n"
+                            f"Tracks ({len(_v2_pl['tracks'])}): {_v2_tnames}\n"
+                            f"[END MUSIC DATA]"
+                        )
+                    else:
+                        _v2_task_ctx = "[MUSIC DATA]\nNo matching tracks found.\n[END MUSIC DATA]"
+                except Exception as _v2_music_err:
+                    logger.warning("[%s] v2 music playlist failed: %s", session_id[:12], _v2_music_err)
+                    _v2_task_ctx = f"[MUSIC ERROR]\n{_v2_music_err}\n[END MUSIC ERROR]"
+            elif _s1_cls == "SHOPPING_LIST":
+                _v2_action = (_stage1.get("action") or "").lower().strip()
+                try:
+                    from agent_skills.shopping_list import (
+                        add_item as _v2_add_item,
+                        remove_item as _v2_rm_item,
+                        clear_list as _v2_clear_list,
+                    )
+                    _v2_store = "default"
+                    if _v2_action.startswith("add "):
+                        _v2_item = _v2_action[4:].strip()
+                        for _v2_kw in (" to costco", " to the costco", " to walmart",
+                                       " to the walmart", " to grocery", " to the grocery",
+                                       " to target", " to the target"):
+                            if _v2_kw in _v2_item.lower():
+                                _v2_store = _v2_kw.split("to ")[-1].strip().rstrip(" list").strip()
+                                _v2_item = _v2_item[:_v2_item.lower().index(_v2_kw)].strip()
+                                break
+                        _v2_updated = _v2_add_item(_v2_item, _v2_store)
+                        _v2_task_ctx = (f"Added {_v2_item!r} to the {_v2_store} list. "
+                                        f"Current list: {', '.join(_v2_updated) or '(empty)'}")
+                    elif _v2_action.startswith("remove "):
+                        _v2_item = _v2_action[7:].strip()
+                        for _v2_kw in (" from costco", " from the costco",
+                                       " from walmart", " from grocery"):
+                            if _v2_kw in _v2_item.lower():
+                                _v2_store = _v2_kw.split("from ")[-1].strip().rstrip(" list").strip()
+                                _v2_item = _v2_item[:_v2_item.lower().index(_v2_kw)].strip()
+                                break
+                        _v2_updated = _v2_rm_item(_v2_item, _v2_store)
+                        _v2_task_ctx = (f"Removed {_v2_item!r} from the {_v2_store} list. "
+                                        f"Current list: {', '.join(_v2_updated) or '(empty)'}")
+                    elif _v2_action.startswith("clear"):
+                        _v2_store = _v2_action.replace("clear", "").strip() or "default"
+                        _v2_clear_list(_v2_store)
+                        _v2_task_ctx = f"Cleared the {_v2_store} shopping list."
+                except Exception as _v2_shop_err:
+                    logger.warning("[%s] v2 shopping list failed: %s", session_id[:12], _v2_shop_err)
+            # ── Execute Stage 2 ────────────────────────────────────────────────────
+            _stage2 = await _s2_fn(_s1_cls, _stage1, _v2_task_ctx, session_id, message)
+            logger.info(
+                "[%s] v2 stage2: cls=%s delegate=%s conv_end=%s tools=%d resp=%r",
+                session_id[:12], _s1_cls, _stage2.get("delegate"),
+                _stage2.get("conversation_end"), len(_stage2.get("client_tools") or []),
+                (_stage2.get("response") or "")[:60],
+            )
+            if _stage2.get("conversation_end"):
+                _gemma_conversation_end = True
+                _gemma_short_circuit = True
+                _router_response = _stage2["response"]
+            elif _stage2.get("delegate"):
+                _gemma_short_circuit = False
+                _gemma_delegate_ack = _stage2.get("response") or _gemma_delegate_ack
+                # Inject delegate context into message so Opus sees it
+                _v2_dctx = _stage2.get("delegate_context", "") or _v2_task_ctx
+                if _v2_dctx:
+                    message = message + "\n\n" + _v2_dctx
+                if _gemma_delegate_ack and not _suppress_delegate_ack:
+                    _raw_emit("model", ROUTER_MODEL)
+                    _raw_emit("ack", _gemma_delegate_ack)
+                    _ack_seen = True
+                    logger.info("[%s] v2 delegate ack: %s", session_id[:12], (_gemma_delegate_ack or "")[:60])
+                elif _gemma_delegate_ack and _suppress_delegate_ack:
+                    logger.info("[%s] v2 delegate (ack suppressed, text mode): %s",
+                                session_id[:12], (_gemma_delegate_ack or "")[:60])
+            else:
+                # Stage 2 handled it completely — short-circuit
+                _gemma_short_circuit = True
+                _router_response = _stage2["response"]
+                _gemma_client_tools = _stage2.get("client_tools") or []
+            raise _SkipRouterSignal()  # skip old pipeline
+        # ── Old pipeline (JANE_USE_V2_PIPELINE not set) ───────────────────────────
         from intent_classifier.v1.gemma_router import classify_prompt, ROUTER_MODEL
         _router_history = [{"role": h["role"], "content": h.get("content", "")}
                            for h in state.history[-10:]
@@ -2270,11 +2457,21 @@ async def stream_message(
     if _gemma_short_circuit:
         # Gemma handled it — emit model label, response, and done event.
         _raw_emit("model", ROUTER_MODEL)
+        if _gemma_conversation_end:
+            _raw_emit("conversation_end", "true")
+        for _v2_ct in _gemma_client_tools:
+            _raw_emit("client_tool_call", json.dumps(
+                {"name": _v2_ct["name"], "args": _v2_ct.get("args", {})},
+                ensure_ascii=True,
+            ))
         _raw_emit("delta", _router_response)
         _raw_emit("done", _router_response)
         broadcaster.finish(_router_response)
         user_turn = {"role": "user", "content": persisted_user_message}
-        assistant_turn = {"role": "assistant", "content": _router_response}
+        # Tag Gemma-handled turns so the standing brain knows it didn't see them.
+        # Without this tag, [Recent exchanges] includes turns Claude never processed,
+        # causing its internal conversation memory to diverge from the injected history.
+        assistant_turn = {"role": "assistant", "content": _router_response, "handler": "gemma"}
         state.history.extend([user_turn, assistant_turn])
         state.history = state.history[-24:]
         _persist_turns_async(
@@ -2374,7 +2571,24 @@ async def stream_message(
                 else:
                     recent = _format_recent_history(list(state.history), max_turns=6, max_chars=2400)
                     if recent:
-                        safety_parts.append(f"[Recent exchanges]\n{recent}")
+                        # Check if any recent turns were handled by Gemma (not by this brain).
+                        # The brain's internal memory won't have those turns, so we must tell it
+                        # to trust [Recent exchanges] as the authoritative conversation record.
+                        _recent_history_slice = state.history[-6:]
+                        _has_gemma_turns = any(
+                            h.get("handler") == "gemma" for h in _recent_history_slice
+                        )
+                        if _has_gemma_turns:
+                            safety_parts.append(
+                                f"[Recent exchanges]\n{recent}\n\n"
+                                "IMPORTANT: Some recent exchanges above were handled by the fast "
+                                "router (not by you), so they won't be in your conversation memory. "
+                                "Trust this [Recent exchanges] block as the authoritative record of "
+                                "what the user said and what was answered. Respond to the user's "
+                                "CURRENT message below, not to an earlier one from your memory."
+                            )
+                        else:
+                            safety_parts.append(f"[Recent exchanges]\n{recent}")
                 # Retrieve fresh memory from ChromaDB for EVERY standing brain turn
                 # (not just turn 1). Without this, Jane has no memory of who the user
                 # is, their preferences, or context — making her feel "dumb."
@@ -2383,6 +2597,7 @@ async def stream_message(
                         from context_builder.v1.context_builder import _safe_get_memory_summary
                         _sb_memory = _safe_get_memory_summary(
                             message,
+                            conversation_summary=summary_text or "",
                             session_id=session_id,
                             fallback_summary=state.bootstrap_memory_summary or "",
                         )
@@ -2673,28 +2888,43 @@ async def stream_message(
                 logger.warning("[%s] Stream exiting after error event", _session_log_id(session_id))
                 break
     finally:
-        brain_stop.set()
-        # NEVER cancel the adapter task — let it finish even if the client disconnected.
-        # The brain is still working server-side; we need its response for history + writeback.
-        if not task.done():
-            logger.info("[%s] Client disconnected — waiting for adapter task to finish (brain still working)",
-                        _session_log_id(session_id))
-            try:
-                await asyncio.wait_for(task, timeout=300)  # 5 min max wait
-            except asyncio.TimeoutError:
-                logger.warning("[%s] Adapter task still running after 5min post-disconnect, cancelling",
-                               _session_log_id(session_id))
-                task.cancel()
+        # ── Gate release: innermost try/finally so it runs even if cleanup raises ──
+        # Two reasons this MUST be here and not after this block:
+        #  1. When the client disconnects, Python calls aclose() on the generator.
+        #     The finally block runs, but ALL code after it is skipped. If the gate
+        #     release is post-finally, it never runs → gate stays locked forever.
+        #  2. If anything inside this finally raises unexpectedly, a gate release
+        #     placed at the end of finally would also be skipped. The nested
+        #     try/finally below ensures it runs unconditionally.
+        try:
+            brain_stop.set()
+            # NEVER cancel the adapter task — let it finish even if the client disconnected.
+            # The brain is still working server-side; we need its response for history + writeback.
+            if not task.done():
+                logger.info("[%s] Client disconnected — waiting for adapter task to finish (brain still working)",
+                            _session_log_id(session_id))
+                try:
+                    await asyncio.wait_for(task, timeout=300)  # 5 min max wait
+                except asyncio.TimeoutError:
+                    logger.warning("[%s] Adapter task still running after 5min post-disconnect, cancelling",
+                                   _session_log_id(session_id))
+                    task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await task
+                except asyncio.CancelledError:
+                    pass
+            else:
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
-            except asyncio.CancelledError:
-                pass
-        else:
             with contextlib.suppress(asyncio.CancelledError):
-                await task
-        with contextlib.suppress(asyncio.CancelledError):
-            keepalive_task.cancel()
-            await keepalive_task
+                keepalive_task.cancel()
+                await keepalive_task
+        finally:
+            # Unconditional gate release — runs even if cleanup above raises.
+            if _gate_acquired:
+                state.request_gate.release()
+                _gate_acquired = False
+                logger.info("[%s] Gate released in finally", _session_log_id(session_id))
 
         # Drain any remaining events from the queue to capture final_response
         if final_response is None:

@@ -3,10 +3,8 @@ fastapi
 uvicorn[standard]
 jinja2
 aiofiles
-starlette
 
 # LLM interface
-litellm
 tiktoken
 
 # Vector memory
@@ -14,32 +12,14 @@ chromadb
 
 # Configuration
 python-dotenv
-pydantic
 
 # HTTP client
 httpx
 aiohttp
 
-
-# Database
-aiosqlite
-
-# Image processing
+# Image processing (vault file browser)
 pillow
 
 # Authentication
 pyotp
 authlib
-
-# TTS (CLI voice)
-edge-tts
-
-# Google ADK (agent framework)
-google-adk
-
-# Gmail API
-google-api-python-client
-google-auth-oauthlib
-
-# Discord bridge (optional)
-discord.py

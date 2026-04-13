@@ -35,18 +35,29 @@ object SyncForceSmsHandler : ClientToolHandler {
         if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.READ_SMS)
             != PackageManager.PERMISSION_GRANTED
         ) {
-            return ToolActionStatus.NeedsUser("READ_SMS permission not granted")
+            Log.w(TAG, "READ_SMS permission not granted — returning NeedsUser")
+            return ToolActionStatus.NeedsUser(
+                "SMS sync needs the Messages permission. " +
+                "Open Android Settings → Apps → Vessence → Permissions → SMS → Allow"
+            )
         }
 
         return withContext(Dispatchers.IO) {
             try {
-                Log.i(TAG, "Force SMS sync requested — resetting backfill flag and syncing")
-                SmsSyncManager.forceSync(ctx)
-                Log.i(TAG, "Force SMS sync completed successfully")
-                ToolActionStatus.Completed("SMS sync completed — last 14 days re-synced")
+                Log.i(TAG, "Force SMS sync requested — calling SmsSyncManager.forceSync")
+                val count = SmsSyncManager.forceSync(ctx)
+                if (count > 0) {
+                    Log.i(TAG, "Force SMS sync completed: $count messages synced")
+                    ToolActionStatus.Completed("Synced $count messages from the last 14 days")
+                } else {
+                    Log.w(TAG, "Force SMS sync completed but found 0 messages")
+                    ToolActionStatus.Completed(
+                        "No messages found — check that SMS permission is granted"
+                    )
+                }
             } catch (e: Exception) {
                 Log.e(TAG, "Force SMS sync failed", e)
-                ToolActionStatus.Failed("SMS sync failed: ${e.message}")
+                ToolActionStatus.Failed("SMS sync failed: ${e.message ?: e.javaClass.simpleName}")
             }
         }
     }

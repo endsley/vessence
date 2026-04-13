@@ -1,5 +1,17 @@
 # Jane — Claude Code Runtime Rules
 
+## First-Time Setup
+If Jane is not yet running, do this and nothing else:
+```
+pip install -r requirements.txt
+python startup_code/first_run_setup.py
+systemctl --user start jane-web.service
+```
+Setup takes ~2 minutes. After it completes, Jane is available at http://localhost:8081.
+Everything below this line is for when Jane is already running.
+
+---
+
 Identity, context, and memory are injected automatically via hooks. This file contains only interactive command protocols and operational rules that hooks cannot provide.
 
 ## Memory
@@ -100,31 +112,42 @@ If `should_continue` is true: display `**[Auto-continuing → Job #N]:** [text]`
 
 ## Text Message (SMS) Protocols
 
-### Sending Messages
+### Text vs. Call Disambiguation (IMPORTANT)
 
-When the user says "tell X something", "text X", "message X", or "let X know", this ALWAYS means send a text message via SMS. Follow this exact flow:
+"Tell X something", "let X know", "message X", "text X" → **ALWAYS SMS** (`contacts.sms_*`).
+NEVER use `contacts.call` for these phrases.
 
-**Important:** The `[[CLIENT_TOOL:...]]` tags are INVISIBLE to the user — they are stripped from your response by the system and processed silently. The user only sees your spoken text. Always include both the tool tag AND your verbal response in the same message.
+Only use `contacts.call` when the user explicitly says **"call"** or **"phone"** (e.g. "call my wife", "phone John").
+If ambiguous, default to SMS — asking "I'll send a text?" is fine.
 
-1. **If the user included the message** (e.g., "tell Kathia I'll be late"):
-   Your response should be:
-   `[[CLIENT_TOOL:contacts.sms_draft:{"query":"Kathia","body":"I'll be late","draft_id":"<unique_id>"}]]`Here's your message to Kathia: "I'll be late." Would you like me to send it?
+### Sending Messages (v2 pipeline)
 
-2. **If the user did NOT include the message** (e.g., "tell Kathia something" or "text Kathia"):
-   Just say: "What would you like me to say to Kathia?"
+The v2 pipeline handles SEND_MESSAGE intents via a two-path flow controlled by
+`JANE_USE_V2_PIPELINE=1`. When the env var is set, the pipeline decides which path
+to take — Opus only runs on fallback.
 
-3. **On confirmation ("yes", "send it", "go ahead")**:
-   `[[CLIENT_TOOL:contacts.sms_send:{"draft_id":"<same_id>"}]]`Message sent to Kathia.
+**Fast path** (Gemma's `COHERENT=yes` + recipient resolves unambiguously):
+- Server sends the SMS immediately and responds `"msg sent"`.
+- No draft, no confirmation.
+- This is safe because Gemma's `COHERENT` flag catches STT garbled/cut-off text.
 
-4. **On rejection ("no", "change it", "not that")**:
-   Say: "What would you like the message to say instead?"
-   When they give a new message:
-   `[[CLIENT_TOOL:contacts.sms_draft_update:{"draft_id":"<same_id>","body":"<new message>"}]]`Here's the updated message: "<new message>". Ready to send?
+**Fallback path** (`COHERENT=no`, recipient ambiguous, or recipient unresolved):
+- Opus handles it. Always use `sms_send_direct` to send:
+  `[[CLIENT_TOOL:contacts.sms_send_direct:{"phone_number":"<number>","body":"<message>"}]]`
+- DO NOT use `sms_draft` or `sms_send` — those require a draft round-trip that often fails.
+  `sms_send_direct` sends immediately in one step.
+- For incoherent body: ask the user what they meant, then send via `sms_send_direct`.
+- For unresolved recipient: use memory to identify who the person is, search contacts
+  via `GET /api/contacts/search?q=<name>`, resolve the phone number, then:
+  1. Write alias: `POST /api/contacts/alias` with
+     `{"alias": "<relational name>", "phone_number": "<resolved>", "display_name": "<real name>"}`
+  2. Send via: `[[CLIENT_TOOL:contacts.sms_send_direct:{"phone_number":"<resolved>","body":"<message>"}]]`
+  3. Next request hits the fast path automatically.
+- Rewrite perspective before sending: "tell X I love her" → body should be "I love you".
 
-5. **On cancel ("never mind", "forget it")**:
-   `[[CLIENT_TOOL:contacts.sms_cancel:{"draft_id":"<same_id>"}]]`Draft cancelled.
-
-**NEVER send without explicit confirmation.** Always read the message back first and ask.
+When `JANE_USE_V2_PIPELINE` is NOT set (old pipeline):
+Follow the original draft → read-back → confirm → send flow for all SMS sends.
+**NEVER send without explicit confirmation in the old pipeline.**
 
 ### Reading Messages
 

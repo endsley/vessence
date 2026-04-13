@@ -11,6 +11,9 @@ import androidx.core.content.ContextCompat
 import com.vessences.android.data.api.ApiClient
 import com.vessences.android.notifications.NotificationSafety
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
@@ -99,67 +102,87 @@ object SmsSyncManager {
 
     /**
      * Force full re-sync of last 14 days.
+     * Returns the number of messages found (and uploaded).
+     * Throws on upload failure so the caller can report the real error.
      */
-    suspend fun forceSync(context: Context) {
-        if (!hasPermission(context)) return
-        try {
-            val sinceMs = System.currentTimeMillis() - DAYS_TO_SYNC * 24 * 60 * 60 * 1000L
-            val messages = querySmsSince(context, sinceMs)
-            uploadMessages(messages)
-            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            val newest = messages.maxOfOrNull { (it["timestamp_ms"] as? Long) ?: 0L } ?: 0L
-            prefs.edit()
-                .putBoolean(KEY_BACKFILL_DONE, true)
-                .putLong(KEY_LAST_SYNC_TS, newest)
-                .apply()
-            Log.i(TAG, "Force-synced ${messages.size} SMS messages")
-        } catch (e: Exception) {
-            Log.e(TAG, "Force sync failed", e)
+    suspend fun forceSync(context: Context): Int {
+        if (!hasPermission(context)) {
+            Log.w(TAG, "forceSync: READ_SMS permission not granted — aborting")
+            return 0
         }
+        val sinceMs = System.currentTimeMillis() - DAYS_TO_SYNC * 24 * 60 * 60 * 1000L
+        Log.d(TAG, "forceSync: querying SMS since ${sinceMs} (last $DAYS_TO_SYNC days)")
+        val messages = querySmsSince(context, sinceMs)
+        Log.i(TAG, "forceSync: querySmsSince returned ${messages.size} message(s)")
+        if (messages.isEmpty()) {
+            Log.i(TAG, "forceSync: 0 messages found — nothing to upload")
+            return 0
+        }
+        try {
+            uploadMessages(messages)
+        } catch (e: Exception) {
+            Log.e(TAG, "forceSync: uploadMessages failed for ${messages.size} messages", e)
+            throw e
+        }
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val newest = messages.maxOfOrNull { (it["timestamp_ms"] as? Long) ?: 0L } ?: 0L
+        prefs.edit()
+            .putBoolean(KEY_BACKFILL_DONE, true)
+            .putLong(KEY_LAST_SYNC_TS, newest)
+            .apply()
+        Log.i(TAG, "forceSync: completed — synced ${messages.size} SMS messages")
+        return messages.size
     }
 
     /**
-     * Query content://sms/inbox for messages since [sinceMs].
+     * Query both content://sms/inbox AND content://sms/sent for messages since [sinceMs].
+     * Inbox = received messages, Sent = messages the user sent.
      */
     private suspend fun querySmsSince(context: Context, sinceMs: Long): List<Map<String, Any?>> =
         withContext(Dispatchers.IO) {
             val numberToName = buildNumberToNameCache(context)
-            val uri = Uri.parse("content://sms/inbox")
-            val projection = arrayOf("address", "body", "date", "read")
             val messages = mutableListOf<Map<String, Any?>>()
 
-            val cursor: Cursor? = context.contentResolver.query(
-                uri, projection, "date > ?", arrayOf(sinceMs.toString()),
-                "date DESC LIMIT $MAX_MESSAGES",
-            )
+            // Query both inbox and sent
+            for ((uriStr, msgType) in listOf("content://sms/inbox" to "received", "content://sms/sent" to "sent")) {
+                val uri = Uri.parse(uriStr)
+                val projection = arrayOf("address", "body", "date", "read")
 
-            cursor?.use { c ->
-                val addrIdx = c.getColumnIndexOrThrow("address")
-                val bodyIdx = c.getColumnIndexOrThrow("body")
-                val dateIdx = c.getColumnIndexOrThrow("date")
-                val readIdx = c.getColumnIndexOrThrow("read")
+                val cursor: Cursor? = context.contentResolver.query(
+                    uri, projection, "date > ?", arrayOf(sinceMs.toString()),
+                    "date DESC LIMIT $MAX_MESSAGES",
+                )
 
-                while (c.moveToNext()) {
-                    val address = c.getString(addrIdx) ?: continue
-                    val body = c.getString(bodyIdx) ?: continue
-                    if (NotificationSafety.looksLikeOtp(body)) continue
-                    if (NotificationSafety.isPlaceholderBody(body)) continue
+                cursor?.use { c ->
+                    val addrIdx = c.getColumnIndexOrThrow("address")
+                    val bodyIdx = c.getColumnIndexOrThrow("body")
+                    val dateIdx = c.getColumnIndexOrThrow("date")
+                    val readIdx = c.getColumnIndexOrThrow("read")
 
-                    val resolved = numberToName[normalizeNumber(address)]
-                        ?: numberToName[address]
-                    val senderName = resolved ?: address
-                    val isContact = resolved != null  // true if phone number matched a contact
+                    while (c.moveToNext()) {
+                        val address = c.getString(addrIdx) ?: continue
+                        val body = c.getString(bodyIdx) ?: continue
+                        if (NotificationSafety.looksLikeOtp(body)) continue
+                        if (NotificationSafety.isPlaceholderBody(body)) continue
 
-                    messages.add(mapOf(
-                        "sender" to senderName,
-                        "body" to body.take(NotificationSafety.MAX_BODY_CHARS),
-                        "timestamp_ms" to c.getLong(dateIdx),
-                        "is_read" to (c.getInt(readIdx) == 1),
-                        "is_contact" to isContact,
-                    ))
+                        val resolved = numberToName[normalizeNumber(address)]
+                            ?: numberToName[address]
+                        val senderName = if (msgType == "sent") "Me → ${resolved ?: address}" else (resolved ?: address)
+                        val isContact = resolved != null
+
+                        messages.add(mapOf(
+                            "sender" to senderName,
+                            "body" to body.take(NotificationSafety.MAX_BODY_CHARS),
+                            "timestamp_ms" to c.getLong(dateIdx),
+                            "is_read" to (c.getInt(readIdx) == 1),
+                            "is_contact" to isContact,
+                        ))
+                    }
                 }
             }
-            messages
+            // Sort by timestamp descending and cap
+            messages.sortByDescending { (it["timestamp_ms"] as? Long) ?: 0L }
+            if (messages.size > MAX_MESSAGES) messages.subList(0, MAX_MESSAGES) else messages
         }
 
     private fun buildNumberToNameCache(ctx: Context): Map<String, String> {
@@ -187,11 +210,14 @@ object SmsSyncManager {
 
     private suspend fun uploadMessages(messages: List<Map<String, Any?>>) {
         withContext(Dispatchers.IO) {
+            Log.d(TAG, "uploadMessages: uploading ${messages.size} message(s) to server")
             val response = ApiClient.janeApi.syncMessages(messages)
             if (response.isSuccessful) {
-                Log.i(TAG, "Upload success: ${response.body()}")
+                Log.i(TAG, "uploadMessages: success (${response.code()}) — body: ${response.body()}")
             } else {
-                Log.e(TAG, "Upload failed: ${response.code()}")
+                val errorBody = response.errorBody()?.string() ?: "(no body)"
+                Log.e(TAG, "uploadMessages: failed with HTTP ${response.code()} — $errorBody")
+                throw RuntimeException("SMS upload failed: HTTP ${response.code()} — $errorBody")
             }
         }
     }
@@ -200,6 +226,36 @@ object SmsSyncManager {
         number.replace(Regex("[^0-9+]"), "").let {
             if (it.startsWith("+1") && it.length == 12) it.substring(2) else it
         }
+
+    // ── Periodic sync ──────────────────────────────────────────────────────────
+
+    private const val PERIODIC_SYNC_INTERVAL_MS = 5 * 60 * 1000L  // 5 minutes
+    @Volatile private var periodicRunning = false
+
+    /**
+     * Start a background coroutine that syncs new messages every 5 minutes.
+     * Catches sent messages (no notification for those) and fills gaps if
+     * the notification listener was killed by the system.
+     * Safe to call multiple times — only one loop runs at a time.
+     */
+    fun startPeriodicSync(context: Context) {
+        if (periodicRunning) return
+        periodicRunning = true
+        val scope = kotlinx.coroutines.CoroutineScope(
+            Dispatchers.IO + SupervisorJob()
+        )
+        scope.launch {
+            Log.i(TAG, "Periodic SMS sync started (every ${PERIODIC_SYNC_INTERVAL_MS / 1000}s)")
+            while (true) {
+                delay(PERIODIC_SYNC_INTERVAL_MS)
+                try {
+                    pushNewMessages(context)
+                } catch (e: Exception) {
+                    Log.d(TAG, "Periodic sync failed: ${e.message}")
+                }
+            }
+        }
+    }
 
     private fun hasPermission(context: Context): Boolean =
         ContextCompat.checkSelfPermission(context, Manifest.permission.READ_SMS) ==

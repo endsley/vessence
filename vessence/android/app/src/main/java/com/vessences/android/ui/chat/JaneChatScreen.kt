@@ -355,12 +355,22 @@ private fun ChatInputBar(
     // Speech recognition launcher
     // Track when STT was last launched to prevent premature always-listen restart
     var lastSttLaunchTime by remember { mutableStateOf(0L) }
+    // Set to true when the user presses our X button — discards any pending STT result
+    var sttCancelledByUser by remember { mutableStateOf(false) }
 
     val speechLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
         isListeningForSpeech = false
         val timeSinceLaunch = System.currentTimeMillis() - lastSttLaunchTime
+        if (sttCancelledByUser) {
+            // User pressed X — discard result entirely, restart always-listen
+            sttCancelledByUser = false
+            com.vessences.android.voice.WakeWordBridge.sttActive = false
+            com.vessences.android.voice.AlwaysListeningService.start(context)
+            android.util.Log.i("JaneChatScreen", "STT result discarded — cancelled by user X button")
+            return@rememberLauncherForActivityResult
+        }
         if (result.resultCode == Activity.RESULT_OK) {
             val matches = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
             val spoken = matches?.firstOrNull()
@@ -558,7 +568,14 @@ private fun ChatInputBar(
         }
 
         // STT listening status — shows real-time transcript while user speaks
-        VoiceStatusBanner(voice = chatState.voice, aiColor = Violet500)
+        VoiceStatusBanner(
+            voice = chatState.voice,
+            aiColor = Violet500,
+            onCancel = {
+                chatViewModel.stopListeningAndReturnToWakeWord()
+                isListeningForSpeech = false
+            },
+        )
 
         // Attached file indicator
         if (attachedFileUri != null) {
@@ -643,10 +660,11 @@ private fun ChatInputBar(
 
             // Mic button for speech-to-text / Stop button when listening
             if (chatState.voice.isCapturingCommand || isListeningForSpeech) {
-                // Show stop button while actively listening
+                // X button: stop listening and return to always-listen (wake word) mode
                 IconButton(
                     onClick = {
-                        chatViewModel.cancelListening()
+                        sttCancelledByUser = true
+                        chatViewModel.stopListeningAndReturnToWakeWord()
                         isListeningForSpeech = false
                     },
                     modifier = Modifier.size(40.dp),
@@ -663,7 +681,7 @@ private fun ChatInputBar(
                     )
                     Icon(
                         imageVector = Icons.Default.Close,
-                        contentDescription = "Stop listening",
+                        contentDescription = "Stop listening and return to always-listen mode",
                         tint = Color(0xFFEF4444),
                         modifier = Modifier.scale(scale),
                     )

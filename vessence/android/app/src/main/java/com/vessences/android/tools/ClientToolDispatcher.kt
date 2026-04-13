@@ -63,6 +63,7 @@ class ClientToolDispatcher(
         register(MessagesFetchUnreadHandler)
         register(MessagesReadInboxHandler)
         register(SyncForceSmsHandler)
+        register(DeviceSpeakTimeHandler)
     }
 
     /** Register a handler under its [ClientToolHandler.name]. */

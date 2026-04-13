@@ -3,6 +3,7 @@ package com.vessences.android
 import android.content.Context
 import android.util.Log
 import com.vessences.android.data.api.ApiClient
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -52,16 +53,17 @@ object DiagnosticReporter {
                     }
                 }
 
-                val url = java.net.URL("${ApiClient.getJaneBaseUrl()}/api/device-diagnostics")
-                val conn = url.openConnection() as java.net.HttpURLConnection
-                conn.requestMethod = "POST"
-                conn.setRequestProperty("Content-Type", "application/json")
-                conn.connectTimeout = 5000
-                conn.readTimeout = 5000
-                conn.doOutput = true
-                conn.outputStream.use { it.write(payload.toString().toByteArray()) }
-                conn.responseCode
-                conn.disconnect()
+                // Use the shared OkHttp client so the session cookie is included
+                // (raw HttpURLConnection doesn't share the cookie jar → 401)
+                val body = okhttp3.RequestBody.create(
+                    "application/json".toMediaTypeOrNull(),
+                    payload.toString()
+                )
+                val request = okhttp3.Request.Builder()
+                    .url("${ApiClient.getJaneBaseUrl().trimEnd('/')}/api/device-diagnostics")
+                    .post(body)
+                    .build()
+                ApiClient.getOkHttpClient().newCall(request).execute().close()
             } catch (e: Exception) {
                 Log.d(TAG, "Failed to send diagnostic: ${e.message}")
             }

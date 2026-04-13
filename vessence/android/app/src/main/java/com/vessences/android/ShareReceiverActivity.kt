@@ -1,8 +1,10 @@
 package com.vessences.android
 
 import android.app.AlertDialog
+import android.app.ProgressDialog
 import android.content.Intent
 import android.os.Bundle
+import android.speech.tts.TextToSpeech
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import com.vessences.android.data.api.ApiClient
@@ -15,15 +17,19 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
+import java.util.Locale
 
 /**
  * Transparent activity that handles shared URLs with a picker dialog:
- *   - "Summarize Now" — sends URL to Jane chat, gets immediate summary via TTS
+ *   - "Summarize Now" — fetches & summarizes via server, speaks result via device TTS
  *   - "Add to Briefing" — queues for daily briefing (existing behavior)
  *
  * If the shared text is not a URL, forwards the intent to MainActivity.
  */
-class ShareReceiverActivity : ComponentActivity() {
+class ShareReceiverActivity : ComponentActivity(), TextToSpeech.OnInitListener {
+
+    private var tts: TextToSpeech? = null
+    private var pendingSpeech: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -61,6 +67,9 @@ class ShareReceiverActivity : ComponentActivity() {
             ApiClient.init(applicationContext)
         }
 
+        // Initialize TTS engine early so it's ready when we need it
+        tts = TextToSpeech(this, this)
+
         // Show picker dialog
         AlertDialog.Builder(this)
             .setTitle("Share Article")
@@ -74,26 +83,88 @@ class ShareReceiverActivity : ComponentActivity() {
             .show()
     }
 
+    override fun onInit(status: Int) {
+        if (status == TextToSpeech.SUCCESS) {
+            tts?.language = Locale.US
+            // Speak any text that arrived before TTS was ready
+            pendingSpeech?.let { text ->
+                pendingSpeech = null
+                speakAndFinish(text)
+            }
+        }
+    }
+
+    private fun speakAndFinish(text: String) {
+        val engine = tts
+        if (engine == null) {
+            pendingSpeech = text
+            return
+        }
+        engine.setOnUtteranceProgressListener(object : android.speech.tts.UtteranceProgressListener() {
+            override fun onStart(utteranceId: String?) {}
+            override fun onDone(utteranceId: String?) { finish() }
+            override fun onError(utteranceId: String?) { finish() }
+        })
+        engine.speak(text, TextToSpeech.QUEUE_FLUSH, null, "summarize_now")
+    }
+
     private fun extractUrl(text: String): String? {
         val urlPattern = Regex("""https?://\S+""")
         return urlPattern.find(text)?.value
     }
 
     /**
-     * Send the URL to Jane's chat as a message. Jane will fetch, summarize,
-     * and the response gets spoken via TTS on the chat screen.
+     * Call the server's summarize_now endpoint, get back summary text,
+     * and speak it immediately via device TTS.
      */
+    @Suppress("DEPRECATION")
     private fun summarizeNow(url: String) {
-        // Open the main chat with the URL as a pre-filled message
-        val chatIntent = Intent(this, MainActivity::class.java).apply {
-            action = Intent.ACTION_SEND
-            type = "text/plain"
-            putExtra(Intent.EXTRA_TEXT, "Summarize this article for me: $url")
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        val prefs = getSharedPreferences(Constants.PREFS_NAME, MODE_PRIVATE)
+        val serverUrl = prefs.getString(Constants.PREF_JANE_URL, Constants.DEFAULT_JANE_BASE_URL)
+            ?: Constants.DEFAULT_JANE_BASE_URL
+
+        val progress = ProgressDialog(this).apply {
+            setMessage("Summarizing article…")
+            setCancelable(false)
+            show()
         }
-        startActivity(chatIntent)
-        Toast.makeText(this, "Sending to Jane for summary...", Toast.LENGTH_SHORT).show()
-        finish()
+
+        val client = ApiClient.getOkHttpClient()
+        val json = JSONObject().apply { put("url", url) }
+        val body = json.toString().toRequestBody("application/json".toMediaType())
+        val request = Request.Builder()
+            .url("${serverUrl.trimEnd('/')}/api/briefing/articles/summarize_now")
+            .post(body)
+            .build()
+
+        lifecycleScope.launch {
+            val result = try {
+                withContext(Dispatchers.IO) {
+                    val response = client.newCall(request).execute()
+                    val responseBody = response.body?.string() ?: ""
+                    response.close()
+                    if (response.isSuccessful && responseBody.isNotEmpty()) {
+                        val obj = JSONObject(responseBody)
+                        val title = obj.optString("title", "")
+                        val summary = obj.optString("summary", "")
+                        if (summary.isNotEmpty()) {
+                            if (title.isNotEmpty()) "$title. $summary" else summary
+                        } else null
+                    } else null
+                }
+            } catch (_: Exception) {
+                null
+            }
+
+            progress.dismiss()
+
+            if (result != null) {
+                speakAndFinish(result)
+            } else {
+                Toast.makeText(this@ShareReceiverActivity, "Could not summarize article", Toast.LENGTH_SHORT).show()
+                finish()
+            }
+        }
     }
 
     /**
@@ -132,5 +203,11 @@ class ShareReceiverActivity : ComponentActivity() {
 
             finish()
         }
+    }
+
+    override fun onDestroy() {
+        tts?.stop()
+        tts?.shutdown()
+        super.onDestroy()
     }
 }

@@ -83,6 +83,37 @@ def _get_proxy_client_ip(request: web.Request) -> str:
 STATE_FILE = Path(os.environ.get("VESSENCE_DATA_HOME", Path.home() / "ambient" / "vessence-data")) / "proxy_state.json"
 
 # ---------------------------------------------------------------------------
+# Persistent upstream session (connection-pooled, not created per-request)
+# ---------------------------------------------------------------------------
+# One session is shared for all upstream requests. aiohttp's TCPConnector
+# maintains a pool of keep-alive connections, eliminating the TCP handshake
+# overhead that was previously paid on every request.
+#
+# Port switching (8081 ↔ 8084) still works: the session is not bound to a
+# specific host/port — it routes each request to whatever URL is passed to
+# session.request(). Old keep-alive connections to the previous port expire
+# naturally after keepalive_timeout seconds.
+
+_upstream_session: aiohttp.ClientSession | None = None
+
+
+def _get_upstream_session() -> aiohttp.ClientSession:
+    """Return the shared upstream session, creating it if needed."""
+    global _upstream_session
+    if _upstream_session is None or _upstream_session.closed:
+        connector = aiohttp.TCPConnector(
+            limit=200,              # max total connections in pool
+            limit_per_host=100,     # max connections to any one upstream
+            keepalive_timeout=30,   # idle keep-alive TTL (seconds)
+            enable_cleanup_closed=True,
+        )
+        _upstream_session = aiohttp.ClientSession(
+            timeout=CONNECT_TIMEOUT,
+            connector=connector,
+        )
+    return _upstream_session
+
+# ---------------------------------------------------------------------------
 # State
 # ---------------------------------------------------------------------------
 
@@ -225,43 +256,44 @@ async def proxy_handler(request: web.Request) -> web.StreamResponse:
             return await _proxy_websocket(request, target_url, headers)
 
         # Check if this is a streaming response (SSE / chunked)
-        async with aiohttp.ClientSession(timeout=CONNECT_TIMEOUT) as session:
-            async with session.request(
-                method=request.method,
-                url=target_url,
-                headers=headers,
-                data=await request.read() if request.can_read_body else None,
-                allow_redirects=False,
-            ) as upstream_resp:
-                # If upstream sends chunked / streaming, stream it through
-                is_streaming = (
-                    upstream_resp.headers.get("Transfer-Encoding", "").lower() == "chunked"
-                    or "text/event-stream" in upstream_resp.headers.get("Content-Type", "")
-                )
+        # Use the shared persistent session (connection pool) — not a per-request session.
+        session = _get_upstream_session()
+        async with session.request(
+            method=request.method,
+            url=target_url,
+            headers=headers,
+            data=await request.read() if request.can_read_body else None,
+            allow_redirects=False,
+        ) as upstream_resp:
+            # If upstream sends chunked / streaming, stream it through
+            is_streaming = (
+                upstream_resp.headers.get("Transfer-Encoding", "").lower() == "chunked"
+                or "text/event-stream" in upstream_resp.headers.get("Content-Type", "")
+            )
 
-                if is_streaming:
-                    response = web.StreamResponse(
-                        status=upstream_resp.status,
-                        headers={
-                            k: v for k, v in upstream_resp.headers.items()
-                            if k.lower() not in HOP_BY_HOP
-                        },
-                    )
-                    await response.prepare(request)
-                    async for chunk in upstream_resp.content.iter_any():
-                        await response.write(chunk)
-                    await response.write_eof()
-                    return response
-                else:
-                    body = await upstream_resp.read()
-                    return web.Response(
-                        status=upstream_resp.status,
-                        headers={
-                            k: v for k, v in upstream_resp.headers.items()
-                            if k.lower() not in HOP_BY_HOP
-                        },
-                        body=body,
-                    )
+            if is_streaming:
+                response = web.StreamResponse(
+                    status=upstream_resp.status,
+                    headers={
+                        k: v for k, v in upstream_resp.headers.items()
+                        if k.lower() not in HOP_BY_HOP
+                    },
+                )
+                await response.prepare(request)
+                async for chunk in upstream_resp.content.iter_any():
+                    await response.write(chunk)
+                await response.write_eof()
+                return response
+            else:
+                body = await upstream_resp.read()
+                return web.Response(
+                    status=upstream_resp.status,
+                    headers={
+                        k: v for k, v in upstream_resp.headers.items()
+                        if k.lower() not in HOP_BY_HOP
+                    },
+                    body=body,
+                )
     except aiohttp.ClientConnectorError as exc:
         logger.error("Upstream connection failed (%s): %s", upstream, exc)
         return web.json_response(

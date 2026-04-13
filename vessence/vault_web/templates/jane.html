@@ -902,6 +902,7 @@
         chatListening: false,
         micEnabled: localStorage.getItem('jane_mic_enabled') === '1',
         _micRecognition: null,
+        _conversationEnd: false,
         activeEssence: null,
         activeEssenceDisplay: '',
 
@@ -1369,6 +1370,11 @@
             active.status = '';
             return true;
           }
+          if (event.type === 'conversation_end') {
+            // Server signals END_CONVERSATION: client should NOT reopen active STT
+            // after TTS finishes — switch back to wake-word / passive mode instead.
+            this._conversationEnd = true;
+          }
           return event.type === 'done';
         },
 
@@ -1826,10 +1832,13 @@
         resetSpeechState() {
           this.isSpeaking = false;
           this.currentSpeechText = '';
+          const wasConversationEnd = this._conversationEnd;
+          this._conversationEnd = false; // consume the flag
           // Re-kick mic listening after TTS ends — browsers often kill
           // SpeechRecognition while SpeechSynthesis is active, so the
           // normal rec.onend auto-restart may never fire.
-          if (this.micEnabled && !this._micRecognition) {
+          // Skip re-open if END_CONVERSATION was signalled — stay passive.
+          if (this.micEnabled && !this._micRecognition && !wasConversationEnd) {
             setTimeout(() => {
               if (this.micEnabled && !this._micRecognition) {
                 this._startMicListening();

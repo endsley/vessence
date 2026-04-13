@@ -1,0 +1,1255 @@
+{
+  "models": [
+    "gemma4:e2b",
+    "qwen2.5:7b"
+  ],
+  "prompts": [
+    {
+      "cls": "SEND_MESSAGE",
+      "ctx": "The user wants to TEXT/SMS someone. Never call \u2014 SMS only.\nOutput exactly:\nCLASSIFICATION: SEND_MESSAGE\nRECIPIENT: <name as said \u2014 keep \"wife\", \"mom\", \"Kathia\" literal>\nBODY: <message text only>\nCOHERENT: yes | no   (no = garbled/cut-off/random words)",
+      "msg": "tell my wife I'll be home by 7",
+      "expect": {
+        "RECIPIENT": "wife",
+        "BODY": "I'll be home by 7",
+        "COHERENT": "yes"
+      }
+    },
+    {
+      "cls": "SEND_MESSAGE",
+      "ctx": "The user wants to TEXT/SMS someone. Never call \u2014 SMS only.\nOutput exactly:\nCLASSIFICATION: SEND_MESSAGE\nRECIPIENT: <name as said \u2014 keep \"wife\", \"mom\", \"Kathia\" literal>\nBODY: <message text only>\nCOHERENT: yes | no   (no = garbled/cut-off/random words)",
+      "msg": "text john that the meeting is moved to thursday",
+      "expect": {
+        "RECIPIENT": "john",
+        "BODY": "the meeting is moved to thursday",
+        "COHERENT": "yes"
+      }
+    },
+    {
+      "cls": "SEND_MESSAGE",
+      "ctx": "The user wants to TEXT/SMS someone. Never call \u2014 SMS only.\nOutput exactly:\nCLASSIFICATION: SEND_MESSAGE\nRECIPIENT: <name as said \u2014 keep \"wife\", \"mom\", \"Kathia\" literal>\nBODY: <message text only>\nCOHERENT: yes | no   (no = garbled/cut-off/random words)",
+      "msg": "message kathia I miss her",
+      "expect": {
+        "RECIPIENT": "kathia",
+        "BODY": "I miss her",
+        "COHERENT": "yes"
+      }
+    },
+    {
+      "cls": "SEND_MESSAGE",
+      "ctx": "The user wants to TEXT/SMS someone. Never call \u2014 SMS only.\nOutput exactly:\nCLASSIFICATION: SEND_MESSAGE\nRECIPIENT: <name as said \u2014 keep \"wife\", \"mom\", \"Kathia\" literal>\nBODY: <message text only>\nCOHERENT: yes | no   (no = garbled/cut-off/random words)",
+      "msg": "let mom know I landed safely",
+      "expect": {
+        "RECIPIENT": "mom",
+        "BODY": "I landed safely",
+        "COHERENT": "yes"
+      }
+    },
+    {
+      "cls": "SEND_MESSAGE",
+      "ctx": "The user wants to TEXT/SMS someone. Never call \u2014 SMS only.\nOutput exactly:\nCLASSIFICATION: SEND_MESSAGE\nRECIPIENT: <name as said \u2014 keep \"wife\", \"mom\", \"Kathia\" literal>\nBODY: <message text only>\nCOHERENT: yes | no   (no = garbled/cut-off/random words)",
+      "msg": "tell my boss I'm working from home today",
+      "expect": {
+        "RECIPIENT": "boss",
+        "BODY": "I'm working from home today",
+        "COHERENT": "yes"
+      }
+    },
+    {
+      "cls": "SEND_MESSAGE",
+      "ctx": "The user wants to TEXT/SMS someone. Never call \u2014 SMS only.\nOutput exactly:\nCLASSIFICATION: SEND_MESSAGE\nRECIPIENT: <name as said \u2014 keep \"wife\", \"mom\", \"Kathia\" literal>\nBODY: <message text only>\nCOHERENT: yes | no   (no = garbled/cut-off/random words)",
+      "msg": "text sarah happy birthday",
+      "expect": {
+        "RECIPIENT": "sarah",
+        "BODY": "happy birthday",
+        "COHERENT": "yes"
+      }
+    },
+    {
+      "cls": "SEND_MESSAGE",
+      "ctx": "The user wants to TEXT/SMS someone. Never call \u2014 SMS only.\nOutput exactly:\nCLASSIFICATION: SEND_MESSAGE\nRECIPIENT: <name as said \u2014 keep \"wife\", \"mom\", \"Kathia\" literal>\nBODY: <message text only>\nCOHERENT: yes | no   (no = garbled/cut-off/random words)",
+      "msg": "send my dad a message saying call me when you can",
+      "expect": {
+        "RECIPIENT": "dad",
+        "BODY": "call me when you can",
+        "COHERENT": "yes"
+      }
+    },
+    {
+      "cls": "SEND_MESSAGE",
+      "ctx": "The user wants to TEXT/SMS someone. Never call \u2014 SMS only.\nOutput exactly:\nCLASSIFICATION: SEND_MESSAGE\nRECIPIENT: <name as said \u2014 keep \"wife\", \"mom\", \"Kathia\" literal>\nBODY: <message text only>\nCOHERENT: yes | no   (no = garbled/cut-off/random words)",
+      "msg": "tell my sister I'll see her at christmas",
+      "expect": {
+        "RECIPIENT": "sister",
+        "BODY": "I'll see her at christmas",
+        "COHERENT": "yes"
+      }
+    },
+    {
+      "cls": "SEND_MESSAGE",
+      "ctx": "The user wants to TEXT/SMS someone. Never call \u2014 SMS only.\nOutput exactly:\nCLASSIFICATION: SEND_MESSAGE\nRECIPIENT: <name as said \u2014 keep \"wife\", \"mom\", \"Kathia\" literal>\nBODY: <message text only>\nCOHERENT: yes | no   (no = garbled/cut-off/random words)",
+      "msg": "message bob that the report is done",
+      "expect": {
+        "RECIPIENT": "bob",
+        "BODY": "the report is done",
+        "COHERENT": "yes"
+      }
+    },
+    {
+      "cls": "SEND_MESSAGE",
+      "ctx": "The user wants to TEXT/SMS someone. Never call \u2014 SMS only.\nOutput exactly:\nCLASSIFICATION: SEND_MESSAGE\nRECIPIENT: <name as said \u2014 keep \"wife\", \"mom\", \"Kathia\" literal>\nBODY: <message text only>\nCOHERENT: yes | no   (no = garbled/cut-off/random words)",
+      "msg": "asdfjkl qwerty blorp snarf",
+      "expect": {
+        "COHERENT": "no"
+      }
+    },
+    {
+      "cls": "MUSIC_PLAY",
+      "ctx": "The user wants to play music.\nOutput exactly:\nCLASSIFICATION: MUSIC_PLAY\nQUERY: <artist, song, or genre \u2014 nothing else>",
+      "msg": "play some jazz",
+      "expect": {
+        "QUERY": "jazz"
+      }
+    },
+    {
+      "cls": "MUSIC_PLAY",
+      "ctx": "The user wants to play music.\nOutput exactly:\nCLASSIFICATION: MUSIC_PLAY\nQUERY: <artist, song, or genre \u2014 nothing else>",
+      "msg": "put on the weeknd",
+      "expect": {
+        "QUERY": "the weeknd"
+      }
+    },
+    {
+      "cls": "MUSIC_PLAY",
+      "ctx": "The user wants to play music.\nOutput exactly:\nCLASSIFICATION: MUSIC_PLAY\nQUERY: <artist, song, or genre \u2014 nothing else>",
+      "msg": "play something relaxing",
+      "expect": {
+        "QUERY": "relaxing"
+      }
+    },
+    {
+      "cls": "MUSIC_PLAY",
+      "ctx": "The user wants to play music.\nOutput exactly:\nCLASSIFICATION: MUSIC_PLAY\nQUERY: <artist, song, or genre \u2014 nothing else>",
+      "msg": "throw on some hip hop",
+      "expect": {
+        "QUERY": "hip hop"
+      }
+    },
+    {
+      "cls": "MUSIC_PLAY",
+      "ctx": "The user wants to play music.\nOutput exactly:\nCLASSIFICATION: MUSIC_PLAY\nQUERY: <artist, song, or genre \u2014 nothing else>",
+      "msg": "shuffle my playlist",
+      "expect": {
+        "QUERY": ""
+      }
+    },
+    {
+      "cls": "MUSIC_PLAY",
+      "ctx": "The user wants to play music.\nOutput exactly:\nCLASSIFICATION: MUSIC_PLAY\nQUERY: <artist, song, or genre \u2014 nothing else>",
+      "msg": "play bohemian rhapsody by queen",
+      "expect": {
+        "QUERY": "bohemian rhapsody queen"
+      }
+    },
+    {
+      "cls": "MUSIC_PLAY",
+      "ctx": "The user wants to play music.\nOutput exactly:\nCLASSIFICATION: MUSIC_PLAY\nQUERY: <artist, song, or genre \u2014 nothing else>",
+      "msg": "can you play some lo-fi beats",
+      "expect": {
+        "QUERY": "lo-fi"
+      }
+    },
+    {
+      "cls": "MUSIC_PLAY",
+      "ctx": "The user wants to play music.\nOutput exactly:\nCLASSIFICATION: MUSIC_PLAY\nQUERY: <artist, song, or genre \u2014 nothing else>",
+      "msg": "play workout music",
+      "expect": {
+        "QUERY": "workout"
+      }
+    },
+    {
+      "cls": "READ_MESSAGES",
+      "ctx": "The user wants to read/check their text messages.\nOutput exactly:\nCLASSIFICATION: READ_MESSAGES\nFILTER: <sender name if mentioned, else \"all\">",
+      "msg": "check my texts",
+      "expect": {
+        "FILTER": "all"
+      }
+    },
+    {
+      "cls": "READ_MESSAGES",
+      "ctx": "The user wants to read/check their text messages.\nOutput exactly:\nCLASSIFICATION: READ_MESSAGES\nFILTER: <sender name if mentioned, else \"all\">",
+      "msg": "any messages from kathia",
+      "expect": {
+        "FILTER": "kathia"
+      }
+    },
+    {
+      "cls": "READ_MESSAGES",
+      "ctx": "The user wants to read/check their text messages.\nOutput exactly:\nCLASSIFICATION: READ_MESSAGES\nFILTER: <sender name if mentioned, else \"all\">",
+      "msg": "what did john text me",
+      "expect": {
+        "FILTER": "john"
+      }
+    },
+    {
+      "cls": "READ_MESSAGES",
+      "ctx": "The user wants to read/check their text messages.\nOutput exactly:\nCLASSIFICATION: READ_MESSAGES\nFILTER: <sender name if mentioned, else \"all\">",
+      "msg": "read my unread texts",
+      "expect": {
+        "FILTER": "all"
+      }
+    },
+    {
+      "cls": "READ_MESSAGES",
+      "ctx": "The user wants to read/check their text messages.\nOutput exactly:\nCLASSIFICATION: READ_MESSAGES\nFILTER: <sender name if mentioned, else \"all\">",
+      "msg": "did my wife message me",
+      "expect": {
+        "FILTER": "wife"
+      }
+    },
+    {
+      "cls": "READ_MESSAGES",
+      "ctx": "The user wants to read/check their text messages.\nOutput exactly:\nCLASSIFICATION: READ_MESSAGES\nFILTER: <sender name if mentioned, else \"all\">",
+      "msg": "show me messages from mom",
+      "expect": {
+        "FILTER": "mom"
+      }
+    },
+    {
+      "cls": "READ_MESSAGES",
+      "ctx": "The user wants to read/check their text messages.\nOutput exactly:\nCLASSIFICATION: READ_MESSAGES\nFILTER: <sender name if mentioned, else \"all\">",
+      "msg": "any new texts",
+      "expect": {
+        "FILTER": "all"
+      }
+    },
+    {
+      "cls": "READ_MESSAGES",
+      "ctx": "The user wants to read/check their text messages.\nOutput exactly:\nCLASSIFICATION: READ_MESSAGES\nFILTER: <sender name if mentioned, else \"all\">",
+      "msg": "read texts from sarah",
+      "expect": {
+        "FILTER": "sarah"
+      }
+    },
+    {
+      "cls": "READ_EMAIL",
+      "ctx": "The user wants to read or check their email inbox.\nOutput exactly:\nCLASSIFICATION: READ_EMAIL\nQUERY: <sender or search filter if mentioned, else \"unread\">",
+      "msg": "check my email",
+      "expect": {
+        "QUERY": "unread"
+      }
+    },
+    {
+      "cls": "READ_EMAIL",
+      "ctx": "The user wants to read or check their email inbox.\nOutput exactly:\nCLASSIFICATION: READ_EMAIL\nQUERY: <sender or search filter if mentioned, else \"unread\">",
+      "msg": "any emails from amazon",
+      "expect": {
+        "QUERY": "amazon"
+      }
+    },
+    {
+      "cls": "READ_EMAIL",
+      "ctx": "The user wants to read or check their email inbox.\nOutput exactly:\nCLASSIFICATION: READ_EMAIL\nQUERY: <sender or search filter if mentioned, else \"unread\">",
+      "msg": "did the bank email me",
+      "expect": {
+        "QUERY": "bank"
+      }
+    },
+    {
+      "cls": "READ_EMAIL",
+      "ctx": "The user wants to read or check their email inbox.\nOutput exactly:\nCLASSIFICATION: READ_EMAIL\nQUERY: <sender or search filter if mentioned, else \"unread\">",
+      "msg": "check for new mail",
+      "expect": {
+        "QUERY": "unread"
+      }
+    },
+    {
+      "cls": "READ_EMAIL",
+      "ctx": "The user wants to read or check their email inbox.\nOutput exactly:\nCLASSIFICATION: READ_EMAIL\nQUERY: <sender or search filter if mentioned, else \"unread\">",
+      "msg": "any emails from john",
+      "expect": {
+        "QUERY": "john"
+      }
+    },
+    {
+      "cls": "READ_EMAIL",
+      "ctx": "The user wants to read or check their email inbox.\nOutput exactly:\nCLASSIFICATION: READ_EMAIL\nQUERY: <sender or search filter if mentioned, else \"unread\">",
+      "msg": "read email from my doctor",
+      "expect": {
+        "QUERY": "doctor"
+      }
+    },
+    {
+      "cls": "READ_EMAIL",
+      "ctx": "The user wants to read or check their email inbox.\nOutput exactly:\nCLASSIFICATION: READ_EMAIL\nQUERY: <sender or search filter if mentioned, else \"unread\">",
+      "msg": "show my unread emails",
+      "expect": {
+        "QUERY": "unread"
+      }
+    },
+    {
+      "cls": "SHOPPING_LIST",
+      "ctx": "The user wants to add, remove, or view their shopping/grocery list.\nOutput exactly:\nCLASSIFICATION: SHOPPING_LIST\nACTION: <verb + item, e.g. \"add milk\" or \"remove eggs\" or \"show list\">",
+      "msg": "add milk to my list",
+      "expect": {
+        "ACTION": "add milk"
+      }
+    },
+    {
+      "cls": "SHOPPING_LIST",
+      "ctx": "The user wants to add, remove, or view their shopping/grocery list.\nOutput exactly:\nCLASSIFICATION: SHOPPING_LIST\nACTION: <verb + item, e.g. \"add milk\" or \"remove eggs\" or \"show list\">",
+      "msg": "put bread on the grocery list",
+      "expect": {
+        "ACTION": "add bread"
+      }
+    },
+    {
+      "cls": "SHOPPING_LIST",
+      "ctx": "The user wants to add, remove, or view their shopping/grocery list.\nOutput exactly:\nCLASSIFICATION: SHOPPING_LIST\nACTION: <verb + item, e.g. \"add milk\" or \"remove eggs\" or \"show list\">",
+      "msg": "remove eggs I already got them",
+      "expect": {
+        "ACTION": "remove eggs"
+      }
+    },
+    {
+      "cls": "SHOPPING_LIST",
+      "ctx": "The user wants to add, remove, or view their shopping/grocery list.\nOutput exactly:\nCLASSIFICATION: SHOPPING_LIST\nACTION: <verb + item, e.g. \"add milk\" or \"remove eggs\" or \"show list\">",
+      "msg": "what's on my shopping list",
+      "expect": {
+        "ACTION": "show list"
+      }
+    },
+    {
+      "cls": "SHOPPING_LIST",
+      "ctx": "The user wants to add, remove, or view their shopping/grocery list.\nOutput exactly:\nCLASSIFICATION: SHOPPING_LIST\nACTION: <verb + item, e.g. \"add milk\" or \"remove eggs\" or \"show list\">",
+      "msg": "add coffee and orange juice",
+      "expect": {
+        "ACTION": "add coffee"
+      }
+    },
+    {
+      "cls": "SHOPPING_LIST",
+      "ctx": "The user wants to add, remove, or view their shopping/grocery list.\nOutput exactly:\nCLASSIFICATION: SHOPPING_LIST\nACTION: <verb + item, e.g. \"add milk\" or \"remove eggs\" or \"show list\">",
+      "msg": "take bananas off the list",
+      "expect": {
+        "ACTION": "remove bananas"
+      }
+    },
+    {
+      "cls": "SHOPPING_LIST",
+      "ctx": "The user wants to add, remove, or view their shopping/grocery list.\nOutput exactly:\nCLASSIFICATION: SHOPPING_LIST\nACTION: <verb + item, e.g. \"add milk\" or \"remove eggs\" or \"show list\">",
+      "msg": "add a dozen eggs",
+      "expect": {
+        "ACTION": "add eggs"
+      }
+    }
+  ],
+  "results": {
+    "gemma4:e2b": [
+      {
+        "cls": "SEND_MESSAGE",
+        "msg": "tell my wife I'll be home by 7",
+        "raw": "CLASSIFICATION: SEND_MESSAGE\nRECIPIENT: wife\nBODY: I'll be home by 7\nCOHERENT: yes",
+        "latency_s": 3.9606456756591797,
+        "quality": "good",
+        "fields": {
+          "CLASSIFICATION": "SEND_MESSAGE",
+          "RECIPIENT": "wife",
+          "BODY": "I'll be home by 7",
+          "COHERENT": "yes"
+        }
+      },
+      {
+        "cls": "SEND_MESSAGE",
+        "msg": "text john that the meeting is moved to thursday",
+        "raw": "CLASSIFICATION: SEND_MESSAGE\nRECIPIENT: john\nBODY: the meeting is moved to thursday\nCOHERENT: yes",
+        "latency_s": 3.655320167541504,
+        "quality": "good",
+        "fields": {
+          "CLASSIFICATION": "SEND_MESSAGE",
+          "RECIPIENT": "john",
+          "BODY": "the meeting is moved to thursday",
+          "COHERENT": "yes"
+        }
+      },
+      {
+        "cls": "SEND_MESSAGE",
+        "msg": "message kathia I miss her",
+        "raw": "CLASSIFICATION: SEND_MESSAGE\nRECIPIENT: kathia\nBODY: I miss her\nCOHERENT: yes",
+        "latency_s": 3.026644229888916,
+        "quality": "good",
+        "fields": {
+          "CLASSIFICATION": "SEND_MESSAGE",
+          "RECIPIENT": "kathia",
+          "BODY": "I miss her",
+          "COHERENT": "yes"
+        }
+      },
+      {
+        "cls": "SEND_MESSAGE",
+        "msg": "let mom know I landed safely",
+        "raw": "CLASSIFICATION: SEND_MESSAGE\nRECIPIENT: mom\nBODY: let mom know I landed safely\nCOHERENT: yes",
+        "latency_s": 3.332728862762451,
+        "quality": "good",
+        "fields": {
+          "CLASSIFICATION": "SEND_MESSAGE",
+          "RECIPIENT": "mom",
+          "BODY": "let mom know I landed safely",
+          "COHERENT": "yes"
+        }
+      },
+      {
+        "cls": "SEND_MESSAGE",
+        "msg": "tell my boss I'm working from home today",
+        "raw": "CLASSIFICATION: SEND_MESSAGE\nRECIPIENT: boss\nBODY: I'm working from home today.\nCOHERENT: yes",
+        "latency_s": 4.397128105163574,
+        "quality": "good",
+        "fields": {
+          "CLASSIFICATION": "SEND_MESSAGE",
+          "RECIPIENT": "boss",
+          "BODY": "I'm working from home today.",
+          "COHERENT": "yes"
+        }
+      },
+      {
+        "cls": "SEND_MESSAGE",
+        "msg": "text sarah happy birthday",
+        "raw": "CLASSIFICATION: SEND_MESSAGE\nRECIPIENT: sarah\nBODY: happy birthday\nCOHERENT: yes",
+        "latency_s": 3.7205886840820312,
+        "quality": "good",
+        "fields": {
+          "CLASSIFICATION": "SEND_MESSAGE",
+          "RECIPIENT": "sarah",
+          "BODY": "happy birthday",
+          "COHERENT": "yes"
+        }
+      },
+      {
+        "cls": "SEND_MESSAGE",
+        "msg": "send my dad a message saying call me when you can",
+        "raw": "CLASSIFICATION: SEND_MESSAGE\nRECIPIENT: dad\nBODY: call me when you can\nCOHERENT: yes",
+        "latency_s": 3.571681499481201,
+        "quality": "good",
+        "fields": {
+          "CLASSIFICATION": "SEND_MESSAGE",
+          "RECIPIENT": "dad",
+          "BODY": "call me when you can",
+          "COHERENT": "yes"
+        }
+      },
+      {
+        "cls": "SEND_MESSAGE",
+        "msg": "tell my sister I'll see her at christmas",
+        "raw": "CLASSIFICATION: SEND_MESSAGE\nRECIPIENT: sister\nBODY: I'll see you at Christmas.\nCOHERENT: yes",
+        "latency_s": 4.124460458755493,
+        "quality": "good",
+        "fields": {
+          "CLASSIFICATION": "SEND_MESSAGE",
+          "RECIPIENT": "sister",
+          "BODY": "I'll see you at Christmas.",
+          "COHERENT": "yes"
+        }
+      },
+      {
+        "cls": "SEND_MESSAGE",
+        "msg": "message bob that the report is done",
+        "raw": "CLASSIFICATION: SEND_MESSAGE\nRECIPIENT: bob\nBODY: the report is done\nCOHERENT: yes",
+        "latency_s": 3.046361207962036,
+        "quality": "good",
+        "fields": {
+          "CLASSIFICATION": "SEND_MESSAGE",
+          "RECIPIENT": "bob",
+          "BODY": "the report is done",
+          "COHERENT": "yes"
+        }
+      },
+      {
+        "cls": "SEND_MESSAGE",
+        "msg": "asdfjkl qwerty blorp snarf",
+        "raw": "CLASSIFICATION: SEND_MESSAGE\nRECIPIENT: \nBODY: asdfjkl qwerty blorp snarf\nCOHERENT: no",
+        "latency_s": 8.4609956741333,
+        "quality": "partial",
+        "fields": {
+          "CLASSIFICATION": "SEND_MESSAGE",
+          "BODY": "asdfjkl qwerty blorp snarf",
+          "COHERENT": "no"
+        }
+      },
+      {
+        "cls": "MUSIC_PLAY",
+        "msg": "play some jazz",
+        "raw": "CLASSIFICATION: MUSIC_PLAY\nQUERY: jazz",
+        "latency_s": 3.499424457550049,
+        "quality": "good",
+        "fields": {
+          "CLASSIFICATION": "MUSIC_PLAY",
+          "QUERY": "jazz"
+        }
+      },
+      {
+        "cls": "MUSIC_PLAY",
+        "msg": "put on the weeknd",
+        "raw": "CLASSIFICATION: MUSIC_PLAY\nQUERY: The Weeknd",
+        "latency_s": 2.1869001388549805,
+        "quality": "good",
+        "fields": {
+          "CLASSIFICATION": "MUSIC_PLAY",
+          "QUERY": "The Weeknd"
+        }
+      },
+      {
+        "cls": "MUSIC_PLAY",
+        "msg": "play something relaxing",
+        "raw": "CLASSIFICATION: MUSIC_PLAY\nQUERY: relaxing music",
+        "latency_s": 3.1730127334594727,
+        "quality": "good",
+        "fields": {
+          "CLASSIFICATION": "MUSIC_PLAY",
+          "QUERY": "relaxing music"
+        }
+      },
+      {
+        "cls": "MUSIC_PLAY",
+        "msg": "throw on some hip hop",
+        "raw": "CLASSIFICATION: MUSIC_PLAY\nQUERY: hip hop",
+        "latency_s": 2.247462272644043,
+        "quality": "good",
+        "fields": {
+          "CLASSIFICATION": "MUSIC_PLAY",
+          "QUERY": "hip hop"
+        }
+      },
+      {
+        "cls": "MUSIC_PLAY",
+        "msg": "shuffle my playlist",
+        "raw": "CLASSIFICATION: MUSIC_PLAY\nQUERY:",
+        "latency_s": 4.424853563308716,
+        "quality": "partial",
+        "fields": {
+          "CLASSIFICATION": "MUSIC_PLAY"
+        }
+      },
+      {
+        "cls": "MUSIC_PLAY",
+        "msg": "play bohemian rhapsody by queen",
+        "raw": "CLASSIFICATION: MUSIC_PLAY\nQUERY: queen, bohemian rhapsody",
+        "latency_s": 2.283799886703491,
+        "quality": "good",
+        "fields": {
+          "CLASSIFICATION": "MUSIC_PLAY",
+          "QUERY": "queen, bohemian rhapsody"
+        }
+      },
+      {
+        "cls": "MUSIC_PLAY",
+        "msg": "can you play some lo-fi beats",
+        "raw": "CLASSIFICATION: MUSIC_PLAY\nQUERY: lo-fi beats",
+        "latency_s": 2.265850067138672,
+        "quality": "good",
+        "fields": {
+          "CLASSIFICATION": "MUSIC_PLAY",
+          "QUERY": "lo-fi beats"
+        }
+      },
+      {
+        "cls": "MUSIC_PLAY",
+        "msg": "play workout music",
+        "raw": "CLASSIFICATION: MUSIC_PLAY\nQUERY: workout music",
+        "latency_s": 2.7502338886260986,
+        "quality": "good",
+        "fields": {
+          "CLASSIFICATION": "MUSIC_PLAY",
+          "QUERY": "workout music"
+        }
+      },
+      {
+        "cls": "READ_MESSAGES",
+        "msg": "check my texts",
+        "raw": "I am sorry, but as a large language model, I do not have access to your personal text messages or any private data on your devices. I cannot check your texts for you.",
+        "latency_s": 4.665860891342163,
+        "quality": "fail",
+        "fields": {}
+      },
+      {
+        "cls": "READ_MESSAGES",
+        "msg": "any messages from kathia",
+        "raw": "CLASSIFICATION: READ_MESSAGES\nFILTER: kathia",
+        "latency_s": 2.930510997772217,
+        "quality": "good",
+        "fields": {
+          "CLASSIFICATION": "READ_MESSAGES",
+          "FILTER": "kathia"
+        }
+      },
+      {
+        "cls": "READ_MESSAGES",
+        "msg": "what did john text me",
+        "raw": "CLASSIFICATION: READ_MESSAGES\nFILTER: john",
+        "latency_s": 3.512436866760254,
+        "quality": "good",
+        "fields": {
+          "CLASSIFICATION": "READ_MESSAGES",
+          "FILTER": "john"
+        }
+      },
+      {
+        "cls": "READ_MESSAGES",
+        "msg": "read my unread texts",
+        "raw": "CLASSIFICATION: READ_MESSAGES\nFILTER: all",
+        "latency_s": 3.1164469718933105,
+        "quality": "good",
+        "fields": {
+          "CLASSIFICATION": "READ_MESSAGES",
+          "FILTER": "all"
+        }
+      },
+      {
+        "cls": "READ_MESSAGES",
+        "msg": "did my wife message me",
+        "raw": "CLASSIFICATION: READ_MESSAGES\nFILTER: wife",
+        "latency_s": 2.827181339263916,
+        "quality": "good",
+        "fields": {
+          "CLASSIFICATION": "READ_MESSAGES",
+          "FILTER": "wife"
+        }
+      },
+      {
+        "cls": "READ_MESSAGES",
+        "msg": "show me messages from mom",
+        "raw": "CLASSIFICATION: READ_MESSAGES\nFILTER: mom",
+        "latency_s": 2.2746741771698,
+        "quality": "good",
+        "fields": {
+          "CLASSIFICATION": "READ_MESSAGES",
+          "FILTER": "mom"
+        }
+      },
+      {
+        "cls": "READ_MESSAGES",
+        "msg": "any new texts",
+        "raw": "CLASSIFICATION: READ_MESSAGES\nFILTER: all",
+        "latency_s": 2.5765867233276367,
+        "quality": "good",
+        "fields": {
+          "CLASSIFICATION": "READ_MESSAGES",
+          "FILTER": "all"
+        }
+      },
+      {
+        "cls": "READ_MESSAGES",
+        "msg": "read texts from sarah",
+        "raw": "CLASSIFICATION: READ_MESSAGES\nFILTER: sarah",
+        "latency_s": 3.13456392288208,
+        "quality": "good",
+        "fields": {
+          "CLASSIFICATION": "READ_MESSAGES",
+          "FILTER": "sarah"
+        }
+      },
+      {
+        "cls": "READ_EMAIL",
+        "msg": "check my email",
+        "raw": "CLASSIFICATION: READ_EMAIL\nQUERY: unread",
+        "latency_s": 2.4434778690338135,
+        "quality": "good",
+        "fields": {
+          "CLASSIFICATION": "READ_EMAIL",
+          "QUERY": "unread"
+        }
+      },
+      {
+        "cls": "READ_EMAIL",
+        "msg": "any emails from amazon",
+        "raw": "CLASSIFICATION: READ_EMAIL\nQUERY: emails from amazon",
+        "latency_s": 2.566634178161621,
+        "quality": "good",
+        "fields": {
+          "CLASSIFICATION": "READ_EMAIL",
+          "QUERY": "emails from amazon"
+        }
+      },
+      {
+        "cls": "READ_EMAIL",
+        "msg": "did the bank email me",
+        "raw": "CLASSIFICATION: READ_EMAIL\nQUERY: bank",
+        "latency_s": 3.5509791374206543,
+        "quality": "good",
+        "fields": {
+          "CLASSIFICATION": "READ_EMAIL",
+          "QUERY": "bank"
+        }
+      },
+      {
+        "cls": "READ_EMAIL",
+        "msg": "check for new mail",
+        "raw": "CLASSIFICATION: READ_EMAIL\nQUERY: unread",
+        "latency_s": 2.683631658554077,
+        "quality": "good",
+        "fields": {
+          "CLASSIFICATION": "READ_EMAIL",
+          "QUERY": "unread"
+        }
+      },
+      {
+        "cls": "READ_EMAIL",
+        "msg": "any emails from john",
+        "raw": "CLASSIFICATION: READ_EMAIL\nQUERY: from john",
+        "latency_s": 2.5661840438842773,
+        "quality": "good",
+        "fields": {
+          "CLASSIFICATION": "READ_EMAIL",
+          "QUERY": "from john"
+        }
+      },
+      {
+        "cls": "READ_EMAIL",
+        "msg": "read email from my doctor",
+        "raw": "CLASSIFICATION: READ_EMAIL\nQUERY: doctor",
+        "latency_s": 3.1139018535614014,
+        "quality": "good",
+        "fields": {
+          "CLASSIFICATION": "READ_EMAIL",
+          "QUERY": "doctor"
+        }
+      },
+      {
+        "cls": "READ_EMAIL",
+        "msg": "show my unread emails",
+        "raw": "CLASSIFICATION: READ_EMAIL\nQUERY: unread",
+        "latency_s": 2.6256725788116455,
+        "quality": "good",
+        "fields": {
+          "CLASSIFICATION": "READ_EMAIL",
+          "QUERY": "unread"
+        }
+      },
+      {
+        "cls": "SHOPPING_LIST",
+        "msg": "add milk to my list",
+        "raw": "CLASSIFICATION: SHOPPING_LIST\nACTION: add milk",
+        "latency_s": 2.4657435417175293,
+        "quality": "good",
+        "fields": {
+          "CLASSIFICATION": "SHOPPING_LIST",
+          "ACTION": "add milk"
+        }
+      },
+      {
+        "cls": "SHOPPING_LIST",
+        "msg": "put bread on the grocery list",
+        "raw": "CLASSIFICATION: SHOPPING_LIST\nACTION: add bread",
+        "latency_s": 2.5716238021850586,
+        "quality": "good",
+        "fields": {
+          "CLASSIFICATION": "SHOPPING_LIST",
+          "ACTION": "add bread"
+        }
+      },
+      {
+        "cls": "SHOPPING_LIST",
+        "msg": "remove eggs I already got them",
+        "raw": "ACTION: remove eggs",
+        "latency_s": 2.3580996990203857,
+        "quality": "good",
+        "fields": {
+          "ACTION": "remove eggs"
+        }
+      },
+      {
+        "cls": "SHOPPING_LIST",
+        "msg": "what's on my shopping list",
+        "raw": "CLASSIFICATION: SHOPPING_LIST\nACTION: show list",
+        "latency_s": 2.2899909019470215,
+        "quality": "good",
+        "fields": {
+          "CLASSIFICATION": "SHOPPING_LIST",
+          "ACTION": "show list"
+        }
+      },
+      {
+        "cls": "SHOPPING_LIST",
+        "msg": "add coffee and orange juice",
+        "raw": "CLASSIFICATION: SHOPPING_LIST\nACTION: add coffee and orange juice",
+        "latency_s": 2.49873948097229,
+        "quality": "good",
+        "fields": {
+          "CLASSIFICATION": "SHOPPING_LIST",
+          "ACTION": "add coffee and orange juice"
+        }
+      },
+      {
+        "cls": "SHOPPING_LIST",
+        "msg": "take bananas off the list",
+        "raw": "CLASSIFICATION: SHOPPING_LIST\nACTION: remove bananas",
+        "latency_s": 2.7039408683776855,
+        "quality": "good",
+        "fields": {
+          "CLASSIFICATION": "SHOPPING_LIST",
+          "ACTION": "remove bananas"
+        }
+      },
+      {
+        "cls": "SHOPPING_LIST",
+        "msg": "add a dozen eggs",
+        "raw": "CLASSIFICATION: SHOPPING_LIST\nACTION: add a dozen eggs",
+        "latency_s": 2.1677491664886475,
+        "quality": "good",
+        "fields": {
+          "CLASSIFICATION": "SHOPPING_LIST",
+          "ACTION": "add a dozen eggs"
+        }
+      }
+    ],
+    "qwen2.5:7b": [
+      {
+        "cls": "SEND_MESSAGE",
+        "msg": "tell my wife I'll be home by 7",
+        "raw": "CLASSIFICATION: SEND_MESSAGE\nRECIPIENT: wife\nBODY: I'll be home by 7\nCOHERENT: yes",
+        "latency_s": 10.9584379196167,
+        "quality": "good",
+        "fields": {
+          "CLASSIFICATION": "SEND_MESSAGE",
+          "RECIPIENT": "wife",
+          "BODY": "I'll be home by 7",
+          "COHERENT": "yes"
+        }
+      },
+      {
+        "cls": "SEND_MESSAGE",
+        "msg": "text john that the meeting is moved to thursday",
+        "raw": "CLASSIFICATION: SEND_MESSAGE\nRECIPIENT: John\nBODY: The meeting is moved to Thursday.\nCOHERENT: yes",
+        "latency_s": 0.615727424621582,
+        "quality": "good",
+        "fields": {
+          "CLASSIFICATION": "SEND_MESSAGE",
+          "RECIPIENT": "John",
+          "BODY": "The meeting is moved to Thursday.",
+          "COHERENT": "yes"
+        }
+      },
+      {
+        "cls": "SEND_MESSAGE",
+        "msg": "message kathia I miss her",
+        "raw": "CLASSIFICATION: SEND_MESSAGE\nRECIPIENT: Kathia\nBODY: I miss her\nCOHERENT: yes",
+        "latency_s": 0.627692461013794,
+        "quality": "good",
+        "fields": {
+          "CLASSIFICATION": "SEND_MESSAGE",
+          "RECIPIENT": "Kathia",
+          "BODY": "I miss her",
+          "COHERENT": "yes"
+        }
+      },
+      {
+        "cls": "SEND_MESSAGE",
+        "msg": "let mom know I landed safely",
+        "raw": "CLASSIFICATION: SEND_MESSAGE\nRECIPIENT: mom\nBODY: Letting you know I landed safely.\nCOHERENT: yes",
+        "latency_s": 0.6227335929870605,
+        "quality": "good",
+        "fields": {
+          "CLASSIFICATION": "SEND_MESSAGE",
+          "RECIPIENT": "mom",
+          "BODY": "Letting you know I landed safely.",
+          "COHERENT": "yes"
+        }
+      },
+      {
+        "cls": "SEND_MESSAGE",
+        "msg": "tell my boss I'm working from home today",
+        "raw": "CLASSIFICATION: SEND_MESSAGE\nRECIPIENT: wife\nBODY: Telling the boss I'll be working from home today.\nCOHERENT: yes",
+        "latency_s": 0.6983604431152344,
+        "quality": "good",
+        "fields": {
+          "CLASSIFICATION": "SEND_MESSAGE",
+          "RECIPIENT": "wife",
+          "BODY": "Telling the boss I'll be working from home today.",
+          "COHERENT": "yes"
+        }
+      },
+      {
+        "cls": "SEND_MESSAGE",
+        "msg": "text sarah happy birthday",
+        "raw": "CLASSIFICATION: SEND_MESSAGE\nRECIPIENT: Sarah\nBODY: Happy birthday!\nCOHERENT: yes",
+        "latency_s": 0.5740599632263184,
+        "quality": "good",
+        "fields": {
+          "CLASSIFICATION": "SEND_MESSAGE",
+          "RECIPIENT": "Sarah",
+          "BODY": "Happy birthday!",
+          "COHERENT": "yes"
+        }
+      },
+      {
+        "cls": "SEND_MESSAGE",
+        "msg": "send my dad a message saying call me when you can",
+        "raw": "CLASSIFICATION: SEND_MESSAGE\nRECIPIENT: dad\nBODY: call me when you can\nCOHERENT: yes",
+        "latency_s": 0.6073379516601562,
+        "quality": "good",
+        "fields": {
+          "CLASSIFICATION": "SEND_MESSAGE",
+          "RECIPIENT": "dad",
+          "BODY": "call me when you can",
+          "COHERENT": "yes"
+        }
+      },
+      {
+        "cls": "SEND_MESSAGE",
+        "msg": "tell my sister I'll see her at christmas",
+        "raw": "CLASSIFICATION: SEND_MESSAGE\nRECIPIENT: Kathia\nBODY: I'll see you at Christmas.\nCOHERENT: yes",
+        "latency_s": 0.7873413562774658,
+        "quality": "good",
+        "fields": {
+          "CLASSIFICATION": "SEND_MESSAGE",
+          "RECIPIENT": "Kathia",
+          "BODY": "I'll see you at Christmas.",
+          "COHERENT": "yes"
+        }
+      },
+      {
+        "cls": "SEND_MESSAGE",
+        "msg": "message bob that the report is done",
+        "raw": "CLASSIFICATION: SEND_MESSAGE\nRECIPIENT: Bob\nBODY: The report is done.\nCOHERENT: yes",
+        "latency_s": 0.7115676403045654,
+        "quality": "good",
+        "fields": {
+          "CLASSIFICATION": "SEND_MESSAGE",
+          "RECIPIENT": "Bob",
+          "BODY": "The report is done.",
+          "COHERENT": "yes"
+        }
+      },
+      {
+        "cls": "SEND_MESSAGE",
+        "msg": "asdfjkl qwerty blorp snarf",
+        "raw": "CLASSIFICATION: SEND_MESSAGE\nRECIPIENT: mom\nBODY: This message seems to have some typing errors. Can you please clarify or provide the correct text?\nCOHERENT: no",
+        "latency_s": 0.9781298637390137,
+        "quality": "good",
+        "fields": {
+          "CLASSIFICATION": "SEND_MESSAGE",
+          "RECIPIENT": "mom",
+          "BODY": "This message seems to have some typing errors. Can you please clarify or provide the correct text?",
+          "COHERENT": "no"
+        }
+      },
+      {
+        "cls": "MUSIC_PLAY",
+        "msg": "play some jazz",
+        "raw": "QUERY: jazz",
+        "latency_s": 0.33228015899658203,
+        "quality": "good",
+        "fields": {
+          "QUERY": "jazz"
+        }
+      },
+      {
+        "cls": "MUSIC_PLAY",
+        "msg": "put on the weeknd",
+        "raw": "MUSIC_PLAY\nQUERY: The Weeknd",
+        "latency_s": 0.4033479690551758,
+        "quality": "good",
+        "fields": {
+          "QUERY": "The Weeknd"
+        }
+      },
+      {
+        "cls": "MUSIC_PLAY",
+        "msg": "play something relaxing",
+        "raw": "CLASSIFICATION: MUSIC_PLAY\nQUERY: relaxationaltering",
+        "latency_s": 18.021585702896118,
+        "quality": "good",
+        "fields": {
+          "CLASSIFICATION": "MUSIC_PLAY",
+          "QUERY": "relaxationaltering"
+        }
+      },
+      {
+        "cls": "MUSIC_PLAY",
+        "msg": "throw on some hip hop",
+        "raw": "QUERY: hip hop",
+        "latency_s": 0.3639814853668213,
+        "quality": "good",
+        "fields": {
+          "QUERY": "hip hop"
+        }
+      },
+      {
+        "cls": "MUSIC_PLAY",
+        "msg": "shuffle my playlist",
+        "raw": "CLASSIFICATION: MUSIC_PLAY\nQUERY: shuffle playlist",
+        "latency_s": 0.44403624534606934,
+        "quality": "good",
+        "fields": {
+          "CLASSIFICATION": "MUSIC_PLAY",
+          "QUERY": "shuffle playlist"
+        }
+      },
+      {
+        "cls": "MUSIC_PLAY",
+        "msg": "play bohemian rhapsody by queen",
+        "raw": "MUSIC_PLAY: Bohemian Rhapsody by Queen",
+        "latency_s": 0.4723682403564453,
+        "quality": "partial",
+        "fields": {
+          "MUSIC_PLAY": "Bohemian Rhapsody by Queen"
+        }
+      },
+      {
+        "cls": "MUSIC_PLAY",
+        "msg": "can you play some lo-fi beats",
+        "raw": "CLASSIFICATION: MUSIC_PLAY\nQUERY: lo-fi beats",
+        "latency_s": 0.42539119720458984,
+        "quality": "good",
+        "fields": {
+          "CLASSIFICATION": "MUSIC_PLAY",
+          "QUERY": "lo-fi beats"
+        }
+      },
+      {
+        "cls": "MUSIC_PLAY",
+        "msg": "play workout music",
+        "raw": "CLASSIFICATION: MUSIC_PLAY\nQUERY: workout",
+        "latency_s": 0.4572727680206299,
+        "quality": "good",
+        "fields": {
+          "CLASSIFICATION": "MUSIC_PLAY",
+          "QUERY": "workout"
+        }
+      },
+      {
+        "cls": "READ_MESSAGES",
+        "msg": "check my texts",
+        "raw": "CLASSIFICATION: READ_MESSAGES\nFILTER: all",
+        "latency_s": 0.4278850555419922,
+        "quality": "good",
+        "fields": {
+          "CLASSIFICATION": "READ_MESSAGES",
+          "FILTER": "all"
+        }
+      },
+      {
+        "cls": "READ_MESSAGES",
+        "msg": "any messages from kathia",
+        "raw": "CLASSIFICATION: READ_MESSAGES\nFILTER: Kathia",
+        "latency_s": 0.40276646614074707,
+        "quality": "good",
+        "fields": {
+          "CLASSIFICATION": "READ_MESSAGES",
+          "FILTER": "Kathia"
+        }
+      },
+      {
+        "cls": "READ_MESSAGES",
+        "msg": "what did john text me",
+        "raw": "CLASSIFICATION: READ_MESSAGES\nFILTER: John",
+        "latency_s": 0.443889856338501,
+        "quality": "good",
+        "fields": {
+          "CLASSIFICATION": "READ_MESSAGES",
+          "FILTER": "John"
+        }
+      },
+      {
+        "cls": "READ_MESSAGES",
+        "msg": "read my unread texts",
+        "raw": "CLASSIFICATION: READ_MESSAGES\nFILTER: all",
+        "latency_s": 0.4112544059753418,
+        "quality": "good",
+        "fields": {
+          "CLASSIFICATION": "READ_MESSAGES",
+          "FILTER": "all"
+        }
+      },
+      {
+        "cls": "READ_MESSAGES",
+        "msg": "did my wife message me",
+        "raw": "CLASSIFICATION: READ_MESSAGES\nFILTER: all",
+        "latency_s": 0.4552805423736572,
+        "quality": "good",
+        "fields": {
+          "CLASSIFICATION": "READ_MESSAGES",
+          "FILTER": "all"
+        }
+      },
+      {
+        "cls": "READ_MESSAGES",
+        "msg": "show me messages from mom",
+        "raw": "CLASSIFICATION: READ_MESSAGES\nFILTER: mom",
+        "latency_s": 0.40490102767944336,
+        "quality": "good",
+        "fields": {
+          "CLASSIFICATION": "READ_MESSAGES",
+          "FILTER": "mom"
+        }
+      },
+      {
+        "cls": "READ_MESSAGES",
+        "msg": "any new texts",
+        "raw": "CLASSIFICATION: READ_MESSAGES\nFILTER: all",
+        "latency_s": 0.42642927169799805,
+        "quality": "good",
+        "fields": {
+          "CLASSIFICATION": "READ_MESSAGES",
+          "FILTER": "all"
+        }
+      },
+      {
+        "cls": "READ_MESSAGES",
+        "msg": "read texts from sarah",
+        "raw": "CLASSIFICATION: READ_MESSAGES\nFILTER: Sarah",
+        "latency_s": 0.422452449798584,
+        "quality": "good",
+        "fields": {
+          "CLASSIFICATION": "READ_MESSAGES",
+          "FILTER": "Sarah"
+        }
+      },
+      {
+        "cls": "READ_EMAIL",
+        "msg": "check my email",
+        "raw": "CLASSIFICATION: READ_EMAIL\nQUERY: unread",
+        "latency_s": 0.403977632522583,
+        "quality": "good",
+        "fields": {
+          "CLASSIFICATION": "READ_EMAIL",
+          "QUERY": "unread"
+        }
+      },
+      {
+        "cls": "READ_EMAIL",
+        "msg": "any emails from amazon",
+        "raw": "CLASSIFICATION: READ_EMAIL\nQUERY: Amazon",
+        "latency_s": 0.3932657241821289,
+        "quality": "good",
+        "fields": {
+          "CLASSIFICATION": "READ_EMAIL",
+          "QUERY": "Amazon"
+        }
+      },
+      {
+        "cls": "READ_EMAIL",
+        "msg": "did the bank email me",
+        "raw": "CLASSIFICATION: READ_EMAIL\nQUERY: unread",
+        "latency_s": 0.44736194610595703,
+        "quality": "good",
+        "fields": {
+          "CLASSIFICATION": "READ_EMAIL",
+          "QUERY": "unread"
+        }
+      },
+      {
+        "cls": "READ_EMAIL",
+        "msg": "check for new mail",
+        "raw": "CLASSIFICATION: READ_EMAIL\nQUERY: unread",
+        "latency_s": 0.43559741973876953,
+        "quality": "good",
+        "fields": {
+          "CLASSIFICATION": "READ_EMAIL",
+          "QUERY": "unread"
+        }
+      },
+      {
+        "cls": "READ_EMAIL",
+        "msg": "any emails from john",
+        "raw": "CLASSIFICATION: READ_EMAIL\nQUERY: sender:john unread",
+        "latency_s": 0.42853212356567383,
+        "quality": "good",
+        "fields": {
+          "CLASSIFICATION": "READ_EMAIL",
+          "QUERY": "sender:john unread"
+        }
+      },
+      {
+        "cls": "READ_EMAIL",
+        "msg": "read email from my doctor",
+        "raw": "CLASSIFICATION: READ_EMAIL\nQUERY: sender:my doctor",
+        "latency_s": 0.4399123191833496,
+        "quality": "good",
+        "fields": {
+          "CLASSIFICATION": "READ_EMAIL",
+          "QUERY": "sender:my doctor"
+        }
+      },
+      {
+        "cls": "READ_EMAIL",
+        "msg": "show my unread emails",
+        "raw": "CLASSIFICATION: READ_EMAIL\nQUERY: unread",
+        "latency_s": 0.4548470973968506,
+        "quality": "good",
+        "fields": {
+          "CLASSIFICATION": "READ_EMAIL",
+          "QUERY": "unread"
+        }
+      },
+      {
+        "cls": "SHOPPING_LIST",
+        "msg": "add milk to my list",
+        "raw": "ACTION: add milk",
+        "latency_s": 0.3756732940673828,
+        "quality": "good",
+        "fields": {
+          "ACTION": "add milk"
+        }
+      },
+      {
+        "cls": "SHOPPING_LIST",
+        "msg": "put bread on the grocery list",
+        "raw": "ACTION: add bread",
+        "latency_s": 0.34064817428588867,
+        "quality": "good",
+        "fields": {
+          "ACTION": "add bread"
+        }
+      },
+      {
+        "cls": "SHOPPING_LIST",
+        "msg": "remove eggs I already got them",
+        "raw": "ACTION: remove eggs",
+        "latency_s": 0.3750734329223633,
+        "quality": "good",
+        "fields": {
+          "ACTION": "remove eggs"
+        }
+      },
+      {
+        "cls": "SHOPPING_LIST",
+        "msg": "what's on my shopping list",
+        "raw": "ACTION: show list",
+        "latency_s": 0.3248937129974365,
+        "quality": "good",
+        "fields": {
+          "ACTION": "show list"
+        }
+      },
+      {
+        "cls": "SHOPPING_LIST",
+        "msg": "add coffee and orange juice",
+        "raw": "ACTION: add coffee and orange juice",
+        "latency_s": 0.38027143478393555,
+        "quality": "good",
+        "fields": {
+          "ACTION": "add coffee and orange juice"
+        }
+      },
+      {
+        "cls": "SHOPPING_LIST",
+        "msg": "take bananas off the list",
+        "raw": "ACTION: remove bananas",
+        "latency_s": 0.3467905521392822,
+        "quality": "good",
+        "fields": {
+          "ACTION": "remove bananas"
+        }
+      },
+      {
+        "cls": "SHOPPING_LIST",
+        "msg": "add a dozen eggs",
+        "raw": "ACTION: add a dozen eggs",
+        "latency_s": 0.39451122283935547,
+        "quality": "good",
+        "fields": {
+          "ACTION": "add a dozen eggs"
+        }
+      }
+    ]
+  }
+}

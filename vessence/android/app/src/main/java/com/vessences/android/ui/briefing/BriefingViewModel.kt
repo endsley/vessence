@@ -240,26 +240,13 @@ class BriefingViewModel(application: Application) : AndroidViewModel(application
             com.vessences.android.voice.WakeWordBridge.sttActive = true
             com.vessences.android.voice.AlwaysListeningService.stop(appContext)
 
-            // Priority: 1) local cache, 2) stream from server, 3) device TTS
-            val cachedFile = com.vessences.android.util.BriefingAudioCache.getCachedFile(appContext, article.id, summaryType)
-            val played = if (cachedFile != null) {
-                // Play from local cache (instant, no network)
-                playAudioFile(cachedFile.absolutePath)
+            // Use device TTS directly — server-side audio generation removed
+            val text = if (summaryType == "full" && article.fullSummary != null) {
+                "${article.title}. ${article.fullSummary}"
             } else {
-                // Stream from server
-                val audioUrl = "$baseUrl/api/briefing/audio/${article.id}/$summaryType"
-                tryPlayServerAudio(audioUrl)
+                "${article.title}. ${article.briefSummary}"
             }
-
-            if (!played) {
-                // Fallback to device TTS
-                val text = if (summaryType == "full" && article.fullSummary != null) {
-                    "${article.title}. ${article.fullSummary}"
-                } else {
-                    "${article.title}. ${article.briefSummary}"
-                }
-                tts.speak(text)
-            }
+            tts.speak(text)
             _state.value = _state.value.copy(isSpeaking = false)
             // Resume always-listen after audio finishes
             com.vessences.android.voice.WakeWordBridge.sttActive = false

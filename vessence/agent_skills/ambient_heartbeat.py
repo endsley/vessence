@@ -319,10 +319,15 @@ def main():
     except Exception:
         pass
 
-    # 1. Idle check
-    if is_user_active():
+    # 1. Idle check (bypassed during sleep hours 2-6 AM local time)
+    import datetime as _dt
+    _now_hour = _dt.datetime.now().hour
+    _is_sleep_window = 2 <= _now_hour < 6
+    if is_user_active() and not _is_sleep_window:
         logger.info("User is active — exiting without running.")
         return
+    if _is_sleep_window:
+        logger.info(f"Sleep-window override active (hour={_now_hour}) — running regardless of activity.")
 
     cache = load_cache()
     research_done = []

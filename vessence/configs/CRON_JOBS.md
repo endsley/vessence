@@ -108,5 +108,10 @@ This document logs all scheduled tasks (cron jobs) for the system. It must be up
 - **Script Path:** `$VESSENCE_HOME/agent_skills/process_watchdog.py`
 - **Description:** Kills zombie Docker containers (stale TTS/build containers), idle Gradle/Kotlin daemons (>10 min idle), and memory hog processes. Prevents resource exhaustion from accumulated build artifacts and abandoned containers.
 
+## 21. Nightly Code Auditor (NEW 2026-04-12)
+- **Schedule:** `0 3 * * *` (Runs daily at 3:00 AM, sleep window)
+- **Script Path:** `$VESSENCE_HOME/agent_skills/nightly_code_auditor.py`
+- **Description:** Autonomous code audit + fix loop. Each night picks one module from `configs/auditable_modules.md` (rotating), uses Claude Opus to generate stress tests, runs pytest, diagnoses any failures, and patches the module. Always works on a `auto-audit/YYYY-MM-DD-HHMM` git branch — if all tests pass, fast-forward merges to master; if fixes can't make tests pass after 3 attempts, reverts and logs to `configs/audit_failures.md`. Successful audits logged to `configs/auto_audit_log.md`. 30-minute time budget per session. Skips when working tree is dirty.
+
 ## NOTE: Automation Provider Rule
 - **Critical note for future agents:** Cron jobs and other unattended execution paths must never hardcode a specific coding CLI (`claude`, `codex`, etc.). They must go through the shared automation runner and respect `AUTOMATION_CLI_PROVIDER` (falling back to `JANE_BRAIN` when unset). When switching providers, audit cron jobs, queue runners, background research jobs, and Discord bridges before assuming the cutover is complete.

@@ -1,21 +1,30 @@
 #!/usr/bin/env python3
-"""Fetch 7-day weather forecast + air quality for Medford, MA.
+"""Fetch 7-day weather forecast + air quality + pollen for Medford, MA.
 
 Saves to $VESSENCE_DATA_HOME/cache/weather.json.
 Run daily via cron at 3:30am ET.
+
+Pollen data requires a free Tomorrow.io API key:
+  Sign up at https://app.tomorrow.io  (500 calls/day free)
+  Set TOMORROW_IO_API_KEY in $VESSENCE_DATA_HOME/.env
+  If key is absent, pollen block is omitted from weather.json.
 """
 
 import json
+import logging
 import os
-from datetime import datetime
+from datetime import datetime, date as _date
 from pathlib import Path
 
 import requests
+
+logger = logging.getLogger(__name__)
 
 # Location from .env or defaults to Medford, MA
 LAT = float(os.environ.get("WEATHER_LAT", "42.4184"))
 LON = float(os.environ.get("WEATHER_LON", "-71.1062"))
 LOCATION = os.environ.get("WEATHER_LOCATION", "Medford, MA")
+TOMORROW_IO_KEY = os.environ.get("TOMORROW_IO_API_KEY", "")
 
 VESSENCE_DATA_HOME = Path(os.environ.get(
     "VESSENCE_DATA_HOME",
@@ -34,6 +43,46 @@ WMO_CODES = {
     85: "Slight snow showers", 86: "Heavy snow showers",
     95: "Thunderstorm", 96: "Thunderstorm with slight hail", 99: "Thunderstorm with heavy hail",
 }
+
+
+_POLLEN_LABELS = {0: "None", 1: "Very Low", 2: "Low", 3: "Medium", 4: "High", 5: "Very High"}
+
+
+def fetch_pollen() -> dict:
+    """Fetch tree/grass/weed pollen index from Tomorrow.io.
+
+    Returns an empty dict if TOMORROW_IO_API_KEY is not set or the call fails.
+    Index values: 0=None, 1=Very Low, 2=Low, 3=Medium, 4=High, 5=Very High
+    """
+    if not TOMORROW_IO_KEY:
+        return {}
+    try:
+        r = requests.get(
+            "https://api.tomorrow.io/v4/weather/realtime",
+            params={
+                "location": f"{LAT},{LON}",
+                "fields": "treeIndex,grassIndex,weedIndex",
+                "apikey": TOMORROW_IO_KEY,
+                "units": "imperial",
+            },
+            timeout=10,
+        )
+        r.raise_for_status()
+        vals = r.json().get("data", {}).get("values", {})
+        tree_idx = vals.get("treeIndex") or 0
+        grass_idx = vals.get("grassIndex") or 0
+        weed_idx = vals.get("weedIndex") or 0
+        return {
+            "tree": _POLLEN_LABELS.get(int(tree_idx), "Unknown"),
+            "grass": _POLLEN_LABELS.get(int(grass_idx), "Unknown"),
+            "weed": _POLLEN_LABELS.get(int(weed_idx), "Unknown"),
+            "tree_index": int(tree_idx),
+            "grass_index": int(grass_idx),
+            "weed_index": int(weed_idx),
+        }
+    except Exception as e:
+        logger.warning("pollen fetch failed: %s", e)
+        return {}
 
 
 def fetch_weather() -> dict:
@@ -65,6 +114,8 @@ def fetch_weather() -> dict:
         timeout=15,
     ).json()
 
+    pollen = fetch_pollen()
+
     result = {
         "location": LOCATION,
         "fetched": datetime.now().strftime("%Y-%m-%d %H:%M"),
@@ -84,9 +135,14 @@ def fetch_weather() -> dict:
         "forecast": [],
     }
 
+    if pollen:
+        result["pollen"] = pollen
+
     for i, date in enumerate(weather["daily"]["time"]):
+        weekday = _date.fromisoformat(date).strftime("%A")
         result["forecast"].append({
             "date": date,
+            "weekday": weekday,
             "high": f"{weather['daily']['temperature_2m_max'][i]}°F",
             "low": f"{weather['daily']['temperature_2m_min'][i]}°F",
             "condition": WMO_CODES.get(weather["daily"]["weathercode"][i], "Unknown"),

@@ -1,0 +1,246 @@
+{
+  "endpoint": "http://localhost:8081/api/jane/chat",
+  "total_elapsed_s": 160.18,
+  "results": [
+    {
+      "i": 1,
+      "prompt": "What's the temperature right now?",
+      "classification": "weather:High",
+      "stage2": "It's currently 57 degrees and feels like 48.8 degrees.",
+      "stage3": "",
+      "time_s": 2.22
+    },
+    {
+      "i": 2,
+      "prompt": "How cold is it outside?",
+      "classification": "weather:High",
+      "stage2": "It's currently 57 degrees and feels like 48 degrees.",
+      "stage3": "",
+      "time_s": 1.91
+    },
+    {
+      "i": 3,
+      "prompt": "Will it rain tomorrow?",
+      "classification": "weather:High",
+      "stage2": "There is a chance of light drizzle tomorrow.",
+      "stage3": "",
+      "time_s": 3.93
+    },
+    {
+      "i": 4,
+      "prompt": "What's the high on Monday?",
+      "classification": "weather:Medium",
+      "stage2": "High on Monday will be about 70 degrees.",
+      "stage3": "",
+      "time_s": 1.94
+    },
+    {
+      "i": 5,
+      "prompt": "Is the air quality okay today?",
+      "classification": "weather:High",
+      "stage2": "Air quality is good with an AQI of 36.",
+      "stage3": "",
+      "time_s": 2.12
+    },
+    {
+      "i": 6,
+      "prompt": "How windy is it right now?",
+      "classification": "weather:High",
+      "stage2": "The wind is currently 15.3 mph.",
+      "stage3": "",
+      "time_s": 2.53
+    },
+    {
+      "i": 7,
+      "prompt": "What's the forecast for this week?",
+      "classification": "weather:High",
+      "stage2": "Here is the forecast for the week.",
+      "stage3": "",
+      "time_s": 1.87
+    },
+    {
+      "i": 8,
+      "prompt": "Should I bring an umbrella tomorrow?",
+      "classification": "weather:High",
+      "stage2": "You should probably bring an umbrella tomorrow because there is a chance of light drizzle.",
+      "stage3": "",
+      "time_s": 2.01
+    },
+    {
+      "i": 9,
+      "prompt": "What's the UV index today?",
+      "classification": "weather:High",
+      "stage2": "The UV index today is 6.55.",
+      "stage3": "",
+      "time_s": 1.94
+    },
+    {
+      "i": 10,
+      "prompt": "How warm will it be on Tuesday?",
+      "classification": "weather:High",
+      "stage2": "High of about 79 on Tuesday with slight rain showers.",
+      "stage3": "",
+      "time_s": 1.9
+    },
+    {
+      "i": 11,
+      "prompt": "Play my coldplay playlist",
+      "classification": "music play:High",
+      "stage2": "Playing coldplay (6 tracks).",
+      "stage3": "",
+      "time_s": 0.92
+    },
+    {
+      "i": 12,
+      "prompt": "Put on some music",
+      "classification": "music play:High",
+      "stage2": "Playing Random Mix (10 tracks).",
+      "stage3": "",
+      "time_s": 1.08
+    },
+    {
+      "i": 13,
+      "prompt": "Play Bohemian Rhapsody",
+      "classification": "music play:High",
+      "stage2": "Unable to find the song in our list.",
+      "stage3": "",
+      "time_s": 0.79
+    },
+    {
+      "i": 14,
+      "prompt": "I want to hear some Brazilian music",
+      "classification": "music play:High",
+      "stage2": "Unable to find the song in our list.",
+      "stage3": "",
+      "time_s": 0.88
+    },
+    {
+      "i": 15,
+      "prompt": "Play something relaxing",
+      "classification": "music play:High",
+      "stage2": "Playing Playing: Something Relaxing (1 tracks).",
+      "stage3": "",
+      "time_s": 0.79
+    },
+    {
+      "i": 16,
+      "prompt": "Start the encanto playlist",
+      "classification": "music play:High",
+      "stage2": "Playing Encanto Playlist (4 tracks).",
+      "stage3": "",
+      "time_s": 0.78
+    },
+    {
+      "i": 17,
+      "prompt": "Queue up some piano",
+      "classification": "music play:High",
+      "stage2": "Playing Piano Collection (69 tracks).",
+      "stage3": "",
+      "time_s": 0.81
+    },
+    {
+      "i": 18,
+      "prompt": "Play a random song",
+      "classification": "music play:High",
+      "stage2": "Playing Random Mix (10 tracks).",
+      "stage3": "",
+      "time_s": 0.76
+    },
+    {
+      "i": 19,
+      "prompt": "Shuffle my coldplay playlist",
+      "classification": "music play:High",
+      "stage2": "Playing coldplay (6 tracks).",
+      "stage3": "",
+      "time_s": 0.82
+    },
+    {
+      "i": 20,
+      "prompt": "Put on some Chinese music",
+      "classification": "music play:High",
+      "stage2": "Unable to find the song in our list.",
+      "stage3": "",
+      "time_s": 0.78
+    },
+    {
+      "i": 21,
+      "prompt": "Hey, good morning!",
+      "classification": "others:Low",
+      "stage2": "",
+      "stage3": "Good morning, Chieh! Hope your Saturday's off to a good start.",
+      "time_s": 9.39
+    },
+    {
+      "i": 22,
+      "prompt": "How does Python's asyncio event loop work?",
+      "classification": "others:Low",
+      "stage2": "",
+      "stage3": "Python's asyncio event loop is essentially a single-threaded cooperative scheduler. It maintains a queue of coroutines and callbacks, and on each iteration it:\n\n1. **Polls for I/O readiness** \u2014 uses `epoll` (Linux), `kqueue` (macOS), or `select` under the hood via a selector. Any sockets or file descriptors registered for read/write get checked.\n\n2. **Runs ready callbacks** \u2014 anything whose I/O is ready, or whose `Future` resolved, or whose `call_soon` / `call_later` timer fired, gets executed.\n\n3. **Resumes awaiting coroutines** \u2014 when you `await` something, the coroutine yields control back to the loop. Once the awaited thing completes, the loop resumes the coroutine at the exact suspension point.\n\nThe key insight: **nothing preempts**. A coroutine runs until it hits an `await`, and only then does the loop get control back. That's why a CPU-bound function without `await` blocks the entire loop \u2014 there's no yield point for the scheduler to intervene.\n\nUnder the hood, coroutines are just generator-like objects using `send()` / `throw()`. The `await` keyword compiles down to `yield from` semantics, passing control through a chain of coroutines back to the loop's `_run_once()`.\n\nFor CPU-bound work, you'd use `loop.run_in_executor()` to offload to a thread or process pool \u2014 the loop gets a Future back and resumes the coroutine when the executor finishes, keeping the event loop unblocked.",
+      "time_s": 20.33
+    },
+    {
+      "i": 23,
+      "prompt": "Nice weather we're having, huh.",
+      "classification": "others:Low",
+      "stage2": "",
+      "stage3": "It really is \u2014 perfect day to get outside for some pickleball if you can squeeze it in! How's it going, Chieh?",
+      "time_s": 12.05
+    },
+    {
+      "i": 24,
+      "prompt": "When was Bohemian Rhapsody released?",
+      "classification": "others:Low",
+      "stage2": "",
+      "stage3": "\"Bohemian Rhapsody\" by Queen was released on October 31, 1975, as a single from the album *A Night at the Opera*. It was written by Freddie Mercury and became one of the most iconic rock songs of all time.",
+      "time_s": 11.12
+    },
+    {
+      "i": 25,
+      "prompt": "What's 42 times 17?",
+      "classification": "others:Low",
+      "stage2": "",
+      "stage3": "42 times 17 is 714.",
+      "time_s": 11.22
+    },
+    {
+      "i": 26,
+      "prompt": "Explain the Pythagorean theorem simply",
+      "classification": "others:Low",
+      "stage2": "",
+      "stage3": "The Pythagorean theorem says that in a right triangle \u2014 one with a 90-degree corner \u2014 the two shorter sides squared and added together equal the longest side squared.\n\nSo if the short sides are 3 and 4, you get 9 plus 16, which is 25. The long side is 5, because 5 squared is 25.\n\nIt's basically a rule that links the three sides of any right triangle together. Builders use it all the time to check if a corner is perfectly square.",
+      "time_s": 11.95
+    },
+    {
+      "i": 27,
+      "prompt": "Write a haiku about coffee",
+      "classification": "others:Low",
+      "stage2": "",
+      "stage3": "Steam curls from the cup,\nbitter warmth wakes sleeping thoughts\u2014\nmorning finds its voice.",
+      "time_s": 9.89
+    },
+    {
+      "i": 28,
+      "prompt": "How tall is the Eiffel Tower?",
+      "classification": "others:Low",
+      "stage2": "",
+      "stage3": "The Eiffel Tower is about 330 meters tall, or roughly 1,083 feet including the antenna at the top. When it was first built in 1889, it was around 300 meters \u2014 the antenna was added later.",
+      "time_s": 9.85
+    },
+    {
+      "i": 29,
+      "prompt": "Translate 'good night' to Japanese",
+      "classification": "others:Low",
+      "stage2": "",
+      "stage3": "\u304a\u3084\u3059\u307f\u306a\u3055\u3044 (Oyasuminasai) \u2014 that's the standard way to say \"good night\" in Japanese.",
+      "time_s": 8.25
+    },
+    {
+      "i": 30,
+      "prompt": "How does the weather cron job run in this codebase?",
+      "classification": "others:Low",
+      "stage2": "",
+      "stage3": "Here's how the weather cron job works:\n\nThe script is `agent_skills/fetch_weather.py`. It calls the Open-Meteo API (free, no key needed) to get a 7-day forecast plus current conditions and air quality for Medford, MA. It saves everything to `vessence-data/cache/weather.json`.\n\nIt runs every 4 hours via crontab (line 23 in the crontab: `30 */4 * * *`), so the cache stays reasonably fresh throughout the day. The original job spec said 3:30am daily, but it was later bumped to every 4 hours.\n\nWhen you ask a weather question, the Gemma4 router detects weather keywords, reads the cached JSON, and answers directly without escalating to Claude \u2014 unless the data is stale (over 24 hours old), in which case it falls back to me.",
+      "time_s": 22.35
+    }
+  ]
+}

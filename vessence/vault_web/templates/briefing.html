@@ -159,24 +159,24 @@
         </button>
       </div>
 
-      <!-- View tabs: All News / Saved -->
+      <!-- View tabs: News / Saved Articles -->
       <div class="flex flex-wrap gap-2 items-center">
-        <button @click="activeView = 'all'; currentPage = 1; loadArticles()"
-          :class="activeView === 'all' ? 'bg-violet-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700 border border-slate-700'"
+        <button @click="activeView = 'all'; viewingSaved = false; currentPage = 1; loadArticles()"
+          :class="!viewingSaved ? 'bg-violet-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700 border border-slate-700'"
           class="px-3 py-1 rounded-full text-xs font-medium transition">
-          All News
+          News
         </button>
-        <button @click="activeView = 'saved'; currentPage = 1; loadArticles()"
-          :class="activeView === 'saved' ? 'bg-violet-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700 border border-slate-700'"
+        <button @click="viewingSaved = true; savedFilterCategory = null; loadSavedArticles()"
+          :class="viewingSaved ? 'bg-violet-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700 border border-slate-700'"
           class="px-3 py-1 rounded-full text-xs font-medium transition flex items-center gap-1">
           <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"/>
           </svg>
-          Saved
+          Saved Articles
         </button>
 
-        <!-- Show/Hide dismissed toggle -->
-        <button @click="showDismissed = !showDismissed; currentPage = 1"
+        <!-- Show/Hide dismissed toggle (News view only) -->
+        <button x-show="!viewingSaved" @click="showDismissed = !showDismissed; currentPage = 1"
           :class="showDismissed ? 'bg-slate-700 text-slate-300' : 'bg-slate-800 text-slate-500 border border-slate-700'"
           class="ml-auto px-3 py-1 rounded-full text-xs font-medium transition flex items-center gap-1">
           <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -223,34 +223,66 @@
 
     <!-- ── Saved Articles View ──────────────────────────────────────────── -->
     <div x-show="viewingSaved" x-cloak>
-      <!-- Saved category filter -->
-      <div x-show="savedArticleCategories.length > 0" class="flex flex-wrap gap-2 mb-5">
-        <button @click="savedFilterCategory = null; loadSavedArticles()"
-          class="px-3 py-1 rounded-full text-xs font-medium transition"
-          :class="!savedFilterCategory ? 'bg-amber-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700 border border-slate-700'">
-          All Saved
-        </button>
-        <template x-for="cat in savedArticleCategories" :key="cat">
-          <button @click="savedFilterCategory = cat; loadSavedArticles(cat)"
-            class="px-3 py-1 rounded-full text-xs font-medium transition"
-            :class="savedFilterCategory === cat ? 'bg-amber-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700 border border-slate-700'"
-            x-text="cat">
+
+      <!-- Level 1: Group browser (no group selected) -->
+      <div x-show="!savedFilterCategory">
+        <!-- Empty state -->
+        <div x-show="savedGroups.length === 0" class="flex flex-col items-center justify-center py-20 text-center">
+          <svg class="w-16 h-16 text-slate-700 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"/>
+          </svg>
+          <h3 class="text-lg font-semibold text-slate-400 mb-1">No saved articles</h3>
+          <p class="text-sm text-slate-500">Save articles from the news feed to keep them permanently.</p>
+        </div>
+
+        <!-- Group cards -->
+        <div x-show="savedGroups.length > 0" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+          <template x-for="group in savedGroups" :key="group.name">
+            <button @click="savedFilterCategory = group.name"
+              class="bg-slate-900 rounded-2xl border border-slate-800 hover:border-amber-600/40 p-5 text-left card-hover flex flex-col gap-3 w-full transition">
+              <div class="flex items-center gap-2">
+                <svg class="w-5 h-5 text-amber-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
+                </svg>
+                <span class="text-sm font-semibold text-white truncate" x-text="group.name"></span>
+              </div>
+              <div>
+                <span class="text-2xl font-bold text-amber-400" x-text="group.count"></span>
+                <span class="text-xs text-slate-500 ml-1" x-text="group.count === 1 ? 'article' : 'articles'"></span>
+              </div>
+              <span class="text-[10px] text-slate-600" x-text="timeAgo(group.latest)"></span>
+            </button>
+          </template>
+        </div>
+      </div>
+
+      <!-- Level 2: Articles in selected group -->
+      <div x-show="savedFilterCategory">
+        <!-- Back nav + group header -->
+        <div class="flex items-center gap-3 mb-5">
+          <button @click="savedFilterCategory = null"
+            class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm text-slate-400 hover:text-white hover:bg-slate-800 transition">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+            </svg>
+            All Groups
           </button>
-        </template>
-      </div>
+          <svg class="w-4 h-4 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
+          </svg>
+          <h2 class="text-lg font-bold text-white" x-text="savedFilterCategory"></h2>
+          <span class="text-xs text-slate-500" x-text="savedGroupArticles.length + (savedGroupArticles.length === 1 ? ' article' : ' articles')"></span>
+        </div>
 
-      <!-- Empty saved state -->
-      <div x-show="savedArticlesList.length === 0" class="flex flex-col items-center justify-center py-20 text-center">
-        <svg class="w-16 h-16 text-slate-700 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"/>
-        </svg>
-        <h3 class="text-lg font-semibold text-slate-400 mb-1">No saved articles</h3>
-        <p class="text-sm text-slate-500">Save articles from the audio player to keep them permanently.</p>
-      </div>
+        <!-- Empty group state -->
+        <div x-show="savedGroupArticles.length === 0" class="flex flex-col items-center justify-center py-20 text-center">
+          <h3 class="text-lg font-semibold text-slate-400 mb-1">No articles here</h3>
+          <p class="text-sm text-slate-500">Articles you unsaved are removed from this group.</p>
+        </div>
 
-      <!-- Saved articles grid -->
-      <div x-show="savedArticlesList.length > 0" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-        <template x-for="saved in savedArticlesList" :key="saved.article_id">
+        <!-- Articles grid -->
+        <div x-show="savedGroupArticles.length > 0" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+          <template x-for="saved in savedGroupArticles" :key="saved.article_id">
           <div class="bg-slate-900 rounded-2xl border border-amber-800/30 overflow-hidden card-hover flex flex-col">
             <div class="p-4 flex flex-col flex-1">
               <!-- Category + saved date -->
@@ -312,7 +344,8 @@
               </div>
             </div>
           </div>
-        </template>
+          </template>
+        </div>
       </div>
     </div>
 
@@ -320,7 +353,7 @@
     <div x-show="!loading && !viewingSaved && displayArticles.length > 0" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
       <template x-for="article in paginatedArticles" :key="article.id">
         <div class="bg-slate-900 rounded-2xl border border-slate-800 overflow-hidden card-hover flex flex-col"
-          :class="{ 'card-dismissed': article.dismissed, 'card-saved': article.state === 'saved' }"
+          :class="{ 'card-dismissed': article.dismissed, 'card-saved': article.state === 'saved' }">
           <!-- Image -->
           <div class="relative aspect-video overflow-hidden">
             <template x-if="article.image_url">
@@ -348,7 +381,7 @@
             <p class="text-xs text-slate-500 mb-2">
               <span x-text="article.source || 'Unknown'"></span>
               <span class="mx-1">&middot;</span>
-              <span x-text="timeAgo(article.published_at || article.fetched_at)"></span>
+              <span x-text="timeAgo(article.published || article.fetched_at)"></span>
             </p>
 
             <!-- Tags -->
@@ -743,21 +776,39 @@
         savedArticleCategories: [],
         savedFilterCategory: null,
 
-        // Computed-like getter for display articles
+        // Computed-like getter for display articles (News tab)
         get displayArticles() {
           let list = this.searchResults !== null ? this.searchResults : this.articles;
           if (!this.showDismissed) {
             list = list.filter(a => !a.dismissed);
-          } else {
-            // Sort by state: new first, saved second, archived last
-            const stateOrder = { 'new': 0, 'saved': 1, 'archived': 2 };
-            list = [...list].sort((a, b) => {
-              const sa = stateOrder[a.state || 'new'] || 0;
-              const sb = stateOrder[b.state || 'new'] || 0;
-              return sa - sb;
-            });
           }
-          return list;
+          // Sort by fetched_at desc (most recently summarized first); archived at bottom
+          return [...list].sort((a, b) => {
+            const aArchived = a.state === 'archived' ? 1 : 0;
+            const bArchived = b.state === 'archived' ? 1 : 0;
+            if (aArchived !== bArchived) return aArchived - bArchived;
+            const fa = a.fetched_at || a.published || '';
+            const fb = b.fetched_at || b.published || '';
+            return fb.localeCompare(fa);
+          });
+        },
+
+        // Saved articles grouped by category
+        get savedGroups() {
+          const groups = {};
+          for (const s of this.savedArticlesList) {
+            const cat = s.category || 'Uncategorized';
+            if (!groups[cat]) groups[cat] = { name: cat, count: 0, latest: s.saved_at || '' };
+            groups[cat].count++;
+            if ((s.saved_at || '') > groups[cat].latest) groups[cat].latest = s.saved_at || '';
+          }
+          return Object.values(groups).sort((a, b) => b.latest.localeCompare(a.latest));
+        },
+
+        // Articles for the selected group
+        get savedGroupArticles() {
+          if (!this.savedFilterCategory) return [];
+          return this.savedArticlesList.filter(s => (s.category || 'Uncategorized') === this.savedFilterCategory);
         },
 
         get totalPages() {
@@ -814,10 +865,8 @@
 
         async loadArticles() {
           try {
-            const params = new URLSearchParams();
-            if (this.activeView === 'saved') params.set('view', 'saved');
             const [articlesRes, savedRes] = await Promise.all([
-              fetch('/api/briefing/articles?' + params.toString()),
+              fetch('/api/briefing/articles'),
               fetch('/api/briefing/saved'),
             ]);
             if (articlesRes.ok) {
@@ -1139,16 +1188,14 @@
           }
         },
 
-        async loadSavedArticles(category) {
+        async loadSavedArticles() {
           try {
-            const params = new URLSearchParams();
-            if (category) params.set('category', category);
-            const r = await fetch('/api/briefing/saved?' + params.toString());
+            const r = await fetch('/api/briefing/saved');
             if (r.ok) {
               const data = await r.json();
               this.savedArticlesList = data.articles || [];
             }
-            // Also refresh categories
+            // Refresh categories list for the save-to dropdown
             await this.loadSavedCategories();
           } catch (e) {
             console.error('Failed to load saved articles:', e);

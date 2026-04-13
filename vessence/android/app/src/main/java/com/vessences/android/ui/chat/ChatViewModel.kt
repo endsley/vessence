@@ -70,7 +70,7 @@ class ChatViewModel(
     private val pendingQueue = ConcurrentLinkedQueue<PendingMessage>()
     private var currentStreamJob: Job? = null
     private val liveListener = LiveBroadcastListener(viewModelScope, sessionId.take(12))
-    private val announcementPoller = AnnouncementPoller(viewModelScope)
+    private val announcementPoller = AnnouncementPoller(viewModelScope, appContext)
     private val tts = HybridTtsManager(appContext)
 
     // Jane Phone Tools (Phase 1 scaffolding): dispatcher + action queue.
@@ -85,6 +85,9 @@ class ChatViewModel(
 
     // Wake lock to keep network alive during chat streaming when screen is off
     private var streamWakeLock: PowerManager.WakeLock? = null
+
+    // Track last transient-error retry to avoid retry loops on flaky network
+    private var lastTransientRetryAt: Long = 0L
 
     private fun acquireStreamWakeLock() {
         if (streamWakeLock?.isHeld == true) return
@@ -396,6 +399,7 @@ class ChatViewModel(
                 var currentMsgId = aiMsg.id
                 var files = emptyList<com.vessences.android.data.model.StreamEvent.FileRef>()
                 var toolCallDispatched = false  // track if a tool call fired this turn
+                var serverConversationEnd = false  // server signalled END_CONVERSATION
 
                 flow.catch { e ->
                     val msg = e.message ?: ""
@@ -480,6 +484,11 @@ class ChatViewModel(
                                 statusLog.add(ackText)
                                 updateAiMessage(currentMsgId, accumulated, isStreaming = true, status = ackText, statusLog = statusLog.toList())
                             }
+                        }
+                        "conversation_end" -> {
+                            // Server signalled END_CONVERSATION — after TTS completes, switch
+                            // back to wake-word passive mode instead of reopening active STT.
+                            serverConversationEnd = true
                         }
                         "delta" -> {
                             // Incremental ACK parser — never leaks ACK markup into visible text
@@ -616,7 +625,19 @@ class ChatViewModel(
                                 // Show interim message
                                 updateAiMessage(currentMsgId, displayText.ifBlank { "Working on it..." }, isStreaming = true, status = "Waiting for phone data...")
                                 // Wait up to 10s for the tool handler to finish
-                                val toolResults = com.vessences.android.tools.PendingToolResultBuffer.awaitAndDrainAll(10_000)
+                                val allToolResults = com.vessences.android.tools.PendingToolResultBuffer.awaitAndDrainAll(10_000)
+                                // Filter: only send follow-up for tools that return data
+                                // for Jane to analyze (e.g. messages.fetch_unread).
+                                // Fire-and-forget tools (sms_send_direct, sync.force_sms)
+                                // don't need a follow-up — the action is already done.
+                                val FIRE_AND_FORGET = setOf(
+                                    "contacts.sms_send_direct",
+                                    "contacts.sms_send",
+                                    "contacts.sms_draft",
+                                    "contacts.sms_cancel",
+                                    "sync.force_sms",
+                                )
+                                val toolResults = allToolResults.filter { it.tool !in FIRE_AND_FORGET }
                                 if (toolResults.isNotEmpty()) {
                                     android.util.Log.i("ChatVM", "Got ${toolResults.size} tool result(s) — auto-sending follow-up")
                                     // Build the tool result prefix
@@ -665,7 +686,7 @@ class ChatViewModel(
                                 if (fromVoice) {
                                     _state.value = _state.value.copy(isSpeaking = false)
                                     val lastUserMsg = _state.value.messages.lastOrNull { it.isUser }?.text ?: ""
-                                    if (!isConversationEnding(lastUserMsg) && chatPrefs.isAutoListenEnabled()) {
+                                    if (!serverConversationEnd && !isConversationEnding(lastUserMsg) && chatPrefs.isAutoListenEnabled()) {
                                         com.vessences.android.MainActivity.instance?.launchStt()
                                     } else {
                                         endVoiceConversation()
@@ -680,7 +701,7 @@ class ChatViewModel(
                                     fullText = if (hasSpokenBlock) displayText else null,
                                 )
                                 notifier?.showReplyNotification(senderName = backend.displayName, message = displayText)
-                                onSendComplete(fromVoice, displayText, spokenText)
+                                onSendComplete(fromVoice, displayText, spokenText, serverConversationEnd)
                             }
                         }
                         "error" -> {
@@ -734,12 +755,35 @@ class ChatViewModel(
                 }
             } catch (e: Exception) {
                 val msg = e.message ?: ""
+                // Send full error details to server diagnostics so we can see
+                // the real stack trace and exception class instead of just "abort"
+                try {
+                    val sw = java.io.StringWriter()
+                    e.printStackTrace(java.io.PrintWriter(sw))
+                    com.vessences.android.DiagnosticReporter.report(
+                        "chat_error",
+                        "Stream error: ${e.javaClass.simpleName}: ${msg.take(200)}",
+                        mapOf(
+                            "exception_class" to e.javaClass.name,
+                            "message" to msg,
+                            "stack_trace" to sw.toString().take(2000),
+                            "from_voice" to fromVoice.toString(),
+                        )
+                    )
+                } catch (_: Exception) {}
                 val isTransient = msg.contains("stream", ignoreCase = true)
                     || msg.contains("reset", ignoreCase = true)
                     || msg.contains("timeout", ignoreCase = true)
                     || msg.contains("refused", ignoreCase = true)
                     || msg.contains("connect", ignoreCase = true)
+                    || msg.contains("abort", ignoreCase = true)
+                    || msg.contains("broken pipe", ignoreCase = true)
+                    || msg.contains("eof", ignoreCase = true)
+                    || msg.contains("unexpected end", ignoreCase = true)
+                    || msg.contains("canceled", ignoreCase = true)
+                    || msg.contains("cancelled", ignoreCase = true)
                 if (isTransient) {
+                    android.util.Log.w("ChatVM", "Transient connection error: ${msg.take(120)}")
                     val friendlyMsg = "Jane seems to be restarting. I'll try again in about thirty seconds."
                     updateAiMessage(aiMsg.id, friendlyMsg, isStreaming = false)
                     if (fromVoice) {
@@ -785,15 +829,16 @@ class ChatViewModel(
         return endings.any { lower.contains(it) }
     }
 
-    private fun onSendComplete(fromVoice: Boolean, replyText: String?, spokenText: String? = null) {
+    private fun onSendComplete(fromVoice: Boolean, replyText: String?, spokenText: String? = null, serverConversationEnd: Boolean = false) {
         if (fromVoice) {
             val textToSpeak = spokenText?.takeIf { it.isNotBlank() }
                 ?: replyText?.takeIf { it.isNotBlank() }
                 ?: ""  // empty = silent end, no misleading "I finished" message
 
-            // Check if the user's last message was a conversation-ending phrase
+            // Check if the user's last message was a conversation-ending phrase,
+            // OR if the server explicitly signalled END_CONVERSATION.
             val lastUserMsg = _state.value.messages.lastOrNull { it.isUser }?.text ?: ""
-            val conversationOver = isConversationEnding(lastUserMsg)
+            val conversationOver = serverConversationEnd || isConversationEnding(lastUserMsg)
             // If music is about to play, sttActive was already cleared by endVoiceConversation()
             // in the MUSIC_PLAY handler. Treat it as a conversation-ending event — no STT re-launch.
             val musicPlaying = !com.vessences.android.voice.WakeWordBridge.sttActive
@@ -1063,6 +1108,16 @@ class ChatViewModel(
 
     fun cancelListening() {
         voiceController?.cancelListening()
+    }
+
+    /** Stop listening immediately and return to always-listen (wake word) mode. */
+    fun stopListeningAndReturnToWakeWord() {
+        voiceController?.cancelListening()
+        com.vessences.android.voice.WakeWordBridge.sttActive = false
+        if (voiceSettings?.isAlwaysListeningEnabled() == true) {
+            com.vessences.android.voice.AlwaysListeningService.start(appContext)
+            android.util.Log.i("ChatVM", "X button: cancelled STT, restarted AlwaysListeningService")
+        }
     }
 
     fun clearVoiceError() {

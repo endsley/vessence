@@ -296,7 +296,6 @@ def main():
     print("Next steps:")
     print(f"  1. Start the server: systemctl --user start jane-web.service")
     print(f"     (on macOS: launchctl load ~/Library/LaunchAgents/jane-web.plist)")
-    print(f"     (on Windows: see docs/windows-setup.md)")
     print(f"  2. Open Jane: http://localhost:8081/")
     if access_mode == "2":
         print(f"  3. Sign in with Google at http://localhost:8081/auth/google")
@@ -305,6 +304,9 @@ def main():
         print(f"     - Or: Cloudflare tunnel pointing at localhost:8081")
     else:
         print(f"  3. To enable remote access later, re-run this script")
+    print()
+    print("Optional: Gmail integration")
+    print(f"  pip install -r requirements-optional.txt")
     print()
     return 0
 

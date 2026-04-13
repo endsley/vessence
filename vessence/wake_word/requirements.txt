@@ -1,0 +1,6 @@
+# Wake word / local voice daemon dependencies
+# Install only on machines running the local voice hardware setup:
+#   pip install -r wake_word/requirements.txt
+
+edge-tts
+faster-whisper

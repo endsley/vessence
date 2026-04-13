@@ -30,10 +30,18 @@ VESSENCE_DATA_HOME="/home/chieh/ambient/vessence-data"
 VAULT_HOME="/home/chieh/ambient/vault"
 ENV_FILE="$VESSENCE_DATA_HOME/.env"
 
-HEALTH_TIMEOUT=30    # seconds to wait for new server health
-WARMUP_TIMEOUT=60    # seconds to wait for CLI brain warmup
+HEALTH_TIMEOUT=90    # seconds to wait for new server health
+WARMUP_TIMEOUT=120   # seconds to wait for CLI brain warmup
 
 log() { echo "[$(date '+%H:%M:%S')] $*"; }
+
+# ── Step 0: Create healthcheck lock to prevent interference ──
+# The healthcheck runs every 2 minutes and checks port 8081 directly.
+# During the ping-pong, 8081 may be vacant, causing the healthcheck to
+# restart jane-web.service, killing our new nohup server. Lock it out.
+LOCKFILE="/tmp/jane-web-restarting.lock"
+touch "$LOCKFILE"
+log "Created healthcheck lock (prevents restart collision during ping-pong)"
 
 # ── Step 1: Detect current active port ──
 log "Checking current upstream..."
@@ -146,24 +154,35 @@ fi
 log "Giving old server 5s grace period for in-flight requests..."
 sleep 5
 
-# Stop systemd service ONLY if it's actually running and managing the OLD port.
-# Don't stop it blindly — it might already be dead, and the stop signal
-# can accidentally kill our new nohup server if systemd adopted its PID.
-if systemctl --user is-active jane-web.service >/dev/null 2>&1; then
-    log "Stopping systemd jane-web.service (was managing old server)..."
-    systemctl --user stop jane-web.service 2>/dev/null || true
-fi
-
+# Kill old server directly by PID — do NOT use `systemctl stop`.
+# `systemctl stop` kills the entire service cgroup, which includes the NEW
+# nohup server if it was spawned from a process in that cgroup (race condition
+# observed: healthcheck restarted the service mid-ping-pong, killing new server).
+# Killing by port PID is precise: only the old server dies.
 OLD_SERVER_PID=$(lsof -ti:$CURRENT_PORT 2>/dev/null || true)
 if [ -n "$OLD_SERVER_PID" ]; then
     log "Stopping old server on port $CURRENT_PORT (PID: $OLD_SERVER_PID)"
-    kill $OLD_SERVER_PID 2>/dev/null || true
+    # Exclude the NEW server PID in case lsof picks it up transiently
+    for pid in $OLD_SERVER_PID; do
+        if [ "$pid" != "$NEW_PID" ]; then
+            kill "$pid" 2>/dev/null || true
+        fi
+    done
     sleep 2
-    # Force kill if still alive
+    # Force kill stragglers (again excluding new server)
     REMAINING=$(lsof -ti:$CURRENT_PORT 2>/dev/null || true)
-    if [ -n "$REMAINING" ]; then
-        kill -9 $REMAINING 2>/dev/null || true
-    fi
+    for pid in $REMAINING; do
+        if [ "$pid" != "$NEW_PID" ]; then
+            kill -9 "$pid" 2>/dev/null || true
+        fi
+    done
+fi
+
+# Notify systemd that the service is no longer being managed (avoids surprise restarts).
+# Use `kill --kill-who=main` (only main PID) instead of `stop` (whole cgroup).
+if systemctl --user is-active jane-web.service >/dev/null 2>&1; then
+    log "Disabling systemd jane-web.service restart supervision..."
+    systemctl --user kill --kill-who=main --signal=SIGTERM jane-web.service 2>/dev/null || true
 fi
 
 # ── Done ──

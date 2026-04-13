@@ -103,4 +103,50 @@ def init_db():
                 synced_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE(sender, timestamp_ms, body)
             );
+
+            -- Relational-name aliases learned over time (e.g. "wife" → Kathia's
+            -- number). Survives the full-replace contacts sync because it's a
+            -- separate table. Written by the classifier fast-path handler after
+            -- Opus resolves an unknown name via memory, or by the add_alias API.
+            CREATE TABLE IF NOT EXISTS contact_aliases (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                alias TEXT NOT NULL,
+                phone_number TEXT NOT NULL,
+                display_name TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(alias)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_contact_aliases_alias
+                ON contact_aliases(alias);
+
+            -- Pending SMS drafts awaiting user confirmation. Only created on
+            -- the fallback path when Gemma's coherence gate fails and the
+            -- draft-confirm flow kicks in. Auto-expires after 5 minutes.
+            CREATE TABLE IF NOT EXISTS sms_drafts (
+                draft_id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                phone_number TEXT NOT NULL,
+                display_name TEXT,
+                body TEXT NOT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_sms_drafts_session
+                ON sms_drafts(session_id, created_at DESC);
+
+            -- Per-session FIFO of recent turn summaries. Populated by
+            -- the background persistence worker after every completed
+            -- turn. Used by v2's ack generator / classifier for fast
+            -- recency-based context (no similarity search needed).
+            -- Capped per session — see vault_web/recent_turns.py.
+            CREATE TABLE IF NOT EXISTS recent_turns (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                summary TEXT NOT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_recent_turns_session_id
+                ON recent_turns(session_id, id DESC);
         """)

@@ -201,6 +201,9 @@ class MainActivity : ComponentActivity() {
             try { ContactsSyncManager.syncIfNeeded(applicationContext) } catch (_: Exception) {}
             try { SmsSyncManager.backfillIfNeeded(applicationContext) } catch (_: Exception) {}
         }
+        // Periodic SMS sync every 5 minutes — catches sent messages and
+        // fills gaps if notification listener was killed by the system
+        SmsSyncManager.startPeriodicSync(applicationContext)
         try { ChatNotificationManager(applicationContext).ensureChannels() } catch (_: Exception) {}
         // Auto-start wake word service if always-listen was enabled
         // BUT skip if this is a wake word intent — service just stopped itself on purpose

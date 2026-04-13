@@ -46,6 +46,7 @@ object ContactsSmsHandler : ClientToolHandler {
     val ALIASES: List<String> = listOf(
         "contacts.sms_draft_update",
         "contacts.sms_send",
+        "contacts.sms_send_direct",
         "contacts.sms_cancel",
     )
 
@@ -215,6 +216,7 @@ object ContactsSmsHandler : ClientToolHandler {
         "contacts.sms_draft" -> openDraft(call, ctx, queue)
         "contacts.sms_draft_update" -> updateDraft(call, queue)
         "contacts.sms_send" -> commitDraft(call, ctx, queue)
+        "contacts.sms_send_direct" -> sendDirect(call, ctx, queue)
         "contacts.sms_cancel" -> cancelDraft(call, queue)
         else -> ToolActionStatus.Failed("unknown sms sub-tool: ${call.tool}")
     }
@@ -366,6 +368,54 @@ object ContactsSmsHandler : ClientToolHandler {
         }
         // No handler TTS — Jane's response says "Dropped it."
         return ToolActionStatus.Cancelled
+    }
+
+    /**
+     * Fast-path send: no prior draft required.
+     *
+     * Used by the v2 pipeline SEND_MESSAGE fast path when Gemma's coherence
+     * gate passes AND the recipient resolves server-side unambiguously. The
+     * server has already verified the phone number; we just send immediately.
+     *
+     * Args: phone_number (str), body (str)
+     */
+    private suspend fun sendDirect(
+        call: ClientToolCall,
+        ctx: Context,
+        queue: ActionQueue,
+    ): ToolActionStatus {
+        val phoneNumber = call.args.get("phone_number").asSafeString()
+            ?: return ToolActionStatus.Failed("missing 'phone_number' arg")
+        val body = call.args.get("body").asSafeString()
+            ?: return ToolActionStatus.Failed("missing 'body' arg")
+
+        if (!hasSendSmsPermission(ctx)) {
+            return ToolActionStatus.NeedsUser("grant SEND_SMS permission")
+        }
+
+        val cleanedBody = sanitizeBody(body)
+        if (cleanedBody.isBlank()) return ToolActionStatus.Failed("sanitized body was blank")
+        val finalBody = addSignature(cleanedBody)
+
+        return try {
+            @Suppress("DEPRECATION")
+            val sm: SmsManager = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                ctx.getSystemService(SmsManager::class.java)
+            } else {
+                SmsManager.getDefault()
+            }
+            val parts = sm.divideMessage(finalBody)
+            if (parts.size > 1) {
+                sm.sendMultipartTextMessage(phoneNumber, null, parts, null, null)
+            } else {
+                sm.sendTextMessage(phoneNumber, null, finalBody, null, null)
+            }
+            Log.i(TAG, "sms_send_direct to $phoneNumber (${finalBody.length} chars, ${parts.size} part(s))")
+            ToolActionStatus.Completed("sms sent to $phoneNumber")
+        } catch (e: Exception) {
+            Log.e(TAG, "sms_send_direct failed", e)
+            ToolActionStatus.Failed(e.localizedMessage ?: "sms send failed")
+        }
     }
 
     private fun isExpired(p: PendingDraft): Boolean =

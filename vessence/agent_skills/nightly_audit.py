@@ -273,12 +273,17 @@ def main():
     except Exception:
         pass
 
-    # Idle gate: skip if user is active
-    if not is_user_idle():
+    # Idle gate: skip if user is active (bypassed during sleep hours 2-6 AM)
+    import datetime as _dt
+    _now_hour = _dt.datetime.now().hour
+    _is_sleep_window = 2 <= _now_hour < 6
+    if not is_user_idle() and not _is_sleep_window:
         logger.info("User is active — skipping audit this cycle.")
         return
-
-    logger.info("User is idle — starting audit")
+    if _is_sleep_window:
+        logger.info(f"Sleep-window override active (hour={_now_hour}) — running audit regardless of activity.")
+    else:
+        logger.info("User is idle — starting audit")
 
     # Read key script bodies for deeper code/doc drift detection
     script_bodies_parts = []

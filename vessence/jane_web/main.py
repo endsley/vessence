@@ -204,8 +204,8 @@ try:
     ANDROID_VERSION = _version_data["version_name"]
     _ANDROID_VERSION_CODE = _version_data["version_code"]
 except FileNotFoundError:
-    ANDROID_VERSION = "0.2.7"
-    _ANDROID_VERSION_CODE = 239
+    ANDROID_VERSION = "0.2.25"
+    _ANDROID_VERSION_CODE = 257
 
 # Startup validation: ensure the APK for the advertised version actually exists
 _expected_apk = MARKETING_DOWNLOADS_DIR / f"vessences-android-v{ANDROID_VERSION}.apk"
@@ -478,7 +478,7 @@ async def startup():
     _logger.info("Jane Web startup complete — database initialized, essences loaded, ready to serve")
     # Resume processing any unprocessed shared articles left from before a restart
     asyncio.create_task(_resume_shared_queue_if_needed())
-    # Pre-warm gemma4:e4b — used by the prompt router for every request
+    # Pre-warm gemma4:e2b — used by the prompt router for every request
     prewarm = asyncio.create_task(_prewarm_gemma4())
     _background_tasks.add(prewarm)
     prewarm.add_done_callback(_background_tasks.discard)
@@ -505,13 +505,13 @@ async def _start_standing_brains():
 
 
 async def _prewarm_gemma4():
-    """Pre-warm gemma4:e4b via ollama HTTP API with keep_alive=-1 (pinned).
+    """Pre-warm gemma4:e2b via ollama HTTP API with keep_alive=-1 (pinned).
 
-    Using the HTTP API (not `ollama run`) lets us set keep_alive=-1, which
-    keeps the model loaded in memory indefinitely instead of ollama's 5-min
-    default idle timeout.
+    Ollama is the preferred ack provider when available (fast, local, no cost).
+    This prewarm pins the model in memory so the first ack isn't slow.
+    Skipped silently if Ollama isn't running.
     """
-    model = os.environ.get("GEMMA_ROUTER_MODEL", "gemma4:e4b")
+    model = os.environ.get("GEMMA_ROUTER_MODEL", "gemma4:e2b")
     if ":" not in model:
         return
     _logger.info("Pre-warming Gemma4 router model: %s", model)
@@ -532,7 +532,7 @@ async def _prewarm_gemma4():
 async def _prewarm_ollama():
     """Legacy prewarm — no longer called at startup."""
     import subprocess
-    model = os.environ.get("INTENT_CLASSIFIER_MODEL", "gemma4:e4b")
+    model = os.environ.get("INTENT_CLASSIFIER_MODEL", "gemma4:e2b")
     if ":" not in model:
         return  # API model, no need to prewarm
     _logger.info("Pre-warming Ollama model: %s", model)
@@ -665,6 +665,40 @@ def _get_essence_runtime():
 async def health():
     brain = os.getenv("JANE_BRAIN", "gemini")
     return {"status": "ok", "service": "jane", "brain": brain}
+
+
+@app.post("/api/admin/reset-gate")
+async def reset_session_gate(request: Request):
+    """Force-release a stuck request_gate for a session. Localhost only.
+
+    Used when a mid-stream disconnect left the gate locked, blocking all
+    subsequent requests with 'Jane is busy'. Avoids needing a full restart.
+
+    Body: {"session_id": "jane_android"}
+    """
+    client_ip = _client_ip(request)
+    if client_ip not in ("127.0.0.1", "::1", "localhost"):
+        return JSONResponse({"error": "localhost only"}, status_code=403)
+    try:
+        body = await request.json()
+        session_id = body.get("session_id", "").strip()
+    except Exception:
+        return JSONResponse({"error": "invalid JSON body"}, status_code=400)
+    if not session_id:
+        return JSONResponse({"error": "session_id required"}, status_code=400)
+
+    from jane_web.jane_proxy import _sessions
+    state = _sessions.get(session_id)
+    if state is None:
+        return JSONResponse({"status": "not_found", "session_id": session_id})
+
+    gate = state.request_gate
+    locked = gate._value == 0  # Semaphore(1): 0 = locked, 1 = free
+    if locked:
+        gate.release()
+        _logger.warning("Admin reset gate for session=%s", session_id[:12])
+        return JSONResponse({"status": "released", "session_id": session_id})
+    return JSONResponse({"status": "already_free", "session_id": session_id})
 
 
 @app.post("/api/jane/warmup")
@@ -1116,6 +1150,29 @@ async def list_contacts(request: Request, _=Depends(require_auth)):
             "SELECT display_name, phone_number, email, is_primary, contact_id, synced_at FROM contacts ORDER BY display_name"
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+@app.post("/api/contacts/alias")
+async def add_contact_alias(request: Request, _=Depends(require_auth)):
+    """Write a relational alias → phone number mapping.
+
+    Used by Opus when it resolves an unknown relational name (e.g. "my wife")
+    via memory so that future SEND_MESSAGE fast-path requests resolve without
+    an Opus round-trip.
+
+    Body: {"alias": "wife", "phone_number": "+15551234567", "display_name": "Kathia"}
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON")
+    alias = (body.get("alias") or "").strip()
+    phone = (body.get("phone_number") or "").strip()
+    if not alias or not phone:
+        raise HTTPException(status_code=400, detail="alias and phone_number are required")
+    from agent_skills.sms_helpers import add_alias
+    ok = add_alias(alias=alias, phone_number=phone, display_name=body.get("display_name"))
+    return {"ok": ok}
 
 
 # ── SMS message sync ──────────────────────────────────────────────────────────
@@ -1704,7 +1761,41 @@ async def is_new_device(request: Request):
 
 @app.get("/api/jane/announcements")
 async def get_announcements(since: Optional[str] = None, _=Depends(require_auth)):
-    return {"items": _read_announcements(since)}
+    result = {"items": _read_announcements(since)}
+    # Piggyback pending device commands on announcement polls
+    cmds = _drain_pending_commands()
+    if cmds:
+        result["pending_commands"] = cmds
+    return result
+
+
+# ─── Device command queue (server → Android) ─────────────────────────────────
+# Simple in-memory queue. Commands are drained on each announcement poll.
+# Used for server-initiated actions like "sync your SMS now".
+
+_pending_device_commands: list[dict] = []
+_pending_lock = __import__("threading").Lock()
+
+
+def queue_device_command(command: str, **kwargs):
+    """Queue a command for the Android device to pick up on next poll."""
+    with _pending_lock:
+        _pending_device_commands.append({"command": command, **kwargs})
+
+
+def _drain_pending_commands() -> list[dict]:
+    """Return and clear all pending commands."""
+    with _pending_lock:
+        cmds = list(_pending_device_commands)
+        _pending_device_commands.clear()
+    return cmds
+
+
+@app.post("/api/device/sync-sms")
+async def trigger_sms_sync(_=Depends(require_auth)):
+    """Server-initiated SMS sync. Queues a command for the Android app."""
+    queue_device_command("sync_sms")
+    return {"status": "queued", "message": "SMS sync will trigger on next Android poll"}
 
 
 # ─── Brain Model Settings ────────────────────────────────────────────────────
@@ -2411,19 +2502,92 @@ def create_music_playlist_from_query(query: str) -> dict | None:
     Returns playlist dict {"id", "name", "tracks", ...} or None if no matches.
     Shared by /api/music/play endpoint and jane_proxy gemma4 music handler.
     Cleans up any prior temporary playlists first so they don't accumulate.
+
+    Matching tiers:
+      Tier 0: existing named user playlist (exact / substring / fuzzy) —
+              returns the existing playlist, does NOT create a new one.
+      Tier 1-4: substring / word / OR / fuzzy scan over vault/Music/*.mp3,
+                builds a new ephemeral playlist from the matched files.
     """
     import glob as _glob, random as _random
+    import re as _re_inner
 
     _cleanup_temporary_playlists()
     q = (query or "").strip().lower()
+    q_norm = _re_inner.sub(r"\s+", " ", q)
+    # Strip common wrappers so "my coldplay playlist" matches a playlist
+    # named "coldplay" — same extraction the v2 music handler uses.
+    _q_core = _re_inner.sub(
+        r"^(play|put on|start|queue up|shuffle|resume|i want to (listen to|hear)|"
+        r"i'?d like to (listen to|hear))\s+",
+        "",
+        q_norm,
+    )
+    _q_core = _re_inner.sub(r"^(some |the |my |a |an )+", "", _q_core)
+    _q_core = _re_inner.sub(r"\s+(playlist|folder|music|songs?)$", "", _q_core).strip()
+
+    # ── Tier 0: match an existing named user playlist ─────────────────────
+    # Skip for generic "random" queries which should build a fresh random mix.
+    _is_random = q_norm in ("random", "anything", "something", "a song", "music",
+                            "random song", "some music", "something random")
+    if _q_core and not _is_random:
+        try:
+            existing = list_playlists()
+        except Exception:
+            existing = []
+        # Ignore prior ephemeral playlists — user meant a real named one.
+        _real = [p for p in existing if not (
+            (p.get("name", "") == "Random Mix")
+            or p.get("name", "").startswith("Playing:")
+        )]
+        _hit = None
+        # A. exact name match
+        for p in _real:
+            if _re_inner.sub(r"\s+", " ", p.get("name", "").lower()) == _q_core:
+                _hit = p
+                break
+        # B. substring match either way
+        if _hit is None:
+            for p in _real:
+                name_norm = _re_inner.sub(r"\s+", " ", p.get("name", "").lower())
+                if not name_norm:
+                    continue
+                if _q_core in name_norm or name_norm in _q_core:
+                    _hit = p
+                    break
+        # C. fuzzy match (rapidfuzz)
+        if _hit is None:
+            try:
+                from rapidfuzz import fuzz as _fz
+                _scored = [
+                    (_fz.token_set_ratio(_q_core, _re_inner.sub(r"\s+", " ", p.get("name", "").lower())), p)
+                    for p in _real
+                    if p.get("name", "")
+                ]
+                _scored.sort(key=lambda x: x[0], reverse=True)
+                if _scored and _scored[0][0] >= 80:
+                    _hit = _scored[0][1]
+            except ImportError:
+                pass
+        if _hit is not None:
+            full = get_playlist(_hit["id"])
+            if full:
+                _logger.info(
+                    "music query %r matched existing playlist %r (%d tracks) — Tier 0 hit",
+                    query, _hit.get("name", ""), len(full.get("tracks", []) or []),
+                )
+                # Mark NOT temporary — this is a real user playlist; cleanup
+                # must never touch it.
+                full["temporary"] = False
+                return full
+
     vault_music = Path(os.environ.get("VAULT_HOME", Path.home() / "ambient" / "vault")) / "Music"
 
     all_files = sorted(_glob.glob(str(vault_music / "**" / "*.mp3"), recursive=True))
     if not all_files:
         return None
 
-    if q in ("random", "anything", "something", "a song", "music", "random song",
-             "some music", "something random"):
+    if _is_random:
         selected = _random.sample(all_files, min(10, len(all_files)))
         playlist_name = "Random Mix"
     else:
@@ -2536,8 +2700,25 @@ async def _handle_jane_chat(body: ChatMessage, request: Request):
     return response
 
 
+def _should_use_v2(body: ChatMessage) -> bool:
+    """Every chat request now goes through the v2 3-stage pipeline.
+
+    The only escape hatch is the env var JANE_PIPELINE=v1, which forces
+    every caller back to v1 (for emergency rollback). Unset or any other
+    value → v2.
+
+    Stage 3 of v2 delegates to v1's brain internally, so web users still
+    get the rich Opus "thinking stream" for anything that escalates past
+    Stage 2 (weather/music get answered locally by gemma4 and skip Opus).
+    """
+    return os.environ.get("JANE_PIPELINE", "").strip().lower() != "v1"
+
+
 @app.post("/api/jane/chat")
 async def jane_chat(body: ChatMessage, request: Request):
+    if _should_use_v2(body):
+        from jane_web.jane_v2.pipeline import handle_chat as _v2_handle_chat
+        return await _v2_handle_chat(body, request)
     return await _handle_jane_chat(body, request)
 
 
@@ -2986,6 +3167,9 @@ async def permission_pending_endpoint(request: Request, _=Depends(require_auth))
 
 @app.post("/api/jane/chat/stream")
 async def jane_chat_stream(body: ChatMessage, request: Request):
+    if _should_use_v2(body):
+        from jane_web.jane_v2.pipeline import handle_chat_stream as _v2_handle_chat_stream
+        return await _v2_handle_chat_stream(body, request)
     return await _handle_jane_chat_stream(body, request)
 
 
@@ -3333,9 +3517,12 @@ async def get_briefing_articles(topic: Optional[str] = None, view: Optional[str]
         return result
     cards = result["cards"]
     # Populate per-card 'categories' from tags (Android app filters on this field)
+    # Also add image_url from the serving endpoint when image_path is present
     for c in cards:
         if not c.get("categories"):
             c["categories"] = c.get("tags", []) or ([c["topic"]] if c.get("topic") else [])
+        if c.get("image_path") and not c.get("image_url"):
+            c["image_url"] = f"/api/briefing/image/{c['id']}"
     if view == "saved":
         cards = [c for c in cards if c.get("state") == "saved"]
     elif topic:
@@ -3488,6 +3675,48 @@ async def submit_briefing_article(request: Request, _=Depends(require_auth)):
     _spawn_shared_article_processor()
 
     return result
+
+
+@app.post("/api/briefing/articles/summarize_now")
+async def summarize_article_now(request: Request, _=Depends(require_auth)):
+    """Fetch a URL and return a brief summary synchronously for immediate TTS on the client.
+
+    Returns {"status": "ok", "title": "...", "summary": "..."} or {"status": "error", "message": "..."}.
+    """
+    body = await request.json()
+    url = body.get("url", "").strip()
+    if not url or not re.match(r'^https?://', url):
+        raise HTTPException(status_code=400, detail="A valid URL starting with http(s):// is required")
+
+    if _BRIEFING_FUNCTIONS_DIR not in sys.path:
+        sys.path.insert(0, _BRIEFING_FUNCTIONS_DIR)
+
+    try:
+        from news_fetcher import extract_article, summarize_brief
+    except ImportError as e:
+        raise HTTPException(status_code=503, detail=f"Briefing module unavailable: {e}")
+
+    try:
+        extracted = await asyncio.get_event_loop().run_in_executor(
+            None, lambda: extract_article(url)
+        )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Failed to fetch article: {e}")
+
+    title = extracted.get("title") or ""
+    text = extracted.get("text") or ""
+
+    if not text and not title:
+        raise HTTPException(status_code=422, detail="Could not extract article content from that URL")
+
+    if text:
+        summary = await asyncio.get_event_loop().run_in_executor(
+            None, lambda: summarize_brief(title, text)
+        )
+    else:
+        summary = title
+
+    return {"status": "ok", "title": title, "summary": summary}
 
 
 @app.post("/api/briefing/processor-status")

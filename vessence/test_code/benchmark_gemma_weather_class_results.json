@@ -1,0 +1,911 @@
+{
+  "model": "gemma4:e2b",
+  "total": 100,
+  "avg_ms": 724.918688206235,
+  "p50_ms": 710.9977980144322,
+  "p95_ms": 861.7703809868544,
+  "best_threshold": 0.01,
+  "best_accuracy": 0.85,
+  "results": [
+    {
+      "i": 1,
+      "category": "yes_answerable",
+      "prompt": "What's the temperature in Medford right now?",
+      "gold": 1.0,
+      "score": 1.0,
+      "raw": "1.00",
+      "elapsed": 0.8978787669911981
+    },
+    {
+      "i": 2,
+      "category": "yes_answerable",
+      "prompt": "How warm is it outside?",
+      "gold": 1.0,
+      "score": 0.8,
+      "raw": "0.8",
+      "elapsed": 0.685339089948684
+    },
+    {
+      "i": 3,
+      "category": "yes_answerable",
+      "prompt": "Is it cold out today?",
+      "gold": 1.0,
+      "score": 0.6,
+      "raw": "0.60",
+      "elapsed": 0.6233861419605091
+    },
+    {
+      "i": 4,
+      "category": "yes_answerable",
+      "prompt": "What does it feel like outside right now?",
+      "gold": 1.0,
+      "score": 1.0,
+      "raw": "1.00",
+      "elapsed": 0.7654328539501876
+    },
+    {
+      "i": 5,
+      "category": "yes_answerable",
+      "prompt": "What's the humidity like right now in Medford?",
+      "gold": 1.0,
+      "score": 0.5,
+      "raw": "0.5",
+      "elapsed": 0.7051503489492461
+    },
+    {
+      "i": 6,
+      "category": "yes_answerable",
+      "prompt": "How windy is it outside?",
+      "gold": 1.0,
+      "score": 0.3,
+      "raw": "0.3",
+      "elapsed": 0.7121772180544212
+    },
+    {
+      "i": 7,
+      "category": "yes_answerable",
+      "prompt": "What are the current conditions in Medford?",
+      "gold": 1.0,
+      "score": 1.0,
+      "raw": "1.00",
+      "elapsed": 0.6814268069574609
+    },
+    {
+      "i": 8,
+      "category": "yes_answerable",
+      "prompt": "Is the sky clear right now?",
+      "gold": 1.0,
+      "score": 0.9,
+      "raw": "0.9",
+      "elapsed": 0.717439669999294
+    },
+    {
+      "i": 9,
+      "category": "yes_answerable",
+      "prompt": "What's the air quality index right now?",
+      "gold": 1.0,
+      "score": 1.0,
+      "raw": "1.00",
+      "elapsed": 0.723013669019565
+    },
+    {
+      "i": 10,
+      "category": "yes_answerable",
+      "prompt": "Is the air quality good today in Medford?",
+      "gold": 1.0,
+      "score": 0.9,
+      "raw": "0.9",
+      "elapsed": 0.7289316350361332
+    },
+    {
+      "i": 11,
+      "category": "yes_answerable",
+      "prompt": "What's the PM2.5 level right now?",
+      "gold": 1.0,
+      "score": 1.0,
+      "raw": "1.00",
+      "elapsed": 0.6871527889743447
+    },
+    {
+      "i": 12,
+      "category": "yes_answerable",
+      "prompt": "How much ozone is in the air right now?",
+      "gold": 1.0,
+      "score": 1.0,
+      "raw": "1.00",
+      "elapsed": 0.7303303990047425
+    },
+    {
+      "i": 13,
+      "category": "yes_answerable",
+      "prompt": "What's the high temperature today?",
+      "gold": 1.0,
+      "score": 0.0,
+      "raw": "0.00",
+      "elapsed": 0.727575485012494
+    },
+    {
+      "i": 14,
+      "category": "yes_answerable",
+      "prompt": "What's the low temperature tonight?",
+      "gold": 1.0,
+      "score": 1.0,
+      "raw": "1.00",
+      "elapsed": 0.7254751940490678
+    },
+    {
+      "i": 15,
+      "category": "yes_answerable",
+      "prompt": "Will it rain today in Medford?",
+      "gold": 1.0,
+      "score": 0.0,
+      "raw": "0.0",
+      "elapsed": 0.7416123469593003
+    },
+    {
+      "i": 16,
+      "category": "yes_answerable",
+      "prompt": "Is there any precipitation expected today?",
+      "gold": 1.0,
+      "score": 0.0,
+      "raw": "0.0",
+      "elapsed": 0.7478896509855986
+    },
+    {
+      "i": 17,
+      "category": "yes_answerable",
+      "prompt": "What's the UV index today?",
+      "gold": 1.0,
+      "score": 1.0,
+      "raw": "1.00",
+      "elapsed": 0.7046691830037162
+    },
+    {
+      "i": 18,
+      "category": "yes_answerable",
+      "prompt": "How humid will it get today?",
+      "gold": 1.0,
+      "score": 0.5,
+      "raw": "0.5",
+      "elapsed": 0.6918740959372371
+    },
+    {
+      "i": 19,
+      "category": "yes_answerable",
+      "prompt": "What's the forecast for tomorrow?",
+      "gold": 1.0,
+      "score": 0.9,
+      "raw": "0.9",
+      "elapsed": 0.7342535440111533
+    },
+    {
+      "i": 20,
+      "category": "yes_answerable",
+      "prompt": "Will it rain tomorrow?",
+      "gold": 1.0,
+      "score": 0.0,
+      "raw": "0.0",
+      "elapsed": 0.7017280469881371
+    },
+    {
+      "i": 21,
+      "category": "yes_answerable",
+      "prompt": "What's the high tomorrow in Medford?",
+      "gold": 1.0,
+      "score": 0.99,
+      "raw": "0.99",
+      "elapsed": 0.7283090100390837
+    },
+    {
+      "i": 22,
+      "category": "yes_answerable",
+      "prompt": "How cold will it get tomorrow night?",
+      "gold": 1.0,
+      "score": 0.8,
+      "raw": "0.8",
+      "elapsed": 0.6847944910405204
+    },
+    {
+      "i": 23,
+      "category": "yes_answerable",
+      "prompt": "What's the weather on April 13th?",
+      "gold": 1.0,
+      "score": 1.0,
+      "raw": "1.0",
+      "elapsed": 0.6978802360827103
+    },
+    {
+      "i": 24,
+      "category": "yes_answerable",
+      "prompt": "Will it rain on Monday?",
+      "gold": 1.0,
+      "score": 0.0,
+      "raw": "0.0",
+      "elapsed": 0.7803679059725255
+    },
+    {
+      "i": 25,
+      "category": "yes_answerable",
+      "prompt": "How much rain is expected on April 13?",
+      "gold": 1.0,
+      "score": 0.2,
+      "raw": "0.2",
+      "elapsed": 0.7067336899926886
+    },
+    {
+      "i": 26,
+      "category": "yes_answerable",
+      "prompt": "What's Tuesday's forecast?",
+      "gold": 1.0,
+      "score": 0.9,
+      "raw": "0.9",
+      "elapsed": 0.672392904991284
+    },
+    {
+      "i": 27,
+      "category": "yes_answerable",
+      "prompt": "How hot will it get on April 14?",
+      "gold": 1.0,
+      "score": 1.0,
+      "raw": "1.00",
+      "elapsed": 0.7821666999952868
+    },
+    {
+      "i": 28,
+      "category": "yes_answerable",
+      "prompt": "What's the high on Wednesday in Medford?",
+      "gold": 1.0,
+      "score": 0.99,
+      "raw": "0.99",
+      "elapsed": 0.7648675960954279
+    },
+    {
+      "i": 29,
+      "category": "yes_answerable",
+      "prompt": "Will it be overcast on Wednesday?",
+      "gold": 1.0,
+      "score": 0.0,
+      "raw": "0.0",
+      "elapsed": 0.7022145970258862
+    },
+    {
+      "i": 30,
+      "category": "yes_answerable",
+      "prompt": "What's Thursday looking like?",
+      "gold": 1.0,
+      "score": 0.8,
+      "raw": "0.8",
+      "elapsed": 0.732231008936651
+    },
+    {
+      "i": 31,
+      "category": "yes_answerable",
+      "prompt": "How hot will it get on April 15?",
+      "gold": 1.0,
+      "score": 1.0,
+      "raw": "1.00",
+      "elapsed": 0.7075937069021165
+    },
+    {
+      "i": 32,
+      "category": "yes_answerable",
+      "prompt": "Will there be rain on April 15?",
+      "gold": 1.0,
+      "score": 1.0,
+      "raw": "1.0",
+      "elapsed": 0.7415037140017375
+    },
+    {
+      "i": 33,
+      "category": "yes_answerable",
+      "prompt": "What's the UV index on Thursday?",
+      "gold": 1.0,
+      "score": 0.9,
+      "raw": "0.9",
+      "elapsed": 0.7007904920028523
+    },
+    {
+      "i": 34,
+      "category": "yes_answerable",
+      "prompt": "What's Friday's weather in Medford?",
+      "gold": 1.0,
+      "score": 1.0,
+      "raw": "1.0",
+      "elapsed": 0.7489607769530267
+    },
+    {
+      "i": 35,
+      "category": "yes_answerable",
+      "prompt": "Will it rain on April 16?",
+      "gold": 1.0,
+      "score": 0.0,
+      "raw": "0.0",
+      "elapsed": 0.6972464320715517
+    },
+    {
+      "i": 36,
+      "category": "yes_answerable",
+      "prompt": "What's Saturday's forecast?",
+      "gold": 1.0,
+      "score": 0.9,
+      "raw": "0.9",
+      "elapsed": 0.7388285839697346
+    },
+    {
+      "i": 37,
+      "category": "yes_answerable",
+      "prompt": "How warm will it be on April 17?",
+      "gold": 1.0,
+      "score": 1.0,
+      "raw": "1.00",
+      "elapsed": 0.7007497580489144
+    },
+    {
+      "i": 38,
+      "category": "yes_answerable",
+      "prompt": "What's the forecast for the next few days?",
+      "gold": 1.0,
+      "score": 1.0,
+      "raw": "1.0",
+      "elapsed": 0.714111645007506
+    },
+    {
+      "i": 39,
+      "category": "yes_answerable",
+      "prompt": "Give me this week's weather.",
+      "gold": 1.0,
+      "score": 0.9,
+      "raw": "0.9",
+      "elapsed": 0.7646073549985886
+    },
+    {
+      "i": 40,
+      "category": "yes_answerable",
+      "prompt": "What's the hottest day this week in Medford?",
+      "gold": 1.0,
+      "score": 0.9,
+      "raw": "0.9",
+      "elapsed": 0.704111832077615
+    },
+    {
+      "i": 41,
+      "category": "yes_answerable",
+      "prompt": "Which day this week has the most rain?",
+      "gold": 1.0,
+      "score": 0.0,
+      "raw": "0.0",
+      "elapsed": 0.7035375109408051
+    },
+    {
+      "i": 42,
+      "category": "yes_answerable",
+      "prompt": "Are we expecting any rain this week?",
+      "gold": 1.0,
+      "score": 0.8,
+      "raw": "0.8",
+      "elapsed": 0.7265492320293561
+    },
+    {
+      "i": 43,
+      "category": "yes_answerable",
+      "prompt": "Is it going to warm up later this week?",
+      "gold": 1.0,
+      "score": 0.7,
+      "raw": "0.7",
+      "elapsed": 0.7298740280093625
+    },
+    {
+      "i": 44,
+      "category": "yes_answerable",
+      "prompt": "What's the coldest night this week?",
+      "gold": 1.0,
+      "score": 0.0,
+      "raw": "43.0",
+      "elapsed": 0.8349039109889418
+    },
+    {
+      "i": 45,
+      "category": "yes_answerable",
+      "prompt": "How's the weather looking for the rest of the week?",
+      "gold": 1.0,
+      "score": 0.9,
+      "raw": "0.90",
+      "elapsed": 0.7048869170248508
+    },
+    {
+      "i": 46,
+      "category": "yes_answerable",
+      "prompt": "Will I need an umbrella tomorrow?",
+      "gold": 1.0,
+      "score": 0.0,
+      "raw": "0.0",
+      "elapsed": 0.7747159090358764
+    },
+    {
+      "i": 47,
+      "category": "yes_answerable",
+      "prompt": "Should I wear a jacket today?",
+      "gold": 1.0,
+      "score": 0.8,
+      "raw": "0.8",
+      "elapsed": 0.7494187969714403
+    },
+    {
+      "i": 48,
+      "category": "yes_answerable",
+      "prompt": "Is it warmer today than tomorrow will be?",
+      "gold": 1.0,
+      "score": 0.3,
+      "raw": "0.3",
+      "elapsed": 0.6726616139058024
+    },
+    {
+      "i": 49,
+      "category": "yes_answerable",
+      "prompt": "Will Thursday be warmer than today?",
+      "gold": 1.0,
+      "score": 0.8,
+      "raw": "0.8",
+      "elapsed": 0.6731734779896215
+    },
+    {
+      "i": 50,
+      "category": "yes_answerable",
+      "prompt": "Is it going to be sunny or overcast today?",
+      "gold": 1.0,
+      "score": 0.7,
+      "raw": "0.7",
+      "elapsed": 0.7185844460036606
+    },
+    {
+      "i": 51,
+      "category": "no_small_talk",
+      "prompt": "Nice weather we're having, huh.",
+      "gold": 0.0,
+      "score": 0.0,
+      "raw": "0.00",
+      "elapsed": 0.7336346260271966
+    },
+    {
+      "i": 52,
+      "category": "no_small_talk",
+      "prompt": "The weather's been crazy lately.",
+      "gold": 0.0,
+      "score": 0.0,
+      "raw": "0.00",
+      "elapsed": 0.9519631180446595
+    },
+    {
+      "i": 53,
+      "category": "no_small_talk",
+      "prompt": "I love how spring is finally here.",
+      "gold": 0.0,
+      "score": 0.0,
+      "raw": "0.00",
+      "elapsed": 0.7514629230136052
+    },
+    {
+      "i": 54,
+      "category": "no_small_talk",
+      "prompt": "Yesterday was such a beautiful day.",
+      "gold": 0.0,
+      "score": 0.0,
+      "raw": "0.00",
+      "elapsed": 0.6909947809763253
+    },
+    {
+      "i": 55,
+      "category": "no_small_talk",
+      "prompt": "Ugh, I hate this cold.",
+      "gold": 0.0,
+      "score": 0.0,
+      "raw": "0.00",
+      "elapsed": 0.7109977980144322
+    },
+    {
+      "i": 56,
+      "category": "no_small_talk",
+      "prompt": "Remember that blizzard last year?",
+      "gold": 0.0,
+      "score": 0.0,
+      "raw": "0.00",
+      "elapsed": 0.8962206779979169
+    },
+    {
+      "i": 57,
+      "category": "no_small_talk",
+      "prompt": "Weather, weather, weather, that's all anyone talks about.",
+      "gold": 0.0,
+      "score": 1.0,
+      "raw": "1.0",
+      "elapsed": 0.6840907540172338
+    },
+    {
+      "i": 58,
+      "category": "no_small_talk",
+      "prompt": "Good morning!",
+      "gold": 0.0,
+      "score": 0.0,
+      "raw": "0.00",
+      "elapsed": 0.7061417980585247
+    },
+    {
+      "i": 59,
+      "category": "no_small_talk",
+      "prompt": "Hope you're having a great day.",
+      "gold": 0.0,
+      "score": 0.0,
+      "raw": "0.00",
+      "elapsed": 0.7365335469366983
+    },
+    {
+      "i": 60,
+      "category": "no_small_talk",
+      "prompt": "The weather reminds me of when I was a kid.",
+      "gold": 0.0,
+      "score": 0.0,
+      "raw": "0.00",
+      "elapsed": 0.6702349679544568
+    },
+    {
+      "i": 61,
+      "category": "no_small_talk",
+      "prompt": "I wish it were summer already.",
+      "gold": 0.0,
+      "score": 0.0,
+      "raw": "0.00",
+      "elapsed": 0.7069361800095066
+    },
+    {
+      "i": 62,
+      "category": "no_small_talk",
+      "prompt": "Small talk about the weather is so boring.",
+      "gold": 0.0,
+      "score": 0.0,
+      "raw": "0.00",
+      "elapsed": 0.7288247059332207
+    },
+    {
+      "i": 63,
+      "category": "no_small_talk",
+      "prompt": "Weather is a fun topic for conversation starters.",
+      "gold": 0.0,
+      "score": 0.0,
+      "raw": "0.00",
+      "elapsed": 0.72367888095323
+    },
+    {
+      "i": 64,
+      "category": "no_small_talk",
+      "prompt": "I like rainy days, they're cozy.",
+      "gold": 0.0,
+      "score": 0.0,
+      "raw": "0.00",
+      "elapsed": 0.9466593359829858
+    },
+    {
+      "i": 65,
+      "category": "no_small_talk",
+      "prompt": "Sunshine always puts me in a good mood.",
+      "gold": 0.0,
+      "score": 0.0,
+      "raw": "0.00",
+      "elapsed": 0.8382692399900407
+    },
+    {
+      "i": 66,
+      "category": "no_small_talk",
+      "prompt": "My grandpa used to predict weather by his knee.",
+      "gold": 0.0,
+      "score": 0.0,
+      "raw": "0.00",
+      "elapsed": 0.7263113959925249
+    },
+    {
+      "i": 67,
+      "category": "no_small_talk",
+      "prompt": "Climate and weather aren't the same thing, you know.",
+      "gold": 0.0,
+      "score": 0.0,
+      "raw": "0.00",
+      "elapsed": 0.7233047719346359
+    },
+    {
+      "i": 68,
+      "category": "no_small_talk",
+      "prompt": "Let's talk about something other than the weather.",
+      "gold": 0.0,
+      "score": 0.0,
+      "raw": "0.00",
+      "elapsed": 0.6917737940093502
+    },
+    {
+      "i": 69,
+      "category": "no_small_talk",
+      "prompt": "I'm going for a walk.",
+      "gold": 0.0,
+      "score": 0.0,
+      "raw": "0.00",
+      "elapsed": 0.7255017890129238
+    },
+    {
+      "i": 70,
+      "category": "no_small_talk",
+      "prompt": "What should I have for lunch?",
+      "gold": 0.0,
+      "score": 0.0,
+      "raw": "0.00",
+      "elapsed": 0.7937162750167772
+    },
+    {
+      "i": 71,
+      "category": "no_code",
+      "prompt": "How does the weather fetch script work?",
+      "gold": 0.0,
+      "score": 0.0,
+      "raw": "0.00",
+      "elapsed": 0.8247461060527712
+    },
+    {
+      "i": 72,
+      "category": "no_code",
+      "prompt": "Which API are we using to get the weather data?",
+      "gold": 0.0,
+      "score": 0.0,
+      "raw": "0.00",
+      "elapsed": 0.8617703809868544
+    },
+    {
+      "i": 73,
+      "category": "no_code",
+      "prompt": "Where is the weather cron job configured?",
+      "gold": 0.0,
+      "score": 0.0,
+      "raw": "0.0",
+      "elapsed": 0.7076367361005396
+    },
+    {
+      "i": 74,
+      "category": "no_code",
+      "prompt": "Show me the code that pulls the forecast.",
+      "gold": 0.0,
+      "score": 0.0,
+      "raw": "0.00",
+      "elapsed": 0.7056367030600086
+    },
+    {
+      "i": 75,
+      "category": "no_code",
+      "prompt": "How often does weather.json get refreshed?",
+      "gold": 0.0,
+      "score": 0.0,
+      "raw": "0.0",
+      "elapsed": 0.6848927440587431
+    },
+    {
+      "i": 76,
+      "category": "no_code",
+      "prompt": "Why is weather.json stored under vessence-data/cache?",
+      "gold": 0.0,
+      "score": 0.0,
+      "raw": "0.0",
+      "elapsed": 0.744715131004341
+    },
+    {
+      "i": 77,
+      "category": "no_code",
+      "prompt": "Can you refactor fetch_weather.py?",
+      "gold": 0.0,
+      "score": 0.0,
+      "raw": "0.0",
+      "elapsed": 0.8021790849743411
+    },
+    {
+      "i": 78,
+      "category": "no_code",
+      "prompt": "Add a unit test for the weather parser.",
+      "gold": 0.0,
+      "score": 0.0,
+      "raw": "0.00",
+      "elapsed": 0.710081277997233
+    },
+    {
+      "i": 79,
+      "category": "no_code",
+      "prompt": "How is the weather data injected into the prompt?",
+      "gold": 0.0,
+      "score": 0.0,
+      "raw": "0.00",
+      "elapsed": 0.6929172219242901
+    },
+    {
+      "i": 80,
+      "category": "no_code",
+      "prompt": "What format does the weather JSON use?",
+      "gold": 0.0,
+      "score": 0.0,
+      "raw": "0.00",
+      "elapsed": 0.6646911369170994
+    },
+    {
+      "i": 81,
+      "category": "no_code",
+      "prompt": "Write a function that formats the weather into a short string.",
+      "gold": 0.0,
+      "score": 0.0,
+      "raw": "0.00",
+      "elapsed": 0.6708898190408945
+    },
+    {
+      "i": 82,
+      "category": "no_code",
+      "prompt": "Why does the weather cron log go to weather_cron.log?",
+      "gold": 0.0,
+      "score": 0.0,
+      "raw": "0.0",
+      "elapsed": 0.6954720210051164
+    },
+    {
+      "i": 83,
+      "category": "no_code",
+      "prompt": "Can we switch the weather API to a paid provider?",
+      "gold": 0.0,
+      "score": 0.0,
+      "raw": "0.00",
+      "elapsed": 0.6767147139180452
+    },
+    {
+      "i": 84,
+      "category": "no_code",
+      "prompt": "How do we handle errors if the weather fetch fails?",
+      "gold": 0.0,
+      "score": 0.0,
+      "raw": "0.00",
+      "elapsed": 0.6855839929776266
+    },
+    {
+      "i": 85,
+      "category": "no_code",
+      "prompt": "Explain the schema of the weather cache file.",
+      "gold": 0.0,
+      "score": 0.0,
+      "raw": "0.00",
+      "elapsed": 0.6901637119008228
+    },
+    {
+      "i": 86,
+      "category": "no_unanswerable",
+      "prompt": "What's the weather in Tokyo right now?",
+      "gold": 0.0,
+      "score": 0.0,
+      "raw": "0.00",
+      "elapsed": 0.7040032530203462
+    },
+    {
+      "i": 87,
+      "category": "no_unanswerable",
+      "prompt": "How's the weather in San Francisco today?",
+      "gold": 0.0,
+      "score": 0.0,
+      "raw": "0.00",
+      "elapsed": 0.6963533030357212
+    },
+    {
+      "i": 88,
+      "category": "no_unanswerable",
+      "prompt": "Will it snow in Boston in December?",
+      "gold": 0.0,
+      "score": 0.0,
+      "raw": "0.00",
+      "elapsed": 0.7207383590284735
+    },
+    {
+      "i": 89,
+      "category": "no_unanswerable",
+      "prompt": "What was the temperature in Medford last Tuesday?",
+      "gold": 0.0,
+      "score": 0.99,
+      "raw": "0.99",
+      "elapsed": 0.6763958979863673
+    },
+    {
+      "i": 90,
+      "category": "no_unanswerable",
+      "prompt": "What was yesterday's high?",
+      "gold": 0.0,
+      "score": 0.0,
+      "raw": "0.00",
+      "elapsed": 0.6689569710288197
+    },
+    {
+      "i": 91,
+      "category": "no_unanswerable",
+      "prompt": "How much did it rain last week?",
+      "gold": 0.0,
+      "score": 0.0,
+      "raw": "0.0",
+      "elapsed": 0.609196514938958
+    },
+    {
+      "i": 92,
+      "category": "no_unanswerable",
+      "prompt": "What's the weather going to be like in three weeks?",
+      "gold": 0.0,
+      "score": 0.75,
+      "raw": "0.75",
+      "elapsed": 0.6829221419757232
+    },
+    {
+      "i": 93,
+      "category": "no_unanswerable",
+      "prompt": "Will there be a hurricane next month?",
+      "gold": 0.0,
+      "score": 0.0,
+      "raw": "0.0",
+      "elapsed": 0.6703344739507884
+    },
+    {
+      "i": 94,
+      "category": "no_unanswerable",
+      "prompt": "What's the dew point right now?",
+      "gold": 0.0,
+      "score": 0.3,
+      "raw": "0.3",
+      "elapsed": 0.716047456022352
+    },
+    {
+      "i": 95,
+      "category": "no_unanswerable",
+      "prompt": "What direction is the wind blowing from?",
+      "gold": 0.0,
+      "score": 0.0,
+      "raw": "0.00",
+      "elapsed": 0.7052807359723374
+    },
+    {
+      "i": 96,
+      "category": "no_unanswerable",
+      "prompt": "What's the barometric pressure right now?",
+      "gold": 0.0,
+      "score": 0.0,
+      "raw": "0.00",
+      "elapsed": 0.7105352970538661
+    },
+    {
+      "i": 97,
+      "category": "no_unanswerable",
+      "prompt": "When is sunrise tomorrow in Medford?",
+      "gold": 0.0,
+      "score": 0.0,
+      "raw": "0.00",
+      "elapsed": 0.6749388080788776
+    },
+    {
+      "i": 98,
+      "category": "no_unanswerable",
+      "prompt": "What time does the sun set today?",
+      "gold": 0.0,
+      "score": 0.0,
+      "raw": "0.00",
+      "elapsed": 0.7224491200176999
+    },
+    {
+      "i": 99,
+      "category": "no_unanswerable",
+      "prompt": "What's the pollen count right now?",
+      "gold": 0.0,
+      "score": 0.0,
+      "raw": "0.00",
+      "elapsed": 0.7122881188988686
+    },
+    {
+      "i": 100,
+      "category": "no_unanswerable",
+      "prompt": "How long will this weather pattern last into May?",
+      "gold": 0.0,
+      "score": 0.3,
+      "raw": "0.3",
+      "elapsed": 0.6745810129214078
+    }
+  ]
+}

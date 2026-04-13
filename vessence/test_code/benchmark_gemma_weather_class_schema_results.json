@@ -1,0 +1,910 @@
+{
+  "model": "gemma4:e2b",
+  "mode": "schema_context_3label",
+  "total": 100,
+  "avg_ms": 665.0775189825799,
+  "p50_ms": 668.9229500479996,
+  "p95_ms": 696.6566930059344,
+  "results": [
+    {
+      "i": 1,
+      "category": "yes_answerable",
+      "prompt": "What's the temperature in Medford right now?",
+      "gold": "HIGH",
+      "label": "HIGH",
+      "raw": "High",
+      "elapsed": 0.7590495320037007
+    },
+    {
+      "i": 2,
+      "category": "yes_answerable",
+      "prompt": "How warm is it outside?",
+      "gold": "HIGH",
+      "label": "MEDIUM",
+      "raw": "Medium",
+      "elapsed": 0.6634005689993501
+    },
+    {
+      "i": 3,
+      "category": "yes_answerable",
+      "prompt": "Is it cold out today?",
+      "gold": "HIGH",
+      "label": "MEDIUM",
+      "raw": "Medium",
+      "elapsed": 0.6795440749265254
+    },
+    {
+      "i": 4,
+      "category": "yes_answerable",
+      "prompt": "What does it feel like outside right now?",
+      "gold": "HIGH",
+      "label": "HIGH",
+      "raw": "High",
+      "elapsed": 0.6966566930059344
+    },
+    {
+      "i": 5,
+      "category": "yes_answerable",
+      "prompt": "What's the humidity like right now in Medford?",
+      "gold": "HIGH",
+      "label": "HIGH",
+      "raw": "High",
+      "elapsed": 0.5520467890892178
+    },
+    {
+      "i": 6,
+      "category": "yes_answerable",
+      "prompt": "How windy is it outside?",
+      "gold": "HIGH",
+      "label": "HIGH",
+      "raw": "High",
+      "elapsed": 0.6895300979958847
+    },
+    {
+      "i": 7,
+      "category": "yes_answerable",
+      "prompt": "What are the current conditions in Medford?",
+      "gold": "HIGH",
+      "label": "HIGH",
+      "raw": "High",
+      "elapsed": 0.7664794190786779
+    },
+    {
+      "i": 8,
+      "category": "yes_answerable",
+      "prompt": "Is the sky clear right now?",
+      "gold": "HIGH",
+      "label": "HIGH",
+      "raw": "High",
+      "elapsed": 0.7692494089715183
+    },
+    {
+      "i": 9,
+      "category": "yes_answerable",
+      "prompt": "What's the air quality index right now?",
+      "gold": "HIGH",
+      "label": "HIGH",
+      "raw": "High",
+      "elapsed": 0.7576238599140197
+    },
+    {
+      "i": 10,
+      "category": "yes_answerable",
+      "prompt": "Is the air quality good today in Medford?",
+      "gold": "HIGH",
+      "label": "HIGH",
+      "raw": "High",
+      "elapsed": 0.6383825599914417
+    },
+    {
+      "i": 11,
+      "category": "yes_answerable",
+      "prompt": "What's the PM2.5 level right now?",
+      "gold": "HIGH",
+      "label": "HIGH",
+      "raw": "High",
+      "elapsed": 0.6324317379621789
+    },
+    {
+      "i": 12,
+      "category": "yes_answerable",
+      "prompt": "How much ozone is in the air right now?",
+      "gold": "HIGH",
+      "label": "HIGH",
+      "raw": "High",
+      "elapsed": 0.677554099005647
+    },
+    {
+      "i": 13,
+      "category": "yes_answerable",
+      "prompt": "What's the high temperature today?",
+      "gold": "HIGH",
+      "label": "HIGH",
+      "raw": "High",
+      "elapsed": 0.6598232530523092
+    },
+    {
+      "i": 14,
+      "category": "yes_answerable",
+      "prompt": "What's the low temperature tonight?",
+      "gold": "HIGH",
+      "label": "MEDIUM",
+      "raw": "Medium",
+      "elapsed": 0.6643328960053623
+    },
+    {
+      "i": 15,
+      "category": "yes_answerable",
+      "prompt": "Will it rain today in Medford?",
+      "gold": "HIGH",
+      "label": "MEDIUM",
+      "raw": "Medium",
+      "elapsed": 0.6689229500479996
+    },
+    {
+      "i": 16,
+      "category": "yes_answerable",
+      "prompt": "Is there any precipitation expected today?",
+      "gold": "HIGH",
+      "label": "HIGH",
+      "raw": "High",
+      "elapsed": 0.6527005559764802
+    },
+    {
+      "i": 17,
+      "category": "yes_answerable",
+      "prompt": "What's the UV index today?",
+      "gold": "HIGH",
+      "label": "HIGH",
+      "raw": "High",
+      "elapsed": 0.6938765950035304
+    },
+    {
+      "i": 18,
+      "category": "yes_answerable",
+      "prompt": "How humid will it get today?",
+      "gold": "HIGH",
+      "label": "HIGH",
+      "raw": "High",
+      "elapsed": 0.6323747590649873
+    },
+    {
+      "i": 19,
+      "category": "yes_answerable",
+      "prompt": "What's the forecast for tomorrow?",
+      "gold": "HIGH",
+      "label": "HIGH",
+      "raw": "High",
+      "elapsed": 0.6518413069425151
+    },
+    {
+      "i": 20,
+      "category": "yes_answerable",
+      "prompt": "Will it rain tomorrow?",
+      "gold": "HIGH",
+      "label": "MEDIUM",
+      "raw": "Medium",
+      "elapsed": 0.6636285500135273
+    },
+    {
+      "i": 21,
+      "category": "yes_answerable",
+      "prompt": "What's the high tomorrow in Medford?",
+      "gold": "HIGH",
+      "label": "HIGH",
+      "raw": "High",
+      "elapsed": 0.6770470110932365
+    },
+    {
+      "i": 22,
+      "category": "yes_answerable",
+      "prompt": "How cold will it get tomorrow night?",
+      "gold": "HIGH",
+      "label": "MEDIUM",
+      "raw": "Medium",
+      "elapsed": 0.6584511570399627
+    },
+    {
+      "i": 23,
+      "category": "yes_answerable",
+      "prompt": "What's the weather on April 13th?",
+      "gold": "HIGH",
+      "label": "HIGH",
+      "raw": "High",
+      "elapsed": 0.673261538031511
+    },
+    {
+      "i": 24,
+      "category": "yes_answerable",
+      "prompt": "Will it rain on Monday?",
+      "gold": "HIGH",
+      "label": "MEDIUM",
+      "raw": "Medium",
+      "elapsed": 0.6797633030219004
+    },
+    {
+      "i": 25,
+      "category": "yes_answerable",
+      "prompt": "How much rain is expected on April 13?",
+      "gold": "HIGH",
+      "label": "HIGH",
+      "raw": "High",
+      "elapsed": 0.647654548054561
+    },
+    {
+      "i": 26,
+      "category": "yes_answerable",
+      "prompt": "What's Tuesday's forecast?",
+      "gold": "HIGH",
+      "label": "MEDIUM",
+      "raw": "Medium",
+      "elapsed": 0.6860877400031313
+    },
+    {
+      "i": 27,
+      "category": "yes_answerable",
+      "prompt": "How hot will it get on April 14?",
+      "gold": "HIGH",
+      "label": "HIGH",
+      "raw": "High",
+      "elapsed": 0.6606804130133241
+    },
+    {
+      "i": 28,
+      "category": "yes_answerable",
+      "prompt": "What's the high on Wednesday in Medford?",
+      "gold": "HIGH",
+      "label": "HIGH",
+      "raw": "High",
+      "elapsed": 0.6725128750549629
+    },
+    {
+      "i": 29,
+      "category": "yes_answerable",
+      "prompt": "Will it be overcast on Wednesday?",
+      "gold": "HIGH",
+      "label": "MEDIUM",
+      "raw": "Medium",
+      "elapsed": 0.6491299190092832
+    },
+    {
+      "i": 30,
+      "category": "yes_answerable",
+      "prompt": "What's Thursday looking like?",
+      "gold": "HIGH",
+      "label": "MEDIUM",
+      "raw": "Medium",
+      "elapsed": 0.6294270310318097
+    },
+    {
+      "i": 31,
+      "category": "yes_answerable",
+      "prompt": "How hot will it get on April 15?",
+      "gold": "HIGH",
+      "label": "HIGH",
+      "raw": "High",
+      "elapsed": 0.6501380649860948
+    },
+    {
+      "i": 32,
+      "category": "yes_answerable",
+      "prompt": "Will there be rain on April 15?",
+      "gold": "HIGH",
+      "label": "MEDIUM",
+      "raw": "Medium",
+      "elapsed": 0.674478198052384
+    },
+    {
+      "i": 33,
+      "category": "yes_answerable",
+      "prompt": "What's the UV index on Thursday?",
+      "gold": "HIGH",
+      "label": "HIGH",
+      "raw": "High",
+      "elapsed": 0.6799435489811003
+    },
+    {
+      "i": 34,
+      "category": "yes_answerable",
+      "prompt": "What's Friday's weather in Medford?",
+      "gold": "HIGH",
+      "label": "HIGH",
+      "raw": "High",
+      "elapsed": 0.6761420300463215
+    },
+    {
+      "i": 35,
+      "category": "yes_answerable",
+      "prompt": "Will it rain on April 16?",
+      "gold": "HIGH",
+      "label": "HIGH",
+      "raw": "High",
+      "elapsed": 0.682318735984154
+    },
+    {
+      "i": 36,
+      "category": "yes_answerable",
+      "prompt": "What's Saturday's forecast?",
+      "gold": "HIGH",
+      "label": "HIGH",
+      "raw": "High",
+      "elapsed": 0.6540013949852437
+    },
+    {
+      "i": 37,
+      "category": "yes_answerable",
+      "prompt": "How warm will it be on April 17?",
+      "gold": "HIGH",
+      "label": "HIGH",
+      "raw": "High",
+      "elapsed": 0.6750116070033982
+    },
+    {
+      "i": 38,
+      "category": "yes_answerable",
+      "prompt": "What's the forecast for the next few days?",
+      "gold": "HIGH",
+      "label": "HIGH",
+      "raw": "High",
+      "elapsed": 0.6702686360804364
+    },
+    {
+      "i": 39,
+      "category": "yes_answerable",
+      "prompt": "Give me this week's weather.",
+      "gold": "HIGH",
+      "label": "HIGH",
+      "raw": "High",
+      "elapsed": 0.6825682009803131
+    },
+    {
+      "i": 40,
+      "category": "yes_answerable",
+      "prompt": "What's the hottest day this week in Medford?",
+      "gold": "HIGH",
+      "label": "MEDIUM",
+      "raw": "Medium",
+      "elapsed": 0.6861239259596914
+    },
+    {
+      "i": 41,
+      "category": "yes_answerable",
+      "prompt": "Which day this week has the most rain?",
+      "gold": "HIGH",
+      "label": "MEDIUM",
+      "raw": "Medium",
+      "elapsed": 0.6793403869960457
+    },
+    {
+      "i": 42,
+      "category": "yes_answerable",
+      "prompt": "Are we expecting any rain this week?",
+      "gold": "HIGH",
+      "label": "MEDIUM",
+      "raw": "Medium",
+      "elapsed": 0.6883943959837779
+    },
+    {
+      "i": 43,
+      "category": "yes_answerable",
+      "prompt": "Is it going to warm up later this week?",
+      "gold": "HIGH",
+      "label": "MEDIUM",
+      "raw": "Medium",
+      "elapsed": 0.6647137999534607
+    },
+    {
+      "i": 44,
+      "category": "yes_answerable",
+      "prompt": "What's the coldest night this week?",
+      "gold": "HIGH",
+      "label": "MEDIUM",
+      "raw": "Medium",
+      "elapsed": 0.6328563559800386
+    },
+    {
+      "i": 45,
+      "category": "yes_answerable",
+      "prompt": "How's the weather looking for the rest of the week?",
+      "gold": "HIGH",
+      "label": "HIGH",
+      "raw": "High",
+      "elapsed": 0.6440673830220476
+    },
+    {
+      "i": 46,
+      "category": "yes_answerable",
+      "prompt": "Will I need an umbrella tomorrow?",
+      "gold": "HIGH",
+      "label": "MEDIUM",
+      "raw": "Medium",
+      "elapsed": 0.6455093539552763
+    },
+    {
+      "i": 47,
+      "category": "yes_answerable",
+      "prompt": "Should I wear a jacket today?",
+      "gold": "HIGH",
+      "label": "MEDIUM",
+      "raw": "Medium",
+      "elapsed": 0.6637166109867394
+    },
+    {
+      "i": 48,
+      "category": "yes_answerable",
+      "prompt": "Is it warmer today than tomorrow will be?",
+      "gold": "HIGH",
+      "label": "MEDIUM",
+      "raw": "Medium",
+      "elapsed": 0.6794431530870497
+    },
+    {
+      "i": 49,
+      "category": "yes_answerable",
+      "prompt": "Will Thursday be warmer than today?",
+      "gold": "HIGH",
+      "label": "MEDIUM",
+      "raw": "Medium",
+      "elapsed": 0.6581258500227705
+    },
+    {
+      "i": 50,
+      "category": "yes_answerable",
+      "prompt": "Is it going to be sunny or overcast today?",
+      "gold": "HIGH",
+      "label": "HIGH",
+      "raw": "High",
+      "elapsed": 0.6590402839938179
+    },
+    {
+      "i": 51,
+      "category": "no_small_talk",
+      "prompt": "Nice weather we're having, huh.",
+      "gold": "LOW",
+      "label": "LOW",
+      "raw": "Low",
+      "elapsed": 0.6610806119861081
+    },
+    {
+      "i": 52,
+      "category": "no_small_talk",
+      "prompt": "The weather's been crazy lately.",
+      "gold": "LOW",
+      "label": "LOW",
+      "raw": "Low",
+      "elapsed": 0.631092855008319
+    },
+    {
+      "i": 53,
+      "category": "no_small_talk",
+      "prompt": "I love how spring is finally here.",
+      "gold": "LOW",
+      "label": "LOW",
+      "raw": "Low",
+      "elapsed": 0.6793602290563285
+    },
+    {
+      "i": 54,
+      "category": "no_small_talk",
+      "prompt": "Yesterday was such a beautiful day.",
+      "gold": "LOW",
+      "label": "LOW",
+      "raw": "Low",
+      "elapsed": 0.6682691649766639
+    },
+    {
+      "i": 55,
+      "category": "no_small_talk",
+      "prompt": "Ugh, I hate this cold.",
+      "gold": "LOW",
+      "label": "LOW",
+      "raw": "Low",
+      "elapsed": 0.6669284070376307
+    },
+    {
+      "i": 56,
+      "category": "no_small_talk",
+      "prompt": "Remember that blizzard last year?",
+      "gold": "LOW",
+      "label": "LOW",
+      "raw": "Low",
+      "elapsed": 0.6437372269574553
+    },
+    {
+      "i": 57,
+      "category": "no_small_talk",
+      "prompt": "Weather, weather, weather, that's all anyone talks about.",
+      "gold": "LOW",
+      "label": "LOW",
+      "raw": "Low",
+      "elapsed": 0.6756902120541781
+    },
+    {
+      "i": 58,
+      "category": "no_small_talk",
+      "prompt": "Good morning!",
+      "gold": "LOW",
+      "label": "LOW",
+      "raw": "Low",
+      "elapsed": 0.6859518269775435
+    },
+    {
+      "i": 59,
+      "category": "no_small_talk",
+      "prompt": "Hope you're having a great day.",
+      "gold": "LOW",
+      "label": "LOW",
+      "raw": "Low",
+      "elapsed": 0.6520537229953334
+    },
+    {
+      "i": 60,
+      "category": "no_small_talk",
+      "prompt": "The weather reminds me of when I was a kid.",
+      "gold": "LOW",
+      "label": "LOW",
+      "raw": "Low",
+      "elapsed": 0.5472837849520147
+    },
+    {
+      "i": 61,
+      "category": "no_small_talk",
+      "prompt": "I wish it were summer already.",
+      "gold": "LOW",
+      "label": "LOW",
+      "raw": "Low",
+      "elapsed": 0.68195100792218
+    },
+    {
+      "i": 62,
+      "category": "no_small_talk",
+      "prompt": "Small talk about the weather is so boring.",
+      "gold": "LOW",
+      "label": "LOW",
+      "raw": "Low",
+      "elapsed": 0.6686144330305979
+    },
+    {
+      "i": 63,
+      "category": "no_small_talk",
+      "prompt": "Weather is a fun topic for conversation starters.",
+      "gold": "LOW",
+      "label": "LOW",
+      "raw": "Low",
+      "elapsed": 0.6698607039870694
+    },
+    {
+      "i": 64,
+      "category": "no_small_talk",
+      "prompt": "I like rainy days, they're cozy.",
+      "gold": "LOW",
+      "label": "LOW",
+      "raw": "Low",
+      "elapsed": 0.686063747969456
+    },
+    {
+      "i": 65,
+      "category": "no_small_talk",
+      "prompt": "Sunshine always puts me in a good mood.",
+      "gold": "LOW",
+      "label": "LOW",
+      "raw": "Low",
+      "elapsed": 0.6675970971118659
+    },
+    {
+      "i": 66,
+      "category": "no_small_talk",
+      "prompt": "My grandpa used to predict weather by his knee.",
+      "gold": "LOW",
+      "label": "LOW",
+      "raw": "Low",
+      "elapsed": 0.6704834509873763
+    },
+    {
+      "i": 67,
+      "category": "no_small_talk",
+      "prompt": "Climate and weather aren't the same thing, you know.",
+      "gold": "LOW",
+      "label": "LOW",
+      "raw": "Low",
+      "elapsed": 0.6768764749867842
+    },
+    {
+      "i": 68,
+      "category": "no_small_talk",
+      "prompt": "Let's talk about something other than the weather.",
+      "gold": "LOW",
+      "label": "LOW",
+      "raw": "Low",
+      "elapsed": 0.6639039219589904
+    },
+    {
+      "i": 69,
+      "category": "no_small_talk",
+      "prompt": "I'm going for a walk.",
+      "gold": "LOW",
+      "label": "LOW",
+      "raw": "Low",
+      "elapsed": 0.6916922789532691
+    },
+    {
+      "i": 70,
+      "category": "no_small_talk",
+      "prompt": "What should I have for lunch?",
+      "gold": "LOW",
+      "label": "LOW",
+      "raw": "Low",
+      "elapsed": 0.6656412869924679
+    },
+    {
+      "i": 71,
+      "category": "no_code",
+      "prompt": "How does the weather fetch script work?",
+      "gold": "LOW",
+      "label": "LOW",
+      "raw": "Low",
+      "elapsed": 0.5980494730174541
+    },
+    {
+      "i": 72,
+      "category": "no_code",
+      "prompt": "Which API are we using to get the weather data?",
+      "gold": "LOW",
+      "label": "LOW",
+      "raw": "Low",
+      "elapsed": 0.6498007569462061
+    },
+    {
+      "i": 73,
+      "category": "no_code",
+      "prompt": "Where is the weather cron job configured?",
+      "gold": "LOW",
+      "label": "LOW",
+      "raw": "Low",
+      "elapsed": 0.6708561199484393
+    },
+    {
+      "i": 74,
+      "category": "no_code",
+      "prompt": "Show me the code that pulls the forecast.",
+      "gold": "LOW",
+      "label": "LOW",
+      "raw": "Low",
+      "elapsed": 0.684928477043286
+    },
+    {
+      "i": 75,
+      "category": "no_code",
+      "prompt": "How often does weather.json get refreshed?",
+      "gold": "LOW",
+      "label": "LOW",
+      "raw": "Low",
+      "elapsed": 0.6555189599748701
+    },
+    {
+      "i": 76,
+      "category": "no_code",
+      "prompt": "Why is weather.json stored under vessence-data/cache?",
+      "gold": "LOW",
+      "label": "LOW",
+      "raw": "Low",
+      "elapsed": 0.6754869919968769
+    },
+    {
+      "i": 77,
+      "category": "no_code",
+      "prompt": "Can you refactor fetch_weather.py?",
+      "gold": "LOW",
+      "label": "LOW",
+      "raw": "Low",
+      "elapsed": 0.6775685379980132
+    },
+    {
+      "i": 78,
+      "category": "no_code",
+      "prompt": "Add a unit test for the weather parser.",
+      "gold": "LOW",
+      "label": "LOW",
+      "raw": "Low",
+      "elapsed": 0.6874637099681422
+    },
+    {
+      "i": 79,
+      "category": "no_code",
+      "prompt": "How is the weather data injected into the prompt?",
+      "gold": "LOW",
+      "label": "LOW",
+      "raw": "Low",
+      "elapsed": 0.6641243790509179
+    },
+    {
+      "i": 80,
+      "category": "no_code",
+      "prompt": "What format does the weather JSON use?",
+      "gold": "LOW",
+      "label": "LOW",
+      "raw": "Low",
+      "elapsed": 0.6870114880148321
+    },
+    {
+      "i": 81,
+      "category": "no_code",
+      "prompt": "Write a function that formats the weather into a short string.",
+      "gold": "LOW",
+      "label": "LOW",
+      "raw": "Low",
+      "elapsed": 0.6748309520771727
+    },
+    {
+      "i": 82,
+      "category": "no_code",
+      "prompt": "Why does the weather cron log go to weather_cron.log?",
+      "gold": "LOW",
+      "label": "LOW",
+      "raw": "Low",
+      "elapsed": 0.6761401159456
+    },
+    {
+      "i": 83,
+      "category": "no_code",
+      "prompt": "Can we switch the weather API to a paid provider?",
+      "gold": "LOW",
+      "label": "LOW",
+      "raw": "Low",
+      "elapsed": 0.6700719969812781
+    },
+    {
+      "i": 84,
+      "category": "no_code",
+      "prompt": "How do we handle errors if the weather fetch fails?",
+      "gold": "LOW",
+      "label": "LOW",
+      "raw": "Low",
+      "elapsed": 0.6520107940305024
+    },
+    {
+      "i": 85,
+      "category": "no_code",
+      "prompt": "Explain the schema of the weather cache file.",
+      "gold": "LOW",
+      "label": "LOW",
+      "raw": "Low",
+      "elapsed": 0.6015867029782385
+    },
+    {
+      "i": 86,
+      "category": "no_unanswerable",
+      "prompt": "What's the weather in Tokyo right now?",
+      "gold": "LOW",
+      "label": "LOW",
+      "raw": "Low",
+      "elapsed": 0.6707866159267724
+    },
+    {
+      "i": 87,
+      "category": "no_unanswerable",
+      "prompt": "How's the weather in San Francisco today?",
+      "gold": "LOW",
+      "label": "LOW",
+      "raw": "Low",
+      "elapsed": 0.6585235530510545
+    },
+    {
+      "i": 88,
+      "category": "no_unanswerable",
+      "prompt": "Will it snow in Boston in December?",
+      "gold": "LOW",
+      "label": "LOW",
+      "raw": "Low",
+      "elapsed": 0.6687413529725745
+    },
+    {
+      "i": 89,
+      "category": "no_unanswerable",
+      "prompt": "What was the temperature in Medford last Tuesday?",
+      "gold": "LOW",
+      "label": "LOW",
+      "raw": "Low",
+      "elapsed": 0.6920503879664466
+    },
+    {
+      "i": 90,
+      "category": "no_unanswerable",
+      "prompt": "What was yesterday's high?",
+      "gold": "LOW",
+      "label": "MEDIUM",
+      "raw": "Medium",
+      "elapsed": 0.6375879300758243
+    },
+    {
+      "i": 91,
+      "category": "no_unanswerable",
+      "prompt": "How much did it rain last week?",
+      "gold": "LOW",
+      "label": "LOW",
+      "raw": "Low",
+      "elapsed": 0.6429813919821754
+    },
+    {
+      "i": 92,
+      "category": "no_unanswerable",
+      "prompt": "What's the weather going to be like in three weeks?",
+      "gold": "LOW",
+      "label": "LOW",
+      "raw": "Low",
+      "elapsed": 0.6738981830421835
+    },
+    {
+      "i": 93,
+      "category": "no_unanswerable",
+      "prompt": "Will there be a hurricane next month?",
+      "gold": "LOW",
+      "label": "LOW",
+      "raw": "Low",
+      "elapsed": 0.6454611369408667
+    },
+    {
+      "i": 94,
+      "category": "no_unanswerable",
+      "prompt": "What's the dew point right now?",
+      "gold": "LOW",
+      "label": "LOW",
+      "raw": "Low",
+      "elapsed": 0.6240559909492731
+    },
+    {
+      "i": 95,
+      "category": "no_unanswerable",
+      "prompt": "What direction is the wind blowing from?",
+      "gold": "LOW",
+      "label": "LOW",
+      "raw": "Low",
+      "elapsed": 0.5467208899790421
+    },
+    {
+      "i": 96,
+      "category": "no_unanswerable",
+      "prompt": "What's the barometric pressure right now?",
+      "gold": "LOW",
+      "label": "LOW",
+      "raw": "Low",
+      "elapsed": 0.6752646430395544
+    },
+    {
+      "i": 97,
+      "category": "no_unanswerable",
+      "prompt": "When is sunrise tomorrow in Medford?",
+      "gold": "LOW",
+      "label": "LOW",
+      "raw": "Low",
+      "elapsed": 0.6330284959403798
+    },
+    {
+      "i": 98,
+      "category": "no_unanswerable",
+      "prompt": "What time does the sun set today?",
+      "gold": "LOW",
+      "label": "LOW",
+      "raw": "Low",
+      "elapsed": 0.6406088679796085
+    },
+    {
+      "i": 99,
+      "category": "no_unanswerable",
+      "prompt": "What's the pollen count right now?",
+      "gold": "LOW",
+      "label": "LOW",
+      "raw": "Low",
+      "elapsed": 0.6747646720614284
+    },
+    {
+      "i": 100,
+      "category": "no_unanswerable",
+      "prompt": "How long will this weather pattern last into May?",
+      "gold": "LOW",
+      "label": "LOW",
+      "raw": "Low",
+      "elapsed": 0.6940287250326946
+    }
+  ]
+}
