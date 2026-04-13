@@ -123,8 +123,22 @@ if [ -d "./venv" ] && [ -f "./venv/bin/python" ]; then
     info "Virtual environment already exists at ./venv"
 else
     info "Creating virtual environment..."
-    $PYTHON_CMD -m venv ./venv
-    ok "Virtual environment created"
+    if $PYTHON_CMD -m venv ./venv 2>/dev/null; then
+        ok "Virtual environment created"
+    else
+        # Happens on Debian/Ubuntu when python3-venv isn't installed.
+        # Fall back to pip-installing virtualenv into the user site so we
+        # don't force the user through sudo/apt mid-install.
+        warn "python3 -m venv failed (likely python3-venv not installed)."
+        info "Falling back to virtualenv via --user pip install..."
+        $PYTHON_CMD -m pip install --user --break-system-packages virtualenv --quiet
+        VIRTUALENV_BIN="$HOME/.local/bin/virtualenv"
+        if [ ! -x "$VIRTUALENV_BIN" ]; then
+            VIRTUALENV_BIN="$($PYTHON_CMD -m site --user-base)/bin/virtualenv"
+        fi
+        "$VIRTUALENV_BIN" ./venv
+        ok "Virtual environment created (via virtualenv)"
+    fi
 fi
 
 info "Upgrading pip..."
@@ -134,11 +148,20 @@ info "Installing dependencies from vessence/requirements.txt..."
 info "(This may take 1-3 minutes on first run)"
 ./venv/bin/pip install -r vessence/requirements.txt --quiet
 
-# Verify key imports
-if ./venv/bin/python -c "import chromadb, fastapi, uvicorn; print('OK')" 2>/dev/null | grep -q "OK"; then
-    ok "Core packages verified (chromadb, fastapi, uvicorn)"
+# Verify the app actually imports — catches missing transitive deps that a
+# simple `import chromadb, fastapi` check would let slip through (e.g. the
+# itsdangerous / python-multipart deps that bit us once).
+if ./venv/bin/python -c "
+import sys
+sys.path.insert(0, 'vessence')
+from jane_web.main import app  # noqa: F401
+print('OK')
+" 2>/dev/null | grep -q "OK"; then
+    ok "jane_web.main imports cleanly (all deps resolved)"
 else
-    fail "Package verification failed. Check the pip install output above for errors."
+    fail "jane_web.main failed to import. Re-run with:"
+    fail "  ./venv/bin/python -c \"import sys; sys.path.insert(0,'vessence'); from jane_web.main import app\""
+    fail "to see the underlying error."
     exit 1
 fi
 
@@ -296,31 +319,20 @@ if [ "$OS_TYPE" = "Linux" ]; then
     info "Detected Linux -- using systemd user service"
 
     mkdir -p ~/.config/systemd/user
+    mkdir -p vessence-data/logs
 
     SERVICE_FILE=~/.config/systemd/user/jane-web.service
+    TEMPLATE_FILE=vessence/configs/systemd/jane-web.service
 
-    cat > "$SERVICE_FILE" << SVCEOF
-[Unit]
-Description=Jane Web Server
-After=network.target
+    if [ ! -f "$TEMPLATE_FILE" ]; then
+        fail "Missing systemd template at $TEMPLATE_FILE"
+        exit 1
+    fi
 
-[Service]
-Type=simple
-WorkingDirectory=${REPO_ROOT}/vessence
-ExecStart=${REPO_ROOT}/venv/bin/python -m uvicorn jane_web.main:app --host 127.0.0.1 --port 8081 --log-level info
-Restart=always
-RestartSec=5
-Environment=VESSENCE_HOME=${REPO_ROOT}/vessence
-Environment=VESSENCE_DATA_HOME=${REPO_ROOT}/vessence-data
-Environment=VAULT_HOME=${REPO_ROOT}/vault
-Environment=ESSENCES_DIR=${REPO_ROOT}/essences
-EnvironmentFile=${REPO_ROOT}/vessence-data/.env
-
-[Install]
-WantedBy=default.target
-SVCEOF
-
-    ok "Service file written to $SERVICE_FILE"
+    # Single source of truth: the committed template. It uses %h for the
+    # user's home directory, so no path substitution is needed.
+    cp "$TEMPLATE_FILE" "$SERVICE_FILE"
+    ok "Service file installed from $TEMPLATE_FILE → $SERVICE_FILE"
 
     systemctl --user daemon-reload
     systemctl --user enable jane-web.service 2>/dev/null

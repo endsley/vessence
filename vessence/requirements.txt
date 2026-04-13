@@ -23,3 +23,5 @@ pillow
 # Authentication
 pyotp
 authlib
+itsdangerous        # session cookies (starlette.middleware.sessions)
+python-multipart    # FastAPI form parsing

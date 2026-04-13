@@ -13,7 +13,7 @@ Environment=PYTHONPATH=%h/ambient/vessence
 WorkingDirectory=%h/ambient/vessence
 EnvironmentFile=%h/ambient/vessence-data/.env
 ExecStartPre=/bin/bash -c 'fuser -k 8081/tcp 2>/dev/null || true; sleep 1; fuser -k -9 8081/tcp 2>/dev/null || true'
-ExecStart=/home/chieh/google-adk-env/adk-venv/bin/python -m uvicorn jane_web.main:app --host 127.0.0.1 --port 8081 --log-level info
+ExecStart=%h/ambient/venv/bin/python -m uvicorn jane_web.main:app --host 127.0.0.1 --port 8081 --log-level info
 ExecStopPost=/bin/bash -c 'fuser -k -9 8081/tcp 2>/dev/null || true'
 # on-failure (not always) so a controlled SIGTERM stop (e.g. from
 # graceful_restart.sh after the proxy has been switched to the

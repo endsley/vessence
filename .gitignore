@@ -1,0 +1,24 @@
+# Runtime data — populated per-user by setup.sh / first_run_setup.py
+vessence-data/
+vault/
+essences/
+skills/
+venv/
+
+# User-specific agent config symlinks (linked from vessence/{CLAUDE,GEMINI,AGENTS}.md)
+/CLAUDE.md
+/GEMINI.md
+/AGENTS.md
+/.claude/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
