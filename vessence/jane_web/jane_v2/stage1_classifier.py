@@ -46,10 +46,16 @@ async def classify(user_prompt: str, timeout: float = 90.0) -> tuple[str, str]:
     confidence = result.get("confidence", 0.0)
 
     cls = _CLASS_MAP.get(raw_cls, "others")
-    # If the classifier returned a specific class (not DELEGATE_OPUS),
-    # it already passed its own confidence/margin thresholds → High.
-    # DELEGATE_OPUS means it wasn't confident enough → Low.
-    conf = "Low" if raw_cls == "DELEGATE_OPUS" else "High"
+    # If the wrapper doesn't know the class, treat as Low (catch-all).
+    # If the classifier returned DELEGATE_OPUS, also Low.
+    # END_CONVERSATION must be very high confidence since it destructively
+    # ends the chat with no LLM second opinion (tighter gate than 0.60).
+    if raw_cls == "DELEGATE_OPUS" or cls == "others":
+        conf = "Low"
+    elif raw_cls == "END_CONVERSATION" and confidence < 0.80:
+        conf = "Low"
+    else:
+        conf = "High"
 
     logger.info(
         "stage1_classifier: %s:%s  (raw=%s conf=%.2f margin=%.2f lat=%.0fms)",
