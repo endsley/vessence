@@ -636,6 +636,7 @@ class ChatViewModel(
                                     "contacts.sms_draft",
                                     "contacts.sms_cancel",
                                     "sync.force_sms",
+                                    "device.speak_time",
                                 )
                                 val toolResults = allToolResults.filter { it.tool !in FIRE_AND_FORGET }
                                 if (toolResults.isNotEmpty()) {

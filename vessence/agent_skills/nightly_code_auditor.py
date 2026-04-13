@@ -32,6 +32,7 @@ from pathlib import Path
 VESSENCE_HOME = Path(os.environ.get("VESSENCE_HOME", str(Path(__file__).resolve().parents[1])))
 VESSENCE_DATA_HOME = Path(os.environ.get("VESSENCE_DATA_HOME", str(Path.home() / "ambient/vessence-data")))
 WHITELIST_PATH = VESSENCE_HOME / "configs" / "auditable_modules.md"
+INTEGRATIONS_PATH = VESSENCE_HOME / "configs" / "auditable_integrations.md"
 STATE_PATH = VESSENCE_DATA_HOME / "auditor_state.json"
 AUDIT_LOG_PATH = VESSENCE_HOME / "configs" / "auto_audit_log.md"
 FAILURE_LOG_PATH = VESSENCE_HOME / "configs" / "audit_failures.md"
@@ -157,10 +158,29 @@ def phase1_generate_tests(module: dict, target_test_path: Path) -> bool:
 
     code = module_path.read_text()
     spec = module["spec"]
+
+    # Load any cross-stack integration contracts that mention this module
+    integrations = ""
+    try:
+        if INTEGRATIONS_PATH.exists():
+            full = INTEGRATIONS_PATH.read_text()
+            # Crude but effective: include the whole file if any contract
+            # mentions this module path. The file is short.
+            if module["path"] in full:
+                integrations = (
+                    "\n\nCROSS-STACK INTEGRATION CONTRACTS:\n"
+                    "This module participates in cross-stack contracts. The full\n"
+                    "contract file is below — write tests that verify the invariants\n"
+                    "for any contract where this module is the Producer:\n\n"
+                    + full
+                )
+    except Exception:
+        pass
+
     prompt = f"""You are auditing a Python module for the Vessence project.
 
 MODULE PATH: {module["path"]}
-SPEC SOURCE: {spec}
+SPEC SOURCE: {spec}{integrations}
 
 MODULE CODE:
 ```python
