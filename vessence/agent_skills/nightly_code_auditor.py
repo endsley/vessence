@@ -167,11 +167,28 @@ MODULE CODE:
 {code[:8000]}
 ```
 
-Write a comprehensive pytest file at {target_test_path} that:
-1. Tests the documented behavior from the docstring/spec
-2. Tests edge cases: empty input, malformed input, None, very long input
-3. Tests integration points (DB queries, LLM calls) using mocks if needed
-4. Each test should be independent and runnable in isolation
+Write a comprehensive pytest file at {target_test_path} that includes:
+
+1. **Behavioral tests** — verify documented behavior from docstring/spec
+2. **Edge cases** — empty input, malformed input, None, very long input
+3. **Integration points** — DB queries, LLM calls (use mocks if needed)
+4. **STRUCTURAL INVARIANTS** (CRITICAL — these catch the highest-leverage bugs):
+   - If the module has a mapping/lookup table (dict, registry), test that:
+     a. No key maps to a value that contradicts other invariants
+       (e.g. classifier wrappers must not return "High" confidence with
+        a fallback class like "others" — that's a logical contradiction)
+     b. Every key referenced elsewhere in the codebase exists in the table
+     c. Every value in the table is reachable from at least one input
+   - If the module has destructive operations (delete, end_conversation,
+     send_message, sms_send_direct, irreversible state changes), test that:
+     a. They require a strict confidence threshold (>= 0.80, not just "High")
+     b. They cannot fire on borderline / ambiguous input
+   - If the module has a class registry / handler dispatch, test that:
+     a. Every registered class has a corresponding handler OR is explicitly
+        documented as "no handler — escalates"
+     b. Every handler returns the documented shape (dict with "text" key)
+
+5. **Each test should be independent and runnable in isolation**
 
 Output ONLY the Python code, no markdown, no explanation. Use `import pytest` and proper pytest fixtures.
 Save the file at {target_test_path} using the Write tool. Do not modify the module being tested."""
