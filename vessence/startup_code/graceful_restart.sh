@@ -43,6 +43,21 @@ LOCKFILE="/tmp/jane-web-restarting.lock"
 touch "$LOCKFILE"
 log "Created healthcheck lock (prevents restart collision during ping-pong)"
 
+# ── Step 0.5: Sanity check — detect orphan uvicorn processes ──
+# If any uvicorn jane_web process is running on a port other than
+# 8081/8084, it's an orphan (e.g. someone manually nohup'd one). Kill
+# it before proceeding so we don't end up with three concurrent servers.
+ORPHAN_PIDS=$(pgrep -f "uvicorn jane_web.main:app" 2>/dev/null | while read pid; do
+    port=$(ss -ltnp 2>/dev/null | grep "pid=$pid," | grep -oP ':\K[0-9]+' | head -1)
+    if [ -n "$port" ] && [ "$port" != "8081" ] && [ "$port" != "8084" ]; then
+        echo "$pid"
+    fi
+done)
+if [ -n "$ORPHAN_PIDS" ]; then
+    log "WARN: Killing orphan uvicorn processes (not on 8081/8084): $ORPHAN_PIDS"
+    for pid in $ORPHAN_PIDS; do kill -9 "$pid" 2>/dev/null || true; done
+fi
+
 # ── Step 1: Detect current active port ──
 log "Checking current upstream..."
 CURRENT_PORT=$(curl -s http://localhost:$PROXY_PORT/proxy/status 2>/dev/null \
@@ -154,22 +169,27 @@ fi
 log "Giving old server 5s grace period for in-flight requests..."
 sleep 5
 
-# Kill old server directly by PID — do NOT use `systemctl stop`.
-# `systemctl stop` kills the entire service cgroup, which includes the NEW
-# nohup server if it was spawned from a process in that cgroup (race condition
-# observed: healthcheck restarted the service mid-ping-pong, killing new server).
-# Killing by port PID is precise: only the old server dies.
+# Stop the OLD server cleanly. With Restart=on-failure, a clean
+# systemctl stop won't trigger a respawn (only crashes do).
+# Only stop systemd if the old server was on port 8081 (systemd's port).
+# If the old server was on 8084 (previous nohup), kill by PID directly.
+if [ "$CURRENT_PORT" = "8081" ] && systemctl --user is-active jane-web.service >/dev/null 2>&1; then
+    log "Stopping systemd jane-web.service cleanly (won't respawn — Restart=on-failure)..."
+    systemctl --user stop jane-web.service 2>/dev/null || true
+    sleep 1
+fi
+
+# Backup: kill anything still bound to the old port (e.g. nohup orphan from
+# a previous graceful_restart). Exclude the NEW server PID just in case.
 OLD_SERVER_PID=$(lsof -ti:$CURRENT_PORT 2>/dev/null || true)
 if [ -n "$OLD_SERVER_PID" ]; then
-    log "Stopping old server on port $CURRENT_PORT (PID: $OLD_SERVER_PID)"
-    # Exclude the NEW server PID in case lsof picks it up transiently
+    log "Cleaning up stragglers on port $CURRENT_PORT (PID: $OLD_SERVER_PID)"
     for pid in $OLD_SERVER_PID; do
         if [ "$pid" != "$NEW_PID" ]; then
             kill "$pid" 2>/dev/null || true
         fi
     done
     sleep 2
-    # Force kill stragglers (again excluding new server)
     REMAINING=$(lsof -ti:$CURRENT_PORT 2>/dev/null || true)
     for pid in $REMAINING; do
         if [ "$pid" != "$NEW_PID" ]; then
@@ -178,12 +198,8 @@ if [ -n "$OLD_SERVER_PID" ]; then
     done
 fi
 
-# Notify systemd that the service is no longer being managed (avoids surprise restarts).
-# Use `kill --kill-who=main` (only main PID) instead of `stop` (whole cgroup).
-if systemctl --user is-active jane-web.service >/dev/null 2>&1; then
-    log "Disabling systemd jane-web.service restart supervision..."
-    systemctl --user kill --kill-who=main --signal=SIGTERM jane-web.service 2>/dev/null || true
-fi
+# (Old server was already stopped above via systemctl stop. No further
+# action needed here — Restart=on-failure ensures no respawn.)
 
 # ── Done ──
 log "=== Zero-downtime restart complete ==="
