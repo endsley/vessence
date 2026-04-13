@@ -188,47 +188,21 @@ else
 fi
 
 # ═════════════════════════════════════════════════════════════════════════════
-# Phase 5 — Copy .env Template + Generate Session Secret
+# Phase 5 — Configure Jane (delegates to first_run_setup.py)
 # ═════════════════════════════════════════════════════════════════════════════
 
-header "Phase 5: Environment configuration file"
+header "Phase 5: Configure Jane"
 
-if [ -f "vessence-data/.env" ]; then
-    warn ".env already exists at vessence-data/.env -- not overwriting"
-    info "To reset, delete it and re-run this script."
-else
-    if [ -f "vessence/.env.example" ]; then
-        cp vessence/.env.example vessence-data/.env
-        ok "Copied .env.example -> vessence-data/.env"
-    else
-        fail "vessence/.env.example not found. Cannot create config."
-        exit 1
-    fi
-fi
+info "Launching interactive configuration (first_run_setup.py)..."
+echo ""
 
-# Auto-generate SESSION_SECRET_KEY if it's still the placeholder
-if grep -q "SESSION_SECRET_KEY=changeme-generate-a-real-secret" "vessence-data/.env" 2>/dev/null; then
-    ./venv/bin/python -c "
-import secrets, re, pathlib
-env = pathlib.Path('vessence-data/.env')
-text = env.read_text()
-secret = secrets.token_hex(32)
-text = re.sub(r'^SESSION_SECRET_KEY=.*', f'SESSION_SECRET_KEY={secret}', text, flags=re.M)
-env.write_text(text)
-print('done')
-" >/dev/null
-    ok "Session secret key generated"
-elif grep -q "SESSION_SECRET_KEY=" "vessence-data/.env" 2>/dev/null; then
-    info "Session secret key already set"
-fi
+# first_run_setup.py owns everything .env-related: copying .env.example,
+# generating the session secret, detecting the AI CLI, prompting for name /
+# API keys / OAuth / weather.
+./venv/bin/python vessence/startup_code/first_run_setup.py
 
-# ═════════════════════════════════════════════════════════════════════════════
-# Phase 6 — Configure Jane (Interactive)
-# ═════════════════════════════════════════════════════════════════════════════
-
-header "Phase 6: Configure Jane"
-
-# Helper to set a value in the .env file
+# Helper used by Phase 10 (get-to-know-you) to update USER_NAME if the user
+# picks a different name during intro questions.
 set_env() {
     local key="$1" value="$2"
     if grep -q "^${key}=" "vessence-data/.env" 2>/dev/null; then
@@ -238,152 +212,21 @@ set_env() {
     fi
 }
 
-# -- Your name --
-EXISTING_NAME=$(grep -oP '^USER_NAME=\K.+' "vessence-data/.env" 2>/dev/null || true)
-if [ -n "$EXISTING_NAME" ]; then
-    info "Name already set: $EXISTING_NAME"
-    echo -n "  Keep this name? (y/n) [y]: "
-    read -r KEEP_NAME
-    if [ "$KEEP_NAME" = "n" ] || [ "$KEEP_NAME" = "N" ]; then
-        echo -n "  What's your name? "
-        read -r USER_NAME
-        set_env "USER_NAME" "$USER_NAME"
-        ok "Name set to: $USER_NAME"
-    else
-        USER_NAME="$EXISTING_NAME"
-        ok "Keeping name: $USER_NAME"
-    fi
-else
-    echo -n "  What's your name? Jane will use this to address you: "
-    read -r USER_NAME
-    if [ -z "$USER_NAME" ]; then
-        USER_NAME="Friend"
-        warn "No name entered -- using 'Friend'"
-    fi
-    set_env "USER_NAME" "$USER_NAME"
-    ok "Name set to: $USER_NAME"
-fi
+# Read JANE_BRAIN + USER_NAME back from .env for the phases that follow.
+JANE_BRAIN=$(grep -oP '^JANE_BRAIN=\K.+' "vessence-data/.env" 2>/dev/null || echo "")
+USER_NAME=$(grep -oP '^USER_NAME=\K.+' "vessence-data/.env" 2>/dev/null || echo "")
 
-# -- Detect AI brain --
-echo ""
-info "Checking which AI CLIs are installed..."
-
-BRAINS_FOUND=()
-if command -v claude &>/dev/null; then
-    ok "Claude Code found: $(which claude)"
-    BRAINS_FOUND+=("claude")
+if [ -z "$JANE_BRAIN" ]; then
+    fail "JANE_BRAIN was not set by first_run_setup.py. Aborting."
+    exit 1
 fi
-if command -v gemini &>/dev/null; then
-    ok "Gemini CLI found: $(which gemini)"
-    BRAINS_FOUND+=("gemini")
-fi
-if command -v codex &>/dev/null; then
-    ok "Codex found: $(which codex)"
-    BRAINS_FOUND+=("codex")
-fi
-
-JANE_BRAIN=""
-if [ ${#BRAINS_FOUND[@]} -eq 0 ]; then
-    warn "No AI CLI detected. Jane needs one to think."
-    echo ""
-    echo -e "  Install one of these (requires Node.js from ${CYAN}https://nodejs.org${NC}):"
-    echo -e "    ${CYAN}npm install -g @anthropic-ai/claude-code${NC}   — Claude Code (best, needs subscription)"
-    echo -e "    ${CYAN}npm install -g @google/gemini-cli${NC}          — Gemini CLI (free tier available)"
-    echo -e "    ${CYAN}npm install -g @openai/codex${NC}               — Codex (needs OpenAI API key)"
-    echo ""
-    echo -n "  Which will you use? (claude/gemini/codex): "
-    read -r JANE_BRAIN
-    if [[ ! "$JANE_BRAIN" =~ ^(claude|gemini|codex)$ ]]; then
-        JANE_BRAIN="gemini"
-        warn "Defaulting to gemini"
-    fi
-    warn "Install it now, then re-run this script to verify."
-elif [ ${#BRAINS_FOUND[@]} -eq 1 ]; then
-    JANE_BRAIN="${BRAINS_FOUND[0]}"
-    ok "Using $JANE_BRAIN as Jane's brain (only one found)"
-else
-    echo ""
-    echo -n "  Multiple CLIs found. Which should Jane use? (${BRAINS_FOUND[*]}): "
-    read -r JANE_BRAIN
-    # Validate
-    VALID=false
-    for b in "${BRAINS_FOUND[@]}"; do
-        if [ "$b" = "$JANE_BRAIN" ]; then VALID=true; break; fi
-    done
-    if [ "$VALID" = false ]; then
-        JANE_BRAIN="${BRAINS_FOUND[0]}"
-        warn "Invalid choice -- using $JANE_BRAIN"
-    fi
-    ok "Using $JANE_BRAIN as Jane's brain"
-fi
-set_env "JANE_BRAIN" "$JANE_BRAIN"
-
-# -- API key --
-echo ""
-case "$JANE_BRAIN" in
-    claude)
-        info "Claude Code authenticates via its own login -- no API key needed here."
-        info "Make sure you've run 'claude' at least once to log in."
-        echo ""
-        info "A Google API key is optional but useful for weather and background services."
-        EXISTING_GKEY=$(grep -oP '^GOOGLE_API_KEY=\K.+' "vessence-data/.env" 2>/dev/null || true)
-        if [ -n "$EXISTING_GKEY" ]; then
-            info "Google API key already set"
-        else
-            echo -e "  Get a free one at: ${CYAN}https://aistudio.google.com${NC} → Get API key"
-            echo -n "  Google API key (or press Enter to skip): "
-            read -r GOOGLE_KEY
-            if [ -n "$GOOGLE_KEY" ]; then
-                set_env "GOOGLE_API_KEY" "$GOOGLE_KEY"
-                ok "Google API key saved"
-            else
-                info "Skipped -- you can add it later in vessence-data/.env"
-            fi
-        fi
-        ;;
-    gemini)
-        EXISTING_GKEY=$(grep -oP '^GOOGLE_API_KEY=\K.+' "vessence-data/.env" 2>/dev/null || true)
-        if [ -n "$EXISTING_GKEY" ]; then
-            info "Google API key already set"
-        else
-            echo -e "  Jane needs a Google Gemini API key. It's free."
-            echo -e "  Get one at: ${CYAN}https://aistudio.google.com${NC} → Get API key"
-            echo -e "  It looks like: AIzaSy..."
-            echo -n "  Google API key: "
-            read -r GOOGLE_KEY
-            if [ -n "$GOOGLE_KEY" ]; then
-                set_env "GOOGLE_API_KEY" "$GOOGLE_KEY"
-                ok "Google API key saved"
-            else
-                warn "No key entered -- Jane won't work without it. Add it to vessence-data/.env later."
-            fi
-        fi
-        ;;
-    codex)
-        EXISTING_OKEY=$(grep -oP '^OPENAI_API_KEY=\K.+' "vessence-data/.env" 2>/dev/null || true)
-        if [ -n "$EXISTING_OKEY" ]; then
-            info "OpenAI API key already set"
-        else
-            echo -e "  Jane needs an OpenAI API key."
-            echo -e "  Get one at: ${CYAN}https://platform.openai.com/api-keys${NC}"
-            echo -e "  It looks like: sk-proj-..."
-            echo -n "  OpenAI API key: "
-            read -r OPENAI_KEY
-            if [ -n "$OPENAI_KEY" ]; then
-                set_env "OPENAI_API_KEY" "$OPENAI_KEY"
-                ok "OpenAI API key saved"
-            else
-                warn "No key entered -- Jane won't work without it. Add it to vessence-data/.env later."
-            fi
-        fi
-        ;;
-esac
+ok "Brain: $JANE_BRAIN, name: ${USER_NAME:-<unset>}"
 
 # ═════════════════════════════════════════════════════════════════════════════
-# Phase 7 — Link Agent Configuration
+# Phase 6 — Link Agent Configuration
 # ═════════════════════════════════════════════════════════════════════════════
 
-header "Phase 7: Linking agent configuration"
+header "Phase 6: Linking agent configuration"
 
 info "Connecting your AI CLI to Jane's identity and protocols..."
 
@@ -399,17 +242,17 @@ case "$JANE_BRAIN" in
         ln -sf vessence/GEMINI.md ./GEMINI.md
         ok "Linked GEMINI.md"
         ;;
-    codex)
+    openai|codex)
         ln -sf vessence/AGENTS.md ./AGENTS.md
         ok "Linked AGENTS.md"
         ;;
 esac
 
 # ═════════════════════════════════════════════════════════════════════════════
-# Phase 8 — Test Run
+# Phase 7 — Test Run
 # ═════════════════════════════════════════════════════════════════════════════
 
-header "Phase 8: Test run"
+header "Phase 7: Test run"
 
 info "Starting Jane briefly to verify the server works..."
 
@@ -442,10 +285,10 @@ else
 fi
 
 # ═════════════════════════════════════════════════════════════════════════════
-# Phase 9 — Auto-Start on Boot
+# Phase 8 — Auto-Start on Boot
 # ═════════════════════════════════════════════════════════════════════════════
 
-header "Phase 9: Setting up auto-start"
+header "Phase 8: Setting up auto-start"
 
 OS_TYPE="$(uname -s)"
 
@@ -554,10 +397,10 @@ else
 fi
 
 # ═════════════════════════════════════════════════════════════════════════════
-# Phase 10 — Remote Access (Optional)
+# Phase 9 — Remote Access (Optional)
 # ═════════════════════════════════════════════════════════════════════════════
 
-header "Phase 10: Remote access (optional)"
+header "Phase 9: Remote access (optional)"
 
 echo ""
 echo -e "  Jane is running locally at ${CYAN}http://localhost:8081${NC}."
@@ -592,10 +435,10 @@ else
 fi
 
 # ═════════════════════════════════════════════════════════════════════════════
-# Phase 11 — Get to Know You (Optional)
+# Phase 10 — Get to Know You (Optional)
 # ═════════════════════════════════════════════════════════════════════════════
 
-header "Phase 11: Quick intro (optional)"
+header "Phase 10: Quick intro (optional)"
 
 echo ""
 echo "  A few quick questions so Jane already knows you when you first meet."
