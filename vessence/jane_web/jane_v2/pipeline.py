@@ -255,12 +255,21 @@ async def _classify_and_try_stage2(
     stage2_ms = 0
     result: dict | None = None
 
-    # END_CONVERSATION short-circuit: no Stage 2, no Stage 3 — just acknowledge
-    # and signal the client to stop auto-listening. Cheap and instant.
+    # END_CONVERSATION short-circuit: gate-check first since this is destructive
+    # (no Stage 3 recovery). Only fires if BOTH classifier confidence is high
+    # AND the LLM gate confirms the user is really saying goodbye.
     if conf in ("High", "Medium") and cls == "end conversation":
-        result = {"text": "Ok.", "conversation_end": True}
+        fifo_ctx = ""
+        try:
+            fifo_ctx = recent_context.get_recent_context(session_id, max_turns=2)
+        except Exception:
+            pass
+        if await stage2_dispatcher._gate_check("end conversation", prompt, fifo_ctx):
+            result = {"text": "Ok.", "conversation_end": True}
+        else:
+            logger.info("pipeline: END_CONVERSATION gate rejected — escalating instead")
 
-    elif conf in ("High", "Medium") and cls != "others":
+    if result is None and conf in ("High", "Medium") and cls != "others":
         fifo_ctx = ""
         try:
             fifo_ctx = recent_context.get_recent_context(session_id, max_turns=2)

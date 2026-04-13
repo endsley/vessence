@@ -64,6 +64,72 @@ def _self_correct_classification(prompt: str, wrong_class: str):
         logger.warning("self-correct failed: %s", e)
 
 
+_CLASS_DESCRIPTIONS = {
+    "send message":  "the user wants to text/SMS another person",
+    "read messages": "the user wants to read or check their text messages",
+    "sync messages": "the user wants to force-sync SMS from the phone",
+    "read email":    "the user wants to read or check their email inbox",
+    "shopping list": "the user wants to add/remove/view items on a shopping list",
+    "weather":       "the user wants the current/forecast weather",
+    "music play":    "the user wants to play/queue music",
+    "greeting":      "the user is just greeting (hi/hello/how are you)",
+    "get time":      "the user wants the current time",
+    "end conversation": "the user is ending the conversation (bye/cancel/stop/never mind)",
+}
+
+
+async def _gate_check(class_name: str, prompt: str, context: str) -> bool:
+    """Quick LLM gate: does this prompt actually match the predicted class?
+    Returns True if the prompt fits the class, False if WRONG_CLASS.
+
+    Universal safety net — runs BEFORE every handler so misclassifications
+    get caught even by handlers that don't implement their own check.
+    Uses qwen2.5:7b with a tiny prompt (~50 tokens) — adds ~300ms.
+    """
+    desc = _CLASS_DESCRIPTIONS.get(class_name)
+    if not desc:
+        return True  # unknown class → no gate (fail open)
+
+    import os
+    import httpx
+
+    model = os.environ.get("JANE_STAGE2_GATE_MODEL", "qwen2.5:7b")
+    ctx_block = f"Recent conversation:\n{context.strip()}\n\n" if context and context.strip() else ""
+    gate_prompt = (
+        f"You are a STRICT intent gate. The classifier predicted that:\n"
+        f"  → {desc}\n\n"
+        f"Your job: confirm whether the user is ACTUALLY asking for that ACTION RIGHT NOW, "
+        f"or just talking ABOUT it.\n\n"
+        f"Reply NO when ANY of these are true:\n"
+        f"- The user is COMPLAINING about a previous result (e.g. \"the time you told me was wrong\")\n"
+        f"- The user is asking META questions about the system, code, classifier, handler, or pipeline\n"
+        f"- The user is DISCUSSING the topic, not requesting the action\n"
+        f"- Topic words appear but the intent is something else (e.g. mentioning \"messages\" "
+        f"when discussing architecture)\n"
+        f"- The user is correcting or redirecting Jane\n\n"
+        f"Reply YES only if the user is CLEARLY making a fresh request for that action right now.\n\n"
+        f"{ctx_block}User prompt: {prompt.strip()}\n\n"
+        f"Answer ONE word only — YES or NO:"
+    )
+    body = {
+        "model": model,
+        "prompt": gate_prompt,
+        "stream": False,
+        "think": False,
+        "options": {"temperature": 0.0, "num_predict": 5},
+        "keep_alive": "1h",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            r = await client.post("http://localhost:11434/api/generate", json=body)
+            r.raise_for_status()
+            ans = (r.json().get("response") or "").strip().upper()
+            return not ans.startswith("NO")
+    except Exception as e:
+        logger.warning("dispatcher gate check failed (%s) — failing open", e)
+        return True
+
+
 async def dispatch(
     class_name: str,
     prompt: str,
@@ -85,11 +151,25 @@ async def dispatch(
       - the class has no handler (e.g. "others")
       - the handler raised
       - the handler returned None (declining the request)
+      - the universal gate check says the prompt doesn't match the class
     """
     registry = class_registry.get_registry()
     meta = registry.get(class_name)
     if not meta:
         logger.info("dispatcher: no class %r in registry", class_name)
+        return None
+
+    # Universal WRONG_CLASS gate — runs for EVERY class before the handler.
+    # Handlers may also have their own deeper checks, but this catches the
+    # obvious misclassifications uniformly.
+    if not await _gate_check(class_name, prompt, context):
+        logger.info("dispatcher: gate check rejected %r for class %r → escalating",
+                    prompt[:60], class_name)
+        threading.Thread(
+            target=_self_correct_classification,
+            args=(prompt, class_name),
+            daemon=True,
+        ).start()
         return None
 
     handler = meta.get("handler")

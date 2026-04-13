@@ -124,8 +124,13 @@ async def _llm_answer(prompt: str, messages: list[dict], context: str = "") -> s
         context_block = f"Recent conversation:\n{context.strip()}\n\n"
 
     full_prompt = f"""You are Jane, a personal AI assistant. The user asked a SPECIFIC \
-question about their text messages. Answer it directly and concisely (1-3 sentences).
-Do NOT dump all messages — only answer what was asked.
+question about their text messages. Answer it directly and concisely.
+
+RULES:
+- When citing a message from a CONTACT (kind=contact), QUOTE THE BODY VERBATIM — do not paraphrase or shorten it.
+- When referring to SPAM / PROMO / AUTOMATED messages (kind != contact), summarize them briefly (e.g. "a Chase statement alert", "an Amazon delivery update"). Never quote spam verbatim.
+- Do NOT dump all messages — only answer what was asked.
+- Keep your framing sentence short (1 sentence); the contact quote itself can be as long as the original.
 
 Messages (most recent first):
 {formatted}
@@ -139,7 +144,7 @@ Your answer:"""
         "prompt": full_prompt,
         "stream": False,
         "think": False,
-        "options": {"temperature": 0.2, "num_predict": 200},
+        "options": {"temperature": 0.1, "num_predict": 400},
         "keep_alive": "1h",
     }
     try:
