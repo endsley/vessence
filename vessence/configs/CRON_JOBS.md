@@ -118,5 +118,10 @@ This document logs all scheduled tasks (cron jobs) for the system. It must be up
 - **Script Path:** `$VESSENCE_HOME/agent_skills/pipeline_audit_100.py`
 - **Description:** End-to-end audit of the v2 3-stage pipeline against the last 100 real user prompts from `jane_prompt_dump.jsonl`. Each prompt is run through the live `/api/jane/chat/stream` endpoint and judged by qwen2.5:7b for: (1) Stage 1 classification correctness, (2) Stage 2/3 response quality. Stage 1 misclassifications with a clear correct class are auto-fixed by adding the prompt as an exemplar in ChromaDB. Stage 2/3 issues are logged to `configs/pipeline_audit_report.md` for human review. Runtime ~50 min for 100 prompts.
 
+## 23. Auto Pull (NEW 2026-04-13)
+- **Schedule:** `0 */2 * * *` (Every 2 hours, on the hour)
+- **Script Path:** `$VESSENCE_HOME/startup_code/auto_pull.sh`
+- **Description:** Fetches origin/master and fast-forward pulls when new commits are available. If `requirements.txt` changed, reinstalls deps into the venv. If code files (`*.py` / `*.html` / `*.css` / `*.js` under `vessence/`) changed, triggers `graceful_restart.sh` (or falls back to `systemctl --user restart jane-web.service`). Skips when the working tree has local uncommitted changes — never forces or stashes. Logs to `vessence-data/logs/auto_pull.log`.
+
 ## NOTE: Automation Provider Rule
 - **Critical note for future agents:** Cron jobs and other unattended execution paths must never hardcode a specific coding CLI (`claude`, `codex`, etc.). They must go through the shared automation runner and respect `AUTOMATION_CLI_PROVIDER` (falling back to `JANE_BRAIN` when unset). When switching providers, audit cron jobs, queue runners, background research jobs, and Discord bridges before assuming the cutover is complete.
