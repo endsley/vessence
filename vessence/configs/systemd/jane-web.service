@@ -1,0 +1,31 @@
+[Unit]
+Description=Jane Web Server
+After=network.target
+
+[Service]
+Type=simple
+Environment=AMBIENT_BASE=%h/ambient
+Environment=VESSENCE_HOME=%h/ambient/vessence
+Environment=VESSENCE_DATA_HOME=%h/ambient/vessence-data
+Environment=VAULT_HOME=%h/ambient/vault
+Environment=AMBIENT_HOME=%h/ambient/vessence-data
+Environment=PYTHONPATH=%h/ambient/vessence
+WorkingDirectory=%h/ambient/vessence
+EnvironmentFile=%h/ambient/vessence-data/.env
+ExecStartPre=/bin/bash -c 'fuser -k 8081/tcp 2>/dev/null || true; sleep 1; fuser -k -9 8081/tcp 2>/dev/null || true'
+ExecStart=/home/chieh/google-adk-env/adk-venv/bin/python -m uvicorn jane_web.main:app --host 127.0.0.1 --port 8081 --log-level info
+ExecStopPost=/bin/bash -c 'fuser -k -9 8081/tcp 2>/dev/null || true'
+# on-failure (not always) so a controlled SIGTERM stop (e.g. from
+# graceful_restart.sh after the proxy has been switched to the
+# alternate port) won't trigger an immediate respawn that would
+# create a duplicate uvicorn process.
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=30
+KillMode=mixed
+KillSignal=SIGINT
+StandardOutput=append:%h/ambient/vessence-data/logs/jane_web.log
+StandardError=append:%h/ambient/vessence-data/logs/jane_web.log
+
+[Install]
+WantedBy=default.target
