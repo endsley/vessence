@@ -96,52 +96,87 @@ def _fifo_as_fake_history(session_id: str | None) -> list[dict]:
     return [{"role": "assistant", "content": s} for s in summaries if s]
 
 
-async def _generate_delegate_ack(prompt: str, session_id: str | None) -> str:
-    """Produce a contextual ack for a Stage 3 escalation.
+import random as _random
 
-    Reuses v1's `intent_classifier.v1.gemma_router.classify_prompt`, which
-    already generates delegate acks in the exact style we want: topic
-    echo + vague time hint (e.g. "Checking the playlist — one sec.").
-    We feed it the Haiku-generated recent-turn summaries from the FIFO
-    (condensed, semantically dense) instead of raw turns.
+# Topic phrase per class — used to fill a "what I'll do" slot in the
+# ack templates. Just a short verb phrase, not a full sentence.
+_ACK_TOPIC = {
+    "send message":  "draft that text",
+    "read messages": "look through your messages",
+    "sync messages": "sync your messages",
+    "read email":    "check your email",
+    "shopping list": "update your list",
+    "weather":       "check the weather",
+    "music play":    "find that music",
+    "others":        "look into that",
+}
 
-    We trust v1's output when it's classified as "delegate"; otherwise
-    fall back to the static ack from class metadata.
+# Templates split by expected duration. The pipeline picks a bucket based on
+# the prompt's complexity, then a random template within the bucket.
+# Each template has a {topic} slot filled from _ACK_TOPIC.
+_ACK_TEMPLATES_FAST = [  # seconds — simple lookups
+    "Sure thing, give me a sec to {topic}.",
+    "Yeah, let me {topic} real quick.",
+    "Hold on a moment while I {topic}.",
+    "Okay, give me just a sec to {topic}.",
+    "Alright, I'll {topic} — back in a moment.",
+    "Sure, hang tight while I {topic}.",
+]
+_ACK_TEMPLATES_MEDIUM = [  # ~1-3 minutes — research, multi-step
+    "Sure, give me a minute or two to {topic} properly.",
+    "Yeah, this might take a couple minutes — let me {topic}.",
+    "Okay, hold on a bit while I {topic} carefully.",
+    "Alright, let me {topic} — I'll need a minute or two.",
+    "Sure, give me a few minutes to {topic} thoroughly.",
+    "Yeah, let me take a couple minutes to {topic}.",
+]
+_ACK_TEMPLATES_LONG = [  # 5+ minutes — research, code, complex
+    "Sure, this is going to take a while — let me {topic} and I'll come back when I'm done.",
+    "Yeah, give me a good chunk of time to {topic} properly.",
+    "Okay, this might take several minutes — let me {topic}.",
+    "Alright, hang on for a bit — I need real time to {topic}.",
+    "Sure, this won't be quick — let me {topic} and circle back.",
+]
 
-    Runs before Stage 3 kickoff. Adds ~700ms of gemma4 time but the ack
-    arrives well before Opus's first token anyway, so net user latency
-    is unchanged.
+
+# Heuristics for estimating Opus duration without running it.
+def _estimate_duration(prompt: str) -> str:
+    """Return 'fast' | 'medium' | 'long' based on prompt content."""
+    p = prompt.lower()
+    word_count = len(prompt.split())
+    long_signals = ("build", "implement", "refactor", "write code",
+                    "debug", "analyze the codebase", "trace through",
+                    "compare and contrast", "summarize the entire")
+    medium_signals = ("research", "look online", "compare", "analyze",
+                      "explain how", "explain why", "walk me through",
+                      "what are the differences", "pros and cons",
+                      "investigate", "trace")
+    if any(s in p for s in long_signals) or word_count > 60:
+        return "long"
+    if any(s in p for s in medium_signals) or word_count > 25:
+        return "medium"
+    return "fast"
+
+
+
+
+async def _generate_delegate_ack(prompt: str, session_id: str | None,
+                                  cls: str = "others") -> str:
+    """Produce an ack for a Stage 3 escalation.
+
+    Estimates how long Opus will take (fast/medium/long), picks a template
+    from the matching pool, and fills in the topic from the Stage 1 class.
+    No LLM call, zero tokens, no name-dropping, conveys time expectation.
     """
-    if not prompt:
-        return _DEFAULT_ESCALATE_ACK
-    try:
-        from intent_classifier.v1.gemma_router import classify_prompt
-    except Exception as e:
-        logger.warning("_generate_delegate_ack: import classify_prompt failed: %s", e)
-        return _DEFAULT_ESCALATE_ACK
-
-    history = _fifo_as_fake_history(session_id)
-    try:
-        cls_v1, response = await classify_prompt(prompt, history)
-    except Exception as e:
-        logger.warning("_generate_delegate_ack: classify_prompt crashed: %s", e)
-        return _DEFAULT_ESCALATE_ACK
-
-    # Only trust the response as an ack when v1 classified as "delegate".
-    # For "self_handle" cases v1 returns an actual answer, not an ack —
-    # using that as an ack then delegating to Opus would cause duplicate
-    # responses.
-    if cls_v1 == "delegate" and response and response.strip():
-        ack = response.strip()
-        logger.info(
-            "_generate_delegate_ack: v1 delegate ack=%r (fifo_turns=%d)",
-            ack[:80],
-            len(history),
-        )
-        return ack
-
-    logger.info("_generate_delegate_ack: v1 returned %s — using static fallback", cls_v1)
-    return _DEFAULT_ESCALATE_ACK
+    duration = _estimate_duration(prompt)
+    if duration == "long":
+        templates = _ACK_TEMPLATES_LONG
+    elif duration == "medium":
+        templates = _ACK_TEMPLATES_MEDIUM
+    else:
+        templates = _ACK_TEMPLATES_FAST
+    topic = _ACK_TOPIC.get(cls, _ACK_TOPIC["others"])
+    return _random.choice(templates).format(topic=topic)
 
 
 def _ndjson(event_type: str, data=None, **extra) -> str:
@@ -290,7 +325,7 @@ async def handle_chat(body, request: Request):
         all_tool_calls = tool_calls + tail_calls
         resp: dict[str, Any] = {
             "response": visible_text or text,
-            "ack": state["stage2_ack"],
+            "ack": None,  # acks only emitted when Stage 3 runs
             "classification": state["classification"],
             "stage": "stage2",
             "stage1_ms": state["stage1_ms"],
@@ -307,9 +342,9 @@ async def handle_chat(body, request: Request):
     # ── Stage 3: delegate to v1's non-streaming brain ───────────────────
     # Generate a contextual ack first (uses v1's classify_prompt — topic
     # echo + time hint). Falls back to the static class ack on failure.
-    dynamic_ack = await _generate_delegate_ack(body.message or "", body.session_id)
-    if dynamic_ack == _DEFAULT_ESCALATE_ACK:
-        dynamic_ack = state["fallback_ack"]
+    dynamic_ack = await _generate_delegate_ack(
+        body.message or "", body.session_id, cls=state["cls"]
+    )
 
     v1_chat = _load_v1_chat()
     if v1_chat is None:
@@ -387,8 +422,7 @@ async def handle_chat_stream(body, request: Request):
 
         # ── Stage 2 success → emit ack + delta + done ─────────────────
         if state["result"] is not None:
-            if state["stage2_ack"]:
-                yield _ndjson("ack", state["stage2_ack"])
+            # No ack when Stage 2 handles directly — acks only fire on Stage 3 escalation
             text, extras = _stage2_response_parts(state["result"])
             if extras.get("playlist_id"):
                 yield _ndjson(
@@ -427,10 +461,8 @@ async def handle_chat_stream(body, request: Request):
         # Generate a contextual ack via v1's classify_prompt (topic
         # echo + time hint). Static class ack is the safe fallback.
         dynamic_ack = await _generate_delegate_ack(
-            body.message or "", body.session_id
+            body.message or "", body.session_id, cls=state["cls"]
         )
-        if dynamic_ack == _DEFAULT_ESCALATE_ACK:
-            dynamic_ack = state["fallback_ack"]
 
         # Inject class-specific context into the message so Opus
         # knows how to handle the request (e.g., SMS protocol).

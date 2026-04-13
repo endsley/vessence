@@ -130,10 +130,11 @@ async def escalate_stream(
     user_id = get_session_user(session_id) or _default_user_id()
 
     try:
-        # For voice, emit ack immediately — silence is uncomfortable.
-        # For text, skip the ack entirely: Stage 2 short-circuits respond in <1s
-        # and don't need it; Opus delegations emit their own ack via jane_proxy.
-        if is_voice:
+        # Always emit the ack for Stage 3 escalations — it conveys both
+        # "message received" and a rough time estimate so the user knows
+        # whether to wait or come back later. Stage 2 fast-paths skip
+        # acks entirely (handled in pipeline.py).
+        if ack_text:
             yield _ndjson("ack", ack_text)
 
         async for chunk in stream_message(

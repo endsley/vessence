@@ -1,16 +1,24 @@
 """Read Messages Stage 2 handler.
 
-Queries the server-side synced_messages database. Contact messages are
-read verbatim (deterministic); non-contact / spam messages are collapsed
-into a one-line tail summary. No phone round-trip needed.
+Two paths:
+  - Specific question ("who sent the last message", "what did Romeo say",
+    "how many texts today") → fetch + Qwen answers the specific question
+  - Generic dump ("read my messages", "check my texts") → deterministic
+    summary (verbatim contact messages, collapsed tail for promo/spam)
+
+Both paths use the same SQL fetch from synced_messages — only the
+answer step differs.
 """
 
 from __future__ import annotations
 
 import datetime
 import logging
+import os
 import sys
 from pathlib import Path
+
+import httpx
 
 _VAULT_WEB_DIR = Path(__file__).resolve().parents[4] / "vault_web"
 if str(_VAULT_WEB_DIR) not in sys.path:
@@ -19,10 +27,16 @@ if str(_VAULT_WEB_DIR) not in sys.path:
 logger = logging.getLogger(__name__)
 
 DEFAULT_LIMIT = 10
+MODEL = os.environ.get("JANE_STAGE2_READ_MSG_MODEL", "qwen2.5:7b")
+OLLAMA_URL = "http://localhost:11434/api/generate"
 
-# Keywords that suggest the user is talking about the pipeline itself, not asking
-# to hear their texts. If none of these plus no read-intent words match, escalate.
+# Architecture/code-question keywords → escalate (not a real read request)
 _ARCH_WORDS = ("architecture", "infrastructure", "pipeline", "handler", "classifier", "stage")
+
+# Words that signal a SPECIFIC question (not just "dump everything")
+_SPECIFIC_WORDS = ("who", "what did", "how many", "when did", "did anyone",
+                   "did i get", "any", "is there", "from", "last message",
+                   "most recent", "latest", "newest")
 
 
 def _fetch_messages(limit: int = DEFAULT_LIMIT, contact_only: bool = False) -> list[dict]:
@@ -49,7 +63,6 @@ def _fetch_messages(limit: int = DEFAULT_LIMIT, contact_only: bool = False) -> l
 
 
 def _is_personal(msg: dict) -> bool:
-    """Personal = from a known contact and not flagged spam."""
     return bool(msg.get("is_contact")) and msg.get("msg_type") != "spam"
 
 
@@ -57,22 +70,25 @@ def _fmt_time(ts_ms: int) -> str:
     return datetime.datetime.fromtimestamp(ts_ms / 1000).strftime("%I:%M %p").lstrip("0")
 
 
-async def handle(prompt: str, context: str = "") -> dict | None:
-    """Read recent texts: contacts verbatim, others collapsed into a tail summary."""
-    p_lower = prompt.lower()
-    if any(w in p_lower for w in _ARCH_WORDS):
-        return {"wrong_class": True}
+def _format_for_llm(messages: list[dict]) -> str:
+    """Format messages as a compact list for the LLM to reason over."""
+    lines = []
+    for i, m in enumerate(messages):
+        ts = _fmt_time(m["timestamp_ms"])
+        date = datetime.datetime.fromtimestamp(m["timestamp_ms"] / 1000).strftime("%m/%d")
+        sender = m["sender"] or "Unknown"
+        body = (m["body"] or "").strip()[:200]
+        kind = "contact" if _is_personal(m) else (m.get("msg_type") or "unknown")
+        lines.append(f"{i+1}. [{date} {ts}] ({kind}) {sender}: {body}")
+    return "\n".join(lines)
 
-    messages = _fetch_messages(limit=DEFAULT_LIMIT)
 
-    if not messages:
-        return {"text": "You don't have any synced messages yet."}
-
+def _generic_dump(messages: list[dict]) -> str:
+    """Deterministic summary for generic 'read my messages' requests."""
     personal = [m for m in messages if _is_personal(m)]
     other = [m for m in messages if not _is_personal(m)]
 
     parts: list[str] = []
-
     if personal:
         if len(personal) == 1:
             parts.append("You have 1 message from a contact.")
@@ -97,7 +113,67 @@ async def handle(prompt: str, context: str = "") -> dict | None:
         more = "" if len(senders) <= 3 else f" and {len(senders) - 3} others"
         noun = "texts" if len(other) > 1 else "text"
         parts.append(f"Plus {len(other)} other {noun} from {sender_list}{more} — mostly promo or automated.")
+    return "\n\n".join(parts)
 
-    text = "\n\n".join(parts)
-    logger.info("read_messages handler: read %d personal, collapsed %d other", len(personal), len(other))
+
+async def _llm_answer(prompt: str, messages: list[dict], context: str = "") -> str | None:
+    """Use Qwen to answer a specific question about the messages."""
+    formatted = _format_for_llm(messages)
+    context_block = ""
+    if context and context.strip():
+        context_block = f"Recent conversation:\n{context.strip()}\n\n"
+
+    full_prompt = f"""You are Jane, a personal AI assistant. The user asked a SPECIFIC \
+question about their text messages. Answer it directly and concisely (1-3 sentences).
+Do NOT dump all messages — only answer what was asked.
+
+Messages (most recent first):
+{formatted}
+
+{context_block}User question: {prompt.strip()}
+
+Your answer:"""
+
+    body = {
+        "model": MODEL,
+        "prompt": full_prompt,
+        "stream": False,
+        "think": False,
+        "options": {"temperature": 0.2, "num_predict": 200},
+        "keep_alive": "1h",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            r = await client.post(OLLAMA_URL, json=body)
+            r.raise_for_status()
+            text = (r.json().get("response") or "").strip()
+            return text or None
+    except Exception as e:
+        logger.warning("read_messages LLM answer failed: %s", e)
+        return None
+
+
+async def handle(prompt: str, context: str = "") -> dict | None:
+    """Read recent texts. Specific questions go to Qwen; generic dumps stay deterministic."""
+    p_lower = prompt.lower()
+    if any(w in p_lower for w in _ARCH_WORDS):
+        return {"wrong_class": True}
+
+    messages = _fetch_messages(limit=DEFAULT_LIMIT)
+    if not messages:
+        return {"text": "You don't have any synced messages yet."}
+
+    # Specific question → use Qwen to answer that exact question
+    is_specific = any(w in p_lower for w in _SPECIFIC_WORDS)
+    if is_specific:
+        answer = await _llm_answer(prompt, messages, context)
+        if answer:
+            logger.info("read_messages handler: specific Q answered (%d msgs)", len(messages))
+            return {"text": answer}
+        # LLM failed → fall back to generic dump rather than escalating
+        logger.warning("read_messages handler: LLM answer failed, falling back to dump")
+
+    # Generic dump
+    text = _generic_dump(messages)
+    logger.info("read_messages handler: generic dump (%d msgs)", len(messages))
     return {"text": text}

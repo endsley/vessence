@@ -5,6 +5,6 @@ METADATA = {
     "priority": 20,
     "description": "",
     "few_shot": [],
-    "ack": "Checking your list…",
-    "escalate_ack": "Let me check your shopping list…",
+    "ack": None,
+    "escalate_ack": None,
 }
