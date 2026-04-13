@@ -113,5 +113,10 @@ This document logs all scheduled tasks (cron jobs) for the system. It must be up
 - **Script Path:** `$VESSENCE_HOME/agent_skills/nightly_code_auditor.py`
 - **Description:** Autonomous code audit + fix loop. Each night picks one module from `configs/auditable_modules.md` (rotating), uses Claude Opus to generate stress tests, runs pytest, diagnoses any failures, and patches the module. Always works on a `auto-audit/YYYY-MM-DD-HHMM` git branch — if all tests pass, fast-forward merges to master; if fixes can't make tests pass after 3 attempts, reverts and logs to `configs/audit_failures.md`. Successful audits logged to `configs/auto_audit_log.md`. 30-minute time budget per session. Skips when working tree is dirty.
 
+## 22. Pipeline Audit 100 (NEW 2026-04-13)
+- **Schedule:** `0 4 * * *` (Runs daily at 4:00 AM, sleep window)
+- **Script Path:** `$VESSENCE_HOME/agent_skills/pipeline_audit_100.py`
+- **Description:** End-to-end audit of the v2 3-stage pipeline against the last 100 real user prompts from `jane_prompt_dump.jsonl`. Each prompt is run through the live `/api/jane/chat/stream` endpoint and judged by qwen2.5:7b for: (1) Stage 1 classification correctness, (2) Stage 2/3 response quality. Stage 1 misclassifications with a clear correct class are auto-fixed by adding the prompt as an exemplar in ChromaDB. Stage 2/3 issues are logged to `configs/pipeline_audit_report.md` for human review. Runtime ~50 min for 100 prompts.
+
 ## NOTE: Automation Provider Rule
 - **Critical note for future agents:** Cron jobs and other unattended execution paths must never hardcode a specific coding CLI (`claude`, `codex`, etc.). They must go through the shared automation runner and respect `AUTOMATION_CLI_PROVIDER` (falling back to `JANE_BRAIN` when unset). When switching providers, audit cron jobs, queue runners, background research jobs, and Discord bridges before assuming the cutover is complete.
