@@ -407,6 +407,17 @@ async def handle_chat_stream(body, request: Request):
                 # Android NdjsonParser uses asString on "data", so the
                 # tool call payload must be a JSON *string*, not a nested object.
                 yield _ndjson("client_tool_call", json.dumps(tc, ensure_ascii=True))
+            # ALSO emit any structured client_tools from the handler result.
+            # Some handlers (get_time, sync_messages) return tool calls in a
+            # structured "client_tools" field rather than embedding markers
+            # in text. Without this, those tools never reach Android.
+            for ct in extras.pop("client_tools", []):
+                tc_payload = {
+                    "tool": ct.get("name", ct.get("tool", "unknown")),
+                    "args": ct.get("args", {}),
+                    "call_id": __import__("uuid").uuid4().hex[:16],
+                }
+                yield _ndjson("client_tool_call", json.dumps(tc_payload, ensure_ascii=True))
             yield _ndjson("delta", visible_text or text)
             yield _ndjson("done", visible_text or text, **extras)
             _persist_stage2_to_fifo(body.session_id, prompt, visible_text or text)
