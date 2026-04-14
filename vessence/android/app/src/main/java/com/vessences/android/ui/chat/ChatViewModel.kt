@@ -138,6 +138,23 @@ class ChatViewModel(
         )
     } catch (_: Throwable) { null }
 
+    // Receiver for shared-article summaries dispatched by MainActivity after
+    // ShareReceiverActivity finishes. Posts the summary into chat + speaks it.
+    private val sharedSummaryReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: android.content.Context?, intent: android.content.Intent?) {
+            val text = intent?.getStringExtra("text") ?: return
+            if (text.isBlank()) return
+            val shouldSpeak = intent.getBooleanExtra("speak", true)
+            val msg = com.vessences.android.data.model.ChatMessage(
+                text = text, isUser = false, isStreaming = false,
+            )
+            _state.value = _state.value.copy(messages = _state.value.messages + msg)
+            if (shouldSpeak) {
+                viewModelScope.launch { tts.speak(text) }
+            }
+        }
+    }
+
     init {
         voiceController?.onSpeakingDone = {
             _state.value = _state.value.copy(isSpeaking = false)
@@ -150,6 +167,17 @@ class ChatViewModel(
                     try { chatPersistence.saveMessages(backendKey, uiState.messages) } catch (_: Exception) {}
                 }
             }
+        }
+        // Register receiver for shared-article summaries
+        try {
+            val filter = android.content.IntentFilter("com.vessences.android.SHARED_SUMMARY_READY")
+            if (android.os.Build.VERSION.SDK_INT >= 33) {
+                appContext.registerReceiver(sharedSummaryReceiver, filter, android.content.Context.RECEIVER_NOT_EXPORTED)
+            } else {
+                appContext.registerReceiver(sharedSummaryReceiver, filter)
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("ChatVM", "Could not register shared summary receiver: ${e.message}")
         }
         // Check for app updates
         if (backend == com.vessences.android.data.repository.ChatBackend.JANE) {
@@ -1248,6 +1276,7 @@ class ChatViewModel(
         if (messages.isNotEmpty()) {
             try { chatPersistence.saveMessages(backendKey, messages) } catch (_: Exception) {}
         }
+        try { appContext.unregisterReceiver(sharedSummaryReceiver) } catch (_: Exception) {}
         super.onCleared()
         voiceController?.release()
         tts.shutdown()

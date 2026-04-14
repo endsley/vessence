@@ -20,7 +20,16 @@ logger = logging.getLogger(__name__)
 # blob contains words like "tool", "send", "message" that pollute
 # the classifier's signal. The user's actual question comes after.
 _TOOL_RESULT_RE = re.compile(r"\[TOOL_RESULT:\{[^}]*\}\]\s*", re.DOTALL)
-_SYS_PREFIX_RE = re.compile(r"\[(SMS SEND REQUEST|PHONE TOOL RESULTS)[^\]]*\][^\[]*\[END[^\]]*\]\s*", re.DOTALL | re.IGNORECASE)
+# Non-greedy match through nested [[CLIENT_TOOL:...]] up to the [END ...] sentinel.
+_SYS_PREFIX_RE = re.compile(
+    r"\[(SMS SEND REQUEST|PHONE TOOL RESULTS)[^\]]*\].*?\[END\s+[^\]]+\]\s*",
+    re.DOTALL | re.IGNORECASE,
+)
+# Fallback: SMS SEND REQUEST that got truncated without a closing [END...]
+_SYS_TAIL_RE = re.compile(
+    r"\n*\[(SMS SEND REQUEST|PHONE TOOL RESULTS)[\s\S]*$",
+    re.IGNORECASE,
+)
 
 
 def _strip_system_markers(prompt: str) -> str:
@@ -28,6 +37,7 @@ def _strip_system_markers(prompt: str) -> str:
     sees only the user's actual words."""
     cleaned = _TOOL_RESULT_RE.sub("", prompt)
     cleaned = _SYS_PREFIX_RE.sub("", cleaned)
+    cleaned = _SYS_TAIL_RE.sub("", cleaned)  # truncated leftovers
     return cleaned.strip() or prompt
 
 # Map ChromaDB uppercase class names → pipeline registry names

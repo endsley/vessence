@@ -98,50 +98,9 @@ def _fifo_as_fake_history(session_id: str | None) -> list[dict]:
 
 import random as _random
 
-# Topic phrase per class — used to fill a "what I'll do" slot in the
-# ack templates. Just a short verb phrase, not a full sentence.
-_ACK_TOPIC = {
-    "send message":  "draft that text",
-    "read messages": "look through your messages",
-    "sync messages": "sync your messages",
-    "read email":    "check your email",
-    "shopping list": "update your list",
-    "weather":       "check the weather",
-    "music play":    "find that music",
-    "others":        "look into that",
-}
-
-# Templates split by expected duration. The pipeline picks a bucket based on
-# the prompt's complexity, then a random template within the bucket.
-# Each template has a {topic} slot filled from _ACK_TOPIC.
-_ACK_TEMPLATES_FAST = [  # seconds — simple lookups
-    "Sure thing, give me a sec to {topic}.",
-    "Yeah, let me {topic} real quick.",
-    "Hold on a moment while I {topic}.",
-    "Okay, give me just a sec to {topic}.",
-    "Alright, I'll {topic} — back in a moment.",
-    "Sure, hang tight while I {topic}.",
-]
-_ACK_TEMPLATES_MEDIUM = [  # ~1-3 minutes — research, multi-step
-    "Sure, give me a minute or two to {topic} properly.",
-    "Yeah, this might take a couple minutes — let me {topic}.",
-    "Okay, hold on a bit while I {topic} carefully.",
-    "Alright, let me {topic} — I'll need a minute or two.",
-    "Sure, give me a few minutes to {topic} thoroughly.",
-    "Yeah, let me take a couple minutes to {topic}.",
-]
-_ACK_TEMPLATES_LONG = [  # 5+ minutes — research, code, complex
-    "Sure, this is going to take a while — let me {topic} and I'll come back when I'm done.",
-    "Yeah, give me a good chunk of time to {topic} properly.",
-    "Okay, this might take several minutes — let me {topic}.",
-    "Alright, hang on for a bit — I need real time to {topic}.",
-    "Sure, this won't be quick — let me {topic} and circle back.",
-]
-
-
 # Heuristics for estimating Opus duration without running it.
 def _estimate_duration(prompt: str) -> str:
-    """Return 'fast' | 'medium' | 'long' based on prompt content."""
+    """Return 'a few seconds' | 'a minute or two' | 'a while' based on prompt."""
     p = prompt.lower()
     word_count = len(prompt.split())
     long_signals = ("build", "implement", "refactor", "write code",
@@ -152,31 +111,72 @@ def _estimate_duration(prompt: str) -> str:
                       "what are the differences", "pros and cons",
                       "investigate", "trace")
     if any(s in p for s in long_signals) or word_count > 60:
-        return "long"
+        return "a while"
     if any(s in p for s in medium_signals) or word_count > 25:
-        return "medium"
-    return "fast"
+        return "a minute or two"
+    return "a few seconds"
 
 
+_ACK_FALLBACK = "Got it, give me a moment to look into that."
 
 
 async def _generate_delegate_ack(prompt: str, session_id: str | None,
                                   cls: str = "others") -> str:
-    """Produce an ack for a Stage 3 escalation.
+    """Produce an ack for a Stage 3 escalation using gemma4:e2b.
 
-    Estimates how long Opus will take (fast/medium/long), picks a template
-    from the matching pool, and fills in the topic from the Stage 1 class.
-    No LLM call, zero tokens, no name-dropping, conveys time expectation.
+    Two-part structured response:
+      Part 1: acknowledge understanding + intent ("Got it", "I'll work on it",
+              "Let me think about that")
+      Part 2: time estimate ("give me a sec", "this might take a few minutes",
+              "could take a while")
+
+    Uses gemma4:e2b at higher temp for variety. Falls back to a static
+    sentence on failure. ~700ms cost, runs in parallel with Stage 3 brain
+    so net latency is unchanged.
     """
+    import os
+    import httpx
     duration = _estimate_duration(prompt)
-    if duration == "long":
-        templates = _ACK_TEMPLATES_LONG
-    elif duration == "medium":
-        templates = _ACK_TEMPLATES_MEDIUM
-    else:
-        templates = _ACK_TEMPLATES_FAST
-    topic = _ACK_TOPIC.get(cls, _ACK_TOPIC["others"])
-    return _random.choice(templates).format(topic=topic)
+    model = os.environ.get("JANE_ACK_MODEL", "qwen2.5:7b")
+    # Force variety by REQUIRING a random opener per call. qwen otherwise
+    # anchors on "Sure thing" no matter the temperature.
+    openers = [
+        "Got it", "Yeah", "Alright", "Okay", "Hmm",
+        "Interesting one", "Good question", "Let me think about it",
+        "I can do that", "On it", "Right", "Hmm let me see",
+        "Mmkay", "Cool", "Oh nice", "Yep", "Sure", "Sure thing",
+        "Fair", "Solid one", "Heh, yeah", "Ah",
+    ]
+    chosen_opener = _random.choice(openers)
+    gen_prompt = (
+        f"Write ONE casual sentence with two parts:\n"
+        f"  PART 1 — START with: \"{chosen_opener}\". You may extend it with a few "
+        f"more words but keep that as your opening.\n"
+        f"  PART 2 — say it'll take about {duration}, in your own natural words.\n\n"
+        f"Be casual like a friend. Never use the user's name. No questions. "
+        f"No filler. One sentence only.\n\n"
+        f"User said: {prompt.strip()[:300]}\n\n"
+        f"Your acknowledgment (must start with \"{chosen_opener}\"):"
+    )
+    try:
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            r = await client.post(
+                "http://localhost:11434/api/generate",
+                json={
+                    "model": model, "prompt": gen_prompt, "stream": False,
+                    "think": False,
+                    "options": {"temperature": 1.0, "top_p": 0.95, "num_predict": 60},
+                    "keep_alive": "1h",
+                },
+            )
+            r.raise_for_status()
+            text = (r.json().get("response") or "").strip()
+            # Strip stray quotes the model sometimes adds
+            text = text.strip('"').strip("'").strip()
+            return text or _ACK_FALLBACK
+    except Exception as e:
+        logger.warning("ack generation failed (%s) — using fallback", e)
+        return _ACK_FALLBACK
 
 
 def _ndjson(event_type: str, data=None, **extra) -> str:

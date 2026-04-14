@@ -159,7 +159,18 @@ class ShareReceiverActivity : ComponentActivity(), TextToSpeech.OnInitListener {
             progress.dismiss()
 
             if (result != null) {
-                speakAndFinish(result)
+                // Hand off to MainActivity: bring app to focus, post the summary
+                // into chat, and trigger main TTS path. Do NOT speak from this
+                // share activity — keep all TTS routed through the main app so
+                // the user can stop, replay, or interact with it normally.
+                val mainIntent = Intent(this@ShareReceiverActivity, MainActivity::class.java).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                    putExtra("shared_summary_text", result)
+                    putExtra("shared_summary_url", url)
+                    putExtra("shared_summary_speak", true)
+                }
+                startActivity(mainIntent)
+                finish()
             } else {
                 Toast.makeText(this@ShareReceiverActivity, "Could not summarize article", Toast.LENGTH_SHORT).show()
                 finish()

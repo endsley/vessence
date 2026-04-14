@@ -137,6 +137,12 @@ async def escalate_stream(
         if ack_text:
             yield _ndjson("ack", ack_text)
 
+        # Filter out v1's own canned `ack` events — we already emitted ours
+        # above. Without this filter the user hears two acks: ours ("Sure,
+        # give me a sec to ...") followed by v1's ("On it...").
+        # We also drop v1's "model" + initial gemma classification noise
+        # when they immediately precede an Opus ack.
+        v1_ack_suppressed = False
         async for chunk in stream_message(
             user_id,
             session_id,
@@ -145,6 +151,14 @@ async def escalate_stream(
             platform=effective_body.platform,
             tts_enabled=effective_body.tts_enabled or False,
         ):
+            stripped = chunk.strip()
+            if stripped:
+                # Each chunk is one NDJSON line; check if it's a v1 ack and skip
+                if stripped.startswith('{"type": "ack"') or stripped.startswith('{"type":"ack"'):
+                    if not v1_ack_suppressed:
+                        v1_ack_suppressed = True
+                        logger.debug("stage3_escalate: suppressed v1 ack (already emitted v2 ack)")
+                    continue
             if not chunk.endswith("\n"):
                 chunk = chunk + "\n"
             yield chunk

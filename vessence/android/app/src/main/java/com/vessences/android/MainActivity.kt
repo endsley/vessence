@@ -237,6 +237,11 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+        // If launched directly from ShareReceiverActivity with a summary,
+        // dispatch it after the UI mounts (slight delay so chat is ready).
+        if (intent?.hasExtra("shared_summary_text") == true) {
+            window.decorView.post { handleSharedSummaryIntent(intent) }
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -244,6 +249,34 @@ class MainActivity : ComponentActivity() {
         handleWakeWordIntent(intent)
         handleIncomingShareIntent(intent)
         handleNotificationIntent(intent)
+        handleSharedSummaryIntent(intent)
+    }
+
+    /**
+     * When ShareReceiverActivity finishes summarizing a shared URL, it
+     * launches MainActivity with the summary text as an extra. Post the
+     * summary into the chat as an assistant message and trigger TTS via
+     * the main app's TTS path so the user can stop, replay, etc.
+     */
+    private fun handleSharedSummaryIntent(intent: Intent?) {
+        val text = intent?.getStringExtra("shared_summary_text") ?: return
+        if (text.isBlank()) return
+        // Clear so a configuration change doesn't replay it
+        intent.removeExtra("shared_summary_text")
+        val shouldSpeak = intent.getBooleanExtra("shared_summary_speak", true)
+        intent.removeExtra("shared_summary_speak")
+        try {
+            // Push to ChatViewModel via a shared channel — exposed through
+            // a broadcast so the active Compose chat picks it up.
+            val broadcastIntent = Intent("com.vessences.android.SHARED_SUMMARY_READY").apply {
+                putExtra("text", text)
+                putExtra("speak", shouldSpeak)
+                setPackage(packageName)
+            }
+            sendBroadcast(broadcastIntent)
+        } catch (e: Exception) {
+            android.util.Log.w("MainActivity", "Failed to dispatch shared summary: ${e.message}")
+        }
     }
 
     private fun handleWakeWordIntent(intent: Intent?) {
