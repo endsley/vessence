@@ -261,7 +261,7 @@ async def _classify_and_try_stage2(
     if conf in ("High", "Medium") and cls == "end conversation":
         fifo_ctx = ""
         try:
-            fifo_ctx = recent_context.get_recent_context(session_id, max_turns=2)
+            fifo_ctx = recent_context.get_recent_context(session_id, max_turns=3)
         except Exception:
             pass
         if await stage2_dispatcher._gate_check("end conversation", prompt, fifo_ctx):
@@ -272,7 +272,7 @@ async def _classify_and_try_stage2(
     if result is None and conf in ("High", "Medium") and cls != "others":
         fifo_ctx = ""
         try:
-            fifo_ctx = recent_context.get_recent_context(session_id, max_turns=2)
+            fifo_ctx = recent_context.get_recent_context(session_id, max_turns=3)
         except Exception:
             pass
         _t2 = time.perf_counter()
