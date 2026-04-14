@@ -108,15 +108,10 @@ This document logs all scheduled tasks (cron jobs) for the system. It must be up
 - **Script Path:** `$VESSENCE_HOME/agent_skills/process_watchdog.py`
 - **Description:** Kills zombie Docker containers (stale TTS/build containers), idle Gradle/Kotlin daemons (>10 min idle), and memory hog processes. Prevents resource exhaustion from accumulated build artifacts and abandoned containers.
 
-## 21. Nightly Code Auditor (NEW 2026-04-12)
+## 21. Nightly Self-Improve Orchestrator (NEW 2026-04-13)
 - **Schedule:** `0 3 * * *` (Runs daily at 3:00 AM, sleep window)
-- **Script Path:** `$VESSENCE_HOME/agent_skills/nightly_code_auditor.py`
-- **Description:** Autonomous code audit + fix loop. Each night picks one module from `configs/auditable_modules.md` (rotating), uses Claude Opus to generate stress tests, runs pytest, diagnoses any failures, and patches the module. Always works on a `auto-audit/YYYY-MM-DD-HHMM` git branch — if all tests pass, fast-forward merges to master; if fixes can't make tests pass after 3 attempts, reverts and logs to `configs/audit_failures.md`. Successful audits logged to `configs/auto_audit_log.md`. 30-minute time budget per session. Skips when working tree is dirty.
-
-## 22. Pipeline Audit 100 (NEW 2026-04-13)
-- **Schedule:** `0 4 * * *` (Runs daily at 4:00 AM, sleep window)
-- **Script Path:** `$VESSENCE_HOME/agent_skills/pipeline_audit_100.py`
-- **Description:** End-to-end audit of the v2 3-stage pipeline against the last 100 real user prompts from `jane_prompt_dump.jsonl`. Each prompt is run through the live `/api/jane/chat/stream` endpoint and judged by qwen2.5:7b for: (1) Stage 1 classification correctness, (2) Stage 2/3 response quality. Stage 1 misclassifications with a clear correct class are auto-fixed by adding the prompt as an exemplar in ChromaDB. Stage 2/3 issues are logged to `configs/pipeline_audit_report.md` for human review. Runtime ~50 min for 100 prompts.
+- **Script Path:** `$VESSENCE_HOME/agent_skills/nightly_self_improve.py`
+- **Description:** Single entry point that runs ALL nightly self-improvement jobs sequentially with per-job time budgets. Currently dispatches: (1) `nightly_code_auditor.py` — picks one module from `configs/auditable_modules.md`, generates tests via Opus, attempts up to 3 fixes, commits if green; (2) `pipeline_audit_100.py --n 30` — runs 30 real user prompts through the live pipeline, auto-fixes Stage 1 'others' misclassifications by adding exemplars to ChromaDB, logs Stage 2/3 issues for review. Each job has its own log + timeout. Add new jobs by appending to the JOBS list in the script. Summary written to `configs/self_improve_log.md` after every run.
 
 ## 23. Auto Pull (NEW 2026-04-13)
 - **Schedule:** `0 */2 * * *` (Every 2 hours, on the hour)
