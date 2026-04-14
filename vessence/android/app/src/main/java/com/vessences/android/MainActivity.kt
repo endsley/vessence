@@ -121,7 +121,7 @@ class MainActivity : ComponentActivity() {
                     // Play a short beep so the user knows it's their turn to speak
                     try {
                         val tg = android.media.ToneGenerator(
-                            android.media.AudioManager.STREAM_MUSIC, 60)
+                            android.media.AudioManager.STREAM_MUSIC, 100)
                         tg.startTone(android.media.ToneGenerator.TONE_PROP_BEEP, 120)
                         android.os.Handler(android.os.Looper.getMainLooper())
                             .postDelayed({ tg.release() }, 300)

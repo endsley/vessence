@@ -276,7 +276,7 @@ def main():
     # Idle gate: skip if user is active (bypassed during sleep hours 2-6 AM)
     import datetime as _dt
     _now_hour = _dt.datetime.now().hour
-    _is_sleep_window = 2 <= _now_hour < 6
+    _is_sleep_window = 1 <= _now_hour < 7
     if not is_user_idle() and not _is_sleep_window:
         logger.info("User is active — skipping audit this cycle.")
         return

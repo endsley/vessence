@@ -218,7 +218,7 @@ class VoiceController(
                             // Play beep + capture command
                             try {
                                 val toneGen = android.media.ToneGenerator(
-                                    android.media.AudioManager.STREAM_NOTIFICATION, 80)
+                                    android.media.AudioManager.STREAM_NOTIFICATION, 100)
                                 toneGen.startTone(android.media.ToneGenerator.TONE_PROP_BEEP, 150)
                                 Thread.sleep(200)
                                 toneGen.release()

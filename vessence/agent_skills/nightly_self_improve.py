@@ -91,11 +91,14 @@ def write_summary(results: list[dict], started: dt.datetime) -> None:
 # Format: (name, script_path_relative_to_VESSENCE_HOME, args_list, timeout_minutes)
 
 JOBS = [
+    # Dead-code auditor runs FIRST so subsequent jobs (and the doc drift
+    # auditor) reflect the post-cleanup state. Removing files first avoids
+    # tests being generated for code that's about to be deleted.
     (
-        "Doc Drift Auditor",
-        "agent_skills/doc_drift_auditor.py",
+        "Dead Code Auditor",
+        "agent_skills/dead_code_auditor.py",
         [],
-        5,
+        15,
     ),
     (
         "Code Auditor",
@@ -108,6 +111,14 @@ JOBS = [
         "agent_skills/pipeline_audit_100.py",
         ["--n", "30"],
         20,
+    ),
+    # Doc drift auditor runs LAST so it picks up any docs that drifted
+    # because of fixes applied by earlier jobs in this same run.
+    (
+        "Doc Drift Auditor",
+        "agent_skills/doc_drift_auditor.py",
+        [],
+        5,
     ),
     # Future jobs append here. Examples:
     # ("Opener Pool Grower", "agent_skills/grow_ack_openers.py", [], 10),
