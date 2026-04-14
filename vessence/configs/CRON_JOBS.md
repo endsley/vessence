@@ -109,9 +109,9 @@ This document logs all scheduled tasks (cron jobs) for the system. It must be up
 - **Description:** Kills zombie Docker containers (stale TTS/build containers), idle Gradle/Kotlin daemons (>10 min idle), and memory hog processes. Prevents resource exhaustion from accumulated build artifacts and abandoned containers.
 
 ## 21. Nightly Self-Improve Orchestrator (NEW 2026-04-13)
-- **Schedule:** `0 3 * * *` (Runs daily at 3:00 AM, sleep window)
+- **Schedule:** `0 1 * * *` (Runs daily at 1:00 AM, sleep window 1-7 AM — could be a long night)
 - **Script Path:** `$VESSENCE_HOME/agent_skills/nightly_self_improve.py`
-- **Description:** Single entry point that runs ALL nightly self-improvement jobs sequentially with per-job time budgets. Currently dispatches: (1) `nightly_code_auditor.py` — picks one module from `configs/auditable_modules.md`, generates tests via Opus, attempts up to 3 fixes, commits if green; (2) `pipeline_audit_100.py --n 30` — runs 30 real user prompts through the live pipeline, auto-fixes Stage 1 'others' misclassifications by adding exemplars to ChromaDB, logs Stage 2/3 issues for review. Each job has its own log + timeout. Add new jobs by appending to the JOBS list in the script. Summary written to `configs/self_improve_log.md` after every run.
+- **Description:** Single entry point that runs ALL nightly self-improvement jobs sequentially with per-job time budgets. Currently dispatches: (1) `doc_drift_auditor.py` — compares each `configs/*.md` registry against actual filesystem/cron state, auto-fixes safe drifts (dead module rows, etc.), commits with `auto-doc-sync:` prefix, flags ambiguous cases in `configs/doc_drift_report.md`; (2) `nightly_code_auditor.py` — picks one module from `configs/auditable_modules.md`, generates tests via Opus, attempts up to 3 fixes, commits if green; (3) `pipeline_audit_100.py --n 30` — runs 30 real user prompts through the live pipeline, auto-fixes Stage 1 'others' misclassifications by adding exemplars to ChromaDB, logs Stage 2/3 issues for review. Each job has its own log + timeout. Add new jobs by appending to the JOBS list in the script. Summary written to `configs/self_improve_log.md` after every run.
 
 ## 23. Auto Pull (NEW 2026-04-13)
 - **Schedule:** `0 */2 * * *` (Every 2 hours, on the hour)

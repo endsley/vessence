@@ -1,6 +1,6 @@
 """nightly_code_auditor.py — autonomous code audit + fix loop.
 
-Runs nightly during the sleep window (3 AM). Picks one module from the
+Runs nightly during the sleep window (1-7 AM). Picks one module from the
 whitelist (rotating), generates stress tests for it via Claude Opus,
 runs them, diagnoses failures, and commits fixes.
 
@@ -285,7 +285,7 @@ def main() -> int:
     # Sleep-window check: only run during 2-6 AM unless forced
     if "--force" not in sys.argv:
         hour = dt.datetime.now().hour
-        if not (2 <= hour < 6):
+        if not (1 <= hour < 7):
             logger.info("Outside sleep window (hour=%d), skipping. Use --force to override.", hour)
             return 0
 

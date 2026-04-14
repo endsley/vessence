@@ -92,6 +92,12 @@ def write_summary(results: list[dict], started: dt.datetime) -> None:
 
 JOBS = [
     (
+        "Doc Drift Auditor",
+        "agent_skills/doc_drift_auditor.py",
+        [],
+        5,
+    ),
+    (
         "Code Auditor",
         "agent_skills/nightly_code_auditor.py",
         [],
