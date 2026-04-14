@@ -5,6 +5,6 @@ METADATA = {
     "priority": 10,
     "description": "",
     "few_shot": [],
-    "ack": "Syncing your messages…",
-    "escalate_ack": "Let me sync your messages…",
+    "ack": None,  # Stage 2 fast-path is instant — no interim ack needed
+    "escalate_ack": None,
 }

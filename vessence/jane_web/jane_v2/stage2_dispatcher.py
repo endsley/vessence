@@ -90,26 +90,40 @@ async def _gate_check(class_name: str, prompt: str, context: str) -> bool:
     if not desc:
         return True  # unknown class → no gate (fail open)
 
+    # Fast bypass: short prompts (≤5 words) with no meta/complaint signals
+    # are almost always real requests. Skip the LLM call entirely.
+    word_count = len(prompt.split())
+    p_lower = prompt.lower()
+    META_SIGNALS = ("how does", "why does", "explain the", "debug",
+                    " handler", " classifier", " pipeline",
+                    "the time you told me", "you got", "was wrong",
+                    "incorrect", "fix it", "broken", "stale", "should auto",
+                    "in your code", "in the codebase", "the way you handled",
+                    "shouldn't", "doesn't sync", "keep failing")
+    if word_count <= 5 and not any(s in p_lower for s in META_SIGNALS):
+        return True  # short clear request, no LLM needed
+
     import os
     import httpx
 
     model = os.environ.get("JANE_STAGE2_GATE_MODEL", "qwen2.5:7b")
     ctx_block = f"Recent conversation:\n{context.strip()}\n\n" if context and context.strip() else ""
     gate_prompt = (
-        f"You are a STRICT intent gate. The classifier predicted that:\n"
-        f"  → {desc}\n\n"
-        f"Your job: confirm whether the user is ACTUALLY asking for that ACTION RIGHT NOW, "
-        f"or just talking ABOUT it.\n\n"
-        f"Reply NO when ANY of these are true:\n"
-        f"- The user is COMPLAINING about a previous result (e.g. \"the time you told me was wrong\")\n"
-        f"- The user is asking META questions about the system, code, classifier, handler, or pipeline\n"
-        f"- The user is DISCUSSING the topic, not requesting the action\n"
-        f"- Topic words appear but the intent is something else (e.g. mentioning \"messages\" "
-        f"when discussing architecture)\n"
-        f"- The user is correcting or redirecting Jane\n\n"
-        f"Reply YES only if the user is CLEARLY making a fresh request for that action right now.\n\n"
+        f"The classifier predicted: {desc}\n\n"
+        f"Examples — judge if it's a real request (YES) or complaint/meta (NO):\n"
+        f"  \"what time is it\" → YES\n"
+        f"  \"the time you told me was wrong\" → NO (complaint)\n"
+        f"  \"how do we get the time using the phone\" → NO (implementation question)\n"
+        f"  \"hello jane\" → YES\n"
+        f"  \"how does the greeting handler work\" → NO (meta)\n"
+        f"  \"bye\" → YES\n"
+        f"  \"don't send it like that\" → NO (correction)\n"
+        f"  \"read my messages\" → YES\n"
+        f"  \"why are you reading my messages wrong\" → NO (complaint)\n"
+        f"  \"sync my messages\" → YES\n"
+        f"  \"the sync isn't working can you debug it\" → NO (meta)\n\n"
         f"{ctx_block}User prompt: {prompt.strip()}\n\n"
-        f"Answer ONE word only — YES or NO:"
+        f"Is this a real fresh request? Answer ONE word — YES or NO:"
     )
     body = {
         "model": model,
