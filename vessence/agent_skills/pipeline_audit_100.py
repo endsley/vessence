@@ -308,10 +308,24 @@ async def main(n: int = 100, apply_fixes: bool = True) -> int:
                 "got": actual_class,
                 "should_be": correct_class,
             })
-            if apply_fixes:
+            # Highest-leverage auto-fix: prompt that SHOULD have been a real class
+            # but ended up in "others"/DELEGATE_OPUS — add it as an exemplar to
+            # the correct class so Stage 1 catches it next time. Skip the
+            # opposite case (real class but should be others) since adding to
+            # DELEGATE_OPUS could over-train it.
+            should_autofix = (
+                apply_fixes
+                and (actual_class == "others" or not actual_class)
+                and correct_class != "others"
+            )
+            if should_autofix:
                 if add_exemplar(prompt, correct_class):
                     fixes_applied += 1
                     fixes_by_class[correct_class] += 1
+                    logger.info(
+                        "AUTO-FIX: added %r to %s (was: %s)",
+                        prompt[:60], correct_class, actual_class or "others",
+                    )
 
         if not resp_ok:
             response_failures.append({
