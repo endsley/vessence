@@ -71,15 +71,24 @@ def _fmt_time(ts_ms: int) -> str:
 
 
 def _format_for_llm(messages: list[dict]) -> str:
-    """Format messages as a compact list for the LLM to reason over."""
+    """Format messages as a compact list for the LLM to reason over.
+    Direction is made explicit (SENT vs RECEIVED) so the LLM doesn't
+    confuse who's the sender. The DB marks outgoing messages with a
+    "Me → " prefix on the sender field — we strip it and emit a
+    direction tag instead.
+    """
     lines = []
     for i, m in enumerate(messages):
         ts = _fmt_time(m["timestamp_ms"])
         date = datetime.datetime.fromtimestamp(m["timestamp_ms"] / 1000).strftime("%m/%d")
-        sender = m["sender"] or "Unknown"
+        sender_raw = m["sender"] or "Unknown"
         body = (m["body"] or "").strip()[:200]
         kind = "contact" if _is_personal(m) else (m.get("msg_type") or "unknown")
-        lines.append(f"{i+1}. [{date} {ts}] ({kind}) {sender}: {body}")
+        if sender_raw.startswith("Me → "):
+            other = sender_raw[len("Me → "):].strip()
+            lines.append(f"{i+1}. [{date} {ts}] (SENT by you to {other}) ({kind}): {body}")
+        else:
+            lines.append(f"{i+1}. [{date} {ts}] (RECEIVED from {sender_raw}) ({kind}): {body}")
     return "\n".join(lines)
 
 
@@ -97,7 +106,12 @@ def _generic_dump(messages: list[dict]) -> str:
         for m in personal:
             sender = m["sender"] or "Unknown"
             body = (m["body"] or "").strip()
-            parts.append(f"From {sender} at {_fmt_time(m['timestamp_ms'])}: {body}")
+            ts = _fmt_time(m["timestamp_ms"])
+            if sender.startswith("Me → "):
+                other = sender[len("Me → "):].strip()
+                parts.append(f"You sent to {other} at {ts}: {body}")
+            else:
+                parts.append(f"From {sender} at {ts}: {body}")
     else:
         parts.append("No new messages from contacts.")
 
@@ -127,8 +141,13 @@ async def _llm_answer(prompt: str, messages: list[dict], context: str = "") -> s
 question about their text messages. Answer it directly and concisely.
 
 RULES:
-- When citing a message from a CONTACT (kind=contact), QUOTE THE BODY VERBATIM — do not paraphrase or shorten it.
-- When referring to SPAM / PROMO / AUTOMATED messages (kind != contact), summarize them briefly (e.g. "a Chase statement alert", "an Amazon delivery update"). Never quote spam verbatim.
+- DIRECTION MATTERS. Each message has a tag:
+    "(SENT by you to <person>)" — the USER wrote this and sent it OUT
+    "(RECEIVED from <person>)" — the OTHER person wrote it and the user got it
+  Never confuse who sent vs. who received. If the user asks "who texted me",
+  list only RECEIVED messages, not the user's own SENT messages.
+- When citing a CONTACT message (kind=contact), QUOTE THE BODY VERBATIM.
+- When referring to SPAM / PROMO / AUTOMATED messages (kind != contact), summarize them briefly (e.g. "a Chase statement alert"). Never quote spam verbatim.
 - Do NOT dump all messages — only answer what was asked.
 - Keep your framing sentence short (1 sentence); the contact quote itself can be as long as the original.
 
