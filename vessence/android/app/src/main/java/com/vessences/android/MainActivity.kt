@@ -54,10 +54,12 @@ class MainActivity : ComponentActivity() {
      * AlwaysListening is silently restored. On success, result flows to SttResultBus.
      */
     fun launchStt() {
+        DiagnosticReporter.voiceFlow("stt_launch")
         val hasMicPerm = ContextCompat.checkSelfPermission(
             this, Manifest.permission.RECORD_AUDIO
         ) == PackageManager.PERMISSION_GRANTED
         if (!hasMicPerm) {
+            DiagnosticReporter.voiceFlow("stt_error", mapOf("reason" to "no_mic_permission"))
             com.vessences.android.voice.WakeWordBridge.sttActive = false
             return
         }
@@ -100,8 +102,15 @@ class MainActivity : ComponentActivity() {
                         android.speech.SpeechRecognizer.RESULTS_RECOGNITION)
                     val spoken = matches?.firstOrNull()?.trim()
                     if (!spoken.isNullOrBlank()) {
+                        DiagnosticReporter.voiceFlow(
+                            "stt_result",
+                            mapOf("text_len" to spoken.length)
+                        )
                         SttResultBus.onResult?.invoke(spoken)
                     } else {
+                        DiagnosticReporter.voiceFlow(
+                            "stt_error", mapOf("reason" to "empty_transcript")
+                        )
                         restoreAlwaysListening()
                     }
                 }
@@ -111,6 +120,9 @@ class MainActivity : ComponentActivity() {
                     activeRecognizer = null
                     recognizer.destroy()
                     SttResultBus.onListening?.invoke(false)
+                    DiagnosticReporter.voiceFlow(
+                        "stt_error", mapOf("reason" to "recognizer_error_$error")
+                    )
                     // No speech or recognizer error — silently restore always-listen
                     restoreAlwaysListening()
                 }

@@ -202,4 +202,23 @@ object DiagnosticReporter {
             "exception" to (exception?.toString() ?: ""),
         ))
     }
+
+    // ── Voice flow — diagnose "STT didn't relaunch after Jane replied" ──
+    //
+    // Stages (in order of a typical voice turn):
+    //   wake_detected      — wake word fired, about to launch STT
+    //   stt_launch         — SpeechRecognizer starting to listen
+    //   stt_result         — got a transcript (details.text)
+    //   stt_error          — STT failed / empty / timed out (details.reason)
+    //   send_message       — ChatViewModel.sendMessage called (details.fromVoice, text_len)
+    //   done               — server `done` event received (details.fromVoice, accumulated_len)
+    //   relaunch_skipped   — STT not restarted after reply (details.reason —
+    //                        one of: not_voice, server_end, user_ended,
+    //                        autolisten_off, music_playing, empty_reply)
+    //   relaunch_launched  — launchStt() called successfully
+    fun voiceFlow(stage: String, details: Map<String, Any?> = emptyMap()) {
+        val payload = mutableMapOf<String, Any?>("stage" to stage)
+        payload.putAll(details)
+        report("voice_flow", "voice_flow[$stage]", payload)
+    }
 }

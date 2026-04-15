@@ -318,6 +318,10 @@ class ChatViewModel(
         fileUri: Uri? = null,
         fromVoice: Boolean = false,
     ) {
+        com.vessences.android.DiagnosticReporter.voiceFlow(
+            "send_message",
+            mapOf("fromVoice" to fromVoice, "text_len" to text.length)
+        )
         if (text.isBlank() && fileUri == null) return
 
         // If already sending, queue the message for later
@@ -427,6 +431,7 @@ class ChatViewModel(
                 var currentMsgId = aiMsg.id
                 var files = emptyList<com.vessences.android.data.model.StreamEvent.FileRef>()
                 var toolCallDispatched = false  // track if a tool call fired this turn
+                var toolHandlesTts = false       // a client tool is speaking the answer itself
                 var serverConversationEnd = false  // server signalled END_CONVERSATION
 
                 flow.catch { e ->
@@ -495,6 +500,15 @@ class ChatViewModel(
                             try {
                                 toolDispatcher.dispatchRaw(event.data, appContext)
                                 toolCallDispatched = true
+                                // Tools that speak the answer themselves (so the
+                                // server-side bubble text is redundant and would
+                                // cause the user to hear the phrase twice, e.g.
+                                // "It's 3:47 PM" then "Let me check your phone's
+                                // clock"). When any such tool fires in this turn,
+                                // we suppress TTS on the bubble text.
+                                if (event.data.contains("device.speak_time")) {
+                                    toolHandlesTts = true
+                                }
                             } catch (e: Exception) {
                                 android.util.Log.w("ChatVM", "tool dispatch failed: ${e.message}")
                             }
@@ -715,11 +729,39 @@ class ChatViewModel(
                                 if (fromVoice) {
                                     _state.value = _state.value.copy(isSpeaking = false)
                                     val lastUserMsg = _state.value.messages.lastOrNull { it.isUser }?.text ?: ""
-                                    if (!serverConversationEnd && !isConversationEnding(lastUserMsg) && chatPrefs.isAutoListenEnabled()) {
+                                    val convEnding = isConversationEnding(lastUserMsg)
+                                    val autoListen = chatPrefs.isAutoListenEnabled()
+                                    if (!serverConversationEnd && !convEnding && autoListen) {
+                                        com.vessences.android.DiagnosticReporter.voiceFlow(
+                                            "relaunch_launched",
+                                            mapOf("path" to "sentence_tts")
+                                        )
                                         com.vessences.android.MainActivity.instance?.launchStt()
                                     } else {
+                                        val reason = when {
+                                            serverConversationEnd -> "server_end"
+                                            convEnding -> "user_ended_phrase"
+                                            !autoListen -> "autolisten_off"
+                                            else -> "unknown"
+                                        }
+                                        com.vessences.android.DiagnosticReporter.voiceFlow(
+                                            "relaunch_skipped",
+                                            mapOf(
+                                                "path" to "sentence_tts",
+                                                "reason" to reason,
+                                                "last_user_msg" to lastUserMsg.take(120),
+                                            )
+                                        )
                                         endVoiceConversation()
                                     }
+                                } else {
+                                    com.vessences.android.DiagnosticReporter.voiceFlow(
+                                        "relaunch_skipped",
+                                        mapOf(
+                                            "path" to "sentence_tts",
+                                            "reason" to "not_voice",
+                                        )
+                                    )
                                 }
                             } else {
                                 // Non-server-TTS path: show text immediately, then speak
@@ -730,7 +772,10 @@ class ChatViewModel(
                                     fullText = if (hasSpokenBlock) displayText else null,
                                 )
                                 notifier?.showReplyNotification(senderName = backend.displayName, message = displayText)
-                                onSendComplete(fromVoice, displayText, spokenText, serverConversationEnd)
+                                onSendComplete(
+                                    fromVoice, displayText, spokenText, serverConversationEnd,
+                                    skipBubbleTts = toolHandlesTts,
+                                )
                             }
                         }
                         "error" -> {
@@ -858,11 +903,24 @@ class ChatViewModel(
         return endings.any { lower.contains(it) }
     }
 
-    private fun onSendComplete(fromVoice: Boolean, replyText: String?, spokenText: String? = null, serverConversationEnd: Boolean = false) {
+    private fun onSendComplete(
+        fromVoice: Boolean,
+        replyText: String?,
+        spokenText: String? = null,
+        serverConversationEnd: Boolean = false,
+        skipBubbleTts: Boolean = false,
+    ) {
         if (fromVoice) {
-            val textToSpeak = spokenText?.takeIf { it.isNotBlank() }
-                ?: replyText?.takeIf { it.isNotBlank() }
-                ?: ""  // empty = silent end, no misleading "I finished" message
+            // When skipBubbleTts is true, the turn's client tool is
+            // already speaking the answer (e.g. device.speak_time) —
+            // we must NOT speak the bubble text again. But we still
+            // need to relaunch STT after the tool finishes, so the
+            // voice conversation continues normally.
+            val textToSpeak = if (skipBubbleTts) "" else (
+                spokenText?.takeIf { it.isNotBlank() }
+                    ?: replyText?.takeIf { it.isNotBlank() }
+                    ?: ""
+            )
 
             // Check if the user's last message was a conversation-ending phrase,
             // OR if the server explicitly signalled END_CONVERSATION.
@@ -872,8 +930,44 @@ class ChatViewModel(
             // in the MUSIC_PLAY handler. Treat it as a conversation-ending event — no STT re-launch.
             val musicPlaying = !com.vessences.android.voice.WakeWordBridge.sttActive
 
-            // If reply was empty (error / tool-only response), end silently — don't say anything misleading
+            // If reply was empty (error / tool-only response), end silently — don't say anything misleading.
+            // Exception: `skipBubbleTts` means a client tool is currently speaking the answer, so the
+            // turn is NOT empty — we just don't do our own TTS. Relaunch STT after a short delay
+            // to let the tool's speech finish.
             if (textToSpeak.isBlank()) {
+                if (skipBubbleTts) {
+                    viewModelScope.launch {
+                        // Give the tool's TTS (~2–3 short sentences) time to play.
+                        kotlinx.coroutines.delay(3_500)
+                        _state.value = _state.value.copy(isSpeaking = false, isSending = false)
+                        val autoListen = chatPrefs.isAutoListenEnabled()
+                        if (!conversationOver && !musicPlaying && autoListen) {
+                            com.vessences.android.DiagnosticReporter.voiceFlow(
+                                "relaunch_launched",
+                                mapOf("path" to "tool_handled_tts")
+                            )
+                            com.vessences.android.MainActivity.instance?.launchStt()
+                        } else {
+                            val reason = when {
+                                conversationOver -> "user_ended_phrase_or_server_end"
+                                musicPlaying -> "music_playing"
+                                else -> "autolisten_off"
+                            }
+                            com.vessences.android.DiagnosticReporter.voiceFlow(
+                                "relaunch_skipped",
+                                mapOf("path" to "tool_handled_tts", "reason" to reason)
+                            )
+                            endVoiceConversation()
+                        }
+                        processNextInQueue()
+                    }
+                    return
+                }
+                com.vessences.android.DiagnosticReporter.voiceFlow(
+                    "relaunch_skipped",
+                    mapOf("path" to "onSendComplete",
+                          "reason" to "empty_reply")
+                )
                 endVoiceConversation()
                 _state.value = _state.value.copy(isSending = false)
                 processNextInQueue()
@@ -892,15 +986,43 @@ class ChatViewModel(
                     // If stopSpeaking() was called while TTS was active, it already
                     // set isSpeaking=false and called endVoiceConversation().
                     // Don't re-launch STT in that case.
-                    if (!_state.value.isSpeaking) return@launch
+                    if (!_state.value.isSpeaking) {
+                        com.vessences.android.DiagnosticReporter.voiceFlow(
+                            "relaunch_skipped",
+                            mapOf("path" to "non_sentence_tts",
+                                  "reason" to "stop_speaking_called")
+                        )
+                        return@launch
+                    }
                     _state.value = _state.value.copy(isSpeaking = false)
+                    val autoListen = chatPrefs.isAutoListenEnabled()
                     if (conversationOver || musicPlaying) {
+                        val reason = when {
+                            serverConversationEnd -> "server_end"
+                            musicPlaying -> "music_playing"
+                            else -> "user_ended_phrase"
+                        }
+                        com.vessences.android.DiagnosticReporter.voiceFlow(
+                            "relaunch_skipped",
+                            mapOf("path" to "non_sentence_tts",
+                                  "reason" to reason,
+                                  "last_user_msg" to lastUserMsg.take(120))
+                        )
                         // Music playing or user said goodbye — stop listening, release mic for wake word
                         endVoiceConversation()
-                    } else if (chatPrefs.isAutoListenEnabled()) {
+                    } else if (autoListen) {
+                        com.vessences.android.DiagnosticReporter.voiceFlow(
+                            "relaunch_launched",
+                            mapOf("path" to "non_sentence_tts")
+                        )
                         // Unified path: trigger Google STT popup (same as mic button + wake word)
                         com.vessences.android.MainActivity.instance?.launchStt()
                     } else {
+                        com.vessences.android.DiagnosticReporter.voiceFlow(
+                            "relaunch_skipped",
+                            mapOf("path" to "non_sentence_tts",
+                                  "reason" to "autolisten_off")
+                        )
                         // Auto-listen disabled — conversation over, release mic for wake word
                         endVoiceConversation()
                     }
