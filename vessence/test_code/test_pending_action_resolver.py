@@ -138,18 +138,21 @@ class TimerStateMachineTests(unittest.TestCase):
     the handler's response to (prompt, pending) pairs."""
 
     def test_full_conversation_no_duration(self):
+        """The pipeline passes pending_action["data"] (not the whole
+        pending_action) as the handler's `pending` kwarg. Tests mirror
+        that contract so they catch shape-mismatch regressions."""
         from jane_web.jane_v2.classes.timer.handler import handle
         r1 = handle("hey Jane I want to create a timer")
         pa1 = r1["structured"]["pending_action"]
         self.assertEqual(pa1["awaiting"], "duration")
 
-        r2 = handle("5 minutes", pending=pa1)
+        r2 = handle("5 minutes", pending=pa1["data"])
         pa2 = r2["structured"].get("pending_action")
         self.assertIsNotNone(pa2)
         self.assertEqual(pa2["awaiting"], "label")
         self.assertEqual(pa2["data"]["duration_ms"], 5 * 60 * 1000)
 
-        r3 = handle("pasta is ready", pending=pa2)
+        r3 = handle("pasta is ready", pending=pa2["data"])
         self.assertIsNone(r3["structured"].get("pending_action"),
                           "final turn should NOT emit a new pending")
         self.assertIn("timer.set", r3["text"])
@@ -162,10 +165,25 @@ class TimerStateMachineTests(unittest.TestCase):
         pa = r["structured"].get("pending_action")
         self.assertIsNotNone(pa)
         self.assertEqual(pa["awaiting"], "label")
-        r2 = handle("no label", pending=pa)
+        r2 = handle("no label", pending=pa["data"])
         self.assertIsNone(r2["structured"].get("pending_action"))
         self.assertIn("timer.set", r2["text"])
         self.assertIn('"label":""', r2["text"])
+
+    def test_regression_no_infinite_loop(self):
+        """Reproduces the duration↔label ping-pong bug: pipeline passes
+        pending_action.data (flat dict with duration_ms + awaiting), not
+        the nested pending_action record. Handler must read the flat
+        shape or it loses state on every turn and re-asks forever."""
+        from jane_web.jane_v2.classes.timer.handler import handle
+        # Simulate exactly what the pipeline hands in: the .data dict.
+        r = handle("pasta",
+                   pending={"duration_ms": 10000, "awaiting": "label"})
+        pa = r["structured"].get("pending_action")
+        self.assertIsNone(pa, "label-reply with known duration must fire, not re-ask")
+        self.assertIn("timer.set", r["text"])
+        self.assertIn('"duration_ms":10000', r["text"])
+        self.assertIn('"label":"pasta"', r["text"])
 
     def test_both_given_fires_immediately(self):
         from jane_web.jane_v2.classes.timer.handler import handle
@@ -176,13 +194,12 @@ class TimerStateMachineTests(unittest.TestCase):
     def test_pivot_abandons(self):
         from jane_web.jane_v2.classes.timer.handler import handle
         r = handle("what's the weather",
-                   pending={"awaiting": "label",
-                            "data": {"duration_ms": 300000}})
+                   pending={"duration_ms": 300000, "awaiting": "label"})
         self.assertTrue(r.get("abandon_pending"))
 
     def test_unparseable_duration_reprompts(self):
         from jane_web.jane_v2.classes.timer.handler import handle
-        r = handle("huh", pending={"awaiting": "duration", "data": {}})
+        r = handle("huh", pending={"awaiting": "duration"})
         pa = r["structured"].get("pending_action")
         self.assertIsNotNone(pa)
         self.assertEqual(pa["awaiting"], "duration")

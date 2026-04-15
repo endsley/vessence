@@ -291,13 +291,21 @@ def _fire_set(duration_ms: int, label: str) -> dict:
 
 def _handle_resume(prompt: str, pending: dict) -> dict | None:
     """Called when the pending_action_resolver routes a follow-up reply
-    back to us. `pending` is the {awaiting, data} payload we stashed."""
+    back to us.
+
+    `pending` is the `data` dict we stashed last turn (the pipeline
+    passes `pending_data` through, not the whole pending_action record).
+    It contains the accumulated state plus an `awaiting` key marking
+    what the user's reply is answering.
+    """
     if _looks_like_pivot(prompt):
         logger.info("timer handler: pivot detected mid-flow → abandon")
         return {"abandon_pending": True}
 
-    data = dict(pending.get("data") or {})
-    awaiting = pending.get("awaiting") or data.get("awaiting")
+    # Treat `pending` directly as the data dict — that's how the
+    # dispatcher hands it to us.
+    data = dict(pending or {})
+    awaiting = data.pop("awaiting", None)
 
     if awaiting == "duration":
         dur = _parse_duration_ms(prompt)
