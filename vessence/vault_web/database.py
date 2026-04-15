@@ -140,13 +140,27 @@ def init_db():
             -- turn. Used by v2's ack generator / classifier for fast
             -- recency-based context (no similarity search needed).
             -- Capped per session — see vault_web/recent_turns.py.
+            -- `structured` (JSON blob) + `schema_version` added for v2
+            -- 3-stage pipeline's structured FIFO (job 069). Old rows have
+            -- NULL structured + schema_version=0 and still read correctly.
             CREATE TABLE IF NOT EXISTS recent_turns (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 session_id TEXT NOT NULL,
                 summary TEXT NOT NULL,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                structured TEXT,
+                schema_version INTEGER DEFAULT 0
             );
 
             CREATE INDEX IF NOT EXISTS idx_recent_turns_session_id
                 ON recent_turns(session_id, id DESC);
         """)
+
+        # Additive migration for existing DBs that predate the structured columns.
+        existing_cols = {row["name"] for row in conn.execute(
+            "PRAGMA table_info(recent_turns)"
+        ).fetchall()}
+        if "structured" not in existing_cols:
+            conn.execute("ALTER TABLE recent_turns ADD COLUMN structured TEXT")
+        if "schema_version" not in existing_cols:
+            conn.execute("ALTER TABLE recent_turns ADD COLUMN schema_version INTEGER DEFAULT 0")

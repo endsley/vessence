@@ -103,10 +103,8 @@ async def _gate_check(class_name: str, prompt: str, context: str) -> bool:
     if word_count <= 5 and not any(s in p_lower for s in META_SIGNALS):
         return True  # short clear request, no LLM needed
 
-    import os
     import httpx
-
-    model = os.environ.get("JANE_STAGE2_GATE_MODEL", "qwen2.5:7b")
+    from jane_web.jane_v2.models import LOCAL_LLM as model
     ctx_block = f"Recent conversation:\n{context.strip()}\n\n" if context and context.strip() else ""
     gate_prompt = (
         f"The classifier predicted: {desc}\n\n"
@@ -131,7 +129,7 @@ async def _gate_check(class_name: str, prompt: str, context: str) -> bool:
         "stream": False,
         "think": False,
         "options": {"temperature": 0.0, "num_predict": 5},
-        "keep_alive": "1h",
+        "keep_alive": -1,
     }
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:

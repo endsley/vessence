@@ -30,7 +30,7 @@ data class BriefingUiState(
     val articles: List<BriefingArticle> = emptyList(),
     val topics: List<BriefingTopic> = emptyList(),
     val categories: List<String> = emptyList(),
-    val selectedCategory: String = "Shared",
+    val selectedCategory: String = "All",
     val isLoading: Boolean = false,
     val isLoadingArchive: Boolean = false,
     val error: String? = null,
@@ -65,7 +65,7 @@ class BriefingViewModel(application: Application) : AndroidViewModel(application
         com.vessences.android.util.BriefingAudioCache.cleanupOldFiles(appContext)
         // Load cached articles immediately so UI has content before network fetch
         loadCachedArticles()?.let { (articles, categories) ->
-            val effectiveCategory = if ("Shared" in categories) "Shared" else "All"
+            val effectiveCategory = "All"
             _state.value = _state.value.copy(
                 articles = articles,
                 categories = categories,
@@ -94,7 +94,7 @@ class BriefingViewModel(application: Application) : AndroidViewModel(application
                 val topics = fetchTopics()
                 val timestamp = SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date())
                 // Fall back to All if Shared has no articles
-                val effectiveCategory = if (_state.value.selectedCategory == "Shared" && "Shared" !in categories) "All" else _state.value.selectedCategory
+                val effectiveCategory = "All"
                 _state.value = _state.value.copy(
                     articles = articles,
                     topics = topics,
@@ -484,8 +484,12 @@ class BriefingViewModel(application: Application) : AndroidViewModel(application
 
     fun toggleSavedView() {
         val newVal = !_state.value.viewingSaved
-        _state.value = _state.value.copy(viewingSaved = newVal)
-        if (newVal) loadSavedArticles()
+        _state.value = _state.value.copy(viewingSaved = newVal, savedFilterCategory = null)
+        if (newVal) loadSavedArticles(null)
+    }
+
+    fun openSavedCategory(category: String?) {
+        _state.value = _state.value.copy(savedFilterCategory = category)
     }
 
     fun loadSavedArticles(category: String? = null) {

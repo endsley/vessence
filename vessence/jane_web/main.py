@@ -3,6 +3,18 @@
 Shares all templates and static assets with vault_web so UI changes propagate to both.
 """
 import os
+
+# Force HuggingFace Hub and Transformers to fully offline mode BEFORE any
+# library that might import them (sentence_transformers, transformers,
+# huggingface_hub). Our local embedding model cache at
+# ~/.cache/huggingface/hub is authoritative — we do NOT want the Stage 1
+# classifier warmup phoning home to HuggingFace on every cold start to
+# check if the cached revision is stale. That added ~6s of HTTP HEAD
+# latency to every warmup. Override by unsetting these env vars if you
+# need to upgrade the embedding model and pull a fresh snapshot.
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
+os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+
 import sys
 import secrets
 from datetime import datetime, timezone
@@ -204,8 +216,8 @@ try:
     ANDROID_VERSION = _version_data["version_name"]
     _ANDROID_VERSION_CODE = _version_data["version_code"]
 except FileNotFoundError:
-    ANDROID_VERSION = "0.2.26"
-    _ANDROID_VERSION_CODE = 258
+    ANDROID_VERSION = "0.2.34"
+    _ANDROID_VERSION_CODE = 265
 
 # Startup validation: ensure the APK for the advertised version actually exists
 _expected_apk = MARKETING_DOWNLOADS_DIR / f"vessences-android-v{ANDROID_VERSION}.apk"
@@ -478,10 +490,17 @@ async def startup():
     _logger.info("Jane Web startup complete — database initialized, essences loaded, ready to serve")
     # Resume processing any unprocessed shared articles left from before a restart
     asyncio.create_task(_resume_shared_queue_if_needed())
-    # Pre-warm gemma4:e2b — used by the prompt router for every request
+    # Pre-warm the local LLM (qwen2.5:7b by default) — used by every
+    # Stage 2 handler + gate check + Stage 3 ack generator
     prewarm = asyncio.create_task(_prewarm_gemma4())
     _background_tasks.add(prewarm)
     prewarm.add_done_callback(_background_tasks.discard)
+    # Keep the Stage 1 embedding model + memory_retrieval singleton hot
+    # in GPU/RAM forever. Belt-and-suspenders against GPU idle-eviction
+    # and a cheap liveness check.
+    keepalive = asyncio.create_task(_embedding_keepalive_loop())
+    _background_tasks.add(keepalive)
+    keepalive.add_done_callback(_background_tasks.discard)
     # Start Standing Brain processes (3 tiers: light/medium/heavy)
     standing_brain_task = asyncio.create_task(_start_standing_brains())
     _background_tasks.add(standing_brain_task)
@@ -504,29 +523,115 @@ async def _start_standing_brains():
         _logger.error("Standing Brain startup failed: %s", exc)
 
 
-async def _prewarm_gemma4():
-    """Pre-warm gemma4:e2b via ollama HTTP API with keep_alive=-1 (pinned).
+async def _embedding_keepalive_loop():
+    """Periodically touch both embedding singletons so they stay hot.
 
-    Ollama is the preferred ack provider when available (fast, local, no cost).
-    This prewarm pins the model in memory so the first ack isn't slow.
+    Python doesn't evict module-level globals, so strictly speaking the
+    models never leave RAM once loaded. But GPUs can throttle/clock-down
+    after long idle, and occasionally a competing CUDA process can evict
+    weights. This loop sends a microscopic encode every few minutes to
+    keep the model pinned on the device and serves as a liveness check —
+    if either singleton silently goes missing, the warning will surface.
+    """
+    from intent_classifier.v2.classifier import stage1_classify
+    from memory.v1.memory_retrieval import _embed_query_text
+    interval_s = int(os.environ.get("JANE_EMBED_KEEPALIVE_SEC", "300"))  # 5 min
+    # First tick happens after the interval — startup warmup already
+    # touched both singletons once.
+    while True:
+        await asyncio.sleep(interval_s)
+        try:
+            await stage1_classify(".")
+        except Exception as e:
+            _logger.warning("embedding keepalive: stage1 failed: %s", e)
+        try:
+            await asyncio.to_thread(_embed_query_text, ".")
+        except Exception as e:
+            _logger.warning("embedding keepalive: memory_retrieval failed: %s", e)
+
+
+async def _prewarm_stage1_classifier():
+    """Warm Jane v2's Stage 1 ChromaDB embedding classifier at startup.
+
+    The classifier's SentenceTransformer (BAAI/bge-small-en-v1.5) is
+    loaded lazily on the first stage1_classify() call — which can take
+    60–90 seconds including HuggingFace metadata checks. When the first
+    real user request pays that cost, Android's streaming socket often
+    times out. Warming here shifts the load to server startup so every
+    user request hits a warm classifier.
+
+    Also warms memory_retrieval._query_embedding_fn, which is a separate
+    singleton using the same model — needed so the first memory lookup
+    (librarian retrieval, Jane CLI memory hits) doesn't pay a second
+    load. Both singletons live in the jane_web process for its lifetime;
+    nothing evicts them until the process restarts.
+    """
+    import time as _time
+    try:
+        from intent_classifier.v2.classifier import stage1_classify
+        _t = _time.perf_counter()
+        _logger.info("Pre-warming Stage 1 embedding classifier…")
+        await stage1_classify("warmup probe")
+        _logger.info("Stage 1 classifier pre-warmed (%.1fs)",
+                     _time.perf_counter() - _t)
+    except Exception as e:
+        _logger.warning("Stage 1 prewarm failed: %s", e)
+
+    # Memory retrieval uses its own SentenceTransformer singleton — warm
+    # it too so the first librarian query / Jane CLI memory call doesn't
+    # pay an additional load cost (mostly fast now that CUDA is hot, but
+    # still a few seconds on a fresh process).
+    try:
+        from memory.v1.memory_retrieval import _embed_query_text
+        _t = _time.perf_counter()
+        _logger.info("Pre-warming memory_retrieval embedding fn…")
+        await asyncio.to_thread(_embed_query_text, "warmup probe")
+        _logger.info("memory_retrieval embedding fn warm (%.1fs)",
+                     _time.perf_counter() - _t)
+    except Exception as e:
+        _logger.warning("memory_retrieval prewarm failed: %s", e)
+
+
+async def _prewarm_gemma4():
+    """Pre-warm Jane's local LLM via Ollama HTTP API with keep_alive=-1.
+
+    Pins the local LLM (used by Stage 2 class action handlers, the
+    dispatcher gate check, and the Stage 3 ack generator) in Ollama's
+    memory at server startup so the very first user request doesn't pay
+    a ~60-second cold-load. Tag comes from
+    `jane_web.jane_v2.models.LOCAL_LLM` (default qwen2.5:7b).
+
+    Also kicks off the Stage 1 classifier warmup in parallel — Stage 1
+    has its own separate cold-start penalty (sentence-transformers +
+    Chroma) that we need to eat up front.
+
+    Name kept as `_prewarm_gemma4` for compatibility with existing callers.
     Skipped silently if Ollama isn't running.
     """
-    model = os.environ.get("GEMMA_ROUTER_MODEL", "gemma4:e2b")
+    # Warm Stage 1 classifier in parallel — independent CPU/GPU work.
+    asyncio.create_task(_prewarm_stage1_classifier())
+    try:
+        from jane_web.jane_v2.models import LOCAL_LLM as model, OLLAMA_KEEP_ALIVE
+    except Exception:
+        # Fallback if the models module can't be imported for some reason.
+        model = os.environ.get("JANE_LOCAL_LLM", "qwen2.5:7b")
+        OLLAMA_KEEP_ALIVE = -1
     if ":" not in model:
         return
-    _logger.info("Pre-warming Gemma4 router model: %s", model)
+    _logger.info("Pre-warming local LLM: %s", model)
     try:
         import aiohttp
         ollama_url = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=120)) as session:
             async with session.post(
                 f"{ollama_url}/api/generate",
-                json={"model": model, "prompt": "hi", "stream": False, "keep_alive": -1},
+                json={"model": model, "prompt": "hi", "stream": False,
+                      "keep_alive": OLLAMA_KEEP_ALIVE},
             ) as resp:
                 await resp.read()
-        _logger.info("Gemma4 router model %s pre-warmed (keep_alive=-1)", model)
+        _logger.info("Local LLM %s pre-warmed (keep_alive=%s)", model, OLLAMA_KEEP_ALIVE)
     except Exception as e:
-        _logger.warning("Gemma4 prewarm failed: %s", e)
+        _logger.warning("Local LLM prewarm failed: %s", e)
 
 
 async def _prewarm_ollama():
@@ -1278,7 +1383,12 @@ async def recent_messages(days: int = 5, limit: int = 50, _=Depends(require_auth
 
 @app.post("/api/device-diagnostics")
 async def receive_device_diagnostics(request: Request, _=Depends(require_auth)):
-    """Receive diagnostic data from Android: wake word status, mic state, errors, scores, etc."""
+    """Receive diagnostic data from Android: wake word status, mic state, errors, scores, etc.
+
+    When a `chat_error` category lands, automatically file an audit job
+    into configs/job_queue/ so the next `run job queue:` reviews the
+    code path that crashed (agent_skills/chat_error_audit.py).
+    """
     import json as _json
     body = await request.json()
     diag_file = Path(LOGS_DIR) / "android_diagnostics.jsonl"
@@ -1287,6 +1397,17 @@ async def receive_device_diagnostics(request: Request, _=Depends(require_auth)):
     category = body.get("category", "unknown")
     message = body.get("message", "")
     _logger.info("Android diagnostic [%s]: %s", category, message[:200])
+
+    # chat_error → auto-file an audit job.
+    if category == "chat_error":
+        try:
+            from agent_skills.chat_error_audit import create_audit_job
+            created = create_audit_job(body)
+            if created:
+                _logger.info("chat_error → opened audit job %s", created.name)
+        except Exception as e:
+            _logger.warning("chat_error audit hook failed: %s", e)
+
     return {"status": "received"}
 
 

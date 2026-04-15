@@ -82,3 +82,132 @@ def get_recent_context(
     # kept is newest-first; reverse to oldest-first (natural reading order)
     kept.reverse()
     return "\n".join(kept)
+
+
+# ─── Structured renderers (v2 3-stage pipeline, job 069) ──────────────────
+
+
+def get_stage1_context_packet(session_id: str | None) -> dict:
+    """Return a compact structured state packet for Stage 1's use.
+
+    Stage 1 itself is currently prompt-only (Chroma k-NN embedding), so
+    it does not consume this packet directly. It is instead used by the
+    pre-Stage-1 resolver and can be logged for diagnostics.
+
+    Keys:
+      pending_action: dict or None — most recent unresolved action
+      last_intent:    str — last known classifier intent
+      last_entities:  dict — entities from the most recent structured turn
+      recent_summary: str — compact prose snippet of the last turn
+    """
+    if not session_id:
+        return {"pending_action": None, "last_intent": "",
+                "last_entities": {}, "recent_summary": ""}
+    try:
+        from vault_web.recent_turns import get_active_state
+    except Exception:
+        return {"pending_action": None, "last_intent": "",
+                "last_entities": {}, "recent_summary": ""}
+    try:
+        state = get_active_state(session_id)
+    except Exception:
+        return {"pending_action": None, "last_intent": "",
+                "last_entities": {}, "recent_summary": ""}
+    summaries = state.get("recent_summaries") or []
+    return {
+        "pending_action": state.get("pending_action"),
+        "last_intent": state.get("last_intent", ""),
+        "last_entities": state.get("last_entities", {}) or {},
+        "recent_summary": summaries[-1] if summaries else "",
+    }
+
+
+def render_stage2_context(session_id: str | None, max_turns: int = 3) -> str:
+    """Prose context block for Stage 2 handlers, augmented with a
+    structured state line when an unresolved pending action exists.
+
+    Handlers that already accept a prose `context=` kwarg (send_message,
+    greeting) get the same FIFO summary they expect — plus, when
+    relevant, a compact state header so they can see what's pending.
+    """
+    if not session_id:
+        return ""
+    prose = get_recent_context(session_id, max_turns=max_turns)
+    packet = get_stage1_context_packet(session_id)
+    pa = packet.get("pending_action")
+    if not pa:
+        return prose
+    header = _render_state_header(packet)
+    return (header + "\n\n" + prose).strip() if prose else header
+
+
+def render_stage3_context(session_id: str | None, max_turns: int = 10) -> str:
+    """Stage 3 (Opus) gets prose FIFO + a clearly-delimited state block.
+
+    Avoids dumping raw JSON. Example output:
+
+        [CURRENT CONVERSATION STATE]
+        - Last intent: send message.
+        - Pending action: awaiting confirmation to send SMS to Kathia.
+        - Draft: "I love you".
+        [END CURRENT CONVERSATION STATE]
+
+        user: …
+        jane: …
+    """
+    if not session_id:
+        return ""
+    prose = get_recent_context(session_id, max_turns=max_turns)
+    packet = get_stage1_context_packet(session_id)
+    if not (packet.get("pending_action") or packet.get("last_intent")):
+        return prose
+    block = _render_state_block(packet)
+    return (block + "\n\n" + prose).strip() if prose else block
+
+
+def _render_state_header(packet: dict) -> str:
+    """Single-line compact state header for Stage 2 handlers."""
+    pa = packet.get("pending_action") or {}
+    intent = packet.get("last_intent") or ""
+    parts = []
+    if intent:
+        parts.append(f"last_intent={intent}")
+    if pa:
+        ptype = pa.get("type", "pending")
+        data = pa.get("data") or {}
+        who = data.get("display_name") or data.get("recipient")
+        if who:
+            parts.append(f"pending={ptype}→{who}")
+        else:
+            parts.append(f"pending={ptype}")
+    return "[STATE: " + "; ".join(parts) + "]" if parts else ""
+
+
+def _render_state_block(packet: dict) -> str:
+    """Multi-line state block for Stage 3 (Opus)."""
+    lines = ["[CURRENT CONVERSATION STATE]"]
+    intent = packet.get("last_intent") or ""
+    if intent:
+        lines.append(f"- Last intent: {intent}.")
+    pa = packet.get("pending_action") or {}
+    if pa:
+        ptype = pa.get("type", "pending action")
+        data = pa.get("data") or {}
+        who = data.get("display_name") or data.get("recipient")
+        body = data.get("body") or data.get("message_body")
+        if ptype == "SEND_MESSAGE_CONFIRMATION":
+            if who and body:
+                lines.append(f'- Pending action: awaiting confirmation to SMS {who}: "{body}".')
+            elif who:
+                lines.append(f"- Pending action: awaiting confirmation to SMS {who}.")
+            else:
+                lines.append("- Pending action: awaiting confirmation to send an SMS.")
+            lines.append("- User may confirm, revise, or cancel.")
+        else:
+            lines.append(f"- Pending action: {ptype}.")
+    entities = packet.get("last_entities") or {}
+    if entities and not pa:
+        ent_str = ", ".join(f"{k}={v}" for k, v in list(entities.items())[:4])
+        lines.append(f"- Recent entities: {ent_str}.")
+    lines.append("[END CURRENT CONVERSATION STATE]")
+    return "\n".join(lines)

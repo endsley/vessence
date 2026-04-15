@@ -51,6 +51,34 @@ def _maybe_voice_wrap(body):
         return body.copy(update={"message": new_message})
 
 
+def _inject_structured_state(body):
+    """Prepend a rendered CURRENT CONVERSATION STATE block to the user's
+    message when FIFO holds an active pending action or last intent.
+
+    Stage 3 (Opus) is the only consumer that benefits — structured state
+    lets it answer context-dependent follow-ups ("what about tomorrow",
+    "actually make it shorter") without re-deriving state from prose.
+    """
+    session_id = getattr(body, "session_id", None)
+    if not session_id:
+        return body
+    try:
+        from . import recent_context
+        block = recent_context.render_stage3_context(session_id, max_turns=10)
+    except Exception:
+        return body
+    if not block or "[CURRENT CONVERSATION STATE]" not in block:
+        return body
+    # Only prepend the state block — the FIFO prose part is already in v1's
+    # own context memory, and we don't want to duplicate that.
+    header_only = block.split("\n\n", 1)[0].strip()
+    new_message = header_only + "\n\n" + (body.message or "")
+    try:
+        return body.model_copy(update={"message": new_message})
+    except AttributeError:
+        return body.copy(update={"message": new_message})
+
+
 def _ndjson(event_type: str, data=None, **extra) -> str:
     payload = {"type": event_type}
     if data is not None:
@@ -107,7 +135,8 @@ async def escalate_stream(
     Yields NDJSON-encoded event strings (each ends with "\\n").
     """
     is_voice = (getattr(body, "platform", None) or "").lower() == "voice"
-    effective_body = _maybe_voice_wrap(body)
+    effective_body = _inject_structured_state(body)
+    effective_body = _maybe_voice_wrap(effective_body)
     logger.info(
         "stage3_escalate: reason=%s voice=%s prompt_len=%d",
         reason,

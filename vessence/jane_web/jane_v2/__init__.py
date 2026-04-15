@@ -5,7 +5,7 @@ main.py falls through to the existing v1 code path and this package is
 never imported.
 
 Stages:
-  1. stage1_classifier — gemma4:e2b routes the prompt to a class
+  1. stage1_classifier — ChromaDB embedding k-NN routes the prompt to a class
      (weather, music play, others) with High/Medium/Low confidence.
   2. stage2_* handlers — per-class handlers produce a direct answer
      when confidence is High.

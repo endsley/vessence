@@ -27,8 +27,8 @@ if str(_VAULT_WEB_DIR) not in sys.path:
 logger = logging.getLogger(__name__)
 
 DEFAULT_LIMIT = 10
-MODEL = os.environ.get("JANE_STAGE2_READ_MSG_MODEL", "qwen2.5:7b")
-OLLAMA_URL = "http://localhost:11434/api/generate"
+
+from jane_web.jane_v2.models import LOCAL_LLM as MODEL, OLLAMA_URL  # noqa: E402
 
 # Architecture/code-question keywords → escalate (not a real read request)
 _ARCH_WORDS = ("architecture", "infrastructure", "pipeline", "handler", "classifier", "stage")
@@ -164,7 +164,7 @@ Your answer:"""
         "stream": False,
         "think": False,
         "options": {"temperature": 0.1, "num_predict": 400},
-        "keep_alive": "1h",
+        "keep_alive": -1,
     }
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:

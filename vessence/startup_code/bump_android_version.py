@@ -11,6 +11,7 @@ Usage:
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -168,6 +169,51 @@ def deploy_apk(apk: Path, version_name: str):
     print(f"  Deployed to {generic}")
 
 
+def _aapt_path() -> Path | None:
+    """Locate an aapt binary from the Android SDK. Used to read versionCode
+    out of already-deployed APKs as a sanity floor for new builds."""
+    for base in (Path.home() / "android-sdk" / "build-tools",
+                 Path("/opt/android-sdk/build-tools"),
+                 Path("/usr/local/android-sdk/build-tools")):
+        if base.exists():
+            for ver_dir in sorted(base.iterdir(), reverse=True):
+                candidate = ver_dir / "aapt"
+                if candidate.is_file() and os.access(candidate, os.X_OK):
+                    return candidate
+    return None
+
+
+def scan_deployed_max_version_code() -> tuple[int, str] | None:
+    """Return (max_version_code, apk_filename) across every APK in
+    downloads/, or None if aapt isn't available or no APK parses.
+
+    We trust the APK's AndroidManifest (via aapt) over version.json
+    because version.json has historically drifted when other build paths
+    bumped Gradle without updating it. This is the scar tissue fix.
+    """
+    aapt = _aapt_path()
+    if aapt is None:
+        return None
+    best = (-1, "")
+    for apk in DOWNLOADS_DIR.glob("vessences-android-v*.apk"):
+        try:
+            r = subprocess.run(
+                [str(aapt), "dump", "badging", str(apk)],
+                capture_output=True, text=True, timeout=10, check=False,
+            )
+            first_line = (r.stdout or "").splitlines()[0] if r.stdout else ""
+            m = re.search(r"versionCode='(\d+)'", first_line)
+            if m:
+                code = int(m.group(1))
+                if code > best[0]:
+                    best = (code, apk.name)
+        except Exception:
+            continue
+    if best[0] < 0:
+        return None
+    return best
+
+
 def main():
     current = load_version()
     old_name = current["version_name"]
@@ -179,6 +225,22 @@ def main():
         new_name = bump_patch(old_name)
 
     new_code = old_code + 1
+
+    # Sanity floor: new_code must exceed the max versionCode of every APK
+    # already in downloads/. Past builds have drifted — e.g., Gradle-side
+    # builds incremented versionCode without updating version.json, then a
+    # bump off the stale version.json produced an APK with a *lower* code
+    # than what users already had installed, silently breaking the auto-
+    # updater. Jump `new_code` above any deployed APK we can find.
+    deployed = scan_deployed_max_version_code()
+    if deployed is not None:
+        deployed_code, deployed_apk = deployed
+        if new_code <= deployed_code:
+            adjusted = deployed_code + 1
+            print(f"  ⚠  versionCode {new_code} ≤ deployed max {deployed_code} "
+                  f"(from {deployed_apk}).")
+            print(f"     Jumping to code {adjusted} so auto-update works.")
+            new_code = adjusted
 
     print(f"Android version bump: {old_name} (code {old_code}) → {new_name} (code {new_code})")
     print()

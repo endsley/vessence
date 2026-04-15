@@ -30,8 +30,7 @@ if str(_VAULT_WEB_DIR) not in sys.path:
 
 logger = logging.getLogger(__name__)
 
-MODEL = os.environ.get("JANE_STAGE2_SMS_MODEL", "qwen2.5:7b")
-OLLAMA_URL = "http://localhost:11434/api/generate"
+from jane_web.jane_v2.models import LOCAL_LLM as MODEL, OLLAMA_URL  # noqa: E402
 
 _EXTRACT_PROMPT = """\
 The classifier thinks the user wants to SEND A TEXT MESSAGE to someone.
@@ -168,7 +167,7 @@ async def handle(prompt: str, context: str = "") -> dict | None:
         "stream": False,
         "think": False,
         "options": {"temperature": 0.0, "num_predict": 100},
-        "keep_alive": "1h",
+        "keep_alive": -1,
     }
 
     try:

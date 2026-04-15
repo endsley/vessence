@@ -1,7 +1,7 @@
 """Weather Stage 2 handler.
 
 Takes a user prompt, injects the cached weather.json into a dedicated
-answer template, asks gemma4:e2b to produce a 1-2 sentence spoken
+answer template, asks qwen2.5:7b to produce a 1-2 sentence spoken
 answer, and returns either:
 
     {"text": "<answer>"}   → success, pipeline returns to user
@@ -16,10 +16,9 @@ from pathlib import Path
 
 import httpx
 
-logger = logging.getLogger(__name__)
+from jane_web.jane_v2.models import LOCAL_LLM as MODEL, OLLAMA_URL
 
-MODEL = "gemma4:e2b"
-OLLAMA_URL = "http://localhost:11434/api/generate"
+logger = logging.getLogger(__name__)
 WEATHER_PATH = Path("/home/chieh/ambient/vessence-data/cache/weather.json")
 
 
@@ -86,7 +85,7 @@ async def handle(prompt: str) -> dict | None:
         "stream": False,
         "think": False,
         "options": {"temperature": 0.2, "num_predict": 120},
-        "keep_alive": "1h",
+        "keep_alive": -1,
     }
     try:
         async with httpx.AsyncClient(timeout=90.0) as client:

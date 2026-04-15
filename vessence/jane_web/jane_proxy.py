@@ -1770,7 +1770,18 @@ async def stream_message(
     file_context: str = None,
     platform: str = None,
     tts_enabled: bool = False,
+    skip_router: bool = False,
 ) -> AsyncIterator[str]:
+    """Stream a chat turn.
+
+    `skip_router=True` tells this function to BYPASS its internal Stage 1
+    embedding classifier + Stage 2 dispatcher and go straight to the
+    final brain (Opus). jane_v2's Stage 3 escalation sets this — v2 has
+    already done its own classification with stronger safeguards, and a
+    second uncoordinated reclassification inside stream_message caused
+    bugs like v2 correctly demoting END_CONVERSATION then v1 re-picking
+    it and short-circuiting with a canned "Ok." reply.
+    """
     broadcast_user_id = user_id  # keep for broadcast; not used for anything else yet
     del user_id  # single-user system for now
     request_start = time.perf_counter()
@@ -1988,6 +1999,10 @@ async def stream_message(
     # free variable even when the v2 pipeline is used and the old pipeline is skipped.
     _classification = None
     try:
+        if skip_router:
+            # Caller (jane_v2 Stage 3 escalation) already classified and
+            # wants us to go straight to Opus — don't rerun classifier.
+            raise _SkipRouterSignal()
         if _skip_initial_ack:
             # Fall-through sentinel: raise a silent skip marker caught below.
             raise _SkipRouterSignal()
@@ -1998,6 +2013,18 @@ async def stream_message(
             ROUTER_MODEL = "embedding-v2"
             _stage1 = await _s1_fn(message, session_id)
             _s1_cls = _stage1.get("classification", "DELEGATE_OPUS")
+            # END_CONVERSATION is destructive: it short-circuits the brain,
+            # replies "Ok.", and tells clients to end active listening. The
+            # jane_v2 wrapper already requires an 0.80 floor, but this proxy
+            # path calls the raw embedding classifier directly, so duplicate
+            # that safety gate here.
+            if _s1_cls == "END_CONVERSATION" and float(_stage1.get("confidence") or 0.0) < 0.80:
+                logger.info(
+                    "[%s] v2 END_CONVERSATION confidence %.2f below safety floor — delegating",
+                    session_id[:12], float(_stage1.get("confidence") or 0.0),
+                )
+                _s1_cls = "DELEGATE_OPUS"
+                _stage1["classification"] = _s1_cls
             _stage1["classification"] = _s1_cls
             # Sync _classification so run_pipeline_async()'s CLASSIFICATION_TO_INTENT
             # lookup works for v2 pipeline turns that delegate to Opus.

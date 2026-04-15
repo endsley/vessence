@@ -35,7 +35,13 @@ from typing import Any, AsyncIterator
 from fastapi import Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from . import recent_context, stage1_classifier, stage2_dispatcher, stage3_escalate
+from . import (
+    pending_action_resolver,
+    recent_context,
+    stage1_classifier,
+    stage2_dispatcher,
+    stage3_escalate,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -46,22 +52,61 @@ _DEFAULT_ESCALATE_ACK = "Let me think about that…"
 # ─── shared helpers ──────────────────────────────────────────────────────────
 
 
-def _persist_stage2_to_fifo(session_id: str | None, user_prompt: str, jane_response: str) -> None:
-    """After a successful Stage 2 turn, write a compact summary to the
-    recent_turns FIFO so future Stage 3 calls (and Stage 2 handlers that
-    use FIFO context) can see what happened in this turn.
+def _persist_turn_to_fifo(
+    session_id: str | None,
+    user_prompt: str,
+    jane_response: str,
+    *,
+    stage: str = "stage2",
+    intent: str = "",
+    confidence: str = "",
+    handler_structured: dict | None = None,
+    extras: dict | None = None,
+) -> None:
+    """Persist a completed turn to the FIFO as a structured record.
 
-    Without this, Stage 2 turns are invisible to subsequent context lookups
-    and Opus loses the conversation thread when it eventually runs.
+    Stage 2 and Stage 3 both call this so the next turn's resolver + Stage
+    1 packet + Stage 3 context see the full conversation history.
+
+    Handlers can opt into richer context by returning a ``structured``
+    field alongside ``text``; it's merged in here (entities / pending_action
+    / safety etc.).
     """
     if not session_id or not jane_response:
         return
     try:
-        from vault_web.recent_turns import add as _recent_add, _format_turn_compact
-        summary = _format_turn_compact(user_prompt or "", jane_response)
-        _recent_add(session_id, summary)
+        from vault_web.recent_turns import add_structured, _format_turn_compact
+        record: dict = {
+            "user_text": user_prompt or "",
+            "assistant_text": jane_response,
+            "summary": _format_turn_compact(user_prompt or "", jane_response),
+            "stage": stage,
+            "intent": intent or "",
+        }
+        if confidence:
+            record["confidence"] = confidence
+        if handler_structured:
+            # Shallow merge: handler-provided fields win.
+            for k, v in handler_structured.items():
+                if v is not None:
+                    record[k] = v
+        if extras:
+            if extras.get("client_tools"):
+                record.setdefault("tool_results", []).extend(
+                    [{"name": t.get("name") or t.get("tool"), "args": t.get("args", {})}
+                     for t in extras["client_tools"]]
+                )
+            if extras.get("conversation_end"):
+                record.setdefault("metadata", {})["conversation_end"] = True
+        add_structured(session_id, record)
     except Exception as e:
-        logger.warning("pipeline: failed to persist stage2 turn to FIFO: %s", e)
+        logger.warning("pipeline: failed to persist turn to FIFO: %s", e)
+
+
+# Backward-compatible alias for older callers/tests that imported the
+# previous name. New code should use _persist_turn_to_fifo directly.
+def _persist_stage2_to_fifo(session_id: str | None, user_prompt: str, jane_response: str) -> None:
+    _persist_turn_to_fifo(session_id, user_prompt, jane_response, stage="stage2")
 
 
 def _ack_for(class_name: str, *, escalate: bool) -> str | None:
@@ -221,6 +266,52 @@ def _stage2_response_parts(result: dict) -> tuple[str, dict[str, Any]]:
     return text, extras
 
 
+def _resolve_pending_sms_confirmation(pending: dict) -> dict:
+    """Build a Stage 2-shaped result dict that sends the pending SMS.
+
+    Marks the pending action as `resolved` in a structured record so the
+    next resolver call won't re-confirm the same pending twice.
+    """
+    import json as _json
+    data = pending.get("data") or {}
+    phone = data.get("phone_number") or ""
+    body = data.get("body") or data.get("message_body") or ""
+    display = data.get("display_name") or data.get("recipient") or "them"
+    tool_args = _json.dumps({"phone_number": phone, "body": body})
+    marker = f"[[CLIENT_TOOL:contacts.sms_send_direct:{tool_args}]]"
+    return {
+        "text": f"Sending to {display}. {marker}",
+        "structured": {
+            "intent": "send message",
+            "entities": {"recipient": display, "message_body": body,
+                         "phone_number": phone},
+            "pending_action": {
+                "type": "SEND_MESSAGE_CONFIRMATION",
+                "status": "resolved",
+                "resolution": "confirmed",
+            },
+            "safety": {"side_effectful": True, "requires_confirmation": False},
+        },
+    }
+
+
+def _cancel_pending_sms_confirmation(pending: dict) -> dict:
+    """Build a Stage 2-shaped result dict that drops the pending SMS."""
+    data = pending.get("data") or {}
+    display = data.get("display_name") or data.get("recipient") or "them"
+    return {
+        "text": f"Okay, not sending that to {display}.",
+        "structured": {
+            "intent": "send message",
+            "pending_action": {
+                "type": "SEND_MESSAGE_CONFIRMATION",
+                "status": "resolved",
+                "resolution": "cancelled",
+            },
+        },
+    }
+
+
 async def _classify_and_try_stage2(
     prompt: str, session_id: str | None = None
 ) -> dict[str, Any]:
@@ -236,10 +327,35 @@ async def _classify_and_try_stage2(
       stage2_ack    — ack text to show while Stage 2 runs
       fallback_ack  — ack text to show when escalating to Stage 3
     """
+    # ── Pre-Stage-1: deterministic pending-action resolver ────────────
+    # If the last turn left an unresolved SMS confirmation in FIFO and
+    # the user replied "yes"/"cancel", short-circuit Stage 1 so a raw
+    # "yes" can't be mis-embedded as GREETING or OTHERS.
+    try:
+        resolved = pending_action_resolver.resolve(session_id, prompt)
+    except Exception as e:
+        logger.warning("pipeline: resolver failed: %s", e)
+        resolved = None
+    if resolved:
+        pending = resolved.get("pending") or {}
+        if resolved["action"] == "confirm":
+            result = _resolve_pending_sms_confirmation(pending)
+        else:
+            result = _cancel_pending_sms_confirmation(pending)
+        cls = "send message"
+        conf = "High"
+        logger.info("jane_v2 pipeline: pending-action resolver → %s", resolved["action"])
+        return {
+            "cls": cls, "conf": conf, "classification": f"{cls}:{conf}",
+            "stage1_ms": 0, "stage2_ms": 0, "result": result,
+            "stage2_ack": _ack_for(cls, escalate=False),
+            "fallback_ack": _ack_for(cls, escalate=True),
+        }
+
     # Stage 1
     _t1 = time.perf_counter()
     try:
-        cls, conf = await stage1_classifier.classify(prompt)
+        cls, conf = await stage1_classifier.classify(prompt, session_id=session_id)
     except Exception as e:
         logger.exception("jane_v2 pipeline: stage1 crashed: %s", e)
         cls, conf = "others", "Low"
@@ -261,7 +377,7 @@ async def _classify_and_try_stage2(
     if conf in ("High", "Medium") and cls == "end conversation":
         fifo_ctx = ""
         try:
-            fifo_ctx = recent_context.get_recent_context(session_id, max_turns=3)
+            fifo_ctx = recent_context.render_stage2_context(session_id, max_turns=3)
         except Exception:
             pass
         if await stage2_dispatcher._gate_check("end conversation", prompt, fifo_ctx):
@@ -272,7 +388,7 @@ async def _classify_and_try_stage2(
     if result is None and conf in ("High", "Medium") and cls != "others":
         fifo_ctx = ""
         try:
-            fifo_ctx = recent_context.get_recent_context(session_id, max_turns=3)
+            fifo_ctx = recent_context.render_stage2_context(session_id, max_turns=3)
         except Exception:
             pass
         _t2 = time.perf_counter()
@@ -345,7 +461,14 @@ async def handle_chat(body, request: Request):
         if all_tool_calls:
             resp["client_tool_calls"] = all_tool_calls
         resp.update(extras)
-        _persist_stage2_to_fifo(body.session_id, prompt, visible_text or text)
+        _persist_turn_to_fifo(
+            body.session_id, prompt, visible_text or text,
+            stage="stage2",
+            intent=state["cls"],
+            confidence=state["conf"],
+            handler_structured=state["result"].get("structured") if isinstance(state["result"], dict) else None,
+            extras=extras,
+        )
         return JSONResponse(resp)
 
     # ── Stage 3: delegate to v1's non-streaming brain ───────────────────
@@ -371,7 +494,8 @@ async def handle_chat(body, request: Request):
             status_code=500,
         )
 
-    effective_body = stage3_escalate._maybe_voice_wrap(body)
+    effective_body = stage3_escalate._inject_structured_state(body)
+    effective_body = stage3_escalate._maybe_voice_wrap(effective_body)
     # Inject SMS context for unresolved send-message requests
     if state["cls"] == "send message":
         sms_ctx = (
@@ -410,6 +534,15 @@ async def handle_chat(body, request: Request):
     new_body_bytes = json.dumps(v1_body, ensure_ascii=True).encode("utf-8")
     v1_response.body = new_body_bytes
     v1_response.headers["content-length"] = str(len(new_body_bytes))
+    # FIFO record for Stage 3 turn so the next pending-action resolver /
+    # Stage 3 state block sees continuity. v1 has its own long-term memory,
+    # so we only record a minimal handoff summary here.
+    _persist_turn_to_fifo(
+        body.session_id, prompt, v1_body.get("response", "") or "",
+        stage="stage3",
+        intent=state["cls"],
+        confidence=state["conf"],
+    )
     return v1_response
 
 
@@ -463,7 +596,14 @@ async def handle_chat_stream(body, request: Request):
                 yield _ndjson("client_tool_call", json.dumps(tc_payload, ensure_ascii=True))
             yield _ndjson("delta", visible_text or text)
             yield _ndjson("done", visible_text or text, **extras)
-            _persist_stage2_to_fifo(body.session_id, prompt, visible_text or text)
+            _persist_turn_to_fifo(
+                body.session_id, prompt, visible_text or text,
+                stage="stage2",
+                intent=state["cls"],
+                confidence=state["conf"],
+                handler_structured=state["result"].get("structured") if isinstance(state["result"], dict) else None,
+                extras=extras,
+            )
             return
 
         # ── Stage 3: delegate to v1's streaming brain ──────────────────
@@ -497,9 +637,24 @@ async def handle_chat_stream(body, request: Request):
                 )
 
         reason = f"{state['cls']}:{state['conf']}"
+        # Accumulate streamed deltas so we can persist a FIFO record at the end.
+        _stage3_text_parts: list[str] = []
         async for ev in stage3_escalate.escalate_stream(
             effective_body, request, dynamic_ack, reason=reason
         ):
+            # Best-effort: sniff `delta` events for accumulated Stage 3 text.
+            try:
+                payload = json.loads(ev)
+                if payload.get("type") == "delta" and isinstance(payload.get("data"), str):
+                    _stage3_text_parts.append(payload["data"])
+            except Exception:
+                pass
             yield ev
+        _persist_turn_to_fifo(
+            body.session_id, prompt, "".join(_stage3_text_parts),
+            stage="stage3",
+            intent=state["cls"],
+            confidence=state["conf"],
+        )
 
     return StreamingResponse(_stream(), media_type="application/x-ndjson")

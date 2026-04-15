@@ -119,21 +119,13 @@ fun BriefingScreen(
                 onShowHistory = { showHistorySheet = true },
             )
 
-            // Category filter chips
+            // Single "News" chip + "Saved" chip — all categories consolidated
             TopicChips(
-                topics = run {
-                    // Shared first (from backend), then All, then rest
-                    val rest = state.categories.filter { it != "Shared" }
-                    val tabs = mutableListOf<String>()
-                    if ("Shared" in state.categories) tabs.add("Shared")
-                    tabs.add("All")
-                    tabs.addAll(rest)
-                    tabs
-                },
-                selected = if (state.viewingSaved) "" else state.selectedCategory,
+                topics = listOf("News"),
+                selected = if (state.viewingSaved) "" else "News",
                 onSelect = {
                     if (state.viewingSaved) viewModel.toggleSavedView()
-                    viewModel.selectCategory(it)
+                    viewModel.selectCategory("All")
                 },
                 trailingContent = {
                     // Saved chip
@@ -167,76 +159,100 @@ fun BriefingScreen(
                 },
             )
 
-            // Saved articles view
+            // Saved articles view — two levels: categories grid, then articles in category
             if (state.viewingSaved) {
-                // Category filter for saved articles
-                if (state.savedCategories.isNotEmpty()) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState())
-                            .padding(horizontal = 12.dp, vertical = 2.dp),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        FilterChip(
-                            selected = state.savedFilterCategory == null,
-                            onClick = { viewModel.loadSavedArticles(null) },
-                            label = { Text("All Saved", fontSize = 11.sp) },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = Color(0xFFF59E0B),
-                                selectedLabelColor = Color.White,
-                                containerColor = SlateCard,
-                                labelColor = SlateMuted,
-                            ),
-                            border = FilterChipDefaults.filterChipBorder(
-                                borderColor = SlateSubtle,
-                                selectedBorderColor = Color(0xFFF59E0B),
-                                enabled = true,
-                                selected = state.savedFilterCategory == null,
-                            ),
-                        )
-                        state.savedCategories.forEach { cat ->
-                            FilterChip(
-                                selected = state.savedFilterCategory == cat,
-                                onClick = { viewModel.loadSavedArticles(cat) },
-                                label = { Text(cat, fontSize = 11.sp) },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = Color(0xFFF59E0B),
-                                    selectedLabelColor = Color.White,
-                                    containerColor = SlateCard,
-                                    labelColor = SlateMuted,
-                                ),
-                                border = FilterChipDefaults.filterChipBorder(
-                                    borderColor = SlateSubtle,
-                                    selectedBorderColor = Color(0xFFF59E0B),
-                                    enabled = true,
-                                    selected = state.savedFilterCategory == cat,
-                                ),
-                            )
+                if (state.savedFilterCategory == null) {
+                    // Level 1: category browser
+                    val groups = state.savedArticles
+                        .groupBy { it.category.ifBlank { "Uncategorized" } }
+                        .toList()
+                        .sortedByDescending { it.second.size }
+                    if (groups.isEmpty()) {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Icon(Icons.Default.BookmarkBorder, "No saved", tint = SlateMuted, modifier = Modifier.size(32.dp))
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text("No saved articles yet", color = SlateMuted, fontSize = 14.sp)
+                                Text("Tap the bookmark icon on any article to save it", color = SlateSubtle, fontSize = 11.sp)
+                            }
                         }
-                    }
-                }
-
-                if (state.savedArticles.isEmpty()) {
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Icon(Icons.Default.BookmarkBorder, "No saved", tint = SlateMuted, modifier = Modifier.size(32.dp))
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text("No saved articles yet", color = SlateMuted, fontSize = 14.sp)
-                            Text("Tap the bookmark icon on any article to save it", color = SlateSubtle, fontSize = 11.sp)
+                    } else {
+                        LazyVerticalGrid(
+                            columns = GridCells.Fixed(2),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            items(groups, key = { it.first }) { (cat, items) ->
+                                Surface(
+                                    onClick = { viewModel.openSavedCategory(cat) },
+                                    color = SlateCard,
+                                    shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, SlateSubtle),
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) {
+                                    Column(modifier = Modifier.padding(16.dp)) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Icon(
+                                                Icons.Default.Bookmark,
+                                                "Folder",
+                                                tint = Color(0xFFF59E0B),
+                                                modifier = Modifier.size(18.dp),
+                                            )
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text(
+                                                cat,
+                                                color = Color.White,
+                                                fontSize = 13.sp,
+                                                maxLines = 1,
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        Text(
+                                            "${items.size}",
+                                            color = Color(0xFFF59E0B),
+                                            fontSize = 22.sp,
+                                        )
+                                        Text(
+                                            if (items.size == 1) "article" else "articles",
+                                            color = SlateSubtle,
+                                            fontSize = 10.sp,
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                 } else {
+                    // Level 2: articles in chosen category — back row + grid
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        IconButton(onClick = { viewModel.openSavedCategory(null) }) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Color(0xFFF59E0B))
+                        }
+                        Text(
+                            state.savedFilterCategory ?: "",
+                            color = Color.White,
+                            fontSize = 14.sp,
+                        )
+                    }
+                    val articlesInCat = state.savedArticles.filter {
+                        (it.category.ifBlank { "Uncategorized" }) == state.savedFilterCategory
+                    }
                     LazyVerticalGrid(
                         columns = GridCells.Fixed(2),
                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        items(state.savedArticles, key = { it.articleId }) { saved ->
+                        items(articlesInCat, key = { it.articleId }) { saved ->
                             saved.article?.let { article ->
                                 ArticleCard(
                                     article = article,

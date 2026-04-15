@@ -40,6 +40,33 @@ def _strip_system_markers(prompt: str) -> str:
     cleaned = _SYS_TAIL_RE.sub("", cleaned)  # truncated leftovers
     return cleaned.strip() or prompt
 
+# Maturity-based gate thresholds. Precision-first for new classes.
+#
+# Loose-gate failure = wrong answer (Stage 2 fires on ambiguous prompts
+# and produces a silent correctness bug). Tight-gate failure = extra
+# latency (Stage 3/Opus handles it correctly, just slower). The cost
+# asymmetry favors tight.
+#
+# A new class defaults to "new" until it proves itself in audit runs or
+# Chieh explicitly promotes it. Promotion = move the key into PROVEN_CLASSES.
+_GATE_NEW    = {"conf": 0.80, "margin": 0.40}  # 4/5 votes, 2-vote gap
+_GATE_PROVEN = {"conf": 0.60, "margin": 0.20}  # 3/5 votes, 1-vote gap
+
+PROVEN_CLASSES = {
+    "WEATHER",
+    "GREETING",
+    "GET_TIME",
+    "MUSIC_PLAY",
+    "SEND_MESSAGE",
+    "TIMER",
+    "END_CONVERSATION",  # has its own 0.80 floor below; still "proven"
+}
+
+
+def _gate_for(raw_cls: str) -> dict:
+    return _GATE_PROVEN if raw_cls in PROVEN_CLASSES else _GATE_NEW
+
+
 # Map ChromaDB uppercase class names → pipeline registry names
 _CLASS_MAP = {
     "MUSIC_PLAY":        "music play",
@@ -53,19 +80,79 @@ _CLASS_MAP = {
     "END_CONVERSATION":  "end conversation",
     "GET_TIME":          "get time",
     "DELEGATE_OPUS":     "others",
+    "FORCE_STAGE3":      "others",
 }
 
+# Explicit user-invoked escalation phrases. If any of these substrings
+# appear in the cleaned prompt, bypass ChromaDB entirely and route to
+# Stage 3. This guarantees Chieh's override works even when a sibling
+# class's embedding matches loosely. Lowercase comparison.
+FORCE_STAGE3_PHRASES = (
+    "think deeply",
+    "think carefully",
+    "think hard about",
+    "think this through",
+    "really think about",
+    "use the big brain",
+    "use your full brain",
+    "use your deeper reasoning",
+    "give this some real thought",
+    "escalate this to opus",
+    "escalate to the main brain",
+    "let the smart one answer",
+    "ponder this carefully",
+    "reason deeply",
+    "actually reason about",
+    "use stage 3",
+    "stage 3 for this",
+    "stage 3 please",
+    "route this to stage 3",
+    "send this to stage 3",
+)
 
-async def classify(user_prompt: str, timeout: float = 90.0) -> tuple[str, str]:
+# Fallback regex for "think <stuff> deeply/carefully/hard/through" variants where
+# an intervening word (e.g. "this", "it", "that one") slips past the literal list.
+# Matches: "think this deeply", "think it carefully", "think that one through", etc.
+_FORCE_STAGE3_RE = re.compile(
+    r"\b(think|reason|ponder)\b[\w\s]{0,20}?\b(deeply|carefully|hard|through|thoroughly)\b",
+    re.IGNORECASE,
+)
+
+async def classify(
+    user_prompt: str,
+    session_id: str | None = None,
+    timeout: float = 90.0,
+) -> tuple[str, str]:
     """Classify a user prompt via ChromaDB embedding lookup.
 
     Returns (class_name, confidence) to match the pipeline's expected interface.
     On any failure returns ("others", "Low") so the caller falls through to Stage 3.
+
+    `session_id` is accepted for forward-compatibility with context-aware
+    routing (job 069). Currently the embedding is still prompt-only — the
+    session-aware deterministic pre-routing lives in
+    ``jane_web.jane_v2.pending_action_resolver`` and runs in the pipeline
+    before this function. Keeping the arg here so future context-embedding
+    experiments don't require another signature change.
     """
+    _ = session_id  # reserved for future context-aware embedding
     cleaned = _strip_system_markers(user_prompt)
     if cleaned != user_prompt:
         logger.info("stage1_classifier: stripped system markers (orig=%d, clean=%d)",
                     len(user_prompt), len(cleaned))
+
+    # Hard phrase override — user explicitly asked for deeper thinking.
+    # Bypass ChromaDB so loose embedding matches in sibling classes can't win.
+    _lc = cleaned.lower()
+    for _p in FORCE_STAGE3_PHRASES:
+        if _p in _lc:
+            logger.info("stage1_classifier: FORCE_STAGE3 phrase override (%r)", _p)
+            return ("others", "Low")
+    # Regex fallback for variants like "think this deeply" / "reason it through"
+    if _FORCE_STAGE3_RE.search(_lc):
+        logger.info("stage1_classifier: FORCE_STAGE3 regex override")
+        return ("others", "Low")
+
     try:
         from intent_classifier.v2.classifier import stage1_classify
         result = await stage1_classify(cleaned)
@@ -79,11 +166,18 @@ async def classify(user_prompt: str, timeout: float = 90.0) -> tuple[str, str]:
     cls = _CLASS_MAP.get(raw_cls, "others")
     # If the wrapper doesn't know the class, treat as Low (catch-all).
     # If the classifier returned DELEGATE_OPUS, also Low.
-    # END_CONVERSATION must be very high confidence since it destructively
-    # ends the chat with no LLM second opinion (tighter gate than 0.60).
+    # END_CONVERSATION gets a tighter confidence gate here, but real
+    # error-capture (questions that embed near goodbyes, etc.) lives in
+    # Stage 2's _gate_check — that's the three-stage design.
+    margin = result.get("margin", 0.0)
+    gate = _gate_for(raw_cls)
     if raw_cls == "DELEGATE_OPUS" or cls == "others":
         conf = "Low"
     elif raw_cls == "END_CONVERSATION" and confidence < 0.80:
+        # Extra floor: a wrong END_CONVERSATION destroys the session.
+        conf = "Low"
+    elif confidence < gate["conf"] or margin < gate["margin"]:
+        # Below this class's maturity gate → demote so Stage 3 decides.
         conf = "Low"
     else:
         conf = "High"

@@ -10,14 +10,12 @@ the greeting contains a follow-up question or task.
 from __future__ import annotations
 
 import logging
-import os
 
 import httpx
 
-logger = logging.getLogger(__name__)
+from jane_web.jane_v2.models import LOCAL_LLM as MODEL, OLLAMA_URL
 
-MODEL = os.environ.get("JANE_STAGE2_GREETING_MODEL", "qwen2.5:7b")
-OLLAMA_URL = "http://localhost:11434/api/generate"
+logger = logging.getLogger(__name__)
 
 _PROMPT_TEMPLATE = """\
 The classifier thinks the user is greeting you (saying hi, checking in, etc.).
@@ -52,7 +50,7 @@ async def handle(prompt: str, context: str = "") -> dict | None:
         "stream": False,
         "think": False,
         "options": {"temperature": 0.7, "num_predict": 60},
-        "keep_alive": "1h",
+        "keep_alive": -1,
     }
 
     try:
