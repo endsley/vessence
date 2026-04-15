@@ -274,7 +274,16 @@ def _fire_set(duration_ms: int, label: str) -> dict:
     marker = f"[[CLIENT_TOOL:timer.set:{json.dumps(args, separators=(',', ':'))}]]"
     pretty = _pretty_duration(duration_ms)
     if label:
-        spoken = f"Timer set — I'll let you know when the {label} is ready in {pretty}."
+        # If the label is already a complete sentence-end ("pasta is
+        # ready", "bread is done", "time's up"), don't re-append
+        # " is ready" — the user already said it.
+        ll = label.lower()
+        already_terminal = any(ll.endswith(w) for w in
+                               ("ready", "done", "up", "finished", "out"))
+        if already_terminal:
+            spoken = f"Timer set — I'll tell you in {pretty} when {label}."
+        else:
+            spoken = f"Timer set — I'll let you know when the {label} is ready in {pretty}."
     else:
         spoken = f"Timer set for {pretty}."
     logger.info("timer handler: fire duration_ms=%d label=%r", duration_ms, label)
