@@ -6,11 +6,24 @@ should NOT be embedded-classified from scratch — that risks routing to
 GREETING, OTHERS, or something equally wrong. Instead we intercept those
 replies here and return a deterministic routing decision.
 
-Scope (first cut): SMS confirmation only (SEND_MESSAGE_CONFIRMATION).
-Other pending action types fall through to normal Stage 1.
+Two resolution modes:
 
-Ambiguous revisions ("actually make it nicer", "change it to say hi")
-intentionally fall through — Stage 3 handles those safely.
+1. **SEND_MESSAGE_CONFIRMATION** — yes/cancel resolution. Returns
+   action="confirm" or action="cancel" and the pipeline short-circuits
+   to send/drop the queued SMS.
+
+2. **STAGE2_FOLLOWUP** — generic multi-turn handler loop. Stage 2
+   handlers that need to ask the user questions (e.g. the timer handler
+   asking for duration or label) stash their open state as a pending
+   action of this type. Returns action="followup" with the target
+   handler_class and its collected data; the pipeline re-dispatches the
+   handler with that context instead of running Stage 1 again. The
+   handler is then responsible for either (a) finishing and emitting
+   the action, (b) asking the next question (new pending_action), or
+   (c) abandoning so Stage 1 resumes.
+
+Universal cancel phrases (no / cancel / never mind) ALWAYS abort any
+pending, regardless of type. This is the global escape hatch.
 """
 
 from __future__ import annotations
@@ -80,23 +93,39 @@ def resolve(session_id: str | None, user_text: str) -> dict | None:
     if not pending:
         return None
 
-    # First-cut scope: only SMS confirmation is resolved deterministically.
     ptype = pending.get("type", "")
-    if ptype != "SEND_MESSAGE_CONFIRMATION":
+    turn_id = state.get("pending_turn_id")
+
+    # Universal cancel — applies regardless of pending type. Gives the
+    # user an always-available escape hatch from any multi-turn flow.
+    if _is_cancel(user_text):
+        logger.info("resolver: global cancel matched for pending %s", ptype)
+        return {"action": "cancel", "pending": pending, "pending_turn_id": turn_id}
+
+    # Legacy SMS confirm/cancel — simple yes/no resolution.
+    if ptype == "SEND_MESSAGE_CONFIRMATION":
+        if _is_confirm(user_text):
+            logger.info("resolver: confirm matched for pending %s", ptype)
+            return {"action": "confirm", "pending": pending, "pending_turn_id": turn_id}
         return None
 
-    if _is_confirm(user_text):
-        logger.info("resolver: confirm matched for pending %s", ptype)
+    # Generic Stage 2 follow-up loop. The handler declared in
+    # pending.handler_class wants to receive the user's reply with the
+    # collected context so far (pending.data) so it can either finish or
+    # ask the next question.
+    if ptype == "STAGE2_FOLLOWUP":
+        handler_class = pending.get("handler_class", "")
+        if not handler_class:
+            logger.warning("resolver: STAGE2_FOLLOWUP missing handler_class")
+            return None
+        logger.info("resolver: followup → %s (awaiting=%s)",
+                    handler_class, pending.get("awaiting") or pending.get("data", {}).get("awaiting"))
         return {
-            "action": "confirm",
+            "action": "followup",
+            "handler_class": handler_class,
             "pending": pending,
-            "pending_turn_id": state.get("pending_turn_id"),
+            "pending_data": pending.get("data", {}),
+            "pending_turn_id": turn_id,
         }
-    if _is_cancel(user_text):
-        logger.info("resolver: cancel matched for pending %s", ptype)
-        return {
-            "action": "cancel",
-            "pending": pending,
-            "pending_turn_id": state.get("pending_turn_id"),
-        }
+
     return None

@@ -1,13 +1,27 @@
 """Timer Stage 2 handler.
 
-Handles three actions entirely on the Android client via CLIENT_TOOL markers:
+Handles four actions entirely on the Android client via CLIENT_TOOL markers:
   - set    → [[CLIENT_TOOL:timer.set:{"duration_ms": <ms>, "label": "..."}]]
   - cancel → [[CLIENT_TOOL:timer.cancel:{}]]
   - list   → [[CLIENT_TOOL:timer.list:{}]]
+  - delete → [[CLIENT_TOOL:timer.delete:{"id"|"index"|"label": ...}]]
 
-The server keeps NO state. The phone owns every timer via AlarmManager
-so alarms ring even when offline. The handler's only job is to parse the
-user's phrasing, pick the action + duration, and emit the marker.
+The server keeps NO state about scheduled alarms — the phone owns every
+timer via AlarmManager so they ring even when offline.
+
+Multi-turn conversation support: when the user says something like "I
+want to create a timer" without specifying a duration, this handler
+emits a STAGE2_FOLLOWUP pending_action and asks a follow-up question.
+The pending_action_resolver routes the user's next reply back to this
+handler (bypassing Stage 1) with the collected state in `pending`, so
+the exchange feels like one logical turn from the user's perspective.
+
+State machine (SET flow):
+  enter(no duration)      → ask duration           [pending: awaiting=duration]
+  enter(duration, label)  → fire                   [no pending]
+  enter(duration, !label) → ask label              [pending: awaiting=label]
+  resume(awaiting=duration, prompt) → parse → ask label OR re-ask
+  resume(awaiting=label, prompt)    → parse → fire
 """
 
 from __future__ import annotations
@@ -166,7 +180,172 @@ _COUNT_PHRASES = (
 )
 
 
-def handle(prompt: str) -> dict | None:
+# ── Follow-up helpers ─────────────────────────────────────────────────────
+
+# The "no label" reply vocabulary — user explicitly opts out of labeling.
+_NO_LABEL_REPLIES = {
+    "no", "no label", "none", "skip", "nothing", "nope", "nah",
+    "no thanks", "no thank you", "don't", "dont", "without a label",
+    "without label", "i don't want one", "i don't want a label",
+    "just set it", "leave it", "blank",
+}
+
+# Phrases that look like a PIVOT away from the timer conversation —
+# the user is asking something else mid-flow. The handler bails via
+# `abandon_pending` so the pipeline re-classifies the original prompt
+# through Stage 1. Kept conservative: only trigger on clear wh-question
+# starts + common domain switches.
+_PIVOT_PREFIXES = (
+    "what's the weather", "whats the weather", "how's the weather",
+    "what time is it", "what's the time", "whats the time",
+    "read my messages", "check my messages", "check my email",
+    "tell ", "text ",  # "tell Kathia...", "text mom..."
+    "play ",
+)
+
+
+def _label_from_reply(prompt: str) -> str:
+    """Extract a clean label from a follow-up reply. '' means 'no label'."""
+    p = prompt.strip()
+    if p.lower().strip(".!?,") in _NO_LABEL_REPLIES:
+        return ""
+    # Strip common polite wrappers: "call it X", "the label is X", "X please"
+    for pattern in (
+        r"^(?:call\s+it|label\s+it|name\s+it|its\s+called|it's\s+called|the\s+label\s+(?:is|should\s+be)|label:)\s+",
+        r"^(?:let's\s+call\s+it\s+|i'd\s+call\s+it\s+|how\s+about\s+)",
+    ):
+        p = re.sub(pattern, "", p, flags=re.IGNORECASE).strip()
+    # Trim trailing politeness
+    p = re.sub(r"\s+(?:please|thanks|thank\s+you)\s*[.!?]?\s*$", "", p, flags=re.IGNORECASE).strip()
+    p = p.rstrip(".!?,").strip()
+    return p[:60]  # cap length
+
+
+def _looks_like_pivot(prompt: str) -> bool:
+    p_lower = prompt.lower().strip()
+    return any(p_lower.startswith(pref) for pref in _PIVOT_PREFIXES)
+
+
+def _expires_at(minutes: int = 2) -> str:
+    import datetime as _dt
+    return (_dt.datetime.utcnow() + _dt.timedelta(minutes=minutes)).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
+
+
+def _pending(awaiting: str, data: dict) -> dict:
+    """Build a STAGE2_FOLLOWUP pending_action for the timer handler."""
+    return {
+        "type": "STAGE2_FOLLOWUP",
+        "handler_class": "timer",
+        "status": "awaiting_user",
+        "awaiting": awaiting,
+        "data": {**data, "awaiting": awaiting},
+        "expires_at": _expires_at(),
+    }
+
+
+def _ask_duration(data: dict) -> dict:
+    return {
+        "text": "Sure — how long should the timer run?",
+        "structured": {
+            "intent": "timer",
+            "entities": {"action": "set", "stage": "await_duration"},
+            "pending_action": _pending("duration", data),
+        },
+    }
+
+
+def _ask_label(data: dict) -> dict:
+    pretty = _pretty_duration(data.get("duration_ms", 0))
+    return {
+        "text": f"Got it, {pretty}. What should I call this timer? Or say 'no label'.",
+        "structured": {
+            "intent": "timer",
+            "entities": {"action": "set", "stage": "await_label",
+                         "duration_ms": data.get("duration_ms")},
+            "pending_action": _pending("label", data),
+        },
+    }
+
+
+def _fire_set(duration_ms: int, label: str) -> dict:
+    args = {"duration_ms": duration_ms, "label": label}
+    marker = f"[[CLIENT_TOOL:timer.set:{json.dumps(args, separators=(',', ':'))}]]"
+    pretty = _pretty_duration(duration_ms)
+    if label:
+        spoken = f"Timer set — I'll let you know when the {label} is ready in {pretty}."
+    else:
+        spoken = f"Timer set for {pretty}."
+    logger.info("timer handler: fire duration_ms=%d label=%r", duration_ms, label)
+    return {
+        "text": f"{spoken} {marker}",
+        "structured": {
+            "intent": "timer",
+            "entities": {"action": "set", "duration_ms": duration_ms,
+                         "label": label or ""},
+            # No pending_action — turn is done, Stage 1 resumes next turn.
+        },
+    }
+
+
+def _handle_resume(prompt: str, pending: dict) -> dict | None:
+    """Called when the pending_action_resolver routes a follow-up reply
+    back to us. `pending` is the {awaiting, data} payload we stashed."""
+    if _looks_like_pivot(prompt):
+        logger.info("timer handler: pivot detected mid-flow → abandon")
+        return {"abandon_pending": True}
+
+    data = dict(pending.get("data") or {})
+    awaiting = pending.get("awaiting") or data.get("awaiting")
+
+    if awaiting == "duration":
+        dur = _parse_duration_ms(prompt)
+        # Also try "five" / "one" → 5 / 1 with an implicit minutes unit,
+        # since follow-up replies often drop the unit word.
+        if dur <= 0:
+            m = re.fullmatch(r"\s*(\d+(?:\.\d+)?|\w+)\s*", prompt.strip().lower())
+            if m:
+                tok = m.group(1)
+                try:
+                    n = float(tok)
+                except ValueError:
+                    n = float(_NUM_WORDS.get(tok, 0))
+                if n > 0:
+                    dur = int(n * 60 * 1000)  # assume minutes
+        if dur <= 0:
+            # Re-ask once.
+            return {
+                "text": "I didn't catch that. How long should the timer run? Like '5 minutes'.",
+                "structured": {
+                    "intent": "timer",
+                    "pending_action": _pending("duration", data),
+                },
+            }
+        data["duration_ms"] = dur
+        # If we already have a label from earlier, fire; otherwise ask.
+        if data.get("label"):
+            return _fire_set(dur, data["label"])
+        return _ask_label(data)
+
+    if awaiting == "label":
+        label = _label_from_reply(prompt)
+        dur = int(data.get("duration_ms") or 0)
+        if dur <= 0:
+            # Shouldn't happen (label is only asked after duration) —
+            # but be defensive: fall back to asking for duration.
+            return _ask_duration({"label": label})
+        return _fire_set(dur, label)
+
+    logger.warning("timer handler: unknown awaiting %r — abandoning", awaiting)
+    return {"abandon_pending": True}
+
+
+def handle(prompt: str, pending: dict | None = None) -> dict | None:
+    # ── Resume path: we're mid-conversation with this user ────────────
+    if pending:
+        return _handle_resume(prompt, pending)
+
     p_lower = prompt.lower()
 
     # COUNT / QUERY — "how many timers do I have"
@@ -224,7 +403,18 @@ def handle(prompt: str) -> dict | None:
 
     # SET
     duration_ms = _parse_duration_ms(prompt)
+
+    # "Wants a timer, no duration yet" — conversational creation.
+    # ("hey Jane I want to create a timer" / "start a timer for me")
+    _CREATE_TIMER_WORDS = ("timer", "alarm", "countdown")
+    _CREATE_VERBS = ("create", "make", "start", "begin", "set up",
+                     "start a", "make me a", "give me a", "need a")
+    wants_timer = any(w in p_lower for w in _CREATE_TIMER_WORDS)
+    wants_create = any(v in p_lower for v in _CREATE_VERBS)
     if duration_ms <= 0:
+        if wants_timer and (wants_create or p_lower.startswith("i ") or "i want" in p_lower):
+            logger.info("timer handler: create-timer intent, no duration → ask")
+            return _ask_duration({})
         logger.info("timer handler: couldn't parse duration — escalating")
         return None  # let Stage 3 (Opus) figure it out
 
@@ -241,19 +431,8 @@ def handle(prompt: str) -> dict | None:
         return None
 
     label = _extract_label(prompt)
-    args = {"duration_ms": duration_ms, "label": label}
-    marker = f"[[CLIENT_TOOL:timer.set:{json.dumps(args, separators=(',', ':'))}]]"
-    pretty = _pretty_duration(duration_ms)
-    if label:
-        spoken = f"Got it, I'll let you know when the {label} is ready in {pretty}."
-    else:
-        spoken = f"Timer set for {pretty}."
-    logger.info("timer handler: set duration_ms=%d label=%r", duration_ms, label)
-    return {
-        "text": f"{spoken} {marker}",
-        "structured": {
-            "intent": "timer",
-            "entities": {"action": "set", "duration_ms": duration_ms,
-                         "label": label or ""},
-        },
-    }
+    # Duration known but no label → ask (user can always say "no label").
+    if not label:
+        logger.info("timer handler: duration=%d but no label → ask", duration_ms)
+        return _ask_label({"duration_ms": duration_ms})
+    return _fire_set(duration_ms, label)

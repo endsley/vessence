@@ -86,6 +86,107 @@ class ResolverTests(unittest.TestCase):
         })
         self.assertIsNone(resolve(self.sid, "yes"))
 
+    # ── STAGE2_FOLLOWUP tests (multi-turn Stage 2 conversations) ──
+
+    def _seed_timer_followup(self, awaiting="duration", data=None):
+        from vault_web.recent_turns import add_structured
+        add_structured(self.sid, {
+            "user_text": "hey Jane I want to create a timer",
+            "assistant_text": "Sure — how long should the timer run?",
+            "intent": "timer",
+            "pending_action": {
+                "type": "STAGE2_FOLLOWUP",
+                "handler_class": "timer",
+                "status": "awaiting_user",
+                "awaiting": awaiting,
+                "data": data or {},
+            },
+        })
+
+    def test_followup_routes_to_handler_class(self):
+        from jane_web.jane_v2.pending_action_resolver import resolve
+        self._seed_timer_followup("duration")
+        r = resolve(self.sid, "5 minutes")
+        self.assertIsNotNone(r)
+        self.assertEqual(r["action"], "followup")
+        self.assertEqual(r["handler_class"], "timer")
+
+    def test_followup_cancel_override(self):
+        from jane_web.jane_v2.pending_action_resolver import resolve
+        self._seed_timer_followup("label", {"duration_ms": 300000})
+        for phrase in ("never mind", "cancel", "forget it"):
+            r = resolve(self.sid, phrase)
+            self.assertIsNotNone(r, f"{phrase!r} should cancel")
+            self.assertEqual(r["action"], "cancel")
+
+    def test_followup_no_handler_class_returns_none(self):
+        from vault_web.recent_turns import add_structured
+        from jane_web.jane_v2.pending_action_resolver import resolve
+        add_structured(self.sid, {
+            "user_text": "broken flow",
+            "pending_action": {
+                "type": "STAGE2_FOLLOWUP",
+                "status": "awaiting_user",
+                "awaiting": "label",
+            },
+        })
+        self.assertIsNone(resolve(self.sid, "pasta"))
+
+
+class TimerStateMachineTests(unittest.TestCase):
+    """End-to-end timer state machine without the DB/pipeline — purely
+    the handler's response to (prompt, pending) pairs."""
+
+    def test_full_conversation_no_duration(self):
+        from jane_web.jane_v2.classes.timer.handler import handle
+        r1 = handle("hey Jane I want to create a timer")
+        pa1 = r1["structured"]["pending_action"]
+        self.assertEqual(pa1["awaiting"], "duration")
+
+        r2 = handle("5 minutes", pending=pa1)
+        pa2 = r2["structured"].get("pending_action")
+        self.assertIsNotNone(pa2)
+        self.assertEqual(pa2["awaiting"], "label")
+        self.assertEqual(pa2["data"]["duration_ms"], 5 * 60 * 1000)
+
+        r3 = handle("pasta is ready", pending=pa2)
+        self.assertIsNone(r3["structured"].get("pending_action"),
+                          "final turn should NOT emit a new pending")
+        self.assertIn("timer.set", r3["text"])
+        self.assertIn('"duration_ms":300000', r3["text"])
+        self.assertIn('"label":"pasta is ready"', r3["text"])
+
+    def test_duration_given_asks_for_label(self):
+        from jane_web.jane_v2.classes.timer.handler import handle
+        r = handle("set a 5 minute timer")
+        pa = r["structured"].get("pending_action")
+        self.assertIsNotNone(pa)
+        self.assertEqual(pa["awaiting"], "label")
+        r2 = handle("no label", pending=pa)
+        self.assertIsNone(r2["structured"].get("pending_action"))
+        self.assertIn("timer.set", r2["text"])
+        self.assertIn('"label":""', r2["text"])
+
+    def test_both_given_fires_immediately(self):
+        from jane_web.jane_v2.classes.timer.handler import handle
+        r = handle("set a 5 minute pasta timer")
+        self.assertIsNone(r["structured"].get("pending_action"))
+        self.assertIn("timer.set", r["text"])
+
+    def test_pivot_abandons(self):
+        from jane_web.jane_v2.classes.timer.handler import handle
+        r = handle("what's the weather",
+                   pending={"awaiting": "label",
+                            "data": {"duration_ms": 300000}})
+        self.assertTrue(r.get("abandon_pending"))
+
+    def test_unparseable_duration_reprompts(self):
+        from jane_web.jane_v2.classes.timer.handler import handle
+        r = handle("huh", pending={"awaiting": "duration", "data": {}})
+        pa = r["structured"].get("pending_action")
+        self.assertIsNotNone(pa)
+        self.assertEqual(pa["awaiting"], "duration")
+
 
 if __name__ == "__main__":
     unittest.main()

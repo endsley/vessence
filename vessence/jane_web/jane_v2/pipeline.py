@@ -330,7 +330,8 @@ async def _classify_and_try_stage2(
     # ── Pre-Stage-1: deterministic pending-action resolver ────────────
     # If the last turn left an unresolved SMS confirmation in FIFO and
     # the user replied "yes"/"cancel", short-circuit Stage 1 so a raw
-    # "yes" can't be mis-embedded as GREETING or OTHERS.
+    # "yes" can't be mis-embedded as GREETING or OTHERS. Also handles
+    # the generic STAGE2_FOLLOWUP loop — see pending_action_resolver.
     try:
         resolved = pending_action_resolver.resolve(session_id, prompt)
     except Exception as e:
@@ -338,19 +339,68 @@ async def _classify_and_try_stage2(
         resolved = None
     if resolved:
         pending = resolved.get("pending") or {}
-        if resolved["action"] == "confirm":
+        action = resolved["action"]
+        if action == "confirm":
             result = _resolve_pending_sms_confirmation(pending)
+            cls = "send message"
+        elif action == "cancel":
+            # Cancel applies to both SMS confirmations and any STAGE2_FOLLOWUP.
+            if pending.get("type") == "STAGE2_FOLLOWUP":
+                handler_class = pending.get("handler_class", "")
+                result = {
+                    "text": "Okay, never mind.",
+                    "structured": {
+                        "intent": handler_class,
+                        "pending_action": {
+                            "type": "STAGE2_FOLLOWUP",
+                            "handler_class": handler_class,
+                            "status": "cancelled",
+                        },
+                    },
+                }
+                cls = handler_class or "others"
+            else:
+                result = _cancel_pending_sms_confirmation(pending)
+                cls = "send message"
+        elif action == "followup":
+            # Re-dispatch to the Stage 2 handler that's mid-conversation.
+            handler_class = resolved["handler_class"]
+            pending_data = resolved.get("pending_data", {})
+            fifo_ctx = ""
+            try:
+                fifo_ctx = recent_context.render_stage2_context(session_id, max_turns=3)
+            except Exception:
+                pass
+            try:
+                result = await stage2_dispatcher.dispatch(
+                    handler_class, prompt, context=fifo_ctx, pending=pending_data,
+                )
+            except Exception as e:
+                logger.exception("pipeline: followup dispatch crashed: %s", e)
+                result = None
+            # If the handler explicitly asks to abandon, re-run Stage 1
+            # on the original prompt (user pivoted mid-conversation).
+            if isinstance(result, dict) and result.get("abandon_pending"):
+                logger.info("pipeline: handler abandoned pending → falling through to Stage 1")
+                # Fall out of the `if resolved` block — pending is dead.
+                resolved = None
+            else:
+                cls = handler_class
+                logger.info("pipeline: followup handler %s → result=%s",
+                            handler_class,
+                            "ok" if result else "none")
         else:
-            result = _cancel_pending_sms_confirmation(pending)
-        cls = "send message"
-        conf = "High"
-        logger.info("jane_v2 pipeline: pending-action resolver → %s", resolved["action"])
-        return {
-            "cls": cls, "conf": conf, "classification": f"{cls}:{conf}",
-            "stage1_ms": 0, "stage2_ms": 0, "result": result,
-            "stage2_ack": _ack_for(cls, escalate=False),
-            "fallback_ack": _ack_for(cls, escalate=True),
-        }
+            result = None
+            cls = "others"
+        if resolved:  # still live after possible abandon
+            conf = "High"
+            logger.info("jane_v2 pipeline: resolver → %s", action)
+            return {
+                "cls": cls, "conf": conf, "classification": f"{cls}:{conf}",
+                "stage1_ms": 0, "stage2_ms": 0, "result": result,
+                "stage2_ack": _ack_for(cls, escalate=False),
+                "fallback_ack": _ack_for(cls, escalate=True),
+            }
 
     # Stage 1
     _t1 = time.perf_counter()

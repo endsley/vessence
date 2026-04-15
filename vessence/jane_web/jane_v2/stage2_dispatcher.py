@@ -147,6 +147,7 @@ async def dispatch(
     prompt: str,
     *,
     context: str = "",
+    pending: dict | None = None,
 ) -> dict | None:
     """Call the Stage 2 handler for `class_name` and return its result.
 
@@ -157,6 +158,12 @@ async def dispatch(
                     the recent_turns FIFO). Handlers that know how to
                     use context accept it as a `context=` kwarg;
                     handlers that don't ignore it silently.
+        pending:    optional dict of state collected over prior turns of
+                    a multi-turn Stage 2 conversation (see
+                    pending_action_resolver STAGE2_FOLLOWUP flow).
+                    Handlers that support follow-up conversations accept
+                    it as a `pending=` kwarg and read its `awaiting`
+                    field to know what the user's reply answers.
 
     Returns None when:
       - no such class is registered
@@ -164,6 +171,7 @@ async def dispatch(
       - the handler raised
       - the handler returned None (declining the request)
       - the universal gate check says the prompt doesn't match the class
+        (skipped during a follow-up resume — we already know the class)
     """
     registry = class_registry.get_registry()
     meta = registry.get(class_name)
@@ -173,41 +181,47 @@ async def dispatch(
 
     # Universal WRONG_CLASS gate — runs for EVERY class before the handler.
     # Handlers may also have their own deeper checks, but this catches the
-    # obvious misclassifications uniformly.
-    if not await _gate_check(class_name, prompt, context):
-        logger.info("dispatcher: gate check rejected %r for class %r → escalating",
-                    prompt[:60], class_name)
-        threading.Thread(
-            target=_self_correct_classification,
-            args=(prompt, class_name),
-            daemon=True,
-        ).start()
-        return None
+    # obvious misclassifications uniformly. Skipped for follow-up resumes
+    # since the class was already decided in the prior turn and the user's
+    # short reply ("5 minutes", "pasta") would fail the gate on its own.
+    if pending is None:
+        if not await _gate_check(class_name, prompt, context):
+            logger.info("dispatcher: gate check rejected %r for class %r → escalating",
+                        prompt[:60], class_name)
+            threading.Thread(
+                target=_self_correct_classification,
+                args=(prompt, class_name),
+                daemon=True,
+            ).start()
+            return None
 
     handler = meta.get("handler")
     if handler is None:
         logger.info("dispatcher: class %r has no handler (fallback class)", class_name)
         return None
 
-    # Pass context only to handlers that declare it as a parameter.
-    # This keeps old handlers backward-compatible with no signature change.
+    # Introspect the handler to see which optional kwargs it accepts.
+    # Backward compatible — handlers declaring neither `context` nor
+    # `pending` are called with just the prompt like they were before.
     try:
         sig = inspect.signature(handler)
         wants_context = "context" in sig.parameters
+        wants_pending = "pending" in sig.parameters
     except (TypeError, ValueError):
         wants_context = False
+        wants_pending = False
+
+    kwargs: dict = {}
+    if wants_context:
+        kwargs["context"] = context
+    if wants_pending:
+        kwargs["pending"] = pending
 
     try:
         if inspect.iscoroutinefunction(handler):
-            if wants_context:
-                result = await handler(prompt, context=context)
-            else:
-                result = await handler(prompt)
+            result = await handler(prompt, **kwargs)
         else:
-            if wants_context:
-                result = await asyncio.to_thread(handler, prompt, context=context)
-            else:
-                result = await asyncio.to_thread(handler, prompt)
+            result = await asyncio.to_thread(handler, prompt, **kwargs)
     except Exception as e:
         logger.exception("dispatcher: handler for %r crashed: %s", class_name, e)
         return None
