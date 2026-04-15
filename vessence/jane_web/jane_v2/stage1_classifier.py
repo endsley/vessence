@@ -79,6 +79,7 @@ _CLASS_MAP = {
     "READ_EMAIL":        "read email",
     "END_CONVERSATION":  "end conversation",
     "GET_TIME":          "get time",
+    "TIMER":             "timer",
     "DELEGATE_OPUS":     "others",
     "FORCE_STAGE3":      "others",
 }
