@@ -187,6 +187,37 @@ async def _fetch_required_memory_evidence(prompt: str) -> tuple[str, bool]:
         return "", False
 
 
+# Path to the condensed Jane architecture context. Generated nightly by
+# startup_code/regenerate_jane_context.py from configs/*.md — single source
+# of truth, two sinks (CLI hook + this web/android consumer). Read fresh on
+# each Stage 3 code/system turn so a recent regen is picked up without a
+# server restart. Missing file → silent skip (the Read tool is still there).
+import os as _os
+_JANE_CTX_WEB_PATH = _os.environ.get(
+    "JANE_CONTEXT_WEB_OUTPUT",
+    "/home/chieh/ambient/vessence-data/cache/jane_context_web.txt",
+)
+_JANE_CTX_MAX_CHARS = 6000  # safety cap — file is ~5KB today
+
+
+def _load_jane_architecture_context() -> str:
+    """Read the condensed architecture context, or '' if missing/empty."""
+    try:
+        from pathlib import Path as _P
+        p = _P(_JANE_CTX_WEB_PATH)
+        if not p.exists():
+            return ""
+        text = p.read_text(encoding="utf-8").strip()
+        if not text:
+            return ""
+        if len(text) > _JANE_CTX_MAX_CHARS:
+            text = text[:_JANE_CTX_MAX_CHARS] + "\n[… truncated]"
+        return text
+    except Exception as exc:
+        logger.warning("pipeline: jane context load failed: %s", exc)
+        return ""
+
+
 def _dedup_memory_for_session(memory_text: str, session_id: str) -> str:
     """Filter chunks already injected for this session (cross-turn dedup).
 
@@ -218,6 +249,7 @@ async def _apply_evidence_policy(body, prompt: str, session_id: str = "") -> tup
         "memory_evidence": False,
         "memory_chars": 0,
         "memory_chars_after_dedup": 0,
+        "architecture_context_chars": 0,
     }
     try:
         from jane_web.verify_first_policy import (
@@ -237,6 +269,25 @@ async def _apply_evidence_policy(body, prompt: str, session_id: str = "") -> tup
         # (self-improvement, stage3_followup hints, sms drafts). Opus weighs
         # top-of-turn XML directives more reliably than trailing appends.
         verify_block = instruction_for_requirements(req)
+        # For code/architecture turns, also inject the condensed Jane system
+        # context (generated nightly from configs/*.md by
+        # startup_code/regenerate_jane_context.py). Single source of truth,
+        # shared with the CLI hook. Scoped to req.code so memory-only or
+        # chitchat escalations don't pay the ~5KB token tax.
+        if req.code:
+            arch_ctx = _load_jane_architecture_context()
+            if arch_ctx:
+                verify_block = (
+                    "<jane_architecture>\n"
+                    "Authoritative snapshot of Jane's system. Use this before "
+                    "guessing about architecture, cron jobs, or which file "
+                    "owns what. If you need detail beyond this summary, Read "
+                    "the specific configs/*.md file.\n\n"
+                    + arch_ctx +
+                    "\n</jane_architecture>\n\n"
+                    + verify_block
+                )
+                metadata["architecture_context_chars"] = len(arch_ctx)
         if req.memory:
             memory_text, memory_ok = await _fetch_required_memory_evidence(prompt)
             metadata["memory_evidence"] = memory_ok
@@ -254,10 +305,10 @@ async def _apply_evidence_policy(body, prompt: str, session_id: str = "") -> tup
         body = _copy_body_with_prepended_message(body, verify_block)
         logger.info(
             "pipeline: evidence policy applied code=%s memory=%s memory_ok=%s "
-            "chars=%d after_dedup=%d prompt=%r",
+            "chars=%d after_dedup=%d arch_ctx=%d prompt=%r",
             req.code, req.memory, metadata["memory_evidence"],
             metadata["memory_chars"], metadata["memory_chars_after_dedup"],
-            prompt[:80],
+            metadata["architecture_context_chars"], prompt[:80],
         )
     except Exception as exc:
         logger.warning("pipeline: evidence policy failed: %s", exc)

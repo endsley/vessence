@@ -29,7 +29,22 @@ except Exception:
 BASE = VESSENCE_HOME
 DATA_ROOT = VESSENCE_DATA_HOME
 VAULT_ROOT = VAULT_DIR
-OUTPUT = os.environ.get('JANE_CONTEXT_OUTPUT', str(Path.home() / '.claude' / 'hooks' / 'jane_context.txt'))
+
+# Single source of truth = configs/*.md. Two sinks consume this same string:
+#   - CLI Jane boot context: injected via ~/.claude/hooks by the UserPromptSubmit hook.
+#   - Web/Android Jane Stage 3 context: read at turn time by jane_web/jane_v2/pipeline.py's
+#     `_apply_evidence_policy` when the prompt is code/system/architecture-related.
+# Both files hold the identical string — no "two copies of the docs", one renderer,
+# two consumers. If either file is missing, that consumer silently falls back to no
+# injection (the Read tool still works for on-demand lookup).
+OUTPUT = os.environ.get(
+    'JANE_CONTEXT_OUTPUT',
+    str(Path.home() / '.claude' / 'hooks' / 'jane_context.txt'),
+)
+WEB_OUTPUT = os.environ.get(
+    'JANE_CONTEXT_WEB_OUTPUT',
+    str(Path(DATA_ROOT) / 'cache' / 'jane_context_web.txt'),
+)
 
 def read_file(path):
     try:
@@ -139,8 +154,25 @@ Cron jobs → CRON_JOBS.md
 """
     return context.strip()
 
+def _write_atomic(path: str, content: str) -> None:
+    """Write via temp-file + rename so readers never see a partial file."""
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix(p.suffix + ".tmp")
+    tmp.write_text(content + "\n", encoding="utf-8")
+    tmp.replace(p)
+
+
 if __name__ == "__main__":
     context = build_context()
-    with open(OUTPUT, "w") as f:
-        f.write(context + "\n")
+    # Write both sinks atomically so neither CLI hook nor web pipeline ever
+    # reads a half-written file if the cron races a live request.
+    _write_atomic(OUTPUT, context)
     print(f"[regenerate_jane_context] Written {len(context)} chars to {OUTPUT}")
+    try:
+        _write_atomic(WEB_OUTPUT, context)
+        print(f"[regenerate_jane_context] Written {len(context)} chars to {WEB_OUTPUT}")
+    except Exception as exc:
+        # Non-fatal: if the web sink fails (disk full, permissions), the CLI
+        # sink still succeeded. Web injector handles missing file silently.
+        print(f"[regenerate_jane_context] WARN: web sink write failed: {exc}")
