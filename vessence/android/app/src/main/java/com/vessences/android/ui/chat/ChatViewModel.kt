@@ -69,6 +69,19 @@ class ChatViewModel(
                             else "${backendKey}_android_${UUID.randomUUID().toString().take(8)}"
     private val pendingQueue = ConcurrentLinkedQueue<PendingMessage>()
     private var currentStreamJob: Job? = null
+
+    /**
+     * Explicit "user tapped Stop" flag. Replaces the prior heuristic of using
+     * `!_state.value.isSpeaking` as a proxy for "user stopped", which misfired
+     * whenever anything else flipped isSpeaking to false during a tts.speak()
+     * suspension (e.g. concurrent state-copy races from collectors). Symptom:
+     * after a Stage 2 reply, STT wouldn't auto-relaunch and the diagnostic
+     * logged `relaunch_skipped reason=stop_speaking_called` even though the
+     * user hadn't touched Stop. Cleared per-turn at executeSend() start, set
+     * in stopSpeaking().
+     */
+    @Volatile
+    private var stopSpeakingInvoked: Boolean = false
     private val liveListener = LiveBroadcastListener(viewModelScope, sessionId.take(12))
     private val announcementPoller = AnnouncementPoller(viewModelScope, appContext)
     private val tts = HybridTtsManager(appContext)
@@ -88,6 +101,60 @@ class ChatViewModel(
 
     // Track last transient-error retry to avoid retry loops on flaky network
     private var lastTransientRetryAt: Long = 0L
+
+    private val spokenBlockRegex = Regex("<spoken>([\\s\\S]*?)</spoken>", RegexOption.IGNORE_CASE)
+    private val spokenOpenRegex = Regex("<spoken>", RegexOption.IGNORE_CASE)
+    private val spokenCloseRegex = Regex("</spoken>", RegexOption.IGNORE_CASE)
+    private val visualBlockRegex = Regex("<visual>([\\s\\S]*?)</visual>", RegexOption.IGNORE_CASE)
+    private val assistantTagRegex = Regex("</?(?:spoken|visual|think|thinking|artifact)>", RegexOption.IGNORE_CASE)
+    private val trailingPartialAssistantTagRegex = Regex("</?(?:spoken|visual|think|thinking|artifact)[^>]*$", RegexOption.IGNORE_CASE)
+    private val clientToolMarkerRegex = Regex("\\[\\[CLIENT_TOOL:[a-z][a-z0-9_.]*:\\{[\\s\\S]*?\\}\\]\\]")
+    private val awaitingMarkerRegex = Regex("\\[\\[AWAITING:[A-Za-z0-9_\\-\\s]{1,200}\\]\\]", RegexOption.IGNORE_CASE)
+    private val trailingPartialAwaitingMarkerRegex = Regex("\\[\\[AWAITING:[A-Za-z0-9_\\-\\s]{0,200}$", RegexOption.IGNORE_CASE)
+
+    private fun removeTrailingPartialAwaitingMarker(text: String): String {
+        val start = text.lastIndexOf("[[")
+        if (start < 0) return text
+        val tail = text.substring(start).uppercase()
+        return if ("[[AWAITING:".startsWith(tail) || tail.startsWith("[[AWAITING:")) {
+            text.substring(0, start)
+        } else {
+            text
+        }
+    }
+
+    private fun stripAssistantTags(text: String): String =
+        removeTrailingPartialAwaitingMarker(text)
+            .replace(assistantTagRegex, "")
+            .replace(trailingPartialAssistantTagRegex, "")
+            .replace(clientToolMarkerRegex, "")
+            .replace(awaitingMarkerRegex, "")
+            .replace(trailingPartialAwaitingMarkerRegex, "")
+
+    private fun assistantTextForDisplay(raw: String, trim: Boolean = true): String {
+        val visibleDetail = raw
+            .replace(visualBlockRegex) { it.groupValues[1] }
+            .replace(spokenBlockRegex, "")
+        val cleaned = stripAssistantTags(visibleDetail)
+        val fallback = if (cleaned.isBlank()) assistantTextForSpeech(raw, trim = false) else cleaned
+        return if (trim) fallback.trim() else fallback
+    }
+
+    private fun assistantTextForSpeech(raw: String, trim: Boolean = true): String {
+        val spokenStart = spokenOpenRegex.find(raw)
+        val base = if (spokenStart != null) {
+            val afterOpen = raw.substring(spokenStart.range.last + 1)
+            val spokenEnd = spokenCloseRegex.find(afterOpen)
+            if (spokenEnd != null) afterOpen.substring(0, spokenEnd.range.first) else afterOpen
+        } else {
+            raw.replace(visualBlockRegex, "")
+        }
+        val cleaned = stripAssistantTags(base)
+        return if (trim) cleaned.trim() else cleaned
+    }
+
+    private fun extractedSpokenBlock(raw: String): String? =
+        spokenBlockRegex.find(raw)?.groupValues?.getOrNull(1)?.trim()?.takeIf { it.isNotBlank() }
 
     private fun acquireStreamWakeLock() {
         if (streamWakeLock?.isHeld == true) return
@@ -384,6 +451,11 @@ class ChatViewModel(
             isSending = true,
             error = null,
         )
+        // New turn → clear the per-turn Stop flag. If the user taps Stop mid-
+        // turn, stopSpeaking() will re-raise it; the post-TTS guard in the
+        // non-sentence-TTS relaunch path reads this (not isSpeaking) so an
+        // unrelated isSpeaking=false flip doesn't suppress auto-relaunch.
+        stopSpeakingInvoked = false
 
         acquireStreamWakeLock()
         currentStreamJob = viewModelScope.launch(Dispatchers.IO) {
@@ -391,6 +463,7 @@ class ChatViewModel(
             // Sentence-level TTS: accumulate text, fire TTS per sentence during streaming
             var sentenceQueue: SentenceTtsQueue? = null
             val sentenceBuffer = StringBuilder()
+            var sentenceSpeechFedChars = 0
             var sentenceTtsActive = false
             try {
                 // If there's a file attachment, upload it first
@@ -569,13 +642,7 @@ class ChatViewModel(
                             // Only show non-ACK content in the bubble.
                             // Strip all markup tags so they never flash in the UI.
                             val rawAccumulated = visibleBuffer.toString()
-                            accumulated = rawAccumulated
-                                .replace(Regex("<spoken>[\\s\\S]*?</spoken>", RegexOption.IGNORE_CASE), "")
-                                .replace(Regex("<visual>([\\s\\S]*?)</visual>", RegexOption.IGNORE_CASE)) { it.groupValues[1] }
-                                .replace(Regex("</?(?:spoken|visual|think|thinking|artifact)>", RegexOption.IGNORE_CASE), "")
-                                // Strip leaked [[CLIENT_TOOL:...]] markers during streaming
-                                .replace(Regex("\\[\\[CLIENT_TOOL:[a-z][a-z0-9_.]*:\\{[\\s\\S]*?\\}\\]\\]"), "")
-                                .trim()
+                            accumulated = assistantTextForDisplay(rawAccumulated)
                             val ackStatus = if (statusLog.isNotEmpty()) statusLog.last() else null
 
                             // Sentence-level TTS: detect complete sentences and submit for generation
@@ -586,11 +653,16 @@ class ChatViewModel(
                                     sentenceQueue!!.startPlayback()
                                     sentenceTtsActive = true
                                 }
-                                // Feed raw text (without markup) into sentence buffer
-                                val cleanDelta = event.data
-                                    .replace(Regex("</?(?:spoken|visual|think|thinking|artifact)>", RegexOption.IGNORE_CASE), "")
-                                    .replace(Regex("\\[\\[CLIENT_TOOL:[a-z][a-z0-9_.]*:\\{[\\s\\S]*?\\}\\]\\]"), "")
-                                sentenceBuffer.append(cleanDelta)
+                                // Feed the sanitized accumulated speech text instead of
+                                // per-delta regex cleanup. Tags can split across SSE
+                                // chunks, and per-delta cleanup can leak fragments like
+                                // </spoken> into TTS.
+                                val speechAccumulated = assistantTextForSpeech(rawAccumulated, trim = false)
+                                if (speechAccumulated.length >= sentenceSpeechFedChars) {
+                                    val cleanDelta = speechAccumulated.substring(sentenceSpeechFedChars)
+                                    sentenceSpeechFedChars = speechAccumulated.length
+                                    sentenceBuffer.append(cleanDelta)
+                                }
                                 // Extract complete sentences (ending with . ! ?)
                                 val sentenceRegex = Regex("([^.!?]+[.!?])\\s*")
                                 val matches = sentenceRegex.findAll(sentenceBuffer.toString()).toList()
@@ -625,15 +697,9 @@ class ChatViewModel(
                             // Strip any leaked [[CLIENT_TOOL:...]] markers so TTS never
                             // speaks raw tool syntax (server should strip these, but
                             // belt-and-suspenders for edge cases).
-                            rawText = rawText.replace(
-                                Regex("\\[\\[CLIENT_TOOL:[a-z][a-z0-9_.]*:\\{[\\s\\S]*?\\}\\]\\]"),
-                                ""
-                            ).trim()
+                            rawText = rawText.replace(clientToolMarkerRegex, "").trim()
                             // TTS mode: main text is spoken-friendly; <visual> blocks are display-only
-                            val visualRegex = Regex("<visual>([\\s\\S]*?)</visual>", RegexOption.IGNORE_CASE)
-                            // For display: keep visual content but strip the tags; also strip legacy <spoken> tags
-                            val spokenRegex = Regex("<spoken>([\\s\\S]*?)</spoken>", RegexOption.IGNORE_CASE)
-                            val spokenMatch = spokenRegex.find(rawText)
+                            val spokenTextFromBlock = extractedSpokenBlock(rawText)
                             // Check for music play command: [MUSIC_PLAY:playlist_id]
                             val musicPlayRegex = Regex("\\[MUSIC_PLAY:([^\\]]+)\\]")
                             val musicMatch = musicPlayRegex.find(rawText)
@@ -647,14 +713,13 @@ class ChatViewModel(
                             }
                             rawText = rawText.replace(musicPlayRegex, "").trim()
 
-                            val displayText = rawText.replace(visualRegex) { it.groupValues[1] }
-                                .replace(spokenRegex, "").trimEnd().ifBlank { rawText }
+                            val displayText = assistantTextForDisplay(rawText)
                             // For TTS: if legacy <spoken> block exists, use it;
                             // otherwise strip <visual> blocks and read the rest
-                            val spokenText = spokenMatch?.groupValues?.getOrNull(1)?.trim()
-                                ?: rawText.replace(visualRegex, "").replace(spokenRegex, "").trim().ifBlank { null }
+                            val spokenText = spokenTextFromBlock
+                                ?: assistantTextForSpeech(rawText).ifBlank { null }
                             // If <spoken> tag exists, store both versions for TTS toggle
-                            val hasSpokenBlock = spokenMatch != null
+                            val hasSpokenBlock = spokenTextFromBlock != null
                             // If sentence-level TTS was active, flush remaining buffer,
                             // wait for all audio to finish, THEN reveal the text.
                             // If a tool call was dispatched this turn (e.g., read_inbox),
@@ -719,7 +784,7 @@ class ChatViewModel(
                                 updateAiMessage(
                                     currentMsgId, displayText, isStreaming = false, files = files,
                                     statusLog = statusLog.toList(),
-                                    spokenText = if (hasSpokenBlock) spokenMatch?.groupValues?.getOrNull(1)?.trim() else null,
+                                    spokenText = if (hasSpokenBlock) spokenTextFromBlock else null,
                                     fullText = if (hasSpokenBlock) displayText else null,
                                 )
                                 notifier?.showReplyNotification(senderName = backend.displayName, message = displayText)
@@ -768,7 +833,7 @@ class ChatViewModel(
                                 updateAiMessage(
                                     currentMsgId, displayText, isStreaming = false, files = files,
                                     statusLog = statusLog.toList(),
-                                    spokenText = if (hasSpokenBlock) spokenMatch?.groupValues?.getOrNull(1)?.trim() else null,
+                                    spokenText = if (hasSpokenBlock) spokenTextFromBlock else null,
                                     fullText = if (hasSpokenBlock) displayText else null,
                                 )
                                 notifier?.showReplyNotification(senderName = backend.displayName, message = displayText)
@@ -983,10 +1048,14 @@ class ChatViewModel(
                 viewModelScope.launch {
                     _state.value = _state.value.copy(isSpeaking = true)
                     tts.speak(textToSpeak)
-                    // If stopSpeaking() was called while TTS was active, it already
-                    // set isSpeaking=false and called endVoiceConversation().
-                    // Don't re-launch STT in that case.
-                    if (!_state.value.isSpeaking) {
+                    // Previously checked !_state.value.isSpeaking as a proxy for
+                    // "user tapped Stop" — but that flag was getting flipped to
+                    // false by unrelated state-update races during tts.speak's
+                    // suspension, causing false positives and suppressing the
+                    // auto-STT relaunch after Stage 2 replies (see 2026-04-16
+                    // todo_list regression). Use the explicit stopSpeakingInvoked
+                    // flag instead — only set by stopSpeaking(), cleared on new turn.
+                    if (stopSpeakingInvoked) {
                         com.vessences.android.DiagnosticReporter.voiceFlow(
                             "relaunch_skipped",
                             mapOf("path" to "non_sentence_tts",
@@ -1070,6 +1139,7 @@ class ChatViewModel(
     }
 
     fun stopSpeaking() {
+        stopSpeakingInvoked = true
         tts.stop()
         voiceController?.stopTts()
         _state.value = _state.value.copy(isSpeaking = false)
@@ -1198,8 +1268,10 @@ class ChatViewModel(
             "ok done", "okay done", "i'm done", "i am done",
         )
         return endPhrases.any { phrase ->
-            if (phrase.length <= 5) {
-                normalized == phrase || normalized.startsWith("$phrase ") || normalized.endsWith(" $phrase")
+            if (phrase in setOf("stop", "bye")) {
+                normalized == phrase || normalized.startsWith("$phrase ")
+            } else if (phrase.length <= 5) {
+                normalized == phrase
             } else {
                 normalized.contains(phrase)
             }

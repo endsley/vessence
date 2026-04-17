@@ -1,5 +1,11 @@
 # Vessence Changelog
 
+## v0.2.48 (2026-04-16)
+- **Fix: STT stopped auto-relaunching after Stage 2 replies.** After a todo_list / weather / greeting / any Stage 2 handler's TTS response finished on voice mode, the post-TTS guard at `ChatViewModel.kt:1036` was using `!_state.value.isSpeaking` as a proxy for "user tapped Stop" — but `isSpeaking` was sometimes flipped to `false` by unrelated state-update races while `tts.speak()` was suspended, producing false `relaunch_skipped reason=stop_speaking_called` events and leaving the user with no mic to answer with. Replaced the heuristic with an explicit `stopSpeakingInvoked: Boolean` flag, set only inside `stopSpeaking()` and cleared at the start of each turn in `executeSend()`. The diagnostic reason label is unchanged so existing log analysis still works.
+
+## v0.2.47 (2026-04-16)
+- Version bump.
+
 ## v0.2.46 (2026-04-16)
 - **Android STT ↔ wake-word race fix.** After Jane's response, the STT relaunch could race with `AlwaysListeningService.start()` — both tried to grab the mic inside the same 3s window, the SpeechRecognizer errored, and AL came up in a zombie state (AudioRecord reading all-zero samples → wake-word scores flat-lined at ~1e-5 noise floor → "hey Jane" stopped working). Added `WakeWordBridge.lastSttLaunchMs` timestamp; `MainActivity.startAlwaysListeningGuarded()` defers AL.start by (2s cooldown + 500ms settle) if STT was launched recently, then re-checks `sttActive` and foreground state before actually starting. Both `restoreAlwaysListening()` and `onResume()` now route through the guarded path.
 - **`stt_error` diagnostic**: now includes a readable label (`no_match`, `recognizer_busy`, `speech_timeout`, etc.) mapped from the SpeechRecognizer error code. Previously just logged `recognizer_error_<int>` with no payload.
