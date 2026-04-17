@@ -13,6 +13,7 @@ from jane.config import (
     VAULT_DIR,
     VECTOR_DB_FILE_INDEX,
     CHROMA_COLLECTION_FILE_INDEX,
+    get_chroma_client,
 )
 
 from .database import get_db
@@ -114,8 +115,7 @@ def build_file_index_document(rel_path: str, description: str, mime_type: str) -
 def upsert_file_index_entry(rel_path: str, description: str, mime_type: str, updated_by: str = "web_ui") -> bool:
     """Persist a vault file record into the dedicated file-index collection."""
     try:
-        import chromadb
-        client = chromadb.PersistentClient(path=VECTOR_DB_FILE_INDEX)
+        client = get_chroma_client(VECTOR_DB_FILE_INDEX)
         coll = client.get_or_create_collection(
             CHROMA_COLLECTION_FILE_INDEX,
             metadata={"hnsw:space": "cosine"},
@@ -226,8 +226,7 @@ def get_file_metadata(rel_path: str) -> dict:
 
     # Fetch from ChromaDB
     try:
-        import chromadb
-        client = chromadb.PersistentClient(path=VECTOR_DB_FILE_INDEX)
+        client = get_chroma_client(VECTOR_DB_FILE_INDEX)
         coll = client.get_or_create_collection(CHROMA_COLLECTION_FILE_INDEX)
         results = coll.query(
             query_texts=[f"file {filename} vault {rel_path}"],

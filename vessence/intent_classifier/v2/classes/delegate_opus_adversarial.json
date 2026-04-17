@@ -1,0 +1,249 @@
+{
+  "class": "DELEGATE_OPUS",
+  "phrases": [
+    "text my wife I love her",
+    "send a message to john saying I'll be late",
+    "tell kathia I'm on my way",
+    "message mom that I'll call tonight",
+    "read my unread messages",
+    "any new texts from bob",
+    "what did kathia text me",
+    "check my email",
+    "any new emails from work",
+    "read my inbox",
+    "set a timer for 15 minutes",
+    "start a 5 minute timer",
+    "cancel the timer",
+    "what's the weather today",
+    "what's it like outside",
+    "how's the weather in seattle",
+    "play some jazz",
+    "play the beatles",
+    "add milk to my shopping list",
+    "put eggs on the grocery list",
+    "what time is it",
+    "what's the time right now",
+    "hi jane",
+    "hello there",
+    "good morning jane",
+    "goodbye jane",
+    "that's all for now",
+    "sync my messages",
+    "resync my texts",
+    "restart the jane server"
+  ],
+  "results": [
+    {
+      "phrase": "text my wife I love her",
+      "classification": "SEND_MESSAGE",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "send a message to john saying I'll be late",
+      "classification": "SEND_MESSAGE",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "tell kathia I'm on my way",
+      "classification": "SEND_MESSAGE",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "message mom that I'll call tonight",
+      "classification": "SEND_MESSAGE",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "read my unread messages",
+      "classification": "READ_MESSAGES",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "any new texts from bob",
+      "classification": "READ_MESSAGES",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "what did kathia text me",
+      "classification": "READ_MESSAGES",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "check my email",
+      "classification": "READ_EMAIL",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "any new emails from work",
+      "classification": "READ_EMAIL",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "read my inbox",
+      "classification": "READ_EMAIL",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "set a timer for 15 minutes",
+      "classification": "TIMER",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "start a 5 minute timer",
+      "classification": "TIMER",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "cancel the timer",
+      "classification": "TIMER",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "what's the weather today",
+      "classification": "WEATHER",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "what's it like outside",
+      "classification": "WEATHER",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "how's the weather in seattle",
+      "classification": "WEATHER",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "play some jazz",
+      "classification": "MUSIC_PLAY",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "play the beatles",
+      "classification": "MUSIC_PLAY",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "add milk to my shopping list",
+      "classification": "SHOPPING_LIST",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "put eggs on the grocery list",
+      "classification": "SHOPPING_LIST",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "what time is it",
+      "classification": "GET_TIME",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "what's the time right now",
+      "classification": "GET_TIME",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "hi jane",
+      "classification": "GREETING",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "hello there",
+      "classification": "GREETING",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "good morning jane",
+      "classification": "GREETING",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "goodbye jane",
+      "classification": "RESTART_SERVER",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "that's all for now",
+      "classification": "END_CONVERSATION",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "sync my messages",
+      "classification": "SYNC_MESSAGES",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "resync my texts",
+      "classification": "SYNC_MESSAGES",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "restart the jane server",
+      "classification": "RESTART_SERVER",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    }
+  ],
+  "false_positive_count": 0,
+  "false_positives": []
+}

@@ -1,5 +1,19 @@
 # Code Map — Android (Kotlin)
-_Auto-generated on 2026-04-05 01:57 UTC by `generate_code_map.py`_
+_Auto-generated on 2026-04-17 08:15 UTC by `generate_code_map.py`_
+
+## android:.../ArticleReaderV2Activity.kt (249 lines)
+  class ArticleReaderV2Activity → L35
+    EXTRA_URL → L38
+    override onCreate() → L51
+    override onPageFinished() → L113
+    override onReceivedError() → L123
+    extractAndSpeak() → L136
+    parseJsString() → L160
+    cleanArticleText() → L165
+    splitForTts() → L194
+    flush() → L198
+    articleExtractionJs() → L219
+    override onDestroy() → L241
 
 ## android:.../CrashReporter.kt (118 lines)
   object CrashReporter → L17
@@ -10,30 +24,51 @@ _Auto-generated on 2026-04-05 01:57 UTC by `generate_code_map.py`_
     buildReport() → L71
     sendToServer() → L104
 
-## android:.../DiagnosticReporter.kt (124 lines)
-  object DiagnosticReporter → L23
-    init() → L28
-    report() → L41
-    wakeWordModelLoaded() → L73
-    wakeWordModelFailed() → L80
-    wakeWordDetected() → L87
-    wakeWordScoreUpdate() → L91
-    micPermissionState() → L99
-    micInitFailed() → L105
-    serviceEvent() → L109
-    nonFatalError() → L117
+## android:.../DiagnosticReporter.kt (224 lines)
+  object DiagnosticReporter → L31
+    init() → L40
+    loadPending() → L56
+    savePending() → L67
+    enqueue() → L77
+    drainPending() → L87
+    postOne() → L95
+    report() → L113
+    wakeWordModelLoaded() → L154
+    wakeWordModelFailed() → L161
+    wakeWordDetected() → L168
+    wakeWordScoreUpdate() → L172
+    micPermissionState() → L180
+    micInitFailed() → L186
+    serviceEvent() → L190
+    nonFatalError() → L198
+    voiceFlow() → L219
 
-## android:.../MainActivity.kt (206 lines)
-  class MainActivity → L22
-    launchStt() → L34
-    override onResume() → L57
-    override onPause() → L68
-    override onCreate() → L75
-    override onNewIntent() → L122
-    handleWakeWordIntent() → L129
-    handleNotificationIntent() → L153
-    handleIncomingShareIntent() → L161
-    requestNotificationPermissionIfNeeded() → L194
+## android:.../MainActivity.kt (508 lines)
+  class MainActivity → L27
+    launchStt() → L56
+    override onResults() → L101
+    override onError() → L123
+    override onReadyForSpeech() → L151
+    override onBeginningOfSpeech() → L163
+    override onRmsChanged() → L164
+    override onBufferReceived() → L165
+    override onEndOfSpeech() → L166
+    override onPartialResults() → L167
+    override onEvent() → L175
+    startAlwaysListeningGuarded() → L191
+    restoreAlwaysListening() → L227
+    override onResume() → L234
+    override onPause() → L257
+    override onCreate() → L264
+    override onNewIntent() → L323
+    handleSharedSummaryIntent() → L337
+    handleWakeWordIntent() → L358
+    handleNotificationIntent() → L382
+    handleIncomingShareIntent() → L390
+    requestNotificationPermissionIfNeeded() → L423
+    requestPhoneToolsPermissionsIfNeeded() → L442
+    promptNotificationListenerIfNeeded() → L461
+    override onDestroy() → L494
 
 ## android:.../MusicPlayNavigationState.kt (24 lines)
   object MusicPlayNavigationState → L11
@@ -50,11 +85,17 @@ _Auto-generated on 2026-04-05 01:57 UTC by `generate_code_map.py`_
     override onGetSession() → L16
     override onDestroy() → L20
 
-## android:.../ShareReceiverActivity.kt (110 lines)
-  class ShareReceiverActivity → L22
-    override onCreate() → L24
-    extractUrl() → L68
-    submitArticle() → L74
+## android:.../ShareReceiverActivity.kt (253 lines)
+  class ShareReceiverActivity → L34
+    override onCreate() → L36
+    extractUrl() → L83
+    summarizeNowV2() → L88
+    summarizeNow() → L100
+    addToBriefing() → L152
+  object ShareSummarizer → L194
+    postSummaryReady() → L201
+    postSummaryFailed() → L229
+    ensureChannel() → L242
 
 ## android:.../SharedIntentState.kt (30 lines)
   object SharedIntentState → L11
@@ -62,9 +103,9 @@ _Auto-generated on 2026-04-05 01:57 UTC by `generate_code_map.py`_
     setSharedText() → L22
     clear() → L26
 
-## android:.../SttResultBus.kt (23 lines)
-  object SttResultBus → L11
-    postResult() → L14
+## android:.../SttResultBus.kt (32 lines)
+  object SttResultBus → L16
+    postResult() → L23
 
 ## android:.../VessencesApp.kt (257 lines)
   @Composable VessencesApp() → L49
@@ -72,17 +113,49 @@ _Auto-generated on 2026-04-05 01:57 UTC by `generate_code_map.py`_
   @Composable EssenceViewRouter() → L203
   @Composable EssencePlaceholderView() → L217
 
-## android:.../data/api/ApiClient.kt (106 lines)
+## android:.../contacts/ContactsResolver.kt (182 lines)
+  object ContactsResolver → L21
+  class Contact → L24
+  class ResolveResult → L32
+  class Single → L34
+  class Multiple → L37
+  object PermissionDenied → L40
+  object None → L43
+    suspend findCallable() → L62
+    suspend resolveExact() → L155
+    hasReadContactsPermission() → L175
+
+## android:.../contacts/ContactsSyncManager.kt (175 lines)
+  object ContactsSyncManager → L20
+    suspend syncIfNeeded() → L31
+    suspend forceSync() → L60
+    suspend queryAllContacts() → L77
+    suspend uploadContacts() → L161
+    hasPermission() → L172
+
+## android:.../contacts/SmsSyncManager.kt (263 lines)
+  object SmsSyncManager → L31
+    suspend backfillIfNeeded() → L45
+    suspend pushNewMessages() → L78
+    suspend forceSync() → L108
+    suspend querySmsSince() → L141
+    buildNumberToNameCache() → L188
+    suspend uploadMessages() → L211
+    normalizeNumber() → L225
+    startPeriodicSync() → L241
+    hasPermission() → L260
+
+## android:.../data/api/ApiClient.kt (116 lines)
   object ApiClient → L17
     init() → L26
-    getOkHttpClient() → L69
-    getCookieStore() → L70
-    getVaultBaseUrl() → L71
-    getJaneBaseUrl() → L72
-    getJaneRetrofit() → L73
-    getAuthenticatedImageLoader() → L77
-    clearSession() → L100
-    ensureTrailingSlash() → L104
+    getOkHttpClient() → L79
+    getCookieStore() → L80
+    getVaultBaseUrl() → L81
+    getJaneBaseUrl() → L82
+    getJaneRetrofit() → L83
+    getAuthenticatedImageLoader() → L87
+    clearSession() → L110
+    ensureTrailingSlash() → L114
 
 ## android:.../data/api/AuthApi.kt (25 lines)
   interface AuthApi → L7
@@ -101,6 +174,14 @@ _Auto-generated on 2026-04-05 01:57 UTC by `generate_code_map.py`_
     suspend activateEssence() → L18
     suspend deleteEssence() → L21
     suspend getActiveEssences() → L24
+
+## android:.../data/api/JaneApi.kt (22 lines)
+  interface JaneApi → L7
+    suspend janeChat() → L9
+    suspend endSession() → L12
+    suspend getAnnouncements() → L15
+    suspend syncContacts() → L18
+    suspend syncMessages() → L21
 
 ## android:.../data/api/UpdateChecker.kt (137 lines)
   class AppVersion → L20
@@ -165,12 +246,13 @@ _Auto-generated on 2026-04-05 01:57 UTC by `generate_code_map.py`_
   class CreatePlaylistRequest → L22
   class TrackInput → L27
 
-## android:.../data/repository/AnnouncementPoller.kt (76 lines)
+## android:.../data/repository/AnnouncementPoller.kt (104 lines)
   class AnnouncementPoller → L13
-  class ProgressBubble → L16
-    start() → L28
-    stop() → L40
-    suspend poll() → L46
+  class ProgressBubble → L17
+    start() → L29
+    stop() → L41
+    suspend poll() → L47
+    handleDeviceCommand() → L88
 
 ## android:.../data/repository/AuthRepository.kt (147 lines)
   class AuthRepository → L19
@@ -179,13 +261,13 @@ _Auto-generated on 2026-04-05 01:57 UTC by `generate_code_map.py`_
     suspend signInWithGoogle() → L64
     suspend logout() → L140
 
-## android:.../data/repository/ChatRepository.kt (161 lines)
-  class UploadResult → L27
-  class ChatRepository → L34
-    suspend uploadFile() → L41
-    streamChat() → L94
-    initSession() → L133
-    suspend endJaneSession() → L156
+## android:.../data/repository/ChatRepository.kt (162 lines)
+  class UploadResult → L28
+  class ChatRepository → L35
+    suspend uploadFile() → L42
+    streamChat() → L95
+    initSession() → L134
+    suspend endJaneSession() → L157
 
 ## android:.../data/repository/EssenceRepository.kt (73 lines)
   class EssenceRepository → L6
@@ -255,6 +337,154 @@ _Auto-generated on 2026-04-05 01:57 UTC by `generate_code_map.py`_
     ensureChannels() → L27
     showReplyNotification() → L62
 
+## android:.../notifications/NotificationSafety.kt (119 lines)
+  object NotificationSafety → L21
+    MAX_BODY_CHARS → L24
+    OTP_REGEX → L45
+    isPlaceholderBody() → L58
+    looksLikeOtp() → L67
+    isPhoneLocked() → L70
+    isListenerEnabled() → L86
+    filterSafe() → L109
+
+## android:.../notifications/RecentMessagesBuffer.kt (83 lines)
+  object RecentMessagesBuffer → L16
+  class Entry → L29
+    record() → L58
+    snapshot() → L73
+    size() → L77
+    clear() → L80
+
+## android:.../notifications/VessenceNotificationListener.kt (198 lines)
+  class VessenceNotificationListener → L33
+    override onListenerConnected() → L35
+    override onListenerDisconnected() → L42
+    override onNotificationPosted() → L55
+    handlePosted() → L63
+    extractMessages() → L93
+    snapshotActiveMessages() → L162
+    setLive() → L194
+
+## android:.../tools/ActionQueue.kt (90 lines)
+  class ActionQueue → L24
+    attachTts() → L34
+    suspend speak() → L44
+    suspend startActivity() → L66
+    suspend fence() → L83
+
+## android:.../tools/ClientToolCall.kt (79 lines)
+  class ClientToolCall → L16
+  class ToolActionStatus → L29
+  object Requested → L31
+  class Running → L34
+  class Completed → L37
+  class CompletedWithData → L45
+  class Failed → L48
+  object Cancelled → L51
+  class NeedsUser → L60
+  class ToolResult → L72
+
+## android:.../tools/ClientToolDispatcher.kt (401 lines)
+  class ClientToolDispatcher → L40
+    register() → L74
+    registerAlias() → L83
+    dispatchRaw() → L92
+    dispatch() → L105
+    parseCall() → L179
+    toToolResult() → L209
+  class SeenEntry → L229
+    pruneSeen() → L231
+    isDuplicate() → L240
+    recordSeen() → L248
+    pruneSharedPrefsOnce() → L265
+    isFeatureEnabled() → L288
+    shutdown() → L299
+    reportHandlerDiagnostic() → L313
+  object PendingToolResultBuffer → L358
+    record() → L368
+    suspend awaitAndDrainAll() → L378
+    drainAll() → L391
+    isEmpty() → L400
+
+## android:.../tools/ClientToolHandler.kt (40 lines)
+  interface ClientToolHandler → L22
+    suspend handle() → L35
+
+## android:.../tools/ContactsCallHandler.kt (98 lines)
+  object ContactsCallHandler → L33
+    suspend handle() → L38
+    hasCallPermission() → L89
+
+## android:.../tools/ContactsSmsHandler.kt (431 lines)
+  object ContactsSmsHandler → L41
+    ALIASES → L46
+    sanitizeBody() → L79
+    stripToolMarkers() → L110
+    addSignature() → L185
+  class PendingDraft → L191
+  class DraftPreview → L202
+    suspend handle() → L211
+    suspend openDraft() → L224
+    suspend updateDraft() → L267
+    suspend commitDraft() → L292
+    suspend cancelDraft() → L360
+    suspend sendDirect() → L382
+    isExpired() → L421
+    hasSendSmsPermission() → L424
+
+## android:.../tools/DeviceSpeakTimeHandler.kt (41 lines)
+  object DeviceSpeakTimeHandler → L19
+    suspend handle() → L25
+
+## android:.../tools/JsonExtensions.kt (63 lines)
+  JsonElement() → L25
+  JsonElement() → L41
+  JsonObject() → L60
+
+## android:.../tools/MessagesFetchUnreadHandler.kt (113 lines)
+  object MessagesFetchUnreadHandler → L30
+    suspend handle() → L38
+
+## android:.../tools/MessagesReadInboxHandler.kt (275 lines)
+  object MessagesReadInboxHandler → L34
+    suspend handle() → L42
+  class SmsMessage → L101
+    queryInbox() → L117
+    buildNumberToNameCache() → L203
+    resolveContactNumbers() → L237
+    normalizeNumber() → L270
+
+## android:.../tools/MessagesReadRecentHandler.kt (74 lines)
+  object MessagesReadRecentHandler → L24
+    suspend handle() → L32
+
+## android:.../tools/SyncForceSmsHandler.kt (64 lines)
+  object SyncForceSmsHandler → L23
+    suspend handle() → L29
+
+## android:.../tools/TimerHandler.kt (339 lines)
+  object TimerHandler → L31
+    ALIASES → L34
+    CHANNEL_ID → L40
+    ACTION_FIRE → L41
+    EXTRA_TIMER_ID → L42
+    EXTRA_LABEL → L43
+    suspend handle() → L45
+    setTimer() → L58
+    cancelAll() → L110
+    deleteTimer() → L140
+    listTimers() → L199
+    readBook() → L223
+    appendToBook() → L226
+    pruneExpired() → L234
+    removeFromBook() → L247
+    ensureChannel() → L258
+  class TimerFireReceiver → L279
+    override onReceive() → L280
+    override onStart() → L299
+    override onDone() → L300
+    override onError() → L304
+
 ## android:.../ui/auth/LoginScreen.kt (150 lines)
   @Composable LoginScreen() → L31
 
@@ -264,114 +494,128 @@ _Auto-generated on 2026-04-05 01:57 UTC by `generate_code_map.py`_
     logout() → L41
     clearError() → L47
 
-## android:.../ui/briefing/BriefingScreen.kt (897 lines)
-  @Composable BriefingScreen() → L94
-  @Composable TopBar() → L267
-  @Composable HistorySheet() → L338
-  @Composable TopicChips() → L397
-  @Composable ArticleGrid() → L438
-  @Composable ArticleCard() → L471
-  @Composable ArticleDetailSheet() → L669
-  formatSourceLine() → L857
-  formatTimeAgo() → L864
+## android:.../ui/briefing/BriefingScreen.kt (1080 lines)
+  @Composable BriefingScreen() → L97
+  @Composable TopBar() → L415
+  @Composable HistorySheet() → L486
+  @Composable TopicChips() → L545
+  @Composable ArticleGrid() → L588
+  @Composable ArticleCard() → L621
+  @Composable ArticleDetailSheet() → L852
+  formatSourceLine() → L1040
+  formatTimeAgo() → L1047
 
-## android:.../ui/briefing/BriefingViewModel.kt (528 lines)
-  class BriefingUiState → L28
-  class BriefingViewModel → L49
-    refresh() → L70
-    fetchArchiveDates() → L106
-    loadArchive() → L127
-    clearArchive() → L159
-    selectCategory() → L164
-    toggleArticleExpanded() → L168
-    getFilteredArticles() → L175
-    dismissArticle() → L186
-    getImageUrl() → L209
-    speakArticle() → L215
-    suspend playAudioFile() → L252
-    suspend tryPlayServerAudio() → L283
-    stopSpeaking() → L329
-    readAll() → L345
-    suspend fetchArticles() → L366
-    suspend fetchTopics() → L386
-    saveArticle() → L400
-    unsaveArticle() → L427
-    isArticleSaved() → L445
-    toggleSavedView() → L447
-    loadSavedArticles() → L453
-    fetchSavedArticleIds() → L481
-    fetchSavedCategories() → L502
-    override onCleared() → L523
+## android:.../ui/briefing/BriefingViewModel.kt (569 lines)
+  class BriefingUiState → L29
+  class BriefingViewModel → L50
+    refresh() → L82
+    fetchArchiveDates() → L127
+    loadArchive() → L148
+    clearArchive() → L180
+    selectCategory() → L185
+    toggleArticleExpanded() → L189
+    getFilteredArticles() → L196
+    dismissArticle() → L207
+    getImageUrl() → L230
+    speakArticle() → L236
+    suspend playAudioFile() → L260
+    suspend tryPlayServerAudio() → L291
+    stopSpeaking() → L337
+    readAll() → L353
+    loadCachedArticles() → L374
+    saveCachedArticles() → L393
+    suspend fetchArticles() → L404
+    suspend fetchTopics() → L424
+    saveArticle() → L438
+    unsaveArticle() → L465
+    isArticleSaved() → L483
+    toggleSavedView() → L485
+    openSavedCategory() → L491
+    loadSavedArticles() → L495
+    fetchSavedArticleIds() → L523
+    fetchSavedCategories() → L544
+    override onCleared() → L564
 
 ## android:.../ui/chat/AttachmentSheet.kt (255 lines)
   @Composable AttachmentSheet() → L46
 
-## android:.../ui/chat/ChatInputRow.kt (425 lines)
-  isConversationEndPhrase() → L109
-  @Composable ChatInputRow() → L130
-    launchSpeechToText() → L202
+## android:.../ui/chat/ChatInputRow.kt (441 lines)
+  isConversationEndPhrase() → L110
+  @Composable ChatInputRow() → L133
+    launchSpeechToText() → L205
 
 ## android:.../ui/chat/ChatMessageList.kt (68 lines)
   @Composable ChatMessageList() → L22
 
-## android:.../ui/chat/ChatScreen.kt (535 lines)
+## android:.../ui/chat/ChatScreen.kt (557 lines)
   @Composable ChatScreen() → L66
     hasMicPermission() → L122
-  @Composable ChatHeader() → L328
-  @Composable LiveActivityBanner() → L417
-  @Composable VoiceStatusBanner() → L454
-  @Composable ErrorBanner() → L504
+  @Composable ChatHeader() → L333
+  @Composable LiveActivityBanner() → L422
+  @Composable VoiceStatusBanner() → L459
+  @Composable ErrorBanner() → L526
 
-## android:.../ui/chat/ChatViewModel.kt (909 lines)
-  class PendingMessage → L33
-  class ChatUiState → L39
-  class ChatViewModel → L57
-    consumeMusicPlayRequest() → L77
-    initSession() → L186
-    sendMessage() → L235
-    cancelCurrentResponse() → L258
-    executeSend() → L278
-    isConversationEnding() → L524
-    onSendComplete() → L541
-    processNextInQueue() → L586
-    clearError() → L596
-    dismissUpdate() → L600
-    installUpdate() → L604
-    toggleTts() → L611
-    stopSpeaking() → L621
-    speakText() → L629
-    speakIfEnabled() → L635
-    suspend tryServerTts() → L646
-    autoListenAfterTts() → L708
-    endVoiceConversation() → L722
-    isConversationEndPhrase() → L738
-    showSystemMessage() → L758
-    clearSession() → L767
-    setAlwaysListeningEnabled() → L780
-    syncVoicePreferences() → L787
-    clearWakeWordTrigger() → L791
-    triggerWakeWord() → L796
-    startPushToTalk() → L801
-    stopPushToTalk() → L805
-    cancelListening() → L809
-    clearVoiceError() → L813
-    updateAiMessage() → L817
-    switchProvider() → L845
-    override onCleared() → L894
+## android:.../ui/chat/ChatViewModel.kt (1484 lines)
+  class PendingMessage → L35
+  class ChatUiState → L41
+  class ChatViewModel → L59
+    removeTrailingPartialAwaitingMarker() → L115
+    stripAssistantTags() → L126
+    assistantTextForDisplay() → L134
+    assistantTextForSpeech() → L143
+    extractedSpokenBlock() → L156
+    acquireStreamWakeLock() → L159
+    releaseStreamWakeLock() → L168
+    consumeMusicPlayRequest() → L176
+    override onReceive() → L211
+    initSession() → L333
+    sendMessage() → L382
+    cancelCurrentResponse() → L409
+    executeSend() → L430
+    FIRE_AND_FORGET → L740
+    isConversationEnding() → L954
+    onSendComplete() → L971
+    processNextInQueue() → L1106
+    clearError() → L1116
+    dismissUpdate() → L1120
+    installUpdate() → L1124
+    toggleTts() → L1131
+    stopSpeaking() → L1141
+    speakText() → L1150
+    speakIfEnabled() → L1156
+    suspend tryServerTts() → L1167
+    autoListenAfterTts() → L1229
+    endVoiceConversation() → L1243
+    isConversationEndPhrase() → L1259
+    showSystemMessage() → L1281
+    clearSession() → L1290
+    setAlwaysListeningEnabled() → L1303
+    syncVoicePreferences() → L1310
+    clearWakeWordTrigger() → L1314
+    triggerWakeWord() → L1319
+    startPushToTalk() → L1324
+    stopPushToTalk() → L1328
+    cancelListening() → L1332
+    stopListeningAndReturnToWakeWord() → L1337
+    clearVoiceError() → L1346
+    updateAiMessage() → L1350
+    switchProvider() → L1378
+    suspend prependPendingToolResults() → L1441
+    override onCleared() → L1467
 
 ## android:.../ui/chat/ChatViewModelFactory.kt (24 lines)
   class ChatViewModelFactory → L9
 
-## android:.../ui/chat/EndPhraseDetector.kt (82 lines)
+## android:.../ui/chat/EndPhraseDetector.kt (90 lines)
   object EndPhraseDetector → L9
-    isEndPhrase() → L62
+    isEndPhrase() → L68
 
-## android:.../ui/chat/JaneChatScreen.kt (708 lines)
-  @Composable JaneChatScreen() → L69
-  @Composable JaneTopBar() → L193
-  @Composable UpdateBanner() → L232
-  @Composable ChatInputBar() → L287
-    launchSpeechRecognition() → L402
+## android:.../ui/chat/JaneChatScreen.kt (766 lines)
+  @Composable JaneChatScreen() → L70
+  @Composable JaneTopBar() → L194
+  @Composable UpdateBanner() → L233
+  @Composable ChatInputBar() → L288
+    launchSpeechRecognition() → L428
 
 ## android:.../ui/chat/PromptQueueSheet.kt (264 lines)
   class QueuePrompt → L41
@@ -483,7 +727,7 @@ _Auto-generated on 2026-04-05 01:57 UTC by `generate_code_map.py`_
 ## android:.../ui/settings/SettingsViewModelFactory.kt (22 lines)
   class SettingsViewModelFactory → L8
 
-## android:.../ui/settings/SystemArchitectureScreen.kt (570 lines)
+## android:.../ui/settings/SystemArchitectureScreen.kt (574 lines)
   @Composable SystemArchitectureScreen() → L40
   @Composable ArchitectureHub() → L65
   @Composable SectionHeader() → L207
@@ -498,10 +742,10 @@ _Auto-generated on 2026-04-05 01:57 UTC by `generate_code_map.py`_
   @Composable EssencesContent() → L421
   @Composable VaultContent() → L447
   @Composable StandingBrainContent() → L465
-  @Composable ProviderSwitchContent() → L487
-  @Composable DockerContent() → L505
-  @Composable CronContent() → L527
-  @Composable SecurityContent() → L547
+  @Composable ProviderSwitchContent() → L491
+  @Composable DockerContent() → L509
+  @Composable CronContent() → L531
+  @Composable SecurityContent() → L551
 
 ## android:.../ui/settings/TtsVoicePicker.kt (160 lines)
   @Composable TtsVoicePickerSheet() → L33
@@ -515,9 +759,9 @@ _Auto-generated on 2026-04-05 01:57 UTC by `generate_code_map.py`_
 ## android:.../ui/theme/VessenceTheme.kt (58 lines)
   @Composable VessenceTheme() → L47
 
-## android:.../ui/vault/FileViewerScreen.kt (240 lines)
-  @Composable FileViewerScreen() → L38
-  syncCookiesToWebView() → L223
+## android:.../ui/vault/FileViewerScreen.kt (245 lines)
+  @Composable FileViewerScreen() → L39
+  syncCookiesToWebView() → L228
 
 ## android:.../ui/vault/VaultScreen.kt (395 lines)
   @Composable VaultScreen() → L47
@@ -561,19 +805,20 @@ _Auto-generated on 2026-04-05 01:57 UTC by `generate_code_map.py`_
   writeWavFile() → L646
   playWavFile() → L672
 
-## android:.../ui/worklog/WorkLogScreen.kt (133 lines)
+## android:.../ui/worklog/WorkLogScreen.kt (137 lines)
   @Composable WorkLogScreen() → L38
     override shouldOverrideUrlLoading() → L93
-  syncCookiesToWebView() → L117
+  syncCookiesToWebView() → L121
 
-## android:.../util/BriefingAudioCache.kt (116 lines)
+## android:.../util/BriefingAudioCache.kt (143 lines)
   object BriefingAudioCache → L19
     getCacheDir() → L24
     isOnWifi() → L30
     getCachedFile() → L38
-    suspend downloadToCache() → L46
-    suspend prefetchAll() → L86
-    cleanupOldFiles() → L103
+  class ServerBusyException → L52
+    suspend downloadToCache() → L54
+    suspend prefetchAll() → L108
+    cleanupOldFiles() → L130
 
 ## android:.../util/ChatPersistence.kt (71 lines)
   class ChatPersistence → L12
@@ -595,7 +840,7 @@ _Auto-generated on 2026-04-05 01:57 UTC by `generate_code_map.py`_
     isAutoListenEnabled() → L40
     setAutoListenEnabled() → L43
 
-## android:.../util/Constants.kt (22 lines)
+## android:.../util/Constants.kt (27 lines)
   object Constants → L3
     DEFAULT_VAULT_BASE_URL → L4
     DEFAULT_JANE_BASE_URL → L5
@@ -615,6 +860,7 @@ _Auto-generated on 2026-04-05 01:57 UTC by `generate_code_map.py`_
     DEFAULT_RELAY_URL → L19
     PREF_CONNECTION_MODE → L20
     PREF_KEEP_SCREEN_ON → L21
+    PREF_PHONE_TOOLS_ENABLED → L26
 
 ## android:.../util/CookieStore.kt (44 lines)
   class CookieStore → L9
@@ -635,40 +881,50 @@ _Auto-generated on 2026-04-05 01:57 UTC by `generate_code_map.py`_
     getBoolean() → L96
     getLong() → L99
 
-## android:.../voice/AlwaysListeningService.kt (552 lines)
+## android:.../voice/AlwaysListeningService.kt (632 lines)
   class AlwaysListeningService → L36
     ACTION_STOP → L41
-    start() → L51
-    stop() → L60
-    override onReceive() → L82
-    override onCreate() → L103
-    override onStartCommand() → L112
-    override onBind() → L144
-    override onDestroy() → L146
-    createNotificationChannel() → L177
-    buildListeningNotification() → L196
-    acquireWakeLock() → L223
-    releaseWakeLock() → L233
-    pauseListening() → L239
-    resumeListening() → L260
-    isInCall() → L267
-    isMediaPlaying() → L276
-    startListeningLoop() → L285
-    runWakeWordDetection() → L346
-    CONFIRMATION_FRAMES → L405
-    onWakeWordDetected() → L474
+    start() → L69
+    stop() → L91
+    override onReceive() → L113
+    override onCreate() → L134
+    startForegroundWithPlaceholder() → L164
+    override onStartCommand() → L183
+    override onBind() → L219
+    override onDestroy() → L221
+    createNotificationChannel() → L257
+    buildListeningNotification() → L276
+    acquireWakeLock() → L303
+    releaseWakeLock() → L313
+    pauseListening() → L319
+    resumeListening() → L340
+    isInCall() → L347
+    isMediaPlaying() → L356
+    startListeningLoop() → L365
+    runWakeWordDetection() → L426
+    CONFIRMATION_FRAMES → L485
+    onWakeWordDetected() → L554
 
-## android:.../voice/AndroidTtsManager.kt (90 lines)
+## android:.../voice/AndroidTtsManager.kt (110 lines)
   class AndroidTtsManager → L15
     override onStart() → L27
     override onDone() → L29
     override onError() → L34
     override onError() → L38
-    override onInit() → L45
-    suspend speak() → L56
-    stop() → L71
-    shutdown() → L75
-    suspend awaitReady() → L82
+    override onStop() → L46
+    override onInit() → L53
+    suspend speak() → L64
+    stop() → L79
+    shutdown() → L95
+    suspend awaitReady() → L102
+
+## android:.../voice/HybridTtsManager.kt (75 lines)
+  class HybridTtsManager → L14
+    USE_SERVER_TTS → L23
+    ensureWarm() → L35
+    suspend speak() → L41
+    stop() → L66
+    shutdown() → L71
 
 ## android:.../voice/OpenWakeWordDetector.kt (291 lines)
   class OpenWakeWordDetector → L15
@@ -683,6 +939,30 @@ _Auto-generated on 2026-04-05 01:57 UTC by `generate_code_map.py`_
     classify() → L254
     override close() → L286
 
+## android:.../voice/SentenceTtsQueue.kt (214 lines)
+  class SentenceTtsQueue → L23
+    getBaseUrl() → L32
+    checkWarm() → L55
+    startPlayback() → L70
+    submitSentence() → L92
+    finishSubmitting() → L103
+    suspend awaitCompletion() → L110
+    stop() → L114
+    generateWav() → L126
+    suspend playWav() → L163
+    escapeJson() → L199
+
+## android:.../voice/ServerTtsPlayer.kt (264 lines)
+  class ServerTtsPlayer → L28
+    getBaseUrl() → L41
+    isModelWarm() → L60
+    triggerWarmUp() → L82
+    ensureWarm() → L112
+    suspend speak() → L124
+    stop() → L196
+    suspend playWavFile() → L206
+    escapeJson() → L249
+
 ## android:.../voice/VessenceVoiceInteractionService.kt (35 lines)
   class VessenceVoiceInteractionService → L14
     override onReady() → L20
@@ -694,39 +974,39 @@ _Auto-generated on 2026-04-05 01:57 UTC by `generate_code_map.py`_
   class VessenceVoiceInteractionSession → L24
     override onShow() → L27
 
-## android:.../voice/VoiceController.kt (336 lines)
+## android:.../voice/VoiceController.kt (358 lines)
   class VoiceState → L27
   class VoiceController → L37
-    isWaitingForReply() → L63
-    setAlwaysListeningEnabled() → L72
-    setTriggerPhrase() → L81
-    startPushToTalk() → L86
-    stopPushToTalk() → L94
-    cancelListening() → L98
-    startWakeWordListening() → L102
-    onAssistantReply() → L113
-    stopTts() → L134
-    clearError() → L138
-    release() → L142
-    startListeningWithTimeout() → L148
-    startWakeDetection() → L157
-    suspend startCommandCapture() → L250
-    override onResults() → L274
-    override onPartialResults() → L280
-    override onError() → L287
-    override onReadyForSpeech() → L291
-    override onBeginningOfSpeech() → L292
-    override onRmsChanged() → L293
-    override onBufferReceived() → L294
-    override onEndOfSpeech() → L295
-    override onEvent() → L296
-    stopListening() → L323
-    emitState() → L332
+    isWaitingForReply() → L66
+    setAlwaysListeningEnabled() → L75
+    setTriggerPhrase() → L84
+    startPushToTalk() → L89
+    stopPushToTalk() → L97
+    cancelListening() → L101
+    startWakeWordListening() → L105
+    onAssistantReply() → L116
+    stopTts() → L144
+    clearError() → L148
+    release() → L152
+    startListeningWithTimeout() → L160
+    startWakeDetection() → L169
+    suspend startCommandCapture() → L269
+    override onResults() → L294
+    override onPartialResults() → L300
+    override onError() → L307
+    override onReadyForSpeech() → L311
+    override onBeginningOfSpeech() → L312
+    override onRmsChanged() → L313
+    override onBufferReceived() → L314
+    override onEndOfSpeech() → L315
+    override onEvent() → L316
+    stopListening() → L343
+    emitState() → L354
 
-## android:.../voice/WakeWordBridge.kt (26 lines)
+## android:.../voice/WakeWordBridge.kt (39 lines)
   object WakeWordBridge → L11
-    signal() → L19
-    consume() → L23
+    signal() → L32
+    consume() → L36
 
 ## android:.../voice/WakeWordVerifier.kt (118 lines)
   object WakeWordVerifier → L20

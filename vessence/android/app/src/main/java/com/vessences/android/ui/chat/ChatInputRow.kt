@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Close
@@ -114,8 +115,10 @@ private fun isConversationEndPhrase(text: String): Boolean {
         .replace(".", "").replace(",", "").replace("!", "").replace("?", "")
         .replace("  ", " ").trim()
     val matched = END_PHRASES.any { phrase ->
-        if (phrase.length <= 5) {
-            normalized == phrase || normalized.startsWith("$phrase ") || normalized.endsWith(" $phrase")
+        if (phrase in setOf("ok", "okay", "stop", "quiet", "enough", "cancel", "dismiss", "nah", "nope")) {
+            normalized == phrase
+        } else if (phrase.length <= 5) {
+            normalized == phrase || normalized.startsWith("$phrase ")
         } else {
             normalized.contains(phrase)
         }
@@ -385,27 +388,40 @@ fun ChatInputRow(
 
             Spacer(modifier = Modifier.width(4.dp))
 
-            IconButton(
-                onClick = {
-                    val hasText = inputText.value.isNotBlank()
-                    val hasFile = fileAttachment.value != null
-                    if (hasText || hasFile) {
-                        val currentFileUri = fileAttachment.value
-                        val messageText = if (hasText) inputText.value.trim() else (fileAttachmentName.value ?: "file")
-                        onSend(messageText, currentFileUri)
-                        inputText.value = ""
-                        fileAttachment.value = null
-                        fileAttachmentName.value = null
-                    }
-                },
-                enabled = inputText.value.isNotBlank() || fileAttachment.value != null,
-                modifier = Modifier.size(40.dp),
-            ) {
-                Icon(
-                    Icons.AutoMirrored.Filled.Send,
-                    contentDescription = if (isSending) "Queue message" else "Send",
-                    tint = if (inputText.value.isNotBlank() || fileAttachment.value != null) Violet500 else Color(0xFF475569),
-                )
+            if (isSending && onCancel != null) {
+                IconButton(
+                    onClick = onCancel,
+                    modifier = Modifier.size(40.dp),
+                ) {
+                    Icon(
+                        Icons.Default.Stop,
+                        contentDescription = "Stop",
+                        tint = Color(0xFFEF4444),
+                    )
+                }
+            } else {
+                IconButton(
+                    onClick = {
+                        val hasText = inputText.value.isNotBlank()
+                        val hasFile = fileAttachment.value != null
+                        if (hasText || hasFile) {
+                            val currentFileUri = fileAttachment.value
+                            val messageText = if (hasText) inputText.value.trim() else (fileAttachmentName.value ?: "file")
+                            onSend(messageText, currentFileUri)
+                            inputText.value = ""
+                            fileAttachment.value = null
+                            fileAttachmentName.value = null
+                        }
+                    },
+                    enabled = inputText.value.isNotBlank() || fileAttachment.value != null,
+                    modifier = Modifier.size(40.dp),
+                ) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.Send,
+                        contentDescription = "Send",
+                        tint = if (inputText.value.isNotBlank() || fileAttachment.value != null) Violet500 else Color(0xFF475569),
+                    )
+                }
             }
         }
 

@@ -1,6 +1,6 @@
 # v2 3-Stage Prompt Pipeline
 
-**Last updated:** 2026-04-12
+**Last updated:** 2026-04-16
 
 ---
 
@@ -165,6 +165,11 @@ col.add(
 - Reads/writes `$VESSENCE_DATA_HOME/shopping_lists.json` directly
 - No Opus needed for any list operation
 
+**TODO List** (`jane_web/jane_v2/classes/todo_list/handler.py`):
+- Reads the personal TODO cache and groups visible items by category
+- If the user picks a category strongly, answers in Stage 2
+- If the user asks a broader question while Jane is awaiting a category, abandons the pending action and pivots to Stage 3
+
 **Music Play** (`jane_web/jane_v2/classes/music_play/handler.py`):
 - Queries playlist DB via qwen2.5:7b
 - Creates temporary playlists, resolves song/artist/genre
@@ -174,6 +179,7 @@ col.add(
 ```python
 {"text": "Spoken response to user"}                              # simple
 {"text": "Playing...", "playlist_id": "abc123", "playlist_name": "Coldplay"}  # with extras
+{"abandon_pending": True, "force_stage3": True, "structured": {...}}           # clear follow-up and pivot
 None                                                              # escalate to Stage 3
 ```
 
@@ -189,6 +195,34 @@ None                                                              # escalate to 
 - Escalation logic: `jane_web/jane_v2/stage3_escalate.py`
 - Pipeline orchestrator: `jane_web/jane_v2/pipeline.py`
 - v1 brain: `jane_web/main.py` (`_handle_jane_chat` / `stream_message`)
+
+### Shared Class Contract
+
+Stage 2 and Stage 3 must not keep duplicate copies of class behavior. The class pack metadata is the single source of truth for behavior that both stages need.
+
+**Source of truth:**
+- `jane_web/jane_v2/classes/<class>/metadata.py` defines the shared class contract: name, ack text, examples, capabilities, limits, and stage routing expectations.
+- `jane_web/jane_v2/classes/<class>/handler.py` implements the fast Stage 2 path only.
+- `jane_web/jane_v2/classes/<class>/protocol.md` is optional and should contain only Stage 3 extensions that cannot be represented cleanly in metadata.
+
+**Stage 3 protocol generation:**
+1. Stage 1/2 classify the turn and produce a class reason such as `todo list:High`.
+2. `stage3_escalate.py` maps that reason back to the class pack.
+3. Stage 3 synthesizes a protocol from the class metadata automatically.
+4. If `protocol.md` exists, Stage 3 appends it as an extension.
+5. The generated protocol is injected into the Stage 3 prompt before Jane's standing brain runs.
+
+This means changing shared class behavior should normally happen in `metadata.py` once. Stage 2 reads the same metadata for routing/acks, and Stage 3 receives the generated version of that same contract.
+
+**When to use `protocol.md`:**
+- Use it for Stage 3-only reasoning instructions, like how to reason over cached TODO categories.
+- Do not repeat handler implementation details, ack text, examples, or general class capability lists from `metadata.py`.
+- Keep it short; if multiple classes need the same rule, move the rule into shared code or metadata instead.
+
+**Pending follow-up pivot:**
+- Stage 2 handlers can return `abandon_pending=True` and `force_stage3=True` when a pending follow-up no longer matches the narrow expected answer.
+- The pipeline clears the pending action in FIFO before Stage 3 persistence, so the next turn is not trapped in the old follow-up state.
+- Example: after TODO asks the user to pick a category, `clinic` stays in Stage 2, but `why are these categories structured this way?` pivots to Stage 3 with TODO context.
 
 ### Ack Generation
 

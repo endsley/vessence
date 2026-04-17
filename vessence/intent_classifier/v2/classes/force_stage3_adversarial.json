@@ -1,0 +1,259 @@
+{
+  "class": "FORCE_STAGE3",
+  "phrases": [
+    "I was thinking deeply about my life yesterday",
+    "she thinks carefully before every decision",
+    "do you think it will rain today",
+    "what do you think about the new essence",
+    "I don't think carefully enough, honestly",
+    "stop thinking so much, just do it",
+    "don't think about it too hard, it's fine",
+    "my brain hurts from thinking",
+    "the big brain on the server is down",
+    "Opus is the name of a jazz album I like",
+    "who is the smart one in your family",
+    "escalate the support ticket to tier 2",
+    "escalate this call to a manager",
+    "the reasoning section of the paper is weak",
+    "give me a quick answer, don't overthink it",
+    "can you take your time with the dishes",
+    "I need a thoughtful gift for my mom",
+    "real thought went into this design",
+    "step by step instructions for the install",
+    "walk me through it step by step",
+    "use the full capacity of the GPU",
+    "think about what you said to her",
+    "careful thought is what this project lacks",
+    "thoughts and prayers",
+    "a penny for your thoughts",
+    "I've been thinking of switching jobs",
+    "deep thoughts by Jack Handey",
+    "careful, the floor is wet",
+    "hard to say, I haven't thought about it",
+    "reason with him, he'll listen"
+  ],
+  "results": [
+    {
+      "phrase": "I was thinking deeply about my life yesterday",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.0,
+      "margin": 0.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "she thinks carefully before every decision",
+      "classification": "FORCE_STAGE3",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": true
+    },
+    {
+      "phrase": "do you think it will rain today",
+      "classification": "WEATHER",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "what do you think about the new essence",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.0,
+      "margin": 0.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "I don't think carefully enough, honestly",
+      "classification": "FORCE_STAGE3",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": true
+    },
+    {
+      "phrase": "stop thinking so much, just do it",
+      "classification": "FORCE_STAGE3",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": true
+    },
+    {
+      "phrase": "don't think about it too hard, it's fine",
+      "classification": "END_CONVERSATION",
+      "confidence": 0.6,
+      "margin": 0.4,
+      "false_positive": false
+    },
+    {
+      "phrase": "my brain hurts from thinking",
+      "classification": "FORCE_STAGE3",
+      "confidence": 0.6,
+      "margin": 0.4,
+      "false_positive": true
+    },
+    {
+      "phrase": "the big brain on the server is down",
+      "classification": "RESTART_SERVER",
+      "confidence": 0.6,
+      "margin": 0.2,
+      "false_positive": false
+    },
+    {
+      "phrase": "Opus is the name of a jazz album I like",
+      "classification": "MUSIC_PLAY",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "who is the smart one in your family",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.0,
+      "margin": 0.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "escalate the support ticket to tier 2",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.0,
+      "margin": 0.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "escalate this call to a manager",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.4,
+      "margin": 0.2,
+      "false_positive": false
+    },
+    {
+      "phrase": "the reasoning section of the paper is weak",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.0,
+      "margin": 0.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "give me a quick answer, don't overthink it",
+      "classification": "FORCE_STAGE3",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": true
+    },
+    {
+      "phrase": "can you take your time with the dishes",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.4,
+      "margin": 0.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "I need a thoughtful gift for my mom",
+      "classification": "SEND_MESSAGE",
+      "confidence": 0.6,
+      "margin": 0.4,
+      "false_positive": false
+    },
+    {
+      "phrase": "real thought went into this design",
+      "classification": "FORCE_STAGE3",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": true
+    },
+    {
+      "phrase": "step by step instructions for the install",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.0,
+      "margin": 0.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "walk me through it step by step",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.4,
+      "margin": 0.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "use the full capacity of the GPU",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.0,
+      "margin": 0.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "think about what you said to her",
+      "classification": "FORCE_STAGE3",
+      "confidence": 0.6,
+      "margin": 0.4,
+      "false_positive": true
+    },
+    {
+      "phrase": "careful thought is what this project lacks",
+      "classification": "FORCE_STAGE3",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": true
+    },
+    {
+      "phrase": "thoughts and prayers",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.6,
+      "margin": 0.4,
+      "false_positive": false
+    },
+    {
+      "phrase": "a penny for your thoughts",
+      "classification": "FORCE_STAGE3",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": true
+    },
+    {
+      "phrase": "I've been thinking of switching jobs",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.0,
+      "margin": 0.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "deep thoughts by Jack Handey",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.0,
+      "margin": 0.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "careful, the floor is wet",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.4,
+      "margin": 0.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "hard to say, I haven't thought about it",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.0,
+      "margin": 0.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "reason with him, he'll listen",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.0,
+      "margin": 0.0,
+      "false_positive": false
+    }
+  ],
+  "false_positive_count": 9,
+  "false_positives": [
+    "she thinks carefully before every decision",
+    "I don't think carefully enough, honestly",
+    "stop thinking so much, just do it",
+    "my brain hurts from thinking",
+    "give me a quick answer, don't overthink it",
+    "real thought went into this design",
+    "think about what you said to her",
+    "careful thought is what this project lacks",
+    "a penny for your thoughts"
+  ]
+}

@@ -99,7 +99,7 @@ def run_once(query: str, conversation_summary: str, assistant_name: str) -> dict
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Benchmark Gemma memory-librarian stages.")
+    parser = argparse.ArgumentParser(description="Benchmark local LLM memory-librarian stages.")
     parser.add_argument("--assistant-name", default="Jane")
     parser.add_argument("--conversation-summary", default="")
     parser.add_argument("--repeat", type=int, default=1)

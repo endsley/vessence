@@ -43,6 +43,7 @@ from . import (
     stage2_dispatcher,
     stage3_escalate,
 )
+from jane_web.session_context import set_current_session_id
 
 logger = logging.getLogger(__name__)
 
@@ -1072,7 +1073,7 @@ async def _classify_and_try_stage2(
             pass
         _t2 = time.perf_counter()
         try:
-            result = await stage2_dispatcher.dispatch(cls, prompt, context=fifo_ctx)
+            result = await stage2_dispatcher.dispatch(cls, prompt, context=fifo_ctx, stage1_conf=conf)
         except Exception as e:
             logger.exception("jane_v2 pipeline: dispatcher crashed: %s", e)
             result = None
@@ -1118,6 +1119,7 @@ async def handle_chat(body, request: Request):
     # cookie. Used for every FIFO read/write in this request so a multi-
     # turn conversation never splits across two session_ids.
     canonical_sid = _canonical_session_id(body, request) or body.session_id
+    set_current_session_id(canonical_sid)
     state = await _classify_and_try_stage2(prompt, canonical_sid)
 
     # ── Stage 2 success → return directly ──────────────────────────────
@@ -1300,6 +1302,87 @@ async def handle_chat(body, request: Request):
     return v1_response
 
 
+def _persist_fifo_for_stream(
+    stage3_text_parts: list[str],
+    evidence_meta: dict,
+    evidence_tool_counter,
+    prompt: str,
+    state: dict,
+    canonical_sid: str | None,
+) -> None:
+    """Extract AWAITING / SMS-draft state from accumulated Stage 3 deltas
+    and persist the FIFO record.
+
+    Factored out so it can be called from INSIDE the async generator
+    BEFORE yielding the ``done`` event.  This eliminates the race where
+    the client receives ``done``, fires the next request, and the
+    pending-action resolver sees stale FIFO state because the persist
+    hadn't happened yet.
+    """
+    full_stage3_text = "".join(stage3_text_parts)
+    if evidence_meta.get("required") and evidence_tool_counter is not None:
+        try:
+            from jane_web.verify_first_policy import summarize_verification_status
+            evidence_meta.update(
+                summarize_verification_status(
+                    prompt,
+                    evidence_tool_counter,
+                    memory_evidence=bool(evidence_meta.get("memory_evidence")),
+                )
+            )
+            if evidence_meta.get("flagged"):
+                logger.warning("pipeline: evidence policy flagged stream turn: %s", evidence_meta)
+        except Exception as exc:
+            logger.warning("pipeline: evidence summary failed: %s", exc)
+    cleaned_text, awaiting_topic = _extract_awaiting_marker(full_stage3_text)
+    structured_extras: dict | None = None
+    # SMS draft tracking wins over AWAITING when both appear.
+    draft_state = _extract_sms_draft_state(full_stage3_text)
+    if draft_state:
+        import datetime as _dt
+        structured_extras = {
+            "intent": "send message",
+            "pending_action": {
+                "type": "SEND_MESSAGE_DRAFT_OPEN",
+                "handler_class": "send message",
+                "status": "awaiting_user",
+                "awaiting": "confirm_draft",
+                "data": draft_state,
+                "expires_at": (
+                    _dt.datetime.utcnow() + _dt.timedelta(minutes=5)
+                ).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            },
+        }
+        logger.info("pipeline: stage3 (stream) SMS_DRAFT_OPEN draft_id=%s",
+                    draft_state.get("draft_id", "")[:12])
+    elif awaiting_topic:
+        import datetime as _dt
+        structured_extras = {
+            "pending_action": {
+                "type": "STAGE3_FOLLOWUP",
+                "handler_class": "stage3",
+                "status": "awaiting_user",
+                "awaiting": awaiting_topic,
+                "expires_at": (
+                    _dt.datetime.utcnow() + _dt.timedelta(minutes=5)
+                ).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            },
+        }
+        logger.info("pipeline: stage3 emitted AWAITING marker → topic=%s",
+                    awaiting_topic)
+    resolved_pa = state.get("resolve_pending_action")
+    if resolved_pa and not (structured_extras and structured_extras.get("pending_action")):
+        structured_extras = {**(structured_extras or {}), "pending_action": resolved_pa}
+    _persist_turn_to_fifo(
+        canonical_sid, prompt, cleaned_text or full_stage3_text,
+        stage="stage3",
+        intent=state["cls"],
+        confidence=state["conf"],
+        handler_structured=structured_extras,
+        extras={"evidence": evidence_meta} if evidence_meta.get("required") else None,
+    )
+
+
 # ─── streaming entry point (/api/jane/chat/stream) ───────────────────────────
 
 
@@ -1312,6 +1395,7 @@ async def handle_chat_stream(body, request: Request):
     # cookie. Captured here so the inner _stream() generator and all FIFO
     # reads/writes share one id.
     canonical_sid = _canonical_session_id(body, request) or body.session_id
+    set_current_session_id(canonical_sid)
 
     async def _stream() -> AsyncIterator[str]:
         if not prompt:
@@ -1424,6 +1508,7 @@ async def handle_chat_stream(body, request: Request):
         # Also run deltas through a stripper so `[[AWAITING:...]]` markers
         # never reach the client's chat bubble / TTS.
         _stage3_text_parts: list[str] = []
+        _fifo_persisted = False
         try:
             from jane_web.verify_first_policy import ToolUseCounter
             _evidence_tool_counter = ToolUseCounter()
@@ -1471,74 +1556,31 @@ async def handle_chat_stream(body, request: Request):
                 if payload.get("type") == "done" and isinstance(payload.get("data"), str):
                     cleaned_done, _ = _extract_awaiting_marker(payload["data"])
                     payload["data"] = cleaned_done
+                    # ── Persist FIFO BEFORE yielding done ─────────────
+                    # The client sees "done" and may immediately fire
+                    # the next request. If we persist after yielding,
+                    # the next turn's pending_action_resolver races
+                    # against the FIFO write and often sees stale state
+                    # (no AWAITING pending action → Stage 1 re-classifies).
+                    _persist_fifo_for_stream(
+                        _stage3_text_parts, evidence_meta,
+                        _evidence_tool_counter, prompt, state,
+                        canonical_sid,
+                    )
+                    _fifo_persisted = True
                     yield json.dumps(payload, ensure_ascii=True) + "\n"
                     continue
             yield ev
-        # Safety: if the loop exited without a terminal event, flush now.
+        # Safety: if the loop exited without a terminal event, flush now
+        # and persist if we haven't already.
         tail = stripper.flush()
         if tail:
             yield _ndjson("delta", tail)
-        full_stage3_text = "".join(_stage3_text_parts)
-        if evidence_meta.get("required") and _evidence_tool_counter is not None:
-            try:
-                from jane_web.verify_first_policy import summarize_verification_status
-                evidence_meta.update(
-                    summarize_verification_status(
-                        prompt,
-                        _evidence_tool_counter,
-                        memory_evidence=bool(evidence_meta.get("memory_evidence")),
-                    )
-                )
-                if evidence_meta.get("flagged"):
-                    logger.warning("pipeline: evidence policy flagged stream turn: %s", evidence_meta)
-            except Exception as exc:
-                logger.warning("pipeline: evidence summary failed: %s", exc)
-        cleaned_text, awaiting_topic = _extract_awaiting_marker(full_stage3_text)
-        structured_extras: dict | None = None
-        # SMS draft tracking wins over AWAITING when both appear.
-        draft_state = _extract_sms_draft_state(full_stage3_text)
-        if draft_state:
-            import datetime as _dt
-            structured_extras = {
-                "intent": "send message",
-                "pending_action": {
-                    "type": "SEND_MESSAGE_DRAFT_OPEN",
-                    "handler_class": "send message",
-                    "status": "awaiting_user",
-                    "awaiting": "confirm_draft",
-                    "data": draft_state,
-                    "expires_at": (
-                        _dt.datetime.utcnow() + _dt.timedelta(minutes=5)
-                    ).strftime("%Y-%m-%dT%H:%M:%SZ"),
-                },
-            }
-            logger.info("pipeline: stage3 (stream) SMS_DRAFT_OPEN draft_id=%s",
-                        draft_state.get("draft_id", "")[:12])
-        elif awaiting_topic:
-            import datetime as _dt
-            structured_extras = {
-                "pending_action": {
-                    "type": "STAGE3_FOLLOWUP",
-                    "handler_class": "stage3",
-                    "status": "awaiting_user",
-                    "awaiting": awaiting_topic,
-                    "expires_at": (
-                        _dt.datetime.utcnow() + _dt.timedelta(minutes=2)
-                    ).strftime("%Y-%m-%dT%H:%M:%SZ"),
-                },
-            }
-            logger.info("pipeline: stage3 emitted AWAITING marker → topic=%s",
-                        awaiting_topic)
-        resolved_pa = state.get("resolve_pending_action")
-        if resolved_pa and not (structured_extras and structured_extras.get("pending_action")):
-            structured_extras = {**(structured_extras or {}), "pending_action": resolved_pa}
-        _persist_turn_to_fifo(
-            canonical_sid, prompt, cleaned_text or full_stage3_text,
-            stage="stage3",
-            intent=state["cls"],
-            confidence=state["conf"],
-            handler_structured=structured_extras,
-            extras={"evidence": evidence_meta} if evidence_meta.get("required") else None,
-        )
+        if not _fifo_persisted:
+            _persist_fifo_for_stream(
+                _stage3_text_parts, evidence_meta,
+                _evidence_tool_counter, prompt, state,
+                canonical_sid,
+            )
 
     return StreamingResponse(_stream(), media_type="application/x-ndjson")

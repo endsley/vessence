@@ -64,6 +64,10 @@ class ClientToolDispatcher(
         register(MessagesReadInboxHandler)
         register(SyncForceSmsHandler)
         register(DeviceSpeakTimeHandler)
+        register(TimerHandler)
+        TimerHandler.ALIASES.forEach { alias ->
+            registerAlias(alias, TimerHandler)
+        }
     }
 
     /** Register a handler under its [ClientToolHandler.name]. */

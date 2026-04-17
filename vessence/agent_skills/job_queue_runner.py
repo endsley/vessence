@@ -146,6 +146,19 @@ def mark_job_incomplete(job: dict, result_summary: str = ""):
 
 
 # ── Build prompt from job content ────────────────────────────────────────────────
+SELF_CONTINUATION_INSTRUCTION = (
+    "\n\n## Self-Continuation\n"
+    "At the end of EVERY response, run:\n"
+    "```bash\n"
+    "/home/chieh/google-adk-env/adk-venv/bin/python "
+    "$VESSENCE_HOME/agent_skills/check_continuation.py\n"
+    "```\n"
+    "If `should_continue` is true: display "
+    "`**[Auto-continuing → Job #N]:** [text]` and execute `run job queue:`. "
+    "Repeat until false. If false, stop silently."
+)
+
+
 def build_prompt(job: dict) -> str:
     content = job["content"]
     # Extract key sections: Objective, Context, Steps
@@ -159,7 +172,10 @@ def build_prompt(job: dict) -> str:
                 prompt_parts.append(f"## {section}")
                 prompt_parts.append(body)
                 prompt_parts.append("")
-    return "\n".join(prompt_parts).strip()
+    prompt_text = "\n".join(prompt_parts).strip()
+    # Inject self-continuation so the CLI automation agent can chain jobs
+    prompt_text += SELF_CONTINUATION_INSTRUCTION
+    return prompt_text
 
 
 # ── Run via Jane web API ─────────────────────────────────────────────────────────

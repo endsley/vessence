@@ -1,0 +1,47 @@
+name: ambient
+description: "Cross-platform native app for talking to the Amber AI agent"
+publish_to: 'none'
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.7.2
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # ── UI ──────────────────────────────────────────────────────────
+  cupertino_icons: ^1.0.8
+  google_fonts: any
+
+  # ── Networking ──────────────────────────────────────────────────
+  dio: any
+  http: any
+  retry: any
+  connectivity_plus: any
+
+  # ── Persistence ─────────────────────────────────────────────────
+  sqflite: any
+  sqflite_common_ffi: any
+  path: any
+  shared_preferences: any
+  flutter_secure_storage: any
+  uuid: any
+
+  # ── State Management ────────────────────────────────────────────
+  flutter_riverpod: any
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  integration_test:
+    sdk: flutter
+  flutter_lints: any
+  mockito: any
+  mocktail: any
+  build_runner: any
+  fake_async: any
+  http_mock_adapter: any
+
+flutter:
+  uses-material-design: true

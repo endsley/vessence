@@ -101,15 +101,6 @@ If message starts with `run job queue:` or asks to "do the job queue" / "complet
    f. Move to the next job
 3. After all jobs complete: "All jobs complete."
 
-## Self-Continuation
-
-At the end of EVERY response, run:
-```bash
-/home/chieh/google-adk-env/adk-venv/bin/python \
-    $VESSENCE_HOME/agent_skills/check_continuation.py
-```
-If `should_continue` is true: display `**[Auto-continuing → Job #N]:** [text]` and execute `run job queue:`. Repeat until false. If false, stop silently.
-
 ## Text Message (SMS) Protocols
 
 ### Text vs. Call Disambiguation (IMPORTANT)
@@ -126,10 +117,10 @@ The v2 pipeline handles SEND_MESSAGE intents via a two-path flow controlled by
 `JANE_USE_V2_PIPELINE=1`. When the env var is set, the pipeline decides which path
 to take — Opus only runs on fallback.
 
-**Fast path** (Gemma's `COHERENT=yes` + recipient resolves unambiguously):
+**Fast path** (Qwen's `COHERENT=yes` + recipient resolves unambiguously):
 - Server sends the SMS immediately and responds `"msg sent"`.
 - No draft, no confirmation.
-- This is safe because Gemma's `COHERENT` flag catches STT garbled/cut-off text.
+- This is safe because Qwen's `COHERENT` flag catches STT garbled/cut-off text.
 
 **Fallback path** (`COHERENT=no`, recipient ambiguous, or recipient unresolved):
 - Opus handles it. Always use `sms_send_direct` to send:

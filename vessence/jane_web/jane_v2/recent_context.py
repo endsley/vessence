@@ -3,7 +3,7 @@
 Thin wrapper around vault_web.recent_turns.get_recent that:
   - reads the FIFO for a given session
   - trims the combined summary block to a char budget (stand-in for
-    a token budget — we use chars because gemma4 doesn't need an exact
+    a token budget — we use chars because the local LLM doesn't need an exact
     tokenizer for this use case and 1 token ≈ 4 chars is close enough)
   - formats the result as a prompt-ready block, newest-last
 
@@ -17,7 +17,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# Rough char → token conversion. gemma4 tokens are ~4 chars on average.
+# Rough char → token conversion. Local LLM tokens are ~4 chars on average.
 _CHARS_PER_TOKEN = 4
 
 # Default budgets for recent-turn context injection.

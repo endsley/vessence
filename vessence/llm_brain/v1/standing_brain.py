@@ -142,7 +142,7 @@ _READ_CHUNK_TIMEOUT = 30  # seconds per read attempt
 # Max consecutive failures before giving up
 MAX_FAILURES = 3
 # Max turns before forcing a brain restart to refresh context
-MAX_TURNS_BEFORE_REFRESH = 1000
+MAX_TURNS_BEFORE_REFRESH = 20
 # CPU threshold (%) above which a brain is considered runaway
 CPU_THRESHOLD_PERCENT = 15.0
 # How long (seconds) a brain must exceed CPU threshold before being killed
@@ -631,7 +631,7 @@ class StandingBrainManager:
             bp.turn_count += 1
             bp.last_used = time.time()
 
-            if got_result:
+            if len(response_text) > 0:
                 bp.consecutive_failures = 0
                 logger.info("Brain [%s] turn %d complete in %dms (%d chars, %d raw events)",
                             bp.model, bp.turn_count, elapsed, len(response_text), _raw_events_seen)

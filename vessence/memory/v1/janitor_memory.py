@@ -432,9 +432,11 @@ def run_janitor(max_sessions: int = 2, max_topics: int = 3):
     target_topics = consolidate_candidates[:max_topics]
     logger.info(f"Consolidating {len(target_topics)} topics (out of {len(consolidate_candidates)} needing work)...")
 
-    # 5. Purge old logs and cluster images (do this every run, they are cheap)
+    # 5. Purge old logs
     log_files_purged = purge_old_log_files()
-    image_cluster_result = cluster_vault_images()
+    # cluster_vault_images() disabled — uses Opus for folder proposals,
+    # too expensive to run nightly. Re-enable when cost is acceptable.
+    image_cluster_result = {"images_moved": 0, "folders_created": []}
 
     total_reduced = 0
     merge_log = []
@@ -545,10 +547,333 @@ FACTS FOR TOPIC '{topic}':
     except Exception as e:
         logger.warning(f"Could not write consolidation history: {e}")
 
+    # Verify code-referencing memories against the real codebase.
+    # Codex audits → Claude validates + fixes stale entries.
+    try:
+        verify_result = verify_code_memories()
+        logger.info("Memory verification: %d checked, %d stale, %d fixed",
+                     verify_result.get("checked", 0),
+                     verify_result.get("stale", 0),
+                     verify_result.get("fixed", 0))
+    except Exception as e:
+        logger.warning("verify_code_memories failed: %s", e)
+
     # Final step: refresh dynamic query markers from all collections
     refresh_dynamic_query_markers()
 
     logger.info(f"Janitor finished. Reduced {total_reduced} facts ({len(merge_log)} merges) across {len(topic_groups)} topics.")
+
+# ── Memory vs Code Verification ─────────────────────────────────────────────
+#
+# Memories about Vessence's own code (file paths, model names, cron schedules,
+# architecture claims) drift fast because we change the code daily. This step
+# asks Codex to audit code-referencing memories against the real codebase,
+# then Claude validates each finding and edits stale memories in-place.
+
+import re as _re
+import subprocess as _sp
+import tempfile as _tf
+
+_CODE_INDICATOR_RE = _re.compile(
+    r"(\.py\b|handler|classifier|cron|Stage [123]|Ollama|pipeline|"
+    r"ChromaDB|model|endpoint|/api/|jane_web|agent_skills|intent_classifier|"
+    r"configs/|\.env|keep_alive|VRAM|qwen|gemma|server|restart|service)",
+    _re.IGNORECASE,
+)
+
+_CODEX_BIN = "codex"
+_CLAUDE_BIN = os.environ.get("CLAUDE_BIN", "claude")
+_VESSENCE_HOME = str(Path(__file__).resolve().parents[2])
+
+
+def _is_code_memory(doc: str) -> bool:
+    """Return True if a memory references Vessence internals."""
+    return bool(doc and _CODE_INDICATOR_RE.search(doc))
+
+
+def verify_code_memories(
+    max_memories: int = 30,
+    codex_timeout: int = 300,
+    claude_timeout: int = 300,
+) -> dict:
+    """Verify code-referencing memories against the real codebase.
+
+    Pipeline:
+      1. Pull code-referencing memories from user_memories.
+      2. Send them to Codex with the full repo context — ask it to check
+         each claim (file exists? function exists? model still used?
+         cron still scheduled?) and flag stale ones.
+      3. Send Codex's report to Claude to double-check each flagged
+         memory, then edit or delete the stale ones in ChromaDB.
+
+    Returns {"checked": N, "stale": N, "fixed": N, "details": [...]}.
+    """
+    # 1. Collect code-referencing memories
+    chroma_client = get_chroma_client(path=DB_PATH)
+    try:
+        col = chroma_client.get_collection(name="user_memories")
+    except Exception:
+        logger.info("verify_code_memories: no user_memories collection")
+        return {"checked": 0, "stale": 0, "fixed": 0}
+
+    all_data = col.get(include=["documents", "metadatas"])
+    code_mems = []
+    for doc_id, doc, meta in zip(
+        all_data["ids"], all_data["documents"], all_data["metadatas"]
+    ):
+        if doc and _is_code_memory(doc):
+            code_mems.append({
+                "id": doc_id,
+                "text": doc[:500],
+                "topic": (meta or {}).get("topic", ""),
+            })
+    if not code_mems:
+        logger.info("verify_code_memories: no code-referencing memories found")
+        return {"checked": 0, "stale": 0, "fixed": 0}
+
+    # Cap to avoid huge prompts
+    code_mems = code_mems[:max_memories]
+    logger.info("verify_code_memories: checking %d memories via Codex", len(code_mems))
+
+    # 2. Ask Codex to verify each memory against the codebase
+    mem_list = "\n".join(
+        f"[{i+1}] (id={m['id'][:12]}, topic={m['topic']})\n    {m['text']}"
+        for i, m in enumerate(code_mems)
+    )
+
+    codex_prompt = f"""\
+You are auditing ChromaDB memories about the Vessence codebase.
+For each memory below, CHECK whether it is still accurate by reading
+the actual code. Specifically verify:
+- File paths mentioned → do they still exist?
+- Function/class names → are they still present in the code?
+- Model names (qwen, gemma, etc.) → are they still used?
+- Cron schedules → do they match `crontab -l`?
+- Architecture claims → do they match the current code?
+
+For each memory, output one of:
+  ACCURATE — the memory matches current code
+  STALE    — the memory contradicts current code (explain what changed)
+  PARTIAL  — some claims are right, some are wrong (explain which)
+
+Output format — JSON array, no markdown fences:
+[
+  {{"index": 1, "id": "<id>", "verdict": "ACCURATE|STALE|PARTIAL",
+    "explanation": "what you found", "corrected_text": null or "the fixed version"}}
+]
+
+MEMORIES TO VERIFY:
+{mem_list}
+"""
+
+    try:
+        codex_result = _sp.run(
+            [_CODEX_BIN, "exec", "-"],
+            input=codex_prompt,
+            capture_output=True, text=True,
+            timeout=codex_timeout,
+            cwd=_VESSENCE_HOME,
+        )
+        codex_output = codex_result.stdout.strip()
+    except _sp.TimeoutExpired:
+        logger.warning("verify_code_memories: Codex timed out")
+        return {"checked": len(code_mems), "stale": 0, "fixed": 0, "error": "codex_timeout"}
+    except FileNotFoundError:
+        logger.warning("verify_code_memories: Codex binary not found")
+        return {"checked": len(code_mems), "stale": 0, "fixed": 0, "error": "codex_not_found"}
+
+    # Parse Codex output
+    json_match = _re.search(r'\[[\s\S]*\]', codex_output)
+    if not json_match:
+        logger.warning("verify_code_memories: could not parse Codex JSON: %s",
+                        codex_output[:300])
+        return {"checked": len(code_mems), "stale": 0, "fixed": 0, "error": "parse_fail"}
+
+    try:
+        codex_findings = json.loads(json_match.group())
+    except json.JSONDecodeError as e:
+        logger.warning("verify_code_memories: JSON decode failed: %s", e)
+        return {"checked": len(code_mems), "stale": 0, "fixed": 0, "error": "json_decode"}
+
+    stale_findings = [
+        f for f in codex_findings
+        if f.get("verdict", "").upper() in ("STALE", "PARTIAL")
+    ]
+
+    if not stale_findings:
+        logger.info("verify_code_memories: Codex found no stale memories")
+        return {"checked": len(code_mems), "stale": 0, "fixed": 0}
+
+    logger.info("verify_code_memories: Codex flagged %d stale memories, "
+                "sending to Claude for validation", len(stale_findings))
+
+    # 3. Claude validates each stale finding and produces corrected text
+    stale_summary = json.dumps(stale_findings, indent=2)
+
+    # Build a lookup from index → original memory
+    idx_to_mem = {i+1: m for i, m in enumerate(code_mems)}
+
+    claude_prompt = f"""\
+Codex audited {len(code_mems)} ChromaDB memories about the Vessence codebase
+and flagged the following as stale or partially wrong.
+
+Your job:
+1. For each flagged memory, READ THE ACTUAL CODE to confirm Codex is right.
+   Do NOT trust Codex blindly — verify each claim yourself.
+2. If the memory IS stale, write a CORRECTED version that matches current
+   code reality. Keep the same topic and style, just fix the wrong facts.
+3. If Codex was wrong (memory is actually still accurate), mark it ACCURATE.
+
+Output — JSON array, no markdown fences:
+[
+  {{"id": "<chromadb_id>", "action": "update|delete|keep",
+    "corrected_text": "the fixed memory text" or null,
+    "reason": "brief explanation"}}
+]
+
+"update" = memory is stale, corrected_text has the fix.
+"delete" = memory is completely obsolete, remove it.
+"keep"   = Codex was wrong, memory is still accurate.
+
+CODEX FINDINGS:
+{stale_summary}
+"""
+
+    try:
+        claude_result = _sp.run(
+            [_CLAUDE_BIN, "-p", "-", "--output-format", "text"],
+            input=claude_prompt,
+            capture_output=True, text=True,
+            timeout=claude_timeout,
+            cwd=_VESSENCE_HOME,
+        )
+        claude_output = claude_result.stdout.strip()
+    except _sp.TimeoutExpired:
+        logger.warning("verify_code_memories: Claude timed out")
+        return {"checked": len(code_mems), "stale": len(stale_findings),
+                "fixed": 0, "error": "claude_timeout"}
+    except FileNotFoundError:
+        logger.warning("verify_code_memories: Claude binary not found")
+        return {"checked": len(code_mems), "stale": len(stale_findings),
+                "fixed": 0, "error": "claude_not_found"}
+
+    # Parse Claude output
+    json_match = _re.search(r'\[[\s\S]*\]', claude_output)
+    if not json_match:
+        logger.warning("verify_code_memories: could not parse Claude JSON: %s",
+                        claude_output[:300])
+        return {"checked": len(code_mems), "stale": len(stale_findings),
+                "fixed": 0, "error": "claude_parse_fail"}
+
+    try:
+        claude_actions = json.loads(json_match.group())
+    except json.JSONDecodeError as e:
+        logger.warning("verify_code_memories: Claude JSON decode failed: %s", e)
+        return {"checked": len(code_mems), "stale": len(stale_findings),
+                "fixed": 0, "error": "claude_json_decode"}
+
+    # 4. Apply fixes to ChromaDB
+    fixed = 0
+    deleted = 0
+    details = []
+
+    for action in claude_actions:
+        mem_id = action.get("id", "")
+        act = action.get("action", "keep").lower()
+        reason = action.get("reason", "")
+        corrected = action.get("corrected_text")
+
+        if act == "update" and corrected and mem_id:
+            try:
+                col.update(ids=[mem_id], documents=[corrected])
+                fixed += 1
+                details.append({
+                    "id": mem_id, "action": "updated", "reason": reason,
+                })
+                logger.info("verify_code_memories: UPDATED %s — %s",
+                            mem_id[:12], reason[:80])
+            except Exception as e:
+                logger.warning("verify_code_memories: update failed for %s: %s",
+                               mem_id[:12], e)
+
+        elif act == "delete" and mem_id:
+            try:
+                col.delete(ids=[mem_id])
+                deleted += 1
+                details.append({
+                    "id": mem_id, "action": "deleted", "reason": reason,
+                })
+                logger.info("verify_code_memories: DELETED %s — %s",
+                            mem_id[:12], reason[:80])
+            except Exception as e:
+                logger.warning("verify_code_memories: delete failed for %s: %s",
+                               mem_id[:12], e)
+
+        elif act == "keep":
+            details.append({
+                "id": mem_id, "action": "kept", "reason": reason,
+            })
+            logger.info("verify_code_memories: KEPT %s — Codex was wrong: %s",
+                        mem_id[:12], reason[:80])
+
+    # 5. Log to vocal summary
+    try:
+        sys.path.insert(0, _VESSENCE_HOME)
+        from agent_skills.self_improve_log import log_vocal_summary
+        total_fixed = fixed + deleted
+        if total_fixed > 0:
+            log_vocal_summary(
+                job="Memory Verification",
+                what_was_wrong=(
+                    f"I found {len(stale_findings)} memories about the codebase "
+                    f"that no longer matched reality"
+                ),
+                why_it_mattered=(
+                    "Stale memories make Jane give wrong answers about her "
+                    "own architecture and capabilities"
+                ),
+                what_was_done=(
+                    f"I updated {fixed} and deleted {deleted} after verifying "
+                    f"each one against the actual code"
+                ),
+                severity="medium",
+            )
+        else:
+            log_vocal_summary(
+                job="Memory Verification",
+                summary=(
+                    f"I verified {len(code_mems)} code-related memories against "
+                    f"the codebase. Everything checked out — no stale entries."
+                ),
+                severity="info",
+            )
+    except Exception as e:
+        logger.warning("verify_code_memories: vocal summary failed: %s", e)
+
+    result = {
+        "checked": len(code_mems),
+        "stale": len(stale_findings),
+        "fixed": fixed,
+        "deleted": deleted,
+        "details": details,
+    }
+
+    # Write report for human review
+    report_path = os.path.join(_VESSENCE_HOME, "configs", "memory_verification_report.md")
+    try:
+        ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+        lines = [f"# Memory Verification Report — {ts}\n"]
+        lines.append(f"Checked: {len(code_mems)} | Stale: {len(stale_findings)} "
+                      f"| Fixed: {fixed} | Deleted: {deleted}\n")
+        for d in details:
+            lines.append(f"- **{d['action'].upper()}** `{d['id'][:12]}` — {d['reason']}")
+        with open(report_path, "w") as f:
+            f.write("\n".join(lines) + "\n")
+    except Exception as e:
+        logger.warning("verify_code_memories: report write failed: %s", e)
+
+    return result
+
 
 LOG_MAX_AGE_DAYS = 21  # 3 weeks
 

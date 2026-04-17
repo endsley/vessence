@@ -1,0 +1,249 @@
+{
+  "class": "TODO_LIST",
+  "phrases": [
+    "what's on my shopping list",
+    "read me my shopping list",
+    "show me my grocery list",
+    "add milk to my list",
+    "what do I need to buy",
+    "what do I still need to pick up at the store",
+    "what's on my wish list",
+    "what's on my reading list",
+    "what's on my music list",
+    "what's on my playlist",
+    "remind me to buy eggs",
+    "set a timer for my laundry task",
+    "remind me to do the dishes",
+    "what are my ambient project goals",
+    "tell me about the ambient project",
+    "what's the next step for the ambient project",
+    "what am I doing on the ambient project this week",
+    "write me a todo item for later",
+    "add clean the garage to my todo list",
+    "put call the plumber on my list",
+    "do the laundry please",
+    "I have a lot of tasks today, want to vent about it",
+    "what's the meaning of life",
+    "what's up Jane",
+    "how's it going Jane",
+    "I already did the clinic errand",
+    "I finished my recommendation letter",
+    "don't remind me about the gym thing",
+    "who should I text at the clinic today",
+    "what did you fix overnight on your own todo"
+  ],
+  "results": [
+    {
+      "phrase": "what's on my shopping list",
+      "classification": "SHOPPING_LIST",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "read me my shopping list",
+      "classification": "SHOPPING_LIST",
+      "confidence": 0.6,
+      "margin": 0.4,
+      "false_positive": false
+    },
+    {
+      "phrase": "show me my grocery list",
+      "classification": "SHOPPING_LIST",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "add milk to my list",
+      "classification": "SHOPPING_LIST",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "what do I need to buy",
+      "classification": "SHOPPING_LIST",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "what do I still need to pick up at the store",
+      "classification": "SHOPPING_LIST",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "what's on my wish list",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.4,
+      "margin": 0.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "what's on my reading list",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.4,
+      "margin": 0.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "what's on my music list",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.4,
+      "margin": 0.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "what's on my playlist",
+      "classification": "MUSIC_PLAY",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "remind me to buy eggs",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.4,
+      "margin": 0.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "set a timer for my laundry task",
+      "classification": "TIMER",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "remind me to do the dishes",
+      "classification": "TIMER",
+      "confidence": 0.6,
+      "margin": 0.2,
+      "false_positive": false
+    },
+    {
+      "phrase": "what are my ambient project goals",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "tell me about the ambient project",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "what's the next step for the ambient project",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "what am I doing on the ambient project this week",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "write me a todo item for later",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "add clean the garage to my todo list",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.6,
+      "margin": 0.2,
+      "false_positive": false
+    },
+    {
+      "phrase": "put call the plumber on my list",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.6,
+      "margin": 0.4,
+      "false_positive": false
+    },
+    {
+      "phrase": "do the laundry please",
+      "classification": "SHOPPING_LIST",
+      "confidence": 0.6,
+      "margin": 0.4,
+      "false_positive": false
+    },
+    {
+      "phrase": "I have a lot of tasks today, want to vent about it",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "what's the meaning of life",
+      "classification": "GET_TIME",
+      "confidence": 0.6,
+      "margin": 0.4,
+      "false_positive": false
+    },
+    {
+      "phrase": "what's up Jane",
+      "classification": "GREETING",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "how's it going Jane",
+      "classification": "GREETING",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "I already did the clinic errand",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "I finished my recommendation letter",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "don't remind me about the gym thing",
+      "classification": "END_CONVERSATION",
+      "confidence": 0.6,
+      "margin": 0.4,
+      "false_positive": false
+    },
+    {
+      "phrase": "who should I text at the clinic today",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "what did you fix overnight on your own todo",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    }
+  ],
+  "false_positive_count": 0,
+  "false_positives": []
+}

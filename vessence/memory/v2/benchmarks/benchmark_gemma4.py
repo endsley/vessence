@@ -1,5 +1,7 @@
 """Benchmark the initial ack classification using local Gemma 4 via Ollama.
 
+# NOTE: This benchmark tested gemma4:e4b which has been removed. Kept for reference only.
+
 Compares local Gemma 4 (gemma4:e4b) against the Claude CLI baseline.
 Tests compact format only at 50/100/200/300 leaf scales, 3 rounds each.
 

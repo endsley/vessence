@@ -1,35 +1,37 @@
 package com.vessences.android
 
 import android.app.AlertDialog
-import android.app.ProgressDialog
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.content.Context
 import android.content.Intent
+import android.os.Build
 import android.os.Bundle
-import android.speech.tts.TextToSpeech
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.core.app.NotificationCompat
 import com.vessences.android.data.api.ApiClient
 import com.vessences.android.util.Constants
-import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
-import java.util.Locale
 
 /**
  * Transparent activity that handles shared URLs with a picker dialog:
- *   - "Summarize Now" — fetches & summarizes via server, speaks result via device TTS
- *   - "Add to Briefing" — queues for daily briefing (existing behavior)
+ *   - "Summarize Now" — kicks off server summarization in the background and
+ *     dismisses immediately; a notification appears when the summary is ready.
+ *   - "Add to Briefing" — queues for daily briefing (existing behavior).
  *
  * If the shared text is not a URL, forwards the intent to MainActivity.
  */
-class ShareReceiverActivity : ComponentActivity(), TextToSpeech.OnInitListener {
-
-    private var tts: TextToSpeech? = null
-    private var pendingSpeech: String? = null
+class ShareReceiverActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -48,7 +50,6 @@ class ShareReceiverActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         val url = extractUrl(sharedText)
 
         if (url == null) {
-            // Not a URL — forward to MainActivity for normal share handling
             val forward = Intent(this, MainActivity::class.java).apply {
                 action = Intent.ACTION_SEND
                 type = intent.type
@@ -60,52 +61,23 @@ class ShareReceiverActivity : ComponentActivity(), TextToSpeech.OnInitListener {
             return
         }
 
-        // Initialize ApiClient if needed
         try {
             ApiClient.getOkHttpClient()
         } catch (_: UninitializedPropertyAccessException) {
             ApiClient.init(applicationContext)
         }
 
-        // Initialize TTS engine early so it's ready when we need it
-        tts = TextToSpeech(this, this)
-
-        // Show picker dialog
         AlertDialog.Builder(this)
             .setTitle("Share Article")
-            .setItems(arrayOf("Summarize Now", "Add to Briefing")) { _, which ->
+            .setItems(arrayOf("Summarize Now", "Summarize Now v2 (WebView)", "Add to Briefing")) { _, which ->
                 when (which) {
                     0 -> summarizeNow(url)
-                    1 -> addToBriefing(url)
+                    1 -> summarizeNowV2(url)
+                    2 -> addToBriefing(url)
                 }
             }
             .setOnCancelListener { finish() }
             .show()
-    }
-
-    override fun onInit(status: Int) {
-        if (status == TextToSpeech.SUCCESS) {
-            tts?.language = Locale.US
-            // Speak any text that arrived before TTS was ready
-            pendingSpeech?.let { text ->
-                pendingSpeech = null
-                speakAndFinish(text)
-            }
-        }
-    }
-
-    private fun speakAndFinish(text: String) {
-        val engine = tts
-        if (engine == null) {
-            pendingSpeech = text
-            return
-        }
-        engine.setOnUtteranceProgressListener(object : android.speech.tts.UtteranceProgressListener() {
-            override fun onStart(utteranceId: String?) {}
-            override fun onDone(utteranceId: String?) { finish() }
-            override fun onError(utteranceId: String?) { finish() }
-        })
-        engine.speak(text, TextToSpeech.QUEUE_FLUSH, null, "summarize_now")
     }
 
     private fun extractUrl(text: String): String? {
@@ -113,76 +85,73 @@ class ShareReceiverActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         return urlPattern.find(text)?.value
     }
 
+    private fun summarizeNowV2(url: String) {
+        startActivity(Intent(this, ArticleReaderV2Activity::class.java).apply {
+            putExtra(ArticleReaderV2Activity.EXTRA_URL, url)
+        })
+        finish()
+    }
+
     /**
-     * Call the server's summarize_now endpoint, get back summary text,
-     * and speak it immediately via device TTS.
+     * Fire-and-forget summarization: kick off the request on an app-scoped
+     * coroutine, dismiss the share UI immediately, post a notification when
+     * the summary returns (or if it fails).
      */
-    @Suppress("DEPRECATION")
     private fun summarizeNow(url: String) {
-        val prefs = getSharedPreferences(Constants.PREFS_NAME, MODE_PRIVATE)
+        val appCtx = applicationContext
+        val prefs = appCtx.getSharedPreferences(Constants.PREFS_NAME, MODE_PRIVATE)
         val serverUrl = prefs.getString(Constants.PREF_JANE_URL, Constants.DEFAULT_JANE_BASE_URL)
             ?: Constants.DEFAULT_JANE_BASE_URL
 
-        val progress = ProgressDialog(this).apply {
-            setMessage("Summarizing article…")
-            setCancelable(false)
-            show()
-        }
+        Toast.makeText(
+            appCtx,
+            "Summarizing in background — Jane will ping you when ready.",
+            Toast.LENGTH_SHORT,
+        ).show()
 
-        val client = ApiClient.getOkHttpClient()
-        val json = JSONObject().apply { put("url", url) }
-        val body = json.toString().toRequestBody("application/json".toMediaType())
-        val request = Request.Builder()
-            .url("${serverUrl.trimEnd('/')}/api/briefing/articles/summarize_now")
-            .post(body)
-            .build()
-
-        lifecycleScope.launch {
+        // Launch on an app-scoped coroutine so the work survives this
+        // activity being finished. SupervisorJob keeps siblings independent.
+        ShareSummarizer.scope.launch {
             val result = try {
                 withContext(Dispatchers.IO) {
-                    val response = client.newCall(request).execute()
-                    val responseBody = response.body?.string() ?: ""
-                    response.close()
-                    if (response.isSuccessful && responseBody.isNotEmpty()) {
-                        val obj = JSONObject(responseBody)
-                        val title = obj.optString("title", "")
-                        val summary = obj.optString("summary", "")
-                        if (summary.isNotEmpty()) {
-                            if (title.isNotEmpty()) "$title. $summary" else summary
+                    val client = ApiClient.getOkHttpClient()
+                    val body = JSONObject().apply { put("url", url) }
+                        .toString()
+                        .toRequestBody("application/json".toMediaType())
+                    val request = Request.Builder()
+                        .url("${serverUrl.trimEnd('/')}/api/briefing/articles/summarize_now")
+                        .post(body)
+                        .build()
+                    client.newCall(request).execute().use { response ->
+                        val responseBody = response.body?.string().orEmpty()
+                        if (response.isSuccessful && responseBody.isNotEmpty()) {
+                            val obj = JSONObject(responseBody)
+                            val title = obj.optString("title", "")
+                            val summary = obj.optString("summary", "")
+                            if (summary.isNotEmpty()) {
+                                val combined = if (title.isNotEmpty()) "$title. $summary" else summary
+                                Pair(title.ifEmpty { "Article" }, combined)
+                            } else null
                         } else null
-                    } else null
+                    }
                 }
             } catch (_: Exception) {
                 null
             }
 
-            progress.dismiss()
-
             if (result != null) {
-                // Hand off to MainActivity: bring app to focus, post the summary
-                // into chat, and trigger main TTS path. Do NOT speak from this
-                // share activity — keep all TTS routed through the main app so
-                // the user can stop, replay, or interact with it normally.
-                val mainIntent = Intent(this@ShareReceiverActivity, MainActivity::class.java).apply {
-                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
-                    putExtra("shared_summary_text", result)
-                    putExtra("shared_summary_url", url)
-                    putExtra("shared_summary_speak", true)
-                }
-                startActivity(mainIntent)
-                finish()
+                ShareSummarizer.postSummaryReady(appCtx, url, result.first, result.second)
             } else {
-                Toast.makeText(this@ShareReceiverActivity, "Could not summarize article", Toast.LENGTH_SHORT).show()
-                finish()
+                ShareSummarizer.postSummaryFailed(appCtx, url)
             }
         }
+
+        finish()
     }
 
-    /**
-     * Queue the URL for the daily briefing (existing behavior).
-     */
     private fun addToBriefing(url: String) {
-        val prefs = getSharedPreferences(Constants.PREFS_NAME, MODE_PRIVATE)
+        val appCtx = applicationContext
+        val prefs = appCtx.getSharedPreferences(Constants.PREFS_NAME, MODE_PRIVATE)
         val serverUrl = prefs.getString(Constants.PREF_JANE_URL, Constants.DEFAULT_JANE_BASE_URL)
             ?: Constants.DEFAULT_JANE_BASE_URL
 
@@ -194,31 +163,91 @@ class ShareReceiverActivity : ComponentActivity(), TextToSpeech.OnInitListener {
             .post(body)
             .build()
 
-        lifecycleScope.launch {
+        Toast.makeText(appCtx, "Queuing article for briefing…", Toast.LENGTH_SHORT).show()
+
+        ShareSummarizer.scope.launch {
             val success = try {
                 withContext(Dispatchers.IO) {
-                    val response = client.newCall(request).execute()
-                    val ok = response.isSuccessful
-                    response.close()
-                    ok
+                    client.newCall(request).execute().use { it.isSuccessful }
                 }
             } catch (_: Exception) {
                 false
             }
-
-            Toast.makeText(
-                this@ShareReceiverActivity,
-                if (success) "Article queued for briefing" else "Failed to queue article",
-                Toast.LENGTH_SHORT
-            ).show()
-
-            finish()
+            withContext(Dispatchers.Main) {
+                Toast.makeText(
+                    appCtx,
+                    if (success) "Article queued for briefing" else "Failed to queue article",
+                    Toast.LENGTH_SHORT,
+                ).show()
+            }
         }
+
+        finish()
+    }
+}
+
+/**
+ * App-scoped coroutine + notification helpers for share-to summarization.
+ * Lives on the process, not on any activity, so work survives the share
+ * activity being finished immediately after kickoff.
+ */
+object ShareSummarizer {
+
+    val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    private const val CHANNEL_ID = "jane_share_summary"
+    private const val CHANNEL_NAME = "Article summaries"
+
+    fun postSummaryReady(ctx: Context, url: String, title: String, summary: String) {
+        ensureChannel(ctx)
+        val intent = Intent(ctx, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                    Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                    Intent.FLAG_ACTIVITY_SINGLE_TOP
+            putExtra("shared_summary_text", summary)
+            putExtra("shared_summary_url", url)
+            putExtra("shared_summary_speak", true)
+        }
+        val pi = PendingIntent.getActivity(
+            ctx, url.hashCode(), intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val contentText = summary.take(120).let { if (summary.length > 120) "$it…" else it }
+        val notif = NotificationCompat.Builder(ctx, CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.ic_menu_info_details)
+            .setContentTitle("Summary ready: $title")
+            .setContentText(contentText)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(contentText))
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setAutoCancel(true)
+            .setContentIntent(pi)
+            .build()
+        val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        nm.notify(300_000 + (url.hashCode() and 0xFFFF), notif)
     }
 
-    override fun onDestroy() {
-        tts?.stop()
-        tts?.shutdown()
-        super.onDestroy()
+    fun postSummaryFailed(ctx: Context, url: String) {
+        ensureChannel(ctx)
+        val notif = NotificationCompat.Builder(ctx, CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.stat_notify_error)
+            .setContentTitle("Could not summarize article")
+            .setContentText(url.take(80))
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setAutoCancel(true)
+            .build()
+        val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        nm.notify(300_100 + (url.hashCode() and 0xFFFF), notif)
+    }
+
+    private fun ensureChannel(ctx: Context) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        if (nm.getNotificationChannel(CHANNEL_ID) != null) return
+        val channel = NotificationChannel(
+            CHANNEL_ID, CHANNEL_NAME, NotificationManager.IMPORTANCE_DEFAULT,
+        ).apply {
+            description = "Notifications when a shared article's summary is ready"
+        }
+        nm.createNotificationChannel(channel)
     }
 }

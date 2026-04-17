@@ -16,7 +16,7 @@ from pathlib import Path
 
 import httpx
 
-from jane_web.jane_v2.models import LOCAL_LLM as MODEL, OLLAMA_URL
+from jane_web.jane_v2.models import LOCAL_LLM as MODEL, LOCAL_LLM_NUM_CTX, OLLAMA_URL
 
 logger = logging.getLogger(__name__)
 WEATHER_PATH = Path("/home/chieh/ambient/vessence-data/cache/weather.json")
@@ -69,8 +69,27 @@ Your 1-sentence spoken answer (or the single word ESCALATE):"""
 
 _ESCALATE_RE = re.compile(r"\bESCALATE\b", re.IGNORECASE)
 
+# Substrings in the user prompt that force an immediate escalation —
+# these questions need current / researched data that the cache can't
+# answer. Avoid spending 10+ seconds in the LLM only to decline.
+_FORCE_ESCALATE_PHRASES = (
+    "online search", "do a search", "look it up", "look up",
+    "search online", "search the web", "google ", "search google",
+    "what's causing", "what is causing", "why is", "why is the",
+    "explain why", "explain the cause", "cause of",
+    "news about", "latest on",
+)
+
 
 async def handle(prompt: str) -> dict | None:
+    # Fast decline: "cause of the bad air quality" / "online search..."
+    # require research, not cached data. Escalate immediately so we
+    # don't burn ~10s in the local LLM before giving up.
+    p_lower = (prompt or "").lower()
+    if any(phrase in p_lower for phrase in _FORCE_ESCALATE_PHRASES):
+        logger.info("weather handler: research/online-search phrase → escalate early")
+        return None
+
     try:
         weather_json = WEATHER_PATH.read_text()
     except Exception as e:
@@ -84,7 +103,7 @@ async def handle(prompt: str) -> dict | None:
         ),
         "stream": False,
         "think": False,
-        "options": {"temperature": 0.2, "num_predict": 120},
+        "options": {"temperature": 0.2, "num_predict": 120, "num_ctx": LOCAL_LLM_NUM_CTX},
         "keep_alive": -1,
     }
     try:

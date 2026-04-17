@@ -75,6 +75,9 @@ wake_word/model.npz
 !seed_db/
 !seed_db/**
 
+# Git backup directories (from git-filter-repo, etc.)
+.git.backup*/
+
 # Temp files
 *.wav.data
 *.onnx.data

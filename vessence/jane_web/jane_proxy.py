@@ -632,6 +632,28 @@ CODE_MAP_KEYWORDS = (
     # Auto-evolved from daily conversations
     "skill",
     "stage",
+    # Auto-evolved from daily conversations
+    "deeply",
+    "resolve",
+    "android",
+    "phrase",
+    "responding",
+    "memory",
+    "phone_number",
+    "number",
+    "body",
+    "steps",
+    # Auto-evolved from daily conversations
+    "end",
+    "conversation",
+    "current",
+    "state",
+    "intent",
+    "question",
+    "answer",
+    "pending",
+    "stage3_followup",
+    "reply",
 )
 
 
@@ -1991,7 +2013,7 @@ async def stream_message(
     # Skipped entirely when an SMS draft is open (see _skip_initial_ack above)
     # so edit instructions like "make it 30" route straight to Jane's mind.
     _gemma_short_circuit = False
-    _gemma_delegate_ack = None  # quick ack emitted by Gemma when delegating to Claude
+    _stage2_delegate_ack = None  # quick ack emitted by Stage 2 when delegating to Claude
     _gemma_conversation_end = False  # v2 pipeline: END_CONVERSATION signal to client
     _gemma_client_tools = []  # v2 pipeline: client tool calls from Stage 2 fast path
     _shopping_list_active = False  # set by shopping_list classification
@@ -2017,14 +2039,28 @@ async def stream_message(
             # replies "Ok.", and tells clients to end active listening. The
             # jane_v2 wrapper already requires an 0.80 floor, but this proxy
             # path calls the raw embedding classifier directly, so duplicate
-            # that safety gate here.
-            if _s1_cls == "END_CONVERSATION" and float(_stage1.get("confidence") or 0.0) < 0.80:
-                logger.info(
-                    "[%s] v2 END_CONVERSATION confidence %.2f below safety floor — delegating",
-                    session_id[:12], float(_stage1.get("confidence") or 0.0),
-                )
-                _s1_cls = "DELEGATE_OPUS"
-                _stage1["classification"] = _s1_cls
+            # the wrapper's safety gates here.
+            if _s1_cls == "END_CONVERSATION":
+                try:
+                    from jane_web.jane_v2.stage1_classifier import _end_conversation_phrase_ok
+                    _end_phrase_ok = _end_conversation_phrase_ok(message)
+                except Exception:
+                    _end_phrase_ok = True
+                _end_conf = float(_stage1.get("confidence") or 0.0)
+                if not _end_phrase_ok:
+                    logger.info(
+                        "[%s] v2 END_CONVERSATION phrase guard rejected %r — delegating",
+                        session_id[:12], (message or "")[:100],
+                    )
+                    _s1_cls = "DELEGATE_OPUS"
+                    _stage1["classification"] = _s1_cls
+                elif _end_conf < 0.80:
+                    logger.info(
+                        "[%s] v2 END_CONVERSATION confidence %.2f below safety floor — delegating",
+                        session_id[:12], _end_conf,
+                    )
+                    _s1_cls = "DELEGATE_OPUS"
+                    _stage1["classification"] = _s1_cls
             _stage1["classification"] = _s1_cls
             # Sync _classification so run_pipeline_async()'s CLASSIFICATION_TO_INTENT
             # lookup works for v2 pipeline turns that delegate to Opus.
@@ -2032,7 +2068,7 @@ async def stream_message(
             # ── Build task context (fetch data for data-intensive intents) ─────────
             _v2_task_ctx = ""
             if _s1_cls == "READ_MESSAGES":
-                _gemma_delegate_ack = "Checking your messages..."
+                _stage2_delegate_ack = "Checking your messages..."
                 try:
                     from vault_web.database import get_db as _v2_get_db
                     import json as _v2j
@@ -2079,7 +2115,7 @@ async def stream_message(
                     logger.error("[%s] v2 SMS fetch failed: %s", session_id[:12], _v2_sms_err)
                     _v2_task_ctx = f"[SMS ERROR]\nFailed to fetch messages: {_v2_sms_err}\n[END SMS ERROR]"
             elif _s1_cls == "READ_EMAIL":
-                _gemma_delegate_ack = "Let me check your email..."
+                _stage2_delegate_ack = "Let me check your email..."
                 try:
                     from agent_skills.email_tools import read_inbox as _v2_read_inbox
                     _v2_emails = _v2_read_inbox(limit=10, query="is:unread")
@@ -2100,7 +2136,7 @@ async def stream_message(
                     _v2_task_ctx = f"[EMAIL ERROR]\nFailed to fetch emails: {_v2_email_err}\n[END EMAIL ERROR]"
             elif _s1_cls == "MUSIC_PLAY":
                 _v2_query = _stage1.get("query", "")
-                _gemma_delegate_ack = f"Playing {_v2_query}..." if _v2_query else "Playing music..."
+                _stage2_delegate_ack = f"Playing {_v2_query}..." if _v2_query else "Playing music..."
                 try:
                     from jane_web.main import create_music_playlist_from_query as _v2_pl_fn
                     _v2_pl = _v2_pl_fn(_v2_query)
@@ -2170,19 +2206,19 @@ async def stream_message(
                 _router_response = _stage2["response"]
             elif _stage2.get("delegate"):
                 _gemma_short_circuit = False
-                _gemma_delegate_ack = _stage2.get("response") or _gemma_delegate_ack
+                _stage2_delegate_ack = _stage2.get("response") or _stage2_delegate_ack
                 # Inject delegate context into message so Opus sees it
                 _v2_dctx = _stage2.get("delegate_context", "") or _v2_task_ctx
                 if _v2_dctx:
                     message = message + "\n\n" + _v2_dctx
-                if _gemma_delegate_ack and not _suppress_delegate_ack:
+                if _stage2_delegate_ack and not _suppress_delegate_ack:
                     _raw_emit("model", ROUTER_MODEL)
-                    _raw_emit("ack", _gemma_delegate_ack)
+                    _raw_emit("ack", _stage2_delegate_ack)
                     _ack_seen = True
-                    logger.info("[%s] v2 delegate ack: %s", session_id[:12], (_gemma_delegate_ack or "")[:60])
-                elif _gemma_delegate_ack and _suppress_delegate_ack:
+                    logger.info("[%s] v2 delegate ack: %s", session_id[:12], (_stage2_delegate_ack or "")[:60])
+                elif _stage2_delegate_ack and _suppress_delegate_ack:
                     logger.info("[%s] v2 delegate (ack suppressed, text mode): %s",
-                                session_id[:12], (_gemma_delegate_ack or "")[:60])
+                                session_id[:12], (_stage2_delegate_ack or "")[:60])
             else:
                 # Stage 2 handled it completely — short-circuit
                 _gemma_short_circuit = True
@@ -2218,7 +2254,7 @@ async def stream_message(
             # so Opus can reference it, but Opus decides the response.
             logger.info("[%s] Gemma router: music_play query='%s' → delegating to Opus",
                         session_id[:12], _router_response)
-            _gemma_delegate_ack = f"Playing {_router_response}..."
+            _stage2_delegate_ack = f"Playing {_router_response}..."
             _gemma_short_circuit = False
             try:
                 from jane_web.main import create_music_playlist_from_query
@@ -2247,7 +2283,7 @@ async def stream_message(
             # Same pattern as read_email: inject data into the brain context.
             logger.info("[%s] Gemma router: read_messages → fetching from synced DB",
                         session_id[:12])
-            _gemma_delegate_ack = "Checking your messages..."
+            _stage2_delegate_ack = "Checking your messages..."
             _gemma_short_circuit = False
             _sms_data_ctx = ""
             try:
@@ -2333,7 +2369,7 @@ async def stream_message(
             # [[CLIENT_TOOL:sync.force_sms:{}]] so the Android app re-syncs.
             logger.info("[%s] Gemma router: sync_messages → delegating to brain with sync tool instruction",
                         session_id[:12])
-            _gemma_delegate_ack = "Syncing your messages..."
+            _stage2_delegate_ack = "Syncing your messages..."
             _gemma_short_circuit = False
             message = message + (
                 "\n\n[SYNC REQUEST]\n"
@@ -2349,7 +2385,7 @@ async def stream_message(
             # email content in a single turn — no CLIENT_TOOL round-trip needed.
             logger.info("[%s] Gemma router: read_email → fetching server-side",
                         session_id[:12])
-            _gemma_delegate_ack = "Let me check your email..."
+            _stage2_delegate_ack = "Let me check your email..."
             _gemma_short_circuit = False
             _email_data_ctx = ""
             try:
@@ -2459,21 +2495,21 @@ async def stream_message(
             else:
                 # Delegate to Opus for greetings, math, trivia, etc.
                 _gemma_short_circuit = False
-                _gemma_delegate_ack = _router_response
+                _stage2_delegate_ack = _router_response
                 logger.info("[%s] Gemma router: self_handle → delegating to Opus", session_id[:12])
         else:
             logger.info("[%s] Gemma router: %s → Claude", session_id[:12], _classification)
-            _gemma_delegate_ack = _router_response  # None if gemma4 didn't produce one
-            if _gemma_delegate_ack and not _suppress_delegate_ack:
+            _stage2_delegate_ack = _router_response  # None if Stage 2 didn't produce one
+            if _stage2_delegate_ack and not _suppress_delegate_ack:
                 # Voice mode: emit the ack so the user hears something while Opus thinks.
                 _raw_emit("model", ROUTER_MODEL)
-                _raw_emit("ack", _gemma_delegate_ack)
+                _raw_emit("ack", _stage2_delegate_ack)
                 _ack_seen = True  # suppress Claude's [ACK] block since Gemma already acked
-                logger.info("[%s] Gemma router: delegate ack emitted: %s", session_id[:12], _gemma_delegate_ack[:60])
-            elif _gemma_delegate_ack and _suppress_delegate_ack:
+                logger.info("[%s] Gemma router: delegate ack emitted: %s", session_id[:12], _stage2_delegate_ack[:60])
+            elif _stage2_delegate_ack and _suppress_delegate_ack:
                 # Text mode: classification happened (for routing) but ack is suppressed.
                 # Don't set _ack_seen — let Claude produce its own [ACK] naturally.
-                logger.info("[%s] Gemma router: delegate (ack suppressed, text mode): %s", session_id[:12], _gemma_delegate_ack[:60])
+                logger.info("[%s] Gemma router: delegate (ack suppressed, text mode): %s", session_id[:12], _stage2_delegate_ack[:60])
             else:
                 logger.info("[%s] Gemma router: no ack — letting Claude handle it", session_id[:12])
     except _SkipRouterSignal:
@@ -2642,6 +2678,15 @@ async def stream_message(
                 # Inject tool-specific context for tool_mode turns
                 if _tool_context:
                     safety_parts.append(_tool_context)
+                # Re-inject Standing Brain Mode override every turn so it
+                # survives context compaction (the turn-0 system prompt can
+                # get lost after many turns).
+                safety_parts.append(
+                    "[STANDING BRAIN MODE] You are the web/Android standing brain. "
+                    "SKIP these CLAUDE.md sections: "
+                    "Run Job Queue (unless user explicitly asks), Code Edit Lock, Review Process. "
+                    "Respond directly to the user's message. No background automation."
+                )
                 safety_ctx = "\n\n".join(safety_parts)
                 user_msg, _cm_loaded = _maybe_prepend_code_map(message)
                 if _cm_loaded:
@@ -2649,8 +2694,8 @@ async def stream_message(
                     logger.info("[%s] Code map injected (standing brain stream)", session_id[:12])
                 transcript = f"{safety_ctx}\n\nUser: {user_msg}" if safety_ctx else user_msg
                 # If Gemma already emitted a quick ack, tell Claude so it can follow up naturally
-                if _gemma_delegate_ack:
-                    transcript += f'\n\n[ALREADY SPOKEN] A brief acknowledgment was already spoken to the user: "{_gemma_delegate_ack}" — do NOT repeat it or generate your own [ACK] block. Continue naturally from where that ack left off.'
+                if _stage2_delegate_ack:
+                    transcript += f'\n\n[ALREADY SPOKEN] A brief acknowledgment was already spoken to the user: "{_stage2_delegate_ack}" — do NOT repeat it or generate your own [ACK] block. Continue naturally from where that ack left off.'
                 request_ctx = JaneRequestContext(
                     system_prompt="",
                     transcript=transcript,
@@ -2711,8 +2756,8 @@ async def stream_message(
 
             # If Gemma already emitted a quick ack, inject context so Claude follows up naturally
             from context_builder.v1.context_builder import JaneRequestContext as _JRC
-            if _gemma_delegate_ack and request_ctx:
-                _ack_note = f'\n\n[ALREADY SPOKEN] A brief acknowledgment was already spoken to the user: "{_gemma_delegate_ack}" — do NOT repeat it or generate your own [ACK] block. Continue naturally from where that ack left off.'
+            if _stage2_delegate_ack and request_ctx:
+                _ack_note = f'\n\n[ALREADY SPOKEN] A brief acknowledgment was already spoken to the user: "{_stage2_delegate_ack}" — do NOT repeat it or generate your own [ACK] block. Continue naturally from where that ack left off.'
                 if request_ctx.transcript:
                     request_ctx = _JRC(
                         system_prompt=request_ctx.system_prompt,

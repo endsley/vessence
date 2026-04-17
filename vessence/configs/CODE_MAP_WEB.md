@@ -1,88 +1,90 @@
 # Code Map — Web Frontend
-_Auto-generated on 2026-04-05 01:57 UTC by `generate_code_map.py`_
+_Auto-generated on 2026-04-17 08:15 UTC by `generate_code_map.py`_
 
-## vault_web/templates/jane.html (2430 lines)
-  setChatSize() → L443
-  setStepSize() → L447
-  formatStatusEntry() → L909
-  async send() → L943
-  setResponseMode() → L951
-  enqueueMessage() → L960
-  moveQueueItem() → L973
-  removeQueueItem() → L982
-  async processQueue() → L997
-  async consumeStream() → L1083
-  async requestJaneFallback() → L1117
-  async readJaneError() → L1160
-  applyStreamEvent() → L1179
-  event.type === 'heartbeat' → L1207
-  event.type === 'offloaded' → L1209
-  event.type === 'model' → L1220
-  event.type === 'ack' → L1224
-  event.type === 'status' → L1233
-  event.type === 'permission_request' → L1241
-  event.type === 'thought' → L1251
-  event.type === 'tool_use' → L1259
-  event.type === 'tool_result' → L1267
-  event.type === 'delta' → L1274
-  event.type === 'done' → L1299
-  event.type === 'provider_error' → L1324
-  event.type === 'error' → L1348
-  event.type === 'done' → L1354
-  _previousBubbleVisible() → L1357
-  _initScrollTracker() → L1369
-  scrollBottom() → L1371
-  formatMessage() → L1388
-  _renderMath() → L1510
-  hasMathPreview() → L1518
-  autoResize() → L1520
-  async onJaneFilePick() → L1527
-  openJanePicker() → L1534
-  isImageUpload() → L1545
-  async collectJaneUploadDescriptions() → L1549
-  async uploadJaneFiles() → L1570
-  removeJaneAttachment() → L1606
-  buildJaneFileContext() → L1610
-  async registerNotifications() → L1619
-  async toggleNotifications() → L1629
-  async notifyReply() → L1651
-  async fetchAnnouncements() → L1672
-  toggleTtsMute() → L1712
-  toggleMic() → L1721
-  _startMicListening() → L1732
-  _stopMicListening() → L1771
-  speakText() → L1779
-  stopSpeech() → L1800
-  resetSpeechState() → L1806
-  async respondPermission() → L1811
-  async checkPendingPermissions() → L1834
-  focusInput() → L1854
-  endSession() → L1858
-  clearSession() → L1866
-  copyText() → L1878
-  async switchProvider() → L1892
-  async _runProviderAuth() → L1935
-  async loadModelSettings() → L1976
-  async saveModelSettings() → L1994
-  resetModelDefaults() → L2016
-  cancelResponse() → L2020
-  async checkHealth() → L2037
-  init() → L2055
-  async loadActiveEssence() → L2110
-  async activateEssenceAndInit() → L2127
-  async deactivateEssence() → L2163
-  async initSession() → L2180
-  event.type === 'status' → L2236
-  event.type === 'done' → L2239
-  async startLiveListener() → L2260
-  async toggle() → L2339
-  async refresh() → L2343
-  async switchTo() → L2353
-  init() → L2377
-  async toggle() → L2387
-  async fetchItems() → L2397
-  async toggle() → L2410
-  async fetchItems() → L2420
+## vault_web/templates/jane.html (2469 lines)
+  setChatSize() → L453
+  setStepSize() → L457
+  formatStatusEntry() → L920
+  async send() → L954
+  setResponseMode() → L962
+  enqueueMessage() → L971
+  moveQueueItem() → L984
+  removeQueueItem() → L993
+  async processQueue() → L1008
+  async consumeStream() → L1094
+  async requestJaneFallback() → L1128
+  async readJaneError() → L1171
+  applyStreamEvent() → L1190
+  event.type === 'heartbeat' → L1218
+  event.type === 'offloaded' → L1220
+  event.type === 'model' → L1231
+  event.type === 'ack' → L1235
+  event.type === 'status' → L1244
+  event.type === 'permission_request' → L1252
+  event.type === 'thought' → L1262
+  event.type === 'tool_use' → L1270
+  event.type === 'tool_result' → L1278
+  event.type === 'delta' → L1285
+  event.type === 'done' → L1310
+  event.type === 'error' → L1335
+  event.type === 'provider_error' → L1343
+  event.type === 'error' → L1367
+  event.type === 'conversation_end' → L1373
+  event.type === 'done' → L1378
+  _previousBubbleVisible() → L1381
+  _initScrollTracker() → L1393
+  scrollBottom() → L1395
+  formatMessage() → L1412
+  _renderMath() → L1534
+  hasMathPreview() → L1542
+  autoResize() → L1544
+  async onJaneFilePick() → L1551
+  openJanePicker() → L1558
+  isImageUpload() → L1569
+  async collectJaneUploadDescriptions() → L1573
+  async uploadJaneFiles() → L1594
+  removeJaneAttachment() → L1630
+  buildJaneFileContext() → L1634
+  async registerNotifications() → L1643
+  async toggleNotifications() → L1653
+  async notifyReply() → L1675
+  async fetchAnnouncements() → L1696
+  toggleTtsMute() → L1736
+  toggleMic() → L1745
+  _startMicListening() → L1756
+  _stopMicListening() → L1795
+  speakText() → L1803
+  stopSpeech() → L1824
+  resetSpeechState() → L1832
+  async respondPermission() → L1850
+  async checkPendingPermissions() → L1873
+  focusInput() → L1893
+  endSession() → L1897
+  clearSession() → L1905
+  copyText() → L1917
+  async switchProvider() → L1931
+  async _runProviderAuth() → L1974
+  async loadModelSettings() → L2015
+  async saveModelSettings() → L2033
+  resetModelDefaults() → L2055
+  cancelResponse() → L2059
+  async checkHealth() → L2076
+  init() → L2094
+  async loadActiveEssence() → L2149
+  async activateEssenceAndInit() → L2166
+  async deactivateEssence() → L2202
+  async initSession() → L2219
+  event.type === 'status' → L2275
+  event.type === 'done' → L2278
+  async startLiveListener() → L2299
+  async toggle() → L2378
+  async refresh() → L2382
+  async switchTo() → L2392
+  init() → L2416
+  async toggle() → L2426
+  async fetchItems() → L2436
+  async toggle() → L2449
+  async fetchItems() → L2459
 
 ## vault_web/templates/app.html (1969 lines)
   setSize() → L750
@@ -90,38 +92,38 @@ _Auto-generated on 2026-04-05 01:57 UTC by `generate_code_map.py`_
   event.type === 'done' → L1433
   event.type === 'error' → L1437
 
-## vault_web/templates/briefing.html (1251 lines)
-  topicColor() → L746
-  async init() → L755
-  async loadArticles() → L760
-  async loadTopics() → L791
-  async addTopic() → L805
-  async deleteTopic() → L829
-  async toggleDismiss() → L845
-  async expandArticle() → L859
-  async triggerFetch() → L876
-  async searchArticles() → L890
-  playArticleAudio() → L908
-  _startAudioPlayback() → L927
-  _browserTTSInPlayer() → L954
-  toggleAudioPlayback() → L989
-  closeAudioPlayer() → L1017
-  switchAudioType() → L1024
-  async saveArticleToCategory() → L1036
-  async loadSavedCategories() → L1059
-  async toggleSavedView() → L1072
-  async loadSavedArticles() → L1079
-  playSavedArticleAudio() → L1095
-  async unsaveArticle() → L1104
-  _browserTTS() → L1121
-  readAllSummaries() → L1144
-  _readNext() → L1154
-  stopSpeaking() → L1186
-  timeAgo() → L1194
-  toggle() → L1215
-  async fetchItems() → L1219
-  toggle() → L1234
-  async fetchItems() → L1238
+## vault_web/templates/briefing.html (1361 lines)
+  topicColor() → L826
+  async init() → L835
+  async loadArticles() → L866
+  async loadTopics() → L902
+  async addTopic() → L916
+  async deleteTopic() → L940
+  async toggleDismiss() → L956
+  async expandArticle() → L970
+  async triggerFetch() → L987
+  async searchArticles() → L1001
+  playArticleAudio() → L1020
+  _startAudioPlayback() → L1039
+  _browserTTSInPlayer() → L1066
+  toggleAudioPlayback() → L1101
+  closeAudioPlayer() → L1129
+  switchAudioType() → L1136
+  async saveArticleToCategory() → L1148
+  async loadSavedCategories() → L1171
+  async toggleSavedView() → L1184
+  async loadSavedArticles() → L1191
+  playSavedArticleAudio() → L1205
+  async unsaveArticle() → L1214
+  _browserTTS() → L1231
+  readAllSummaries() → L1254
+  _readNext() → L1264
+  stopSpeaking() → L1296
+  timeAgo() → L1304
+  toggle() → L1325
+  async fetchItems() → L1329
+  toggle() → L1344
+  async fetchItems() → L1348
 
 ## vault_web/templates/tax_accountant.html (735 lines)
   init() → L358

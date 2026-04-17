@@ -102,8 +102,51 @@ def git(*args, cwd: Path = VESSENCE_HOME, check: bool = True) -> subprocess.Comp
 
 
 def is_clean_working_tree() -> bool:
+    """Return True if the working tree has no UNEXPECTED changes.
+
+    Nightly self-improve jobs write report files (dead_code_report.md,
+    pipeline_audit_report.md, doc_drift_report.md, transcript_review_report.md)
+    that are the EXPECTED output of earlier jobs in the same orchestrator
+    run. Those shouldn't block the code auditor from running — otherwise
+    the first job's output permanently locks out every later job for the
+    rest of the night.  We treat report files as "not real WIP".
+    """
     r = git("status", "--porcelain", check=False)
-    return r.returncode == 0 and not r.stdout.strip()
+    if r.returncode != 0:
+        return False
+    lines = [ln for ln in r.stdout.splitlines() if ln.strip()]
+    # Git porcelain format: "XY path" where XY is status code.
+    # Expected transient outputs from earlier self-improve jobs — safe to ignore.
+    EXPECTED_OUTPUTS = (
+        "configs/dead_code_report.md",
+        "configs/pipeline_audit_report.md",
+        "configs/doc_drift_report.md",
+        "configs/transcript_review_report.md",
+        "configs/self_improve_log.md",
+        "configs/auto_audit_log.md",
+        "configs/audit_failures.md",
+    )
+    unexpected = []
+    for ln in lines:
+        path = ln[3:].strip()
+        if path in EXPECTED_OUTPUTS:
+            continue
+        if path.startswith(".git.backup"):
+            continue
+        unexpected.append(ln)
+    if unexpected:
+        logger.info("is_clean_working_tree: %d unexpected change(s): %s",
+                    len(unexpected), unexpected[:3])
+        return False
+    # Stash the expected report-file changes so the auditor branches off
+    # a truly clean tree. The orchestrator's outer stash restores them
+    # at the end of the run.
+    if lines:
+        stash_name = f"auditor-pre-report-stash-{dt.datetime.now().strftime('%Y%m%d-%H%M%S')}"
+        git("stash", "push", "-u", "-m", stash_name, check=False)
+        logger.info("is_clean_working_tree: stashed %d report file(s) as %s",
+                    len(lines), stash_name)
+    return True
 
 
 def make_audit_branch() -> str:

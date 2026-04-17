@@ -30,7 +30,7 @@ if str(_VAULT_WEB_DIR) not in sys.path:
 
 logger = logging.getLogger(__name__)
 
-from jane_web.jane_v2.models import LOCAL_LLM as MODEL, OLLAMA_URL  # noqa: E402
+from jane_web.jane_v2.models import LOCAL_LLM as MODEL, LOCAL_LLM_NUM_CTX, OLLAMA_URL  # noqa: E402
 
 _EXTRACT_PROMPT = """\
 The classifier thinks the user wants to SEND A TEXT MESSAGE to someone.
@@ -149,6 +149,82 @@ def _parse_extraction(raw: str) -> dict | None:
     }
 
 
+def _check_open_draft(prompt: str) -> dict | None:
+    """If there's an open SMS draft in the FIFO, handle confirm/cancel/edit
+    here in Stage 2 instead of falling through to Stage 3 or re-extracting."""
+    try:
+        from vault_web.recent_turns import get_active_state
+        from jane_web.jane_v2.pending_action_resolver import (
+            _is_confirm, _is_cancel, _is_edit_intent,
+            _STAGE3_CANCEL_STRONG, _normalize,
+        )
+    except Exception:
+        return None
+
+    try:
+        from jane_web.session_context import get_current_session_id
+        session_id = get_current_session_id()
+    except Exception:
+        return None
+    if not session_id:
+        return None
+
+    try:
+        state = get_active_state(session_id)
+    except Exception:
+        return None
+
+    pending = state.get("pending_action")
+    if not pending or pending.get("type") != "SEND_MESSAGE_DRAFT_OPEN":
+        return None
+
+    import json as _json
+    data = pending.get("data") or {}
+    draft_id = data.get("draft_id") or ""
+    query = data.get("query") or data.get("display_name") or data.get("recipient") or "them"
+    body = data.get("body") or ""
+
+    if _is_confirm(prompt):
+        tool_args = _json.dumps({"draft_id": draft_id})
+        marker = f"[[CLIENT_TOOL:contacts.sms_send:{tool_args}]]"
+        logger.info("send_message handler: draft confirm (stage2 safety net) draft_id=%s", draft_id[:12])
+        return {
+            "text": f"Sending to {query}. {marker}",
+            "structured": {
+                "intent": "send message",
+                "entities": {"recipient": query, "message_body": body, "draft_id": draft_id},
+                "pending_action": {
+                    "type": "SEND_MESSAGE_DRAFT_OPEN",
+                    "status": "resolved",
+                    "resolution": "sent",
+                },
+                "safety": {"side_effectful": True, "requires_confirmation": False},
+            },
+        }
+
+    if _is_cancel(prompt) and _normalize(prompt) in _STAGE3_CANCEL_STRONG:
+        tool_args = _json.dumps({"draft_id": draft_id})
+        marker = f"[[CLIENT_TOOL:contacts.sms_cancel:{tool_args}]]"
+        logger.info("send_message handler: draft cancel (stage2 safety net) draft_id=%s", draft_id[:12])
+        return {
+            "text": f"Okay, cancelled the message to {query}. {marker}",
+            "structured": {
+                "intent": "send message",
+                "pending_action": {
+                    "type": "SEND_MESSAGE_DRAFT_OPEN",
+                    "status": "resolved",
+                    "resolution": "cancelled",
+                },
+            },
+        }
+
+    if _is_edit_intent(prompt):
+        logger.info("send_message handler: draft edit detected (stage2 safety net) — escalating to Stage 3")
+        return None
+
+    return None
+
+
 async def handle(prompt: str, context: str = "") -> dict | None:
     """Extract recipient + body, resolve contact, fast-path or escalate.
 
@@ -156,6 +232,13 @@ async def handle(prompt: str, context: str = "") -> dict | None:
       {"text": "msg sent", "client_tools": [...]}  → fast-path send
       None                                          → escalate to Stage 3
     """
+    # Step 0: If there's an open SMS draft, handle confirm/cancel here
+    # instead of re-extracting. This is the Stage 2 safety net — even if
+    # the pre-Stage-1 resolver missed (race, FIFO timing), Stage 2 catches it.
+    draft_result = _check_open_draft(prompt)
+    if draft_result is not None:
+        return draft_result
+
     # Step 1: Extract metadata via local LLM (with FIFO context for pronoun resolution)
     context_block = ""
     if context and context.strip():
@@ -166,7 +249,7 @@ async def handle(prompt: str, context: str = "") -> dict | None:
         "prompt": extract_prompt,
         "stream": False,
         "think": False,
-        "options": {"temperature": 0.0, "num_predict": 100},
+        "options": {"temperature": 0.0, "num_predict": 100, "num_ctx": LOCAL_LLM_NUM_CTX},
         "keep_alive": -1,
     }
 
@@ -194,7 +277,7 @@ async def handle(prompt: str, context: str = "") -> dict | None:
 
     # Step 2: Resolve recipient
     try:
-        from agent_skills.sms_helpers import resolve_recipient
+        from agent_skills.sms_helpers import resolve_recipient, add_alias, _normalize_name
     except Exception as e:
         logger.warning("send_message handler: sms_helpers import failed: %s", e)
         return None  # escalate
@@ -211,6 +294,35 @@ async def handle(prompt: str, context: str = "") -> dict | None:
 
     phone = resolved["phone_number"]
     display = resolved["display_name"]
+
+    # Step 2b: Auto-write alias on first successful disambiguation.
+    # When the user's spoken recipient ("Lee") resolves via the contacts
+    # table (not via an existing alias) and the spoken form differs from
+    # the display name, learn the shortcut so the next request hits the
+    # alias fast-path without touching contacts LIKE-matching again.
+    # We do NOT overwrite an existing alias — add_alias uses INSERT OR
+    # REPLACE which would clobber Chieh's curated entries. Guard by
+    # checking the alias table first.
+    try:
+        if resolved.get("source") == "contacts":
+            spoken = _normalize_name(metadata["recipient"])
+            display_norm = _normalize_name(display)
+            if spoken and spoken != display_norm:
+                from vault_web.database import get_db as _get_db
+                with _get_db() as _conn:
+                    _existing = _conn.execute(
+                        "SELECT 1 FROM contact_aliases WHERE LOWER(alias) = ? LIMIT 1",
+                        (spoken,),
+                    ).fetchone()
+                if not _existing:
+                    if add_alias(spoken, phone, display_name=display):
+                        logger.info(
+                            "send_message handler: auto-aliased '%s' → %s (%s)",
+                            spoken, phone, display,
+                        )
+    except Exception as _alias_exc:
+        # Never let alias-write fail the send.
+        logger.warning("auto-alias attempt failed (non-fatal): %s", _alias_exc)
 
     # Step 3: Check coherence
     if not metadata["coherent"]:

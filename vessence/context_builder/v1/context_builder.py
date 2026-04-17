@@ -133,6 +133,16 @@ PHONE_TOOLS_PROTOCOL = (
     "Returns non-dismissed notification messages. Use when user asks specifically about NEW notifications.\n"
     "`[[CLIENT_TOOL:messages.fetch_unread:{\"limit\":20}]]`\n"
     "Prefer read_inbox unless user explicitly asks about unread notifications.\n\n"
+    "### timer.set / timer.cancel / timer.list / timer.delete (alarm/reminder)\n"
+    "Schedule exact alarms on the phone via AlarmManager — survives Doze, fires offline.\n"
+    "`[[CLIENT_TOOL:timer.set:{\"duration_ms\":<int>,\"label\":\"<short>\"}]]`\n"
+    "- duration_ms: milliseconds from now (3s = 3000, 5min = 300000, 2hr = 7200000)\n"
+    "- label: short phrase the phone TTS speaks when it fires (e.g. \"pasta\", \"laundry\"); empty = generic \"time's up\"\n"
+    "`[[CLIENT_TOOL:timer.cancel:{}]]` cancels ALL outstanding timers.\n"
+    "`[[CLIENT_TOOL:timer.list:{}]]` returns remaining time for each running timer.\n"
+    "`[[CLIENT_TOOL:timer.delete:{\"id\":N}]]` or `{\"index\":N}` or `{\"label\":\"pasta\"}` deletes one.\n"
+    "If the user asks for an alarm/timer/reminder and you have a duration, emit timer.set.\n"
+    "If duration is missing, ASK for it first and end with [[AWAITING:timer_duration]].\n\n"
     "### sync.force_sms (force message sync)\n"
     "Triggers a full re-sync of the last 14 days of SMS messages from the phone to the server.\n"
     "Use when the user says 'sync my messages', 'resync texts', 'refresh my messages', etc.\n"
@@ -695,7 +705,7 @@ def _build_system_sections(
     force_conversation_summary: bool = False,
 ) -> list[str]:
     user_background = _select_user_background(message, personal_facts) if profile.include_user_background else ""
-    system_sections = [BASE_SYSTEM_PROMPT]
+    system_sections = [BASE_SYSTEM_PROMPT, AWAITING_MARKER_INSTRUCTION]
 
     # Inject active essence personality
     essence_personality = _cached("essence_personality", _get_active_essence_personality, ttl=300)
@@ -761,10 +771,10 @@ def _build_system_sections(
 
     # Standing brain mode: the brain runs from the project directory now and
     # loads CLAUDE.md, which gives it full project rules + tool access. But
-    # CLAUDE.md also has automation rules (self-continuation, job queue
-    # processing, CODE_MAP.md reading) that are meant for CLI-interactive
-    # sessions, NOT for the web/Android standing brain. This override tells
-    # the model to skip those specific sections while honoring everything else.
+    # CLAUDE.md also has automation rules (job queue processing, code edit
+    # lock) that are meant for CLI-interactive sessions, NOT for the
+    # web/Android standing brain. This override tells the model to skip
+    # those specific sections while honoring everything else.
     system_sections.append(
         "## Standing Brain Mode — IMPORTANT OVERRIDE\n"
         "You are running as the web/Android standing brain, NOT as an interactive\n"
@@ -772,7 +782,6 @@ def _build_system_sections(
         "you MUST SKIP these CLAUDE.md sections entirely — they are designed for\n"
         "interactive CLI use and will cause empty responses or infinite loops if\n"
         "executed in standing-brain mode:\n\n"
-        "- **Self-Continuation**: Do NOT run check_continuation.py. Do NOT auto-continue.\n"
         "- **Run Job Queue**: Do NOT process the job queue unless the user explicitly asks.\n"
         "- **Code Edit Lock**: Do NOT acquire the code edit lock (another agent may hold it).\n"
         "- **Review Process (AI Review Panel)**: Do NOT run consult_panel.py.\n\n"
@@ -882,6 +891,19 @@ def _format_recent_history(history: list[dict], max_turns: int = 6, max_chars: i
             break
 
     return "\n".join(lines).strip()
+
+
+AWAITING_MARKER_INSTRUCTION = (
+    "Multi-turn follow-ups: if your reply asks the user a question and you "
+    "need their answer before you can finish the task, end your reply with "
+    "the literal marker `[[AWAITING:<short_topic>]]` where <short_topic> is "
+    "3-5 words naming what you're waiting for (e.g. "
+    "`[[AWAITING:which_pasta_recipe]]` or `[[AWAITING:confirm_send_email]]`). "
+    "The marker is stripped before display and tells the pipeline to route "
+    "the user's next reply straight back to you with full context, skipping "
+    "classification. Omit the marker if your reply is a statement, a "
+    "rhetorical question, or already complete."
+)
 
 
 TTS_SPOKEN_BLOCK_INSTRUCTION = (

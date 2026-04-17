@@ -19,6 +19,14 @@
     <uses-permission android:name="android.permission.CALL_PHONE" />
     <uses-permission android:name="android.permission.SEND_SMS" />
     <uses-permission android:name="android.permission.READ_SMS" />
+    <!-- Calendar + timer: Jane is a voice/chat interface for the user's
+         calendar. Users create, view, and modify calendar events conversationally;
+         exact alarms fire notifications for time-critical events. -->
+    <uses-permission android:name="android.permission.READ_CALENDAR" />
+    <uses-permission android:name="android.permission.WRITE_CALENDAR" />
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <application
         android:allowBackup="true"
@@ -52,6 +60,11 @@
                 <data android:mimeType="text/plain" />
             </intent-filter>
         </activity>
+
+        <activity
+            android:name=".ArticleReaderV2Activity"
+            android:exported="false"
+            android:theme="@style/Theme.VessencesAndroid" />
 
         <activity
             android:name=".MainActivity"
@@ -104,6 +117,15 @@
             android:name=".voice.VessenceVoiceInteractionSessionService"
             android:permission="android.permission.BIND_VOICE_INTERACTION"
             android:exported="true" />
+
+        <!-- Timer alarm receiver: fires when AlarmManager delivers a timer. -->
+        <receiver
+            android:name=".tools.TimerFireReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.vessences.android.TIMER_FIRE" />
+            </intent-filter>
+        </receiver>
 
         <!-- Jane Phone Tools: notification listener for reading recent messaging
              notifications aloud. User must grant access via system settings

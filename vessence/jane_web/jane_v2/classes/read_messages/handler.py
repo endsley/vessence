@@ -28,10 +28,21 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_LIMIT = 10
 
-from jane_web.jane_v2.models import LOCAL_LLM as MODEL, OLLAMA_URL  # noqa: E402
+from jane_web.jane_v2.models import LOCAL_LLM as MODEL, LOCAL_LLM_NUM_CTX, OLLAMA_URL  # noqa: E402
 
 # Architecture/code-question keywords → escalate (not a real read request)
 _ARCH_WORDS = ("architecture", "infrastructure", "pipeline", "handler", "classifier", "stage")
+
+# Meta / self-reference phrases about Jane's OWN previous reply — not an
+# SMS inbox readback. "the last message [you sent / took a while]",
+# "your previous reply", etc.
+_META_PHRASES = (
+    "your last message", "your last reply", "your previous message",
+    "your previous reply", "the last message you", "the last reply you",
+    "last message took", "last reply took", "last message when i asked",
+    "took a while", "took so long", "so slow", "explain why",
+    "why did you", "why was your",
+)
 
 # Words that signal a SPECIFIC question (not just "dump everything")
 _SPECIFIC_WORDS = ("who", "what did", "how many", "when did", "did anyone",
@@ -163,7 +174,7 @@ Your answer:"""
         "prompt": full_prompt,
         "stream": False,
         "think": False,
-        "options": {"temperature": 0.1, "num_predict": 400},
+        "options": {"temperature": 0.1, "num_predict": 400, "num_ctx": LOCAL_LLM_NUM_CTX},
         "keep_alive": -1,
     }
     try:
@@ -181,6 +192,12 @@ async def handle(prompt: str, context: str = "") -> dict | None:
     """Read recent texts. Specific questions go to Qwen; generic dumps stay deterministic."""
     p_lower = prompt.lower()
     if any(w in p_lower for w in _ARCH_WORDS):
+        return {"wrong_class": True}
+    # Self-reference debug questions ("your last reply took a while")
+    # are NOT inbox readbacks. Decline so Stage 3 / Opus can actually
+    # answer the meta-question.
+    if any(p in p_lower for p in _META_PHRASES):
+        logger.info("read_messages handler: meta/self-reference phrase → wrong_class")
         return {"wrong_class": True}
 
     messages = _fetch_messages(limit=DEFAULT_LIMIT)

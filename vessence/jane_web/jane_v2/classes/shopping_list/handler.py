@@ -20,7 +20,13 @@ if str(_SKILLS_DIR) not in sys.path:
 
 logger = logging.getLogger(__name__)
 
-from jane_web.jane_v2.models import LOCAL_LLM as MODEL, OLLAMA_URL  # noqa: E402
+from jane_web.jane_v2.models import (  # noqa: E402
+    LOCAL_LLM as MODEL,
+    LOCAL_LLM_NUM_CTX,
+    LOCAL_LLM_TIMEOUT,
+    OLLAMA_KEEP_ALIVE,
+    OLLAMA_URL,
+)
 
 _EXTRACT_PROMPT = """\
 The classifier thinks the user wants to interact with their shopping list.
@@ -102,12 +108,12 @@ async def handle(prompt: str, context: str = "") -> dict | None:
         "prompt": extract_prompt,
         "stream": False,
         "think": False,
-        "options": {"temperature": 0.0, "num_predict": 60},
-        "keep_alive": -1,
+        "options": {"temperature": 0.0, "num_predict": 60, "num_ctx": LOCAL_LLM_NUM_CTX},
+        "keep_alive": OLLAMA_KEEP_ALIVE,
     }
 
     try:
-        async with httpx.AsyncClient(timeout=8.0) as client:
+        async with httpx.AsyncClient(timeout=LOCAL_LLM_TIMEOUT) as client:
             r = await client.post(OLLAMA_URL, json=body)
             r.raise_for_status()
             raw = (r.json().get("response") or "").strip()

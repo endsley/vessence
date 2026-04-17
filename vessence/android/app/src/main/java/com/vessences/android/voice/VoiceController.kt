@@ -60,6 +60,9 @@ class VoiceController(
     private var isRunning = false
     private var waitingForReply = false
 
+    @Volatile
+    private var preWarmedRecognizer: SpeechRecognizer? = null
+
     fun isWaitingForReply(): Boolean = waitingForReply
 
     init {
@@ -120,6 +123,13 @@ class VoiceController(
         }
 
         externalScope.launch {
+            if (autoListen) {
+                withContext(Dispatchers.Main) {
+                    if (SpeechRecognizer.isRecognitionAvailable(appContext)) {
+                        preWarmedRecognizer = SpeechRecognizer.createSpeechRecognizer(appContext)
+                    }
+                }
+            }
             tts.speak(text)
             onSpeakingDone?.invoke()
             waitingForReply = false
@@ -141,6 +151,8 @@ class VoiceController(
 
     fun release() {
         stopListening()
+        preWarmedRecognizer?.destroy()
+        preWarmedRecognizer = null
         tts.shutdown()
         scope.coroutineContext[Job]?.cancel()
     }
@@ -215,7 +227,14 @@ class VoiceController(
                             emitState(currentState.copy(
                                 isWakeListening = false, status = "Wake word detected",
                             ))
-                            // Play beep + capture command
+                            // Release mic BEFORE launching command capture
+                            runCatching {
+                                if (record.recordingState == AudioRecord.RECORDSTATE_RECORDING) record.stop()
+                                record.release()
+                            }
+                            Log.d(TAG, "AudioRecord released, waiting for mic availability")
+                            Thread.sleep(150)
+
                             try {
                                 val toneGen = android.media.ToneGenerator(
                                     android.media.AudioManager.STREAM_NOTIFICATION, 100)
@@ -260,7 +279,8 @@ class VoiceController(
                     return@suspendCancellableCoroutine
                 }
 
-                val recognizer = SpeechRecognizer.createSpeechRecognizer(appContext)
+                val recognizer = preWarmedRecognizer?.also { preWarmedRecognizer = null }
+                    ?: SpeechRecognizer.createSpeechRecognizer(appContext)
                 val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                     putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
                     putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
@@ -323,6 +343,8 @@ class VoiceController(
     private fun stopListening() {
         isRunning = false
         wakeThread = null
+        preWarmedRecognizer?.destroy()
+        preWarmedRecognizer = null
         emitState(currentState.copy(
             isWakeListening = false, isCapturingCommand = false,
             transcriptPreview = "", status = null,

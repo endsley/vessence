@@ -64,7 +64,7 @@ def run_research_offload(message: str) -> str:
         return ""
 
     system_prompt = (
-        "You are Jane's local research analyst running on gemma4:e2b. "
+        "You are Jane's local research analyst running on the local Stage 2 model. "
         "Given raw web search results, produce a compact, high-confidence research brief. "
         "Prioritize official documentation and recent sources. "
         "Output plain text with these sections: Findings, Recommended Direction, Sources."

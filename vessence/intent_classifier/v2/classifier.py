@@ -87,9 +87,9 @@ def _load():
     _embed_fn(["warmup"])
 
     # ChromaDB collection — rebuild if stale or missing
-    import chromadb
+    from jane.config import get_chroma_client
     CHROMA_PATH.mkdir(parents=True, exist_ok=True)
-    client = chromadb.PersistentClient(path=str(CHROMA_PATH))
+    client = get_chroma_client(str(CHROMA_PATH))
 
     existing = {c.name for c in client.list_collections()}
     needs_build = "intent_v2" not in existing

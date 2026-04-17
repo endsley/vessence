@@ -10,12 +10,74 @@ the greeting contains a follow-up question or task.
 from __future__ import annotations
 
 import logging
+import random
+import re
 
 import httpx
 
-from jane_web.jane_v2.models import LOCAL_LLM as MODEL, OLLAMA_URL
+from jane_web.jane_v2.models import LOCAL_LLM as MODEL, LOCAL_LLM_NUM_CTX, OLLAMA_URL
 
 logger = logging.getLogger(__name__)
+
+# Deterministic canned replies for the most common greetings — saves a
+# 7s Ollama round-trip on qwen2.5:7b cold load. Falls through to the
+# LLM for anything less templated.
+_CANNED_REPLIES = {
+    "check_in": [
+        "Going well, thanks for asking. What's up?",
+        "All good here. What's on your mind?",
+        "Doing fine. How can I help?",
+    ],
+    "hello": [
+        "Hey! What's up?",
+        "Hi! How can I help?",
+        "Hey there. What do you need?",
+    ],
+    "morning": [
+        "Morning! How can I help?",
+        "Good morning! What's on the agenda?",
+    ],
+    "afternoon": [
+        "Afternoon! What's up?",
+        "Good afternoon! How can I help?",
+    ],
+    "evening": [
+        "Evening! What do you need?",
+        "Good evening! What's up?",
+    ],
+    "thanks": [
+        "Anytime.",
+        "You're welcome.",
+        "Sure thing.",
+    ],
+}
+
+_CANNED_PATTERNS = [
+    # "how's it going", "how are you", "how you doing", "what's up"
+    (re.compile(r"^(how'?s? (it going|things|you|everything)|"
+                r"how are you|how you (doing|holding up)|"
+                r"what'?s up|what'?s new|sup|you good|you there)\??$"),
+     "check_in"),
+    # bare hellos
+    (re.compile(r"^(hi+|hey+|hello+|yo|howdy|heya|hiya)\b[.!? ]*$"), "hello"),
+    # time-of-day
+    (re.compile(r"^good morning\b"), "morning"),
+    (re.compile(r"^good afternoon\b"), "afternoon"),
+    (re.compile(r"^good evening\b"), "evening"),
+    # thanks
+    (re.compile(r"^(thanks|thank you|thx|ty|appreciate (it|you))\b[.!? ]*$"),
+     "thanks"),
+]
+
+
+def _canned_reply(prompt: str) -> str | None:
+    """Return a deterministic greeting reply, or None if we should use the LLM."""
+    p = (prompt or "").strip().lower().rstrip(".!?,")
+    for pattern, bucket in _CANNED_PATTERNS:
+        if pattern.match(p):
+            choices = _CANNED_REPLIES[bucket]
+            return random.choice(choices)
+    return None
 
 _PROMPT_TEMPLATE = """\
 The classifier thinks the user is greeting you (saying hi, checking in, etc.).
@@ -35,6 +97,11 @@ async def handle(prompt: str, context: str = "") -> dict | None:
 
     Returns {"text": "..."} or None to escalate to Stage 3.
     """
+    canned = _canned_reply(prompt)
+    if canned:
+        logger.info("greeting handler: canned → %r", canned[:60])
+        return {"text": canned}
+
     context_block = ""
     if context and context.strip():
         context_block = f"Recent conversation:\n{context.strip()}\n\n"
@@ -49,7 +116,7 @@ async def handle(prompt: str, context: str = "") -> dict | None:
         "prompt": full_prompt,
         "stream": False,
         "think": False,
-        "options": {"temperature": 0.7, "num_predict": 60},
+        "options": {"temperature": 0.7, "num_predict": 60, "num_ctx": LOCAL_LLM_NUM_CTX},
         "keep_alive": -1,
     }
 

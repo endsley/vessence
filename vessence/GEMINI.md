@@ -213,16 +213,6 @@ If message starts with `run prompt list:`, run queue immediately:
 
 ---
 
-## Self-Continuation Protocol
-At the end of EVERY response, run:
-```bash
-python \
-    $VESSENCE_HOME/agent_skills/check_continuation.py
-```
-If `should_continue` is `true`: display `**[Auto-continuing → Prompt #N]:** [text]` and execute. Repeat until `false`.
-
----
-
 ## Behavioral Constraints
 - **Proactivity**: Do NOT proactively suggest new projects unless asked.
 - **Stuck rule**: If stuck after 2-3 attempts, search online before asking the user.

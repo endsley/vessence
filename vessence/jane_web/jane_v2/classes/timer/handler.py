@@ -190,18 +190,11 @@ _NO_LABEL_REPLIES = {
     "just set it", "leave it", "blank",
 }
 
-# Phrases that look like a PIVOT away from the timer conversation —
-# the user is asking something else mid-flow. The handler bails via
-# `abandon_pending` so the pipeline re-classifies the original prompt
-# through Stage 1. Kept conservative: only trigger on clear wh-question
-# starts + common domain switches.
-_PIVOT_PREFIXES = (
-    "what's the weather", "whats the weather", "how's the weather",
-    "what time is it", "what's the time", "whats the time",
-    "read my messages", "check my messages", "check my email",
-    "tell ", "text ",  # "tell Kathia...", "text mom..."
-    "play ",
-)
+# Pivot detection moved out of this handler on 2026-04-17. The brittle
+# _PIVOT_PREFIXES list (which leaked every new pivot phrase) has been
+# replaced by the LLM-backed check in
+# stage2_dispatcher._continuation_check, keyed off the literal question
+# we stored in pending["question"]. See `_pending()` below.
 
 
 def _label_from_reply(prompt: str) -> str:
@@ -221,9 +214,22 @@ def _label_from_reply(prompt: str) -> str:
     return p[:60]  # cap length
 
 
-def _looks_like_pivot(prompt: str) -> bool:
-    p_lower = prompt.lower().strip()
-    return any(p_lower.startswith(pref) for pref in _PIVOT_PREFIXES)
+def _looks_like_new_timer(prompt: str) -> bool:
+    """True if the prompt looks like a brand-new timer request rather than
+    an answer to a follow-up question (e.g. 'set a 5 minute timer')."""
+    p = prompt.lower()
+    if _parse_duration_ms(prompt) > 0:
+        new_timer_signals = ("set ", "start ", "another timer", "new timer",
+                             "timer for ", "create ", "make ")
+        return any(s in p for s in new_timer_signals)
+    return False
+
+
+# `_looks_like_pivot` removed — pivot detection is dispatcher-level now.
+# `_looks_like_new_timer` is still used below to detect "user wants a NEW
+# timer while we're still assembling the current one" — this is a same-
+# class restart signal that the dispatcher's LLM gate won't catch (same
+# class, same handler), so keep it.
 
 
 def _expires_at(minutes: int = 2) -> str:
@@ -233,43 +239,51 @@ def _expires_at(minutes: int = 2) -> str:
     )
 
 
-def _pending(awaiting: str, data: dict) -> dict:
-    """Build a STAGE2_FOLLOWUP pending_action for the timer handler."""
+def _pending(awaiting: str, data: dict, question: str = "") -> dict:
+    """Build a STAGE2_FOLLOWUP pending_action for the timer handler.
+
+    `question` is the literal text Jane just asked. The dispatcher reads
+    this on the next turn to decide (via LLM) whether the user's reply
+    answered the question or pivoted elsewhere.
+    """
     return {
         "type": "STAGE2_FOLLOWUP",
         "handler_class": "timer",
         "status": "awaiting_user",
         "awaiting": awaiting,
         "data": {**data, "awaiting": awaiting},
+        "question": question,
         "expires_at": _expires_at(),
     }
 
 
 def _ask_duration(data: dict) -> dict:
+    ask = "Sure — how long should the timer run?"
     return {
-        "text": "Sure — how long should the timer run?",
+        "text": ask,
         "structured": {
             "intent": "timer",
             "entities": {"action": "set", "stage": "await_duration"},
-            "pending_action": _pending("duration", data),
+            "pending_action": _pending("duration", data, question=ask),
         },
     }
 
 
 def _ask_label(data: dict) -> dict:
     pretty = _pretty_duration(data.get("duration_ms", 0))
+    ask = f"Got it, {pretty}. What should I call this timer? Or say 'no label'."
     return {
-        "text": f"Got it, {pretty}. What should I call this timer? Or say 'no label'.",
+        "text": ask,
         "structured": {
             "intent": "timer",
             "entities": {"action": "set", "stage": "await_label",
                          "duration_ms": data.get("duration_ms")},
-            "pending_action": _pending("label", data),
+            "pending_action": _pending("label", data, question=ask),
         },
     }
 
 
-def _fire_set(duration_ms: int, label: str) -> dict:
+def _fire_set(duration_ms: int, label: str, *, from_followup: bool = False) -> dict:
     args = {"duration_ms": duration_ms, "label": label}
     marker = f"[[CLIENT_TOOL:timer.set:{json.dumps(args, separators=(',', ':'))}]]"
     pretty = _pretty_duration(duration_ms)
@@ -287,14 +301,20 @@ def _fire_set(duration_ms: int, label: str) -> dict:
     else:
         spoken = f"Timer set for {pretty}."
     logger.info("timer handler: fire duration_ms=%d label=%r", duration_ms, label)
+    structured: dict = {
+        "intent": "timer",
+        "entities": {"action": "set", "duration_ms": duration_ms,
+                     "label": label or ""},
+    }
+    if from_followup:
+        structured["pending_action"] = {
+            "type": "STAGE2_FOLLOWUP",
+            "handler_class": "timer",
+            "status": "resolved",
+        }
     return {
         "text": f"{spoken} {marker}",
-        "structured": {
-            "intent": "timer",
-            "entities": {"action": "set", "duration_ms": duration_ms,
-                         "label": label or ""},
-            # No pending_action — turn is done, Stage 1 resumes next turn.
-        },
+        "structured": structured,
     }
 
 
@@ -307,8 +327,12 @@ def _handle_resume(prompt: str, pending: dict) -> dict | None:
     It contains the accumulated state plus an `awaiting` key marking
     what the user's reply is answering.
     """
-    if _looks_like_pivot(prompt):
-        logger.info("timer handler: pivot detected mid-flow → abandon")
+    # Cross-class pivot detection is dispatcher-level now (LLM gate against
+    # the literal question we stored in pending["question"]). The one thing
+    # we still check locally is a same-class "new timer" restart signal —
+    # the LLM can't catch this because the class doesn't change.
+    if _looks_like_new_timer(prompt):
+        logger.info("timer handler: new-timer restart detected mid-flow → abandon")
         return {"abandon_pending": True}
 
     # Treat `pending` directly as the data dict — that's how the
@@ -332,27 +356,26 @@ def _handle_resume(prompt: str, pending: dict) -> dict | None:
                     dur = int(n * 60 * 1000)  # assume minutes
         if dur <= 0:
             # Re-ask once.
+            ask = "I didn't catch that. How long should the timer run? Like '5 minutes'."
             return {
-                "text": "I didn't catch that. How long should the timer run? Like '5 minutes'.",
+                "text": ask,
                 "structured": {
                     "intent": "timer",
-                    "pending_action": _pending("duration", data),
+                    "pending_action": _pending("duration", data, question=ask),
                 },
             }
         data["duration_ms"] = dur
         # If we already have a label from earlier, fire; otherwise ask.
         if data.get("label"):
-            return _fire_set(dur, data["label"])
+            return _fire_set(dur, data["label"], from_followup=True)
         return _ask_label(data)
 
     if awaiting == "label":
         label = _label_from_reply(prompt)
         dur = int(data.get("duration_ms") or 0)
         if dur <= 0:
-            # Shouldn't happen (label is only asked after duration) —
-            # but be defensive: fall back to asking for duration.
             return _ask_duration({"label": label})
-        return _fire_set(dur, label)
+        return _fire_set(dur, label, from_followup=True)
 
     logger.warning("timer handler: unknown awaiting %r — abandoning", awaiting)
     return {"abandon_pending": True}
@@ -420,17 +443,24 @@ def handle(prompt: str, pending: dict | None = None) -> dict | None:
 
     # SET
     duration_ms = _parse_duration_ms(prompt)
+    logger.info("timer handler: SET parse → duration_ms=%d from prompt=%r",
+                duration_ms, prompt[:120])
 
     # "Wants a timer, no duration yet" — conversational creation.
-    # ("hey Jane I want to create a timer" / "start a timer for me")
+    # ("hey Jane I want to create a timer" / "start a timer for me" /
+    #  "can you set a timer for")
     _CREATE_TIMER_WORDS = ("timer", "alarm", "countdown")
-    _CREATE_VERBS = ("create", "make", "start", "begin", "set up",
-                     "start a", "make me a", "give me a", "need a")
+    _CREATE_VERBS = ("create", "make", "start", "begin", "set up", "set a",
+                     "set the", "set my", "start a", "make me a", "give me a",
+                     "need a", "need another")
     wants_timer = any(w in p_lower for w in _CREATE_TIMER_WORDS)
     wants_create = any(v in p_lower for v in _CREATE_VERBS)
     if duration_ms <= 0:
-        if wants_timer and (wants_create or p_lower.startswith("i ") or "i want" in p_lower):
-            logger.info("timer handler: create-timer intent, no duration → ask")
+        # Stage 1 already classified this as `timer:High`, so an empty
+        # duration is almost always a cut-off sentence like "set a timer
+        # for ...". Ask rather than escalating to Opus.
+        if wants_timer or wants_create or p_lower.startswith("i ") or "i want" in p_lower:
+            logger.info("timer handler: timer intent with no duration → ask")
             return _ask_duration({})
         logger.info("timer handler: couldn't parse duration — escalating")
         return None  # let Stage 3 (Opus) figure it out

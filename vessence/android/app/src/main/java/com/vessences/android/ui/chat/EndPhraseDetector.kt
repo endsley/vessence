@@ -56,8 +56,14 @@ object EndPhraseDetector {
         "no worries", "all set", "i'm all set", "i am all set",
     )
 
-    // These only match if they are the ENTIRE message (no prefix/suffix matching)
-    private val EXACT_ONLY_PHRASES = setOf("ok", "okay")
+    // These only match if they are the ENTIRE message. Short words like
+    // "enough" are too dangerous as suffix matches because "not long enough"
+    // is a normal technical statement, not a request to end the conversation.
+    private val EXACT_ONLY_PHRASES = setOf(
+        "ok", "okay",
+        "stop", "quiet", "enough",
+        "cancel", "dismiss", "nah", "nope",
+    )
 
     fun isEndPhrase(text: String): Boolean {
         val normalized = text.lowercase(Locale.US).trim()
@@ -68,8 +74,10 @@ object EndPhraseDetector {
         // Check exact-only phrases first
         if (normalized in EXACT_ONLY_PHRASES) return true
         val matched = END_PHRASES.any { phrase ->
-            if (phrase.length <= 5) {
-                normalized == phrase || normalized.startsWith("$phrase ") || normalized.endsWith(" $phrase")
+            if (phrase in EXACT_ONLY_PHRASES) {
+                normalized == phrase
+            } else if (phrase.length <= 5) {
+                normalized == phrase || normalized.startsWith("$phrase ")
             } else {
                 normalized.contains(phrase)
             }

@@ -67,7 +67,7 @@ CORE_PRIORITY_FILES = [
     "agent_skills/generate_code_map.py",
     "agent_skills/ambient_heartbeat.py",
     "agent_skills/ambient_task_research.py",
-    "agent_skills/gemma_summarize.py",
+    "agent_skills/llm_summarize.py",
     "agent_skills/qwen_orchestrator.py",
     "agent_skills/validate_essence.py",
     "agent_skills/show_job_queue.py",

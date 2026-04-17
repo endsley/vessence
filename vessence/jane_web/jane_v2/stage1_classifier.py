@@ -1,4 +1,4 @@
-"""Stage 1 �� ChromaDB embedding classifier (replaces gemma4:e2b).
+"""Stage 1 �� ChromaDB embedding classifier.
 
 Pure vector similarity — no LLM call. ~5-50ms per classification.
 
@@ -51,6 +51,7 @@ def _strip_system_markers(prompt: str) -> str:
 # Chieh explicitly promotes it. Promotion = move the key into PROVEN_CLASSES.
 _GATE_NEW    = {"conf": 0.80, "margin": 0.40}  # 4/5 votes, 2-vote gap
 _GATE_PROVEN = {"conf": 0.60, "margin": 0.20}  # 3/5 votes, 1-vote gap
+_GATE_STRICT = {"conf": 1.00, "margin": 0.40}  # 5/5 votes (unanimous)
 
 PROVEN_CLASSES = {
     "WEATHER",
@@ -62,9 +63,80 @@ PROVEN_CLASSES = {
     "END_CONVERSATION",  # has its own 0.80 floor below; still "proven"
 }
 
+# Classes where a false positive is a loud user-visible disruption
+# (Jane reads your texts, dumps your inbox) but a missed call costs only
+# latency (Stage 3 still answers correctly). Cost asymmetry → demand
+# unanimous votes AND a literal keyword match before firing the handler.
+STRICT_CLASSES = {
+    "READ_MESSAGES",
+    "SYNC_MESSAGES",
+    "READ_EMAIL",
+}
+
+# Hard keyword guard for STRICT_CLASSES. Even unanimous votes don't fire
+# the handler unless the cleaned prompt contains one of these substrings.
+# Catches embedding drift on prompts like "any updates" or "what came in"
+# that semantically resemble training data but lack the literal noun.
+_STRICT_KEYWORDS = {
+    "READ_MESSAGES": ("text", "message", "msg", "sms", "imessage", "inbox"),
+    "SYNC_MESSAGES": ("text", "message", "msg", "sms", "sync"),
+    "READ_EMAIL":    ("email", "e-mail", "inbox", "gmail", "mail"),
+}
+
+_END_CONVERSATION_RE = re.compile(
+    r"^\s*(?:"
+    r"(?:ok(?:ay)?\s+)?(?:we(?:'| a)re|were)\s+done|"
+    r"(?:ok(?:ay)?\s+)?i(?:'| a)m\s+done|"
+    r"(?:ok(?:ay)?\s+)?all\s+done|"
+    r"(?:ok(?:ay)?\s+)?(?:that's|that is)\s+(?:all|it)|"
+    r"(?:thank\s+you|thanks)(?:\s+(?:jane|bye|goodbye|(?:that's|that is)\s+(?:all|it)))?|"
+    r"good\s*bye|bye(?:\s+jane|\s+now)?|"
+    r"see\s+(?:you|ya)(?:\s+later)?|talk\s+(?:to\s+you\s+)?later|"
+    r"good\s*night(?:\s+jane)?|night\s+jane|night\s+night|"
+    r"end\s+(?:conversation|chat)|conversation\s+over|close\s+conversation|"
+    r"stop(?:\s+(?:listening|talking|that|right\s+there))?|"
+    r"cancel(?:\s+(?:that|it))?|dismiss|"
+    r"be\s+quiet|quiet|shut\s+up|silence|shush|enough|that's\s+enough|"
+    r"never\s*mind|forget\s+(?:it|about\s+it)|drop\s+it|abort|"
+    r"no\s+thanks|nope|nah|not\s+now|skip\s+it|"
+    r"go\s+away|leave\s+me\s+alone|"
+    r"i(?:'| a)m\s+good|all\s+good|we(?:'| a)re\s+good|all\s+set|"
+    r"ok\s+(?:cool|great|thanks(?:\s+bye)?|done)|"
+    r"roger(?:\s+that\s+done)?|over\s+and\s+out"
+    r")\s*[.!?]*\s*$",
+    re.IGNORECASE,
+)
+
 
 def _gate_for(raw_cls: str) -> dict:
+    if raw_cls in STRICT_CLASSES:
+        return _GATE_STRICT
     return _GATE_PROVEN if raw_cls in PROVEN_CLASSES else _GATE_NEW
+
+
+def _strict_keyword_ok(raw_cls: str, cleaned_prompt: str) -> bool:
+    """Return True if the prompt contains a required keyword for this strict class.
+
+    Returns True for classes not in _STRICT_KEYWORDS so the gate is
+    a no-op for non-strict raw classes.
+    """
+    keywords = _STRICT_KEYWORDS.get(raw_cls)
+    if not keywords:
+        return True
+    lc = cleaned_prompt.lower()
+    return any(k in lc for k in keywords)
+
+
+def _end_conversation_phrase_ok(cleaned_prompt: str) -> bool:
+    """Only allow END_CONVERSATION for complete ending utterances.
+
+    Single stop words embedded in a real sentence are not enough. For example,
+    "I think setting the context window to 1024 is not long enough" contains
+    "enough", but it is a technical observation and must go to Stage 3.
+    """
+    normalized = re.sub(r"\s+", " ", (cleaned_prompt or "").strip())
+    normalized = normalized.replace("\u2019", "'").replace("\u2018", "'")
+    return bool(_END_CONVERSATION_RE.match(normalized))
 
 
 # Map ChromaDB uppercase class names → pipeline registry names
@@ -80,6 +152,8 @@ _CLASS_MAP = {
     "END_CONVERSATION":  "end conversation",
     "GET_TIME":          "get time",
     "TIMER":             "timer",
+    "TODO_LIST":         "todo list",
+    "SELF_IMPROVEMENT":  "self improvement",
     "DELEGATE_OPUS":     "others",
     "FORCE_STAGE3":      "others",
 }
@@ -109,6 +183,14 @@ FORCE_STAGE3_PHRASES = (
     "stage 3 please",
     "route this to stage 3",
     "send this to stage 3",
+    "stage three",
+    "use stage three",
+    "escalate to stage 3",
+    "kick this to stage 3",
+    "bump to stage 3",
+    "go to stage 3",
+    "i want stage 3",
+    "give me stage 3",
 )
 
 # Fallback regex for "think <stuff> deeply/carefully/hard/through" variants where
@@ -174,11 +256,26 @@ async def classify(
     gate = _gate_for(raw_cls)
     if raw_cls == "DELEGATE_OPUS" or cls == "others":
         conf = "Low"
+    elif raw_cls == "END_CONVERSATION" and not _end_conversation_phrase_ok(cleaned):
+        logger.info(
+            "stage1_classifier: END_CONVERSATION phrase guard rejected %r",
+            cleaned[:100],
+        )
+        conf = "Low"
     elif raw_cls == "END_CONVERSATION" and confidence < 0.80:
         # Extra floor: a wrong END_CONVERSATION destroys the session.
         conf = "Low"
     elif confidence < gate["conf"] or margin < gate["margin"]:
         # Below this class's maturity gate → demote so Stage 3 decides.
+        conf = "Low"
+    elif raw_cls in STRICT_CLASSES and not _strict_keyword_ok(raw_cls, cleaned):
+        # Strict-class keyword guard: even a unanimous embedding vote must be
+        # backed by a literal keyword. Stops false positives like
+        # "any updates from yesterday" → READ_MESSAGES.
+        logger.info(
+            "stage1_classifier: STRICT %s lacks keyword in %r — demote to Low",
+            raw_cls, cleaned[:80],
+        )
         conf = "Low"
     else:
         conf = "High"

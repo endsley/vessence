@@ -64,17 +64,37 @@ ENV_FILE_PATH   = f"{VESSENCE_DATA_HOME}/.env"
 CHROMA_HOST = os.environ.get("CHROMA_HOST", "")
 CHROMA_PORT = int(os.environ.get("CHROMA_PORT", "8000"))
 
+_chroma_client_cache: dict = {}
+_chroma_client_lock = __import__("threading").Lock()
+
+
 def get_chroma_client(path: str):
     """
     Returns the appropriate ChromaDB client.
     If CHROMA_HOST is set (e.g. running in Docker), it uses the HttpClient to avoid
     dual-access SQLite corruption. Otherwise, it uses PersistentClient on the local path.
     Note: When using HttpClient, 'path' is ignored by the server, so collections must be uniquely named.
+
+    Cached per-path: each PersistentClient spawns its own tokio runtime
+    (~20 worker threads) + sqlx-sqlite pool. Creating fresh clients per
+    call leaked hundreds of threads and GBs of memory over a multi-hour
+    session, triggering OOM kills of jane-web.
     """
     import chromadb
-    if CHROMA_HOST:
-        return chromadb.HttpClient(host=CHROMA_HOST, port=CHROMA_PORT)
-    return chromadb.PersistentClient(path=path)
+    key = f"http:{CHROMA_HOST}:{CHROMA_PORT}" if CHROMA_HOST else f"persistent:{path}"
+    cached = _chroma_client_cache.get(key)
+    if cached is not None:
+        return cached
+    with _chroma_client_lock:
+        cached = _chroma_client_cache.get(key)
+        if cached is not None:
+            return cached
+        if CHROMA_HOST:
+            client = chromadb.HttpClient(host=CHROMA_HOST, port=CHROMA_PORT)
+        else:
+            client = chromadb.PersistentClient(path=path)
+        _chroma_client_cache[key] = client
+        return client
 
 VECTOR_DB_DIR        = f"{VESSENCE_DATA_HOME}/memory/v1/vector_db"
 VECTOR_DB_USER_MEMORIES = VECTOR_DB_DIR                          # main shared ChromaDB
@@ -237,10 +257,9 @@ WEB_CHAT_MODEL = os.environ.get("JANE_BRAIN_WEB_MODEL", SMART_MODEL)
 
 # Legacy aliases (backward compat)
 OLLAMA_BASE_URL       = os.getenv("LOCAL_LLM_BASE_URL", "http://localhost:11434")
-# Local LLM tasks default to the provider's cheap model via CLI — no Ollama
-# required. Users with Ollama can override via LOCAL_LLM_MODEL env var.
-_DEFAULT_LOCAL_MODEL = os.getenv("LOCAL_LLM_MODEL", CHEAP_MODEL)
-LOCAL_LLM_MODEL       = _DEFAULT_LOCAL_MODEL
+# LOCAL_LLM_MODEL is kept only as a backward-compatible import alias.
+# The single local-model knob is JANE_LOCAL_LLM, falling back to JANE_STAGE2_MODEL.
+LOCAL_LLM_MODEL       = os.getenv("JANE_LOCAL_LLM", os.getenv("JANE_STAGE2_MODEL", "qwen2.5:7b"))
 LOCAL_LLM_MODEL_LITELLM = f"ollama/{LOCAL_LLM_MODEL}" if "/" not in LOCAL_LLM_MODEL else LOCAL_LLM_MODEL
 ARCHIVIST_MODEL       = os.getenv("ARCHIVIST_MODEL", CHEAP_MODEL)
 ARCHIVIST_MODEL_LITELLM = f"ollama/{ARCHIVIST_MODEL}" if "/" not in ARCHIVIST_MODEL else ARCHIVIST_MODEL

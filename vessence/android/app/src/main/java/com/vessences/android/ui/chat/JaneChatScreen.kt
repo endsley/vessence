@@ -35,6 +35,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material3.*
@@ -296,6 +297,21 @@ private fun ChatInputBar(
     var showAttachmentSheet by remember { mutableStateOf(false) }
     var isListeningForSpeech by remember { mutableStateOf(false) }
     val context = LocalContext.current
+
+    // Defensive: if a request starts (isSending flips true), STT flags must
+    // be false. This guarantees the red X stop-listening button can't
+    // linger through the thinking phase even if the STT launcher callback
+    // was skipped (activity recreated mid-STT, dialog crash, etc.).
+    LaunchedEffect(chatState.isSending) {
+        if (chatState.isSending && isListeningForSpeech) {
+            android.util.Log.w(
+                "JaneChatScreen",
+                "isSending=true but isListeningForSpeech still true — " +
+                    "force-clearing (likely STT launcher callback was skipped)",
+            )
+            isListeningForSpeech = false
+        }
+    }
 
     // Camera photo URI
     var cameraPhotoUri by remember { mutableStateOf<Uri?>(null) }
@@ -658,8 +674,13 @@ private fun ChatInputBar(
             )
             Spacer(modifier = Modifier.width(4.dp))
 
-            // Mic button for speech-to-text / Stop button when listening
-            if (chatState.voice.isCapturingCommand || isListeningForSpeech) {
+            // Mic button for speech-to-text / Stop button when listening.
+            // Guard with !isSending so a stuck STT flag can't leave the red X
+            // visible while Jane is actually thinking / streaming a reply.
+            val showStopStt =
+                (chatState.voice.isCapturingCommand || isListeningForSpeech) &&
+                !chatState.isSending
+            if (showStopStt) {
                 // X button: stop listening and return to always-listen (wake word) mode
                 IconButton(
                     onClick = {
@@ -700,29 +721,45 @@ private fun ChatInputBar(
             }
 
             Spacer(modifier = Modifier.width(4.dp))
-            IconButton(
-                onClick = {
-                    val hasText = inputText.isNotBlank()
-                    val hasFile = attachedFileUri != null
-                    if ((hasText || hasFile) && !chatState.isSending) {
-                        val currentFileUri = attachedFileUri
-                        val messageText = if (hasText) inputText.trim() else (attachedFileName ?: "file")
-                        chatViewModel.sendMessage(
-                            text = messageText,
-                            fileUri = currentFileUri,
-                        )
-                        inputText = ""
-                        attachedFileUri = null
-                        attachedFileName = null
-                    }
-                },
-                enabled = (inputText.isNotBlank() || attachedFileUri != null) && !chatState.isSending,
-            ) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.Send,
-                    contentDescription = "Send",
-                    tint = if ((inputText.isNotBlank() || attachedFileUri != null) && !chatState.isSending) Violet500 else Color(0xFF475569),
-                )
+            // Stop-thinking button: shown while Jane is processing a reply.
+            // Equivalent to pressing Esc in the CLI — cancels the in-flight
+            // streaming request and clears any queued follow-ups.
+            if (chatState.isSending) {
+                IconButton(
+                    onClick = { chatViewModel.cancelCurrentResponse() },
+                    modifier = Modifier.size(40.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Stop,
+                        contentDescription = "Stop Jane",
+                        tint = Color(0xFFEF4444),
+                    )
+                }
+            } else {
+                IconButton(
+                    onClick = {
+                        val hasText = inputText.isNotBlank()
+                        val hasFile = attachedFileUri != null
+                        if (hasText || hasFile) {
+                            val currentFileUri = attachedFileUri
+                            val messageText = if (hasText) inputText.trim() else (attachedFileName ?: "file")
+                            chatViewModel.sendMessage(
+                                text = messageText,
+                                fileUri = currentFileUri,
+                            )
+                            inputText = ""
+                            attachedFileUri = null
+                            attachedFileName = null
+                        }
+                    },
+                    enabled = inputText.isNotBlank() || attachedFileUri != null,
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.Send,
+                        contentDescription = "Send",
+                        tint = if (inputText.isNotBlank() || attachedFileUri != null) Violet500 else Color(0xFF475569),
+                    )
+                }
             }
         }
     }

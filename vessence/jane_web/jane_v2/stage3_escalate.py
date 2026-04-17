@@ -19,11 +19,29 @@ from __future__ import annotations
 
 import json
 import logging
+import re
+from pathlib import Path
 from typing import AsyncIterator
 
 from fastapi import Request
 
+from jane_web.jane_proxy import ToolMarkerExtractor # New import
+
 logger = logging.getLogger(__name__)
+
+# Directory that holds class packs — each may contain a `protocol.md` whose
+# contents are injected into Opus's prompt when Stage 3 routes to that class.
+_CLASSES_DIR = (Path(__file__).parent / "classes").resolve()
+
+# Whitelist of legal class folder names. Stops a malicious-looking reason like
+# "../../etc:High" from ever being concatenated into a path.
+_CLASS_NAME_RE = re.compile(r"^[a-z0-9_]+$")
+
+# mtime-keyed protocol cache. lru_cache cannot be used here because it would
+# permanently cache "missing file" results — adding a protocol.md would never
+# load until a server restart, which is the exact rollout path we expect.
+# Keyed by class_name → (mtime_ns, text_or_None).
+_PROTOCOL_CACHE: dict[str, tuple[int, str | None]] = {}
 
 
 # Voice hint prepended to the user message when the request comes from a
@@ -79,6 +97,159 @@ def _inject_structured_state(body):
         return body.copy(update={"message": new_message})
 
 
+def _reason_to_class(reason: str) -> str | None:
+    """Map a Stage 3 escalation reason to a class folder name.
+
+    Reason format from `pipeline.py` is "<cls>:<conf>" (e.g. "send message:High",
+    "weather:High", "others"). We:
+      - drop the confidence suffix
+      - normalize spaces to underscores so "send message" → "send_message"
+      - strip handler-decline suffixes (`_fallback`, `_declined`) so a
+        weather handler that punted still gets the weather protocol
+      - return None for "others" (no class-specific protocol)
+    """
+    if not reason:
+        return None
+    base = reason.split(":", 1)[0].strip().lower().replace(" ", "_")
+    for suffix in ("_fallback", "_declined", "_decline"):
+        if base.endswith(suffix):
+            base = base[: -len(suffix)]
+    if not base or base == "others":
+        return None
+    if not _CLASS_NAME_RE.match(base):
+        # Reason came in with weird chars (path separators, dots, etc.).
+        # Refuse — protect _CLASSES_DIR from path traversal.
+        logger.warning("stage3_escalate: rejecting malformed class name %r", base)
+        return None
+    return base
+
+
+def _metadata_for_class_pkg(class_name: str) -> dict | None:
+    """Return registry metadata for a class package name, e.g. todo_list."""
+    try:
+        from . import classes as class_registry
+        reg = class_registry.get_registry()
+    except Exception as e:
+        logger.warning("stage3_escalate: class registry unavailable: %s", e)
+        return None
+    for meta in reg.values():
+        if meta.get("pkg_name") == class_name:
+            return meta
+    return None
+
+
+def _synthesize_class_protocol(class_name: str) -> str | None:
+    """Build Stage 3 protocol from the same metadata Stage 1/2 use.
+
+    This avoids duplicating every class's instructions in protocol.md.
+    protocol.md remains an optional extension for class-specific Stage 3
+    guidance that is not already represented in metadata.
+    """
+    meta = _metadata_for_class_pkg(class_name)
+    if not meta:
+        return None
+    try:
+        from . import classes as class_registry
+        desc = class_registry.describe(meta.get("name", ""))
+    except Exception:
+        raw_desc = meta.get("description", "")
+        desc = raw_desc() if callable(raw_desc) else str(raw_desc or "")
+
+    lines = [
+        "Shared class contract generated from Stage 2 metadata.",
+        f"- Class name: {meta.get('name', class_name)}",
+        f"- Package: {class_name}",
+        f"- Stage 2 handler present: {'yes' if meta.get('handler') else 'no'}",
+    ]
+    if desc.strip():
+        lines.extend(["", "Stage 1/2 description:", desc.strip()])
+
+    escalation_context = meta.get("escalation_context")
+    if escalation_context:
+        lines.extend(["", "Escalation context:", str(escalation_context).strip()])
+
+    few_shot = meta.get("few_shot") or []
+    if few_shot:
+        lines.append("")
+        lines.append("Classifier examples:")
+        for prompt, label in few_shot[:12]:
+            lines.append(f"- {prompt!r} -> {label}")
+
+    return "\n".join(lines).strip() or None
+
+
+def _load_protocol_extension(class_name: str) -> str | None:
+    """Read optional `classes/<class_name>/protocol.md`, cached by mtime."""
+    if not _CLASS_NAME_RE.match(class_name):
+        # Defense in depth — _reason_to_class already filters, but never
+        # trust callers when the result is a filesystem path.
+        return None
+    p = _CLASSES_DIR / class_name / "protocol.md"
+    # Confirm the resolved path stays inside _CLASSES_DIR (no traversal).
+    try:
+        resolved = p.resolve()
+    except Exception:
+        return None
+    if not str(resolved).startswith(str(_CLASSES_DIR) + "/"):
+        logger.warning("stage3_escalate: %s escapes classes dir, refusing", resolved)
+        return None
+    try:
+        mtime = p.stat().st_mtime_ns
+    except FileNotFoundError:
+        # Do not cache missing files. protocol.md can be added live and
+        # should be picked up without a server restart.
+        return None
+    cached = _PROTOCOL_CACHE.get(class_name)
+    if cached and cached[0] == mtime:
+        return cached[1]
+    try:
+        text = p.read_text(encoding="utf-8").strip() or None
+    except Exception as e:
+        logger.warning("stage3_escalate: failed to read %s: %s", p, e)
+        text = None
+    _PROTOCOL_CACHE[class_name] = (mtime, text)
+    return text
+
+
+def _load_class_protocol(class_name: str) -> str | None:
+    """Return generated metadata protocol plus optional protocol.md."""
+    generated = _synthesize_class_protocol(class_name)
+    extension = _load_protocol_extension(class_name)
+    parts = [p for p in (generated, extension) if p]
+    if not parts:
+        return None
+    return "\n\n".join(parts)
+
+
+def _inject_class_protocol(body, reason: str):
+    """Prepend the matching class protocol to `body.message`.
+
+    The base protocol is synthesized from the same class metadata Stage
+    1/2 use; optional protocol.md adds Stage 3-only detail.
+    """
+    class_name = _reason_to_class(reason)
+    if not class_name:
+        return body
+    protocol = _load_class_protocol(class_name)
+    if not protocol:
+        return body
+    # ASCII XML-ish marker with explicit priority language. Easier to grep
+    # for in logs than a Unicode em-dash, and tells Opus that this block
+    # outranks the embedded user text for this class of request.
+    new_message = (
+        f"<class_protocol name=\"{class_name}\">\n"
+        f"These are runtime instructions for handling a {class_name.replace('_', ' ')} "
+        f"request. Follow them over conflicting guidance in the user message below.\n\n"
+        f"{protocol}\n"
+        f"</class_protocol>\n\n"
+        + (body.message or "")
+    )
+    try:
+        return body.model_copy(update={"message": new_message})
+    except AttributeError:
+        return body.copy(update={"message": new_message})
+
+
 def _ndjson(event_type: str, data=None, **extra) -> str:
     payload = {"type": event_type}
     if data is not None:
@@ -102,15 +273,31 @@ def _load_v1_stream():
 
 
 def _load_session_helpers():
-    """Import session helpers lazily."""
+    """Import session helpers lazily.
+
+    The `jane_web.main` absolute import is expected to succeed in all
+    normal runtime configurations (uvicorn / CLI entrypoint). The
+    previous fallback used a relative import that was always broken
+    (`.main` doesn't exist inside `jane_v2/`) and swallowed the real
+    error.  If the absolute import fails, we now stub out with no-ops
+    and log loudly — Stage 3 can still run without session helpers, it
+    just won't personalize the user context.
+    """
     try:
         from jane_web.main import get_or_bootstrap_session, _default_user_id
-    except Exception:
-        from .main import get_or_bootstrap_session, _default_user_id  # type: ignore
-    try:
-        from auth.v1.sessions import get_session_user
     except Exception as e:
-        logger.exception("stage3_escalate: could not import session helpers: %s", e)
+        logger.exception("stage3_escalate: jane_web.main import failed: %s", e)
+
+        def get_or_bootstrap_session(*_a, **_kw):
+            return None
+
+        def _default_user_id():
+            return None
+
+    try:
+        from vault_web.auth import get_session_user
+    except Exception as e:
+        logger.exception("stage3_escalate: vault_web.auth import failed: %s", e)
 
         def get_session_user(_sid):
             return None
@@ -123,6 +310,7 @@ async def escalate_stream(
     request: Request,
     ack_text: str,
     reason: str = "others",
+    session_id_override: str | None = None,
 ) -> AsyncIterator[str]:
     """Yield an ack, then stream v1's brain response.
 
@@ -131,17 +319,38 @@ async def escalate_stream(
         request: the FastAPI Request (needed for cookie-based auth).
         ack_text: short user-visible status line shown immediately.
         reason: routing reason for logs ("others", "weather_fallback", etc.).
+        session_id_override: if set, use this session_id for v1 stream_message
+            instead of the cookie-derived one. The v2 pipeline passes its
+            canonical session_id here so v1's conversation_manager writes
+            FIFO rows under the SAME key the pipeline uses for pending-
+            action lookups — otherwise multi-turn follow-ups silently
+            lose state.
 
     Yields NDJSON-encoded event strings (each ends with "\\n").
     """
     is_voice = (getattr(body, "platform", None) or "").lower() == "voice"
     effective_body = _inject_structured_state(body)
     effective_body = _maybe_voice_wrap(effective_body)
+    # Class protocol goes outermost so it appears first within the user-turn
+    # payload (ahead of voice hints and state blocks). v1's stream_message
+    # may still wrap this with system instructions, memory, and tool prompts
+    # before sending to Opus, so this is "first in body.message", not
+    # necessarily first in Opus's full prompt.
+    effective_body = _inject_class_protocol(effective_body, reason)
+    injected_class = _reason_to_class(reason)
+    if injected_class is None:
+        protocol_status = "n/a"
+    elif _load_class_protocol(injected_class):
+        protocol_status = f"loaded:{injected_class}"
+    else:
+        protocol_status = f"missing:{injected_class}"
     logger.info(
-        "stage3_escalate: reason=%s voice=%s prompt_len=%d",
+        "stage3_escalate: reason=%s voice=%s prompt_len=%d sid_override=%s class_protocol=%s",
         reason,
         is_voice,
         len(effective_body.message or ""),
+        bool(session_id_override),
+        protocol_status,
     )
 
     stream_message = _load_v1_stream()
@@ -151,12 +360,16 @@ async def escalate_stream(
         return
 
     get_or_bootstrap_session, _default_user_id, get_session_user = _load_session_helpers()
-    session_id, _ = get_or_bootstrap_session(request)
-    if not session_id:
+    # Auth still goes through cookies, but we use the canonical session_id
+    # (body or cookie, whichever the pipeline decided) as the key threaded
+    # into v1. This keeps FIFO writes consistent across v1 + v2.
+    cookie_session_id, _ = get_or_bootstrap_session(request)
+    if not cookie_session_id:
         yield _ndjson("error", error="Not authenticated")
         yield _ndjson("done", "")
         return
-    user_id = get_session_user(session_id) or _default_user_id()
+    session_id = (session_id_override or "").strip() or cookie_session_id
+    user_id = get_session_user(cookie_session_id) or _default_user_id()
 
     try:
         # Always emit the ack for Stage 3 escalations — it conveys both
@@ -188,6 +401,34 @@ async def escalate_stream(
                         v1_ack_suppressed = True
                         logger.debug("stage3_escalate: suppressed v1 ack (already emitted v2 ack)")
                     continue
+
+                # Process chunk for tool_use events
+                try:
+                    payload = json.loads(stripped)
+                except json.JSONDecodeError:
+                    if not chunk.endswith("\n"):
+                        chunk = chunk + "\n"
+                    yield chunk # Yield original if not JSON
+                    continue
+
+                if payload.get("type") == "delta" and isinstance(payload.get("data"), str):
+                    raw_delta_text = payload["data"]
+                    _extractor = ToolMarkerExtractor() # Instantiate here
+                    cleaned_delta_text, tool_calls = _extractor.feed(raw_delta_text)
+                    tail_cleaned, tail_tool_calls = _extractor.flush()
+
+                    # Yield tool_use events
+                    for tc in tool_calls + tail_tool_calls:
+                        yield _ndjson("tool_use", json.dumps(tc, ensure_ascii=True))
+
+                    # Yield cleaned delta (if any visible text remains)
+                    visible_text = cleaned_delta_text + tail_cleaned
+                    if visible_text:
+                        payload["data"] = visible_text
+                        yield json.dumps(payload, ensure_ascii=True) + "\n"
+                    continue # Continue to next chunk from stream_message
+
+            # If it's not a delta event that we processed above, or if stripped was empty
             if not chunk.endswith("\n"):
                 chunk = chunk + "\n"
             yield chunk

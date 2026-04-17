@@ -393,8 +393,8 @@
 
             <!-- Summary -->
             <p class="text-sm text-slate-400 leading-relaxed flex-1 mb-3"
-              :class="expandedArticle === article.id ? '' : 'line-clamp-3'"
-              x-text="expandedArticle === article.id ? (article.full_summary || article.brief_summary || article.summary) : (article.brief_summary || article.summary)"></p>
+              :class="expandedArticle === article.id ? '' : 'line-clamp-6'"
+              x-text="expandedArticle === article.id ? (article.full_summary || article.brief_summary || article.summary) : (article.full_summary || article.brief_summary || article.summary)"></p>
 
             <!-- Action row -->
             <div class="flex items-center gap-2 pt-2 border-t border-slate-800">

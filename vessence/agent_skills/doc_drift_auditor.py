@@ -218,6 +218,50 @@ def commit_if_changed() -> None:
         warn(f"git commit failed: {e}")
 
 
+def _log_vocal() -> None:
+    try:
+        sys.path.insert(0, str(VESSENCE_HOME))
+        from agent_skills.self_improve_log import log_vocal_summary
+    except Exception:
+        return
+    if not _changes and not _warnings:
+        log_vocal_summary(
+            job="Doc Drift Audit",
+            summary=(
+                "I checked that docs like the cron registry, skill "
+                "registry, and pipeline class map still match the code. "
+                "Everything lined up — no drift."
+            ),
+            severity="info",
+        )
+        return
+    sev = "medium" if _warnings else "info"
+    n_fix = len(_changes)
+    n_warn = len(_warnings)
+    log_vocal_summary(
+        job="Doc Drift Audit",
+        what_was_wrong=(
+            f"I found {n_warn} spot{'s' if n_warn != 1 else ''} where "
+            f"docs drifted from the code"
+        ) if n_warn else (
+            f"I found {n_fix} doc{'s' if n_fix != 1 else ''} that needed "
+            "small fixes"
+        ),
+        why_it_mattered=(
+            "Stale docs make it easy to ship changes that break "
+            "undocumented behavior"
+        ),
+        what_was_done=(
+            f"I auto-fixed {n_fix} and flagged the rest in the doc "
+            f"drift report for you to review"
+        ) if n_fix else (
+            "I flagged them in the doc drift report for your review — "
+            "the ambiguous ones need a human call"
+        ),
+        severity=sev,
+    )
+
+
 def main() -> int:
     audit_cron()
     audit_auditable_modules()
@@ -227,6 +271,7 @@ def main() -> int:
     write_report()
     commit_if_changed()
     log(f"Done — {len(_changes)} fixes, {len(_warnings)} warnings")
+    _log_vocal()
     return 0
 
 

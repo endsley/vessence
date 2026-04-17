@@ -22,3 +22,7 @@ __pycache__/
 .vscode/
 .idea/
 .DS_Store
+
+# Never commit git internal backups (filter-branch / filter-repo safety dirs)
+.git.backup-before-filter/
+.git.bfg-*/
