@@ -2,7 +2,11 @@
 
 This document is the comprehensive technical reference for the Vessence platform. It describes every major subsystem, how they connect, and where the code lives.
 
-**Last updated:** 2026-04-02
+**Last updated:** 2026-04-16
+
+> **Invariant (2026-04-16):** Every caller of the local `qwen2.5:7b` model MUST import `LOCAL_LLM_NUM_CTX` from `jane_web/jane_v2/models.py` and pass it as `num_ctx`. Ollama runs a separate runner per `(model, num_ctx)` tuple; any divergent value causes a full model reload (~1.6–14 s) on the next caller swap and defeats `keep_alive=-1`. Never hardcode `num_ctx`; never omit it and rely on Ollama's default (which is the model's `n_ctx_train = 32768` for qwen2.5). See `preference_registry.json::unified_local_llm_num_ctx`.
+
+> **Operational note (2026-04-16):** `jane-web.service` is configured with `Restart=no` (not `on-failure`). The older `on-failure` setting combined with a port-clearing import hook in `main.py` caused duplicate-uvicorn leaks on every graceful restart (~150 orphan threads per restart). Auto-recovery is now handled by `startup_code/jane_healthcheck.sh` which issues an explicit `systemctl restart` on true outages. `graceful_restart.sh` has a hard invariant (Step 0.6) that reconciles multiple live uvicorns before ping-ponging.
 
 ---
 

@@ -2,6 +2,8 @@
 
 This document logs all scheduled tasks (cron jobs) for the system. It must be updated whenever a cron job is added, removed, or modified.
 
+> **⚠️ KNOWN ISSUE (surfaced 2026-04-16): `$VESSENCE_HOME` expands to empty in cron's environment.** Every cron entry that uses `$VESSENCE_HOME/...` in its command has been silently failing since **2026-04-03** (when the crontab was last re-saved without an env header). Confirmed by: `essence_scheduler.log` last mtime 2026-04-03 despite cron firing every minute per `journalctl -u cron`. The USB backup has not run via the nightly cron since that date — the last successful sync on the USB disk was **2026-04-15 11:41 (manual run)**, not a nightly. **Fix**: add `VESSENCE_HOME=/home/chieh/ambient/vessence` + `VESSENCE_DATA_HOME=/home/chieh/ambient/vessence-data` as env lines at the top of `crontab -e`, or replace every `$VESSENCE_HOME` with the absolute path.
+
 ---
 
 ## 1. Memory Janitor

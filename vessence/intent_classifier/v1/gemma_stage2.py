@@ -1,4 +1,11 @@
-"""gemma_stage2.py — Stage 2 of the two-pass Gemma4 architecture.
+"""gemma_stage2.py — LEGACY (v1) Stage 2.
+
+DEPRECATED. The active Stage 2 is `jane_web/jane_v2/stage2_dispatcher.py`,
+which runs `qwen2.5:7b` (NOT Gemma). The "Gemma" naming here is historical —
+see `vessence-data/.env: JANE_STAGE2_MODEL=qwen2.5:7b`. Kept only because
+jane_proxy still imports from it for a fallback path.
+
+Stage 2 of the two-pass v1 architecture.
 
 Responsibility: dispatch based on Stage 1's classification.
 
@@ -81,6 +88,14 @@ before sending. If they confirm, send via
 # ── Shared Gemma CLI / ollama runner ─────────────────────────────────────────
 
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
+OLLAMA_KEEP_ALIVE = int(os.environ.get("JANE_OLLAMA_KEEP_ALIVE", "-1"))
+# Single source of truth lives in jane_web/jane_v2/models.py. Importing here
+# guarantees this legacy path uses the same num_ctx as every other caller —
+# any divergence forces Ollama to reload the runner between callers.
+try:
+    from jane_web.jane_v2.models import LOCAL_LLM_NUM_CTX as OLLAMA_NUM_CTX
+except Exception:
+    OLLAMA_NUM_CTX = int(os.environ.get("JANE_LOCAL_LLM_NUM_CTX", "8192"))
 
 
 def _get_cli() -> Optional[str]:
@@ -96,11 +111,11 @@ def _get_cli() -> Optional[str]:
 
 
 def _get_model() -> str:
-    return (
-        os.environ.get("JANE_STAGE2_MODEL")
-        or os.environ.get("JANE_ACK_MODEL")
-        or "gemma4:e2b"
-    )
+    try:
+        from jane_web.jane_v2.models import STAGE2_MODEL
+        return os.environ.get("JANE_STAGE2_MODEL") or STAGE2_MODEL
+    except Exception:
+        return os.environ.get("JANE_STAGE2_MODEL") or "qwen2.5:7b"
 
 
 async def _gemma_call(prompt: str, timeout: float = STAGE2_TIMEOUT_S) -> Optional[str]:
@@ -114,7 +129,13 @@ async def _gemma_call(prompt: str, timeout: float = STAGE2_TIMEOUT_S) -> Optiona
         import json as _json
         import urllib.request
         url = f"{OLLAMA_URL}/api/generate"
-        payload = _json.dumps({"model": model, "prompt": prompt, "stream": False}).encode()
+        payload = _json.dumps({
+            "model": model,
+            "prompt": prompt,
+            "stream": False,
+            "keep_alive": OLLAMA_KEEP_ALIVE,
+            "options": {"num_ctx": OLLAMA_NUM_CTX},
+        }).encode()
         req = urllib.request.Request(url, data=payload,
                                      headers={"Content-Type": "application/json"}, method="POST")
         try:

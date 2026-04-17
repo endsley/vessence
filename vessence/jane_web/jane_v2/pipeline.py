@@ -5,7 +5,7 @@ Entry points used by main.py:
   - handle_chat_stream(body, request)  → streaming /api/jane/chat/stream
 
 3-stage flow:
-  Stage 1: classify the prompt with gemma4:e2b (~700 ms)
+  Stage 1: classify the prompt via ChromaDB embeddings (~200 ms)
   Stage 2: dispatch to the class pack's handler in
            jane_web/jane_v2/classes/<name>/. Handler lookup is
            dynamic — no hardcoded class names in this file.
@@ -30,6 +30,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+import asyncio
 from typing import Any, AsyncIterator
 
 from fastapi import Request
@@ -50,6 +51,312 @@ _DEFAULT_ESCALATE_ACK = "Let me think about that…"
 
 
 # ─── shared helpers ──────────────────────────────────────────────────────────
+
+
+_AWAITING_RE = __import__("re").compile(
+    r"\[\[AWAITING:\s*([A-Za-z0-9_\-\s]{1,200})\s*\]\]\s*\Z"
+)
+
+
+def _inject_self_improvement_context(body):
+    """Inject recent self-improve vocal summaries so Opus can answer
+    conversationally without reciting code or exit codes."""
+    try:
+        import sys as _sys
+        _sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[2]))
+        from agent_skills.self_improve_log import read_recent_summaries
+        entries = read_recent_summaries(days=14, limit=20)
+    except Exception as exc:
+        logger.warning("self_improvement injection: could not load summaries: %s", exc)
+        return body
+
+    log_path = "$VESSENCE_DATA_HOME/self_improve_vocal_log.jsonl"
+    tech_logs = "$VESSENCE_DATA_HOME/logs/self_improve_*.log"
+    if not entries:
+        block = (
+            "\n\n[SELF IMPROVEMENT CONTEXT]\n"
+            f"Vocal summary log file: {log_path}\n"
+            f"Technical job logs: {tech_logs}\n"
+            "No recent self-improvement entries found (empty log or "
+            "older than 14 days). Tell the user nothing's been logged "
+            "yet and the nightly job may not have run recently.\n"
+            "[END SELF IMPROVEMENT CONTEXT]"
+        )
+    else:
+        # Group for the headline by job category
+        from collections import Counter
+        by_job = Counter(e.get("job", "?") for e in entries)
+
+        lines = ["\n\n[SELF IMPROVEMENT CONTEXT]"]
+        lines.append(f"Vocal summary log file: {log_path}")
+        lines.append(f"Technical job logs: {tech_logs}")
+        lines.append(
+            "RESPONSE STYLE — CRITICAL. The user is on voice and doesn't "
+            "want a long recital. Your reply should be CONVERSATIONAL:\n"
+            "  1) Open with a one-sentence headline: how many changes in "
+            "total and roughly what categories (e.g. 'I logged 7 changes "
+            "overnight — mostly transcript review fixes plus a couple doc "
+            "tweaks').\n"
+            "  2) Ask which one the user wants to hear about, offering by "
+            "NUMBER: 'want me to walk through number 3, the timer bug?'\n"
+            "  3) Do NOT enumerate every entry. Do NOT read timestamps, "
+            "job names, severity labels, or file paths aloud. Do NOT use "
+            "bullet points or lists — speak it like a friend giving a "
+            "quick update.\n"
+            "  4) If the user asks for 'number N', jump to entry N below "
+            "and speak its summary conversationally (one to three "
+            "sentences).\n"
+            "  5) If the user asks about a specific topic (timers, "
+            "transcripts, etc.), filter to matching entries and apply "
+            "the same short-headline-plus-offer pattern.\n\n"
+            f"Total entries in context window: {len(entries)} "
+            f"(most recent first). Job categories: "
+            + ", ".join(f"{job} ({n})" for job, n in by_job.most_common())
+            + "."
+        )
+        lines.append("")
+        lines.append("Entries (numbered for drill-down reference):")
+        for i, e in enumerate(entries, 1):
+            ts = e.get("timestamp", "?")
+            job = e.get("job", "?")
+            sev = e.get("severity", "info")
+            summ = e.get("summary", "").strip()
+            lines.append(f"{i}. [{ts} | {job} | {sev}] {summ}")
+        lines.append("[END SELF IMPROVEMENT CONTEXT]")
+        block = "\n".join(lines)
+
+    try:
+        return body.model_copy(
+            update={"message": (body.message or "") + block}
+        )
+    except AttributeError:
+        return body.copy(
+            update={"message": (body.message or "") + block}
+        )
+
+
+def _copy_body_with_appended_message(body, extra: str):
+    if not extra:
+        return body
+    new_message = (getattr(body, "message", "") or "") + extra
+    try:
+        return body.model_copy(update={"message": new_message})
+    except AttributeError:
+        if hasattr(body, "copy"):
+            return body.copy(update={"message": new_message})
+        setattr(body, "message", new_message)
+        return body
+
+
+def _copy_body_with_prepended_message(body, extra: str):
+    """Prepend `extra` ABOVE the existing message content.
+
+    Used by the verify-first policy so the `<verify_first>` / `<memory_verify>`
+    XML blocks are the first thing Opus reads in the user turn, not something
+    tacked onto the end where they compete with later context injections for
+    attention.
+    """
+    if not extra:
+        return body
+    existing = getattr(body, "message", "") or ""
+    sep = "\n\n" if existing and not extra.endswith("\n\n") else ""
+    new_message = extra + sep + existing
+    try:
+        return body.model_copy(update={"message": new_message})
+    except AttributeError:
+        if hasattr(body, "copy"):
+            return body.copy(update={"message": new_message})
+        setattr(body, "message", new_message)
+        return body
+
+
+async def _fetch_required_memory_evidence(prompt: str) -> tuple[str, bool]:
+    """Query Chroma when the shared evidence policy requires memory."""
+    try:
+        from memory.v1.memory_retrieval import build_memory_sections
+        from jane_web.verify_first_policy import has_meaningful_memory
+        sections = await asyncio.to_thread(
+            build_memory_sections,
+            prompt,
+            assistant_name="Jane",
+        )
+        memory_text = "\n\n".join(sections or [])
+        return memory_text, has_meaningful_memory(memory_text)
+    except Exception as exc:
+        logger.warning("pipeline: required memory evidence lookup failed: %s", exc)
+        return "", False
+
+
+def _dedup_memory_for_session(memory_text: str, session_id: str) -> str:
+    """Filter chunks already injected for this session (cross-turn dedup).
+
+    Reuses the CLI's per-entry hash/cache at /tmp/jane_mem_seen_<sid>.txt so
+    chat, CLI, and web all share a single dedup store when they happen to
+    use the same session_id. The CLI cache file format is stable (one MD5
+    hash per line), so concurrent use is safe.
+    """
+    if not memory_text or not session_id:
+        return memory_text
+    try:
+        import sys as _sys
+        _path = "/home/chieh/ambient/vessence/startup_code"
+        if _path not in _sys.path:
+            _sys.path.insert(0, _path)
+        from session_memory_dedup import dedup as _dedup  # type: ignore
+        return _dedup(memory_text, session_id)
+    except Exception as exc:
+        logger.warning("pipeline: memory dedup failed (sid=%s): %s", session_id[:12], exc)
+        return memory_text
+
+
+async def _apply_evidence_policy(body, prompt: str, session_id: str = "") -> tuple[Any, dict]:
+    """Apply shared code/memory evidence requirements to a Stage 3 body."""
+    metadata = {
+        "required": False,
+        "requires_code": False,
+        "requires_memory": False,
+        "memory_evidence": False,
+        "memory_chars": 0,
+        "memory_chars_after_dedup": 0,
+    }
+    try:
+        from jane_web.verify_first_policy import (
+            classify_evidence_requirements,
+            instruction_for_requirements,
+        )
+        req = classify_evidence_requirements(prompt)
+        metadata.update({
+            "required": req.any,
+            "requires_code": req.code,
+            "requires_memory": req.memory,
+        })
+        if not req.any:
+            return body, metadata
+        # Build the verify-first block as a single prepended payload so it
+        # sits at the TOP of the user turn, before any other injected context
+        # (self-improvement, stage3_followup hints, sms drafts). Opus weighs
+        # top-of-turn XML directives more reliably than trailing appends.
+        verify_block = instruction_for_requirements(req)
+        if req.memory:
+            memory_text, memory_ok = await _fetch_required_memory_evidence(prompt)
+            metadata["memory_evidence"] = memory_ok
+            metadata["memory_chars"] = len(memory_text or "")
+            if memory_text:
+                deduped = _dedup_memory_for_session(memory_text, session_id)
+                metadata["memory_chars_after_dedup"] = len(deduped or "")
+                if deduped and deduped.strip():
+                    verify_block = (
+                        verify_block
+                        + "\n\n[REQUIRED CHROMA MEMORY EVIDENCE]\n"
+                        + deduped
+                        + "\n[END REQUIRED CHROMA MEMORY EVIDENCE]"
+                    )
+        body = _copy_body_with_prepended_message(body, verify_block)
+        logger.info(
+            "pipeline: evidence policy applied code=%s memory=%s memory_ok=%s "
+            "chars=%d after_dedup=%d prompt=%r",
+            req.code, req.memory, metadata["memory_evidence"],
+            metadata["memory_chars"], metadata["memory_chars_after_dedup"],
+            prompt[:80],
+        )
+    except Exception as exc:
+        logger.warning("pipeline: evidence policy failed: %s", exc)
+    return body, metadata
+
+
+class _AwaitingDeltaStripper:
+    """Strip trailing `[[AWAITING:<topic>]]` markers from streaming Stage 3
+    deltas before they reach the client.
+
+    Markers are always at the END of the response, but may arrive split
+    across chunks (e.g. "answer  [[AWAIT", "ING:pasta]]"). Two-state
+    machine:
+
+      STREAMING  : normal flow. Keep a tiny trailing buffer that might
+                   be the beginning of a marker; emit only what's
+                   definitely not part of one.
+      SUPPRESS   : saw `[[AWAITING:`, everything from here to end of
+                   stream is dropped.
+
+    Usage:
+        stripper = _AwaitingDeltaStripper()
+        for chunk in stream:
+            out = stripper.feed(chunk)
+            if out:
+                yield_delta(out)
+        tail = stripper.flush()
+        if tail:
+            yield_delta(tail)
+    """
+
+    _MARKER_START = "[[AWAITING:"
+    # The length of _MARKER_START minus one — the longest trailing
+    # prefix we might have seen that's still ambiguous.
+    _AMBIGUOUS = len(_MARKER_START) - 1
+
+    def __init__(self) -> None:
+        self._buffer = ""
+        self._suppress = False
+
+    def feed(self, chunk: str) -> str:
+        if self._suppress or not chunk:
+            return ""
+
+        combined = self._buffer + chunk
+
+        # Fast path: marker opener anywhere in combined → emit before it,
+        # enter suppress mode, drop the rest.
+        start = combined.find(self._MARKER_START)
+        if start >= 0:
+            self._buffer = ""
+            self._suppress = True
+            return combined[:start]
+
+        # No complete marker opener yet. Safe to emit all but the last
+        # `_AMBIGUOUS` chars — those might be a partial `[[AWAITING:`
+        # prefix that completes in the next chunk.
+        if len(combined) <= self._AMBIGUOUS:
+            self._buffer = combined
+            return ""
+
+        safe_len = len(combined) - self._AMBIGUOUS
+        out = combined[:safe_len]
+        self._buffer = combined[safe_len:]
+        return out
+
+    def flush(self) -> str:
+        """End of stream — emit anything left in buffer (it wasn't a marker).
+
+        If we entered suppress mode, return nothing. Otherwise whatever's
+        in the buffer is just regular text shorter than marker length.
+        """
+        if self._suppress:
+            self._buffer = ""
+            return ""
+        out = self._buffer
+        self._buffer = ""
+        return out
+
+
+def _extract_awaiting_marker(text: str) -> tuple[str, str | None]:
+    """Scan a Stage 3 response for a TRAILING [[AWAITING:<topic>]] marker.
+
+    The marker must be the last non-whitespace thing in the response —
+    Opus echoing the instruction mid-reply is ignored. This prevents
+    accidental (or injected) mid-text markers from activating a
+    follow-up.
+
+    Returns (cleaned_text, topic). If no trailing marker is present,
+    topic is None and cleaned_text == text.
+    """
+    if not text or "[[AWAITING:" not in text:
+        return text, None
+    m = _AWAITING_RE.search(text)
+    if not m:
+        return text, None
+    topic = m.group(1).strip().replace(" ", "_")[:60] or None
+    cleaned = text[:m.start()].rstrip()
+    return cleaned, topic
 
 
 def _persist_turn_to_fifo(
@@ -98,6 +405,8 @@ def _persist_turn_to_fifo(
                 )
             if extras.get("conversation_end"):
                 record.setdefault("metadata", {})["conversation_end"] = True
+            if extras.get("evidence"):
+                record.setdefault("metadata", {})["evidence"] = extras["evidence"]
         add_structured(session_id, record)
     except Exception as e:
         logger.warning("pipeline: failed to persist turn to FIFO: %s", e)
@@ -167,7 +476,7 @@ _ACK_FALLBACK = "Got it, give me a moment to look into that."
 
 async def _generate_delegate_ack(prompt: str, session_id: str | None,
                                   cls: str = "others") -> str:
-    """Produce an ack for a Stage 3 escalation using gemma4:e2b.
+    """Produce an ack for a Stage 3 escalation using the local LLM.
 
     Two-part structured response:
       Part 1: acknowledge understanding + intent ("Got it", "I'll work on it",
@@ -175,14 +484,21 @@ async def _generate_delegate_ack(prompt: str, session_id: str | None,
       Part 2: time estimate ("give me a sec", "this might take a few minutes",
               "could take a while")
 
-    Uses gemma4:e2b at higher temp for variety. Falls back to a static
+    Uses qwen2.5:7b at higher temp for variety. Falls back to a static
     sentence on failure. ~700ms cost, runs in parallel with Stage 3 brain
     so net latency is unchanged.
     """
     import os
     import httpx
+    from jane_web.jane_v2.models import LOCAL_LLM, LOCAL_LLM_NUM_CTX, OLLAMA_KEEP_ALIVE
     duration = _estimate_duration(prompt)
-    model = os.environ.get("JANE_ACK_MODEL", "qwen2.5:7b")
+    model = os.environ.get("JANE_ACK_MODEL", LOCAL_LLM)
+    # If the ack model IS the pinned local LLM, inherit the pin's keep_alive
+    # (-1 = forever) so this call doesn't shorten the runner's retention timer
+    # and evict the model. Per Ollama scheduler, every request's keep_alive
+    # REPLACES the existing runner.sessionDuration — a "1h" here would defeat
+    # the startup warmup's -1 pin and cause cold loads after 1h idle.
+    ack_keep_alive = OLLAMA_KEEP_ALIVE if model == LOCAL_LLM else "1h"
     # Force variety by REQUIRING a random opener per call. qwen otherwise
     # anchors on "Sure thing" no matter the temperature.
     openers = [
@@ -210,8 +526,8 @@ async def _generate_delegate_ack(prompt: str, session_id: str | None,
                 json={
                     "model": model, "prompt": gen_prompt, "stream": False,
                     "think": False,
-                    "options": {"temperature": 1.0, "top_p": 0.95, "num_predict": 60},
-                    "keep_alive": "1h",
+                    "options": {"temperature": 1.0, "top_p": 0.95, "num_predict": 60, "num_ctx": LOCAL_LLM_NUM_CTX},
+                    "keep_alive": ack_keep_alive,
                 },
             )
             r.raise_for_status()
@@ -312,6 +628,223 @@ def _cancel_pending_sms_confirmation(pending: dict) -> dict:
     }
 
 
+# ─── sms_draft short-circuit helpers ─────────────────────────────────────────
+#
+# Stage 3 (Opus) sometimes emits the full draft protocol (sms_draft →
+# sms_send) rather than the single-shot sms_send_direct. When that
+# happens we track the open draft in FIFO as SEND_MESSAGE_DRAFT_OPEN so
+# the next turn's user confirm/cancel/edit can short-circuit past Stage 1
+# and Stage 2 and directly emit the paired sms_send / sms_cancel /
+# sms_draft_update marker with the EXISTING draft_id.
+
+_SMS_DRAFT_MARKER_RE = __import__("re").compile(
+    r"\[\[CLIENT_TOOL:contacts\.(sms_draft|sms_draft_update|sms_send|sms_cancel):"
+    r"(\{[^\n]*?\})\]\]"
+)
+
+
+def _extract_sms_draft_state(text: str) -> dict | None:
+    """Scan Stage 3 output for SMS draft markers. Return the latest
+    open draft as {draft_id, query, body}, or None if no draft is open
+    (e.g. sms_send or sms_cancel closed it, or no markers at all).
+
+    Multiple markers may appear in one turn (e.g. draft then an update).
+    We walk them in order and track whether a draft is open at the end.
+    """
+    if not text or "[[CLIENT_TOOL:contacts.sms_" not in text:
+        return None
+    import json as _json
+    state: dict | None = None
+    for m in _SMS_DRAFT_MARKER_RE.finditer(text):
+        tool = m.group(1)
+        try:
+            args = _json.loads(m.group(2))
+        except Exception:
+            continue
+        if tool == "sms_draft":
+            state = {
+                "draft_id": args.get("draft_id") or "",
+                "query": args.get("query") or "",
+                "body": args.get("body") or "",
+            }
+        elif tool == "sms_draft_update":
+            if state is not None:
+                state["body"] = args.get("body", state.get("body", ""))
+                # draft_id may be echoed — keep existing if args is missing
+                if args.get("draft_id"):
+                    state["draft_id"] = args["draft_id"]
+            else:
+                # update without prior draft in this turn — start from scratch
+                state = {
+                    "draft_id": args.get("draft_id") or "",
+                    "query": "",
+                    "body": args.get("body") or "",
+                }
+        elif tool in ("sms_send", "sms_cancel"):
+            # Draft is closed — nothing pending after this.
+            state = None
+    if state and state.get("draft_id") and state.get("body"):
+        return state
+    return None
+
+
+def _resolve_pending_sms_draft_send(pending: dict) -> dict:
+    """User confirmed an open sms_draft. Emit sms_send with the draft_id."""
+    import json as _json
+    data = pending.get("data") or {}
+    draft_id = data.get("draft_id") or ""
+    query = data.get("query") or data.get("display_name") or data.get("recipient") or "them"
+    body = data.get("body") or ""
+    tool_args = _json.dumps({"draft_id": draft_id})
+    marker = f"[[CLIENT_TOOL:contacts.sms_send:{tool_args}]]"
+    return {
+        "text": f"Sending to {query}. {marker}",
+        "structured": {
+            "intent": "send message",
+            "entities": {"recipient": query, "message_body": body,
+                         "draft_id": draft_id},
+            "pending_action": {
+                "type": "SEND_MESSAGE_DRAFT_OPEN",
+                "status": "resolved",
+                "resolution": "sent",
+            },
+            "safety": {"side_effectful": True, "requires_confirmation": False},
+        },
+    }
+
+
+def _cancel_pending_sms_draft(pending: dict) -> dict:
+    """User cancelled an open sms_draft. Emit sms_cancel with the draft_id."""
+    import json as _json
+    data = pending.get("data") or {}
+    draft_id = data.get("draft_id") or ""
+    query = data.get("query") or data.get("display_name") or data.get("recipient") or "them"
+    tool_args = _json.dumps({"draft_id": draft_id})
+    marker = f"[[CLIENT_TOOL:contacts.sms_cancel:{tool_args}]]"
+    return {
+        "text": f"Okay, cancelled the message to {query}. {marker}",
+        "structured": {
+            "intent": "send message",
+            "pending_action": {
+                "type": "SEND_MESSAGE_DRAFT_OPEN",
+                "status": "resolved",
+                "resolution": "cancelled",
+            },
+        },
+    }
+
+
+async def _resolve_pending_sms_draft_edit(pending: dict, edit_text: str) -> dict:
+    """User asked to revise an open sms_draft. Compose a new body via a
+    tiny LLM call (same local model the send_message handler uses) and
+    emit sms_draft_update with the EXISTING draft_id — no round-trip
+    through Opus.
+
+    On LLM failure we fall back to a minimal "<old_body>. <edit_text>"
+    concatenation so the draft still progresses rather than silently
+    losing the user's edit.
+    """
+    import json as _json
+    data = pending.get("data") or {}
+    draft_id = data.get("draft_id") or ""
+    query = data.get("query") or data.get("display_name") or data.get("recipient") or "them"
+    old_body = data.get("body") or ""
+    new_body = old_body
+
+    compose_prompt = (
+        "You are revising an SMS draft based on the user's edit instruction.\n"
+        "CRITICAL: output ONLY the new message body — no preamble, no quotes, "
+        "no 'Sure, here is' prefix. Just the revised SMS body text itself.\n\n"
+        f"CURRENT DRAFT BODY: {old_body}\n"
+        f"USER EDIT INSTRUCTION: {edit_text}\n\n"
+        "NEW BODY:"
+    )
+    try:
+        import httpx
+        from jane_web.jane_v2.models import (
+            LOCAL_LLM as _model,
+            LOCAL_LLM_NUM_CTX as _num_ctx,
+            OLLAMA_URL as _url,
+        )
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            r = await client.post(_url, json={
+                "model": _model,
+                "prompt": compose_prompt,
+                "stream": False,
+                "think": False,
+                "options": {"temperature": 0.2, "num_predict": 80, "num_ctx": _num_ctx},
+                "keep_alive": -1,
+            })
+            r.raise_for_status()
+            composed = (r.json().get("response") or "").strip()
+            # Strip any stray quotes / "NEW BODY:" echo
+            composed = composed.strip('"').strip("'").strip()
+            if composed.lower().startswith("new body:"):
+                composed = composed[len("new body:"):].strip()
+            if composed:
+                new_body = composed
+    except Exception as e:
+        logger.warning("draft-edit compose failed (%s) — using fallback concat", e)
+        new_body = f"{old_body}. {edit_text}".strip()
+
+    tool_args = _json.dumps({"draft_id": draft_id, "body": new_body})
+    marker = f"[[CLIENT_TOOL:contacts.sms_draft_update:{tool_args}]]"
+    return {
+        "text": f"Updated. To {query}: {new_body}. {marker}",
+        "structured": {
+            "intent": "send message",
+            "entities": {"recipient": query, "message_body": new_body,
+                         "draft_id": draft_id},
+            "pending_action": {
+                "type": "SEND_MESSAGE_DRAFT_OPEN",
+                "status": "awaiting_user",
+                "awaiting": "confirm_draft",
+                "handler_class": "send message",
+                "data": {
+                    "draft_id": draft_id,
+                    "query": query,
+                    "body": new_body,
+                },
+            },
+        },
+    }
+
+
+def _cookie_session_id(request) -> str | None:
+    """Best-effort lookup of the cookie-derived session_id so the v2
+    pipeline and v1's conversation_manager write FIFO rows under the
+    SAME key. If the cookie isn't present or auth failed, returns None
+    and the caller falls back to body.session_id.
+    """
+    try:
+        from jane_web.main import get_or_bootstrap_session
+    except Exception:
+        return None
+    try:
+        sid, _ = get_or_bootstrap_session(request)
+        return sid or None
+    except Exception:
+        return None
+
+
+def _canonical_session_id(body, request) -> str | None:
+    """Resolve the canonical session_id for a chat request.
+
+    Preference order:
+      1. body.session_id  — stable client-side id (jane_android_XXX, etc.)
+      2. cookie session   — server-side fallback when client didn't send one
+
+    This ONE id is then used for every FIFO read/write and threaded into
+    Stage 3 so v1's conversation_manager writes under the same key. The
+    old bug: pipeline wrote under body.session_id, escalate_stream wrote
+    under the cookie session, pending actions disappeared between turns.
+    """
+    sid = (getattr(body, "session_id", None) or "").strip()
+    if sid:
+        return sid
+    return _cookie_session_id(request)
+
+
 async def _classify_and_try_stage2(
     prompt: str, session_id: str | None = None
 ) -> dict[str, Any]:
@@ -343,9 +876,21 @@ async def _classify_and_try_stage2(
         if action == "confirm":
             result = _resolve_pending_sms_confirmation(pending)
             cls = "send message"
+        elif action == "sms_draft_send":
+            # Short-circuit: open sms_draft + user confirmed → emit sms_send
+            # with the existing draft_id. No Opus round-trip.
+            result = _resolve_pending_sms_draft_send(pending)
+            cls = "send message"
+        elif action == "sms_draft_edit":
+            # Short-circuit: open sms_draft + user asked to revise → compose
+            # new body via local LLM and emit sms_draft_update.
+            result = await _resolve_pending_sms_draft_edit(pending, prompt)
+            cls = "send message"
         elif action == "cancel":
-            # Cancel applies to both SMS confirmations and any STAGE2_FOLLOWUP.
-            if pending.get("type") == "STAGE2_FOLLOWUP":
+            # Cancel applies to STAGE2_FOLLOWUP, SEND_MESSAGE_CONFIRMATION,
+            # and SEND_MESSAGE_DRAFT_OPEN.
+            ptype = pending.get("type", "")
+            if ptype == "STAGE2_FOLLOWUP":
                 handler_class = pending.get("handler_class", "")
                 result = {
                     "text": "Okay, never mind.",
@@ -359,9 +904,28 @@ async def _classify_and_try_stage2(
                     },
                 }
                 cls = handler_class or "others"
+            elif ptype == "SEND_MESSAGE_DRAFT_OPEN":
+                result = _cancel_pending_sms_draft(pending)
+                cls = "send message"
             else:
                 result = _cancel_pending_sms_confirmation(pending)
                 cls = "send message"
+        elif action == "stage3_followup":
+            # Opus asked a question last turn (emitted [[AWAITING:...]]).
+            # Skip Stage 1 + Stage 2 — route straight to Stage 3 with a
+            # contextual hint so Opus knows this reply is answering its
+            # pending question.
+            awaiting = pending.get("awaiting") or "previous_question"
+            logger.info("jane_v2 pipeline: resolver → stage3_followup (awaiting=%s)",
+                        awaiting)
+            return {
+                "cls": "stage3_followup", "conf": "High",
+                "classification": "stage3_followup:High",
+                "stage1_ms": 0, "stage2_ms": 0, "result": None,
+                "stage2_ack": None, "fallback_ack": None,
+                "force_stage3": True,
+                "stage3_followup_topic": awaiting,
+            }
         elif action == "followup":
             # Re-dispatch to the Stage 2 handler that's mid-conversation.
             handler_class = resolved["handler_class"]
@@ -378,11 +942,25 @@ async def _classify_and_try_stage2(
             except Exception as e:
                 logger.exception("pipeline: followup dispatch crashed: %s", e)
                 result = None
-            # If the handler explicitly asks to abandon, re-run Stage 1
-            # on the original prompt (user pivoted mid-conversation).
+            # If the handler explicitly asks to abandon, either re-run
+            # Stage 1 or jump straight to Stage 3. Some follow-up prompts
+            # are real questions rather than answers to the pending slot
+            # (e.g. TODO awaiting category, user asks a question).
             if isinstance(result, dict) and result.get("abandon_pending"):
+                structured = result.get("structured") or {}
+                if result.get("force_stage3"):
+                    logger.info("pipeline: handler abandoned pending → Stage 3")
+                    return {
+                        "cls": handler_class, "conf": "High",
+                        "classification": f"{handler_class}:High",
+                        "stage1_ms": 0, "stage2_ms": 0, "result": None,
+                        "stage2_ack": None,
+                        "fallback_ack": _ack_for(handler_class, escalate=True),
+                        "force_stage3": True,
+                        "resolve_pending_action": structured.get("pending_action"),
+                    }
                 logger.info("pipeline: handler abandoned pending → falling through to Stage 1")
-                # Fall out of the `if resolved` block — pending is dead.
+                # Fall out of the `if resolved` block.
                 resolved = None
             else:
                 cls = handler_class
@@ -485,7 +1063,11 @@ async def handle_chat(body, request: Request):
             "files": [],
         })
 
-    state = await _classify_and_try_stage2(prompt, body.session_id)
+    # Canonical session_id: prefer body (stable client id), fall back to
+    # cookie. Used for every FIFO read/write in this request so a multi-
+    # turn conversation never splits across two session_ids.
+    canonical_sid = _canonical_session_id(body, request) or body.session_id
+    state = await _classify_and_try_stage2(prompt, canonical_sid)
 
     # ── Stage 2 success → return directly ──────────────────────────────
     if state["result"] is not None:
@@ -512,7 +1094,7 @@ async def handle_chat(body, request: Request):
             resp["client_tool_calls"] = all_tool_calls
         resp.update(extras)
         _persist_turn_to_fifo(
-            body.session_id, prompt, visible_text or text,
+            canonical_sid, prompt, visible_text or text,
             stage="stage2",
             intent=state["cls"],
             confidence=state["conf"],
@@ -525,7 +1107,7 @@ async def handle_chat(body, request: Request):
     # Generate a contextual ack first (uses v1's classify_prompt — topic
     # echo + time hint). Falls back to the static class ack on failure.
     dynamic_ack = await _generate_delegate_ack(
-        body.message or "", body.session_id, cls=state["cls"]
+        body.message or "", canonical_sid, cls=state["cls"]
     )
 
     v1_chat = _load_v1_chat()
@@ -563,6 +1145,26 @@ async def handle_chat(body, request: Request):
             effective_body = effective_body.copy(
                 update={"message": (effective_body.message or "") + sms_ctx}
             )
+    if state.get("stage3_followup_topic"):
+        topic = state["stage3_followup_topic"]
+        hint = (
+            f"\n\n[STAGE3 FOLLOWUP] Your previous reply ended with "
+            f"[[AWAITING:{topic}]] — the user's message above is their "
+            f"answer to that pending question. Continue the task.\n"
+        )
+        try:
+            effective_body = effective_body.model_copy(
+                update={"message": (effective_body.message or "") + hint}
+            )
+        except AttributeError:
+            effective_body = effective_body.copy(
+                update={"message": (effective_body.message or "") + hint}
+            )
+    if state["cls"] == "self improvement":
+        effective_body = _inject_self_improvement_context(effective_body)
+    effective_body, evidence_meta = await _apply_evidence_policy(
+        effective_body, prompt, session_id=canonical_sid
+    )
     _t3 = time.perf_counter()
     v1_response = await v1_chat(effective_body, request)
     stage3_ms = int((time.perf_counter() - _t3) * 1000)
@@ -581,17 +1183,68 @@ async def handle_chat(body, request: Request):
     v1_body["stage1_ms"] = state["stage1_ms"]
     v1_body["stage2_ms"] = state["stage2_ms"]
     v1_body["stage3_ms"] = stage3_ms
+    if evidence_meta.get("required"):
+        v1_body["evidence"] = evidence_meta
     new_body_bytes = json.dumps(v1_body, ensure_ascii=True).encode("utf-8")
     v1_response.body = new_body_bytes
     v1_response.headers["content-length"] = str(len(new_body_bytes))
     # FIFO record for Stage 3 turn so the next pending-action resolver /
     # Stage 3 state block sees continuity. v1 has its own long-term memory,
     # so we only record a minimal handoff summary here.
+    raw_response = v1_body.get("response", "") or ""
+    cleaned_text, awaiting_topic = _extract_awaiting_marker(raw_response)
+    structured_extras: dict | None = None
+    # SMS draft tracking takes precedence over AWAITING. If Stage 3 opened
+    # a draft (sms_draft / sms_draft_update without a closing sms_send or
+    # sms_cancel), stash it so the next user reply short-circuits to send.
+    draft_state = _extract_sms_draft_state(raw_response)
+    if draft_state:
+        import datetime as _dt
+        structured_extras = {
+            "intent": "send message",
+            "pending_action": {
+                "type": "SEND_MESSAGE_DRAFT_OPEN",
+                "handler_class": "send message",
+                "status": "awaiting_user",
+                "awaiting": "confirm_draft",
+                "data": draft_state,
+                "expires_at": (
+                    _dt.datetime.utcnow() + _dt.timedelta(minutes=5)
+                ).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            },
+        }
+        logger.info("pipeline: stage3 (non-stream) SMS_DRAFT_OPEN draft_id=%s",
+                    draft_state.get("draft_id", "")[:12])
+    elif awaiting_topic:
+        import datetime as _dt
+        structured_extras = {
+            "pending_action": {
+                "type": "STAGE3_FOLLOWUP",
+                "handler_class": "stage3",
+                "status": "awaiting_user",
+                "awaiting": awaiting_topic,
+                "expires_at": (
+                    _dt.datetime.utcnow() + _dt.timedelta(minutes=2)
+                ).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            },
+        }
+        logger.info("pipeline: stage3 (non-stream) AWAITING → topic=%s",
+                    awaiting_topic)
+        # Strip marker from client-facing response too.
+        v1_body["response"] = cleaned_text
+        new_body_bytes = json.dumps(v1_body, ensure_ascii=True).encode("utf-8")
+        v1_response.body = new_body_bytes
+        v1_response.headers["content-length"] = str(len(new_body_bytes))
+    resolved_pa = state.get("resolve_pending_action")
+    if resolved_pa and not (structured_extras and structured_extras.get("pending_action")):
+        structured_extras = {**(structured_extras or {}), "pending_action": resolved_pa}
     _persist_turn_to_fifo(
-        body.session_id, prompt, v1_body.get("response", "") or "",
+        canonical_sid, prompt, cleaned_text or raw_response,
         stage="stage3",
         intent=state["cls"],
         confidence=state["conf"],
+        handler_structured=structured_extras,
+        extras={"evidence": evidence_meta} if evidence_meta.get("required") else None,
     )
     return v1_response
 
@@ -604,13 +1257,18 @@ async def handle_chat_stream(body, request: Request):
     existing Alpine/Android chat UI handlers."""
     prompt = (body.message or "").strip()
 
+    # Canonical session_id: prefer body (stable client id), fall back to
+    # cookie. Captured here so the inner _stream() generator and all FIFO
+    # reads/writes share one id.
+    canonical_sid = _canonical_session_id(body, request) or body.session_id
+
     async def _stream() -> AsyncIterator[str]:
         if not prompt:
             yield _ndjson("done", "")
             return
 
         yield _ndjson("status", "Classifying…")
-        state = await _classify_and_try_stage2(prompt, body.session_id)
+        state = await _classify_and_try_stage2(prompt, canonical_sid)
 
         # ── Stage 2 success → emit ack + delta + done ─────────────────
         if state["result"] is not None:
@@ -647,7 +1305,7 @@ async def handle_chat_stream(body, request: Request):
             yield _ndjson("delta", visible_text or text)
             yield _ndjson("done", visible_text or text, **extras)
             _persist_turn_to_fifo(
-                body.session_id, prompt, visible_text or text,
+                canonical_sid, prompt, visible_text or text,
                 stage="stage2",
                 intent=state["cls"],
                 confidence=state["conf"],
@@ -660,7 +1318,7 @@ async def handle_chat_stream(body, request: Request):
         # Generate a contextual ack via v1's classify_prompt (topic
         # echo + time hint). Static class ack is the safe fallback.
         dynamic_ack = await _generate_delegate_ack(
-            body.message or "", body.session_id, cls=state["cls"]
+            body.message or "", canonical_sid, cls=state["cls"]
         )
 
         # Inject class-specific context into the message so Opus
@@ -686,25 +1344,150 @@ async def handle_chat_stream(body, request: Request):
                     update={"message": (body.message or "") + sms_ctx}
                 )
 
+        if state.get("stage3_followup_topic"):
+            topic = state["stage3_followup_topic"]
+            hint = (
+                f"\n\n[STAGE3 FOLLOWUP] Your previous reply ended with "
+                f"[[AWAITING:{topic}]] — the user's message above is "
+                f"their answer to that pending question. Continue the "
+                f"task.\n"
+            )
+            try:
+                effective_body = effective_body.model_copy(
+                    update={"message": (effective_body.message or "") + hint}
+                )
+            except AttributeError:
+                effective_body = effective_body.copy(
+                    update={"message": (effective_body.message or "") + hint}
+                )
+
+        if state["cls"] == "self improvement":
+            effective_body = _inject_self_improvement_context(effective_body)
+
+        effective_body, evidence_meta = await _apply_evidence_policy(
+            effective_body, prompt, session_id=canonical_sid
+        )
+
         reason = f"{state['cls']}:{state['conf']}"
         # Accumulate streamed deltas so we can persist a FIFO record at the end.
+        # Also run deltas through a stripper so `[[AWAITING:...]]` markers
+        # never reach the client's chat bubble / TTS.
         _stage3_text_parts: list[str] = []
+        try:
+            from jane_web.verify_first_policy import ToolUseCounter
+            _evidence_tool_counter = ToolUseCounter()
+        except Exception:
+            _evidence_tool_counter = None
+        stripper = _AwaitingDeltaStripper()
         async for ev in stage3_escalate.escalate_stream(
-            effective_body, request, dynamic_ack, reason=reason
+            effective_body, request, dynamic_ack, reason=reason,
+            session_id_override=canonical_sid,
         ):
-            # Best-effort: sniff `delta` events for accumulated Stage 3 text.
+            # Try to parse the event; if it's a `delta`, filter the text
+            # through the stripper and rewrite the event before yielding.
             try:
                 payload = json.loads(ev)
-                if payload.get("type") == "delta" and isinstance(payload.get("data"), str):
-                    _stage3_text_parts.append(payload["data"])
             except Exception:
-                pass
+                payload = None
+            if (
+                isinstance(payload, dict)
+                and payload.get("type") == "delta"
+                and isinstance(payload.get("data"), str)
+            ):
+                raw = payload["data"]
+                _stage3_text_parts.append(raw)  # for FIFO / marker extraction
+                cleaned = stripper.feed(raw)
+                if not cleaned:
+                    continue  # buffered — don't send anything this tick
+                payload["data"] = cleaned
+                yield json.dumps(payload, ensure_ascii=True) + "\n"
+                continue
+            if (
+                isinstance(payload, dict)
+                and payload.get("type") == "tool_use"
+                and _evidence_tool_counter is not None
+            ):
+                _evidence_tool_counter(str(payload.get("data") or "tool_use"))
+            # Non-delta event — if we have buffered visible text, flush it
+            # BEFORE passing through any `done`/terminal event.
+            if (
+                isinstance(payload, dict)
+                and payload.get("type") in ("done", "error")
+            ):
+                tail = stripper.flush()
+                if tail:
+                    yield _ndjson("delta", tail)
+                if payload.get("type") == "done" and isinstance(payload.get("data"), str):
+                    cleaned_done, _ = _extract_awaiting_marker(payload["data"])
+                    payload["data"] = cleaned_done
+                    yield json.dumps(payload, ensure_ascii=True) + "\n"
+                    continue
             yield ev
+        # Safety: if the loop exited without a terminal event, flush now.
+        tail = stripper.flush()
+        if tail:
+            yield _ndjson("delta", tail)
+        full_stage3_text = "".join(_stage3_text_parts)
+        if evidence_meta.get("required") and _evidence_tool_counter is not None:
+            try:
+                from jane_web.verify_first_policy import summarize_verification_status
+                evidence_meta.update(
+                    summarize_verification_status(
+                        prompt,
+                        _evidence_tool_counter,
+                        memory_evidence=bool(evidence_meta.get("memory_evidence")),
+                    )
+                )
+                if evidence_meta.get("flagged"):
+                    logger.warning("pipeline: evidence policy flagged stream turn: %s", evidence_meta)
+            except Exception as exc:
+                logger.warning("pipeline: evidence summary failed: %s", exc)
+        cleaned_text, awaiting_topic = _extract_awaiting_marker(full_stage3_text)
+        structured_extras: dict | None = None
+        # SMS draft tracking wins over AWAITING when both appear.
+        draft_state = _extract_sms_draft_state(full_stage3_text)
+        if draft_state:
+            import datetime as _dt
+            structured_extras = {
+                "intent": "send message",
+                "pending_action": {
+                    "type": "SEND_MESSAGE_DRAFT_OPEN",
+                    "handler_class": "send message",
+                    "status": "awaiting_user",
+                    "awaiting": "confirm_draft",
+                    "data": draft_state,
+                    "expires_at": (
+                        _dt.datetime.utcnow() + _dt.timedelta(minutes=5)
+                    ).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                },
+            }
+            logger.info("pipeline: stage3 (stream) SMS_DRAFT_OPEN draft_id=%s",
+                        draft_state.get("draft_id", "")[:12])
+        elif awaiting_topic:
+            import datetime as _dt
+            structured_extras = {
+                "pending_action": {
+                    "type": "STAGE3_FOLLOWUP",
+                    "handler_class": "stage3",
+                    "status": "awaiting_user",
+                    "awaiting": awaiting_topic,
+                    "expires_at": (
+                        _dt.datetime.utcnow() + _dt.timedelta(minutes=2)
+                    ).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                },
+            }
+            logger.info("pipeline: stage3 emitted AWAITING marker → topic=%s",
+                        awaiting_topic)
+        resolved_pa = state.get("resolve_pending_action")
+        if resolved_pa and not (structured_extras and structured_extras.get("pending_action")):
+            structured_extras = {**(structured_extras or {}), "pending_action": resolved_pa}
         _persist_turn_to_fifo(
-            body.session_id, prompt, "".join(_stage3_text_parts),
+            canonical_sid, prompt, cleaned_text or full_stage3_text,
             stage="stage3",
             intent=state["cls"],
             confidence=state["conf"],
+            handler_structured=structured_extras,
+            extras={"evidence": evidence_meta} if evidence_meta.get("required") else None,
         )
 
     return StreamingResponse(_stream(), media_type="application/x-ndjson")

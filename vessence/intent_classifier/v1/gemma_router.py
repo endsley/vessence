@@ -1,4 +1,8 @@
-"""Jane's initial ack layer — classifies prompts as SELF_HANDLE, MUSIC_PLAY, or DELEGATE.
+"""LEGACY (v1) — Jane's initial ack layer. The active classifier is `intent_classifier/v2/`
+and the v2 pipeline runs `qwen2.5:7b`, NOT Gemma. Filename retained for jane_proxy
+backward compatibility only. Do not infer the running model from this file's name.
+
+Classifies prompts as SELF_HANDLE, MUSIC_PLAY, or DELEGATE.
 
 This is the fast front half of Jane. It speaks first (the initial ack), handles
 trivial turns itself, routes music commands, and otherwise emits a contextual
@@ -68,7 +72,7 @@ MAX_HISTORY_CHARS_CLI = 1500
 
 # Per-provider default model. User can override globally via JANE_ACK_MODEL.
 _DEFAULT_ACK_MODELS = {
-    "ollama": "gemma4:e2b",
+    "ollama": "qwen2.5:7b",
     "anthropic": "claude-haiku-4-5-20251001",
     "google": "gemini-2.5-flash",
     "openai": "gpt-5-nano",
@@ -162,7 +166,7 @@ def _resolve_model(provider: str) -> str:
         return override
     if provider == "ollama" and _LEGACY_OLLAMA_MODEL:
         return _LEGACY_OLLAMA_MODEL
-    return _DEFAULT_ACK_MODELS.get(provider, "gemma4:e2b")
+    return _DEFAULT_ACK_MODELS.get(provider, "qwen2.5:7b")
 
 
 # Personal info loaded from ChromaDB at runtime — see memory/v1/memory_retrieval.py
@@ -496,6 +500,13 @@ async def _call_ollama(
         *history,
         {"role": "user", "content": message},
     ]
+    # MUST match every other local-LLM caller's num_ctx. Ollama keys runners
+    # by (model, num_ctx); a mismatched value here would force a reload/evict
+    # every time the call path alternates with Stage 2 gate/handlers.
+    try:
+        from jane_web.jane_v2.models import LOCAL_LLM_NUM_CTX as _SHARED_NUM_CTX
+    except Exception:
+        _SHARED_NUM_CTX = int(os.environ.get("JANE_LOCAL_LLM_NUM_CTX", "8192"))
     payload = {
         "model": model,
         "messages": messages,
@@ -506,9 +517,7 @@ async def _call_ollama(
         "keep_alive": -1,
         "options": {
             "temperature": 0.1,
-            # Gemma4 supports 128K context. We set 32K here to give headroom
-            # for future prompt expansion without wasting VRAM on the full 128K.
-            "num_ctx": 32768,
+            "num_ctx": _SHARED_NUM_CTX,
             # Classification output is CLASSIFICATION: X\nRESPONSE: one short sentence
             # — never more than ~60 tokens. Capping tight makes cold-starts fast.
             "num_predict": 80,

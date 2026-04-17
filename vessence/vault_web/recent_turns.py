@@ -5,11 +5,11 @@ similarity search), this is a plain ordered list per session that
 answers one question cheaply: "give me the last N turns."
 
 Used by v2's ack generator and classifier so they can show context to
-gemma4 without going through a vector search — just a ~1ms SQLite read.
+the local LLM without going through a vector search — just a ~1ms SQLite read.
 
 Design:
   - One row per turn, inserted after the turn completes.
-  - Each session is capped at DEFAULT_MAX_TURNS entries (default 10).
+  - Each session is capped at DEFAULT_MAX_TURNS entries (default 20).
     Older entries are deleted on insert — true FIFO eviction.
   - `summary` is whatever the caller chooses. Keeping it to a
     truncated "user: … / jane: …" string (no LLM) makes this path
@@ -17,14 +17,14 @@ Design:
     a matter of changing the caller, not this module.
 
 API:
-    add(session_id, summary, max_keep=10)               -> None
-    get_recent(session_id, n=10)                        -> list[str]  # oldest -> newest
+    add(session_id, summary, max_keep=20)               -> None
+    get_recent(session_id, n=20)                        -> list[str]  # oldest -> newest
     clear(session_id)                                   -> None
     count(session_id)                                   -> int
 
 Structured API (schema_version 1) — used by v2 3-stage pipeline:
-    add_structured(session_id, record, max_keep=10)     -> None
-    get_recent_structured(session_id, n=10)             -> list[dict]  # oldest -> newest
+    add_structured(session_id, record, max_keep=20)     -> None
+    get_recent_structured(session_id, n=20)             -> list[dict]  # oldest -> newest
     get_active_state(session_id)                        -> dict
 """
 
@@ -38,7 +38,7 @@ from .database import get_db
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MAX_TURNS = 10
+DEFAULT_MAX_TURNS = 20
 STRUCTURED_SCHEMA_VERSION = 1
 
 
@@ -284,11 +284,19 @@ def get_active_state(session_id: str, lookback: int = DEFAULT_MAX_TURNS) -> dict
     if not session_id:
         return out
     records = get_recent_structured(session_id, n=lookback)
+    resolved_handlers: set = set()
     for rec in reversed(records):  # newest first
         pa = rec.get("pending_action")
-        if pa and _pending_is_active(pa) and out["pending_action"] is None:
-            out["pending_action"] = pa
-            out["pending_turn_id"] = rec.get("turn_id")
+        if pa and isinstance(pa, dict):
+            hc = pa.get("handler_class", "")
+            status = pa.get("status", "")
+            if status in ("resolved", "cancelled"):
+                resolved_handlers.add(hc)
+            elif (_pending_is_active(pa)
+                  and out["pending_action"] is None
+                  and hc not in resolved_handlers):
+                out["pending_action"] = pa
+                out["pending_turn_id"] = rec.get("turn_id")
         if not out["last_intent"] and rec.get("intent"):
             out["last_intent"] = rec.get("intent")
         if not out["last_entities"] and rec.get("entities"):

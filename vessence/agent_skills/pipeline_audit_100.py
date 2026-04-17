@@ -39,8 +39,12 @@ VESSENCE_HOME = Path(os.environ.get("VESSENCE_HOME", str(Path(__file__).resolve(
 VESSENCE_DATA_HOME = Path(os.environ.get("VESSENCE_DATA_HOME", str(Path.home() / "ambient/vessence-data")))
 PROMPT_DUMP = VESSENCE_DATA_HOME / "logs" / "jane_prompt_dump.jsonl"
 REPORT_PATH = VESSENCE_HOME / "configs" / "pipeline_audit_report.md"
-JUDGE_MODEL = os.environ.get("JANE_AUDIT_JUDGE_MODEL", "qwen2.5:7b")
-OLLAMA_URL = "http://localhost:11434/api/generate"
+try:
+    sys.path.insert(0, str(VESSENCE_HOME))
+    from jane_web.jane_v2.models import AUDIT_JUDGE_MODEL as JUDGE_MODEL, OLLAMA_URL
+except Exception:
+    JUDGE_MODEL = os.environ.get("JANE_AUDIT_JUDGE_MODEL", "qwen2.5:7b")
+    OLLAMA_URL = "http://localhost:11434/api/generate"
 SERVER = os.environ.get("JANE_AUDIT_SERVER", "http://localhost:8080")
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -190,12 +194,18 @@ CORRECT_CLASS: <one of the classes above>
 CLASSIFICATION_OK: yes | no
 RESPONSE_OK: yes | no
 """
+    # MUST match every other local-LLM caller's num_ctx. Divergent num_ctx
+    # forces Ollama to evict/reload the runner on each caller swap.
+    try:
+        from jane_web.jane_v2.models import LOCAL_LLM_NUM_CTX as _NUM_CTX
+    except Exception:
+        _NUM_CTX = int(os.environ.get("JANE_LOCAL_LLM_NUM_CTX", "8192"))
     body = {
         "model": JUDGE_MODEL,
         "prompt": judge_prompt,
         "stream": False,
         "think": False,
-        "options": {"temperature": 0.0, "num_predict": 80},
+        "options": {"temperature": 0.0, "num_predict": 80, "num_ctx": _NUM_CTX},
         "keep_alive": "1h",
     }
     try:

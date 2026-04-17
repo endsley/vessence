@@ -1,3 +1,41 @@
+### 2026-04-16: Local-LLM Thrashing Fix, Thread-Leak Fix, Verify-First Hardening
+
+Investigation-driven session. Three major issues diagnosed and fixed; one still open.
+
+**1. Ollama cold-start thrashing — ROOT-CAUSED and FIXED.**
+- **Symptom:** Android Jane "how's it going" taking 7.2s instead of ~540ms; Stage 2 gate occasionally stalling at 12s.
+- **Root cause:** Ollama runs a separate runner per `(model, num_ctx)`. Multiple production callers were hitting `qwen2.5:7b` with divergent `num_ctx` — `gemma_router.py` hardcoded 32768, Stage 2 used 1024, and several callers (`agent_skills/llm_summarize.py`, `agent_skills/gemma_summarize.py`, `agent_skills/pipeline_audit_100.py`, `intent_classifier/v1/gemma_stage1.py`, `jane_web/main.py` prewarm, and critically `/home/chieh/ambient/skills/daily_briefing/functions/news_fetcher.py`) passed no `num_ctx` at all, inheriting Ollama's default (model's `n_ctx_train` = 32768 for qwen2.5). Every cross-caller transition triggered a full runner reload (~1.6–14s).
+- **Fix:** `LOCAL_LLM_NUM_CTX` in `jane_web/jane_v2/models.py` is now the single source of truth (bumped 1024 → 8192; 2048 first, then 8192 on request for head-room). Every production caller imports and passes it explicitly. Registered in `preference_registry.json` as `unified_local_llm_num_ctx`.
+- **Files touched:** `models.py`, `gemma_router.py`, `gemma_stage1.py`, `gemma_stage2.py`, `main.py` (prewarm), `pipeline_audit_100.py`, `llm_summarize.py`, `gemma_summarize.py`, `news_fetcher.py` (in `/home/chieh/ambient/skills/daily_briefing/functions/`).
+
+**2. Jane-web dead-thread leak — ROOT-CAUSED and FIXED.**
+- **Symptom:** `jane_web` uvicorn processes accumulating ~150 threads each; multiple live servers running at once after each graceful restart.
+- **Root cause chain:** (a) `jane_web/main.py` had a module-level `_clear_port_if_occupied(8081)` that fired at every import — including the port-8084 ping-pong server spawned by `graceful_restart.sh`, which unconditionally SIGKILL'd whatever was on 8081; (b) systemd unit had `Restart=on-failure`, so the SIGKILL (`status=9/KILL`) triggered an auto-respawn on 8081; (c) the respawned server had nothing routing to it but kept 150 threads alive. Every graceful restart stacked another orphan.
+- **Fix:** removed the hardcoded port-clearing hook from `main.py`; changed `Restart=on-failure` → `Restart=no` in `jane-web.service`; added a hard-invariant Step 0.6 in `graceful_restart.sh` that enumerates all `uvicorn jane_web` processes, keeps only the one the proxy currently routes to, and kills everything else before starting the ping-pong. Killed the current orphan (PID 357087) live — freed 153 threads.
+
+**3. Web/Android verify-first hardening (Option C) — APPLIED.**
+- **Background:** Codex added verify-first to Stage 3 earlier. Review uncovered gaps: the `STRONGER_VERIFY_INSTRUCTION` was *appended* to the user turn (easy to ignore vs. top-of-message), and there were no concrete tool-call examples. CLI Jane blocks at the `Stop` hook; Web Jane only nudged via prompt.
+- **Fix:** Rewrote `STRONGER_VERIFY_INSTRUCTION` and `MEMORY_VERIFY_INSTRUCTION` in `jane_web/verify_first_policy.py` as `<verify_first priority="critical">` / `<memory_verify priority="critical">` XML blocks with 3 concrete tool-call examples each (`Grep(pattern=..., type="py")`, `Read("/abs/path")`, `Bash("tail -50 /logs/...")`, `Bash("python query_live_memory.py ...")`) and an anti-gaming guard: "a one-token tool call just to clear this block is not acceptable." Added `_copy_body_with_prepended_message` helper in `jane_web/jane_v2/pipeline.py` and switched `_apply_evidence_policy` to prepend the block + inline `[REQUIRED CHROMA MEMORY EVIDENCE]` at the TOP of the user turn. Codex's retry mechanism is still advisory (post-hoc audit); true parity with CLI's blocking behavior would require a buffered retry that costs streaming UX — deferred.
+
+**4. Memory subsystem tightening.**
+- `recent_turns` FIFO cap 10 → 20 (`vault_web/recent_turns.py`, preference `recent_turns_fifo_size_20`).
+- Added in-process 60s TTL cache inside `memory/v1/memory_retrieval.py::build_memory_sections` so pipeline Stage 3 + `jane_proxy` context builder stop double-querying Chroma for the same turn.
+- Added cross-turn chunk dedup in `jane_v2/pipeline.py::_apply_evidence_policy` via `session_memory_dedup.dedup` (reuses the CLI's `/tmp/jane_mem_seen_<sid>.txt` store). Evidence block now records `memory_chars_after_dedup` for audit.
+- Fixed stale memory-evidence marker in `.claude/hooks/verify_first_hook.py` — `handle_user_prompt_submit` now unlinks `/tmp/claude-memory-evidence/<sid>.json` at turn start so a prior turn's "True" can't satisfy this turn's check.
+
+**5. todo_list Stage 3 protocol expanded.**
+- `jane_web/jane_v2/classes/todo_list/protocol.md` rewritten from 8 lines → 79 lines. Now documents cache path, category aliases (urgent, kathia, home, etc.), friendly spoken-form transforms ("Do it Immediately" → "your urgent list"), excluded categories (ambient project goals / legacy Jane header), broader-question handling, and stale `STAGE2_FOLLOWUP` semantics.
+
+**6. New stage-breakdown benchmark.**
+- `test_code/benchmark_stage_breakdown.py` isolates each pipeline stage: Stage 1 embed, Stage 2 gate (both bypass and full-LLM paths), Stage 2 handler (pure-Python vs LLM-backed), Stage 3 end-to-end. Results: Stage 1 ~22 ms, Stage 2 gate bypass ~0 ms, full gate LLM ~460 ms, pure-Python handler ~0.3 ms, LLM handler ~540 ms, Stage 3 ~12 s.
+
+**Known issues surfaced but NOT fixed this session:**
+- **Cron `$VESSENCE_HOME` expansion is broken.** Every cron using `$VESSENCE_HOME` stopped logging after 2026-04-03 (essence_scheduler, usb_sync, etc.). The USB backup cron fires every night per journalctl but the path `$VESSENCE_HOME/startup_code/usb_sync.py` expands to empty, so the script never actually runs. Last successful USB sync was **2026-04-15 11:41 (manual trigger)**, not a nightly. Fix needed: add `VESSENCE_HOME=/home/chieh/ambient/vessence` header to the crontab, or hardcode absolute paths.
+- **`\btrace\b` false positive in verify-first regex.** The CLI `Stop` hook matches any occurrence of "Trace" or "trace" (even in system-emitted task-notifications), blocking conversational replies. Narrow to `\btrace\s+(?:the\s+)?(?:code|function|call|path|execution)\b` or similar, and skip `<task-notification>`/`<system-reminder>` wrapped content entirely.
+- **Stage 3 `ToolUseCounter`** may not be receiving `tool_use` events from `stage3_escalate.escalate_stream` (it emits `delta`s). Needs verification before the audit log's `flagged=True` signal can be trusted.
+
+---
+
 ### 2026-04-02: Android Wake Word, Process Management & UX Polish
 - **Wake word detection working on Android:** OpenWakeWord with `hey_jarvis_v0.1.onnx` model, achieving 0.98+ detection scores. (`hey_jane` model broken, needs retraining.)
 - **Always-listening service lifecycle:** `AlwaysListeningService` now stops cleanly on detection (releases mic), `ChatInputRow` launches system STT (same path as mic button). Proper stop/restart lifecycle prevents mic contention.

@@ -487,7 +487,45 @@ def _is_low_signal_shared_memory(doc: str, meta: dict | None) -> bool:
     return False
 
 
+# In-process short-TTL cache so back-to-back callers (e.g. pipeline.py's
+# `_apply_evidence_policy` followed by jane_proxy's context builder, both
+# running for the same turn) don't re-embed and re-query Chroma for the
+# identical prompt. Keyed by (query, assistant_name, essence_path).
+_SECTIONS_CACHE: dict[tuple[str, str, str], tuple[float, list[str]]] = {}
+_SECTIONS_CACHE_LOCK = threading.Lock()
+_SECTIONS_CACHE_TTL_S = 60.0
+_SECTIONS_CACHE_MAX_ENTRIES = 64
+
+
+def _sections_cache_get(key: tuple[str, str, str]) -> list[str] | None:
+    import time as _t
+    with _SECTIONS_CACHE_LOCK:
+        entry = _SECTIONS_CACHE.get(key)
+        if not entry:
+            return None
+        ts, sections = entry
+        if _t.time() - ts > _SECTIONS_CACHE_TTL_S:
+            _SECTIONS_CACHE.pop(key, None)
+            return None
+        return list(sections)
+
+
+def _sections_cache_put(key: tuple[str, str, str], sections: list[str]) -> None:
+    import time as _t
+    with _SECTIONS_CACHE_LOCK:
+        if len(_SECTIONS_CACHE) >= _SECTIONS_CACHE_MAX_ENTRIES:
+            # Evict oldest entry (cheap; cache stays small).
+            oldest_key = min(_SECTIONS_CACHE, key=lambda k: _SECTIONS_CACHE[k][0])
+            _SECTIONS_CACHE.pop(oldest_key, None)
+        _SECTIONS_CACHE[key] = (_t.time(), list(sections))
+
+
 def build_memory_sections(query: str, assistant_name: str = "Jane", essence_chromadb_path: str | None = None) -> list[str]:
+    cache_key = (query or "", assistant_name or "", essence_chromadb_path or "")
+    cached = _sections_cache_get(cache_key)
+    if cached is not None:
+        return cached
+
     intent = _classify_query_intent(query)
     use_shared = True
     use_jane_long_term = assistant_name.strip().lower() != "amber" and intent in {"project_work", "general"}
@@ -711,6 +749,7 @@ def build_memory_sections(query: str, assistant_name: str = "Jane", essence_chro
         )
     if essence_facts:
         sections.append("## Essence Memory\n" + "\n".join(essence_facts))
+    _sections_cache_put(cache_key, sections)
     return sections
 
 

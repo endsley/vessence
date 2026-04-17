@@ -58,6 +58,40 @@ if [ -n "$ORPHAN_PIDS" ]; then
     for pid in $ORPHAN_PIDS; do kill -9 "$pid" 2>/dev/null || true; done
 fi
 
+# ── Step 0.6: Hard invariant — never proceed with >1 live jane-web process ──
+# After a regression, it's possible to end up with TWO valid jane-web uvicorns
+# (one on 8081, one on 8084) both claiming to be alive. If the proxy is only
+# routing to one of them, the other is pure thread-leak. Reconcile before
+# starting a third: keep whichever one the proxy currently points at; kill
+# everything else that's holding 8081 or 8084.
+CURRENT_UPSTREAM=$(curl -s http://localhost:$PROXY_PORT/proxy/status 2>/dev/null \
+    | python3 -c "import sys,json; print(json.load(sys.stdin).get('upstream_port',''))" 2>/dev/null \
+    || echo "")
+ALL_PIDS=$(pgrep -f "uvicorn jane_web.main:app" 2>/dev/null | sort -u)
+ALL_COUNT=$(echo "$ALL_PIDS" | grep -c . || true)
+if [ "$ALL_COUNT" -gt 1 ]; then
+    log "WARN: $ALL_COUNT jane-web uvicorns detected before restart (upstream=${CURRENT_UPSTREAM:-unknown}). Reconciling."
+    for pid in $ALL_PIDS; do
+        port=$(ss -ltnp 2>/dev/null | grep "pid=$pid," | grep -oP ':\K[0-9]+' | head -1)
+        if [ -z "$port" ]; then continue; fi
+        if [ -n "$CURRENT_UPSTREAM" ] && [ "$port" = "$CURRENT_UPSTREAM" ]; then
+            log "  keep PID $pid on port $port (current proxy upstream)"
+        else
+            log "  kill PID $pid on port $port (not the live upstream)"
+            kill "$pid" 2>/dev/null || true
+        fi
+    done
+    sleep 2
+    # Force-kill anything still lingering that isn't the live upstream.
+    for pid in $(pgrep -f "uvicorn jane_web.main:app" 2>/dev/null); do
+        port=$(ss -ltnp 2>/dev/null | grep "pid=$pid," | grep -oP ':\K[0-9]+' | head -1)
+        if [ -n "$CURRENT_UPSTREAM" ] && [ "$port" = "$CURRENT_UPSTREAM" ]; then
+            continue
+        fi
+        kill -9 "$pid" 2>/dev/null || true
+    done
+fi
+
 # ── Step 1: Detect current active port ──
 log "Checking current upstream..."
 CURRENT_PORT=$(curl -s http://localhost:$PROXY_PORT/proxy/status 2>/dev/null \

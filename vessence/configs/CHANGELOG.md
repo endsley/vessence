@@ -1,5 +1,37 @@
 # Vessence Changelog
 
+## 2026-04-16 (session)
+- **Ollama thrashing fix**: Unified `LOCAL_LLM_NUM_CTX = 8192` across every `qwen2.5:7b` caller (gemma_router, gemma_stage1/2, Stage 2 handlers, prewarm, summarizers, audit judge, briefing news_fetcher). Ollama now keeps one runner pinned at 8192 ctx instead of reloading per caller.
+- **Thread-leak fix**: Removed hardcoded port-clearing hook from `jane_web/main.py`; `jane-web.service` now `Restart=no`; `graceful_restart.sh` has a hard invariant (Step 0.6) reconciling duplicate uvicorns.
+- **Verify-first hardening (Option C)**: `STRONGER_VERIFY_INSTRUCTION` and `MEMORY_VERIFY_INSTRUCTION` rewritten as XML blocks with concrete tool-call examples; `_apply_evidence_policy` now prepends the block to the Stage 3 user turn instead of appending.
+- **Memory**: `recent_turns` FIFO 10 → 20; 60s TTL cache on `build_memory_sections`; cross-turn chunk dedup in Stage 3 evidence injection; stale memory-evidence marker cleared per-turn in CLI `verify_first_hook`.
+- **Docs**: `jane_v2/classes/todo_list/protocol.md` expanded from 8 → 79 lines.
+- **New**: `test_code/benchmark_stage_breakdown.py` — per-stage latency isolation (Stage 1 ~22 ms, Stage 2 gate LLM ~460 ms, Stage 3 ~12 s).
+
+## v0.2.45 (2026-04-16)
+- Version bump.
+
+## v0.2.44 (2026-04-16)
+- Version bump.
+
+## v0.2.43 (2026-04-16)
+- Version bump.
+
+## v0.2.42 (2026-04-16)
+- Version bump.
+
+## v0.2.41 (2026-04-16)
+- Version bump.
+
+## v0.2.40 (2026-04-15)
+- Version bump.
+
+## v0.2.39 (2026-04-15)
+- Version bump.
+
+## v0.2.38 (2026-04-15)
+- Version bump.
+
 ## v0.2.37 (2026-04-15)
 - Version bump.
 

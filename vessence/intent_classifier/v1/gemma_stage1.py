@@ -1,4 +1,12 @@
-"""gemma_stage1.py — Stage 1 of the two-pass Gemma4 architecture.
+"""gemma_stage1.py — LEGACY (v1) Stage 1.
+
+DEPRECATED. The active Stage 1 is `jane_web/jane_v2/stage1_classifier.py`
+(ChromaDB embedding-based, no LLM). The active Stage 2 is qwen2.5:7b via
+`jane_web/jane_v2/stage2_dispatcher.py`. The "Gemma" naming here is historical —
+the running model is `qwen2.5:7b` (see `vessence-data/.env: JANE_STAGE2_MODEL`).
+Kept only because jane_proxy still imports from it for a fallback path.
+
+Stage 1 of the two-pass v1 architecture.
 
 Responsibility: classify the user's message. That's it. No response text,
 no ack generation — except GREETING, which generates its own 1-sentence reply
@@ -123,6 +131,8 @@ ALSO use DELEGATE_OPUS for short affirmatives ("yes", "yea", "yeah", "sure", "ok
 "yea please", "yes please", "go ahead", "do it", "sounds good", "that works") when the history
 shows Jane asked a question or proposed an action — Opus already knows what it proposed and
 can follow through. Do NOT classify these as SELF_HANDLE.
+ALSO use DELEGATE_OPUS for status/update statements like "ok sent it", "ok I sent it",
+"sent it", or "I did it". These are NOT conversation endings.
 
 CONFIDENCE rules:
 - Clear match for the class rule → ≥ 0.90
@@ -251,6 +261,11 @@ User: "ok thanks"
 CLASSIFICATION: END_CONVERSATION
 CONFIDENCE: 0.95
 
+[history: assistant: "Try sending that now."]
+User: "ok sent it"
+CLASSIFICATION: DELEGATE_OPUS
+CONFIDENCE: 0.95
+
 [history empty]
 User: "thanks"
 CLASSIFICATION: SELF_HANDLE
@@ -356,7 +371,19 @@ async def _stage1_via_ollama(full_prompt: str, model: str) -> Optional[str]:
     import urllib.request
     import urllib.error
     url = f"{OLLAMA_URL}/api/generate"
-    payload = _json.dumps({"model": model, "prompt": full_prompt, "stream": False}).encode()
+    # MUST match every other local-LLM caller's num_ctx. Divergent num_ctx
+    # forces Ollama to evict/reload the runner on each caller swap.
+    try:
+        from jane_web.jane_v2.models import LOCAL_LLM_NUM_CTX as _NUM_CTX
+    except Exception:
+        _NUM_CTX = int(os.environ.get("JANE_LOCAL_LLM_NUM_CTX", "8192"))
+    payload = _json.dumps({
+        "model": model,
+        "prompt": full_prompt,
+        "stream": False,
+        "options": {"num_ctx": _NUM_CTX},
+        "keep_alive": -1,
+    }).encode()
     req = urllib.request.Request(url, data=payload,
                                  headers={"Content-Type": "application/json"}, method="POST")
     loop = asyncio.get_event_loop()
@@ -394,7 +421,11 @@ async def stage1_classify(message: str, session_id: str) -> dict:
     parts.append(f"user: {message.strip()}")
     full_prompt = "\n".join(parts)
 
-    model = os.environ.get("JANE_STAGE1_MODEL") or os.environ.get("JANE_ACK_MODEL") or "gemma4:e2b"
+    try:
+        from jane_web.jane_v2.models import STAGE2_MODEL
+        model = os.environ.get("JANE_STAGE1_MODEL") or STAGE2_MODEL
+    except Exception:
+        model = os.environ.get("JANE_STAGE1_MODEL") or "qwen2.5:7b"
 
     # If the model is a gemma/ollama model, always go direct to ollama HTTP —
     # CLI backends like 'claude' or 'gemini' cannot run local ollama models.

@@ -1,13 +1,10 @@
 #!/usr/bin/env python3
 """
-gemma_summarize.py — Called by the Stop hook after every Claude response.
+llm_summarize.py — Called by the Stop hook after every Claude response.
 
 Reads the most recent conversation turns from the session JSONL transcript,
-calls qwen2.5:7b (local LLM) to summarize, and saves to short-term
+calls the Stage 2 model (qwen2.5:7b) to summarize, and saves to short-term
 ChromaDB memory. This gives crash resilience and context for subprocess sessions.
-
-NOTE: file still named gemma_summarize.py for hook script compatibility.
-The actual model is qwen2.5:7b — gemma4 was fully removed 2026-04-16.
 
 Stop hook input (stdin): {"session_id": "...", "stop_hook_active": bool, ...}
 """

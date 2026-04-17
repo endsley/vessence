@@ -68,84 +68,22 @@ _logger = logging.getLogger("jane.web")
 _logger.info("=== Jane Web starting (PID %d) ===", os.getpid())
 
 
-def _clear_port_if_occupied(port: int = 8081) -> None:
-    """Kill any process occupying our port before uvicorn tries to bind.
-
-    Prevents the 'address already in use' crash loop where systemd restarts
-    keep failing because the old process still holds the socket.
-    """
-    import socket
-    import signal as _signal
-
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    try:
-        sock.bind(("127.0.0.1", port))
-        # Port is free — nothing to do
-        sock.close()
-        return
-    except OSError:
-        sock.close()
-
-    _logger.warning("Port %d is occupied — attempting to clear it", port)
-
-    # Try fuser first (most reliable on Linux)
-    try:
-        result = subprocess.run(
-            ["fuser", f"{port}/tcp"],
-            capture_output=True, text=True, timeout=5,
-        )
-        pids_str = result.stdout.strip()
-        if pids_str:
-            my_pid = os.getpid()
-            pids = [int(p) for p in pids_str.split() if p.strip().isdigit()]
-            for pid in pids:
-                if pid == my_pid:
-                    continue
-                _logger.warning("Sending SIGTERM to PID %d holding port %d", pid, port)
-                try:
-                    os.kill(pid, _signal.SIGTERM)
-                except ProcessLookupError:
-                    pass
-
-            # Wait up to 5 seconds for graceful shutdown
-            import time as _time
-            for _ in range(10):
-                _time.sleep(0.5)
-                test_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                try:
-                    test_sock.bind(("127.0.0.1", port))
-                    test_sock.close()
-                    _logger.info("Port %d is now free after SIGTERM", port)
-                    return
-                except OSError:
-                    test_sock.close()
-
-            # Force kill
-            for pid in pids:
-                if pid == my_pid:
-                    continue
-                _logger.warning("Sending SIGKILL to PID %d (port %d still occupied)", pid, port)
-                try:
-                    os.kill(pid, _signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
-
-            _time.sleep(1)
-            _logger.info("Port %d force-kill complete", port)
-    except FileNotFoundError:
-        _logger.warning("fuser not found — cannot clear port %d", port)
-    except Exception as exc:
-        _logger.warning("Failed to clear port %d: %s", port, exc)
-
-
-_clear_port_if_occupied(8081)
+# Note: port cleanup was previously done here at import time via a hardcoded
+# _clear_port_if_occupied(8081). That was removed 2026-04-16 because it
+# unconditionally killed whatever process held port 8081 — including the
+# legitimate systemd-managed jane-web server — whenever ANY uvicorn instance
+# started (e.g. the ping-pong server on 8084 during graceful_restart.sh).
+# Port cleanup is handled by two proper owners now:
+#   - systemd unit ExecStartPre runs `fuser -k 8081/tcp` before a managed start
+#   - graceful_restart.sh kills stragglers on its own target port (8081/8084)
+# uvicorn's own bind-or-fail behavior is sufficient beyond those two hooks.
 
 
 from collections import defaultdict
 from time import monotonic
 
 from dotenv import load_dotenv
-from jane.config import ENV_FILE_PATH, VAULT_DIR, TOOLS_DIR, ESSENCES_DIR, VESSENCE_DATA_HOME, ADD_FACT_SCRIPT, ADK_VENV_PYTHON, LOGS_DIR, PROMPT_LIST_PATH
+from jane.config import ENV_FILE_PATH, VAULT_DIR, TOOLS_DIR, ESSENCES_DIR, VESSENCE_DATA_HOME, ADD_FACT_SCRIPT, ADK_VENV_PYTHON, LOGS_DIR, PROMPT_LIST_PATH, get_chroma_client
 
 
 # ── Rate Limiting ────────────────────────────────────────────────────────────
@@ -216,8 +154,8 @@ try:
     ANDROID_VERSION = _version_data["version_name"]
     _ANDROID_VERSION_CODE = _version_data["version_code"]
 except FileNotFoundError:
-    ANDROID_VERSION = "0.2.34"
-    _ANDROID_VERSION_CODE = 265
+    ANDROID_VERSION = "0.2.45"
+    _ANDROID_VERSION_CODE = 276
 
 # Startup validation: ensure the APK for the advertised version actually exists
 _expected_apk = MARKETING_DOWNLOADS_DIR / f"vessences-android-v{ANDROID_VERSION}.apk"
@@ -490,9 +428,9 @@ async def startup():
     _logger.info("Jane Web startup complete — database initialized, essences loaded, ready to serve")
     # Resume processing any unprocessed shared articles left from before a restart
     asyncio.create_task(_resume_shared_queue_if_needed())
-    # Pre-warm the local LLM (qwen2.5:7b by default) — used by every
-    # Stage 2 handler + gate check + Stage 3 ack generator
-    prewarm = asyncio.create_task(_prewarm_gemma4())
+    # Pre-warm the local LLM (qwen2.5:7b) — used by every Stage 2
+    # handler + gate check + Stage 3 ack generator
+    prewarm = asyncio.create_task(_prewarm_local_llm())
     _background_tasks.add(prewarm)
     prewarm.add_done_callback(_background_tasks.discard)
     # Keep the Stage 1 embedding model + memory_retrieval singleton hot
@@ -592,21 +530,16 @@ async def _prewarm_stage1_classifier():
         _logger.warning("memory_retrieval prewarm failed: %s", e)
 
 
-async def _prewarm_gemma4():
-    """Pre-warm Jane's local LLM via Ollama HTTP API with keep_alive=-1.
+async def _prewarm_local_llm():
+    """Pre-warm Jane's local LLM (qwen2.5:7b) via Ollama with keep_alive=-1.
 
-    Pins the local LLM (used by Stage 2 class action handlers, the
-    dispatcher gate check, and the Stage 3 ack generator) in Ollama's
-    memory at server startup so the very first user request doesn't pay
-    a ~60-second cold-load. Tag comes from
-    `jane_web.jane_v2.models.LOCAL_LLM` (default qwen2.5:7b).
+    Pins the model in Ollama's memory at server startup so the very
+    first user request doesn't pay a ~60-second cold-load. Tag comes
+    from `jane_web.jane_v2.models.LOCAL_LLM`.
 
     Also kicks off the Stage 1 classifier warmup in parallel — Stage 1
     has its own separate cold-start penalty (sentence-transformers +
     Chroma) that we need to eat up front.
-
-    Name kept as `_prewarm_gemma4` for compatibility with existing callers.
-    Skipped silently if Ollama isn't running.
     """
     # Warm Stage 1 classifier in parallel — independent CPU/GPU work.
     asyncio.create_task(_prewarm_stage1_classifier())
@@ -614,18 +547,27 @@ async def _prewarm_gemma4():
         from jane_web.jane_v2.models import LOCAL_LLM as model, OLLAMA_KEEP_ALIVE
     except Exception:
         # Fallback if the models module can't be imported for some reason.
-        model = os.environ.get("JANE_LOCAL_LLM", "qwen2.5:7b")
+        from jane_web.jane_v2.models import STAGE2_MODEL
+        model = STAGE2_MODEL
         OLLAMA_KEEP_ALIVE = -1
     if ":" not in model:
         return
     _logger.info("Pre-warming local LLM: %s", model)
     try:
         import aiohttp
+        # Prewarm MUST use the same num_ctx as every live caller, otherwise
+        # the first real request triggers a runner reload (same bug we're
+        # trying to prevent).
+        try:
+            from jane_web.jane_v2.models import LOCAL_LLM_NUM_CTX as _NUM_CTX
+        except Exception:
+            _NUM_CTX = int(os.environ.get("JANE_LOCAL_LLM_NUM_CTX", "8192"))
         ollama_url = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=120)) as session:
             async with session.post(
                 f"{ollama_url}/api/generate",
                 json={"model": model, "prompt": "hi", "stream": False,
+                      "options": {"num_ctx": _NUM_CTX},
                       "keep_alive": OLLAMA_KEEP_ALIVE},
             ) as resp:
                 await resp.read()
@@ -633,24 +575,6 @@ async def _prewarm_gemma4():
     except Exception as e:
         _logger.warning("Local LLM prewarm failed: %s", e)
 
-
-async def _prewarm_ollama():
-    """Legacy prewarm — no longer called at startup."""
-    import subprocess
-    model = os.environ.get("INTENT_CLASSIFIER_MODEL", "gemma4:e2b")
-    if ":" not in model:
-        return  # API model, no need to prewarm
-    _logger.info("Pre-warming Ollama model: %s", model)
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            "ollama", "run", model, "hi",
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-        await asyncio.wait_for(proc.wait(), timeout=60)
-        _logger.info("Ollama model %s pre-warmed successfully", model)
-    except Exception as exc:
-        _logger.warning("Ollama pre-warm failed: %s", exc)
 
 
 async def _reap_stale_sessions_loop():
@@ -2621,7 +2545,7 @@ def create_music_playlist_from_query(query: str) -> dict | None:
     """Search vault music by query and create a temporary playlist.
 
     Returns playlist dict {"id", "name", "tracks", ...} or None if no matches.
-    Shared by /api/music/play endpoint and jane_proxy gemma4 music handler.
+    Shared by /api/music/play endpoint and jane_proxy Stage 2 music handler.
     Cleans up any prior temporary playlists first so they don't accumulate.
 
     Matching tiers:
@@ -2830,7 +2754,7 @@ def _should_use_v2(body: ChatMessage) -> bool:
 
     Stage 3 of v2 delegates to v1's brain internally, so web users still
     get the rich Opus "thinking stream" for anything that escalates past
-    Stage 2 (weather/music get answered locally by gemma4 and skip Opus).
+    Stage 2 (weather/music get answered locally by the local LLM and skip Opus).
     """
     return os.environ.get("JANE_PIPELINE", "").strip().lower() != "v1"
 
@@ -3769,15 +3693,23 @@ def _spawn_shared_article_processor():
     """
     import subprocess
     python = sys.executable
+    log_dir = os.path.join(os.environ.get("VESSENCE_DATA_HOME", str(Path.home() / "ambient" / "vessence-data")), "logs", "System_log")
     try:
+        os.makedirs(log_dir, exist_ok=True)
+    except Exception:
+        log_dir = "/tmp"
+    log_path = os.path.join(log_dir, "shared_article_processor.log")
+    try:
+        log_fd = open(log_path, "a")
         proc = subprocess.Popen(
             [python, _SHARED_ARTICLE_PROCESSOR],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stdout=log_fd,
+            stderr=subprocess.STDOUT,
             stdin=subprocess.DEVNULL,
             start_new_session=True,  # fully detached from server process
         )
-        _logger.info("Spawned detached article processor (pid=%d)", proc.pid)
+        log_fd.close()
+        _logger.info("Spawned detached article processor (pid=%d, log=%s)", proc.pid, log_path)
     except Exception:
         _logger.exception("Failed to spawn article processor")
 
@@ -3800,7 +3732,7 @@ async def submit_briefing_article(request: Request, _=Depends(require_auth)):
 
 @app.post("/api/briefing/articles/summarize_now")
 async def summarize_article_now(request: Request, _=Depends(require_auth)):
-    """Fetch a URL and return a brief summary synchronously for immediate TTS on the client.
+    """Fetch a URL and return a comprehensive summary synchronously for immediate TTS on the client.
 
     Returns {"status": "ok", "title": "...", "summary": "..."} or {"status": "error", "message": "..."}.
     """
@@ -3813,7 +3745,7 @@ async def summarize_article_now(request: Request, _=Depends(require_auth)):
         sys.path.insert(0, _BRIEFING_FUNCTIONS_DIR)
 
     try:
-        from news_fetcher import extract_article, summarize_brief
+        from news_fetcher import extract_article, summarize_full
     except ImportError as e:
         raise HTTPException(status_code=503, detail=f"Briefing module unavailable: {e}")
 
@@ -3832,7 +3764,7 @@ async def summarize_article_now(request: Request, _=Depends(require_auth)):
 
     if text:
         summary = await asyncio.get_event_loop().run_in_executor(
-            None, lambda: summarize_brief(title, text)
+            None, lambda: summarize_full(title, text)
         )
     else:
         summary = title
@@ -4173,7 +4105,7 @@ async def tax_knowledge_search(q: str = "", _=Depends(require_auth)):
         return JSONResponse({"status": "error", "message": "Query parameter 'q' required"})
     try:
         chroma_path = os.path.join(_TAX_ESSENCE_DIR, "knowledge", "chromadb")
-        chroma_client = chromadb.PersistentClient(path=chroma_path)
+        chroma_client = get_chroma_client(chroma_path)
         coll = chroma_client.get_collection("tax_knowledge_2025")
         results = coll.query(query_texts=[q], n_results=5)
         return JSONResponse({
