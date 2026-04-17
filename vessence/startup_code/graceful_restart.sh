@@ -35,6 +35,19 @@ WARMUP_TIMEOUT=120   # seconds to wait for CLI brain warmup
 
 log() { echo "[$(date '+%H:%M:%S')] $*"; }
 
+# Return PID(s) that are LISTENING on the given TCP port, one per line.
+# Fixes the subtle bug where `lsof -ti:$PORT` returned ALL processes with a
+# socket involving the port — including the reverse proxy's OUTGOING
+# connection to an upstream jane-web. That caused a previous graceful restart
+# to accidentally kill the proxy along with the old jane-web. Using `ss -ltn`
+# plus an exact-port grep restricts matches to listeners only.
+listeners_on_port() {
+    local port="$1"
+    [ -z "$port" ] && return 0
+    # -H: no header, -l: listen, -t: tcp, -n: numeric, -p: show pid=...
+    ss -Hltnp "sport = :$port" 2>/dev/null | grep -oP 'pid=\K[0-9]+' | sort -u
+}
+
 # ── Step 0: Create healthcheck lock to prevent interference ──
 # The healthcheck runs every 2 minutes and checks port 8081 directly.
 # During the ping-pong, 8081 may be vacant, causing the healthcheck to
@@ -107,10 +120,12 @@ fi
 log "Active: port $CURRENT_PORT → Starting new server on port $NEXT_PORT"
 
 # ── Step 2: Clear the target port ──
-OLD_PID=$(lsof -ti:$NEXT_PORT 2>/dev/null || true)
+# Listener-only — avoids killing the reverse proxy or any other process
+# that merely has an established connection involving this port number.
+OLD_PID=$(listeners_on_port "$NEXT_PORT")
 if [ -n "$OLD_PID" ]; then
-    log "Killing stale process on port $NEXT_PORT (PID: $OLD_PID)"
-    kill -9 $OLD_PID 2>/dev/null || true
+    log "Killing stale LISTENER on port $NEXT_PORT (PID: $OLD_PID)"
+    for pid in $OLD_PID; do kill -9 "$pid" 2>/dev/null || true; done
     sleep 1
 fi
 
@@ -213,18 +228,22 @@ if [ "$CURRENT_PORT" = "8081" ] && systemctl --user is-active jane-web.service >
     sleep 1
 fi
 
-# Backup: kill anything still bound to the old port (e.g. nohup orphan from
-# a previous graceful_restart). Exclude the NEW server PID just in case.
-OLD_SERVER_PID=$(lsof -ti:$CURRENT_PORT 2>/dev/null || true)
+# Backup: kill anything still LISTENING on the old port (e.g. nohup orphan
+# from a previous graceful_restart). MUST be listener-only — the reverse
+# proxy on port 8080 has an active OUTGOING connection to whichever upstream
+# was live, so `lsof -ti:$CURRENT_PORT` (used here historically) would have
+# returned the proxy's PID too and killed it. `listeners_on_port` matches
+# LISTEN sockets only.
+OLD_SERVER_PID=$(listeners_on_port "$CURRENT_PORT")
 if [ -n "$OLD_SERVER_PID" ]; then
-    log "Cleaning up stragglers on port $CURRENT_PORT (PID: $OLD_SERVER_PID)"
+    log "Cleaning up stragglers LISTENING on port $CURRENT_PORT (PID: $OLD_SERVER_PID)"
     for pid in $OLD_SERVER_PID; do
         if [ "$pid" != "$NEW_PID" ]; then
             kill "$pid" 2>/dev/null || true
         fi
     done
     sleep 2
-    REMAINING=$(lsof -ti:$CURRENT_PORT 2>/dev/null || true)
+    REMAINING=$(listeners_on_port "$CURRENT_PORT")
     for pid in $REMAINING; do
         if [ "$pid" != "$NEW_PID" ]; then
             kill -9 "$pid" 2>/dev/null || true
