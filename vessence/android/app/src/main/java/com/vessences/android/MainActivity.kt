@@ -55,6 +55,11 @@ class MainActivity : ComponentActivity() {
      */
     fun launchStt() {
         DiagnosticReporter.voiceFlow("stt_launch")
+        // Timestamp the launch so restoreAlwaysListening() and onResume() can
+        // see "we JUST tried STT" and avoid racing AL.start on top of a
+        // recognizer that hasn't finished releasing the mic.
+        com.vessences.android.voice.WakeWordBridge.lastSttLaunchMs =
+            System.currentTimeMillis()
         val hasMicPerm = ContextCompat.checkSelfPermission(
             this, Manifest.permission.RECORD_AUDIO
         ) == PackageManager.PERMISSION_GRANTED
@@ -120,8 +125,24 @@ class MainActivity : ComponentActivity() {
                     activeRecognizer = null
                     recognizer.destroy()
                     SttResultBus.onListening?.invoke(false)
+                    // Map numeric codes to a readable label so the diagnostic log
+                    // tells us WHY STT died (was it mic contention, no-speech, etc).
+                    // Codes from android.speech.SpeechRecognizer.
+                    val codeLabel = when (error) {
+                        android.speech.SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "network_timeout"
+                        android.speech.SpeechRecognizer.ERROR_NETWORK -> "network"
+                        android.speech.SpeechRecognizer.ERROR_AUDIO -> "audio"
+                        android.speech.SpeechRecognizer.ERROR_SERVER -> "server"
+                        android.speech.SpeechRecognizer.ERROR_CLIENT -> "client"
+                        android.speech.SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "speech_timeout"
+                        android.speech.SpeechRecognizer.ERROR_NO_MATCH -> "no_match"
+                        android.speech.SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "recognizer_busy"
+                        android.speech.SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "insufficient_permissions"
+                        else -> "unknown_$error"
+                    }
                     DiagnosticReporter.voiceFlow(
-                        "stt_error", mapOf("reason" to "recognizer_error_$error")
+                        "stt_error",
+                        mapOf("reason" to codeLabel, "code" to error)
                     )
                     // No speech or recognizer error — silently restore always-listen
                     restoreAlwaysListening()
@@ -158,12 +179,54 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /** Race guard: min millis between `launchStt()` and `AlwaysListeningService.start()`.
+     *  Below this, the Android SpeechRecognizer's AudioRecord may still hold the mic,
+     *  so AL's AudioRecord comes up in a silent/zombie state (reads succeed but all
+     *  samples are zeros). Delay + re-check prevents that handoff race. */
+    private val STT_TO_AL_COOLDOWN_MS = 2_000L
+    /** Extra settle delay between last-launch cooldown and actual AL.start. */
+    private val STT_TO_AL_SETTLE_MS = 500L
+
+    /** Start AlwaysListening, or defer it if STT was just launched (mic-handoff guard). */
+    private fun startAlwaysListeningGuarded(reason: String) {
+        val voiceSettings = com.vessences.android.data.repository.VoiceSettingsRepository(applicationContext)
+        if (!voiceSettings.isAlwaysListeningEnabled()) return
+
+        val sinceStt = System.currentTimeMillis() -
+            com.vessences.android.voice.WakeWordBridge.lastSttLaunchMs
+        if (sinceStt < STT_TO_AL_COOLDOWN_MS) {
+            val wait = (STT_TO_AL_COOLDOWN_MS - sinceStt) + STT_TO_AL_SETTLE_MS
+            DiagnosticReporter.voiceFlow(
+                "al_start_deferred",
+                mapOf("reason" to reason, "wait_ms" to wait, "since_stt_ms" to sinceStt)
+            )
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                // Re-check: a new STT may have launched in the interim, or the app may
+                // have moved to background. Skip AL.start in both cases.
+                if (com.vessences.android.voice.WakeWordBridge.sttActive) {
+                    DiagnosticReporter.voiceFlow(
+                        "al_start_canceled",
+                        mapOf("reason" to "stt_active_after_defer", "orig_reason" to reason)
+                    )
+                    return@postDelayed
+                }
+                if (!ChatNotificationManager.isAppInForeground) {
+                    DiagnosticReporter.voiceFlow(
+                        "al_start_canceled",
+                        mapOf("reason" to "app_backgrounded_after_defer", "orig_reason" to reason)
+                    )
+                    return@postDelayed
+                }
+                com.vessences.android.voice.AlwaysListeningService.start(applicationContext)
+            }, wait)
+            return
+        }
+        com.vessences.android.voice.AlwaysListeningService.start(applicationContext)
+    }
+
     private fun restoreAlwaysListening() {
         com.vessences.android.voice.WakeWordBridge.sttActive = false
-        val voiceSettings = com.vessences.android.data.repository.VoiceSettingsRepository(applicationContext)
-        if (voiceSettings.isAlwaysListeningEnabled()) {
-            com.vessences.android.voice.AlwaysListeningService.start(applicationContext)
-        }
+        startAlwaysListeningGuarded("restoreAlwaysListening")
     }
 
     private var permissionsRequested = false
@@ -183,10 +246,11 @@ class MainActivity : ComponentActivity() {
             }
         }
         // Start wake word listening only if not in an active voice conversation
-        // (STT popup returning triggers onResume — don't restart listening mid-conversation)
-        val voiceSettings = com.vessences.android.data.repository.VoiceSettingsRepository(this)
-        if (voiceSettings.isAlwaysListeningEnabled() && !com.vessences.android.voice.WakeWordBridge.sttActive) {
-            com.vessences.android.voice.AlwaysListeningService.start(this)
+        // (STT popup returning triggers onResume — don't restart listening mid-conversation).
+        // Route through the guarded path so a recently-launched STT that's still
+        // holding the mic doesn't get trampled by AL.start (see startAlwaysListeningGuarded).
+        if (!com.vessences.android.voice.WakeWordBridge.sttActive) {
+            startAlwaysListeningGuarded("onResume")
         }
     }
 

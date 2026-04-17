@@ -1,5 +1,9 @@
 # Vessence Changelog
 
+## v0.2.46 (2026-04-16)
+- **Android STT ↔ wake-word race fix.** After Jane's response, the STT relaunch could race with `AlwaysListeningService.start()` — both tried to grab the mic inside the same 3s window, the SpeechRecognizer errored, and AL came up in a zombie state (AudioRecord reading all-zero samples → wake-word scores flat-lined at ~1e-5 noise floor → "hey Jane" stopped working). Added `WakeWordBridge.lastSttLaunchMs` timestamp; `MainActivity.startAlwaysListeningGuarded()` defers AL.start by (2s cooldown + 500ms settle) if STT was launched recently, then re-checks `sttActive` and foreground state before actually starting. Both `restoreAlwaysListening()` and `onResume()` now route through the guarded path.
+- **`stt_error` diagnostic**: now includes a readable label (`no_match`, `recognizer_busy`, `speech_timeout`, etc.) mapped from the SpeechRecognizer error code. Previously just logged `recognizer_error_<int>` with no payload.
+
 ## 2026-04-16 (session)
 - **Ollama thrashing fix**: Unified `LOCAL_LLM_NUM_CTX = 8192` across every `qwen2.5:7b` caller (gemma_router, gemma_stage1/2, Stage 2 handlers, prewarm, summarizers, audit judge, briefing news_fetcher). Ollama now keeps one runner pinned at 8192 ctx instead of reloading per caller.
 - **Thread-leak fix**: Removed hardcoded port-clearing hook from `jane_web/main.py`; `jane-web.service` now `Restart=no`; `graceful_restart.sh` has a hard invariant (Step 0.6) reconciling duplicate uvicorns.
