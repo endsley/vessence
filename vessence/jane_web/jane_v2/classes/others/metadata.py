@@ -9,7 +9,19 @@ classifier when to pick 'others' instead of a specific class.
 METADATA = {
     "name": "others",
     "priority": 100,           # run last when iterating; low in classifier prompt
-    "description": "",          # no schema block — 'others' is the fallback
+    "description": (
+        "[others]\n"
+        "The \"else\" possibility — catch-all fallback when neither the "
+        "primary nor alternative class fits. Choose 'others' (with Low "
+        "confidence) when the message: (a) needs general reasoning "
+        "(coding, creative, math, explanations); (b) asks a meta question "
+        "about Jane's own architecture or code; (c) depends on memory of "
+        "past conversations; (d) pivots to a topic with no registered "
+        "handler; or (e) is too ambiguous to route confidently.\n\n"
+        "A weak-but-real match to a specific class still beats 'others'. "
+        "Reserve 'others' for cases where no specific handler is a "
+        "defensible fit at all."
+    ),
     "few_shot": [
         ("What playlists do I have?", "others:Low"),
         ("How many songs are in my workout playlist?", "others:Low"),

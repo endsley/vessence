@@ -543,6 +543,10 @@ async def _prewarm_local_llm():
     """
     # Warm Stage 1 classifier in parallel — independent CPU/GPU work.
     asyncio.create_task(_prewarm_stage1_classifier())
+
+    # v3 pipeline: classifier calls qwen2.5:7b via Ollama, which is
+    # already prewarmed as part of the local-LLM prewarm block below.
+    # No separate v3 warmup needed.
     try:
         from jane_web.jane_v2.models import LOCAL_LLM as model, OLLAMA_KEEP_ALIVE
     except Exception:
@@ -2759,8 +2763,23 @@ def _should_use_v2(body: ChatMessage) -> bool:
     return os.environ.get("JANE_PIPELINE", "").strip().lower() != "v1"
 
 
+def _should_use_v3(body: ChatMessage) -> bool:
+    """Opt-in to jane_v3 pipeline (FIFO-aware Haiku classification).
+
+    Enable with `JANE_USE_V3_PIPELINE=1` in .env. When enabled, v3 takes
+    precedence over v2 for every chat request on the configured user. When
+    the flag is unset or any non-1 value, v2 continues to serve — v3 code
+    is never imported. This flag is independent of `JANE_PIPELINE=v1`
+    which forces the old gemma_router path regardless.
+    """
+    return os.environ.get("JANE_USE_V3_PIPELINE", "").strip() == "1"
+
+
 @app.post("/api/jane/chat")
 async def jane_chat(body: ChatMessage, request: Request):
+    if _should_use_v3(body):
+        from jane_web.jane_v3.pipeline import handle_chat as _v3_handle_chat
+        return await _v3_handle_chat(body, request)
     if _should_use_v2(body):
         from jane_web.jane_v2.pipeline import handle_chat as _v2_handle_chat
         return await _v2_handle_chat(body, request)
@@ -3212,6 +3231,9 @@ async def permission_pending_endpoint(request: Request, _=Depends(require_auth))
 
 @app.post("/api/jane/chat/stream")
 async def jane_chat_stream(body: ChatMessage, request: Request):
+    if _should_use_v3(body):
+        from jane_web.jane_v3.pipeline import handle_chat_stream as _v3_handle_chat_stream
+        return await _v3_handle_chat_stream(body, request)
     if _should_use_v2(body):
         from jane_web.jane_v2.pipeline import handle_chat_stream as _v2_handle_chat_stream
         return await _v2_handle_chat_stream(body, request)
