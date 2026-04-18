@@ -1,0 +1,256 @@
+{
+  "class": "SEND_MESSAGE",
+  "phrases": [
+    "my wife said she loves me",
+    "my wife texted me this morning",
+    "bob just sent me a message",
+    "sarah told me about her trip",
+    "john called me yesterday",
+    "what did my wife text me",
+    "did bob send me anything",
+    "any new texts from my wife",
+    "check texts from my wife",
+    "read my messages from sarah",
+    "read the text john sent",
+    "what did kathia say",
+    "call my wife",
+    "phone my mom",
+    "ring up bob",
+    "tell me about python asyncio",
+    "tell me a story",
+    "tell me the time",
+    "tell me the weather",
+    "tell me a joke",
+    "can you tell me how this works",
+    "can you explain this to me",
+    "let me know when it's 3pm",
+    "let mom pick the restaurant",
+    "let me think about it",
+    "send me the weather forecast",
+    "send me the news",
+    "how do I send a text on android",
+    "what's the best way to message someone",
+    "did I send that email to bob"
+  ],
+  "results": [
+    {
+      "phrase": "my wife said she loves me",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.4,
+      "margin": 0.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "my wife texted me this morning",
+      "classification": "READ_MESSAGES",
+      "confidence": 0.6,
+      "margin": 0.2,
+      "false_positive": false
+    },
+    {
+      "phrase": "bob just sent me a message",
+      "classification": "SEND_MESSAGE",
+      "confidence": 0.6,
+      "margin": 0.4,
+      "false_positive": true
+    },
+    {
+      "phrase": "sarah told me about her trip",
+      "classification": "SEND_MESSAGE",
+      "confidence": 0.6,
+      "margin": 0.4,
+      "false_positive": true
+    },
+    {
+      "phrase": "john called me yesterday",
+      "classification": "SEND_MESSAGE",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": true
+    },
+    {
+      "phrase": "what did my wife text me",
+      "classification": "READ_MESSAGES",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "did bob send me anything",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.4,
+      "margin": 0.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "any new texts from my wife",
+      "classification": "READ_MESSAGES",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "check texts from my wife",
+      "classification": "READ_MESSAGES",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "read my messages from sarah",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.4,
+      "margin": 0.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "read the text john sent",
+      "classification": "READ_MESSAGES",
+      "confidence": 0.6,
+      "margin": 0.2,
+      "false_positive": false
+    },
+    {
+      "phrase": "what did kathia say",
+      "classification": "READ_MESSAGES",
+      "confidence": 0.6,
+      "margin": 0.2,
+      "false_positive": false
+    },
+    {
+      "phrase": "call my wife",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "phone my mom",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.4,
+      "margin": 0.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "ring up bob",
+      "classification": "SEND_MESSAGE",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": true
+    },
+    {
+      "phrase": "tell me about python asyncio",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "tell me a story",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.4,
+      "margin": 0.2,
+      "false_positive": false
+    },
+    {
+      "phrase": "tell me the time",
+      "classification": "GET_TIME",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "tell me the weather",
+      "classification": "WEATHER",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "tell me a joke",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.4,
+      "margin": 0.2,
+      "false_positive": false
+    },
+    {
+      "phrase": "can you tell me how this works",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "can you explain this to me",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.6,
+      "margin": 0.2,
+      "false_positive": false
+    },
+    {
+      "phrase": "let me know when it's 3pm",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.4,
+      "margin": 0.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "let mom pick the restaurant",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.6,
+      "margin": 0.2,
+      "false_positive": false
+    },
+    {
+      "phrase": "let me think about it",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.6,
+      "margin": 0.4,
+      "false_positive": false
+    },
+    {
+      "phrase": "send me the weather forecast",
+      "classification": "WEATHER",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "send me the news",
+      "classification": "READ_EMAIL",
+      "confidence": 0.6,
+      "margin": 0.4,
+      "false_positive": false
+    },
+    {
+      "phrase": "how do I send a text on android",
+      "classification": "SEND_MESSAGE",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": true
+    },
+    {
+      "phrase": "what's the best way to message someone",
+      "classification": "SEND_MESSAGE",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": true
+    },
+    {
+      "phrase": "did I send that email to bob",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.4,
+      "margin": 0.2,
+      "false_positive": false
+    }
+  ],
+  "false_positive_count": 6,
+  "false_positives": [
+    "bob just sent me a message",
+    "sarah told me about her trip",
+    "john called me yesterday",
+    "ring up bob",
+    "how do I send a text on android",
+    "what's the best way to message someone"
+  ]
+}

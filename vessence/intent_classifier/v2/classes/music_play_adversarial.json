@@ -1,0 +1,266 @@
+{
+  "class": "MUSIC_PLAY",
+  "phrases": [
+    "who sang this song",
+    "who wrote bohemian rhapsody",
+    "what's the name of this song",
+    "what song is this",
+    "what year did coldplay release this album",
+    "tell me about taylor swift's new album",
+    "is coldplay touring this year",
+    "what genre is billie eilish",
+    "can you translate these lyrics",
+    "what are the lyrics to yesterday",
+    "I love this song",
+    "this song is stuck in my head",
+    "the song was playing on the radio",
+    "she sang at the concert last night",
+    "my daughter likes to play the piano",
+    "play a game with me",
+    "let's play chess",
+    "turn off the lights",
+    "turn off the alarm",
+    "turn on the oven",
+    "pause the video",
+    "stop the timer",
+    "stop the countdown",
+    "skip to the next item on my list",
+    "skip breakfast today",
+    "go to the next todo",
+    "next meeting on my calendar",
+    "resume my workout",
+    "volume is too loud in this room",
+    "do you know any good songs to play at a wedding"
+  ],
+  "results": [
+    {
+      "phrase": "who sang this song",
+      "classification": "MUSIC_PLAY",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": true
+    },
+    {
+      "phrase": "who wrote bohemian rhapsody",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.0,
+      "margin": 0.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "what's the name of this song",
+      "classification": "MUSIC_PLAY",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": true
+    },
+    {
+      "phrase": "what song is this",
+      "classification": "MUSIC_PLAY",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": true
+    },
+    {
+      "phrase": "what year did coldplay release this album",
+      "classification": "MUSIC_PLAY",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": true
+    },
+    {
+      "phrase": "tell me about taylor swift's new album",
+      "classification": "MUSIC_PLAY",
+      "confidence": 0.6,
+      "margin": 0.4,
+      "false_positive": true
+    },
+    {
+      "phrase": "is coldplay touring this year",
+      "classification": "MUSIC_PLAY",
+      "confidence": 0.6,
+      "margin": 0.2,
+      "false_positive": true
+    },
+    {
+      "phrase": "what genre is billie eilish",
+      "classification": "MUSIC_PLAY",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": true
+    },
+    {
+      "phrase": "can you translate these lyrics",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.4,
+      "margin": 0.2,
+      "false_positive": false
+    },
+    {
+      "phrase": "what are the lyrics to yesterday",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.4,
+      "margin": 0.2,
+      "false_positive": false
+    },
+    {
+      "phrase": "I love this song",
+      "classification": "MUSIC_PLAY",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": true
+    },
+    {
+      "phrase": "this song is stuck in my head",
+      "classification": "MUSIC_PLAY",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": true
+    },
+    {
+      "phrase": "the song was playing on the radio",
+      "classification": "MUSIC_PLAY",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": true
+    },
+    {
+      "phrase": "she sang at the concert last night",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.0,
+      "margin": 0.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "my daughter likes to play the piano",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.0,
+      "margin": 0.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "play a game with me",
+      "classification": "MUSIC_PLAY",
+      "confidence": 0.6,
+      "margin": 0.2,
+      "false_positive": true
+    },
+    {
+      "phrase": "let's play chess",
+      "classification": "MUSIC_PLAY",
+      "confidence": 0.6,
+      "margin": 0.2,
+      "false_positive": true
+    },
+    {
+      "phrase": "turn off the lights",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.4,
+      "margin": 0.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "turn off the alarm",
+      "classification": "TIMER",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "turn on the oven",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "pause the video",
+      "classification": "MUSIC_PLAY",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": true
+    },
+    {
+      "phrase": "stop the timer",
+      "classification": "TIMER",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "stop the countdown",
+      "classification": "TIMER",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "skip to the next item on my list",
+      "classification": "MUSIC_PLAY",
+      "confidence": 0.6,
+      "margin": 0.2,
+      "false_positive": true
+    },
+    {
+      "phrase": "skip breakfast today",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.4,
+      "margin": 0.2,
+      "false_positive": false
+    },
+    {
+      "phrase": "go to the next todo",
+      "classification": "TODO_LIST",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "next meeting on my calendar",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "resume my workout",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.4,
+      "margin": 0.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "volume is too loud in this room",
+      "classification": "MUSIC_PLAY",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": true
+    },
+    {
+      "phrase": "do you know any good songs to play at a wedding",
+      "classification": "MUSIC_PLAY",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": true
+    }
+  ],
+  "false_positive_count": 16,
+  "false_positives": [
+    "who sang this song",
+    "what's the name of this song",
+    "what song is this",
+    "what year did coldplay release this album",
+    "tell me about taylor swift's new album",
+    "is coldplay touring this year",
+    "what genre is billie eilish",
+    "I love this song",
+    "this song is stuck in my head",
+    "the song was playing on the radio",
+    "play a game with me",
+    "let's play chess",
+    "pause the video",
+    "skip to the next item on my list",
+    "volume is too loud in this room",
+    "do you know any good songs to play at a wedding"
+  ]
+}

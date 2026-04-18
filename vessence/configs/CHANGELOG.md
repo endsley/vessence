@@ -1,5 +1,8 @@
 # Vessence Changelog
 
+## v0.2.49 (2026-04-17)
+- Version bump.
+
 ## v0.2.48 (2026-04-16)
 - **Fix: STT stopped auto-relaunching after Stage 2 replies.** After a todo_list / weather / greeting / any Stage 2 handler's TTS response finished on voice mode, the post-TTS guard at `ChatViewModel.kt:1036` was using `!_state.value.isSpeaking` as a proxy for "user tapped Stop" — but `isSpeaking` was sometimes flipped to `false` by unrelated state-update races while `tts.speak()` was suspended, producing false `relaunch_skipped reason=stop_speaking_called` events and leaving the user with no mic to answer with. Replaced the heuristic with an explicit `stopSpeakingInvoked: Boolean` flag, set only inside `stopSpeaking()` and cleared at the start of each turn in `executeSend()`. The diagnostic reason label is unchanged so existing log analysis still works.
 

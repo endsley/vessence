@@ -44,6 +44,19 @@ EXAMPLES = [
     "play some white noise", "play ambient sounds",
     "play rain sounds", "play ocean sounds",
     "put on some sleep music", "play something to fall asleep to",
+    # Playback controls — always tied to music/song/track vocabulary so
+    # they don't poach workouts, videos, lists, etc. Bare "turn it up" /
+    # "louder" are NOT added here because they ambiguously apply to any
+    # audio source; the v3 classifier's FIFO context handles those.
+    "skip this song", "skip this track", "skip to the next song",
+    "skip to the next track", "next song", "next track",
+    "play the next song", "go to the next song",
+    "previous song", "go back a song", "play the previous track",
+    "stop the music", "stop the song", "pause the music",
+    "pause the song", "resume the music",
+    "turn the music up", "turn the volume of the music up",
+    "turn the music down", "turn the volume of the music down",
+    "make the music louder", "make the music quieter",
 ]
 
 CONTEXT = """\

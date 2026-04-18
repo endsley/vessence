@@ -40,10 +40,22 @@ logger = logging.getLogger(__name__)
 
 TOP_K = int(os.environ.get("JANE_V3_TOP_K", "5"))
 MAX_DISTANCE = float(os.environ.get("JANE_V3_MAX_DISTANCE", "0.60"))
-FIFO_TURNS = int(os.environ.get("JANE_V3_FIFO_TURNS", "8"))
+FIFO_TURNS = int(os.environ.get("JANE_V3_FIFO_TURNS", "4"))
+# If the winner's nearest exemplar is within this cosine distance, treat
+# the embedding vote as authoritative and tell qwen to trust it.
+# 0.05 ≈ "essentially the same string" (perfect match is 0.0).
+#
+# We deliberately DO NOT short-circuit on "unanimous top-K vote" — the
+# bge-small model embeds question/statement variants of the same topic
+# too close together (e.g. "what song is this?" and "play this song" both
+# land unanimously in MUSIC_PLAY's neighborhood). A unanimous vote means
+# vocabulary overlap, not semantic correctness. Only verbatim matches
+# (distance ≈ 0) are safe to bypass qwen on.
+NEAR_IDENTICAL_DIST = float(os.environ.get("JANE_V3_NEAR_IDENTICAL_DIST", "0.05"))
 # Per-call timeout for the qwen HTTP call. qwen is warm so this is usually
-# ~200–600 ms; 5 s is a generous upper bound for long prompts.
-_LLM_TIMEOUT = float(os.environ.get("JANE_V3_LLM_TIMEOUT_S", "5.0"))
+# ~200–600 ms; 40 s absorbs rare stalls (runner reload, heavy system load)
+# without classifying as timeout.
+_LLM_TIMEOUT = float(os.environ.get("JANE_V3_LLM_TIMEOUT_S", "40.0"))
 # Output budget — the expected response is a ~40-token JSON object.
 _NUM_PREDICT = int(os.environ.get("JANE_V3_NUM_PREDICT", "60"))
 
@@ -151,6 +163,30 @@ async def _recent_fifo(session_id: str) -> str:
         return ""
 
 
+def _janes_last_question(fifo_block: str) -> str:
+    """Extract Jane's most recent utterance from the FIFO IF it ended with a '?'.
+
+    We call this out explicitly in the prompt because qwen tends to weight
+    the embedding vote over the FIFO on short-reply follow-ups (e.g. a bare
+    "pasta" replying to "what should I call this timer?"). A direct callout
+    forces qwen to see that there's an open question on the table.
+    """
+    if not fifo_block:
+        return ""
+    last_jane_line = ""
+    for line in fifo_block.splitlines():
+        s = line.strip()
+        if not s:
+            continue
+        # Lines are rendered as "jane: ..." or "user: ..." by recent_context.
+        if s.lower().startswith("jane:"):
+            last_jane_line = s[len("jane:"):].strip()
+        # We keep overwriting so we end with Jane's MOST RECENT utterance.
+    if last_jane_line.endswith("?"):
+        return last_jane_line
+    return ""
+
+
 # ── Prompt assembly ──────────────────────────────────────────────────────────
 
 
@@ -158,6 +194,7 @@ def _build_prompt(
     winner_class: str,
     winner_def: str,
     winner_count: int,
+    winner_best_distance: float,
     runnerup_class: str | None,
     runnerup_def: str,
     runnerup_count: int,
@@ -172,70 +209,66 @@ def _build_prompt(
     conversation context clearly favors it over the embedding's top pick.
     """
     fifo_section = (
-        f"Recent conversation (oldest first, last {FIFO_TURNS} turns):\n{fifo_block}\n"
+        f"Recent turns (oldest first):\n{fifo_block}\n"
         if fifo_block else
-        "Recent conversation: (empty — first turn or no prior context)\n"
+        "Recent turns: (none)\n"
+    )
+
+    # Jane's last question callout — kept because short follow-ups ("pasta",
+    # "clinic", "five") only make sense against the open question.
+    janes_q = _janes_last_question(fifo_block)
+    jane_callout = (
+        f"Jane's last question: \"{janes_q}\" "
+        f"(user may be answering it, or pivoting).\n"
+        if janes_q else ""
     )
 
     primary_def_block = (
-        f"What '{winner_class}' handles:\n{winner_def}\n"
-        if winner_def else
-        f"(No description available for '{winner_class}'.)\n"
+        f"[{winner_class}]\n{winner_def}\n" if winner_def
+        else f"[{winner_class}] (no description)\n"
     )
     if runnerup_class and runnerup_class != winner_class:
-        alt_header = (
-            f"\nAlternative possibility — '{runnerup_class}' "
-            f"(won {runnerup_count} of {total_votes} neighbors, "
-            f"vs. winner {winner_count}/{total_votes})"
-        )
         alt_def_block = (
-            f"\nWhat '{runnerup_class}' handles:\n{runnerup_def}\n"
-            if runnerup_def else
-            f"\n(No description available for '{runnerup_class}'.)\n"
+            f"\n[{runnerup_class}] (alternative)\n{runnerup_def}\n" if runnerup_def
+            else f"\n[{runnerup_class}] (alternative, no description)\n"
         )
     else:
-        alt_header = "\n(No runner-up — the embedding neighbors all agreed on the same class.)"
         alt_def_block = ""
 
-    # Always show the 'others' description as the explicit fallback option.
-    others_def = _class_definition("others") or ""
-    others_section = (
-        f"\nElse possibility — 'others' (catch-all, always available):\n"
-        f"{others_def}\n"
-        if others_def else
-        "\nElse possibility — 'others' (catch-all; use when neither primary nor alternative fits).\n"
-    )
+    # Short fallback note — full 'others' description is redundant given
+    # the rule "if neither fits, return others".
+    others_section = "\n[others] — pick this if neither class above fits.\n"
 
-    return f"""You are validating a class-routing decision for a voice assistant named Jane.
+    # Near-identical-match shortcut: if the winner's nearest exemplar is
+    # essentially the same string as the user prompt (cosine distance near
+    # zero), the embedding vote is authoritative — trust it unless the
+    # conversation context blatantly contradicts. This only fires on
+    # verbatim matches (dist < 0.05); looser thresholds let question/
+    # command variants of the same topic fool the shortcut.
+    if winner_best_distance <= NEAR_IDENTICAL_DIST:
+        identical_callout = (
+            f"IMPORTANT: The user's message is a near-identical match "
+            f"(distance={winner_best_distance:.3f}) to an existing "
+            f"'{winner_class}' exemplar in the embedding database. "
+            f"Trust the embedding vote and return '{winner_class}' with "
+            f"Very High confidence UNLESS the recent conversation clearly "
+            f"shows the user is pivoting away from it.\n\n"
+        )
+    else:
+        identical_callout = ""
 
-How this routing works: an embedding classifier looks ONLY at the user's current message text — it does not see the conversation history. This is a blind spot. If the current message is a short reply or follow-up to a question Jane just asked, the embedding can easily pick the wrong class. Example: the word "clinic" on its own embeds near `read messages` (appointment associations), but if Jane just asked "which todo category?" then "clinic" is a `todo list` answer.
+    return f"""Classify the user's message for Jane (voice assistant). An embedding vote picked {winner_class}{f" (runner-up: {runnerup_class})" if runnerup_class and runnerup_class != winner_class else ""}. Validate against the conversation and pick the right class.
 
-We voted over the 5 nearest neighbors in the embedding space. The top guess and the runner-up are given to you below. You may pick either, OR reject both with "others" if neither fits the conversation.
+{identical_callout}{primary_def_block}{alt_def_block}{others_section}
+{fifo_section}{jane_callout}
+User: "{user_prompt.strip()}"
 
-Our primary guess: {winner_class}  (won {winner_count} of {total_votes} top-5 nearest neighbors)
-{primary_def_block}{alt_header}{alt_def_block}{others_section}
-{fifo_section}
-User's current message:
-  "{user_prompt.strip()}"
+Return ONLY JSON: {{"class": "<name>", "confidence": "Very High|High|Medium|Low"}}
+- Very High / High → Stage 2 handler runs.
+- Medium / Low → escalate to reasoning brain.
+Pick "others" with Low if neither candidate fits.
 
-Your job: given the FULL context — the recent conversation AND the current message — decide:
-  1. Is the primary guess correct? → return it with appropriate confidence.
-  2. Does the alternative fit better? → return the alternative's class name.
-  3. Is neither right? → return "others" with Low confidence.
-
-Return ONLY a JSON object. No prose. No markdown fences. No explanation.
-Shape:
-  {{"class": "<primary name, alternative name, or 'others'>", "confidence": "Very High|High|Medium|Low"}}
-
-Confidence rules:
-- Very High — unambiguous; Jane's handler should run without hesitation.
-- High      — correct class, only minor detail uncertainty.
-- Medium    — might be right, but enough ambiguity that a reasoning model should handle it.
-- Low       — probably wrong class; escalate.
-
-Only Very High and High route to Jane's fast handler. Medium and Low route to the full reasoning brain (Opus). If the message has clearly pivoted to a different topic than either candidate, return class="others" with Low confidence.
-
-Your JSON:"""
+JSON:"""
 
 
 # ── qwen call via Ollama (reuses the already-warm runner) ────────────────────
@@ -321,6 +354,7 @@ async def classify(
         winner_class=winner_handler,
         winner_def=winner_def,
         winner_count=winner["count"],
+        winner_best_distance=winner["best_distance"],
         runnerup_class=runnerup_handler,
         runnerup_def=runnerup_def,
         runnerup_count=runnerup["count"] if runnerup else 0,

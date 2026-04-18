@@ -28,9 +28,10 @@ METADATA = {
         "Adversarial phrasings that LOOK LIKE 'end conversation' but ARE NOT:\n"
         "  - \"stop the music\" → 'music play' (media control, not sign-off)\n"
         "  - \"cancel my timer\" → 'timer' (cancel a specific timer)\n"
-        "  - \"ok\" (alone, mid-flow) → stay in current flow or 'others'\n"
-        "  - \"thanks\" (standalone, after a useful answer) → 'others' (acknowledgment, not sign-off)\n"
-        "  - \"never mind\" after Jane misheard earlier → could be correction, not necessarily sign-off"
+        "  - \"never mind\" after Jane misheard earlier → could be correction, not necessarily sign-off\n\n"
+        "Note: bare acknowledgments like \"ok thanks\", \"okay thank\", \"thanks\", "
+        "\"cool thanks\", \"great thanks\" ARE end conversation — do not reclassify "
+        "them as 'others'."
     ),
     "few_shot": [],
     "ack": None,

@@ -45,7 +45,9 @@ listeners_on_port() {
     local port="$1"
     [ -z "$port" ] && return 0
     # -H: no header, -l: listen, -t: tcp, -n: numeric, -p: show pid=...
-    ss -Hltnp "sport = :$port" 2>/dev/null | grep -oP 'pid=\K[0-9]+' | sort -u
+    # `|| true` prevents pipefail abort when grep finds no matches (empty
+    # port is the common case on ping-pong startup).
+    ss -Hltnp "sport = :$port" 2>/dev/null | { grep -oP 'pid=\K[0-9]+' || true; } | sort -u
 }
 
 # ── Step 0: Create healthcheck lock to prevent interference ──

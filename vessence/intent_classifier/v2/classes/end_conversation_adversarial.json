@@ -1,0 +1,258 @@
+{
+  "class": "END_CONVERSATION",
+  "phrases": [
+    "stop the music",
+    "stop the timer",
+    "stop the song",
+    "cancel my timer",
+    "cancel the 5 minute timer",
+    "cancel my reminder",
+    "pause the music",
+    "mute the volume",
+    "skip to the next song",
+    "skip this track",
+    "skip to the next one",
+    "turn it off",
+    "turn off the music",
+    "hold on, tell my wife I'm late",
+    "wait, what's the weather",
+    "never mind the timer, what time is it",
+    "forget the todo list, play some music",
+    "don't send it to bob, send it to alice",
+    "nope, tell her something different",
+    "not now, maybe later today",
+    "be quiet for five minutes",
+    "silence the alarm",
+    "say goodbye to bob for me",
+    "tell my wife goodnight",
+    "text dad have a good night",
+    "how do I end a meeting",
+    "what does bye mean in french",
+    "is it good night already",
+    "thanks for the help though",
+    "thanks for telling me that"
+  ],
+  "results": [
+    {
+      "phrase": "stop the music",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.4,
+      "margin": 0.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "stop the timer",
+      "classification": "TIMER",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "stop the song",
+      "classification": "END_CONVERSATION",
+      "confidence": 0.6,
+      "margin": 0.2,
+      "false_positive": true
+    },
+    {
+      "phrase": "cancel my timer",
+      "classification": "TIMER",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "cancel the 5 minute timer",
+      "classification": "TIMER",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "cancel my reminder",
+      "classification": "END_CONVERSATION",
+      "confidence": 0.6,
+      "margin": 0.2,
+      "false_positive": true
+    },
+    {
+      "phrase": "pause the music",
+      "classification": "MUSIC_PLAY",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "mute the volume",
+      "classification": "TIMER",
+      "confidence": 0.6,
+      "margin": 0.2,
+      "false_positive": false
+    },
+    {
+      "phrase": "skip to the next song",
+      "classification": "MUSIC_PLAY",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "skip this track",
+      "classification": "END_CONVERSATION",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": true
+    },
+    {
+      "phrase": "skip to the next one",
+      "classification": "END_CONVERSATION",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": true
+    },
+    {
+      "phrase": "turn it off",
+      "classification": "END_CONVERSATION",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": true
+    },
+    {
+      "phrase": "turn off the music",
+      "classification": "TIMER",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "hold on, tell my wife I'm late",
+      "classification": "SEND_MESSAGE",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "wait, what's the weather",
+      "classification": "WEATHER",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "never mind the timer, what time is it",
+      "classification": "TIMER",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "forget the todo list, play some music",
+      "classification": "MUSIC_PLAY",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "don't send it to bob, send it to alice",
+      "classification": "SEND_MESSAGE",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "nope, tell her something different",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.0,
+      "margin": 0.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "not now, maybe later today",
+      "classification": "GET_TIME",
+      "confidence": 0.6,
+      "margin": 0.2,
+      "false_positive": false
+    },
+    {
+      "phrase": "be quiet for five minutes",
+      "classification": "TIMER",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "silence the alarm",
+      "classification": "TIMER",
+      "confidence": 0.6,
+      "margin": 0.4,
+      "false_positive": false
+    },
+    {
+      "phrase": "say goodbye to bob for me",
+      "classification": "SEND_MESSAGE",
+      "confidence": 0.6,
+      "margin": 0.2,
+      "false_positive": false
+    },
+    {
+      "phrase": "tell my wife goodnight",
+      "classification": "SEND_MESSAGE",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "text dad have a good night",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.4,
+      "margin": 0.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "how do I end a meeting",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.4,
+      "margin": 0.2,
+      "false_positive": false
+    },
+    {
+      "phrase": "what does bye mean in french",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.4,
+      "margin": 0.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "is it good night already",
+      "classification": "END_CONVERSATION",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": true
+    },
+    {
+      "phrase": "thanks for the help though",
+      "classification": "END_CONVERSATION",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": true
+    },
+    {
+      "phrase": "thanks for telling me that",
+      "classification": "END_CONVERSATION",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": true
+    }
+  ],
+  "false_positive_count": 8,
+  "false_positives": [
+    "stop the song",
+    "cancel my reminder",
+    "skip this track",
+    "skip to the next one",
+    "turn it off",
+    "is it good night already",
+    "thanks for the help though",
+    "thanks for telling me that"
+  ]
+}

@@ -3,6 +3,7 @@ package com.vessences.android
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.os.Bundle
+import android.text.method.ScrollingMovementMethod
 import android.view.Gravity
 import android.view.ViewGroup
 import android.webkit.WebResourceError
@@ -75,6 +76,8 @@ class ArticleReaderV2Activity : Activity() {
             setTextColor(0xFFCBD5E1.toInt())
             textSize = 14f
             setPadding(0, 18, 0, 18)
+            movementMethod = ScrollingMovementMethod()
+            isVerticalScrollBarEnabled = true
         }
         val stop = Button(this).apply {
             text = "Stop and close"
@@ -134,13 +137,21 @@ class ArticleReaderV2Activity : Activity() {
     }
 
     private fun extractAndSpeak(view: WebView) {
-        view.evaluateJavascript(articleExtractionJs()) { encoded ->
+        val readabilityJs = readAsset("Readability.js")
+        if (readabilityJs.isBlank()) {
+            status.text = "Error: Readability.js asset not found."
+            return
+        }
+
+        val scriptToEvaluate = "$readabilityJs\n${articleExtractionJs()}"
+
+        view.evaluateJavascript(scriptToEvaluate) { encoded ->
             val parsed = parseJsString(encoded)
             val obj = runCatching { JSONObject(parsed) }.getOrNull()
             val title = obj?.optString("title").orEmpty().trim()
-            val raw = obj?.optString("text").orEmpty()
+            val raw = obj?.optString("textContent").orEmpty()
             val cleaned = cleanArticleText(title, raw)
-            if (cleaned.length < 300) {
+            if (cleaned.length < 150) { // Reduced threshold slightly
                 status.text = "I could not extract enough article text from this page."
                 preview.text = "This page may require login, block WebView, or render text in a way Android cannot read."
                 return@evaluateJavascript
@@ -157,31 +168,27 @@ class ArticleReaderV2Activity : Activity() {
         }
     }
 
+    private fun readAsset(filename: String): String {
+        return try {
+            assets.open(filename).bufferedReader().use { it.readText() }
+        } catch (e: Exception) {
+            ""
+        }
+    }
+
     private fun parseJsString(encoded: String?): String {
         if (encoded.isNullOrBlank() || encoded == "null") return "{}"
         return runCatching { JSONArray("[$encoded]").getString(0) }.getOrElse { "{}" }
     }
 
     private fun cleanArticleText(title: String, raw: String): String {
-        val junk = listOf(
-            "advertisement", "subscribe", "sign in", "sign up", "cookie",
-            "privacy policy", "terms of service", "all rights reserved",
-            "share this article", "follow us", "enable javascript",
-        )
-        val lines = raw
+        val body = raw
             .replace('\u00A0', ' ')
             .replace(Regex("[ \\t]+"), " ")
             .lines()
             .map { it.trim() }
-            .filter { it.length >= 20 }
-            .filter { line -> junk.none { line.contains(it, ignoreCase = true) } }
-
-        val collapsed = mutableListOf<String>()
-        for (line in lines) {
-            if (collapsed.lastOrNull() != line) collapsed += line
-        }
-
-        val body = collapsed.joinToString("\n\n")
+            .filter { it.isNotBlank() }
+            .joinToString("\n\n")
             .replace(Regex("\n{3,}"), "\n\n")
             .take(MAX_ARTICLE_CHARS)
             .trim()
@@ -218,23 +225,8 @@ class ArticleReaderV2Activity : Activity() {
 
     private fun articleExtractionJs(): String = """
         (() => {
-          const bad = 'script,style,noscript,nav,footer,header,aside,form,button,svg,canvas,iframe';
-          document.querySelectorAll(bad).forEach(el => el.remove());
-          const candidates = [
-            document.querySelector('article'),
-            document.querySelector('main'),
-            document.querySelector('[role="main"]'),
-            document.querySelector('[itemprop="articleBody"]'),
-            document.body
-          ].filter(Boolean);
-          let best = candidates[0] || document.body;
-          for (const el of candidates) {
-            if ((el.innerText || '').length > (best.innerText || '').length) best = el;
-          }
-          return JSON.stringify({
-            title: document.title || '',
-            text: (best && best.innerText) || document.body.innerText || ''
-          });
+            var article = new Readability(document).parse();
+            return JSON.stringify(article);
         })();
     """.trimIndent()
 

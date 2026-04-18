@@ -5,7 +5,7 @@ NEEDS_LLM = False
 
 EXAMPLES = [
     "cancel", "stop", "never mind", "forget it", "don't send it",
-    "nope", "no thanks", "not now", "skip it",
+    "nope", "no thanks", "not now",
     "be quiet", "silence", "shush", "enough",
     "leave me alone", "that's all", "that's it",
     "we're done", "i'm done", "drop it",
