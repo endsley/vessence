@@ -182,9 +182,6 @@ async def _gate_check(class_name: str, prompt: str, context: str) -> bool:
     if not desc:
         return True  # unknown class → no gate (fail open)
 
-    # Fast bypass: short prompts (≤5 words) with no meta/complaint signals
-    # are almost always real requests. Skip the LLM call entirely.
-    word_count = len(prompt.split())
     p_lower = prompt.lower()
     META_SIGNALS = ("how does", "why does", "explain the", "debug",
                     " handler", " classifier", " pipeline",
@@ -192,8 +189,6 @@ async def _gate_check(class_name: str, prompt: str, context: str) -> bool:
                     "incorrect", "fix it", "broken", "stale", "should auto",
                     "in your code", "in the codebase", "the way you handled",
                     "shouldn't", "doesn't sync", "keep failing")
-    if word_count <= 5 and not any(s in p_lower for s in META_SIGNALS):
-        return True  # short clear request, no LLM needed
 
     import httpx
     from jane_web.jane_v2.models import (
@@ -206,20 +201,20 @@ async def _gate_check(class_name: str, prompt: str, context: str) -> bool:
     ctx_block = f"Recent conversation:\n{context.strip()}\n\n" if context and context.strip() else ""
     gate_prompt = (
         f"The classifier predicted: {desc}\n\n"
-        f"Examples — judge if it's a real request (YES) or complaint/meta (NO):\n"
+        f"Answer NO if ANY of these apply:\n"
+        f"- The prompt is a complaint or meta question about this feature\n"
+        f"- The prompt is a follow-up to a DIFFERENT topic in the conversation\n"
+        f"- The prompt doesn't actually request this specific action\n\n"
+        f"Examples:\n"
         f"  \"what time is it\" → YES\n"
         f"  \"the time you told me was wrong\" → NO (complaint)\n"
-        f"  \"how do we get the time using the phone\" → NO (implementation question)\n"
-        f"  \"hello jane\" → YES\n"
-        f"  \"how does the greeting handler work\" → NO (meta)\n"
-        f"  \"bye\" → YES\n"
-        f"  \"don't send it like that\" → NO (correction)\n"
+        f"  \"how about tomorrow\" after weather conversation → NO (follow-up to weather, not this)\n"
         f"  \"read my messages\" → YES\n"
-        f"  \"why are you reading my messages wrong\" → NO (complaint)\n"
-        f"  \"sync my messages\" → YES\n"
-        f"  \"the sync isn't working can you debug it\" → NO (meta)\n\n"
+        f"  \"and next week?\" after weather conversation → NO (follow-up to weather)\n"
+        f"  \"hello jane\" → YES\n"
+        f"  \"how does the greeting handler work\" → NO (meta)\n\n"
         f"{ctx_block}User prompt: {prompt.strip()}\n\n"
-        f"Is this a real fresh request? Answer ONE word — YES or NO:"
+        f"Is this a genuine request for {desc}? Answer ONE word — YES or NO:"
     )
     body = {
         "model": model,
@@ -288,9 +283,7 @@ async def dispatch(
     # maturity gate (conf + margin thresholds) already validated the class.
     # The LLM gate adds ~300ms-12s latency for no gain in that case.
     if pending is None:
-        if stage1_conf == "High":
-            logger.info("dispatcher: skipping gate check — stage1 conf=High for %r", class_name)
-        elif not await _gate_check(class_name, prompt, context):
+        if not await _gate_check(class_name, prompt, context):
             logger.info("dispatcher: gate check rejected %r for class %r → escalating",
                         prompt[:60], class_name)
             threading.Thread(

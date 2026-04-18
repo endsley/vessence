@@ -392,6 +392,7 @@ async def escalate_stream(
             effective_body.file_context,
             platform=effective_body.platform,
             tts_enabled=effective_body.tts_enabled or False,
+            skip_router=True,
         ):
             stripped = chunk.strip()
             if stripped:

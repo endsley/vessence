@@ -94,6 +94,45 @@ _CANCEL = {
     "abort", "forget it", "drop it", "scratch that",
 }
 
+# Topic-pivot phrases. When a user is mid-follow-up and explicitly says they
+# want to shift the conversation (e.g. "different issue", "change the subject",
+# "not about that"), clear the pending slot instead of forcing the reply
+# through the pending handler or Stage 3 follow-up loop. The next Stage 1
+# classification then routes the real intent afresh.
+# Matches anywhere in the user's reply (not just full-match), because pivots
+# are often embedded in a sentence ("no no I actually think we should focus
+# on the different issue").
+_PIVOT_PHRASES = (
+    "different issue", "different topic", "different subject",
+    "different question", "another issue", "another topic",
+    "another subject", "another question",
+    "change the subject", "change the topic", "change subject",
+    "switch the subject", "switch the topic", "switch subject",
+    "new subject", "new topic",
+    "focus on (?:a |the )?different",
+    "focus on (?:a |the )?another",
+    "not about that", "not about this",
+    "not what i asked", "not what i meant", "not what i was asking",
+    "that(?:'| a)?s not what i",
+    "forget that,? (?:let(?:'| a)?s|lets|what about|how about)",
+    "never mind that,? (?:let(?:'| a)?s|lets|what about|how about)",
+    "(?:can we|let(?:'| a)?s|lets) (?:talk about|discuss) (?:something|a different)",
+    "move on to",
+    "change of subject", "change of topic",
+)
+_PIVOT_RE = re.compile(
+    r"\b(?:" + "|".join(_PIVOT_PHRASES) + r")\b",
+    re.IGNORECASE,
+)
+
+
+def _is_topic_pivot(text: str) -> bool:
+    """True if the user's reply indicates an explicit change of subject."""
+    if not text:
+        return False
+    return bool(_PIVOT_RE.search(text))
+
+
 _PUNCT_RE = re.compile(r"[.!?,\s]+$")
 
 
@@ -156,6 +195,26 @@ def resolve(session_id: str | None, user_text: str) -> dict | None:
 
     ptype = pending.get("type", "")
     turn_id = state.get("pending_turn_id")
+
+    # Topic-pivot detection — for open-ended follow-up types, treat an
+    # explicit "different issue" / "change the subject" / "not what I asked
+    # for" as a signal to clear the pending slot and let Stage 1
+    # reclassify the new intent from scratch. Confirm/cancel flows (SMS
+    # drafts, send-confirmation) keep their strict yes/no semantics — the
+    # user there will typically say "cancel" / "no" instead of a pivot.
+    # The pipeline treats action="pivot" as: write a cancelled marker
+    # for this pending's type, then run Stage 1 on the prompt as usual.
+    if ptype in ("STAGE3_FOLLOWUP", "STAGE2_FOLLOWUP") and _is_topic_pivot(user_text):
+        logger.info(
+            "resolver: topic-pivot detected for %s — clearing pending, "
+            "falling through to Stage 1 (text=%r)",
+            ptype, (user_text or "")[:80],
+        )
+        return {
+            "action": "pivot",
+            "pending": pending,
+            "pending_turn_id": turn_id,
+        }
 
     # Universal cancel — applies to most pending types. For
     # STAGE3_FOLLOWUP and SEND_MESSAGE_DRAFT_OPEN specifically we narrow

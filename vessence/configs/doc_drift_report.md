@@ -1,4 +1,4 @@
-# Doc Drift Report — 2026-04-17 01:36
+# Doc Drift Report — 2026-04-18 01:35
 
 ## Needs human review
 
@@ -19,4 +19,5 @@
 - v2_3stage_pipeline.md missing class row: TIMER
 - v2_3stage_pipeline.md missing class row: TODO_LIST
 - v2_3stage_pipeline.md mentions SELF_HANDLE but no _CLASS_MAP entry
+- class pack build_apk/ has no metadata.py
 

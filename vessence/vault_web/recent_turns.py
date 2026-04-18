@@ -285,16 +285,24 @@ def get_active_state(session_id: str, lookback: int = DEFAULT_MAX_TURNS) -> dict
         return out
     records = get_recent_structured(session_id, n=lookback)
     resolved_handlers: set = set()
+    # Pending types that have been explicitly cancelled (topic pivot, etc).
+    # Needed for type-only pendings like STAGE3_FOLLOWUP that have no
+    # handler_class to suppress via resolved_handlers.
+    cancelled_types: set = set()
     for rec in reversed(records):  # newest first
         pa = rec.get("pending_action")
         if pa and isinstance(pa, dict):
             hc = pa.get("handler_class", "")
+            ptype = pa.get("type", "")
             status = pa.get("status", "")
             if status in ("resolved", "cancelled"):
                 resolved_handlers.add(hc)
+                if ptype:
+                    cancelled_types.add(ptype)
             elif (_pending_is_active(pa)
                   and out["pending_action"] is None
-                  and hc not in resolved_handlers):
+                  and hc not in resolved_handlers
+                  and ptype not in cancelled_types):
                 out["pending_action"] = pa
                 out["pending_turn_id"] = rec.get("turn_id")
         if not out["last_intent"] and rec.get("intent"):

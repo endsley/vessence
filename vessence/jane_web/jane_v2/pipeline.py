@@ -563,12 +563,16 @@ async def _generate_delegate_ack(prompt: str, session_id: str | None,
     chosen_opener = _random.choice(openers)
     gen_prompt = (
         f"Write ONE casual sentence with two parts:\n"
-        f"  PART 1 — START with: \"{chosen_opener}\". You may extend it with a few "
-        f"more words but keep that as your opening.\n"
+        f"  PART 1 — START with: \"{chosen_opener}\".\n"
         f"  PART 2 — say it'll take about {duration}, in your own natural words.\n\n"
-        f"Be casual like a friend. Never use the user's name. No questions. "
-        f"No filler. One sentence only.\n\n"
-        f"User said: {prompt.strip()[:300]}\n\n"
+        f"STRICT RULES:\n"
+        f"- Do NOT summarize, paraphrase, or mention what the user is talking about.\n"
+        f"- Do NOT describe the user's topic or intent.\n"
+        f"- ONLY say you're on it and how long it'll take. Nothing about the topic.\n"
+        f"- Be casual like a friend. Never use the user's name. No questions. "
+        f"One sentence only.\n\n"
+        f"GOOD examples: \"{chosen_opener}, give me a sec to look into that.\"\n"
+        f"BAD examples: \"{chosen_opener}, I'll check the weather for you.\"\n\n"
         f"Your acknowledgment (must start with \"{chosen_opener}\"):"
     )
     try:
@@ -922,10 +926,29 @@ async def _classify_and_try_stage2(
     except Exception as e:
         logger.warning("pipeline: resolver failed: %s", e)
         resolved = None
+    # Emitted below when action=="pivot": a cancelled pending_action marker
+    # the current turn's response must carry, so get_active_state stops
+    # matching the stale pending on subsequent turns.
+    _pivot_cancel_marker: dict | None = None
     if resolved:
         pending = resolved.get("pending") or {}
         action = resolved["action"]
-        if action == "confirm":
+        if action == "pivot":
+            # Topic pivot while mid-follow-up. Stamp a cancelled marker for
+            # the pending's type, then fall through to Stage 1 so the real
+            # intent gets classified and answered in the same turn.
+            ptype = pending.get("type", "")
+            _pivot_cancel_marker = {
+                "type": ptype,
+                "handler_class": pending.get("handler_class", ""),
+                "status": "cancelled",
+            }
+            logger.info(
+                "jane_v2 pipeline: resolver → pivot (type=%s) — falling through to Stage 1",
+                ptype,
+            )
+            resolved = None
+        elif action == "confirm":
             result = _resolve_pending_sms_confirmation(pending)
             cls = "send message"
         elif action == "sms_draft_send":
@@ -1083,7 +1106,7 @@ async def _classify_and_try_stage2(
         else:
             logger.info("jane_v2 pipeline: stage2 %s declined (%dms)", cls, stage2_ms)
 
-    return {
+    out = {
         "cls": cls,
         "conf": conf,
         "classification": classification,
@@ -1093,6 +1116,12 @@ async def _classify_and_try_stage2(
         "stage2_ack": _ack_for(cls, escalate=False),
         "fallback_ack": _ack_for(cls, escalate=True),
     }
+    # If the pre-Stage-1 resolver detected a topic pivot, attach a
+    # cancelled marker so the current turn's FIFO record carries it;
+    # get_active_state then skips the stale pending on future turns.
+    if _pivot_cancel_marker is not None:
+        out["resolve_pending_action"] = _pivot_cancel_marker
+    return out
 
 
 # ─── non-streaming entry point (/api/jane/chat) ──────────────────────────────
@@ -1146,12 +1175,18 @@ async def handle_chat(body, request: Request):
         if all_tool_calls:
             resp["client_tool_calls"] = all_tool_calls
         resp.update(extras)
+        handler_structured = (
+            state["result"].get("structured") if isinstance(state["result"], dict) else None
+        )
+        resolved_pa = state.get("resolve_pending_action")
+        if resolved_pa and not (handler_structured and handler_structured.get("pending_action")):
+            handler_structured = {**(handler_structured or {}), "pending_action": resolved_pa}
         _persist_turn_to_fifo(
             canonical_sid, prompt, visible_text or text,
             stage="stage2",
             intent=state["cls"],
             confidence=state["conf"],
-            handler_structured=state["result"].get("structured") if isinstance(state["result"], dict) else None,
+            handler_structured=handler_structured,
             extras=extras,
         )
         return JSONResponse(resp)
@@ -1439,12 +1474,18 @@ async def handle_chat_stream(body, request: Request):
                 yield _ndjson("client_tool_call", json.dumps(tc_payload, ensure_ascii=True))
             yield _ndjson("delta", visible_text or text)
             yield _ndjson("done", visible_text or text, **extras)
+            handler_structured = (
+                state["result"].get("structured") if isinstance(state["result"], dict) else None
+            )
+            resolved_pa = state.get("resolve_pending_action")
+            if resolved_pa and not (handler_structured and handler_structured.get("pending_action")):
+                handler_structured = {**(handler_structured or {}), "pending_action": resolved_pa}
             _persist_turn_to_fifo(
                 canonical_sid, prompt, visible_text or text,
                 stage="stage2",
                 intent=state["cls"],
                 confidence=state["conf"],
-                handler_structured=state["result"].get("structured") if isinstance(state["result"], dict) else None,
+                handler_structured=handler_structured,
                 extras=extras,
             )
             return

@@ -31,6 +31,36 @@ _SYS_TAIL_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Subject-change prefixes. "change the subject to weather" leaks the verb
+# "change" and the filler "subject" into the embedding — the weather signal
+# can then lose to sibling classes. Strip the preamble so the classifier
+# sees only the new topic ("weather").
+_SUBJECT_CHANGE_RE = re.compile(
+    r"^\s*(?:"
+    r"(?:i(?:'| a)?d\s+like\s+to\s+"
+    r"|i\s+would\s+like\s+to\s+"
+    r"|i\s+want\s+to\s+"
+    r"|i\s+wanna\s+"
+    r"|(?:let(?:'| a)?s|lets)\s+"
+    r"|can\s+we\s+"
+    r"|can\s+you\s+"
+    r"|please\s+)?"
+    r"(?:change|switch|shift|move|go)\s+(?:the\s+)?(?:subject|topic|conversation)\s+to\s+"
+    r"|"
+    r"(?:let(?:'| a)?s|lets)\s+(?:talk\s+about|discuss)\s+"
+    r"|"
+    r"(?:switching|changing)\s+(?:the\s+)?(?:subject|topic)(?:\s+to)?\s+"
+    r")",
+    re.IGNORECASE,
+)
+
+# Common singular/plural normalization to help the classifier recognize the
+# canonical class term ("weathers" → "weather"). Only the classes where a
+# trailing-s confusion actually hurt Stage 1 in production.
+_PLURAL_FIXUPS = {
+    r"\bweathers\b": "weather",
+}
+
 
 def _strip_system_markers(prompt: str) -> str:
     """Strip TOOL_RESULT and SMS SEND REQUEST markers so the classifier
@@ -38,6 +68,9 @@ def _strip_system_markers(prompt: str) -> str:
     cleaned = _TOOL_RESULT_RE.sub("", prompt)
     cleaned = _SYS_PREFIX_RE.sub("", cleaned)
     cleaned = _SYS_TAIL_RE.sub("", cleaned)  # truncated leftovers
+    cleaned = _SUBJECT_CHANGE_RE.sub("", cleaned, count=1)
+    for pat, repl in _PLURAL_FIXUPS.items():
+        cleaned = re.sub(pat, repl, cleaned, flags=re.IGNORECASE)
     return cleaned.strip() or prompt
 
 # Maturity-based gate thresholds. Precision-first for new classes.
