@@ -387,6 +387,7 @@ async def escalate_stream(
         # We also drop v1's "model" + initial gemma classification noise
         # when they immediately precede an Opus ack.
         v1_ack_suppressed = False
+        _extractor = ToolMarkerExtractor()
         async for chunk in stream_message(
             user_id,
             session_id,
@@ -416,18 +417,15 @@ async def escalate_stream(
 
                 if payload.get("type") == "delta" and isinstance(payload.get("data"), str):
                     raw_delta_text = payload["data"]
-                    _extractor = ToolMarkerExtractor() # Instantiate here
                     cleaned_delta_text, tool_calls = _extractor.feed(raw_delta_text)
-                    tail_cleaned, tail_tool_calls = _extractor.flush()
 
                     # Yield tool_use events
-                    for tc in tool_calls + tail_tool_calls:
+                    for tc in tool_calls:
                         yield _ndjson("tool_use", json.dumps(tc, ensure_ascii=True))
 
                     # Yield cleaned delta (if any visible text remains)
-                    visible_text = cleaned_delta_text + tail_cleaned
-                    if visible_text:
-                        payload["data"] = visible_text
+                    if cleaned_delta_text:
+                        payload["data"] = cleaned_delta_text
                         yield json.dumps(payload, ensure_ascii=True) + "\n"
                     continue # Continue to next chunk from stream_message
 
@@ -435,6 +433,13 @@ async def escalate_stream(
             if not chunk.endswith("\n"):
                 chunk = chunk + "\n"
             yield chunk
+
+        # Flush any buffered partial marker at end of stream
+        tail_cleaned, tail_tool_calls = _extractor.flush()
+        for tc in tail_tool_calls:
+            yield _ndjson("tool_use", json.dumps(tc, ensure_ascii=True))
+        if tail_cleaned:
+            yield _ndjson("delta", tail_cleaned)
     except Exception as e:
         logger.exception("stage3_escalate: v1 stream_message crashed: %s", e)
         yield _ndjson("error", error=str(e))

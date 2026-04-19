@@ -34,6 +34,42 @@ import re
 
 logger = logging.getLogger(__name__)
 
+# High-precision interrupt intents. When a user mid-pending types one of these
+# unmistakable standalone requests (e.g. "what time is it", "what's the
+# weather", "cancel that"), the resolver releases the pending slot so Stage 1
+# can classify the new intent normally instead of misrouting the utterance as
+# the answer to a stale AWAITING question.
+#
+# Reason: see transcript review 2026-04-18 Issues 1 and 5 — "what time is it"
+# was consumed by an [[AWAITING:re_sign_in_confirm]] pending, and "what's the
+# weather like today" was consumed by [[AWAITING:confirm_restart]].
+#
+# Only applied to open-ended follow-up types (STAGE3_FOLLOWUP, STAGE2_FOLLOWUP)
+# — confirm/cancel flows (SMS drafts) keep their strict semantics because
+# there a plain "yes" / "cancel" is the most likely intent.
+_HIGH_PRECISION_INTERRUPT_RE = re.compile(
+    r"(?:"
+    r"^\s*what(?:'s|\s+is)?\s+(?:the\s+)?time\b"
+    r"|^\s*what\s+time\s+is\s+it\b"
+    r"|^\s*(?:tell|give)\s+me\s+the\s+time\b"
+    r"|^\s*what(?:'s|\s+is)?\s+(?:the\s+)?weather\b"
+    r"|^\s*(?:how(?:'s|\s+is)\s+)?(?:the\s+)?weather\b"
+    r"|^\s*(?:set|start)\s+(?:a|the)?\s*timer\b"
+    r"|^\s*(?:cancel|stop)\s+(?:the|my)\s+timer\b"
+    r"|^\s*(?:text|message|sms|send\s+(?:a\s+)?text\s+to)\b"
+    r"|^\s*tell\s+(?:\w+\s+){0,3}(?:that|hi|hello|to\s+)"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def _is_high_precision_interrupt(text: str) -> bool:
+    """True if the user's reply is an unmistakable standalone intent that
+    should release a stale pending slot (GET_TIME / WEATHER / TIMER / SMS)."""
+    if not text or not text.strip():
+        return False
+    return bool(_HIGH_PRECISION_INTERRUPT_RE.search(text.strip()))
+
 
 def _is_expired(pending: dict) -> bool:
     """True when pending.expires_at is set AND has passed.
@@ -172,6 +208,15 @@ def resolve(session_id: str | None, user_text: str) -> dict | None:
     """
     if not session_id or not user_text:
         return None
+    # Guard against empty / whitespace-only / filler-only STT transcripts
+    # while a pending_action is active. A blank follow-up would otherwise
+    # be treated as "the user's answer" and trigger an abandon_pending in
+    # handlers like todo_list's _match_category (no match → abandon). See
+    # transcript review 2026-04-18 Issue 10: debounced STT relaunch
+    # produced a blank follow-up that silently killed a good pending slot.
+    _stripped = (user_text or "").strip()
+    if len(_stripped) < 2:
+        return None
     try:
         from vault_web.recent_turns import get_active_state
     except Exception as e:
@@ -195,6 +240,26 @@ def resolve(session_id: str | None, user_text: str) -> dict | None:
 
     ptype = pending.get("type", "")
     turn_id = state.get("pending_turn_id")
+
+    # High-precision interrupt intents override open-ended follow-ups so a
+    # clearly-standalone request (e.g. "what time is it", "what's the
+    # weather") can't be hijacked by a stale AWAITING slot. Uses the same
+    # "pivot" action so the pipeline writes a cancelled marker and lets
+    # Stage 1 classify the new intent. SMS confirm/cancel flows keep their
+    # strict semantics because confirm/cancel vocabulary doesn't match this
+    # pattern.
+    if (ptype in ("STAGE3_FOLLOWUP", "STAGE2_FOLLOWUP")
+            and _is_high_precision_interrupt(user_text)):
+        logger.info(
+            "resolver: high-precision interrupt detected for %s — clearing "
+            "pending, falling through to Stage 1 (text=%r)",
+            ptype, (user_text or "")[:80],
+        )
+        return {
+            "action": "pivot",
+            "pending": pending,
+            "pending_turn_id": turn_id,
+        }
 
     # Topic-pivot detection — for open-ended follow-up types, treat an
     # explicit "different issue" / "change the subject" / "not what I asked

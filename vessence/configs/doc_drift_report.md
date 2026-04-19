@@ -1,4 +1,4 @@
-# Doc Drift Report — 2026-04-18 01:35
+# Doc Drift Report — 2026-04-19 01:25
 
 ## Needs human review
 
@@ -10,6 +10,7 @@
 - CRON_JOBS.md mentions audit_auto_fixer.py but no matching cron entry exists
 - CRON_JOBS.md mentions auto_pull.sh but no matching cron entry exists
 - CRON_JOBS.md mentions bot_watchdog.sh but no matching cron entry exists
+- CRON_JOBS.md mentions essence_scheduler.py but no matching cron entry exists
 - CRON_JOBS.md mentions janitor_memory.py but no matching cron entry exists
 - CRON_JOBS.md mentions nightly_audit.py but no matching cron entry exists
 - CRON_JOBS.md mentions notify_audit_results.py but no matching cron entry exists

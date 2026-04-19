@@ -22,10 +22,59 @@ Version B architecture (2026-04-18):
 from __future__ import annotations
 
 import logging
+import re
 import time
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
+
+
+# Canonical "just tell me the time / date / day" phrasings. When the user's
+# prompt matches one of these we skip the LLM round-trip and return a direct
+# spoken answer from the local clock — sub-10ms instead of ~3s.
+# Covers: "what time is it", "what's the time", "tell me the time", "the
+# time please", "current time", "what day is it", "what's today's date",
+# "what's the date", "what day of the week", etc.
+# See transcript review 2026-04-18 Issue 11.
+_FAST_TIME_RE = re.compile(
+    r"^\s*(?:"
+    r"(?:hey\s+jane,?\s+)?"
+    r"(?:please\s+|can\s+you\s+|could\s+you\s+|would\s+you\s+)?"
+    r"(?:just\s+)?"
+    r"(?:tell\s+me\s+|give\s+me\s+|say\s+)?"
+    r"(?:what(?:'?s|\s+is)\s+(?:the\s+)?(?:current\s+)?)?"
+    r"(?:time|clock)"
+    r"(?:\s+is\s+it|\s+now|\s+please)?"
+    r"[\s?.!]*$"
+    r")",
+    re.IGNORECASE,
+)
+_FAST_DATE_RE = re.compile(
+    r"^\s*(?:"
+    r"(?:hey\s+jane,?\s+)?"
+    r"(?:please\s+|can\s+you\s+|could\s+you\s+)?"
+    r"(?:what(?:'?s|\s+is)\s+(?:the\s+)?(?:current\s+|today'?s\s+)?)?"
+    r"(?:date|day(?:\s+of\s+the\s+week)?|today)"
+    r"(?:\s+is\s+it|\s+today)?"
+    r"[\s?.!]*$"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def _fast_time_reply(prompt: str) -> str | None:
+    """Return a locally-generated spoken answer when the prompt is a plain
+    time/date query, else None (the LLM path will handle contextual cases
+    like 'is it late?')."""
+    p = (prompt or "").strip()
+    if not p:
+        return None
+    now = datetime.now().astimezone()
+    if _FAST_TIME_RE.match(p):
+        return f"It's {now.strftime('%-I:%M %p')}."
+    if _FAST_DATE_RE.match(p):
+        return f"It's {now.strftime('%A, %B %-d')}."
+    return None
 
 
 def _format_time_info() -> str:
@@ -99,6 +148,13 @@ async def handle(prompt: str, context: str = "") -> dict:
 
     `context` is the recent FIFO rendered as prose by v3's pipeline.
     """
+    # Fast path: simple "what time/date is it" queries skip the LLM
+    # round-trip entirely. Cuts Stage 2 handler latency from ~3s to <10ms.
+    fast = _fast_time_reply(prompt)
+    if fast is not None:
+        logger.info("get_time: fast path → %r", fast)
+        return {"text": fast, "thought": "fast-path: simple time/date query"}
+
     time_info = _format_time_info()
     llm_prompt = _build_prompt(prompt, context or "", time_info)
 

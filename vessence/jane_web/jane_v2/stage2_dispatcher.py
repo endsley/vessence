@@ -307,11 +307,26 @@ async def dispatch(
         if not await _gate_check(class_name, prompt, context):
             logger.info("dispatcher: gate check rejected %r for class %r → escalating",
                         prompt[:60], class_name)
-            threading.Thread(
-                target=_self_correct_classification,
-                args=(prompt, class_name),
-                daemon=True,
-            ).start()
+            # Skip the ChromaDB self-correct write when Stage 1 was High
+            # confidence. The gate LLM and the Stage 1 classifier disagree
+            # often on edge phrasings ("what is all my to-do list", "what's
+            # on my todo", "why what's on my to-do list") and poisoning a
+            # legitimate High-conf class into DELEGATE_OPUS breaks future
+            # classifications. The escalate-on-rejection behavior still
+            # runs — we just stop corrupting training data.
+            # See transcript review 2026-04-18 Issues 2, 8, 16, 17.
+            if stage1_conf != "High":
+                threading.Thread(
+                    target=_self_correct_classification,
+                    args=(prompt, class_name),
+                    daemon=True,
+                ).start()
+            else:
+                logger.info(
+                    "dispatcher: skipping self-correct for %r "
+                    "(stage1_conf=High — trust classifier)",
+                    class_name,
+                )
             return None
     else:
         # Follow-up resume: the class was decided in the prior turn. Short

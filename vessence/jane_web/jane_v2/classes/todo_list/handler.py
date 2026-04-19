@@ -81,6 +81,18 @@ def _extract_item_text(prompt: str, edit_type: str) -> str | None:
         m = re.search(r"""['"\u2018\u2019\u201c\u201d](.+?)['"\u2018\u2019\u201c\u201d]""", p)
         if m:
             return m.group(1).strip()
+        # "... and the item is to create a clinic Gmail account"
+        # Matches "(the )?item (is|should be) X" so "add an item to the clinic
+        # and the item is to create a Gmail account" parses item text correctly.
+        # See transcript review 2026-04-18 Issue 15.
+        m = re.search(
+            r"\b(?:the\s+)?(?:item|task|thing)\s+(?:is|should\s+be|would\s+be)\s+(.+)$",
+            p, re.I,
+        )
+        if m:
+            candidate = m.group(1).strip().rstrip(".!?,")
+            if candidate and not _is_placeholder_item_text(candidate):
+                return candidate
         # "add a task for students: grade midterms"
         m = re.search(r":\s*(.+)$", p)
         if m:

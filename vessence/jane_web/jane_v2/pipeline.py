@@ -1042,14 +1042,34 @@ async def _classify_and_try_stage2(
             awaiting = pending.get("awaiting") or "previous_question"
             logger.info("jane_v2 pipeline: resolver → stage3_followup (awaiting=%s)",
                         awaiting)
-            return {
+            # Mark the pending consumed so that if Stage 3 finishes its task
+            # WITHOUT emitting a new [[AWAITING:...]], the pending slot clears.
+            # Without this marker, a stale AWAITING (e.g. confirm_restart)
+            # lingers and hijacks the next unrelated request. If Stage 3 does
+            # emit a new AWAITING marker downstream, that overrides this
+            # "resolved" marker in the new FIFO row (see _persist_fifo_for_stream).
+            consumed_marker = _pending_consumed_marker(
+                pending, status="resolved", resolution="answered"
+            )
+            out = {
                 "cls": "stage3_followup", "conf": "High",
                 "classification": "stage3_followup:High",
                 "stage1_ms": 0, "stage2_ms": 0, "result": None,
                 "stage2_ack": None, "fallback_ack": None,
                 "force_stage3": True,
                 "stage3_followup_topic": awaiting,
+                "resolve_pending_action": consumed_marker,
             }
+            # Persist the original class/protocol so Stage 3 can load the
+            # right class_protocol instead of using the synthetic
+            # "stage3_followup" name (which has no class folder). See
+            # transcript review 2026-04-18 Issue 6.
+            original_cls = pending.get("original_class") or (
+                pending.get("data") or {}
+            ).get("original_class")
+            if original_cls:
+                out["stage3_followup_original_class"] = original_cls
+            return out
         elif action == "followup":
             # Re-dispatch to the Stage 2 handler that's mid-conversation.
             handler_class = resolved["handler_class"]
@@ -1378,19 +1398,26 @@ async def handle_chat(body, request: Request):
                     draft_state.get("draft_id", "")[:12])
     elif awaiting_topic:
         import datetime as _dt
-        structured_extras = {
-            "pending_action": {
-                "type": "STAGE3_FOLLOWUP",
-                "handler_class": "stage3",
-                "status": "awaiting_user",
-                "awaiting": awaiting_topic,
-                "expires_at": (
-                    _dt.datetime.utcnow() + _dt.timedelta(minutes=2)
-                ).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            },
+        # Preserve the originating class so that when the user replies to
+        # this AWAITING marker on a later turn, Stage 3 can load the right
+        # class_protocol (weather, send_message, etc.) instead of falling
+        # back to the synthetic "stage3_followup" name that has no class
+        # folder. See transcript review 2026-04-18 Issue 6.
+        original_class = state.get("cls") or ""
+        pa_fields = {
+            "type": "STAGE3_FOLLOWUP",
+            "handler_class": "stage3",
+            "status": "awaiting_user",
+            "awaiting": awaiting_topic,
+            "expires_at": (
+                _dt.datetime.utcnow() + _dt.timedelta(minutes=2)
+            ).strftime("%Y-%m-%dT%H:%M:%SZ"),
         }
-        logger.info("pipeline: stage3 (non-stream) AWAITING → topic=%s",
-                    awaiting_topic)
+        if original_class and original_class not in ("others", "stage3_followup"):
+            pa_fields["original_class"] = original_class
+        structured_extras = {"pending_action": pa_fields}
+        logger.info("pipeline: stage3 (non-stream) AWAITING → topic=%s (original_class=%s)",
+                    awaiting_topic, original_class or "-")
         # Strip marker from client-facing response too.
         v1_body["response"] = cleaned_text
         new_body_bytes = json.dumps(v1_body, ensure_ascii=True).encode("utf-8")
@@ -1465,19 +1492,23 @@ def _persist_fifo_for_stream(
                     draft_state.get("draft_id", "")[:12])
     elif awaiting_topic:
         import datetime as _dt
-        structured_extras = {
-            "pending_action": {
-                "type": "STAGE3_FOLLOWUP",
-                "handler_class": "stage3",
-                "status": "awaiting_user",
-                "awaiting": awaiting_topic,
-                "expires_at": (
-                    _dt.datetime.utcnow() + _dt.timedelta(minutes=5)
-                ).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            },
+        # Preserve originating class for Stage 3 class_protocol loading on
+        # the next turn. See transcript review 2026-04-18 Issue 6.
+        original_class = state.get("cls") or ""
+        pa_fields = {
+            "type": "STAGE3_FOLLOWUP",
+            "handler_class": "stage3",
+            "status": "awaiting_user",
+            "awaiting": awaiting_topic,
+            "expires_at": (
+                _dt.datetime.utcnow() + _dt.timedelta(minutes=5)
+            ).strftime("%Y-%m-%dT%H:%M:%SZ"),
         }
-        logger.info("pipeline: stage3 emitted AWAITING marker → topic=%s",
-                    awaiting_topic)
+        if original_class and original_class not in ("others", "stage3_followup"):
+            pa_fields["original_class"] = original_class
+        structured_extras = {"pending_action": pa_fields}
+        logger.info("pipeline: stage3 emitted AWAITING marker → topic=%s (original_class=%s)",
+                    awaiting_topic, original_class or "-")
     resolved_pa = state.get("resolve_pending_action")
     if resolved_pa and not (structured_extras and structured_extras.get("pending_action")):
         structured_extras = {**(structured_extras or {}), "pending_action": resolved_pa}
@@ -1617,7 +1648,16 @@ async def handle_chat_stream(body, request: Request):
             effective_body, prompt, session_id=canonical_sid
         )
 
-        reason = f"{state['cls']}:{state['conf']}"
+        # When this Stage 3 call is resuming a STAGE3_FOLLOWUP, prefer the
+        # original class for reason → class_protocol lookup. Otherwise the
+        # reason becomes "stage3_followup:High" which maps to a nonexistent
+        # class folder and class_protocol loads as missing. See transcript
+        # review 2026-04-18 Issue 6.
+        _followup_orig = state.get("stage3_followup_original_class")
+        if _followup_orig:
+            reason = f"{_followup_orig}:{state['conf']}"
+        else:
+            reason = f"{state['cls']}:{state['conf']}"
         # Accumulate streamed deltas so we can persist a FIFO record at the end.
         # Also run deltas through a stripper so `[[AWAITING:...]]` markers
         # never reach the client's chat bubble / TTS.
