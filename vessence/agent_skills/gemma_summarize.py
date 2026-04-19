@@ -36,7 +36,15 @@ try:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from jane_web.jane_v2.models import STAGE2_MODEL as LOCAL_LLM_MODEL
 except Exception:
-    LOCAL_LLM_MODEL = "qwen2.5:7b"
+    LOCAL_LLM_MODEL = (
+        os.environ.get("JANE_LOCAL_LLM")
+        or os.environ.get("JANE_STAGE2_MODEL")
+    )
+    if not LOCAL_LLM_MODEL:
+        raise RuntimeError(
+            "Cannot resolve local LLM: jane_web.jane_v2.models import failed "
+            "AND no JANE_LOCAL_LLM / JANE_STAGE2_MODEL env var is set"
+        )
 TURNS_TO_INCLUDE = 6      # last N messages to summarize (user + assistant)
 MIN_TEXT_LEN     = 100    # skip if too little content
 

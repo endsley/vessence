@@ -50,7 +50,42 @@ def format_session_summary(summary: dict) -> str:
     return "\n".join(lines).strip()
 
 
+# Trivial-turn heuristics: skip the expensive session-summary update for
+# short greetings / time queries / acks. These turns add no durable topic
+# worth persisting, and each subprocess.run forks a large (~1.4 GB) Python
+# process — fork cost + qwen subprocess (90 s timeout) + GIL contention
+# during fork was measurably stalling the event loop (investigation
+# 2026-04-18, see jane_proxy logs around 18:03:46).
+_TRIVIAL_USER_PATTERNS = (
+    # Greetings / sign-offs
+    "hi", "hey", "hello", "bye", "goodbye", "good morning", "good night",
+    "thanks", "thank you", "ok thanks", "cool thanks",
+    # Time / weather / clock queries
+    "what time", "what day", "what's the time", "what's the date",
+    "what's the weather", "is it raining",
+    # One-word acks
+    "ok", "yes", "no", "sure", "yeah", "nope",
+)
+
+
+def _is_trivial_turn(user_message: str, assistant_message: str) -> bool:
+    """True if this turn is too small to be worth persisting to session summary."""
+    u = (user_message or "").strip().lower().rstrip(".?!,")
+    if not u:
+        return True
+    # Exact-match on short phrases
+    if len(u) < 35 and any(u == p or u.startswith(p + " ") for p in _TRIVIAL_USER_PATTERNS):
+        return True
+    # Short user query + short Jane response (<200 chars) = not worth summarizing
+    if len(u) < 25 and len((assistant_message or "").strip()) < 200:
+        return True
+    return False
+
+
 def update_session_summary_async(session_id: str, user_message: str, assistant_message: str) -> None:
+    if _is_trivial_turn(user_message, assistant_message):
+        # Skip — prevents fork pressure + subprocess overhead on chit-chat.
+        return
     thread = threading.Thread(
         target=_update_session_summary,
         args=(session_id, user_message, assistant_message),

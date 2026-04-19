@@ -229,10 +229,18 @@ async def _gate_check(class_name: str, prompt: str, context: str) -> bool:
             r = await client.post(OLLAMA_URL, json=body)
             r.raise_for_status()
             ans = (r.json().get("response") or "").strip().upper()
+            try:
+                from jane_web.jane_v2.models import record_ollama_activity
+                record_ollama_activity()
+            except Exception:
+                pass
             return not ans.startswith("NO")
     except Exception as e:
         logger.warning("dispatcher gate check failed (%s) — failing open", e)
         return True
+
+
+_NEAR_IDENTICAL_DIST = 0.10
 
 
 async def dispatch(
@@ -242,6 +250,7 @@ async def dispatch(
     context: str = "",
     pending: dict | None = None,
     stage1_conf: str = "",
+    min_dist: float = 1.0,
 ) -> dict | None:
     """Call the Stage 2 handler for `class_name` and return its result.
 
@@ -282,7 +291,19 @@ async def dispatch(
     # Skip when Stage 1 already passed with "High" confidence — its own
     # maturity gate (conf + margin thresholds) already validated the class.
     # The LLM gate adds ~300ms-12s latency for no gain in that case.
-    if pending is None:
+    # Skip the gate LLM when Stage 1 had a near-identical chroma match —
+    # the prompt is basically a verbatim exemplar, so the gate can only
+    # add latency and introduce false negatives (e.g. rejecting because
+    # recent FIFO context is about a different topic). The coarse voting
+    # margin ("High") already gave some confidence; the tight min_dist
+    # threshold is the real guard.
+    skip_gate = pending is None and min_dist <= _NEAR_IDENTICAL_DIST
+    if skip_gate:
+        logger.info(
+            "dispatcher: gate skipped for %r (class=%r, min_dist=%.3f ≤ %.2f)",
+            prompt[:60], class_name, min_dist, _NEAR_IDENTICAL_DIST,
+        )
+    if pending is None and not skip_gate:
         if not await _gate_check(class_name, prompt, context):
             logger.info("dispatcher: gate check rejected %r for class %r → escalating",
                         prompt[:60], class_name)
@@ -331,7 +352,11 @@ async def dispatch(
     if wants_context:
         kwargs["context"] = context
     if wants_pending:
-        kwargs["pending"] = pending
+        handler_pending = pending
+        if isinstance(handler_pending, dict) and "question" in handler_pending:
+            handler_pending = dict(handler_pending)
+            handler_pending.pop("question", None)
+        kwargs["pending"] = handler_pending
 
     try:
         if inspect.iscoroutinefunction(handler):

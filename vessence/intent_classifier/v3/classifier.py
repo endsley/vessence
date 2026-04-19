@@ -52,10 +52,16 @@ FIFO_TURNS = int(os.environ.get("JANE_V3_FIFO_TURNS", "4"))
 # vocabulary overlap, not semantic correctness. Only verbatim matches
 # (distance ≈ 0) are safe to bypass qwen on.
 NEAR_IDENTICAL_DIST = float(os.environ.get("JANE_V3_NEAR_IDENTICAL_DIST", "0.05"))
-# Per-call timeout for the qwen HTTP call. qwen is warm so this is usually
-# ~200–600 ms; 40 s absorbs rare stalls (runner reload, heavy system load)
-# without classifying as timeout.
-_LLM_TIMEOUT = float(os.environ.get("JANE_V3_LLM_TIMEOUT_S", "40.0"))
+# Per-call timeout for the qwen HTTP call. Reads the SINGLE source of
+# truth from jane_web.jane_v2.models so every Ollama caller agrees.
+# JANE_V3_LLM_TIMEOUT_S overrides for this specific call site if needed.
+def _load_timeout() -> float:
+    try:
+        from jane_web.jane_v2.models import LOCAL_LLM_TIMEOUT as _t
+        return float(os.environ.get("JANE_V3_LLM_TIMEOUT_S", str(_t)))
+    except Exception:
+        return float(os.environ.get("JANE_V3_LLM_TIMEOUT_S", "40.0"))
+_LLM_TIMEOUT = _load_timeout()
 # Output budget — the expected response is a ~40-token JSON object.
 _NUM_PREDICT = int(os.environ.get("JANE_V3_NUM_PREDICT", "60"))
 
@@ -163,6 +169,36 @@ async def _recent_fifo(session_id: str) -> str:
         return ""
 
 
+# ── Pending-action lookup ─────────────────────────────────────────────────────
+
+
+def _pending_action_class(session_id: str) -> tuple[str, str]:
+    """Return (handler_class, question) from the session's pending_action,
+    IFF the pending is STAGE2_FOLLOWUP and not expired. Otherwise ("", "").
+
+    The handler_class tells us what class ASKED the question, so on the next
+    turn we should inject THAT class as the primary candidate to qwen —
+    overriding chroma, which has no conversation awareness.
+    """
+    if not session_id:
+        return ("", "")
+    try:
+        from vault_web.recent_turns import get_active_state
+        from jane_web.jane_v2.pending_action_resolver import _is_expired
+        state = get_active_state(session_id) or {}
+        pending = state.get("pending_action") or {}
+        if pending.get("type") != "STAGE2_FOLLOWUP":
+            return ("", "")
+        if _is_expired(pending):
+            return ("", "")
+        handler_class = (pending.get("handler_class") or "").strip()
+        question = (pending.get("question") or "").strip()
+        return (handler_class, question)
+    except Exception as e:
+        logger.warning("v3: pending_action lookup failed: %s", e)
+        return ("", "")
+
+
 def _janes_last_question(fifo_block: str) -> str:
     """Extract Jane's most recent utterance from the FIFO IF it ended with a '?'.
 
@@ -201,12 +237,25 @@ def _build_prompt(
     total_votes: int,
     fifo_block: str,
     user_prompt: str,
+    pending_class: str = "",
+    pending_def: str = "",
+    pending_question: str = "",
 ) -> str:
-    """Soft-framing prompt — 'we THINK it's X, but possibly Y. Decide.'
+    """Build the qwen prompt.
 
-    Includes both the winner AND the runner-up (if any) with their
-    full class definitions, so qwen can pick the alternative when the
-    conversation context clearly favors it over the embedding's top pick.
+    Two modes:
+
+    A. NO pending_class — embedding vote wins. We show primary (chroma
+       winner) + alternative (runner-up) + others. Qwen validates
+       against FIFO and picks one.
+
+    B. WITH pending_class — Jane's previous turn asked a clarifying
+       question tied to a specific handler class (e.g. timer asking
+       for a label). We inject THAT class as option 1 (primary) and
+       the chroma winner becomes option 2 (alternative). The prompt
+       explains WHY option 1 is preferred so qwen picks correctly when
+       the user is answering the open question — and still lets qwen
+       choose option 2 (or 'others') if the user clearly pivoted.
     """
     fifo_section = (
         f"Recent turns (oldest first):\n{fifo_block}\n"
@@ -214,23 +263,42 @@ def _build_prompt(
         "Recent turns: (none)\n"
     )
 
-    # Jane's last question callout — kept because short follow-ups ("pasta",
-    # "clinic", "five") only make sense against the open question.
-    janes_q = _janes_last_question(fifo_block)
+    # Jane's last question callout — still surfaced because FIFO
+    # rendering sometimes truncates and we want the question front-and-
+    # center regardless of pending_action state.
+    janes_q = _janes_last_question(fifo_block) or pending_question
     jane_callout = (
         f"Jane's last question: \"{janes_q}\" "
         f"(user may be answering it, or pivoting).\n"
         if janes_q else ""
     )
 
-    primary_def_block = (
-        f"[{winner_class}]\n{winner_def}\n" if winner_def
-        else f"[{winner_class}] (no description)\n"
+    # Assemble primary / alternative sections. In pending-follow-up mode,
+    # the pending class is primary; otherwise the chroma winner is.
+    has_pending = bool(
+        pending_class
+        and pending_class.lower() != (winner_class or "").lower()
     )
-    if runnerup_class and runnerup_class != winner_class:
+
+    if has_pending:
+        primary_class = pending_class
+        primary_def = pending_def
+        alt_class = winner_class
+        alt_def = winner_def
+    else:
+        primary_class = winner_class
+        primary_def = winner_def
+        alt_class = runnerup_class if (runnerup_class and runnerup_class != winner_class) else None
+        alt_def = runnerup_def if alt_class else ""
+
+    primary_def_block = (
+        f"[{primary_class}]\n{primary_def}\n" if primary_def
+        else f"[{primary_class}] (no description)\n"
+    )
+    if alt_class:
         alt_def_block = (
-            f"\n[{runnerup_class}] (alternative)\n{runnerup_def}\n" if runnerup_def
-            else f"\n[{runnerup_class}] (alternative, no description)\n"
+            f"\n[{alt_class}] (alternative)\n{alt_def}\n" if alt_def
+            else f"\n[{alt_class}] (alternative, no description)\n"
         )
     else:
         alt_def_block = ""
@@ -239,26 +307,75 @@ def _build_prompt(
     # the rule "if neither fits, return others".
     others_section = "\n[others] — pick this if neither class above fits.\n"
 
-    # Near-identical-match shortcut: if the winner's nearest exemplar is
-    # essentially the same string as the user prompt (cosine distance near
-    # zero), the embedding vote is authoritative — trust it unless the
-    # conversation context blatantly contradicts. This only fires on
-    # verbatim matches (dist < 0.05); looser thresholds let question/
-    # command variants of the same topic fool the shortcut.
-    if winner_best_distance <= NEAR_IDENTICAL_DIST:
-        identical_callout = (
-            f"IMPORTANT: The user's message is a near-identical match "
-            f"(distance={winner_best_distance:.3f}) to an existing "
-            f"'{winner_class}' exemplar in the embedding database. "
-            f"Trust the embedding vote and return '{winner_class}' with "
-            f"Very High confidence UNLESS the recent conversation clearly "
-            f"shows the user is pivoting away from it.\n\n"
+    # Guidance explaining HOW the two options were selected differs by
+    # mode. In pending-follow-up mode we tell qwen explicitly that
+    # option 1 came from "Jane asked a question and is waiting for this
+    # class's answer" while option 2 came from raw chroma with no
+    # conversation awareness — then ask qwen to use context.
+    if has_pending:
+        header = (
+            f"Classify the user's message for Jane (voice assistant).\n"
+            f"\n"
+            f"Option 1 ({primary_class}) — Jane's previous turn asked the user "
+            f"a clarifying question on behalf of '{primary_class}', and Jane "
+            f"is waiting for the user's answer. If the user's current message "
+            f"could reasonably be that answer, this is the right class.\n"
+            f"\n"
+            f"Option 2 ({alt_class if alt_class else 'n/a'}) — raw embedding "
+            f"nearest-neighbor match against the current message ONLY, with "
+            f"NO awareness of the conversation history. Use this only if the "
+            f"user has clearly pivoted away from option 1.\n"
+            f"\n"
+            f"Your job: use the recent conversation to decide which option "
+            f"fits. Prefer option 1 if the message plausibly answers Jane's "
+            f"pending question; prefer option 2 only if the user clearly "
+            f"pivoted to a new topic; return 'others' if neither fits.\n"
         )
+        identical_callout = ""  # near-identical shortcut is suppressed in pending mode
     else:
-        identical_callout = ""
+        header = (
+            f"Classify the user's message for Jane (voice assistant). "
+            f"An embedding vote picked {primary_class}"
+            f"{f' (runner-up: {alt_class})' if alt_class else ''}. "
+            f"Validate against the conversation and pick the right class.\n"
+        )
+        # Near-identical-match shortcut — only fires in non-pending mode.
+        if winner_best_distance <= NEAR_IDENTICAL_DIST:
+            identical_callout = (
+                f"IMPORTANT: The user's message is a near-identical match "
+                f"(distance={winner_best_distance:.3f}) to an existing "
+                f"'{primary_class}' exemplar in the embedding database. "
+                f"Trust the embedding vote and return '{primary_class}' with "
+                f"Very High confidence UNLESS the recent conversation clearly "
+                f"shows the user is pivoting away from it.\n\n"
+            )
+        else:
+            identical_callout = ""
 
-    return f"""Classify the user's message for Jane (voice assistant). An embedding vote picked {winner_class}{f" (runner-up: {runnerup_class})" if runnerup_class and runnerup_class != winner_class else ""}. Validate against the conversation and pick the right class.
+    # STT-awareness nudge: messages arrive via speech-to-text and can be
+    # cut off mid-sentence, contain filler/background speech, or be
+    # incomplete fragments. A fragmentary input often embeds closest to
+    # whatever exemplar shares its first word — a dangerous false-
+    # confidence trap.
+    #
+    # BUT: if the near-identical shortcut fired, the user's message matched
+    # a chroma exemplar almost verbatim — that's proof the message is NOT
+    # fragmentary (an exact-match phrase IS a complete intent). Suppress
+    # the STT nudge in that case so the two signals don't contradict.
+    if winner_best_distance <= NEAR_IDENTICAL_DIST:
+        stt_nudge = ""
+    else:
+        stt_nudge = (
+            "\nInput via speech-to-text: the user's message may be truncated "
+            "mid-sentence, contain filler/background speech, or be incomplete. "
+            "If the message looks fragmentary, cut-off, or too short to express "
+            "a clear intent on its own, DO NOT trust the embedding match — "
+            "prefer 'others' with Low confidence so a reasoning model can "
+            "decide. Examples of fragmentary inputs: \"tell my\", \"set a\", "
+            "\"what about\", \"I was wondering if\".\n"
+        )
 
+    return f"""{header}{stt_nudge}
 {identical_callout}{primary_def_block}{alt_def_block}{others_section}
 {fifo_section}{jane_callout}
 User: "{user_prompt.strip()}"
@@ -266,7 +383,9 @@ User: "{user_prompt.strip()}"
 Return ONLY JSON: {{"class": "<name>", "confidence": "Very High|High|Medium|Low"}}
 - Very High / High → Stage 2 handler runs.
 - Medium / Low → escalate to reasoning brain.
-Pick "others" with Low if neither candidate fits.
+Pick "others" with Low if neither candidate fits — this is SAFE because
+Stage 3 has the full FIFO and all the same handlers, just slower. When
+in doubt, escalate.
 
 JSON:"""
 
@@ -303,6 +422,11 @@ async def _call_qwen(prompt_text: str) -> str:
     async with httpx.AsyncClient(timeout=_LLM_TIMEOUT) as client:
         r = await client.post(OLLAMA_URL, json=body)
         r.raise_for_status()
+        try:
+            from jane_web.jane_v2.models import record_ollama_activity
+            record_ollama_activity()
+        except Exception:
+            pass
         return (r.json().get("response") or "").strip()
 
 
@@ -350,6 +474,18 @@ async def classify(
         _class_definition(runnerup_handler) if runnerup_handler else ""
     ) or ""
 
+    # 3a. Pending STAGE2_FOLLOWUP? If the previous turn's handler emitted
+    # a pending_action with a clarifying question, THAT class should be
+    # the primary candidate (chroma demotes to alternative). Chroma has
+    # no conversation awareness and will routinely misroute short replies
+    # like "pasta" → shopping_list when the user is actually answering
+    # a timer-label question. Normalize underscore→space to match the
+    # handler registry keys (handler_class comes in as "todo_list" but
+    # the registry uses "todo list").
+    raw_pending_class, pending_question = _pending_action_class(session_id or "")
+    pending_class = raw_pending_class.lower().replace("_", " ").strip()
+    pending_def = _class_definition(pending_class) if pending_class else ""
+
     prompt_text = _build_prompt(
         winner_class=winner_handler,
         winner_def=winner_def,
@@ -361,6 +497,9 @@ async def classify(
         total_votes=len(candidates),
         fifo_block=fifo_block,
         user_prompt=user_prompt,
+        pending_class=pending_class,
+        pending_def=pending_def,
+        pending_question=pending_question,
     )
 
     # 4. Send to qwen via Ollama (warm runner, sub-second typical)

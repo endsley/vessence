@@ -6,13 +6,18 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.media.AudioAttributes
+import android.media.AudioFocusRequest
+import android.media.AudioManager
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.core.app.NotificationCompat
 import com.vessences.android.data.api.ApiClient
 import com.vessences.android.util.Constants
+import com.vessences.android.voice.AndroidTtsManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -200,20 +205,21 @@ object ShareSummarizer {
 
     fun postSummaryReady(ctx: Context, url: String, title: String, summary: String) {
         ensureChannel(ctx)
-        val intent = Intent(ctx, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or
-                    Intent.FLAG_ACTIVITY_CLEAR_TOP or
-                    Intent.FLAG_ACTIVITY_SINGLE_TOP
-            putExtra("shared_summary_text", summary)
-            putExtra("shared_summary_url", url)
-            putExtra("shared_summary_speak", true)
+        val appCtx = ctx.applicationContext
+        // Tap-to-open a dedicated reader screen that shows the text and
+        // auto-speaks it, with Stop/Close controls.
+        val intent = Intent(appCtx, SummaryReaderActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra(SummaryReaderActivity.EXTRA_TITLE, title)
+            putExtra(SummaryReaderActivity.EXTRA_SUMMARY, summary)
+            putExtra(SummaryReaderActivity.EXTRA_URL, url)
         }
         val pi = PendingIntent.getActivity(
-            ctx, url.hashCode(), intent,
+            appCtx, url.hashCode(), intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         val contentText = summary.take(120).let { if (summary.length > 120) "$it…" else it }
-        val notif = NotificationCompat.Builder(ctx, CHANNEL_ID)
+        val notif = NotificationCompat.Builder(appCtx, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_menu_info_details)
             .setContentTitle("Summary ready: $title")
             .setContentText(contentText)
@@ -222,8 +228,85 @@ object ShareSummarizer {
             .setAutoCancel(true)
             .setContentIntent(pi)
             .build()
-        val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val nm = appCtx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         nm.notify(300_000 + (url.hashCode() and 0xFFFF), notif)
+
+        // Short spoken heads-up so the user hears something even if the
+        // phone is in a pocket. Tapping the notification opens the reader
+        // which auto-reads the full summary.
+        speakHeadsUp(appCtx)
+    }
+
+    private fun speakHeadsUp(ctx: Context) {
+        scope.launch {
+            val audioMan = ctx.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+            val gotFocus = audioMan?.let { requestFocus(it) } ?: false
+            try {
+                getOrCreateTts(ctx).speak("Your article summary is ready.")
+            } catch (e: Exception) {
+                Log.w("ShareSummarizer", "heads-up TTS failed: ${e.message}")
+            } finally {
+                if (gotFocus) audioMan?.let { releaseFocus(it) }
+            }
+        }
+    }
+
+    @Volatile private var tts: AndroidTtsManager? = null
+    @Volatile private var focusRequest: AudioFocusRequest? = null
+
+    private fun getOrCreateTts(ctx: Context): AndroidTtsManager {
+        tts?.let { return it }
+        synchronized(this) {
+            tts?.let { return it }
+            val created = AndroidTtsManager(ctx.applicationContext)
+            tts = created
+            return created
+        }
+    }
+
+    private fun buildFocusRequest(): AudioFocusRequest? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return null
+        focusRequest?.let { return it }
+        synchronized(this) {
+            focusRequest?.let { return it }
+            val built = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+                .setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                        .build()
+                )
+                .build()
+            focusRequest = built
+            return built
+        }
+    }
+
+    private suspend fun requestFocus(audioMan: AudioManager): Boolean {
+        return withContext(Dispatchers.Main.immediate) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val req = buildFocusRequest() ?: return@withContext false
+                audioMan.requestAudioFocus(req) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+            } else {
+                @Suppress("DEPRECATION")
+                audioMan.requestAudioFocus(
+                    null,
+                    AudioManager.STREAM_MUSIC,
+                    AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK,
+                ) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+            }
+        }
+    }
+
+    private suspend fun releaseFocus(audioMan: AudioManager) {
+        withContext(Dispatchers.Main.immediate) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                buildFocusRequest()?.let { audioMan.abandonAudioFocusRequest(it) }
+            } else {
+                @Suppress("DEPRECATION")
+                audioMan.abandonAudioFocus(null)
+            }
+        }
     }
 
     fun postSummaryFailed(ctx: Context, url: String) {

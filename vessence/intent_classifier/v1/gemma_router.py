@@ -12,7 +12,9 @@ standing brain). It is NOT a separate agent — it is an aspect of Jane.
 The slot is pluggable across four providers — matched to whichever provider
 is currently hosting Jane's mind so the pairing stays coherent by default:
 
-  - "ollama"    → gemma4:e2b (local, no API key required; fallback default)
+  - "ollama"    → LOCAL_LLM from jane_web.jane_v2.models (single source of
+                  truth — currently qwen2.5:7b, override at the models.py
+                  layer, NEVER hardcode here)
   - "anthropic" → claude-haiku-4-5-20251001 (pairs with Claude-Opus mind)
   - "google"    → gemini-2.5-flash         (pairs with Gemini-Pro mind)
   - "openai"    → gpt-5-nano               (pairs with OpenAI mind)
@@ -56,9 +58,11 @@ logger = logging.getLogger(__name__)
 # f"{OLLAMA_URL}/api/chat" never produces "...//api/chat".
 OLLAMA_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
 
-# Legacy env var kept for backwards compatibility — only used when
-# JANE_ACK_MODEL is unset AND provider == "ollama". Prefer JANE_ACK_MODEL.
-_LEGACY_OLLAMA_MODEL = os.environ.get("GEMMA_ROUTER_MODEL", "").strip()
+# GEMMA_ROUTER_MODEL was a legacy override that could force gemma4 back
+# into the ollama ack slot regardless of LOCAL_LLM in models.py. Removed
+# 2026-04-18 — set JANE_ACK_MODEL (explicit override) or change
+# LOCAL_LLM in jane_web/jane_v2/models.py instead.
+_LEGACY_OLLAMA_MODEL = ""
 
 # Overall request budget (per provider call). Weather context adds +3s.
 ROUTER_TIMEOUT = float(os.environ.get("GEMMA_ROUTER_TIMEOUT", "10.0"))
@@ -71,8 +75,17 @@ MAX_HISTORY_CHARS_OLLAMA = 600
 MAX_HISTORY_CHARS_CLI = 1500
 
 # Per-provider default model. User can override globally via JANE_ACK_MODEL.
+# For "ollama" we pull from the single source of truth in models.py so swapping
+# the local model (qwen2.5:7b → anything else) happens in ONE place.
+def _ollama_default_model() -> str:
+    try:
+        from jane_web.jane_v2.models import LOCAL_LLM
+        return LOCAL_LLM
+    except Exception:
+        return "qwen2.5:7b"
+
 _DEFAULT_ACK_MODELS = {
-    "ollama": "qwen2.5:7b",
+    "ollama": _ollama_default_model(),
     "anthropic": "claude-haiku-4-5-20251001",
     "google": "gemini-2.5-flash",
     "openai": "gpt-5-nano",
@@ -166,7 +179,7 @@ def _resolve_model(provider: str) -> str:
         return override
     if provider == "ollama" and _LEGACY_OLLAMA_MODEL:
         return _LEGACY_OLLAMA_MODEL
-    return _DEFAULT_ACK_MODELS.get(provider, "qwen2.5:7b")
+    return _DEFAULT_ACK_MODELS.get(provider, _ollama_default_model())
 
 
 # Personal info loaded from ChromaDB at runtime — see memory/v1/memory_retrieval.py

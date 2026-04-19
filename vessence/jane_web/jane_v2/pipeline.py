@@ -73,9 +73,11 @@ def _inject_self_improvement_context(body):
 
     log_path = "$VESSENCE_DATA_HOME/self_improve_vocal_log.jsonl"
     tech_logs = "$VESSENCE_DATA_HOME/logs/self_improve_*.log"
+    latest_report = "$VESSENCE_HOME/configs/self_improvement_latest.md"
     if not entries:
         block = (
             "\n\n[SELF IMPROVEMENT CONTEXT]\n"
+            f"Readable latest report: {latest_report}\n"
             f"Vocal summary log file: {log_path}\n"
             f"Technical job logs: {tech_logs}\n"
             "No recent self-improvement entries found (empty log or "
@@ -89,11 +91,15 @@ def _inject_self_improvement_context(body):
         by_job = Counter(e.get("job", "?") for e in entries)
 
         lines = ["\n\n[SELF IMPROVEMENT CONTEXT]"]
+        lines.append(f"Readable latest report: {latest_report}")
         lines.append(f"Vocal summary log file: {log_path}")
         lines.append(f"Technical job logs: {tech_logs}")
         lines.append(
             "RESPONSE STYLE — CRITICAL. The user is on voice and doesn't "
             "want a long recital. Your reply should be CONVERSATIONAL:\n"
+            "  0) When the user asks for the most recent self-improvement "
+            "or asks what happened last night, read the readable latest "
+            "report first if exact per-stage details are needed.\n"
             "  1) Open with a one-sentence headline: how many changes in "
             "total and roughly what categories (e.g. 'I logged 7 changes "
             "overnight — mostly transcript review fixes plus a couple doc "
@@ -542,7 +548,7 @@ async def _generate_delegate_ack(prompt: str, session_id: str | None,
     """
     import os
     import httpx
-    from jane_web.jane_v2.models import LOCAL_LLM, LOCAL_LLM_NUM_CTX, OLLAMA_KEEP_ALIVE
+    from jane_web.jane_v2.models import LOCAL_LLM, LOCAL_LLM_NUM_CTX, LOCAL_LLM_TIMEOUT, OLLAMA_KEEP_ALIVE
     duration = _estimate_duration(prompt)
     model = os.environ.get("JANE_ACK_MODEL", LOCAL_LLM)
     # If the ack model IS the pinned local LLM, inherit the pin's keep_alive
@@ -551,45 +557,65 @@ async def _generate_delegate_ack(prompt: str, session_id: str | None,
     # REPLACES the existing runner.sessionDuration — a "1h" here would defeat
     # the startup warmup's -1 pin and cause cold loads after 1h idle.
     ack_keep_alive = OLLAMA_KEEP_ALIVE if model == LOCAL_LLM else "1h"
-    # Force variety by REQUIRING a random opener per call. qwen otherwise
-    # anchors on "Sure thing" no matter the temperature.
-    openers = [
-        "Got it", "Yeah", "Alright", "Okay", "Hmm",
-        "Interesting one", "Good question", "Let me think about it",
-        "I can do that", "On it", "Right", "Hmm let me see",
-        "Mmkay", "Cool", "Oh nice", "Yep", "Sure", "Sure thing",
-        "Fair", "Solid one", "Heh, yeah", "Ah",
-    ]
-    chosen_opener = _random.choice(openers)
+
+    # Topic-aware ack. Previous version forbade mentioning the topic which
+    # produced disconnected/flippant acks ("Heh yeah, give me a sec" after
+    # a serious email question). User feedback 2026-04-18: the ack should
+    # briefly acknowledge Jane received the specific message and signal a
+    # short wait, matching the topic context.
+    #
+    # We still deliberately avoid SUMMARIZING the answer or predicting what
+    # Jane will say — that's Opus's job. Just 4-10 words: "Got it — <short
+    # topic reference>, one sec."
     gen_prompt = (
-        f"Write ONE casual sentence with two parts:\n"
-        f"  PART 1 — START with: \"{chosen_opener}\".\n"
-        f"  PART 2 — say it'll take about {duration}, in your own natural words.\n\n"
-        f"STRICT RULES:\n"
-        f"- Do NOT summarize, paraphrase, or mention what the user is talking about.\n"
-        f"- Do NOT describe the user's topic or intent.\n"
-        f"- ONLY say you're on it and how long it'll take. Nothing about the topic.\n"
-        f"- Be casual like a friend. Never use the user's name. No questions. "
-        f"One sentence only.\n\n"
-        f"GOOD examples: \"{chosen_opener}, give me a sec to look into that.\"\n"
-        f"BAD examples: \"{chosen_opener}, I'll check the weather for you.\"\n\n"
-        f"Your acknowledgment (must start with \"{chosen_opener}\"):"
+        "You are writing a ONE-sentence acknowledgment Jane (a voice assistant) will speak OUT LOUD while she works on the user's request in the background. The reply itself is coming separately — this is just so the user knows Jane heard them.\n\n"
+        "Requirements:\n"
+        "1. Start with a short, natural acknowledgment (\"Got it\", \"Okay\", \"Sure\", \"One sec\", \"Let me check\", \"On it\"). Never clown-speak (\"Heh\", \"Mmkay\", \"Oh nice\").\n"
+        "2. Briefly reference what the user asked about — 2–6 words max, no details. The user already knows what they asked; this is a breadcrumb that you heard the specific thing.\n"
+        "3. End with a short time signal — \"one sec\", \"give me a moment\", \"this'll take a moment\", etc. Rough scale: " + duration + ".\n"
+        "4. ONE sentence. 6–14 words total. No questions. No summarizing the likely answer. No filler. No emoji.\n\n"
+        "Good examples:\n"
+        "  user: \"What was the last email from Bob about?\" → \"Let me check your email, one sec.\"\n"
+        "  user: \"Explain how rsync works\"                → \"Sure — rsync breakdown coming, give me a moment.\"\n"
+        "  user: \"When did we talk about the scheduler?\"  → \"On it, let me pull up the scheduler thread.\"\n"
+        "  user: \"Rewrite this function\"                  → \"Got it, refactoring now — this'll take a moment.\"\n\n"
+        "Bad examples:\n"
+        "  \"Hmm, give me a sec.\"                           ← topic-blind, feels disconnected\n"
+        "  \"Oh nice, this might take a minute or two.\"     ← clown opener, still disconnected\n"
+        "  \"Let me check your email and summarize the three most recent threads.\"  ← over-specifying Opus's answer\n\n"
+        f"User message: {(prompt or '').strip()[:400]}\n\n"
+        "Your one-sentence acknowledgment (plain text, no quotes):"
     )
     try:
-        async with httpx.AsyncClient(timeout=8.0) as client:
+        async with httpx.AsyncClient(timeout=LOCAL_LLM_TIMEOUT) as client:
             r = await client.post(
                 "http://localhost:11434/api/generate",
                 json={
                     "model": model, "prompt": gen_prompt, "stream": False,
                     "think": False,
-                    "options": {"temperature": 1.0, "top_p": 0.95, "num_predict": 60, "num_ctx": LOCAL_LLM_NUM_CTX},
+                    "options": {"temperature": 0.6, "top_p": 0.9, "num_predict": 40, "num_ctx": LOCAL_LLM_NUM_CTX},
                     "keep_alive": ack_keep_alive,
                 },
             )
             r.raise_for_status()
+            try:
+                from jane_web.jane_v2.models import record_ollama_activity
+                record_ollama_activity()
+            except Exception:
+                pass
             text = (r.json().get("response") or "").strip()
-            # Strip stray quotes the model sometimes adds
+            # Strip stray quotes + any leading label the model sometimes adds
             text = text.strip('"').strip("'").strip()
+            if text.lower().startswith("acknowledgment:"):
+                text = text.split(":", 1)[1].strip()
+            # Cap length defensively — if the model went long, truncate at
+            # the first period to preserve a single sentence.
+            if len(text) > 120:
+                first_period = text.find(".")
+                if 10 < first_period < 120:
+                    text = text[:first_period + 1]
+                else:
+                    text = text[:120]
             return text or _ACK_FALLBACK
     except Exception as e:
         logger.warning("ack generation failed (%s) — using fallback", e)
@@ -636,6 +662,27 @@ def _stage2_response_parts(result: dict) -> tuple[str, dict[str, Any]]:
     if result.get("conversation_end"):
         extras["conversation_end"] = True
     return text, extras
+
+
+def _pending_consumed_marker(pending: dict, *, status: str = "resolved",
+                             resolution: str = "answered") -> dict:
+    """Build a FIFO marker that suppresses an older pending_action.
+
+    Stage 2 follow-up handlers receive a pending action, consume the user's
+    answer, and may finish without emitting a new pending_action. The FIFO
+    state scanner needs an explicit marker or the older pending turn remains
+    active and hijacks the next user message.
+    """
+    marker = {
+        "type": pending.get("type", ""),
+        "handler_class": pending.get("handler_class", ""),
+        "status": status,
+        "resolution": resolution,
+    }
+    awaiting = pending.get("awaiting") or (pending.get("data") or {}).get("awaiting")
+    if awaiting:
+        marker["awaiting"] = awaiting
+    return {k: v for k, v in marker.items() if v}
 
 
 def _resolve_pending_sms_confirmation(pending: dict) -> dict:
@@ -820,9 +867,10 @@ async def _resolve_pending_sms_draft_edit(pending: dict, edit_text: str) -> dict
         from jane_web.jane_v2.models import (
             LOCAL_LLM as _model,
             LOCAL_LLM_NUM_CTX as _num_ctx,
+            LOCAL_LLM_TIMEOUT as _timeout,
             OLLAMA_URL as _url,
         )
-        async with httpx.AsyncClient(timeout=8.0) as client:
+        async with httpx.AsyncClient(timeout=_timeout) as client:
             r = await client.post(_url, json={
                 "model": _model,
                 "prompt": compose_prompt,
@@ -930,6 +978,7 @@ async def _classify_and_try_stage2(
     # the current turn's response must carry, so get_active_state stops
     # matching the stale pending on subsequent turns.
     _pivot_cancel_marker: dict | None = None
+    consumed_pending_marker: dict | None = None
     if resolved:
         pending = resolved.get("pending") or {}
         action = resolved["action"]
@@ -1005,6 +1054,9 @@ async def _classify_and_try_stage2(
             # Re-dispatch to the Stage 2 handler that's mid-conversation.
             handler_class = resolved["handler_class"]
             pending_data = resolved.get("pending_data", {})
+            pending_for_dispatch = dict(pending_data) if isinstance(pending_data, dict) else {}
+            if pending.get("question") and "question" not in pending_for_dispatch:
+                pending_for_dispatch["question"] = pending.get("question")
             fifo_ctx = ""
             try:
                 fifo_ctx = recent_context.render_stage2_context(session_id, max_turns=3)
@@ -1012,7 +1064,7 @@ async def _classify_and_try_stage2(
                 pass
             try:
                 result = await stage2_dispatcher.dispatch(
-                    handler_class, prompt, context=fifo_ctx, pending=pending_data,
+                    handler_class, prompt, context=fifo_ctx, pending=pending_for_dispatch,
                 )
             except Exception as e:
                 logger.exception("pipeline: followup dispatch crashed: %s", e)
@@ -1035,10 +1087,16 @@ async def _classify_and_try_stage2(
                         "resolve_pending_action": structured.get("pending_action"),
                     }
                 logger.info("pipeline: handler abandoned pending → falling through to Stage 1")
+                _pivot_cancel_marker = _pending_consumed_marker(
+                    pending, status="cancelled", resolution="abandoned"
+                )
                 # Fall out of the `if resolved` block.
                 resolved = None
             else:
                 cls = handler_class
+                structured = result.get("structured") if isinstance(result, dict) else {}
+                if result and not (structured and structured.get("pending_action")):
+                    consumed_pending_marker = _pending_consumed_marker(pending)
                 logger.info("pipeline: followup handler %s → result=%s",
                             handler_class,
                             "ok" if result else "none")
@@ -1048,20 +1106,23 @@ async def _classify_and_try_stage2(
         if resolved:  # still live after possible abandon
             conf = "High"
             logger.info("jane_v2 pipeline: resolver → %s", action)
-            return {
+            out = {
                 "cls": cls, "conf": conf, "classification": f"{cls}:{conf}",
                 "stage1_ms": 0, "stage2_ms": 0, "result": result,
                 "stage2_ack": _ack_for(cls, escalate=False),
                 "fallback_ack": _ack_for(cls, escalate=True),
             }
+            if consumed_pending_marker is not None:
+                out["resolve_pending_action"] = consumed_pending_marker
+            return out
 
     # Stage 1
     _t1 = time.perf_counter()
     try:
-        cls, conf = await stage1_classifier.classify(prompt, session_id=session_id)
+        cls, conf, min_dist = await stage1_classifier.classify(prompt, session_id=session_id)
     except Exception as e:
         logger.exception("jane_v2 pipeline: stage1 crashed: %s", e)
-        cls, conf = "others", "Low"
+        cls, conf, min_dist = "others", "Low", 1.0
     stage1_ms = int((time.perf_counter() - _t1) * 1000)
     classification = f"{cls}:{conf}"
     logger.info("jane_v2 pipeline: stage1 %s (%dms)", classification, stage1_ms)
@@ -1074,10 +1135,22 @@ async def _classify_and_try_stage2(
     stage2_ms = 0
     result: dict | None = None
 
+    # Unclear-prompt short-circuit — runs only when Stage 1's top chroma
+    # match isn't essentially verbatim (min_dist > SKIP_DIST). Catches STT
+    # noise (background bleed-through, mis-speaks, cut-offs) and asks the
+    # user to repeat instead of escalating to Stage 3 with garbage.
+    try:
+        from jane_web.jane_v2 import unclear_prompt as _unclear
+        if min_dist > _unclear.SKIP_DIST and await _unclear.is_unclear(prompt):
+            result = {"text": _unclear.REPEAT_REPLY, "unclear_prompt": True}
+            logger.info("jane_v2 pipeline: unclear_prompt short-circuit fired")
+    except Exception as e:
+        logger.warning("jane_v2 pipeline: unclear_prompt check failed: %s", e)
+
     # END_CONVERSATION short-circuit: gate-check first since this is destructive
     # (no Stage 3 recovery). Only fires if BOTH classifier confidence is high
     # AND the LLM gate confirms the user is really saying goodbye.
-    if conf in ("High", "Medium") and cls == "end conversation":
+    if result is None and conf in ("High", "Medium") and cls == "end conversation":
         fifo_ctx = ""
         try:
             fifo_ctx = recent_context.render_stage2_context(session_id, max_turns=3)
@@ -1096,7 +1169,7 @@ async def _classify_and_try_stage2(
             pass
         _t2 = time.perf_counter()
         try:
-            result = await stage2_dispatcher.dispatch(cls, prompt, context=fifo_ctx, stage1_conf=conf)
+            result = await stage2_dispatcher.dispatch(cls, prompt, context=fifo_ctx, stage1_conf=conf, min_dist=min_dist)
         except Exception as e:
             logger.exception("jane_v2 pipeline: dispatcher crashed: %s", e)
             result = None

@@ -1,5 +1,18 @@
 """Get time class — current time/date queries delegated to phone."""
 
+from datetime import datetime
+
+
+def _escalation_context() -> str:
+    """Inject current date/time so Stage 3 (Opus) can answer immediately."""
+    now = datetime.now().astimezone()
+    return (
+        f"Current local time: {now.strftime('%-I:%M %p')} on "
+        f"{now.strftime('%A, %B %-d, %Y')} "
+        f"(timezone: {now.tzname()})."
+    )
+
+
 METADATA = {
     "name": "get time",
     "priority": 10,
@@ -30,4 +43,5 @@ METADATA = {
     ],
     "ack": None,
     "escalate_ack": None,
+    "escalation_context": _escalation_context,
 }

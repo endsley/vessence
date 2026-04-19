@@ -425,7 +425,17 @@ async def stage1_classify(message: str, session_id: str) -> dict:
         from jane_web.jane_v2.models import STAGE2_MODEL
         model = os.environ.get("JANE_STAGE1_MODEL") or STAGE2_MODEL
     except Exception:
-        model = os.environ.get("JANE_STAGE1_MODEL") or "qwen2.5:7b"
+        model = (
+            os.environ.get("JANE_STAGE1_MODEL")
+            or os.environ.get("JANE_LOCAL_LLM")
+            or os.environ.get("JANE_STAGE2_MODEL")
+        )
+        if not model:
+            raise RuntimeError(
+                "Cannot resolve Stage 1 model: models.py import failed AND "
+                "no JANE_STAGE1_MODEL / JANE_LOCAL_LLM / JANE_STAGE2_MODEL "
+                "env var is set"
+            )
 
     # If the model is a gemma/ollama model, always go direct to ollama HTTP —
     # CLI backends like 'claude' or 'gemini' cannot run local ollama models.

@@ -188,6 +188,7 @@ def classify(message: str) -> dict:
             "classification": "DELEGATE_OPUS",
             "confidence":     0.0,
             "margin":         0.0,
+            "min_dist":       round(min_dist, 4),
             "latency_ms":     round(elapsed_ms, 1),
         }
 
@@ -216,6 +217,7 @@ def classify(message: str) -> dict:
         "classification": final_cls,
         "confidence":     round(vote_fraction, 4),
         "margin":         round(margin, 4),
+        "min_dist":       round(min_dist, 4),
         "latency_ms":     round(elapsed_ms, 1),
     }
 

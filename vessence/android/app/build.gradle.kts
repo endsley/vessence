@@ -172,6 +172,10 @@ dependencies {
     // OpenWakeWord: lightweight ONNX-based wake word detection
     implementation("com.microsoft.onnxruntime:onnxruntime-android:1.20.0")
 
+    // Markdown rendering for canonical docs (System Architecture screen
+    // pulls /api/docs/<slug> from server — single source of truth).
+    implementation("com.mikepenz:multiplatform-markdown-renderer-m3:0.32.0")
+
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 }

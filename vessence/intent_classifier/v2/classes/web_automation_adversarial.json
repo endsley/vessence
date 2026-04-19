@@ -1,0 +1,249 @@
+{
+  "class": "WEB_AUTOMATION",
+  "phrases": [
+    "how does Jane browse websites anyway",
+    "explain how the web automation feature works",
+    "what's headless browsing",
+    "debug the web_automation classifier",
+    "why did you open the wrong site earlier",
+    "I was browsing hacker news last night",
+    "do you remember when we opened the bank site together",
+    "tell me about the last workflow you ran",
+    "don't open any websites right now",
+    "stop the browser automation",
+    "cancel whatever you're doing in the browser",
+    "close the open tabs",
+    "kill the browser session",
+    "open the calendar app",
+    "open my texts with x",
+    "open the garage door",
+    "open a timer for 10 minutes",
+    "go to my room in 10 minutes",
+    "go to bed",
+    "search google for pasta recipes",
+    "look up pasta recipes",
+    "what is the best website for recipes",
+    "recommend a website to learn python",
+    "is hacker news down right now",
+    "what's the weather tomorrow",
+    "read my email",
+    "text x that I'm running late",
+    "what's on my todo list",
+    "play some taylor swift",
+    "what time is it"
+  ],
+  "results": [
+    {
+      "phrase": "how does Jane browse websites anyway",
+      "classification": "RESTART_SERVER",
+      "confidence": 0.6,
+      "margin": 0.4,
+      "false_positive": false
+    },
+    {
+      "phrase": "explain how the web automation feature works",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.0,
+      "margin": 0.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "what's headless browsing",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.0,
+      "margin": 0.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "debug the web_automation classifier",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.0,
+      "margin": 0.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "why did you open the wrong site earlier",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "I was browsing hacker news last night",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "do you remember when we opened the bank site together",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.6,
+      "margin": 0.4,
+      "false_positive": false
+    },
+    {
+      "phrase": "tell me about the last workflow you ran",
+      "classification": "TODO_LIST",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "don't open any websites right now",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.4,
+      "margin": 0.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "stop the browser automation",
+      "classification": "TIMER",
+      "confidence": 0.6,
+      "margin": 0.2,
+      "false_positive": false
+    },
+    {
+      "phrase": "cancel whatever you're doing in the browser",
+      "classification": "TIMER",
+      "confidence": 0.6,
+      "margin": 0.2,
+      "false_positive": false
+    },
+    {
+      "phrase": "close the open tabs",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.4,
+      "margin": 0.2,
+      "false_positive": false
+    },
+    {
+      "phrase": "kill the browser session",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.4,
+      "margin": 0.2,
+      "false_positive": false
+    },
+    {
+      "phrase": "open the calendar app",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "open my texts with x",
+      "classification": "READ_MESSAGES",
+      "confidence": 0.6,
+      "margin": 0.2,
+      "false_positive": false
+    },
+    {
+      "phrase": "open the garage door",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.6,
+      "margin": 0.2,
+      "false_positive": false
+    },
+    {
+      "phrase": "open a timer for 10 minutes",
+      "classification": "TIMER",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "go to my room in 10 minutes",
+      "classification": "TIMER",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "go to bed",
+      "classification": "END_CONVERSATION",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "search google for pasta recipes",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.4,
+      "margin": 0.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "look up pasta recipes",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.6,
+      "margin": 0.4,
+      "false_positive": false
+    },
+    {
+      "phrase": "what is the best website for recipes",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "recommend a website to learn python",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.0,
+      "margin": 0.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "is hacker news down right now",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.4,
+      "margin": 0.2,
+      "false_positive": false
+    },
+    {
+      "phrase": "what's the weather tomorrow",
+      "classification": "WEATHER",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "read my email",
+      "classification": "READ_EMAIL",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "text x that I'm running late",
+      "classification": "SEND_MESSAGE",
+      "confidence": 0.6,
+      "margin": 0.2,
+      "false_positive": false
+    },
+    {
+      "phrase": "what's on my todo list",
+      "classification": "TODO_LIST",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "play some taylor swift",
+      "classification": "MUSIC_PLAY",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "what time is it",
+      "classification": "GET_TIME",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    }
+  ],
+  "false_positive_count": 0,
+  "false_positives": []
+}

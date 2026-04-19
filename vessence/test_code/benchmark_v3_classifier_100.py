@@ -121,52 +121,62 @@ CASES: list[dict] = [
     {"prompt": "pasta", "fifo": [
         {"role": "user", "text": "set a 10 minute timer"},
         {"role": "assistant", "text": "Got it, 10 minutes. What should I call this timer?"},
-     ], "expected_stage": "stage2", "expected_class_contains": "timer",
+     ], "pending": {"handler_class": "timer", "question": "What should I call this timer?"},
+     "expected_stage": "stage2", "expected_class_contains": "timer",
      "note": "timer label follow-up"},
     {"prompt": "laundry", "fifo": [
         {"role": "user", "text": "start a 30 minute timer"},
         {"role": "assistant", "text": "30 minutes. What's this timer for?"},
-     ], "expected_stage": "stage2", "expected_class_contains": "timer",
+     ], "pending": {"handler_class": "timer", "question": "What's this timer for?"},
+     "expected_stage": "stage2", "expected_class_contains": "timer",
      "note": "timer label follow-up"},
     {"prompt": "ten minutes", "fifo": [
         {"role": "user", "text": "start a timer"},
         {"role": "assistant", "text": "How long?"},
-     ], "expected_stage": "stage2", "expected_class_contains": "timer",
+     ], "pending": {"handler_class": "timer", "question": "How long?"},
+     "expected_stage": "stage2", "expected_class_contains": "timer",
      "note": "timer duration follow-up"},
     {"prompt": "half an hour", "fifo": [
         {"role": "user", "text": "set a timer"},
         {"role": "assistant", "text": "How long should the timer run?"},
-     ], "expected_stage": "stage2", "expected_class_contains": "timer",
+     ], "pending": {"handler_class": "timer", "question": "How long should the timer run?"},
+     "expected_stage": "stage2", "expected_class_contains": "timer",
      "note": "timer duration — natural language"},
     {"prompt": "clinic", "fifo": [
         {"role": "user", "text": "what's on my todo list"},
         {"role": "assistant", "text": "Two categories: home and clinic. Which one?"},
-     ], "expected_stage": "stage2", "expected_class_contains": "todo",
+     ], "pending": {"handler_class": "todo_list", "question": "Two categories: home and clinic. Which one?"},
+     "expected_stage": "stage2", "expected_class_contains": "todo",
      "note": "todo category follow-up"},
     {"prompt": "home", "fifo": [
         {"role": "user", "text": "what do I need to do"},
         {"role": "assistant", "text": "Categories: home, clinic, urgent. Which?"},
-     ], "expected_stage": "stage2", "expected_class_contains": "todo",
+     ], "pending": {"handler_class": "todo_list", "question": "Categories: home, clinic, urgent. Which?"},
+     "expected_stage": "stage2", "expected_class_contains": "todo",
      "note": "todo category single word"},
     {"prompt": "urgent", "fifo": [
         {"role": "user", "text": "show me my todos"},
         {"role": "assistant", "text": "Categories: urgent, home, clinic. Which one?"},
-     ], "expected_stage": "stage2", "expected_class_contains": "todo",
+     ], "pending": {"handler_class": "todo_list", "question": "Categories: urgent, home, clinic. Which one?"},
+     "expected_stage": "stage2", "expected_class_contains": "todo",
      "note": "todo category — 'urgent' single word"},
     {"prompt": "the clinic stuff", "fifo": [
         {"role": "user", "text": "what do I need to do today"},
         {"role": "assistant", "text": "Categories: urgent, clinic, home. Which one?"},
-     ], "expected_stage": "stage2", "expected_class_contains": "todo",
+     ], "pending": {"handler_class": "todo_list", "question": "Categories: urgent, clinic, home. Which one?"},
+     "expected_stage": "stage2", "expected_class_contains": "todo",
      "note": "todo category with filler"},
     {"prompt": "yes send it", "fifo": [
         {"role": "user", "text": "text bob I'm on my way"},
         {"role": "assistant", "text": "Draft for Bob: 'I'm on my way'. Send?"},
-     ], "expected_stage": "stage2", "expected_class_contains": "send",
+     ], "pending": {"handler_class": "send_message", "question": "Draft for Bob: 'I'm on my way'. Send?"},
+     "expected_stage": "stage2", "expected_class_contains": "send",
      "note": "sms confirm"},
     {"prompt": "yeah send that", "fifo": [
         {"role": "user", "text": "text my wife I love her"},
         {"role": "assistant", "text": "Draft for Kathia: 'I love you'. Send?"},
-     ], "expected_stage": "stage2", "expected_class_contains": "send",
+     ], "pending": {"handler_class": "send_message", "question": "Draft for Kathia: 'I love you'. Send?"},
+     "expected_stage": "stage2", "expected_class_contains": "send",
      "note": "sms confirm variant"},
     {"prompt": "no don't send", "fifo": [
         {"role": "user", "text": "text alice meeting at 3"},
@@ -391,11 +401,23 @@ CASES: list[dict] = [
 # ── FIFO seeding helpers (copied from the 30-case bench) ─────────────────────
 
 
-async def _patch_fifo_for_case(sid: str, prior_turns: list[dict]):
+async def _patch_fifo_for_case(sid: str, prior_turns: list[dict],
+                                pending: dict | None = None):
+    """Seed FIFO for a case. If `pending` is provided AND the last turn
+    is from the assistant, attach a STAGE2_FOLLOWUP pending_action to
+    that turn so `get_active_state()` surfaces it to the classifier.
+
+    `pending` shape:
+      {"handler_class": "timer", "question": "What should I call this timer?"}
+    """
     if not prior_turns:
         return
     try:
-        from vault_web.recent_turns import add as _recent_add, clear as _recent_clear
+        from vault_web.recent_turns import (
+            add as _recent_add,
+            add_structured as _recent_add_struct,
+            clear as _recent_clear,
+        )
     except Exception as e:
         print(f"  (FIFO seed unavailable: {e})")
         return
@@ -403,23 +425,50 @@ async def _patch_fifo_for_case(sid: str, prior_turns: list[dict]):
         _recent_clear(sid)
     except Exception:
         pass
-    for t in prior_turns:
+
+    last_idx = len(prior_turns) - 1
+    for i, t in enumerate(prior_turns):
         role = t.get("role", "user")
         text = t.get("text", "").strip()
         prefix = "user: " if role == "user" else "jane: "
-        try:
-            _recent_add(sid, prefix + text)
-        except Exception:
-            pass
+        is_last_assistant = (i == last_idx and role == "assistant")
+        if pending and is_last_assistant:
+            # Write a structured record so pending_action is carried.
+            try:
+                import time as _t
+                pa = {
+                    "type": "STAGE2_FOLLOWUP",
+                    "handler_class": pending.get("handler_class", ""),
+                    "status": "awaiting_user",
+                    "question": pending.get("question") or text,
+                    "expires_at": _t.time() + 600,  # 10 min from now
+                }
+                _recent_add_struct(sid, {
+                    "role": "assistant",
+                    "summary": prefix + text,
+                    "pending_action": pa,
+                })
+            except Exception as e:
+                print(f"  (pending seed failed: {e})")
+                try:
+                    _recent_add(sid, prefix + text)
+                except Exception:
+                    pass
+        else:
+            try:
+                _recent_add(sid, prefix + text)
+            except Exception:
+                pass
 
 
 async def _run_case(idx: int, case: dict) -> dict:
     prompt = case["prompt"]
     fifo = case.get("fifo", [])
     expected = case["expected_stage"]
+    pending = case.get("pending")  # optional {"handler_class":..., "question":...}
 
     sid = f"bench-v3-100-{idx:03d}"
-    await _patch_fifo_for_case(sid, fifo)
+    await _patch_fifo_for_case(sid, fifo, pending=pending)
 
     t0 = time.perf_counter()
     cls, conf = await v3_classifier.classify(prompt, session_id=sid)

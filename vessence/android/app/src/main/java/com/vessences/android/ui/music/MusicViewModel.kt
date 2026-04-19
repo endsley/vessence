@@ -114,9 +114,18 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             android.util.Log.i("MusicVM", "Auto-playing playlist: $pendingPlaylistId")
             viewModelScope.launch {
                 repo.getPlaylist(pendingPlaylistId).onSuccess { playlist ->
-                    _state.value = _state.value.copy(activePlaylist = playlist, currentTrackIndex = 0)
+                    val tracks = playlist.tracks ?: emptyList()
+                    android.util.Log.i("MusicVM", "Loaded playlist ${playlist.id} name=${playlist.name} tracks=${tracks.size}")
+                    _state.value = _state.value.copy(activePlaylist = playlist, currentTrackIndex = 0, error = null)
                     preparePlaylist(playlist)
-                    playTrack(0)
+                    if (tracks.isEmpty()) {
+                        _state.value = _state.value.copy(error = "Playlist '${playlist.name}' is empty.")
+                    } else {
+                        playTrack(0)
+                    }
+                }.onFailure { e ->
+                    android.util.Log.e("MusicVM", "Auto-play failed for playlist $pendingPlaylistId: ${e.message}", e)
+                    _state.value = _state.value.copy(error = "Couldn't open playlist: ${e.message ?: "unknown error"}")
                 }
             }
         }
@@ -128,9 +137,18 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             android.util.Log.i("MusicVM", "Auto-playing playlist (from checkPendingPlay): $pendingPlaylistId")
             viewModelScope.launch {
                 repo.getPlaylist(pendingPlaylistId).onSuccess { playlist ->
-                    _state.value = _state.value.copy(activePlaylist = playlist, currentTrackIndex = 0)
+                    val tracks = playlist.tracks ?: emptyList()
+                    android.util.Log.i("MusicVM", "Loaded playlist ${playlist.id} name=${playlist.name} tracks=${tracks.size}")
+                    _state.value = _state.value.copy(activePlaylist = playlist, currentTrackIndex = 0, error = null)
                     preparePlaylist(playlist)
-                    playTrack(0)
+                    if (tracks.isEmpty()) {
+                        _state.value = _state.value.copy(error = "Playlist '${playlist.name}' is empty.")
+                    } else {
+                        playTrack(0)
+                    }
+                }.onFailure { e ->
+                    android.util.Log.e("MusicVM", "Auto-play failed for playlist $pendingPlaylistId: ${e.message}", e)
+                    _state.value = _state.value.copy(error = "Couldn't open playlist: ${e.message ?: "unknown error"}")
                 }
             }
         }
@@ -150,8 +168,16 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     fun openPlaylist(playlistId: String) {
         viewModelScope.launch {
             repo.getPlaylist(playlistId).onSuccess { playlist ->
-                _state.value = _state.value.copy(activePlaylist = playlist, currentTrackIndex = 0)
+                val tracks = playlist.tracks ?: emptyList()
+                android.util.Log.i("MusicVM", "openPlaylist ${playlist.id} name=${playlist.name} tracks=${tracks.size}")
+                _state.value = _state.value.copy(activePlaylist = playlist, currentTrackIndex = 0, error = null)
                 preparePlaylist(playlist)
+                if (tracks.isEmpty()) {
+                    _state.value = _state.value.copy(error = "Playlist '${playlist.name}' is empty.")
+                }
+            }.onFailure { e ->
+                android.util.Log.e("MusicVM", "openPlaylist failed for $playlistId: ${e.message}", e)
+                _state.value = _state.value.copy(error = "Couldn't open playlist: ${e.message ?: "unknown error"}")
             }
         }
     }

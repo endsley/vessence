@@ -238,11 +238,13 @@ async def classify(
     user_prompt: str,
     session_id: str | None = None,
     timeout: float = 90.0,
-) -> tuple[str, str]:
+) -> tuple[str, str, float]:
     """Classify a user prompt via ChromaDB embedding lookup.
 
-    Returns (class_name, confidence) to match the pipeline's expected interface.
-    On any failure returns ("others", "Low") so the caller falls through to Stage 3.
+    Returns (class_name, confidence, min_dist). `min_dist` is the cosine
+    distance of the top-1 nearest exemplar; callers use it to detect
+    "near-identical to a known example" prompts and skip downstream LLM
+    gates. On failure returns ("others", "Low", 1.0).
 
     `session_id` is accepted for forward-compatibility with context-aware
     routing (job 069). Currently the embedding is still prompt-only — the
@@ -263,18 +265,18 @@ async def classify(
     for _p in FORCE_STAGE3_PHRASES:
         if _p in _lc:
             logger.info("stage1_classifier: FORCE_STAGE3 phrase override (%r)", _p)
-            return ("others", "Low")
+            return ("others", "Low", 1.0)
     # Regex fallback for variants like "think this deeply" / "reason it through"
     if _FORCE_STAGE3_RE.search(_lc):
         logger.info("stage1_classifier: FORCE_STAGE3 regex override")
-        return ("others", "Low")
+        return ("others", "Low", 1.0)
 
     try:
         from intent_classifier.v2.classifier import stage1_classify
         result = await stage1_classify(cleaned)
     except Exception as e:
         logger.warning("stage1_classifier: ChromaDB classify failed: %s", e)
-        return ("others", "Low")
+        return ("others", "Low", 1.0)
 
     raw_cls = result.get("classification", "DELEGATE_OPUS")
     confidence = result.get("confidence", 0.0)
@@ -313,9 +315,10 @@ async def classify(
     else:
         conf = "High"
 
+    min_dist = float(result.get("min_dist", 1.0))
     logger.info(
-        "stage1_classifier: %s:%s  (raw=%s conf=%.2f margin=%.2f lat=%.0fms)",
+        "stage1_classifier: %s:%s  (raw=%s conf=%.2f margin=%.2f dist=%.3f lat=%.0fms)",
         cls, conf, raw_cls, confidence,
-        result.get("margin", 0.0), result.get("latency_ms", 0.0),
+        result.get("margin", 0.0), min_dist, result.get("latency_ms", 0.0),
     )
-    return (cls, conf)
+    return (cls, conf, min_dist)

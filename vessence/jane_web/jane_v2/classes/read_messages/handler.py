@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_LIMIT = 10
 
-from jane_web.jane_v2.models import LOCAL_LLM as MODEL, LOCAL_LLM_NUM_CTX, OLLAMA_URL  # noqa: E402
+from jane_web.jane_v2.models import LOCAL_LLM as MODEL, LOCAL_LLM_NUM_CTX, LOCAL_LLM_TIMEOUT, OLLAMA_URL  # noqa: E402
 
 # Architecture/code-question keywords → escalate (not a real read request)
 _ARCH_WORDS = ("architecture", "infrastructure", "pipeline", "handler", "classifier", "stage")
@@ -178,9 +178,14 @@ Your answer:"""
         "keep_alive": -1,
     }
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with httpx.AsyncClient(timeout=LOCAL_LLM_TIMEOUT) as client:
             r = await client.post(OLLAMA_URL, json=body)
             r.raise_for_status()
+            try:
+                from jane_web.jane_v2.models import record_ollama_activity
+                record_ollama_activity()
+            except Exception:
+                pass
             text = (r.json().get("response") or "").strip()
             return text or None
     except Exception as e:

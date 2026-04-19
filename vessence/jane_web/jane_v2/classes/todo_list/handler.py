@@ -57,6 +57,22 @@ def _detect_edit_intent(prompt: str) -> str | None:
     return None
 
 
+_PLACEHOLDER_ITEM_RE = re.compile(
+    r"^(?:a|an|the|new)?\s*"
+    r"(?:item|task|todo|to-do|thing|something)"
+    r"(?:\s+(?:item|task|todo|to-do|thing))?$",
+    re.I,
+)
+
+
+def _is_placeholder_item_text(text: str | None) -> bool:
+    """True when the extracted add text is a slot placeholder, not a task."""
+    if not text:
+        return False
+    cleaned = re.sub(r"[.?!,;:]+$", "", text.strip())
+    return bool(_PLACEHOLDER_ITEM_RE.match(cleaned))
+
+
 def _extract_item_text(prompt: str, edit_type: str) -> str | None:
     """Try to extract the item text from an add/remove request."""
     p = prompt.strip()
@@ -65,12 +81,12 @@ def _extract_item_text(prompt: str, edit_type: str) -> str | None:
         m = re.search(r"""['"\u2018\u2019\u201c\u201d](.+?)['"\u2018\u2019\u201c\u201d]""", p)
         if m:
             return m.group(1).strip()
-        # "add buy milk to my to-do"
-        m = re.search(r"\badd\s+(.+?)(?:\s+to\s+(?:my|the)\b|\s+(?:under|for)\s+)", p, re.I)
-        if m:
-            return m.group(1).strip()
         # "add a task for students: grade midterms"
         m = re.search(r":\s*(.+)$", p)
+        if m:
+            return m.group(1).strip()
+        # "add buy milk to my to-do"
+        m = re.search(r"\badd\s+(.+?)(?:\s+to\s+(?:my|the)\b|\s+(?:under|for)\s+)", p, re.I)
         if m:
             return m.group(1).strip()
         # Fallback: everything after "add"
@@ -78,7 +94,7 @@ def _extract_item_text(prompt: str, edit_type: str) -> str | None:
         if m:
             text = m.group(1).strip()
             text = re.sub(r"\s+(?:to|on|under|for)\s+(?:my|the)\s+.*$", "", text, flags=re.I)
-            return text if text else None
+            return text if text and not _is_placeholder_item_text(text) else None
     elif edit_type == "remove":
         # "remove 'curtain rods' from my clinic list"
         m = re.search(r"""['"\u2018\u2019\u201c\u201d](.+?)['"\u2018\u2019\u201c\u201d]""", p)
@@ -120,17 +136,40 @@ def _refresh_cache() -> None:
 async def _handle_edit(prompt: str, edit_type: str, categories: list[dict]) -> dict | None:
     """Handle an add or remove edit request."""
     item_text = _extract_item_text(prompt, edit_type)
+    if _is_placeholder_item_text(item_text):
+        item_text = None
     cat = _match_category(prompt, categories)
 
     if edit_type == "add":
-        if not item_text:
-            ask = "What would you like me to add? And to which category?"
+        if not item_text and cat:
+            ask = f"What item should I add to {_friendly_category_name(cat['name'])}?"
             return {
                 "text": ask,
                 "structured": {
                     "intent": "todo list",
+                    "entities": {"action": "add", "category": cat["name"]},
+                    "pending_action": _pending(
+                        "add_item_for_category",
+                        {"action": "add", "category": cat["name"]},
+                        question=ask,
+                    ),
+                },
+            }
+        if not item_text:
+            cat_list = _speak_category_list(categories).replace(
+                "Which one do you want to hear?",
+                "Which category should I add it to?"
+            )
+            return {
+                "text": cat_list,
+                "structured": {
+                    "intent": "todo list",
                     "entities": {"action": "add"},
-                    "pending_action": _pending("add_item", {"action": "add"}, question=ask),
+                    "pending_action": _pending(
+                        "add_category_then_item",
+                        {"action": "add"},
+                        question=cat_list,
+                    ),
                 },
             }
         if not cat:
@@ -454,9 +493,10 @@ async def _handle_resume(prompt: str, pending: dict) -> dict | None:
 
     categories = cache.get("categories") or []
 
-    # Handle edit follow-ups: we previously asked "which category?"
-    pending_data = pending.get("data", {})
-    awaiting = pending_data.get("awaiting", "")
+    # The pipeline passes pending.data for Stage 2 follow-ups. Some tests and
+    # older callers still pass the full pending_action wrapper, so accept both.
+    pending_data = pending.get("data") if isinstance(pending.get("data"), dict) else pending
+    awaiting = pending_data.get("awaiting", "") or pending.get("awaiting", "")
 
     if awaiting == "add_category":
         item_text = pending_data.get("item_text", "")
@@ -479,9 +519,98 @@ async def _handle_resume(prompt: str, pending: dict) -> dict | None:
             logger.error("todo_list: add (resume) failed: %s", e)
             return {"text": f"I couldn't add that. Error: {e}", "structured": {"intent": "todo list"}}
 
+    if awaiting == "add_category_then_item":
+        cat = _match_category(prompt, categories)
+        if cat is None:
+            logger.info("todo_list: no category match for add slot → abandon")
+            return {"abandon_pending": True}
+        ask = f"What item should I add to {_friendly_category_name(cat['name'])}?"
+        return {
+            "text": ask,
+            "structured": {
+                "intent": "todo list",
+                "entities": {"action": "add", "category": cat["name"]},
+                "pending_action": _pending(
+                    "add_item_for_category",
+                    {"action": "add", "category": cat["name"]},
+                    question=ask,
+                ),
+            },
+        }
+
+    if awaiting == "add_item_for_category":
+        item_text = prompt.strip()
+        if not item_text or _is_placeholder_item_text(item_text):
+            category_name = pending_data.get("category", "")
+            ask = f"What item should I add to {_friendly_category_name(category_name)}?"
+            return {
+                "text": ask,
+                "structured": {
+                    "intent": "todo list",
+                    "entities": {"action": "add", "category": category_name},
+                    "pending_action": _pending(
+                        "add_item_for_category",
+                        {"action": "add", "category": category_name},
+                        question=ask,
+                    ),
+                },
+            }
+        category_name = pending_data.get("category", "")
+        cat = next((c for c in categories if c.get("name") == category_name), None)
+        if cat is None:
+            logger.info("todo_list: saved add category missing → abandon")
+            return {"abandon_pending": True}
+        try:
+            from agent_skills.docs_tools import todo_add_item
+            result = todo_add_item(item_text, cat["name"])
+            _refresh_cache()
+            return {
+                "text": f"Done. {result}",
+                "structured": {
+                    "intent": "todo list",
+                    "entities": {
+                        "action": "add",
+                        "category": cat["name"],
+                        "item_text": item_text,
+                    },
+                },
+            }
+        except Exception as e:
+            logger.error("todo_list: add item for category failed: %s", e)
+            return {"text": f"Couldn't add that. Error: {e}", "structured": {"intent": "todo list"}}
+
     if awaiting == "add_item":
         item_text = prompt.strip()
+        if _is_placeholder_item_text(item_text):
+            ask = "What item should I add?"
+            return {
+                "text": ask,
+                "structured": {
+                    "intent": "todo list",
+                    "entities": {"action": "add"},
+                    "pending_action": _pending("add_item", {"action": "add"}, question=ask),
+                },
+            }
         cat = _match_category(prompt, categories)
+        if cat and (prompt.strip().lower() in {
+            cat.get("name", "").strip().lower(),
+            _friendly_category_name(cat.get("name", "")).strip().lower(),
+            "urgent",
+            "urgent stuff",
+        }):
+            ask = f"What item should I add to {_friendly_category_name(cat['name'])}?"
+            return {
+                "text": ask,
+                "structured": {
+                    "intent": "todo list",
+                    "entities": {"action": "add", "category": cat["name"]},
+                    "pending_action": _pending(
+                        "add_item_for_category",
+                        {"action": "add", "category": cat["name"]},
+                        question=ask,
+                    ),
+                },
+            }
         if not cat:
             ask = f"Got it: '{item_text}'. Which category should I add it to?"
             return {

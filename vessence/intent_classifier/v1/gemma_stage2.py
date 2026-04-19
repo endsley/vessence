@@ -115,7 +115,16 @@ def _get_model() -> str:
         from jane_web.jane_v2.models import STAGE2_MODEL
         return os.environ.get("JANE_STAGE2_MODEL") or STAGE2_MODEL
     except Exception:
-        return os.environ.get("JANE_STAGE2_MODEL") or "qwen2.5:7b"
+        model = (
+            os.environ.get("JANE_STAGE2_MODEL")
+            or os.environ.get("JANE_LOCAL_LLM")
+        )
+        if not model:
+            raise RuntimeError(
+                "Cannot resolve Stage 2 model: models.py import failed AND "
+                "no JANE_STAGE2_MODEL / JANE_LOCAL_LLM env var is set"
+            )
+        return model
 
 
 async def _gemma_call(prompt: str, timeout: float = STAGE2_TIMEOUT_S) -> Optional[str]:

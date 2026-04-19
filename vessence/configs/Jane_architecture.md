@@ -93,7 +93,7 @@ Jane is one agent from the user's point of view, but her execution is split acro
 
 | Role | What it does | Default model (per provider stack) |
 |---|---|---|
-| **Jane's initial ack** | The fast front half. Speaks first within ~1–2s. Classifies each turn as SELF_HANDLE / MUSIC_PLAY / DELEGATE. Self-handles trivia, greetings, weather, unit conversions, obvious STT garbage (with a "was that meant for me?" check-in), and music routing. Otherwise emits a contextual ack with a verbal ETA hint (TRIVIAL / MEDIUM / BIG) and hands off to Jane's mind. Never tries to answer anything hard. | **Claude stack:** `claude-haiku-4-5-20251001` · **Gemini stack:** `gemini-2.5-flash` · **OpenAI stack:** `gpt-5-nano` · **Local/no-cloud:** `gemma4:e4b` via Ollama (current default, fallback) |
+| **Jane's initial ack** | The fast front half. Speaks first within ~1–2s. Classifies each turn as SELF_HANDLE / MUSIC_PLAY / DELEGATE. Self-handles trivia, greetings, weather, unit conversions, obvious STT garbage (with a "was that meant for me?" check-in), and music routing. Otherwise emits a contextual ack with a verbal ETA hint (TRIVIAL / MEDIUM / BIG) and hands off to Jane's mind. Never tries to answer anything hard. | **Claude stack:** `claude-haiku-4-5-20251001` · **Gemini stack:** `gemini-2.5-flash` · **OpenAI stack:** `gpt-5-nano` · **Local/no-cloud:** `LOCAL_LLM` from `jane_web/jane_v2/models.py` (single source of truth — swap model there) |
 | **Jane's mind** (a.k.a. "the standing brain") | The deep reasoner. Writes code, does research, runs tools, maintains long-running projects, replies to anything that wasn't self-handled. Implemented as a long-lived CLI process kept warm to skip cold-start ("standing brain"). | **Claude stack:** `claude-opus-4-6` · **Gemini stack:** `gemini-2.5-pro` · **OpenAI stack:** `gpt-5.4` |
 
 **Vocabulary rules:**
@@ -103,7 +103,7 @@ Jane is one agent from the user's point of view, but her execution is split acro
 
 **Default selection policy:** A new user inherits the initial-ack model that is provider-matched to whichever stack is configured for Jane's mind, so the ack latency stays tight by default. Customizing the initial-ack model independently of Jane's mind is a planned user setting, not the default path.
 
-**Pluggability status (2026-04-05):** Jane's mind slot is fully pluggable today via `jane/standing_brain.py` (`ALL_PROVIDERS = ("claude", "gemini", "openai")` with env-var overrides). Jane's initial ack slot is currently hardcoded to Ollama/gemma4:e4b in `jane_web/gemma_router.py:23`; turning it into a real provider-dispatching slot (Ollama, Anthropic, Google, OpenAI) is a pending refactor.
+**Pluggability status (2026-04-18):** Jane's mind slot is fully pluggable today via `jane/standing_brain.py` (`ALL_PROVIDERS = ("claude", "gemini", "openai")` with env-var overrides). Jane's initial ack slot now also dispatches across four providers (Ollama / Anthropic / Google / OpenAI) in `intent_classifier/v1/gemma_router.py`, with the Ollama default pulled from `LOCAL_LLM` in `jane_web/jane_v2/models.py` so no specific local model is hardcoded.
 
 
 ---
@@ -118,8 +118,8 @@ When a user sends a message through any interface, this is the complete flow:
 - Instant commands (`show job queue`, `my commands`) bypass LLM entirely (<100ms)
 - Task classifier checks if this is a "big task" to offload to background queue
 
-### Phase 2: Intent Classification + Context Assembly (Gemma Router)
-- **Gemma4:e4b** (`intent_classifier/v1/gemma_router.py`) classifies each message into an intent:
+### Phase 2: Intent Classification + Context Assembly (Initial-Ack Router)
+- **`LOCAL_LLM`** (default: qwen2.5:7b; pluggable via `jane_web/jane_v2/models.py`, called from `intent_classifier/v1/gemma_router.py` — the filename is legacy, the running model is NOT gemma) classifies each message into an intent:
   - `SELF_HANDLE` → greetings, math, trivia (minimal context)
   - `MUSIC_PLAY` → server creates playlist, short-circuits (no Opus needed)
   - `SHOPPING_LIST` → server injects list data, Opus responds
@@ -904,7 +904,7 @@ Every tool and essence MUST define an MCP (`mcp.json`) that tells Jane how to us
 
 ### 18.2 How Jane Uses MCPs
 - **Startup**: all `mcp.json` files are loaded and indexed by keywords
-- **Per request**: gemma4 router checks keywords → loads matching MCP into context → knows exact command format
+- **Per request**: the initial-ack router checks keywords → loads matching MCP into context → knows exact command format
 - **Delegation**: if Claude handles it, MCP is included in Claude's context too
 - **Marketplace**: MCP is mandatory for publishing — buyers see it as the capabilities list
 

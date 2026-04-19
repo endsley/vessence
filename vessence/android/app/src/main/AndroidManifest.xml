@@ -67,6 +67,12 @@
             android:theme="@style/Theme.VessencesAndroid" />
 
         <activity
+            android:name=".SummaryReaderActivity"
+            android:exported="false"
+            android:launchMode="singleTask"
+            android:theme="@style/Theme.VessencesAndroid" />
+
+        <activity
             android:name=".MainActivity"
             android:exported="true"
             android:windowSoftInputMode="adjustResize">

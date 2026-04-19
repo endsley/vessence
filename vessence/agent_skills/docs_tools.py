@@ -182,9 +182,10 @@ def todo_add_item(
     doc_id: str | None = None,
     user_id: str | None = None,
 ) -> str:
-    """Add a numbered item to a category in the TODO doc.
+    """Add an item to a category in the TODO doc.
 
-    Reads the doc, finds the section, appends after the last item.
+    Reads the doc, finds the section, and appends after the last item.
+    Supports both numbered lists and the live TODO doc's plain-line format.
     Returns a confirmation message.
     """
     doc_id = doc_id or _DEFAULT_TODO_DOC_ID
@@ -193,26 +194,42 @@ def todo_add_item(
 
     lines = full_text.split("\n")
     in_section = False
+    found_section = False
     last_item_num = 0
+    numbered_insert_line = None
     insert_after_line = None
+    section_has_items = False
 
-    for i, line in enumerate(lines):
+    for line in lines:
         stripped = line.strip()
         if stripped.lower() == category.lower():
             in_section = True
+            found_section = True
+            insert_after_line = line
             continue
         if in_section:
+            if not stripped:
+                if section_has_items:
+                    break
+                continue
             m = re.match(r"^\s*(\d+)[.)]\s+", line)
             if m:
                 last_item_num = int(m.group(1))
-                insert_after_line = line
-            elif stripped and not re.match(r"^\s*(?:\-|\*|•)\s+", line):
-                break
+                numbered_insert_line = line
+            insert_after_line = line
+            section_has_items = True
 
-    if insert_after_line is None:
+    if not found_section:
         return f"Could not find category '{category}' in the doc."
 
-    new_item = f"\n{last_item_num + 1}. {item_text}"
+    if numbered_insert_line is not None:
+        insert_after_line = numbered_insert_line
+        new_item = f"\n{last_item_num + 1}. {item_text}"
+        confirmation = f"Added item #{last_item_num + 1} to {category}: {item_text}"
+    else:
+        new_item = f"\n{item_text}"
+        confirmation = f"Added item to {category}: {item_text}"
+
     success = replace_text(
         doc_id,
         insert_after_line,
@@ -221,7 +238,7 @@ def todo_add_item(
     )
 
     if success:
-        return f"Added item #{last_item_num + 1} to {category}: {item_text}"
+        return confirmation
     return f"Failed to add item to {category}."
 
 
@@ -241,14 +258,26 @@ def todo_remove_item(
     full_text = doc_data["text"]
 
     target = item_text.lower().strip()
+    in_section = category is None
+    section_has_items = False
+
     for line in full_text.split("\n"):
         stripped = line.strip()
-        if re.match(r"^\s*(?:\d+[.)]|\-|\*|•)\s+", line):
-            item_body = re.sub(r"^\s*(?:\d+[.)]|\-|\*|•)\s+", "", line).strip()
-            if target in item_body.lower():
-                success = delete_text(doc_id, line + "\n", user_id)
-                if success:
-                    return f"Removed: {item_body}"
-                return f"Found the item but failed to delete it."
+        if category is not None and stripped.lower() == category.lower():
+            in_section = True
+            continue
+        if not in_section:
+            continue
+        if not stripped:
+            if category is not None and section_has_items:
+                break
+            continue
+        section_has_items = True
+        item_body = re.sub(r"^\s*(?:\d+[.)]|\-|\*|•)\s+", "", line).strip()
+        if target in item_body.lower():
+            success = delete_text(doc_id, line + "\n", user_id)
+            if success:
+                return f"Removed: {item_body}"
+            return f"Found the item but failed to delete it."
 
     return f"Could not find an item matching '{item_text}' in the doc."

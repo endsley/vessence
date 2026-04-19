@@ -1,0 +1,267 @@
+{
+  "class": "READ_EMAIL",
+  "phrases": [
+    "send an email to x",
+    "email x the report",
+    "compose a new email",
+    "reply to x's email",
+    "forward this email to x",
+    "delete all spam emails",
+    "archive emails from x",
+    "unsubscribe from this newsletter",
+    "what did x say in his last email last week",
+    "read my text messages",
+    "check my SMS",
+    "any new texts",
+    "what's in my shopping list",
+    "check my todo list",
+    "read my notes",
+    "read me a bedtime story",
+    "read the news to me",
+    "how do I set up gmail on android",
+    "is gmail down right now",
+    "my inbox is full",
+    "I got a weird email from a stranger",
+    "my boss emailed me a rude message",
+    "emails are not syncing on my phone",
+    "what's the best email client for linux",
+    "how many emails should I keep in my inbox",
+    "do I need to backup my email",
+    "did the mailman come today",
+    "check if the package arrived",
+    "did amazon deliver my order",
+    "what does inbox zero mean"
+  ],
+  "results": [
+    {
+      "phrase": "send an email to x",
+      "classification": "READ_EMAIL",
+      "confidence": 0.6,
+      "margin": 0.2,
+      "false_positive": true
+    },
+    {
+      "phrase": "email x the report",
+      "classification": "READ_EMAIL",
+      "confidence": 0.6,
+      "margin": 0.2,
+      "false_positive": true
+    },
+    {
+      "phrase": "compose a new email",
+      "classification": "READ_EMAIL",
+      "confidence": 0.6,
+      "margin": 0.2,
+      "false_positive": true
+    },
+    {
+      "phrase": "reply to x's email",
+      "classification": "READ_EMAIL",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": true
+    },
+    {
+      "phrase": "forward this email to x",
+      "classification": "READ_EMAIL",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": true
+    },
+    {
+      "phrase": "delete all spam emails",
+      "classification": "READ_EMAIL",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": true
+    },
+    {
+      "phrase": "archive emails from x",
+      "classification": "READ_EMAIL",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": true
+    },
+    {
+      "phrase": "unsubscribe from this newsletter",
+      "classification": "READ_EMAIL",
+      "confidence": 0.6,
+      "margin": 0.2,
+      "false_positive": true
+    },
+    {
+      "phrase": "what did x say in his last email last week",
+      "classification": "READ_EMAIL",
+      "confidence": 0.6,
+      "margin": 0.2,
+      "false_positive": true
+    },
+    {
+      "phrase": "read my text messages",
+      "classification": "READ_MESSAGES",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "check my SMS",
+      "classification": "READ_MESSAGES",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "any new texts",
+      "classification": "READ_MESSAGES",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "what's in my shopping list",
+      "classification": "SHOPPING_LIST",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "check my todo list",
+      "classification": "TODO_LIST",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "read my notes",
+      "classification": "TODO_LIST",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "read me a bedtime story",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.4,
+      "margin": 0.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "read the news to me",
+      "classification": "READ_MESSAGES",
+      "confidence": 0.6,
+      "margin": 0.4,
+      "false_positive": false
+    },
+    {
+      "phrase": "how do I set up gmail on android",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.6,
+      "margin": 0.2,
+      "false_positive": false
+    },
+    {
+      "phrase": "is gmail down right now",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.6,
+      "margin": 0.2,
+      "false_positive": false
+    },
+    {
+      "phrase": "my inbox is full",
+      "classification": "READ_EMAIL",
+      "confidence": 0.6,
+      "margin": 0.2,
+      "false_positive": true
+    },
+    {
+      "phrase": "I got a weird email from a stranger",
+      "classification": "READ_EMAIL",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": true
+    },
+    {
+      "phrase": "my boss emailed me a rude message",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.4,
+      "margin": 0.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "emails are not syncing on my phone",
+      "classification": "SYNC_MESSAGES",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "what's the best email client for linux",
+      "classification": "READ_EMAIL",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": true
+    },
+    {
+      "phrase": "how many emails should I keep in my inbox",
+      "classification": "READ_EMAIL",
+      "confidence": 0.6,
+      "margin": 0.4,
+      "false_positive": true
+    },
+    {
+      "phrase": "do I need to backup my email",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.6,
+      "margin": 0.2,
+      "false_positive": false
+    },
+    {
+      "phrase": "did the mailman come today",
+      "classification": "READ_EMAIL",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": true
+    },
+    {
+      "phrase": "check if the package arrived",
+      "classification": "READ_EMAIL",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": true
+    },
+    {
+      "phrase": "did amazon deliver my order",
+      "classification": "READ_EMAIL",
+      "confidence": 0.6,
+      "margin": 0.4,
+      "false_positive": true
+    },
+    {
+      "phrase": "what does inbox zero mean",
+      "classification": "READ_EMAIL",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": true
+    }
+  ],
+  "false_positive_count": 17,
+  "false_positives": [
+    "send an email to x",
+    "email x the report",
+    "compose a new email",
+    "reply to x's email",
+    "forward this email to x",
+    "delete all spam emails",
+    "archive emails from x",
+    "unsubscribe from this newsletter",
+    "what did x say in his last email last week",
+    "my inbox is full",
+    "I got a weird email from a stranger",
+    "what's the best email client for linux",
+    "how many emails should I keep in my inbox",
+    "did the mailman come today",
+    "check if the package arrived",
+    "did amazon deliver my order",
+    "what does inbox zero mean"
+  ]
+}

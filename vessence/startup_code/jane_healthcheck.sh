@@ -13,6 +13,29 @@ COOLDOWN=180  # seconds between restart attempts
 
 log() { echo "$(date '+%Y-%m-%d %H:%M:%S') $*" >> "$LOG"; }
 
+active_port() {
+    curl -s http://localhost:8080/proxy/status 2>/dev/null \
+        | python3 -c "import sys,json; print(json.load(sys.stdin).get('upstream_port','8081'))" 2>/dev/null \
+        || echo "8081"
+}
+
+restart_systemd_and_repoint_proxy() {
+    log "CRITICAL: Jane web server down — restarting systemd service and repointing proxy to 8081"
+    touch "$LOCKFILE"
+    systemctl --user restart jane-web.service
+    for _ in $(seq 1 60); do
+        if curl -s --max-time 3 -o /dev/null -w "%{http_code}" "http://localhost:8081/health" 2>/dev/null | grep -qx "200"; then
+            curl -sf -X POST "http://localhost:8080/proxy/switch" \
+                -H "Content-Type: application/json" \
+                -d '{"port": 8081}' >/dev/null 2>&1 || true
+            rm -f "$LOCKFILE" 2>/dev/null || true
+            return 0
+        fi
+        sleep 1
+    done
+    return 1
+}
+
 # If a restart was recently triggered, skip restart (but still check)
 RESTART_ALLOWED=true
 if [ -f "$LOCKFILE" ]; then
@@ -36,9 +59,7 @@ HTTP_CODE=$(curl -s --max-time 10 -o /dev/null -w "%{http_code}" "http://localho
 if [ "$HTTP_CODE" != "200" ]; then
     ISSUES="${ISSUES}Jane web server is down (HTTP $HTTP_CODE). "
     if [ "$RESTART_ALLOWED" = true ]; then
-        log "CRITICAL: Jane web server down — restarting"
-        touch "$LOCKFILE"
-        systemctl --user restart jane-web.service
+        restart_systemd_and_repoint_proxy
     fi
 fi
 
@@ -50,7 +71,8 @@ if [ "$PROXY_CODE" != "200" ]; then
 fi
 
 # ── Check 3: Standing brain alive ──
-BRAIN_ALIVE=$(curl -s --max-time 5 "http://localhost:8081/api/jane/current-provider" 2>/dev/null | "$PYTHON" -c "import sys,json; d=json.load(sys.stdin); print(d.get('alive',False))" 2>/dev/null || echo "False")
+ACTIVE_PORT=$(active_port)
+BRAIN_ALIVE=$(curl -s --max-time 5 "http://localhost:${ACTIVE_PORT}/api/jane/current-provider" 2>/dev/null | "$PYTHON" -c "import sys,json; d=json.load(sys.stdin); print(d.get('alive',False))" 2>/dev/null || echo "False")
 if [ "$BRAIN_ALIVE" != "True" ]; then
     ISSUES="${ISSUES}Standing brain is dead. "
     log "WARNING: Standing brain not alive"
@@ -115,9 +137,7 @@ fi
 # ── Check 8: Stuck request gate (jane_android session) ──
 # A mid-stream disconnect can lock the gate permanently, silently blocking
 # all chat. Detect and auto-fix without requiring a restart.
-ACTIVE_PORT=$(curl -s http://localhost:8080/proxy/status 2>/dev/null \
-    | python3 -c "import sys,json; print(json.load(sys.stdin)['upstream_port'])" 2>/dev/null \
-    || echo "8081")
+ACTIVE_PORT=$(active_port)
 GATE_RESULT=$(curl -sf -X POST "http://localhost:${ACTIVE_PORT}/api/admin/reset-gate" \
     -H "Content-Type: application/json" \
     -d '{"session_id": "jane_android"}' 2>/dev/null || echo "")
@@ -139,7 +159,7 @@ data = json.dumps({
     'severity': 'warning'
 }).encode()
 try:
-    req = urllib.request.Request('http://localhost:8081/api/jane/announce',
+    req = urllib.request.Request('http://localhost:$ACTIVE_PORT/api/jane/announce',
         data=data, headers={'Content-Type': 'application/json'}, method='POST')
     urllib.request.urlopen(req, timeout=5)
 except: pass

@@ -30,7 +30,7 @@ if str(_VAULT_WEB_DIR) not in sys.path:
 
 logger = logging.getLogger(__name__)
 
-from jane_web.jane_v2.models import LOCAL_LLM as MODEL, LOCAL_LLM_NUM_CTX, OLLAMA_URL  # noqa: E402
+from jane_web.jane_v2.models import LOCAL_LLM as MODEL, LOCAL_LLM_NUM_CTX, LOCAL_LLM_TIMEOUT, OLLAMA_URL  # noqa: E402
 
 _EXTRACT_PROMPT = """\
 The classifier thinks the user wants to SEND A TEXT MESSAGE to someone.
@@ -254,9 +254,14 @@ async def handle(prompt: str, context: str = "") -> dict | None:
     }
 
     try:
-        async with httpx.AsyncClient(timeout=8.0) as client:
+        async with httpx.AsyncClient(timeout=LOCAL_LLM_TIMEOUT) as client:
             r = await client.post(OLLAMA_URL, json=body)
             r.raise_for_status()
+            try:
+                from jane_web.jane_v2.models import record_ollama_activity
+                record_ollama_activity()
+            except Exception:
+                pass
             raw = (r.json().get("response") or "").strip()
     except Exception as e:
         logger.warning("send_message handler: LLM extract failed: %s", e)

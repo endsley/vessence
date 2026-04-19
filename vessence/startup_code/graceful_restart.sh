@@ -32,8 +32,48 @@ ENV_FILE="$VESSENCE_DATA_HOME/.env"
 
 HEALTH_TIMEOUT=90    # seconds to wait for new server health
 WARMUP_TIMEOUT=120   # seconds to wait for CLI brain warmup
+POST_SWITCH_WATCH_SECONDS=45
 
 log() { echo "[$(date '+%H:%M:%S')] $*"; }
+
+# Return only real Jane uvicorn server PIDs.
+#
+# Do not use `pgrep -f "uvicorn jane_web.main:app"` here. That pattern also
+# matches shell commands, monitors, editors, and traced invocations that merely
+# contain the text. With `set -euo pipefail`, those false positives can abort
+# the script when they do not own a listening socket.
+jane_web_pids() {
+    "$PYTHON" - <<'PY'
+from pathlib import Path
+
+for proc in Path("/proc").iterdir():
+    if not proc.name.isdigit():
+        continue
+    try:
+        raw = (proc / "cmdline").read_bytes()
+    except OSError:
+        continue
+    if not raw:
+        continue
+    argv = [part.decode("utf-8", "ignore") for part in raw.split(b"\0") if part]
+    for i in range(len(argv) - 2):
+        if argv[i] == "-m" and argv[i + 1] == "uvicorn" and argv[i + 2] == "jane_web.main:app":
+            print(proc.name)
+            break
+PY
+}
+
+port_for_pid() {
+    local pid="$1"
+    ss -Hltnp 2>/dev/null \
+        | awk -v needle="pid=${pid}," '
+            index($0, needle) {
+                split($4, parts, ":")
+                print parts[length(parts)]
+                exit
+            }
+        '
+}
 
 # Return PID(s) that are LISTENING on the given TCP port, one per line.
 # Fixes the subtle bug where `lsof -ti:$PORT` returned ALL processes with a
@@ -50,20 +90,55 @@ listeners_on_port() {
     ss -Hltnp "sport = :$port" 2>/dev/null | { grep -oP 'pid=\K[0-9]+' || true; } | sort -u
 }
 
+rollback_to_systemd_8081() {
+    log "Rolling back to systemd-managed port 8081..."
+    systemctl --user start jane-web.service 2>/dev/null || systemctl --user restart jane-web.service
+    for _ in $(seq 1 60); do
+        if curl -sf "http://localhost:8081/health" > /dev/null 2>&1; then
+            curl -sf -X POST "http://localhost:$PROXY_PORT/proxy/switch" \
+                -H "Content-Type: application/json" \
+                -d '{"port": 8081}' >/dev/null 2>&1 || true
+            systemctl --user stop jane-web-pingpong-8084.service >/dev/null 2>&1 || true
+            log "Rollback complete: proxy points at port 8081."
+            return 0
+        fi
+        sleep 1
+    done
+    log "ERROR: Rollback failed; port 8081 did not become healthy."
+    return 1
+}
+
+stop_systemd_8081_as_old_slot() {
+    log "Stopping systemd jane-web.service cleanly..."
+    systemctl --user stop jane-web.service 2>/dev/null || true
+
+    # During ping-pong, port 8081 is the retired slot. Long-lived requests
+    # can make systemd hit TimeoutStopSec and mark the stopped unit as
+    # failed(Result=timeout), even though the proxy has already moved to the
+    # new healthy upstream. Normalize that expected inactive state so later
+    # diagnostics do not report a false service failure.
+    systemctl --user reset-failed jane-web.service 2>/dev/null || true
+    sleep 1
+}
+
 # ── Step 0: Create healthcheck lock to prevent interference ──
-# The healthcheck runs every 2 minutes and checks port 8081 directly.
-# During the ping-pong, 8081 may be vacant, causing the healthcheck to
-# restart jane-web.service, killing our new nohup server. Lock it out.
+# The healthcheck runs every 2 minutes. During ping-pong, the proxy can briefly
+# point at a port that is still settling; lock out auto-recovery until this
+# script either finishes or exits through the cleanup trap.
 LOCKFILE="/tmp/jane-web-restarting.lock"
 touch "$LOCKFILE"
 log "Created healthcheck lock (prevents restart collision during ping-pong)"
+cleanup_lock() {
+    rm -f "$LOCKFILE" 2>/dev/null || true
+}
+trap cleanup_lock EXIT
 
 # ── Step 0.5: Sanity check — detect orphan uvicorn processes ──
 # If any uvicorn jane_web process is running on a port other than
 # 8081/8084, it's an orphan (e.g. someone manually nohup'd one). Kill
 # it before proceeding so we don't end up with three concurrent servers.
-ORPHAN_PIDS=$(pgrep -f "uvicorn jane_web.main:app" 2>/dev/null | while read pid; do
-    port=$(ss -ltnp 2>/dev/null | grep "pid=$pid," | grep -oP ':\K[0-9]+' | head -1)
+ORPHAN_PIDS=$(jane_web_pids | while read -r pid; do
+    port=$(port_for_pid "$pid")
     if [ -n "$port" ] && [ "$port" != "8081" ] && [ "$port" != "8084" ]; then
         echo "$pid"
     fi
@@ -82,12 +157,12 @@ fi
 CURRENT_UPSTREAM=$(curl -s http://localhost:$PROXY_PORT/proxy/status 2>/dev/null \
     | python3 -c "import sys,json; print(json.load(sys.stdin).get('upstream_port',''))" 2>/dev/null \
     || echo "")
-ALL_PIDS=$(pgrep -f "uvicorn jane_web.main:app" 2>/dev/null | sort -u)
+ALL_PIDS=$(jane_web_pids | sort -u)
 ALL_COUNT=$(echo "$ALL_PIDS" | grep -c . || true)
 if [ "$ALL_COUNT" -gt 1 ]; then
     log "WARN: $ALL_COUNT jane-web uvicorns detected before restart (upstream=${CURRENT_UPSTREAM:-unknown}). Reconciling."
     for pid in $ALL_PIDS; do
-        port=$(ss -ltnp 2>/dev/null | grep "pid=$pid," | grep -oP ':\K[0-9]+' | head -1)
+        port=$(port_for_pid "$pid")
         if [ -z "$port" ]; then continue; fi
         if [ -n "$CURRENT_UPSTREAM" ] && [ "$port" = "$CURRENT_UPSTREAM" ]; then
             log "  keep PID $pid on port $port (current proxy upstream)"
@@ -98,8 +173,8 @@ if [ "$ALL_COUNT" -gt 1 ]; then
     done
     sleep 2
     # Force-kill anything still lingering that isn't the live upstream.
-    for pid in $(pgrep -f "uvicorn jane_web.main:app" 2>/dev/null); do
-        port=$(ss -ltnp 2>/dev/null | grep "pid=$pid," | grep -oP ':\K[0-9]+' | head -1)
+    for pid in $(jane_web_pids); do
+        port=$(port_for_pid "$pid")
         if [ -n "$CURRENT_UPSTREAM" ] && [ "$port" = "$CURRENT_UPSTREAM" ]; then
             continue
         fi
@@ -155,19 +230,43 @@ find "$VESSENCE_HOME" -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null 
 log "Cleared Python bytecache and refreshed file timestamps."
 
 # ── Step 4: Start new server ──
-AMBIENT_BASE="$HOME/ambient" \
-VESSENCE_HOME="$VESSENCE_HOME" \
-VESSENCE_DATA_HOME="$VESSENCE_DATA_HOME" \
-VAULT_HOME="$VAULT_HOME" \
-AMBIENT_HOME="$VESSENCE_DATA_HOME" \
-PYTHONPATH="$VESSENCE_HOME" \
-nohup "$PYTHON" -m uvicorn jane_web.main:app \
-    --host 127.0.0.1 \
-    --port "$NEXT_PORT" \
-    --log-level info \
-    > "$VESSENCE_DATA_HOME/logs/jane-web-$NEXT_PORT.log" 2>&1 &
+if [ "$NEXT_PORT" = "8081" ]; then
+    log "Starting systemd-managed jane-web.service on port 8081..."
+    systemctl --user restart jane-web.service
+    NEW_PID=""
+    for i in $(seq 1 30); do
+        NEW_PID=$(listeners_on_port "$NEXT_PORT" | head -1)
+        [ -n "$NEW_PID" ] && break
+        sleep 1
+    done
+    if [ -z "$NEW_PID" ]; then
+        log "ERROR: systemd did not create a listener on port 8081."
+        systemctl --user status jane-web.service --no-pager || true
+        exit 1
+    fi
+else
+    PINGPONG_UNIT="jane-web-pingpong-${NEXT_PORT}.service"
+    log "Starting transient systemd unit $PINGPONG_UNIT on port $NEXT_PORT..."
+    systemctl --user stop "$PINGPONG_UNIT" >/dev/null 2>&1 || true
+    systemd-run --user \
+        --unit="${PINGPONG_UNIT%.service}" \
+        --collect \
+        --property="WorkingDirectory=$VESSENCE_HOME" \
+        /bin/bash -lc "exec env AMBIENT_BASE='$HOME/ambient' VESSENCE_HOME='$VESSENCE_HOME' VESSENCE_DATA_HOME='$VESSENCE_DATA_HOME' VAULT_HOME='$VAULT_HOME' AMBIENT_HOME='$VESSENCE_DATA_HOME' PYTHONPATH='$VESSENCE_HOME' '$PYTHON' -m uvicorn jane_web.main:app --host 127.0.0.1 --port '$NEXT_PORT' --log-level info >> '$VESSENCE_DATA_HOME/logs/jane-web-$NEXT_PORT.log' 2>&1" \
+        >/dev/null
 
-NEW_PID=$!
+    NEW_PID=""
+    for i in $(seq 1 30); do
+        NEW_PID=$(listeners_on_port "$NEXT_PORT" | head -1)
+        [ -n "$NEW_PID" ] && break
+        sleep 1
+    done
+    if [ -z "$NEW_PID" ]; then
+        log "ERROR: transient unit did not create a listener on port $NEXT_PORT."
+        systemctl --user status "$PINGPONG_UNIT" --no-pager || true
+        exit 1
+    fi
+fi
 log "New server PID: $NEW_PID"
 
 # ── Step 5: Wait for health ──
@@ -183,7 +282,12 @@ done
 
 if [ "$HEALTH_OK" = false ]; then
     log "ERROR: New server failed to start within ${HEALTH_TIMEOUT}s. Aborting — old server still active."
-    kill "$NEW_PID" 2>/dev/null || true
+    if [ "$NEXT_PORT" = "8081" ]; then
+        systemctl --user stop jane-web.service 2>/dev/null || true
+    else
+        systemctl --user stop "jane-web-pingpong-${NEXT_PORT}.service" 2>/dev/null || true
+        kill "$NEW_PID" 2>/dev/null || true
+    fi
     exit 1
 fi
 
@@ -220,14 +324,14 @@ fi
 log "Giving old server 5s grace period for in-flight requests..."
 sleep 5
 
-# Stop the OLD server cleanly. With Restart=on-failure, a clean
-# systemctl stop won't trigger a respawn (only crashes do).
+# Stop the OLD server cleanly.
 # Only stop systemd if the old server was on port 8081 (systemd's port).
 # If the old server was on 8084 (previous nohup), kill by PID directly.
 if [ "$CURRENT_PORT" = "8081" ] && systemctl --user is-active jane-web.service >/dev/null 2>&1; then
-    log "Stopping systemd jane-web.service cleanly (won't respawn — Restart=on-failure)..."
-    systemctl --user stop jane-web.service 2>/dev/null || true
-    sleep 1
+    stop_systemd_8081_as_old_slot
+fi
+if [ "$CURRENT_PORT" != "8081" ]; then
+    systemctl --user stop "jane-web-pingpong-${CURRENT_PORT}.service" 2>/dev/null || true
 fi
 
 # Backup: kill anything still LISTENING on the old port (e.g. nohup orphan
@@ -253,13 +357,43 @@ if [ -n "$OLD_SERVER_PID" ]; then
     done
 fi
 
-# (Old server was already stopped above via systemctl stop. No further
-# action needed here — Restart=on-failure ensures no respawn.)
+# (Old server was already stopped above via systemctl stop or listener cleanup.)
+
+# ── Step 9: Verify the switched upstream survived cleanup ──
+log "Verifying active upstream survived cleanup for ${POST_SWITCH_WATCH_SECONDS}s..."
+for i in $(seq 1 "$POST_SWITCH_WATCH_SECONDS"); do
+    if ! kill -0 "$NEW_PID" 2>/dev/null; then
+        log "ERROR: New server PID $NEW_PID exited after proxy switch."
+        if [ "$NEXT_PORT" = "8081" ]; then
+            systemctl --user status jane-web.service --no-pager || true
+        else
+            tail -n 80 "$VESSENCE_DATA_HOME/logs/jane-web-$NEXT_PORT.log" || true
+            rollback_to_systemd_8081 || true
+        fi
+        exit 1
+    fi
+
+    if ! curl -sf "http://localhost:$NEXT_PORT/health" > /dev/null 2>&1; then
+        log "ERROR: Direct health check failed on active upstream port $NEXT_PORT during post-switch watch."
+        if [ "$NEXT_PORT" != "8081" ]; then
+            rollback_to_systemd_8081 || true
+        fi
+        exit 1
+    fi
+
+    if ! curl -sf "http://localhost:$PROXY_PORT/health" > /dev/null 2>&1; then
+        log "ERROR: Proxy health check failed after switching to $NEXT_PORT during post-switch watch."
+        if [ "$NEXT_PORT" != "8081" ]; then
+            rollback_to_systemd_8081 || true
+        fi
+        exit 1
+    fi
+
+    sleep 1
+done
 
 # ── Done ──
 log "=== Zero-downtime restart complete ==="
 log "  Active server: port $NEXT_PORT (PID $NEW_PID)"
 log "  Proxy: port $PROXY_PORT"
-curl -sf "http://localhost:$PROXY_PORT/health" > /dev/null \
-    && log "Health check: OK" \
-    || log "WARNING: Health check failed"
+log "Health check: OK"

@@ -16,7 +16,7 @@ from pathlib import Path
 
 import httpx
 
-from jane_web.jane_v2.models import LOCAL_LLM as MODEL, LOCAL_LLM_NUM_CTX, OLLAMA_URL
+from jane_web.jane_v2.models import LOCAL_LLM as MODEL, LOCAL_LLM_NUM_CTX, LOCAL_LLM_TIMEOUT, OLLAMA_URL
 
 logger = logging.getLogger(__name__)
 WEATHER_PATH = Path("/home/chieh/ambient/vessence-data/cache/weather.json")
@@ -107,9 +107,14 @@ async def handle(prompt: str) -> dict | None:
         "keep_alive": -1,
     }
     try:
-        async with httpx.AsyncClient(timeout=90.0) as client:
+        async with httpx.AsyncClient(timeout=LOCAL_LLM_TIMEOUT) as client:
             r = await client.post(OLLAMA_URL, json=body)
             r.raise_for_status()
+            try:
+                from jane_web.jane_v2.models import record_ollama_activity
+                record_ollama_activity()
+            except Exception:
+                pass
             text = (r.json().get("response") or "").strip()
     except Exception as e:
         logger.warning("weather handler: ollama call failed: %s", e)

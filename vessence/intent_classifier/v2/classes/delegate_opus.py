@@ -4,7 +4,7 @@ CLASS_NAME = "DELEGATE_OPUS"
 NEEDS_LLM = False
 
 EXAMPLES = [
-    "call my wife", "call john", "phone my mom",
+    "call x", "phone x",
     "fix the auth bug", "debug this issue",
     "why is the playlist empty", "why isn't this working",
     "what's going on with the server", "look into the crash",
@@ -84,7 +84,7 @@ EXAMPLES = [
     # Weather mentioned but NOT a weather request
     "Nice weather we're having, huh.",
     "Ugh, I hate this cold.", "The weather's been crazy lately.",
-    "My grandpa used to predict weather by his knee.",
+    "x used to predict weather by his knee.",
     "light frizzles a little bit of rain",
     "it's raining cats and dogs out there",
     "the weather is beautiful today isn't it",
@@ -113,9 +113,9 @@ EXAMPLES = [
     "yes please flip that on", "yeah that's fine",
     "ok sounds good", "okay sounds good",
     # Questions about contacts/people (NOT sending a message)
-    "do you have the contact information for my wife",
-    "do you have to contact information for my wife",
-    "what's my wife's phone number", "who is in my contacts",
+    "do you have the contact information for x",
+    "do you have to contact information for x",
+    "what's x's phone number", "who is in my contacts",
     # Cooking/recipes (NOT shopping list)
     "How do I make pancakes?", "how do I cook pasta",
     "what's a good recipe for lasagna", "how do you bake bread",
@@ -171,14 +171,14 @@ EXAMPLES = [
     "put get the oil changed on my todo",
     "remove the dentist from my todo",
     "remove the dentist task from my todo list",
-    "cross off the clinic errand from my todo",
+    "cross off that errand from my todo",
     "strike the recommendation letter off my to-do",
-    "mark the clinic task as done",
-    "mark the clinic errand complete",
-    "I already did the clinic errand",
-    "I already did the clinic task",
-    "I already did the errand at the clinic",
-    "I already finished the clinic",
+    "mark that task as done",
+    "mark that errand complete",
+    "I already did that errand",
+    "I already did that task",
+    "I already did the errand",
+    "I already finished that task",
     "I finished my recommendation letter",
     "I finished the student recommendation letter",
     "I already finished that todo item",
@@ -204,15 +204,15 @@ EXAMPLES = [
     "what did you fix overnight on your own todo",
     "what's on your internal todo",
     "what's left on jane's todo",
-    # Text-contact phrasing that happens to mention the clinic — these
-    # are ambiguous (who-to-text inquiries), so let Stage 3 decide.
-    "who should I text at the clinic today",
-    "who at the clinic should I text today",
-    "who do I need to text at the clinic",
-    "which client at the clinic should I contact",
-    "which clinic person should I text",
-    "should I text someone at the clinic",
-    "who at the clinic needs a text",
+    # Text-contact phrasings that ask who to contact — these are
+    # ambiguous who-to-text inquiries, so let Stage 3 decide.
+    "who should I text today",
+    "who should I contact today",
+    "who do I need to text",
+    "which person should I contact",
+    "which person should I text",
+    "should I text someone",
+    "who needs a text",
     # Status updates after the user did something outside Jane. These are
     # not commands to send a new SMS and not conversation-ending phrases.
     "ok sent it",
@@ -224,6 +224,18 @@ EXAMPLES = [
     "ok I sent that",
     "I already sent it",
     "I just sent the message",
+    # Past-tense browsing anecdotes — NOT commands to drive a browser now.
+    # These get pulled toward WEB_AUTOMATION by surface word overlap but
+    # have no actionable intent. Route to DELEGATE_OPUS so Opus can
+    # respond conversationally.
+    "I was browsing hacker news last night",
+    "I was on the amazon site earlier",
+    "I opened the bank site yesterday",
+    "I visited their website last week",
+    "we were on the city water page last time",
+    "I ended up on wikipedia for an hour",
+    "I kept clicking around on their portal",
+    "I was reading an article on the bbc",
 ]
 
 CONTEXT = None

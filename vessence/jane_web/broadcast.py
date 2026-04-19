@@ -43,7 +43,10 @@ def _summarize_sync(user_message: str, partial_response: str) -> str:
             input=prompt,
             capture_output=True,
             text=True,
-            timeout=10,
+            # 50s — Haiku CLI routinely takes 10-30s cold, 3-8s warm, and
+            # occasional slower responses are real, not hangs. Previously
+            # 10s which tripped too frequently (2026-04-18 investigation).
+            timeout=50,
         )
         summary = result.stdout.strip() if result.returncode == 0 else ""
         # Log for quality evaluation

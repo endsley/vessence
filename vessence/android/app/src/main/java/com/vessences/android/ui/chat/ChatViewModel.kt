@@ -587,7 +587,7 @@ class ChatViewModel(
                             }
                         }
                         "ack" -> {
-                            // Quick ack from gemma4 — speak it for immediate feedback.
+                            // Quick ack from the local LLM — speak it for immediate feedback.
                             // Uses raw tts.speak() which does NOT trigger auto-listen.
                             // Auto-listen only fires after the "done" event via onSendComplete.
                             val ackText = event.data.trim()

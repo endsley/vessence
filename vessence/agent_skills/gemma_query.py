@@ -7,7 +7,15 @@ try:
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
     from jane_web.jane_v2.models import STAGE2_MODEL
 except Exception:
-    STAGE2_MODEL = "qwen2.5:7b"
+    STAGE2_MODEL = (
+        os.environ.get("JANE_LOCAL_LLM")
+        or os.environ.get("JANE_STAGE2_MODEL")
+    )
+    if not STAGE2_MODEL:
+        raise RuntimeError(
+            "Cannot resolve local LLM: jane_web.jane_v2.models import failed "
+            "AND no JANE_LOCAL_LLM / JANE_STAGE2_MODEL env var is set"
+        )
 
 
 def query_local_llm(prompt):

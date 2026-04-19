@@ -1,5 +1,68 @@
 """Read messages class — check/read text messages."""
 
+import datetime
+import logging
+import sys
+from pathlib import Path
+
+_VAULT_WEB_DIR = Path(__file__).resolve().parents[4] / "vault_web"
+if str(_VAULT_WEB_DIR) not in sys.path:
+    sys.path.insert(0, str(_VAULT_WEB_DIR))
+
+_logger = logging.getLogger(__name__)
+
+
+def _escalation_context() -> str:
+    """Inject recent synced messages so Stage 3 (Opus) can analyze them
+    without re-querying the database."""
+    try:
+        from database import get_db
+    except Exception as e:
+        return f"Message database unavailable: {e}"
+
+    try:
+        with get_db() as conn:
+            rows = conn.execute(
+                "SELECT sender, body, timestamp_ms, is_contact, msg_type "
+                "FROM synced_messages "
+                "ORDER BY timestamp_ms DESC LIMIT 20",
+                (),
+            ).fetchall()
+    except Exception as e:
+        return f"Message query failed: {e}"
+
+    if not rows:
+        return "No synced messages in the database yet."
+
+    lines = ["Recent synced messages (most recent first):"]
+    for i, r in enumerate(rows):
+        r = dict(r)
+        ts = datetime.datetime.fromtimestamp(
+            r["timestamp_ms"] / 1000
+        ).strftime("%m/%d %I:%M %p").lstrip("0")
+        sender_raw = r["sender"] or "Unknown"
+        body = (r["body"] or "").strip()[:200]
+        kind = "contact" if r.get("is_contact") else (r.get("msg_type") or "unknown")
+        if sender_raw.startswith("Me → "):
+            other = sender_raw[len("Me → "):].strip()
+            lines.append(
+                f"{i+1}. [{ts}] (SENT by user to {other}) ({kind}): {body}"
+            )
+        else:
+            lines.append(
+                f"{i+1}. [{ts}] (RECEIVED from {sender_raw}) ({kind}): {body}"
+            )
+
+    lines.append("")
+    lines.append(
+        "Interpret and summarize these messages for the user. "
+        "SENT = user's outgoing messages, RECEIVED = incoming. "
+        "Classify each as important (personal/contact) or spam/promo. "
+        "Quote contact messages verbatim; summarize spam briefly."
+    )
+    return "\n".join(lines)
+
+
 METADATA = {
     "name": "read messages",
     "priority": 10,
@@ -30,4 +93,5 @@ METADATA = {
     ],
     "ack": "Checking your messages…",
     "escalate_ack": "Let me check your messages…",
+    "escalation_context": _escalation_context,
 }

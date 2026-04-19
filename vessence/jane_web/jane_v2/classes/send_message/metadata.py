@@ -32,4 +32,21 @@ METADATA = {
     "few_shot": [],
     "ack": None,  # Stage 2 fast-path is quick enough — no interim ack needed
     "escalate_ack": "Let me draft that message…",
+    "escalation_context": (
+        "[send message escalation context]\n"
+        "Contact resolution: search via GET /api/contacts/search?q=<name> to "
+        "find phone numbers. Also check contact_aliases table for relational "
+        "names (wife, mom, dad).\n\n"
+        "Draft state: check vault_web.recent_turns:get_active_state for a "
+        "pending_action of type SEND_MESSAGE_DRAFT_OPEN. If one exists, the "
+        "user may be confirming, cancelling, or editing an existing draft.\n\n"
+        "Sending: use sms_send_direct (not sms_draft flow) when in Stage 3. "
+        "Format: [[CLIENT_TOOL:contacts.sms_send_direct:{\"phone_number\":\"<number>\","
+        "\"body\":\"<message>\"}]]\n\n"
+        "Perspective rewriting: the user speaks TO Jane ABOUT a third person. "
+        "Rewrite the body so it reads from the user to the recipient:\n"
+        "  - \"tell X I love her\" → body: \"I love you\"\n"
+        "  - \"tell X she is beautiful\" → body: \"You are beautiful\"\n"
+        "  - \"let mom know I'm on my way\" → body: \"I'm on my way\""
+    ),
 }

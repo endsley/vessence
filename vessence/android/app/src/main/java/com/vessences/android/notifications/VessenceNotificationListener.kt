@@ -65,6 +65,19 @@ class VessenceNotificationListener : NotificationListenerService() {
         for (entry in entries) {
             RecentMessagesBuffer.record(entry)
         }
+
+        // Event-driven TTS announcement (job 073). Non-blocking — the
+        // announcer schedules its own coroutine. Must NOT block the sync
+        // path below, and must NOT depend on the server for the initial
+        // spoken line. See job_queue/073_event_driven_sms_tts.md.
+        if (entries.isNotEmpty()) {
+            try {
+                IncomingMessageAnnouncer.onMessagesPosted(applicationContext, entries)
+            } catch (e: Exception) {
+                android.util.Log.w(TAG, "IncomingMessageAnnouncer failed", e)
+            }
+        }
+
         // Push new SMS to server so Jane has fresh message data.
         // Only trigger for messaging apps (SMS, WhatsApp, etc.)
         // Push new messages to server when a new SMS notification arrives

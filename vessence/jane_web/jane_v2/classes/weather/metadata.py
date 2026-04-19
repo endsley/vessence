@@ -47,10 +47,31 @@ def _description() -> str:
     )
 
 
+def _escalation_context() -> str:
+    """Inject cached weather data so Stage 3 (Opus) can answer without
+    re-fetching."""
+    try:
+        data = WEATHER_PATH.read_text()
+        return (
+            f"Weather cache data (from {WEATHER_PATH}):\n"
+            f"{data}\n\n"
+            "Use this data to answer the user's weather question. If the "
+            "question requires data not in this cache (other cities, past "
+            "weather, sunrise/sunset, dew point, barometric pressure), use "
+            "web search."
+        )
+    except Exception:
+        return (
+            "Weather cache is unavailable. Use web search to answer the "
+            "user's weather question."
+        )
+
+
 METADATA = {
     "name": "weather",
     "priority": 10,
     "description": _description,
+    "escalation_context": _escalation_context,
     "few_shot": [
         ("What's the temperature in Medford right now?", "weather:High"),
         ("Will it rain tomorrow?", "weather:High"),

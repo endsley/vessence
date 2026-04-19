@@ -11,8 +11,10 @@ EXAMPLES discipline (after adversarial pass):
   - Always framed as a READ action. Edit/add phrasings route to
     DELEGATE_OPUS (see contrast exemplars there).
   - No Ambient-project mentions here — those belong on Stage 3.
-  - Category-filtered reads (clinic/home/students) still require an
+  - Category-filtered reads (home/students/urgent) still require an
     explicit task/to-do/errand word, not just the category name.
+  - Do NOT train on personal/domain-specific nouns. They are broad anchors
+    and can pull vague questions into TODO_LIST through Chroma similarity.
 """
 
 CLASS_NAME = "TODO_LIST"
@@ -66,18 +68,18 @@ EXAMPLES = [
     "what's urgent on my to-do",
 
     # Category-filtered reads — all include an explicit task/to-do/errand anchor.
-    # Repeated density because the embedder otherwise blends these into
-    # DELEGATE_OPUS due to shared vocabulary ("clinic", "task").
-    "what's on my todo for the clinic",
-    "what's on my todo for the clinic today",
-    "what's on my todo at the clinic",
-    "what todo items do I have for the clinic",
-    "what todo items do I have at the clinic",
-    "what tasks do I have for the clinic",
-    "what tasks do I have at the clinic",
-    "what tasks are on my todo for the clinic",
-    "what errands do I have for the clinic",
-    "what errands are on my todo for the clinic",
+    # Generic todo-list density replaces older personal/domain-specific
+    # positives; category routing is handled by Stage 2 context or follow-up.
+    "what's on my todo list today",
+    "what's on my todo list for today",
+    "what is on my todo list today",
+    "what do I have on my todo list today",
+    "what tasks are on my todo list today",
+    "what pending tasks are on my todo list today",
+    "what errands are on my todo list today",
+    "what's still on my todo list today",
+    "what's left on my todo list today",
+    "what should I do from my todo list today",
     "what's on my todo for home",
     "what's on my todo for the house",
     "what tasks do I have for the house",

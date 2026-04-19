@@ -1,19 +1,20 @@
 # Code Map — Android (Kotlin)
-_Auto-generated on 2026-04-17 08:15 UTC by `generate_code_map.py`_
+_Auto-generated on 2026-04-18 08:15 UTC by `generate_code_map.py`_
 
-## android:.../ArticleReaderV2Activity.kt (249 lines)
-  class ArticleReaderV2Activity → L35
-    EXTRA_URL → L38
-    override onCreate() → L51
-    override onPageFinished() → L113
-    override onReceivedError() → L123
-    extractAndSpeak() → L136
-    parseJsString() → L160
-    cleanArticleText() → L165
-    splitForTts() → L194
-    flush() → L198
-    articleExtractionJs() → L219
-    override onDestroy() → L241
+## android:.../ArticleReaderV2Activity.kt (241 lines)
+  class ArticleReaderV2Activity → L36
+    EXTRA_URL → L39
+    override onCreate() → L52
+    override onPageFinished() → L116
+    override onReceivedError() → L126
+    extractAndSpeak() → L139
+    readAsset() → L171
+    parseJsString() → L179
+    cleanArticleText() → L184
+    splitForTts() → L201
+    flush() → L205
+    articleExtractionJs() → L226
+    override onDestroy() → L233
 
 ## android:.../CrashReporter.kt (118 lines)
   object CrashReporter → L17

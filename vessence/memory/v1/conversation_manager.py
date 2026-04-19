@@ -727,6 +727,21 @@ class ConversationManager:
         if not self.short_term_collection:
             return
 
+        # Trivial-turn skip: classifying "what time is it" / "hi jane" /
+        # "thanks" into a theme and running a haiku CLI to summarize it
+        # costs a subprocess fork + up to 45 s of CLI time for no real
+        # value. Investigation 2026-04-18 linked these forks to event-loop
+        # stalls on a 1.4 GB jane-web process. Skip for short ephemeral
+        # turns; keep the Haiku call for substantive exchanges.
+        from jane.session_summary import _is_trivial_turn
+        if _is_trivial_turn(user_msg, assistant_msg):
+            _append_writeback_log(
+                f"session={self.session_id} stage=thematic_update "
+                f"skipped=trivial_turn user_chars={len(user_msg or '')} "
+                f"assistant_chars={len(assistant_msg or '')}"
+            )
+            return
+
         with self._thematic_lock:
             start = time.perf_counter()
             try:

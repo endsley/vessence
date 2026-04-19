@@ -258,8 +258,22 @@ WEB_CHAT_MODEL = os.environ.get("JANE_BRAIN_WEB_MODEL", SMART_MODEL)
 # Legacy aliases (backward compat)
 OLLAMA_BASE_URL       = os.getenv("LOCAL_LLM_BASE_URL", "http://localhost:11434")
 # LOCAL_LLM_MODEL is kept only as a backward-compatible import alias.
-# The single local-model knob is JANE_LOCAL_LLM, falling back to JANE_STAGE2_MODEL.
-LOCAL_LLM_MODEL       = os.getenv("JANE_LOCAL_LLM", os.getenv("JANE_STAGE2_MODEL", "qwen2.5:7b"))
+# Prefer importing LOCAL_LLM directly from jane_web.jane_v2.models — this
+# local resolution is the legacy fallback for early-boot callers that run
+# before models.py is on the path. No hardcoded model tag: env vars
+# JANE_LOCAL_LLM / JANE_STAGE2_MODEL control the default, and we raise
+# if neither is set so stale literals can't silently regress.
+try:
+    # Preferred: single source of truth.
+    from jane_web.jane_v2.models import LOCAL_LLM as _LOCAL_LLM_FROM_MODELS  # type: ignore
+    LOCAL_LLM_MODEL = _LOCAL_LLM_FROM_MODELS
+except Exception:
+    LOCAL_LLM_MODEL = os.getenv("JANE_LOCAL_LLM") or os.getenv("JANE_STAGE2_MODEL")
+    if not LOCAL_LLM_MODEL:
+        raise RuntimeError(
+            "Cannot resolve LOCAL_LLM_MODEL: jane_web.jane_v2.models import "
+            "failed AND no JANE_LOCAL_LLM / JANE_STAGE2_MODEL env var is set"
+        )
 LOCAL_LLM_MODEL_LITELLM = f"ollama/{LOCAL_LLM_MODEL}" if "/" not in LOCAL_LLM_MODEL else LOCAL_LLM_MODEL
 ARCHIVIST_MODEL       = os.getenv("ARCHIVIST_MODEL", CHEAP_MODEL)
 ARCHIVIST_MODEL_LITELLM = f"ollama/{ARCHIVIST_MODEL}" if "/" not in ARCHIVIST_MODEL else ARCHIVIST_MODEL

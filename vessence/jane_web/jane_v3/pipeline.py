@@ -108,6 +108,21 @@ async def _classify_and_maybe_handle(prompt: str, session_id: str) -> dict:
         state["fallback_ack"] = _ack_for(cls, escalate=True)
         return state
 
+    # ── End-conversation short-circuit ──────────────────────────────────
+    # `end conversation` has no handler.py by design — the class only
+    # emits two things: a tiny "Ok." acknowledgment and the
+    # `conversation_end: True` signal that tells the client to close the
+    # voice loop (stop STT, fall back to wake-word passive mode). v2's
+    # pipeline handles this inline at pipeline.py:1080-1087; we mirror
+    # that here so the voice loop actually terminates when v3 is active.
+    if cls == "end conversation":
+        state["result"] = {"text": "Ok.", "conversation_end": True}
+        state["stage2_ack"] = None
+        state["fallback_ack"] = None
+        state["stage2_ms"] = 0
+        logger.info("jane_v3 pipeline: end_conversation short-circuit")
+        return state
+
     # ── Stage 2: dispatch to the handler (no gate, no continuation check) ──
     registry = class_registry.get_registry()
     meta = registry.get(cls)
@@ -132,8 +147,9 @@ async def _classify_and_maybe_handle(prompt: str, session_id: str) -> dict:
     fifo_ctx = ""
     try:
         from jane_web.jane_v2 import recent_context
+        from vault_web.recent_turns import get_active_state
         fifo_ctx = recent_context.render_stage2_context(session_id, max_turns=4) or ""
-        active_state = recent_context.get_active_state(session_id) or {}
+        active_state = get_active_state(session_id) or {}
         pa = active_state.get("pending_action") or {}
         if pa.get("handler_class") == cls and pa.get("status") == "awaiting_user":
             pending_data = pa.get("data") or pa
@@ -346,6 +362,14 @@ async def handle_chat_stream(body, request: Request):
             for tc in (tool_calls or []) + (tail_calls or []):
                 yield _ndjson("client_tool_call", json.dumps(tc, ensure_ascii=True))
             yield _ndjson("delta", visible_text or text)
+            # Emit the conversation_end signal BEFORE `done` so the client
+            # sees it in the same turn and falls back to wake-word passive
+            # mode instead of reopening active STT after TTS finishes.
+            # end_conversation is the only flow that sets this flag; other
+            # extras (playlist_id, etc.) ride along in the non-streaming
+            # path's JSON body and are not needed in the event stream.
+            if extras.get("conversation_end"):
+                yield _ndjson("conversation_end", "true")
             yield _ndjson("done", visible_text or text,
                           classification=state["classification"],
                           stage="stage2",

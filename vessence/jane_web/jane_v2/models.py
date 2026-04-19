@@ -62,5 +62,30 @@ OLLAMA_KEEP_ALIVE: int = -1
 #: in VRAM (KV cache ≈ 448 MiB at this size — well under our GPU budget).
 LOCAL_LLM_NUM_CTX: int = int(os.environ.get("JANE_LOCAL_LLM_NUM_CTX", "8192"))
 
-#: Shared local-LLM timeout. Long enough for a cold load, still bounded.
-LOCAL_LLM_TIMEOUT: float = float(os.environ.get("JANE_STAGE2_TIMEOUT", "12.0"))
+#: Shared local-LLM timeout — used by every Ollama caller (classifier,
+#: handlers, gate checks, summarizers). 40s absorbs cold-loads of models
+#: up to ~8B, and still bounds failure recovery. Keep this as the single
+#: source of truth — do not hardcode timeouts in individual handlers.
+LOCAL_LLM_TIMEOUT: float = float(os.environ.get("JANE_STAGE2_TIMEOUT", "40.0"))
+
+
+# ─── Ollama activity tracker ─────────────────────────────────────────────────
+# Shared counter used by the heartbeat loop to skip unnecessary pings when
+# real traffic has already kept the runner warm. Every production Ollama
+# caller should call `record_ollama_activity()` after a successful request.
+# The heartbeat loop checks `seconds_since_last_ollama_activity()` before
+# firing — if a real call happened recently, heartbeat skips.
+import time as _time
+
+_LAST_OLLAMA_ACTIVITY: float = _time.monotonic()
+
+
+def record_ollama_activity() -> None:
+    """Mark Ollama as recently active. Cheap — just stamps a float."""
+    global _LAST_OLLAMA_ACTIVITY
+    _LAST_OLLAMA_ACTIVITY = _time.monotonic()
+
+
+def seconds_since_last_ollama_activity() -> float:
+    """Return seconds since the last recorded Ollama call."""
+    return _time.monotonic() - _LAST_OLLAMA_ACTIVITY

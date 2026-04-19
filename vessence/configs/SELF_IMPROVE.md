@@ -61,6 +61,12 @@ does, where its artifacts live, and how Jane surfaces the results to the user.
 - `configs/doc_drift_report.md`
 - `configs/transcript_review_report.md`
 - `configs/self_improve_log.md` — summary of each orchestrator run.
+- `configs/self_improvement_latest.md` — readable report for the most
+  recent orchestrator run, organized by stage with what it did, problems
+  found, improvements made, and evidence files. Jane should read this
+  first when the user asks about the most recent self-improvement.
+- `$VESSENCE_DATA_HOME/reports/self_improvement/self_improvement_<timestamp>.md`
+  — archived copies of the readable report for older runs.
 - `configs/auto_audit_log.md` — Code Auditor module-by-module history.
 - `configs/audit_failures.md` — Code Auditor runs that couldn't complete.
 
@@ -96,11 +102,13 @@ When the user asks "what did you fix last night?" or similar, the flow is:
 2. **Stage 2 handler** in `jane_web/jane_v2/classes/self_improvement/handler.py`
    declines immediately — this class is designed for Stage 3.
 3. **Pipeline** injects a `[SELF IMPROVEMENT CONTEXT]` block into Opus's
-   prompt containing the vocal-summary log path and the last ~20 entries
-   from the past 14 days.
+   prompt containing the readable latest report path, vocal-summary log
+   path, and the last ~20 vocal entries from the past 14 days.
 4. **Stage 3 (Opus)** picks the 1-3 most relevant summaries and speaks
-   them conversationally. For older or specific runs not in the injected
-   context, Opus reads the JSONL file directly.
+   them conversationally. For the most recent run, Opus should read
+   `configs/self_improvement_latest.md` first because it is the canonical
+   per-stage report. For older or specific runs not in the injected
+   context, Opus reads the archived Markdown reports or JSONL file.
 
 ## Adding a new self-improve job
 

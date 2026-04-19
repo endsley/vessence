@@ -93,7 +93,7 @@ This script handles everything atomically: bumps version.json, updates main.py, 
 - Never load Ollama models >16GB on this 32GB server
 - Use `nice -n 19 ionice -c 3` for CPU-heavy tasks
 - Set `OLLAMA_MAX_LOADED_MODELS=1` to prevent multiple large models
-- gemma4:26b (22GB) is too large for background experiments on this machine
+- The active local model is `LOCAL_LLM` in `jane_web/jane_v2/models.py` — swap models there, do not hardcode anywhere else
 
 ## Operating Protocols
 

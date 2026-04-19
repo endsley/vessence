@@ -15,6 +15,19 @@ import os
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
 os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 
+# Point Playwright at the Vessence-scoped browser install so
+# agent_skills.web_automation can launch Chromium without relying on
+# ~/.cache/ms-playwright. See configs/project_specs/web_automation_skill.md
+# section 9.1 — install location is deliberate so venv rebuilds don't
+# evict the 180 MB browser binaries.
+_vess_data_home = os.environ.get(
+    "VESSENCE_DATA_HOME", os.path.expanduser("~/ambient/vessence-data"),
+)
+os.environ.setdefault(
+    "PLAYWRIGHT_BROWSERS_PATH",
+    os.path.join(_vess_data_home, "playwright_browsers"),
+)
+
 import sys
 import secrets
 from datetime import datetime, timezone
@@ -154,8 +167,8 @@ try:
     ANDROID_VERSION = _version_data["version_name"]
     _ANDROID_VERSION_CODE = _version_data["version_code"]
 except FileNotFoundError:
-    ANDROID_VERSION = "0.2.49"
-    _ANDROID_VERSION_CODE = 280
+    ANDROID_VERSION = "0.2.56"
+    _ANDROID_VERSION_CODE = 287
 
 # Startup validation: ensure the APK for the advertised version actually exists
 _expected_apk = MARKETING_DOWNLOADS_DIR / f"vessences-android-v{ANDROID_VERSION}.apk"
@@ -433,6 +446,13 @@ async def startup():
     prewarm = asyncio.create_task(_prewarm_local_llm())
     _background_tasks.add(prewarm)
     prewarm.add_done_callback(_background_tasks.discard)
+    # Heartbeat the local LLM every ~15s to keep the GPU power state +
+    # Ollama runner pipeline hot. Evidence (2026-04-18): idle calls
+    # after >30s pay a 5-20s cold-path penalty even with keep_alive=-1.
+    # Disable by setting JANE_OLLAMA_HEARTBEAT_S=0.
+    heartbeat = asyncio.create_task(_ollama_heartbeat_loop())
+    _background_tasks.add(heartbeat)
+    heartbeat.add_done_callback(_background_tasks.discard)
     # Keep the Stage 1 embedding model + memory_retrieval singleton hot
     # in GPU/RAM forever. Belt-and-suspenders against GPU idle-eviction
     # and a cheap liveness check.
@@ -579,6 +599,96 @@ async def _prewarm_local_llm():
     except Exception as e:
         _logger.warning("Local LLM prewarm failed: %s", e)
 
+
+async def _ollama_heartbeat_loop():
+    """Keep the local LLM hot by firing a tiny inference every N seconds.
+
+    `keep_alive=-1` pins the model weights in Ollama's VRAM but does NOT
+    prevent GPU power-state transitions (P0 → P2) or Ollama's runner
+    pipeline from going cold. Evidence (2026-04-18): idle calls after
+    >30 s take 5–20 s of unexplained latency, back-to-back calls run
+    in ~1 s. A periodic 1-token request keeps the GPU context and the
+    Ollama runner pipeline in the hot path so every real user turn
+    sees warm-path latency.
+
+    Interval is deliberately short (≤20 s) — our idle-cold threshold
+    starts biting around 30 s. Power cost of the extra inference is
+    ~0.01 Wh per ping, << $1/mo.
+    """
+    interval_s = int(os.environ.get("JANE_OLLAMA_HEARTBEAT_S", "15"))
+    if interval_s <= 0:
+        _logger.info("Ollama heartbeat disabled (JANE_OLLAMA_HEARTBEAT_S=%s)", interval_s)
+        return
+    try:
+        from jane_web.jane_v2.models import (
+            LOCAL_LLM as model,
+            LOCAL_LLM_NUM_CTX as num_ctx,
+            OLLAMA_KEEP_ALIVE as keep_alive,
+            record_ollama_activity,
+            seconds_since_last_ollama_activity,
+        )
+    except Exception as e:
+        _logger.warning("heartbeat: cannot import models.py (%s) — aborting", e)
+        return
+
+    ollama_url = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
+    endpoint = f"{ollama_url}/api/generate"
+
+    _logger.info(
+        "Ollama heartbeat started: model=%s interval=%ds endpoint=%s",
+        model, interval_s, endpoint,
+    )
+
+    import aiohttp
+    consecutive_failures = 0
+    # Check more often than we ping so we catch idle windows promptly
+    # without over-pinging when real traffic is flowing.
+    poll_s = max(2, interval_s // 5)
+    while True:
+        await asyncio.sleep(poll_s)
+        # Skip if real traffic already kept the runner warm — every
+        # production Ollama caller records activity via
+        # `record_ollama_activity()` in models.py, so heartbeat only
+        # fires during true idle.
+        try:
+            if seconds_since_last_ollama_activity() < interval_s:
+                continue
+        except Exception:
+            pass
+        try:
+            async with aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(total=30)
+            ) as session:
+                async with session.post(
+                    endpoint,
+                    json={
+                        "model": model,
+                        # Tiny prompt; single-token reply is enough to keep the
+                        # inference pipeline resident.
+                        "prompt": ".",
+                        "stream": False,
+                        "think": False,
+                        "options": {
+                            "temperature": 0.0,
+                            "num_predict": 1,
+                            "num_ctx": num_ctx,
+                        },
+                        "keep_alive": keep_alive,
+                    },
+                ) as resp:
+                    await resp.read()
+            record_ollama_activity()
+            consecutive_failures = 0
+        except Exception as e:
+            consecutive_failures += 1
+            # Log only every 10 consecutive failures to avoid spam. One-off
+            # blips happen when jane-web is in the middle of its own
+            # restart or when Ollama is transiently busy.
+            if consecutive_failures % 10 == 1:
+                _logger.warning(
+                    "heartbeat ping failed (%d in a row): %s",
+                    consecutive_failures, e,
+                )
 
 
 async def _reap_stale_sessions_loop():
@@ -3792,6 +3902,385 @@ async def summarize_article_now(request: Request, _=Depends(require_auth)):
         summary = title
 
     return {"status": "ok", "title": title, "summary": summary}
+
+
+# ── Canonical docs ────────────────────────────────────────────────────────────
+# Single source of truth for the "System Architecture" screen in the Android
+# app (and anywhere else that needs human-readable docs). The files live in
+# VESSENCE_HOME/configs/ and are updated whenever Jane's behaviour changes —
+# see CLAUDE.md "Update Rules". The whitelist keeps the endpoint scoped so
+# arbitrary files under configs/ cannot be leaked.
+
+_DOCS_WHITELIST: dict[str, dict[str, str]] = {
+    "architecture":    {"file": "Jane_architecture.md",           "title": "Jane Architecture"},
+    "memory":          {"file": "memory_manage_architecture.md",  "title": "Memory System"},
+    "skills":          {"file": "SKILLS_REGISTRY.md",             "title": "Skills Registry"},
+    "todos":           {"file": "TODO_PROJECTS.md",               "title": "TODO / Projects"},
+    "accomplishments": {"file": "PROJECT_ACCOMPLISHMENTS.md",     "title": "Accomplishments"},
+    "cron":            {"file": "CRON_JOBS.md",                   "title": "Cron Jobs"},
+}
+
+
+def _configs_dir() -> Path:
+    base = os.environ.get("VESSENCE_HOME", os.path.expanduser("~/ambient/vessence"))
+    return Path(base) / "configs"
+
+
+def _read_doc_meta(slug: str) -> dict | None:
+    """Summary-only: stat the file, do not read the body.
+
+    Called by the list endpoint so /api/docs stays O(N_files_to_stat),
+    independent of file size.
+    """
+    meta = _DOCS_WHITELIST.get(slug)
+    if not meta:
+        return None
+    path = _configs_dir() / meta["file"]
+    try:
+        st = path.stat()
+    except FileNotFoundError:
+        return None
+    except Exception as e:
+        _logger.warning("docs: failed to stat %s: %s", path, e)
+        return None
+    return {
+        "slug": slug,
+        "title": meta["title"],
+        "file": meta["file"],
+        "bytes": int(st.st_size),
+        "last_modified": int(st.st_mtime),
+    }
+
+
+def _read_doc_body(slug: str) -> dict | None:
+    meta = _DOCS_WHITELIST.get(slug)
+    if not meta:
+        return None
+    path = _configs_dir() / meta["file"]
+    try:
+        st = path.stat()
+        content = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None
+    except Exception as e:
+        _logger.warning("docs: failed to read %s: %s", path, e)
+        return None
+    return {
+        "slug": slug,
+        "title": meta["title"],
+        "file": meta["file"],
+        "content": content,
+        "bytes": int(st.st_size),
+        "last_modified": int(st.st_mtime),
+    }
+
+
+@app.get("/api/docs")
+async def list_canonical_docs(_=Depends(require_auth)):
+    """List the canonical docs the Android app can pull.
+
+    Response: {"docs": [{"slug", "title", "bytes", "last_modified"}, ...]}
+
+    Metadata only — Android compares the returned ``last_modified`` per
+    slug against its cached body's ``last_modified`` to decide whether
+    to refetch. Cheap (stat only), independent of file size.
+    """
+    docs = []
+    for slug in _DOCS_WHITELIST:
+        d = _read_doc_meta(slug)
+        if d is None:
+            continue
+        docs.append(d)
+    return {"docs": docs}
+
+
+@app.get("/api/docs/{slug}")
+async def get_canonical_doc(slug: str, _=Depends(require_auth)):
+    """Return the markdown body of one whitelisted canonical doc.
+
+    Response: {"slug", "title", "file", "content", "last_modified", "bytes"}
+    """
+    d = _read_doc_body(slug)
+    if d is None:
+        raise HTTPException(status_code=404, detail=f"Unknown or missing doc: {slug}")
+    return d
+
+
+# ── Web automation ────────────────────────────────────────────────────────────
+# Runs a pre-planned sequence of browser actions via
+# agent_skills.web_automation. Called from Jane (via the web.run_plan
+# CLIENT_TOOL marker) and exposed here as REST for direct testing + Phase 2
+# workflow replay. See configs/project_specs/web_automation_skill.md.
+
+@app.post("/api/web_automation/plan")
+async def web_automation_plan(request: Request, _=Depends(require_auth)):
+    """Execute a scripted browser plan end-to-end in one session.
+
+    Request JSON::
+        {
+          "steps": [
+            {"action": "navigate", "args": {"url": "https://example.com"}},
+            {"action": "snapshot", "args": {}},
+            {"action": "extract",  "args": {}}
+          ],
+          "label": "adhoc",
+          "headless": true,
+          "record_trace": false
+        }
+
+    Response::
+        {"ok": true, "run_id": "run_...", "summary": "...", "data": {...}}
+
+    Phase 1 limitations: no workflow persistence, no profiles (each call
+    gets a fresh BrowserContext), no iterative LLM-in-the-loop. Opus
+    precomputes the plan and the server runs it.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+    raw_steps = body.get("steps") or []
+    if not isinstance(raw_steps, list) or not raw_steps:
+        raise HTTPException(status_code=400, detail="'steps' must be a non-empty array")
+
+    try:
+        from agent_skills.web_automation.skill import TaskStep, run_task
+        from agent_skills.web_automation.browser_session import SessionOptions
+    except ImportError as e:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Web automation module unavailable: {e}",
+        )
+
+    steps: list = []
+    for i, s in enumerate(raw_steps):
+        if not isinstance(s, dict) or "action" not in s:
+            raise HTTPException(
+                status_code=400,
+                detail=f"step {i} malformed — need dict with 'action'",
+            )
+        steps.append(TaskStep(
+            action=str(s["action"]),
+            args=s.get("args") or {},
+            confirm=bool(s.get("confirm", False)),
+        ))
+
+    label = str(body.get("label") or "adhoc")[:40]
+    headless = body.get("headless")
+    record_trace = bool(body.get("record_trace", False))
+    profile_id = body.get("profile_id")
+    storage_state = None
+    if isinstance(profile_id, str) and profile_id.strip():
+        try:
+            from agent_skills.web_automation import profiles as _profiles
+            # Domain guard: EVERY navigate step in the plan must target
+            # the profile's bound domain. First-step-only was a hole —
+            # a plan could land legitimately then hop to attacker.com
+            # while the profile cookies are still active.
+            for s in steps:
+                if s.action == "navigate":
+                    _profiles.bind_check(profile_id, s.args.get("url", ""))
+            storage_state = _profiles.storage_state_path(profile_id)
+            _profiles.touch_last_used(profile_id)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Profile load failed: {e}")
+    opts = SessionOptions(
+        headless=headless if isinstance(headless, bool) else None,
+        record_trace=record_trace,
+        storage_state_path=storage_state,
+    )
+
+    result = await run_task(steps, label=label, options=opts)
+    return {
+        "ok": result.ok,
+        "run_id": result.run_id,
+        "summary": result.summary,
+        "data": result.data,
+    }
+
+
+# Profile management — named persistent browser auth contexts (spec 9.5).
+
+@app.get("/api/web_automation/profiles")
+async def list_web_profiles(_=Depends(require_auth)):
+    from agent_skills.web_automation import profiles as _profiles
+    return {"profiles": [p.to_dict() for p in _profiles.list_profiles()]}
+
+
+@app.post("/api/web_automation/profiles")
+async def create_web_profile(request: Request, _=Depends(require_auth)):
+    body = await request.json()
+    name = (body.get("display_name") or "").strip()
+    domain = (body.get("domain") or "").strip()
+    if not name or not domain:
+        raise HTTPException(
+            status_code=400,
+            detail="'display_name' and 'domain' are required",
+        )
+    from agent_skills.web_automation import profiles as _profiles
+    meta = _profiles.create(name, domain)
+    return meta.to_dict()
+
+
+@app.delete("/api/web_automation/profiles/{profile_id}")
+async def delete_web_profile(profile_id: str, _=Depends(require_auth)):
+    from agent_skills.web_automation import profiles as _profiles
+    try:
+        _profiles.delete(profile_id)
+    except _profiles.ProfileNotFound:
+        raise HTTPException(status_code=404, detail=f"Profile not found: {profile_id}")
+    return {"ok": True}
+
+
+@app.post("/api/web_automation/profiles/{profile_id}/capture")
+async def capture_web_profile(profile_id: str, request: Request, _=Depends(require_auth)):
+    """Open a VISIBLE browser to ``login_url``, wait for the user to
+    reach ``success_url_pattern``, then save the storage_state.
+
+    Request::
+        {
+          "login_url": "https://citywater.com/login",
+          "success_url_pattern": "citywater.com/(dashboard|account)",
+          "timeout_s": 300
+        }
+    """
+    body = await request.json()
+    login_url = (body.get("login_url") or "").strip()
+    success_pat = (body.get("success_url_pattern") or "").strip()
+    timeout_s = int(body.get("timeout_s") or 300)
+    if not login_url or not success_pat:
+        raise HTTPException(
+            status_code=400,
+            detail="'login_url' and 'success_url_pattern' required",
+        )
+    try:
+        from agent_skills.web_automation import profiles as _profiles
+        from agent_skills.web_automation.browser_session import (
+            BrowserSessionManager, SessionOptions,
+        )
+    except ImportError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+
+    _profiles.bind_check(profile_id, login_url)
+
+    import re as _re
+    pat = _re.compile(success_pat)
+    mgr = BrowserSessionManager.instance()
+    opts = SessionOptions(headless=False)  # user needs to see the login page
+    async with mgr.session(run_id=f"capture_{profile_id}", options=opts) as sess:
+        page = sess.page
+        await page.goto(login_url)
+        try:
+            await page.wait_for_url(pat, timeout=timeout_s * 1000)
+        except Exception as e:
+            raise HTTPException(status_code=408, detail=f"Login not completed in time: {e}")
+        await _profiles.capture_after_login(page, profile_id)
+    return {"ok": True, "profile_id": profile_id}
+
+
+# Secret management — encrypted credential store with domain binding.
+
+@app.get("/api/web_automation/secrets")
+async def list_web_secrets(_=Depends(require_auth)):
+    from agent_skills.web_automation import secrets as _secrets
+    return {"secrets": [
+        {
+            "secret_id": e.secret_id,
+            "domain": e.domain,
+            "label": e.label,
+            "created_at": e.created_at,
+            "last_used": e.last_used,
+        }
+        for e in _secrets.list_secrets()
+    ]}
+
+
+@app.post("/api/web_automation/secrets")
+async def create_web_secret(request: Request, _=Depends(require_auth)):
+    body = await request.json()
+    domain = (body.get("domain") or "").strip()
+    label = (body.get("label") or "").strip()
+    username = body.get("username") or ""
+    password = body.get("password") or ""
+    notes = body.get("notes") or ""
+    if not domain or not label or not password:
+        raise HTTPException(
+            status_code=400,
+            detail="'domain', 'label', and 'password' are required",
+        )
+    from agent_skills.web_automation import secrets as _secrets
+    sid = _secrets.create(domain, label, username, password, notes)
+    return {"secret_id": sid, "domain": domain, "label": label}
+
+
+@app.delete("/api/web_automation/secrets/{secret_id}")
+async def delete_web_secret(secret_id: str, _=Depends(require_auth)):
+    from agent_skills.web_automation import secrets as _secrets
+    try:
+        _secrets.delete(secret_id)
+    except _secrets.SecretNotFound:
+        raise HTTPException(status_code=404, detail=f"Secret not found: {secret_id}")
+    return {"ok": True}
+
+
+# Workflows — save / load / replay named browser plans (Phase 3).
+
+@app.get("/api/web_automation/workflows")
+async def list_web_workflows(_=Depends(require_auth)):
+    from agent_skills.web_automation import workflow as _wf
+    return {"workflows": [s.__dict__ for s in _wf.list_workflows()]}
+
+
+@app.post("/api/web_automation/workflows")
+async def save_web_workflow(request: Request, _=Depends(require_auth)):
+    body = await request.json()
+    try:
+        from agent_skills.web_automation import workflow as _wf
+        wid = _wf.save(
+            name=body.get("name", ""),
+            description=body.get("description", ""),
+            steps=body.get("steps", []),
+            allowed_domains=body.get("allowed_domains"),
+            browser_profile_id=body.get("browser_profile_id"),
+            inputs_schema=body.get("inputs_schema"),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"workflow_id": wid}
+
+
+@app.get("/api/web_automation/workflows/{name_or_id}")
+async def get_web_workflow(name_or_id: str, _=Depends(require_auth)):
+    from agent_skills.web_automation import workflow as _wf
+    try:
+        return _wf.load(name_or_id)
+    except _wf.WorkflowNotFound:
+        raise HTTPException(status_code=404, detail=f"Workflow not found: {name_or_id}")
+
+
+@app.delete("/api/web_automation/workflows/{name_or_id}")
+async def delete_web_workflow(name_or_id: str, _=Depends(require_auth)):
+    from agent_skills.web_automation import workflow as _wf
+    try:
+        _wf.delete(name_or_id)
+    except _wf.WorkflowNotFound:
+        raise HTTPException(status_code=404, detail=f"Workflow not found: {name_or_id}")
+    return {"ok": True}
+
+
+@app.post("/api/web_automation/workflows/{name_or_id}/run")
+async def run_web_workflow(name_or_id: str, _=Depends(require_auth)):
+    from agent_skills.web_automation import workflow as _wf
+    try:
+        result = await _wf.run(name_or_id)
+    except _wf.WorkflowNotFound:
+        raise HTTPException(status_code=404, detail=f"Workflow not found: {name_or_id}")
+    return {
+        "ok": result.ok,
+        "run_id": result.run_id,
+        "summary": result.summary,
+        "data": result.data,
+    }
 
 
 @app.post("/api/briefing/processor-status")

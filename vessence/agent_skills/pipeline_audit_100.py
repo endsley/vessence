@@ -43,7 +43,16 @@ try:
     sys.path.insert(0, str(VESSENCE_HOME))
     from jane_web.jane_v2.models import AUDIT_JUDGE_MODEL as JUDGE_MODEL, OLLAMA_URL
 except Exception:
-    JUDGE_MODEL = os.environ.get("JANE_AUDIT_JUDGE_MODEL", "qwen2.5:7b")
+    JUDGE_MODEL = (
+        os.environ.get("JANE_AUDIT_JUDGE_MODEL")
+        or os.environ.get("JANE_LOCAL_LLM")
+        or os.environ.get("JANE_STAGE2_MODEL")
+    )
+    if not JUDGE_MODEL:
+        raise RuntimeError(
+            "Cannot resolve audit judge model: models.py import failed AND "
+            "no JANE_AUDIT_JUDGE_MODEL / JANE_LOCAL_LLM env var is set"
+        )
     OLLAMA_URL = "http://localhost:11434/api/generate"
 SERVER = os.environ.get("JANE_AUDIT_SERVER", "http://localhost:8080")
 

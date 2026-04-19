@@ -166,7 +166,9 @@ def _synthesize_class_protocol(class_name: str) -> str | None:
 
     escalation_context = meta.get("escalation_context")
     if escalation_context:
-        lines.extend(["", "Escalation context:", str(escalation_context).strip()])
+        ctx = escalation_context() if callable(escalation_context) else str(escalation_context)
+        if ctx and ctx.strip():
+            lines.extend(["", "Escalation context:", ctx.strip()])
 
     few_shot = meta.get("few_shot") or []
     if few_shot:

@@ -1,0 +1,257 @@
+{
+  "class": "READ_MESSAGES",
+  "phrases": [
+    "my wife said she loves me",
+    "my wife texted me this morning",
+    "bob just sent me a message",
+    "sarah told me about her trip",
+    "text my wife I love her",
+    "tell bob I'm running late",
+    "message sarah happy birthday",
+    "send a text to john",
+    "read me a poem",
+    "read me a bedtime story",
+    "read that book out loud",
+    "read the news to me",
+    "check my email",
+    "any new emails today",
+    "read my email",
+    "what did Bob say in his last email last week",
+    "check the calendar",
+    "any new notifications",
+    "any updates from work",
+    "what did the professor teach today",
+    "tell me about python asyncio",
+    "how do I send a text on android",
+    "what's the best texting app",
+    "I got a weird text from a stranger",
+    "delete all my spam texts",
+    "block messages from this number",
+    "are my text messages end-to-end encrypted",
+    "text messages keep crashing my phone",
+    "what did the doctor say at my appointment",
+    "what did you just say"
+  ],
+  "results": [
+    {
+      "phrase": "my wife said she loves me",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.4,
+      "margin": 0.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "my wife texted me this morning",
+      "classification": "READ_MESSAGES",
+      "confidence": 0.6,
+      "margin": 0.2,
+      "false_positive": true
+    },
+    {
+      "phrase": "bob just sent me a message",
+      "classification": "SEND_MESSAGE",
+      "confidence": 0.6,
+      "margin": 0.4,
+      "false_positive": false
+    },
+    {
+      "phrase": "sarah told me about her trip",
+      "classification": "SEND_MESSAGE",
+      "confidence": 0.6,
+      "margin": 0.4,
+      "false_positive": false
+    },
+    {
+      "phrase": "text my wife I love her",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.4,
+      "margin": 0.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "tell bob I'm running late",
+      "classification": "SEND_MESSAGE",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "message sarah happy birthday",
+      "classification": "SEND_MESSAGE",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "send a text to john",
+      "classification": "SEND_MESSAGE",
+      "confidence": 0.6,
+      "margin": 0.2,
+      "false_positive": false
+    },
+    {
+      "phrase": "read me a poem",
+      "classification": "READ_MESSAGES",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": true
+    },
+    {
+      "phrase": "read me a bedtime story",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.4,
+      "margin": 0.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "read that book out loud",
+      "classification": "READ_MESSAGES",
+      "confidence": 0.6,
+      "margin": 0.2,
+      "false_positive": true
+    },
+    {
+      "phrase": "read the news to me",
+      "classification": "READ_MESSAGES",
+      "confidence": 0.6,
+      "margin": 0.4,
+      "false_positive": true
+    },
+    {
+      "phrase": "check my email",
+      "classification": "READ_EMAIL",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "any new emails today",
+      "classification": "READ_EMAIL",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "read my email",
+      "classification": "READ_EMAIL",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "what did Bob say in his last email last week",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.4,
+      "margin": 0.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "check the calendar",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.6,
+      "margin": 0.4,
+      "false_positive": false
+    },
+    {
+      "phrase": "any new notifications",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.4,
+      "margin": 0.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "any updates from work",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.4,
+      "margin": 0.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "what did the professor teach today",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.0,
+      "margin": 0.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "tell me about python asyncio",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "how do I send a text on android",
+      "classification": "SEND_MESSAGE",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "what's the best texting app",
+      "classification": "READ_MESSAGES",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": true
+    },
+    {
+      "phrase": "I got a weird text from a stranger",
+      "classification": "READ_MESSAGES",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": true
+    },
+    {
+      "phrase": "delete all my spam texts",
+      "classification": "READ_MESSAGES",
+      "confidence": 0.6,
+      "margin": 0.2,
+      "false_positive": true
+    },
+    {
+      "phrase": "block messages from this number",
+      "classification": "SYNC_MESSAGES",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "are my text messages end-to-end encrypted",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "text messages keep crashing my phone",
+      "classification": "SYNC_MESSAGES",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "what did the doctor say at my appointment",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.4,
+      "margin": 0.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "what did you just say",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.4,
+      "margin": 0.0,
+      "false_positive": false
+    }
+  ],
+  "false_positive_count": 7,
+  "false_positives": [
+    "my wife texted me this morning",
+    "read me a poem",
+    "read that book out loud",
+    "read the news to me",
+    "what's the best texting app",
+    "I got a weird text from a stranger",
+    "delete all my spam texts"
+  ]
+}

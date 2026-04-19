@@ -38,4 +38,18 @@ METADATA = {
     ],
     "ack": "Setting your timer…",
     "escalate_ack": "Let me handle the timer…",
+    "escalation_context": (
+        "[timer escalation context]\n"
+        "Timer actions: set, cancel, list, delete.\n\n"
+        "Duration parsing: natural language like \"5 minutes\", \"an hour "
+        "and a half\", \"90 seconds\". Convert to milliseconds.\n\n"
+        "Timers are phone-side (Android AlarmManager) — they ring even "
+        "offline. Use CLIENT_TOOL markers; the server keeps NO timer state.\n\n"
+        "CLIENT_TOOL formats:\n"
+        "  Set:    [[CLIENT_TOOL:timer.set:{\"duration_ms\":<ms>,\"label\":\"...\"}]]\n"
+        "  Cancel: [[CLIENT_TOOL:timer.cancel:{}]]\n"
+        "  List:   [[CLIENT_TOOL:timer.list:{}]]\n"
+        "  Delete: [[CLIENT_TOOL:timer.delete:{\"label\":\"...\"}]] or "
+        "[[CLIENT_TOOL:timer.delete:{\"index\":<n>}]]"
+    ),
 }

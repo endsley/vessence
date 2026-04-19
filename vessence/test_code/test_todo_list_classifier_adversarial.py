@@ -107,7 +107,8 @@ AMBIENT_ESCALATIONS = [
 
 def _classify(prompt: str) -> tuple[str, str]:
     """Sync wrapper around the async classifier. Returns (cls, conf)."""
-    return asyncio.run(stage1_classifier.classify(prompt))
+    cls, conf, _ = asyncio.run(stage1_classifier.classify(prompt))
+    return (cls, conf)
 
 
 class _LiveClassifierRequired(unittest.TestCase):

@@ -85,8 +85,7 @@ This script handles everything atomically: bumps version.json, updates main.py, 
 
 - Never load Ollama models >16GB on this 32GB server
 - Use `nice -n 19 ionice -c 3` for CPU-heavy tasks
-- gemma4:26b (22GB) is too large for background experiments on this machine
-- Preferred local model: gemma4:e4b (9.6GB, fits on GPU)
+- The active local model is whatever `LOCAL_LLM` in `jane_web/jane_v2/models.py` resolves to — do NOT hardcode a model tag anywhere else; swap it in that one file
 
 ## Server Restart Policy
 
@@ -95,6 +94,16 @@ Do NOT restart `jane-web.service` after every code change. Only restart when:
 2. You have accumulated 10+ file changes since the last restart
 
 **Build-only tasks NEVER trigger a restart** (APK builds, Docker bundles, copying files).
+
+## Evidence-Based Diagnostics
+
+When diagnosing broken code, runtime failures, service outages, build errors, or behavior regressions:
+
+- Do not guess, speculate, or say "likely causes."
+- Read the relevant source code, logs, configs, scripts, and live runtime state before explaining the failure.
+- Report only evidence-backed definite causes.
+- If the evidence is incomplete, say exactly what is proven so far and what still needs to be checked.
+- Prefer concrete file paths, commands, log lines, process IDs, ports, timestamps, and config values over theory.
 
 ## Communication Style
 

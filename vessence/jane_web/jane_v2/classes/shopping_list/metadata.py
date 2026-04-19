@@ -1,5 +1,34 @@
 """Shopping list class — add/remove/view shopping items."""
 
+import logging
+import sys
+from pathlib import Path
+
+_SKILLS_DIR = Path(__file__).resolve().parents[4] / "agent_skills"
+if str(_SKILLS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SKILLS_DIR))
+
+_logger = logging.getLogger(__name__)
+
+
+def _escalation_context() -> str:
+    """Inject current shopping list state so Stage 3 (Opus) can view/edit."""
+    try:
+        from agent_skills.shopping_list import format_for_context
+        return format_for_context()
+    except Exception:
+        pass
+    # Fallback: try get_list directly
+    try:
+        from agent_skills.shopping_list import get_list
+        items = get_list()
+        if not items:
+            return "Shopping list is currently empty."
+        return "Current shopping list: " + ", ".join(items)
+    except Exception as e:
+        return f"Shopping list unavailable: {e}"
+
+
 METADATA = {
     "name": "shopping list",
     "priority": 20,
@@ -27,4 +56,5 @@ METADATA = {
     "few_shot": [],
     "ack": None,
     "escalate_ack": None,
+    "escalation_context": _escalation_context,
 }

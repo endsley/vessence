@@ -43,4 +43,19 @@ class ChatPreferences(context: Context) {
     fun setAutoListenEnabled(enabled: Boolean) {
         prefs.edit().putBoolean("auto_listen_after_tts", enabled).apply()
     }
+
+    /**
+     * When a new messaging-app notification arrives, should Android Jane
+     * speak a short event-driven announcement ("New text from <sender>.")?
+     * See [com.vessences.android.notifications.IncomingMessageAnnouncer]
+     * and job_queue/073_event_driven_sms_tts.md.
+     *
+     * Default OFF so an APK update never suddenly starts speaking aloud.
+     */
+    fun isIncomingMessageAnnounceEnabled(): Boolean =
+        prefs.getBoolean("announce_incoming_messages", false)
+
+    fun setIncomingMessageAnnounceEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean("announce_incoming_messages", enabled).apply()
+    }
 }

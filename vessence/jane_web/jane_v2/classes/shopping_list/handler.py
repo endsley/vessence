@@ -116,6 +116,11 @@ async def handle(prompt: str, context: str = "") -> dict | None:
         async with httpx.AsyncClient(timeout=LOCAL_LLM_TIMEOUT) as client:
             r = await client.post(OLLAMA_URL, json=body)
             r.raise_for_status()
+            try:
+                from jane_web.jane_v2.models import record_ollama_activity
+                record_ollama_activity()
+            except Exception:
+                pass
             raw = (r.json().get("response") or "").strip()
     except Exception as e:
         logger.warning("shopping_list handler: LLM failed: %s", e)

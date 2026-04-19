@@ -259,12 +259,7 @@ class HandlerFlowTest(unittest.TestCase):
     def test_resume_unmatched_reasks(self) -> None:
         pending = {"awaiting": "category"}
         out = _run(todo_handler.handle("purple elephants", pending=pending))
-        self.assertIsNotNone(out)
-        self.assertIn("didn't catch", out["text"].lower())
-        self.assertIn(
-            "pending_action", out["structured"],
-            "should keep pending_action alive for another retry",
-        )
+        self.assertEqual(out, {"abandon_pending": True})
 
     def test_resume_pivot_abandons(self) -> None:
         pending = {"awaiting": "category"}
@@ -272,6 +267,44 @@ class HandlerFlowTest(unittest.TestCase):
             "what's the weather today", pending=pending,
         ))
         self.assertEqual(out, {"abandon_pending": True})
+
+    def test_add_item_placeholder_asks_category_then_item(self) -> None:
+        out = _run(todo_handler.handle("can you add an item on the to-do list"))
+        self.assertIsNotNone(out)
+        self.assertIn("which category", out["text"].lower())
+        pending = out["structured"]["pending_action"]
+        self.assertEqual(pending["awaiting"], "add_category_then_item")
+        self.assertNotIn("item_text", pending["data"])
+
+        out = _run(todo_handler.handle("urgent stuff", pending=pending))
+        self.assertIsNotNone(out)
+        self.assertIn("what item", out["text"].lower())
+        pending = out["structured"]["pending_action"]
+        self.assertEqual(pending["awaiting"], "add_item_for_category")
+        self.assertEqual(pending["data"]["category"], "Do it Immediately")
+
+        with patch("agent_skills.docs_tools.todo_add_item", return_value="Added test item."), \
+             patch.object(todo_handler, "_refresh_cache"):
+            out = _run(todo_handler.handle(
+                "deal with my credit card bills",
+                pending=pending["data"],
+            ))
+        self.assertIsNotNone(out)
+        self.assertIn("done", out["text"].lower())
+        self.assertEqual(out["structured"]["entities"]["item_text"], "deal with my credit card bills")
+
+    def test_resume_accepts_full_pending_wrapper_for_add_category(self) -> None:
+        pending = todo_handler._pending(
+            "add_category",
+            {"action": "add", "item_text": "buy milk"},
+            question="Which category should I add it to?",
+        )
+        with patch("agent_skills.docs_tools.todo_add_item", return_value="Added buy milk."), \
+             patch.object(todo_handler, "_refresh_cache"):
+            out = _run(todo_handler.handle("urgent stuff", pending=pending))
+        self.assertIsNotNone(out)
+        self.assertIn("done", out["text"].lower())
+        self.assertEqual(out["structured"]["entities"]["category"], "Do it Immediately")
 
 
 class MissingCacheTest(unittest.TestCase):

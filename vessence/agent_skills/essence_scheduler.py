@@ -187,5 +187,40 @@ def run_scheduler():
         _save_state(state)
 
 
+def _acquire_singleton_lock():
+    """Non-blocking flock so only ONE essence_scheduler runs at a time.
+
+    Cron fires this script every minute (`* * * * *`). When a previous
+    tick is still waiting on GPU/CPU load to drop, a new tick would
+    otherwise spawn a second scheduler that independently decides the
+    same jobs are "due" and launches duplicate subprocesses — notably
+    `daily_briefing/run_briefing.py` — which then contend with each
+    other on the same Ollama runner and collectively take 10+ minutes
+    to finish. Evidence (2026-04-18): three concurrent schedulers →
+    two concurrent briefings → qwen queue thrash → user-turn latency
+    spikes to 15–20 s.
+
+    The lockfile lives under VESSENCE_DATA_HOME/logs so it's co-located
+    with the log and survives across reboots. We grab the lock and
+    keep the fd open for the lifetime of the process — no unlock
+    needed; OS drops it when the process exits.
+    """
+    import fcntl
+    lock_path = os.path.join(LOGS_DIR, "essence_scheduler.lock")
+    lock_fd = open(lock_path, "w")
+    try:
+        fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        logger.info(
+            "Another essence_scheduler is already running "
+            "(lock held on %s) — exiting quietly.", lock_path,
+        )
+        sys.exit(0)
+    # Keep the fd alive by stashing it on a module-level var; GC would
+    # close it (and release the lock) otherwise.
+    globals()["_SINGLETON_LOCK_FD"] = lock_fd
+
+
 if __name__ == "__main__":
+    _acquire_singleton_lock()
     run_scheduler()

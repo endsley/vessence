@@ -654,6 +654,17 @@ CODE_MAP_KEYWORDS = (
     "pending",
     "stage3_followup",
     "reply",
+    # Auto-evolved from daily conversations
+    "shared",
+    "name",
+    "present",
+    "request",
+    "code",
+    "examples",
+    "package",
+    "short",
+    "per",
+    "generated",
 )
 
 
@@ -1282,11 +1293,34 @@ def _persist_turns_async(
     assistant_turn: dict,
     user_message: str,
     assistant_message: str,
+    *,
+    stage: str = "stage3",
 ) -> None:
+    """Persist a completed turn. The scope of work depends on `stage`:
+
+    - `stage="stage3"` (Opus answered): full pipeline. Short-term writeback
+      + thematic memory update (Haiku CLI) + session summary update
+      (qwen subprocess).
+    - `stage="stage2"` (v2 handler short-circuit): short-term writeback
+      ONLY. Thematic + session summary are Stage-3-tier work — they exist
+      to index substantive Opus reasoning into Chroma for later retrieval.
+      Stage 2 turns are templated canned responses ("It's 6:04 PM",
+      canned greeting, "Got it, 10 minutes") — summarizing them wastes a
+      subprocess fork + up to 90 s of qwen time per turn, and the
+      resulting "topics" have no durable value.
+
+    Investigation 2026-04-18: persistence-worker subprocess pressure on
+    a 1.4 GB jane-web process correlated with event-loop stalls of 45-50 s.
+    Gating stage3-tier work on actual stage3 routing eliminates this for
+    the common case (voice Q&A handled by v2 handlers).
+    """
+    is_stage3 = (stage or "stage3").lower() == "stage3"
+
     def _worker() -> None:
         logger.info(
-            "[%s] Persistence worker started user_chars=%d assistant_chars=%d",
+            "[%s] Persistence worker started stage=%s user_chars=%d assistant_chars=%d",
             _session_log_id(session_id),
+            stage,
             len(user_message or ""),
             len(assistant_message or ""),
         )
@@ -1301,6 +1335,14 @@ def _persist_turns_async(
         except Exception as exc:
             logger.exception("[%s] Short-term writeback failed", session_id[:12])
             _log_stage(session_id, "short_term_writeback_async_error", stage_start, error=type(exc).__name__)
+
+        if not is_stage3:
+            # Stage 2 short-circuit — skip thematic + session summary. These
+            # are for Opus-tier substantive content; Stage 2 turns are
+            # handler-generated templated responses with no durable topic.
+            _log_stage(session_id, "persistence_stage2_skip_theme_summary", time.perf_counter())
+            logger.info("[%s] Persistence worker finished (stage2 — skipped thematic + summary)", _session_log_id(session_id))
+            return
 
         # Thematic short-term memory update (Haiku-powered, 1-3s typical).
         # This ALSO dual-writes the Haiku-generated summary into the
@@ -2033,7 +2075,14 @@ async def stream_message(
             from intent_classifier.v2.classifier import stage1_classify as _s1_fn
             from intent_classifier.v1.gemma_stage2 import stage2_execute as _s2_fn
             ROUTER_MODEL = "embedding-v2"
-            _stage1 = await _s1_fn(message, session_id)
+            # ── Stage 0: exact-match lookup (zero LLM cost) ──────────────────
+            from jane_web._stage0_singleton import stage0 as _s0
+            _s0_hit = _s0.classify(message or "")
+            if _s0_hit:
+                logger.info("[%s] Stage0 exact match: %r -> %s", session_id[:12], (message or "")[:60], _s0_hit)
+                _stage1 = {"classification": _s0_hit, "confidence": 1.0, "margin": 1.0, "stage0": True}
+            else:
+                _stage1 = await _s1_fn(message, session_id)
             _s1_cls = _stage1.get("classification", "DELEGATE_OPUS")
             # END_CONVERSATION is destructive: it short-circuits the brain,
             # replies "Ok.", and tells clients to end active listening. The
@@ -2207,6 +2256,22 @@ async def stream_message(
             elif _stage2.get("delegate"):
                 _gemma_short_circuit = False
                 _stage2_delegate_ack = _stage2.get("response") or _stage2_delegate_ack
+                # If no specific ack, generate a topic-aware one via qwen.
+                # Previously picked one of 6 generic strings ("Hmm.", "One sec.",
+                # ...), which user flagged as often feeling disconnected from
+                # the actual request. _generate_delegate_ack uses the user's
+                # message to produce something like "Let me check your email,
+                # one sec." Falls back to a static string on LLM failure.
+                if not _stage2_delegate_ack and not _suppress_delegate_ack:
+                    try:
+                        from jane_web.jane_v2.pipeline import _generate_delegate_ack as _v2_gen_ack
+                        _stage2_delegate_ack = await _v2_gen_ack(
+                            message, session_id, cls=_s1_cls or "others",
+                        )
+                    except Exception as _ack_err:
+                        logger.warning("[%s] topic-aware ack generation failed (%s) — static fallback",
+                                       session_id[:12], _ack_err)
+                        _stage2_delegate_ack = "One sec, let me look into that."
                 # Inject delegate context into message so Opus sees it
                 _v2_dctx = _stage2.get("delegate_context", "") or _v2_task_ctx
                 if _v2_dctx:
@@ -2541,6 +2606,7 @@ async def stream_message(
             session_id, state.conv_manager,
             user_turn, assistant_turn,
             persisted_user_message, _router_response,
+            stage="stage2",
         )
         total_ms = int((time.perf_counter() - request_start) * 1000)
         logger.info("[%s] Gemma short-circuit complete in %dms, response=%d chars",
