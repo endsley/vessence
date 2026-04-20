@@ -69,6 +69,7 @@ _CLASS_DESCRIPTIONS = {
     "read messages": "the user wants to read or check their text messages",
     "sync messages": "the user wants to force-sync SMS from the phone",
     "read email":    "the user wants to read or check their email inbox",
+    "read calendar": "the user wants to read or check events on their Google Calendar",
     "shopping list": "the user wants to add/remove/view items on a shopping list",
     "weather":       "the user wants the current/forecast weather",
     "music play":    "the user wants to play/queue music",

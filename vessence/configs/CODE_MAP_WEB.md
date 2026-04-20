@@ -1,5 +1,5 @@
 # Code Map — Web Frontend
-_Auto-generated on 2026-04-18 08:15 UTC by `generate_code_map.py`_
+_Auto-generated on 2026-04-19 08:15 UTC by `generate_code_map.py`_
 
 ## vault_web/templates/jane.html (2469 lines)
   setChatSize() → L453

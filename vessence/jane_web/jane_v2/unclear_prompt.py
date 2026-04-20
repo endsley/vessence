@@ -29,20 +29,22 @@ SKIP_DIST: Final[float] = 0.02
 # Fixed reply when we decide to re-request. Kept short so TTS is instant.
 REPEAT_REPLY: Final[str] = "Sorry, could you say that again?"
 
-_PROMPT_TEMPLATE = """A user just spoke a command to Jane. Speech-to-text sometimes adds noise: background conversation bleeds in, the speaker misspeaks mid-sentence, or the recording cuts off the start or end.
+_PROMPT_TEMPLATE = """A user spoke a message to Jane. Speech-to-text occasionally garbles the transcription so badly that the result is not actionable. Your job is to catch ONLY those severe cases — not to judge grammar, style, or opinion.
 
-Decide whether the transcribed prompt is CLEAR enough to act on, or UNCLEAR and should be repeated.
+Return UNCLEAR ONLY if at least one of these is true:
+- The prompt is cut off mid-word or ends with a preposition that clearly has more to come ("what's the weather in", "turn on the", "can you please")
+- Contradictory fragments are stitched together mid-sentence with no coherent intent ("play uh no wait the other thing um actually")
+- The transcription is a short phrase made of disconnected words with no verb or subject ("apple meeting tomorrow blue")
 
-Signs a prompt is UNCLEAR:
-- A stray leading or trailing word that does not grammatically fit the rest (looks like bleed-through from someone else talking nearby)
-- Contradictory or self-correcting fragments stitched together ("play uh no wait the other thing")
-- An incomplete sentence that does not stand on its own ("what's the weather in", "turn on the", "can you please")
-- Word salad or two unrelated clauses fused without a conjunction
+Return CLEAR in all other cases, including:
+- Opinions, complaints, or questions about how something works ("well that is a problem", "I don't understand why there's a short circuit", "no we designed it this way on purpose")
+- Natural short sentences ("hi", "yes", "what time is it", "read my messages")
+- Slightly awkward grammar or an extra filler word ("um read my messages", "so what time is it")
+- Informal, rambling, or corrective statements as long as the overall intent is recoverable
+- Technical discussion that happens to include words like "error", "wrong", "why", "problem"
+- Short commands with pronouns that refer to the previous turn ("cancel that", "forget it", "stop that", "do it again", "try the other one")
 
-Signs a prompt is CLEAR — default to CLEAR unless you see a specific reason above:
-- A natural single sentence, even if short ("what time", "hi", "yes", "read my messages")
-- A common command or question that stands on its own, even if terse
-- Minor filler like "um" or "uh" does NOT by itself make it unclear
+Bias strongly toward CLEAR. Only return UNCLEAR when a reasonable human would say "I genuinely couldn't tell what you meant."
 
 User prompt: {prompt}
 

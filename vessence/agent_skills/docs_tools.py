@@ -8,7 +8,7 @@ Usage from Jane's brain / handlers:
     from agent_skills.docs_tools import read_doc, append_item, remove_item, replace_text
 
 For the TODO list specifically:
-    from agent_skills.docs_tools import todo_add_item, todo_remove_item
+    from agent_skills.docs_tools import todo_add_item, todo_remove_item, todo_add_category
 """
 from __future__ import annotations
 
@@ -281,3 +281,28 @@ def todo_remove_item(
             return f"Found the item but failed to delete it."
 
     return f"Could not find an item matching '{item_text}' in the doc."
+
+
+def todo_add_category(
+    category_name: str,
+    doc_id: str | None = None,
+    user_id: str | None = None,
+) -> str:
+    """Add a new category section to the TODO doc.
+
+    Appends a header + '1. Nothing' placeholder at the end of the doc.
+    Returns a confirmation message.
+    """
+    doc_id = doc_id or _DEFAULT_TODO_DOC_ID
+    doc_data = read_doc(doc_id, user_id)
+    full_text = doc_data["text"]
+
+    for line in full_text.split("\n"):
+        if line.strip().lower() == category_name.strip().lower():
+            return f"Category '{category_name}' already exists."
+
+    new_section = f"\n\n{category_name}\n1. Nothing\n"
+    success = append_text(doc_id, new_section, user_id=user_id)
+    if success:
+        return f"Added new category: {category_name}"
+    return f"Failed to add category '{category_name}'."

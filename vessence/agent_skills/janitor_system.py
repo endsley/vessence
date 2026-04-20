@@ -19,6 +19,14 @@ MAX_LOG_SIZE_MB = 50
 LOG_RETENTION_DAYS = 2
 LOG_PATTERNS = ("*.log", "*.jsonl")
 
+TRANSCRIPT_RETENTION_DAYS = 7
+CLAUDE_TRANSCRIPT_DIR = os.path.expanduser(
+    "~/.claude/projects/-home-chieh-ambient-vessence"
+)
+SESSION_SUMMARY_DIR = os.path.join(
+    VESSENCE_DATA_HOME, "data", "jane_session_summaries"
+)
+
 def clean_temp_files():
     for f in TEMP_FILES:
         if os.path.exists(f):
@@ -85,6 +93,37 @@ def _truncate_log_tail(path: Path, keep_bytes: int = 200 * 1024):
     except Exception as e:
         print(f"Failed to truncate {path}: {e}")
 
+def prune_old_transcripts():
+    """Delete raw Claude CLI transcripts and Jane session summaries older than
+    TRANSCRIPT_RETENTION_DAYS. Durable conversation memory lives in ChromaDB;
+    these files are per-session working state that grows unbounded otherwise.
+    """
+    cutoff_ts = time.time() - (TRANSCRIPT_RETENTION_DAYS * 24 * 60 * 60)
+    for label, root, pattern in (
+        ("claude transcripts", CLAUDE_TRANSCRIPT_DIR, "*.jsonl"),
+        ("session summaries", SESSION_SUMMARY_DIR, "*.json"),
+    ):
+        if not os.path.isdir(root):
+            continue
+        removed = 0
+        bytes_freed = 0
+        for path in Path(root).glob(pattern):
+            if not path.is_file():
+                continue
+            try:
+                st = path.stat()
+                if st.st_mtime < cutoff_ts:
+                    bytes_freed += st.st_size
+                    path.unlink()
+                    removed += 1
+            except Exception as e:
+                print(f"Failed to remove {path}: {e}")
+        print(
+            f"{label}: removed {removed} files "
+            f"({bytes_freed // 1024} KB freed, retention={TRANSCRIPT_RETENTION_DAYS}d)."
+        )
+
+
 def archive_completed_jobs():
     try:
         from agent_skills.job_queue_utils import archive_completed
@@ -108,5 +147,6 @@ if __name__ == "__main__":
     clean_temp_files()
     rotate_logs()
     prune_old_logs()
+    prune_old_transcripts()
     archive_completed_jobs()
     print("System Janitor finished.")

@@ -98,9 +98,9 @@ class ShareReceiverActivity : ComponentActivity() {
     }
 
     /**
-     * Fire-and-forget summarization: kick off the request on an app-scoped
-     * coroutine, dismiss the share UI immediately, post a notification when
-     * the summary returns (or if it fails).
+     * Foreground summarization: keep Vessence open while the server summarizes,
+     * then switch directly into the summary reader when ready. If the user
+     * sends it to background, fall back to the notification path.
      */
     private fun summarizeNow(url: String) {
         val appCtx = applicationContext
@@ -108,14 +108,22 @@ class ShareReceiverActivity : ComponentActivity() {
         val serverUrl = prefs.getString(Constants.PREF_JANE_URL, Constants.DEFAULT_JANE_BASE_URL)
             ?: Constants.DEFAULT_JANE_BASE_URL
 
-        Toast.makeText(
-            appCtx,
-            "Summarizing in background — Jane will ping you when ready.",
-            Toast.LENGTH_SHORT,
-        ).show()
+        val progress = AlertDialog.Builder(this)
+            .setTitle("Summarizing article")
+            .setMessage("Jane is preparing the summary. This will open automatically when it is ready.")
+            .setNegativeButton("Run in background") { _, _ ->
+                Toast.makeText(
+                    appCtx,
+                    "Summarizing in background — Jane will ping you when ready.",
+                    Toast.LENGTH_SHORT,
+                ).show()
+                finish()
+            }
+            .setOnCancelListener { finish() }
+            .show()
 
-        // Launch on an app-scoped coroutine so the work survives this
-        // activity being finished. SupervisorJob keeps siblings independent.
+        // Launch on the app-scoped coroutine so the work survives if the user
+        // chooses "Run in background" or Android destroys the share activity.
         ShareSummarizer.scope.launch {
             val result = try {
                 withContext(Dispatchers.IO) {
@@ -134,8 +142,7 @@ class ShareReceiverActivity : ComponentActivity() {
                             val title = obj.optString("title", "")
                             val summary = obj.optString("summary", "")
                             if (summary.isNotEmpty()) {
-                                val combined = if (title.isNotEmpty()) "$title. $summary" else summary
-                                Pair(title.ifEmpty { "Article" }, combined)
+                                Pair(title.ifEmpty { "Article" }, summary)
                             } else null
                         } else null
                     }
@@ -144,14 +151,33 @@ class ShareReceiverActivity : ComponentActivity() {
                 null
             }
 
-            if (result != null) {
-                ShareSummarizer.postSummaryReady(appCtx, url, result.first, result.second)
-            } else {
-                ShareSummarizer.postSummaryFailed(appCtx, url)
+            withContext(Dispatchers.Main) {
+                if (!isFinishing && !isDestroyed) {
+                    progress.dismiss()
+                    if (result != null) {
+                        startActivity(Intent(this@ShareReceiverActivity, SummaryReaderActivity::class.java).apply {
+                            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                            putExtra(SummaryReaderActivity.EXTRA_TITLE, result.first)
+                            putExtra(SummaryReaderActivity.EXTRA_SUMMARY, result.second)
+                            putExtra(SummaryReaderActivity.EXTRA_URL, url)
+                        })
+                        finish()
+                    } else {
+                        Toast.makeText(
+                            appCtx,
+                            "Could not summarize this article.",
+                            Toast.LENGTH_LONG,
+                        ).show()
+                        ShareSummarizer.postSummaryFailed(appCtx, url)
+                        finish()
+                    }
+                } else if (result != null) {
+                    ShareSummarizer.postSummaryReady(appCtx, url, result.first, result.second)
+                } else {
+                    ShareSummarizer.postSummaryFailed(appCtx, url)
+                }
             }
         }
-
-        finish()
     }
 
     private fun addToBriefing(url: String) {

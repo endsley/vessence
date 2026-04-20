@@ -501,6 +501,24 @@ internal fun VoiceStatusBanner(
                             fontSize = 15.sp,
                         )
                     }
+                    if (voice.isCapturingCommand) {
+                        val level = voice.inputLevel.coerceIn(0f, 1f)
+                        val visibleLevel = if (level > 0f) level.coerceAtLeast(0.08f) else 0f
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(4.dp)
+                                .background(Color(0xFF334155), RoundedCornerShape(2.dp)),
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth(visibleLevel)
+                                    .height(4.dp)
+                                    .background(MicHot, RoundedCornerShape(2.dp)),
+                            )
+                        }
+                    }
                 }
                 if (onCancel != null && (voice.isCapturingCommand || voice.isWakeListening)) {
                     Spacer(modifier = Modifier.width(12.dp))

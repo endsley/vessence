@@ -58,6 +58,23 @@ python \
     $VESSENCE_HOME/agent_skills/memory/v1/add_fact.py "fact here" --topic <topic> [--subtopic <subtopic>]
 ```
 
+Codex does not have Claude Code's automatic `UserPromptSubmit` memory hook.
+For memory-sensitive prompts, explicitly query ChromaDB before answering. Use
+the Codex MCP tool `query_jane_memory` when available, or run:
+```bash
+VESSENCE_HOME=/home/chieh/ambient/vessence \
+VESSENCE_DATA_HOME=/home/chieh/ambient/vessence-data \
+VAULT_HOME=/home/chieh/ambient/vault \
+PYTHONPATH=/home/chieh/ambient/vessence \
+/home/chieh/google-adk-env/adk-venv/bin/python \
+    /home/chieh/ambient/vessence/startup_code/query_live_memory.py "query here"
+```
+
+Always query memory first for prompts that ask "do you remember", "recently",
+"what did we decide", project history, user/Jane preferences, family/personal
+context, or prior debugging/architecture rationale. Then verify against code or
+logs when the answer concerns current runtime behavior.
+
 ## Code Edit Lock (MANDATORY)
 
 Before editing any source code file, acquire the code edit lock. This prevents two agents from editing the same codebase simultaneously.

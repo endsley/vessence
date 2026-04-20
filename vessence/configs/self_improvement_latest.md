@@ -1,16 +1,16 @@
 # Most Recent Nightly Self-Improvement
 
-- Run started: 2026-04-18 01:00:00
-- Report generated: 2026-04-18 23:11:47
-- Total runtime: 2824s
-- Jobs: 8 total, 5 ok, 2 timeout, 1 failed
+- Run started: 2026-04-19 01:00:01
+- Report generated: 2026-04-19 01:39:11
+- Total runtime: 2349s
+- Jobs: 8 total, 6 ok, 1 timeout, 1 failed
 - Stable latest report path: `/home/chieh/ambient/vessence/configs/self_improvement_latest.md`
-- Archived copy: `/home/chieh/ambient/vessence-data/reports/self_improvement/self_improvement_20260418_010000_2.md`
+- Archived copy: `/home/chieh/ambient/vessence-data/reports/self_improvement/self_improvement_20260419_010001.md`
 
 ## Executive Summary
 
-- 3 stage(s) need attention because they timed out or exited non-zero.
-- 7 concrete improvement/fix signals were found in logs or reports.
+- 2 stage(s) need attention because they timed out or exited non-zero.
+- 5 concrete improvement/fix signals were found in logs or reports.
 
 ## Stage 1: Auto-Commit WIP (pre)
 
@@ -27,7 +27,7 @@
 
 ### Improvements It Made
 
-- 2026-04-18 01:00:01,882 INFO Committed 22 file(s).
+- 2026-04-19 01:00:02,110 INFO Committed 101 file(s).
 
 ### Evidence Files
 
@@ -69,7 +69,7 @@
 
 ### Problems It Found
 
-- 2026-04-18 01:15:02,004 [WARNING] Working tree has uncommitted changes — skipping audit.
+- 2026-04-19 01:15:02,246 [WARNING] Working tree has uncommitted changes — skipping audit.
 
 ### Improvements It Made
 
@@ -83,8 +83,8 @@
 
 ## Stage 4: Pipeline Audit (30 prompts)
 
-- Status: `timeout`
-- Duration: 1200s (20.0 min)
+- Status: `ok`
+- Duration: 621s (10.3 min)
 
 ### What It Did
 
@@ -92,17 +92,17 @@
 
 ### Problems It Found
 
-- Job ended with status `timeout`.
 - Prompts audited: 30.
-- Classification failures: 0.
-- Response failures: 2.
-- **yes fix it** (others/stage3): Chieh, I'm not sure what you're referring to — could you give me a bit more context? What needs fixing?
-- **hey Jane, i previously asked you to fix the security issues raised by codex, how** (others/stage3): Chieh, I looked through the job queue, audit reports, and configs, and I don't see a specific "security issues from Codex" task tracked anywhere. It's
+- Classification failures: 21.
+- Response failures: 26.
+- **well that is a problem can you fix that** (error/stage2): Sorry, could you say that again?
+- **I don't understand why there's a short circuit there should not be short circuit** (error/stage2): Sorry, could you say that again?
+- **no we designed a three-stage specifically for this reason so we can capture erro** (error/stage2): Sorry, could you say that again?
+- **<memory_verify priority="critical">
 
 ### Improvements It Made
 
-- 2026-04-18 01:33:13,275 [INFO] Added exemplar: 'please read the last 3 turns from Android Jane, the "how are' → GREETING (GREETING_audit_1776490392)
-- 2026-04-18 01:33:13,275 [INFO] AUTO-FIX: added 'please read the last 3 turns from Android Jane, the "how are' to greeting (was: others)
+- No concrete improvement was recorded in the available logs/reports.
 
 ### Evidence Files
 
@@ -141,7 +141,7 @@
 ## Stage 6: Transcript Quality Review
 
 - Status: `exit-1`
-- Duration: 722s (12.0 min)
+- Duration: 824s (13.7 min)
 
 ### What It Did
 
@@ -150,23 +150,23 @@
 ### Problems It Found
 
 - Job ended with status `exit-1`.
-- Transcript review found 17 issues: 6 critical, 1 low, 10 medium.
-- Stage 3 took over two minutes to answer a follow-up and appears to have produced no accumulated response text.
-- Weather fast path was classified correctly but was slow for a Stage 2 handler.
-- Stage 3 gave an ungrounded/inaccurate answer about Google Docs capability.
-- Stage 3 turn took nearly three minutes for an implementation request.
+- Transcript review found 20 issues: 4 critical, 1 low, 15 medium.
+- Obvious time request was routed as a stale Stage 3 follow-up instead of going through Stage 1/Stage 2 get-time fast path.
+- Air-quality weather request was classified correctly but Stage 2 rejected it and escalated to slow Stage 3.
+- Greeting fast path was correct but too slow for a Stage 2 handler.
+- Weather fast path was correct but took 7.5 seconds in Stage 2.
 
 ### Improvements It Made
 
-- 2026-04-18 01:37:04,944 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (17 issues)
-- 2026-04-18 01:37:04,945 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 6 critical, 10 medium, 1 minor issues. The most urgent
+- 2026-04-19 01:29:08,727 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (20 issues)
+- 2026-04-19 01:29:08,728 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 4 critical, 15 medium, 1 minor issues. The most urgent
 
 ### Follow-Up Fixes Recommended
 
-- Fix standing_brain stream parsing so final result events are always surfaced even when accumulated streaming text is empty; add a timeout/fallback that returns the final result payload instead of an empty response.
-- Profile the weather handler network/API path and add request timeouts plus cached recent weather for voice fast path; emit an immediate short acknowledgement only if the handler is expected to exceed a voice latency budget.
-- Require Stage 3 capability answers to inspect registered tools/integrations before answering; add a Google Docs capability protocol that distinguishes read-only document access, API auth, and edit/write access.
-- Separate implementation work from voice response: return a short confirmed plan quickly, then run code work asynchronously. Also fix stream accumulation when result events arrive without incremental text.
+- Add a resolver pre-check for high-precision interrupt intents such as GET_TIME, WEATHER, TIMER, SMS, and CANCEL; if matched, clear or suspend the pending action and run normal Stage 1 classification.
+- Extend the weather handler gate and handler implementation to support air-quality queries; do not self-correct valid class-labeled utterances into DELEGATE_OPUS until a reviewer or post-check verifies the class was actually wrong.
+- Make greeting responses fully local and nonblocking; remove any memory, broadcast, or external calls from the greeting handler path and add a latency assertion for greetings under 500ms.
+- Instrument the weather handler by sub-step, cache current weather reads briefly, and enforce a timeout/fallback response so Stage 2 weather does not block voice UX for multiple seconds.
 
 ### Evidence Files
 
@@ -209,8 +209,8 @@
 
 ### Improvements It Made
 
-- 2026-04-18 01:47:06,255 INFO Committed 10 file(s).
-- 2026-04-18 01:47:07,235 INFO Pushed successfully.
+- 2026-04-19 01:39:10,053 INFO Committed 10 file(s).
+- 2026-04-19 01:39:11,291 INFO Pushed successfully.
 
 ### Evidence Files
 

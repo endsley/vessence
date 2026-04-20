@@ -18,12 +18,14 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from memory.v1.memory_retrieval import build_memory_sections
+import memory.v1.search_memory as search_memory
 from jane.config import VECTOR_DB_DIR, VESSENCE_DATA_HOME
 
 LIVE_VECTOR_ROOT = Path(VECTOR_DB_DIR)
 search_memory.VECTOR_DB_USER_MEMORIES = str(LIVE_VECTOR_ROOT)
 search_memory.VECTOR_DB_SHORT_TERM = str(LIVE_VECTOR_ROOT / "short_term_memory")
 search_memory.VECTOR_DB_LONG_TERM = str(LIVE_VECTOR_ROOT / "long_term_memory")
+ORIGINAL_STDOUT_FD = os.dup(1)
 
 CACHE_FILE = Path(VESSENCE_DATA_HOME) / "data" / "memory_hook_cache.json"
 CACHE_TTL_SECS = 300  # 5 minutes
@@ -70,6 +72,31 @@ def _save_cache(entries: list[dict]) -> None:
         pass
 
 
+def _emit(text: str) -> None:
+    payload = (text or "").rstrip() + "\n"
+    try:
+        os.write(ORIGINAL_STDOUT_FD, payload.encode("utf-8", errors="replace"))
+    except Exception:
+        print(payload, end="", flush=True)
+
+
+class _silence_process_output:
+    def __enter__(self):
+        self.stdout_fd = os.dup(1)
+        self.stderr_fd = os.dup(2)
+        self.null_fd = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(self.null_fd, 1)
+        os.dup2(self.null_fd, 2)
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        os.dup2(self.stdout_fd, 1)
+        os.dup2(self.stderr_fd, 2)
+        os.close(self.null_fd)
+        os.close(self.stdout_fd)
+        os.close(self.stderr_fd)
+
+
 def _lookup_cache(query_embedding: list[float], entries: list[dict]) -> str | None:
     for entry in entries:
         cached_emb = entry.get("emb")
@@ -91,18 +118,20 @@ def main() -> int:
     essence_path = args.essence_path
 
     # Try cache lookup first
-    query_embedding = _embed_query(query)
+    with _silence_process_output():
+        query_embedding = _embed_query(query)
     if query_embedding:
         cache_entries = _load_cache()
         cached = _lookup_cache(query_embedding, cache_entries)
         if cached:
-            print(cached)
+            _emit(cached)
             return 0
 
     # Cache miss — retrieve from ChromaDB (direct sections, no Ollama librarian)
-    sections = build_memory_sections(query, assistant_name="Jane", essence_chromadb_path=essence_path)
+    with _silence_process_output():
+        sections = build_memory_sections(query, assistant_name="Jane", essence_chromadb_path=essence_path)
     if not sections:
-        print("No relevant context found.")
+        _emit("No relevant context found.")
         return 0
     summary = "\n\n".join(sections)
 
@@ -117,7 +146,7 @@ def main() -> int:
         })
         _save_cache(cache_entries)
 
-    print(summary)
+    _emit(summary)
     return 0
 
 

@@ -12,6 +12,7 @@ import android.speech.RecognizerIntent
  *  - onResult       : called with the final transcript (null = cancelled/no-speech)
  *  - onListening    : true when the headless recognizer starts, false when it stops
  *  - onPartialResult: real-time partial transcript as the user speaks
+ *  - onRmsChanged   : normalized mic level from 0.0 to 1.0 while listening
  */
 object SttResultBus {
     var onResult: ((String?) -> Unit)? = null
@@ -19,6 +20,8 @@ object SttResultBus {
     var onListening: ((Boolean) -> Unit)? = null
     /** Partial (real-time) transcript while the user is speaking */
     var onPartialResult: ((String) -> Unit)? = null
+    /** Current speech recognizer input level, normalized to 0.0..1.0 */
+    var onRmsChanged: ((Float) -> Unit)? = null
 
     fun postResult(resultCode: Int, data: Intent?) {
         if (resultCode == Activity.RESULT_OK) {

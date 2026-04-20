@@ -44,6 +44,7 @@ When processing a prompt, context is assembled from four tiers:
 | Collection | Path | What goes here | TTL |
 |-----------|------|----------------|-----|
 | `user_memories` | `$VESSENCE_DATA_HOME/vector_db/` | Permanent + long-term facts for Jane (`memory_type: "permanent"` or `"long_term"`) | None |
+| `user_memories` | `$VESSENCE_DATA_HOME/users/<user_id>/memory/vector_db/` | Managed-user private permanent + long-term facts seeded at user creation and retrieved only for that user | None |
 | `long_term_knowledge` | `$VESSENCE_DATA_HOME/vector_db/long_term_memory/` | Jane's conversation archivist output (curated, high-signal facts promoted from short-term) | None |
 | `short_term_memory` | `$VESSENCE_DATA_HOME/vector_db/short_term_memory/` | Compact summaries of conversation turns + explicitly added time-limited facts. Shared/persistent across sessions. | 14 days |
 | `file_index_memories` | `$VESSENCE_DATA_HOME/vector_db/file_index_memory/` | Vault file index records: path, file name, MIME/type, content-derived description when readable, tags | None |
@@ -67,6 +68,7 @@ Do not store these in `user_memories` by default:
 Retrieval rule:
 - Jane always queries `short_term_memory`, `user_memories`, and `long_term_knowledge`
 - Jane queries `file_index_memories` only when the prompt looks file-oriented, such as questions about files, documents, vault contents, or paths
+- For managed users with `$VESSENCE_DATA_HOME/users/<sanitized_email>/config.json`, Jane queries only that user's private `user_memories` ChromaDB for personal memory. Global `short_term_memory`, global `user_memories`, and `file_index_memories` are skipped for that managed user's conversation path until per-user equivalents exist. The same user folder also owns that account's private vault root at `vault/`.
 
 This prevents file metadata from crowding out real user facts in normal prompts.
 

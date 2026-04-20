@@ -36,17 +36,26 @@ logger = logging.getLogger(__name__)
 # time please", "current time", "what day is it", "what's today's date",
 # "what's the date", "what day of the week", etc.
 # See transcript review 2026-04-18 Issue 11.
+# Accept any common plain-time phrasing. The old regex missed the single
+# most-common form "what time is it" because it required "'s" or " is "
+# immediately after "what" — transcript 2026-04-18 Issue 11 caught 3+ s
+# stalls on exactly that utterance.
 _FAST_TIME_RE = re.compile(
-    r"^\s*(?:"
-    r"(?:hey\s+jane,?\s+)?"
+    r"^\s*"
+    r"(?:hey\s+jane[,\s]+)?"
     r"(?:please\s+|can\s+you\s+|could\s+you\s+|would\s+you\s+)?"
     r"(?:just\s+)?"
     r"(?:tell\s+me\s+|give\s+me\s+|say\s+)?"
-    r"(?:what(?:'?s|\s+is)\s+(?:the\s+)?(?:current\s+)?)?"
-    r"(?:time|clock)"
-    r"(?:\s+is\s+it|\s+now|\s+please)?"
-    r"[\s?.!]*$"
-    r")",
+    r"(?:"
+    # what time / what time is it / what time now
+    r"what\s+time(?:\s+is\s+it|\s+now)?"
+    # what's the time / what is the (current) time / clock
+    r"|what(?:'?s|\s+is)\s+(?:the\s+)?(?:current\s+)?(?:time|clock)(?:\s+is\s+it|\s+now)?"
+    # (the) (current) time / clock
+    r"|(?:the\s+)?(?:current\s+)?(?:time|clock)"
+    r")"
+    r"(?:\s+please)?"
+    r"[\s?.!]*$",
     re.IGNORECASE,
 )
 _FAST_DATE_RE = re.compile(

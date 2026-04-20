@@ -34,7 +34,7 @@ This document logs all scheduled tasks (cron jobs) for the system. It must be up
 ## 6. System Janitor
 - **Schedule:** `0 3 * * *` (Runs daily at 3:00 AM)
 - **Script Path:** `$VESSENCE_HOME/agent_skills/janitor_system.py`
-- **Description:** Performs system-level cleanup: removes temp files, rotates oversized logs, and deletes log files older than 2 days from the runtime logs tree.
+- **Description:** Performs system-level cleanup: removes temp files, rotates oversized logs, deletes log files older than 2 days from the runtime logs tree, and prunes raw Claude CLI transcripts (`~/.claude/projects/-home-chieh-ambient-vessence/*.jsonl`) and Jane session summaries (`$VESSENCE_DATA_HOME/data/jane_session_summaries/*.json`) older than 7 days. Durable conversation memory lives in ChromaDB; these on-disk files are per-session working state.
 
 ## 7. USB Incremental Sync Backup
 - **Schedule:** `0 2 * * *` (Runs daily at 2:00 AM)

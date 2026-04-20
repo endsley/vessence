@@ -30,6 +30,7 @@ data class VoiceState(
     val isWakeListening: Boolean = false,
     val isCapturingCommand: Boolean = false,
     val transcriptPreview: String = "",
+    val inputLevel: Float = 0f,
     val status: String? = null,
     val error: String? = null,
 )

@@ -29,6 +29,10 @@ def _description() -> str:
         window_line = "- Forecast window: 7 days"
     return (
         "[weather]\n"
+        "User wants the weather — current conditions, today's / tomorrow's / "
+        "weekly forecast, temperature, precipitation, wind, air quality, or "
+        "pollen. Handler answers from a local cache for Medford, MA; other "
+        "locations or forecast-window questions escalate.\n\n"
         "Local weather cache contents:\n"
         "- Location: Medford, MA (ONLY location stored)\n"
         f"{today_line}\n"

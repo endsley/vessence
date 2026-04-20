@@ -104,6 +104,7 @@ STRICT_CLASSES = {
     "READ_MESSAGES",
     "SYNC_MESSAGES",
     "READ_EMAIL",
+    "READ_CALENDAR",
 }
 
 # Hard keyword guard for STRICT_CLASSES. Even unanimous votes don't fire
@@ -114,6 +115,7 @@ _STRICT_KEYWORDS = {
     "READ_MESSAGES": ("text", "message", "msg", "sms", "imessage", "inbox"),
     "SYNC_MESSAGES": ("text", "message", "msg", "sms", "sync"),
     "READ_EMAIL":    ("email", "e-mail", "inbox", "gmail", "mail"),
+    "READ_CALENDAR": ("calendar", "agenda", "schedule"),
 }
 
 _END_CONVERSATION_RE = re.compile(
@@ -151,13 +153,20 @@ def _strict_keyword_ok(raw_cls: str, cleaned_prompt: str) -> bool:
     """Return True if the prompt contains a required keyword for this strict class.
 
     Returns True for classes not in _STRICT_KEYWORDS so the gate is
-    a no-op for non-strict raw classes.
+    a no-op for non-strict raw classes. Matches on word boundaries so
+    e.g. "schedule" does not fire on "reschedule".
     """
     keywords = _STRICT_KEYWORDS.get(raw_cls)
     if not keywords:
         return True
     lc = cleaned_prompt.lower()
-    return any(k in lc for k in keywords)
+    for k in keywords:
+        # Left word-boundary only. Stops "schedule" from firing on
+        # "reschedule" while still matching plurals/inflections like
+        # "emails", "schedules", "emailing".
+        if re.search(r"(?<![a-z])" + re.escape(k), lc):
+            return True
+    return False
 
 
 def _end_conversation_phrase_ok(cleaned_prompt: str) -> bool:
@@ -182,6 +191,7 @@ _CLASS_MAP = {
     "SYNC_MESSAGES":     "sync messages",
     "SHOPPING_LIST":     "shopping list",
     "READ_EMAIL":        "read email",
+    "READ_CALENDAR":     "read calendar",
     "END_CONVERSATION":  "end conversation",
     "GET_TIME":          "get time",
     "TIMER":             "timer",

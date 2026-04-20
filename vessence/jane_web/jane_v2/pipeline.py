@@ -177,17 +177,19 @@ def _copy_body_with_prepended_message(body, extra: str):
         return body
 
 
-async def _fetch_required_memory_evidence(prompt: str) -> tuple[str, bool]:
+async def _fetch_required_memory_evidence(prompt: str, user_id: str | None = None) -> tuple[str, bool]:
     """Query Chroma when the shared evidence policy requires memory."""
     try:
-        from memory.v1.memory_retrieval import build_memory_sections
+        from context_builder.v1.context_builder import _safe_get_memory_summary
         from jane_web.verify_first_policy import has_meaningful_memory
-        sections = await asyncio.to_thread(
-            build_memory_sections,
+        memory_text = await asyncio.to_thread(
+            _safe_get_memory_summary,
             prompt,
-            assistant_name="Jane",
+            "",
+            "",
+            None,
+            user_id,
         )
-        memory_text = "\n\n".join(sections or [])
         return memory_text, has_meaningful_memory(memory_text)
     except Exception as exc:
         logger.warning("pipeline: required memory evidence lookup failed: %s", exc)
@@ -247,7 +249,12 @@ def _dedup_memory_for_session(memory_text: str, session_id: str) -> str:
         return memory_text
 
 
-async def _apply_evidence_policy(body, prompt: str, session_id: str = "") -> tuple[Any, dict]:
+async def _apply_evidence_policy(
+    body,
+    prompt: str,
+    session_id: str = "",
+    user_id: str | None = None,
+) -> tuple[Any, dict]:
     """Apply shared code/memory evidence requirements to a Stage 3 body."""
     metadata = {
         "required": False,
@@ -296,7 +303,7 @@ async def _apply_evidence_policy(body, prompt: str, session_id: str = "") -> tup
                 )
                 metadata["architecture_context_chars"] = len(arch_ctx)
         if req.memory:
-            memory_text, memory_ok = await _fetch_required_memory_evidence(prompt)
+            memory_text, memory_ok = await _fetch_required_memory_evidence(prompt, user_id=user_id)
             metadata["memory_evidence"] = memory_ok
             metadata["memory_chars"] = len(memory_text or "")
             if memory_text:
@@ -532,6 +539,50 @@ def _estimate_duration(prompt: str) -> str:
 _ACK_FALLBACK = "Got it, give me a moment to look into that."
 
 
+def _recent_ack_context(session_id: str | None, max_chars: int = 900) -> str:
+    """Return a compact recent-flow block for the spoken ack prompt.
+
+    The ack should sound like it belongs to the current conversation, but
+    it must stay cheap and avoid a memory search. The per-session FIFO is
+    already maintained for v2/v3 routing, so reuse that local context.
+    """
+    if not session_id:
+        return ""
+    try:
+        from jane_web.jane_v2 import recent_context
+        ctx = recent_context.render_stage2_context(session_id, max_turns=3)
+    except Exception as e:
+        logger.debug("ack recent context unavailable: %s", e)
+        return ""
+    ctx = (ctx or "").strip()
+    if not ctx:
+        return ""
+    if len(ctx) > max_chars:
+        ctx = ctx[-max_chars:].lstrip()
+    return ctx
+
+
+def _avoid_got_it_default(text: str, cls: str = "others") -> str:
+    """Prevent the spoken ack from collapsing into a repeated "Got it" tic."""
+    cleaned = (text or "").strip()
+    if not cleaned.lower().startswith("got it"):
+        return cleaned
+
+    re_mod = __import__("re")
+    rest = re_mod.sub(r"^got it[\s,.\-—:]*", "", cleaned, flags=re_mod.IGNORECASE).strip()
+    if rest:
+        rest = rest[0].upper() + rest[1:]
+
+    cls_key = (cls or "").strip().lower()
+    if cls_key in {"read calendar", "read email", "read messages"} and rest:
+        if rest.lower().startswith(("checking", "pulling", "looking", "reading")):
+            return rest
+        return f"Let me check, {rest[0].lower() + rest[1:]}"
+    if cls_key in {"todo list", "send message", "shopping list", "timer"}:
+        return f"Okay, {rest[0].lower() + rest[1:]}" if rest else "Okay, one sec."
+    return f"On it, {rest[0].lower() + rest[1:]}" if rest else "On it."
+
+
 async def _generate_delegate_ack(prompt: str, session_id: str | None,
                                   cls: str = "others") -> str:
     """Produce an ack for a Stage 3 escalation using the local LLM.
@@ -558,6 +609,8 @@ async def _generate_delegate_ack(prompt: str, session_id: str | None,
     # the startup warmup's -1 pin and cause cold loads after 1h idle.
     ack_keep_alive = OLLAMA_KEEP_ALIVE if model == LOCAL_LLM else "1h"
 
+    flow_context = _recent_ack_context(session_id)
+
     # Topic-aware ack. Previous version forbade mentioning the topic which
     # produced disconnected/flippant acks ("Heh yeah, give me a sec" after
     # a serious email question). User feedback 2026-04-18: the ack should
@@ -567,22 +620,37 @@ async def _generate_delegate_ack(prompt: str, session_id: str | None,
     # We still deliberately avoid SUMMARIZING the answer or predicting what
     # Jane will say — that's Opus's job. Just 4-10 words: "Got it — <short
     # topic reference>, one sec."
+    flow_section = ""
+    if flow_context:
+        flow_section = (
+            "Recent conversation flow, oldest to newest. Use this only to avoid a disconnected ack; "
+            "do not quote it or reveal internal state:\n"
+            f"{flow_context}\n\n"
+        )
+
     gen_prompt = (
         "You are writing a ONE-sentence acknowledgment Jane (a voice assistant) will speak OUT LOUD while she works on the user's request in the background. The reply itself is coming separately — this is just so the user knows Jane heard them.\n\n"
+        + flow_section +
         "Requirements:\n"
-        "1. Start with a short, natural acknowledgment (\"Got it\", \"Okay\", \"Sure\", \"One sec\", \"Let me check\", \"On it\"). Never clown-speak (\"Heh\", \"Mmkay\", \"Oh nice\").\n"
-        "2. Briefly reference what the user asked about — 2–6 words max, no details. The user already knows what they asked; this is a breadcrumb that you heard the specific thing.\n"
-        "3. End with a short time signal — \"one sec\", \"give me a moment\", \"this'll take a moment\", etc. Rough scale: " + duration + ".\n"
-        "4. ONE sentence. 6–14 words total. No questions. No summarizing the likely answer. No filler. No emoji.\n\n"
+        "1. Start with a varied, natural acknowledgment (\"Okay\", \"Sure\", \"One sec\", \"Let me check\", \"On it\"). Do not default to \"Got it\"; use it only when it is clearly the best fit. Never clown-speak (\"Heh\", \"Mmkay\", \"Oh nice\").\n"
+        "2. Match the conversation flow. If the user is following up, correcting, confirming, or answering a question, acknowledge that continuation instead of treating the text as a brand-new topic.\n"
+        "3. Briefly reference what the user asked about — 2–6 words max, no details. The user already knows what they asked; this is a breadcrumb that you heard the specific thing.\n"
+        "4. End with a short time signal — \"one sec\", \"give me a moment\", \"this'll take a moment\", etc. Rough scale: " + duration + ".\n"
+        "5. ONE sentence. 6–14 words total. No questions. No summarizing the likely answer. No filler. No emoji.\n\n"
         "Good examples:\n"
         "  user: \"What was the last email from Bob about?\" → \"Let me check your email, one sec.\"\n"
         "  user: \"Explain how rsync works\"                → \"Sure — rsync breakdown coming, give me a moment.\"\n"
         "  user: \"When did we talk about the scheduler?\"  → \"On it, let me pull up the scheduler thread.\"\n"
-        "  user: \"Rewrite this function\"                  → \"Got it, refactoring now — this'll take a moment.\"\n\n"
+        "  user: \"Rewrite this function\"                  → \"Okay, refactoring now — this'll take a moment.\"\n\n"
+        "Flow-aware examples:\n"
+        "  previous: Jane asked which TODO category. user: \"clinic\" → \"Okay, checking the clinic TODOs now.\"\n"
+        "  previous: discussing ack quality. user: \"it feels off\" → \"On it, tuning the ack flow now.\"\n"
+        "  previous: drafting SMS. user: \"make it warmer\" → \"Okay, revising that message tone now.\"\n\n"
         "Bad examples:\n"
         "  \"Hmm, give me a sec.\"                           ← topic-blind, feels disconnected\n"
         "  \"Oh nice, this might take a minute or two.\"     ← clown opener, still disconnected\n"
         "  \"Let me check your email and summarize the three most recent threads.\"  ← over-specifying Opus's answer\n\n"
+        f"Routing class: {cls}\n"
         f"User message: {(prompt or '').strip()[:400]}\n\n"
         "Your one-sentence acknowledgment (plain text, no quotes):"
     )
@@ -616,6 +684,7 @@ async def _generate_delegate_ack(prompt: str, session_id: str | None,
                     text = text[:first_period + 1]
                 else:
                     text = text[:120]
+            text = _avoid_got_it_default(text, cls=cls)
             return text or _ACK_FALLBACK
     except Exception as e:
         logger.warning("ack generation failed (%s) — using fallback", e)
@@ -931,6 +1000,21 @@ def _cookie_session_id(request) -> str | None:
         return None
 
 
+def _cookie_session_user(request) -> str | None:
+    try:
+        from jane_web.main import get_or_bootstrap_session, _default_user_id
+        from vault_web.auth import get_session_user
+    except Exception:
+        return None
+    try:
+        sid, _ = get_or_bootstrap_session(request)
+        if not sid:
+            return None
+        return get_session_user(sid) or _default_user_id()
+    except Exception:
+        return None
+
+
 def _canonical_session_id(body, request) -> str | None:
     """Resolve the canonical session_id for a chat request.
 
@@ -943,10 +1027,15 @@ def _canonical_session_id(body, request) -> str | None:
     old bug: pipeline wrote under body.session_id, escalate_stream wrote
     under the cookie session, pending actions disappeared between turns.
     """
-    sid = (getattr(body, "session_id", None) or "").strip()
-    if sid:
+    sid = (getattr(body, "session_id", None) or "").strip() or _cookie_session_id(request)
+    if not sid:
+        return None
+    user_id = _cookie_session_user(request)
+    try:
+        from agent_skills.user_manager import scoped_session_id
+        return scoped_session_id(user_id, sid)
+    except Exception:
         return sid
-    return _cookie_session_id(request)
 
 
 async def _classify_and_try_stage2(
@@ -1344,7 +1433,7 @@ async def handle_chat(body, request: Request):
     if state["cls"] == "self improvement":
         effective_body = _inject_self_improvement_context(effective_body)
     effective_body, evidence_meta = await _apply_evidence_policy(
-        effective_body, prompt, session_id=canonical_sid
+        effective_body, prompt, session_id=canonical_sid, user_id=_cookie_session_user(request)
     )
     _t3 = time.perf_counter()
     v1_response = await v1_chat(effective_body, request)
@@ -1645,7 +1734,7 @@ async def handle_chat_stream(body, request: Request):
             effective_body = _inject_self_improvement_context(effective_body)
 
         effective_body, evidence_meta = await _apply_evidence_policy(
-            effective_body, prompt, session_id=canonical_sid
+            effective_body, prompt, session_id=canonical_sid, user_id=_cookie_session_user(request)
         )
 
         # When this Stage 3 call is resuming a STAGE3_FOLLOWUP, prefer the

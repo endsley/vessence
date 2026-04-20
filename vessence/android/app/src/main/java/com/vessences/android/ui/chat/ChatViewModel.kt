@@ -9,6 +9,7 @@ import com.vessences.android.data.repository.ChatBackend
 import com.vessences.android.data.repository.ChatRepository
 import com.vessences.android.data.repository.AnnouncementPoller
 import com.vessences.android.data.repository.LiveBroadcastListener
+import com.vessences.android.voice.AndroidSentenceTtsQueue
 import com.vessences.android.voice.HybridTtsManager
 import com.vessences.android.voice.SentenceTtsQueue
 import com.vessences.android.data.repository.VoiceSettingsRepository
@@ -85,6 +86,8 @@ class ChatViewModel(
     private val liveListener = LiveBroadcastListener(viewModelScope, sessionId.take(12))
     private val announcementPoller = AnnouncementPoller(viewModelScope, appContext)
     private val tts = HybridTtsManager(appContext)
+    private var activeServerSentenceQueue: SentenceTtsQueue? = null
+    private var activeAndroidSentenceQueue: AndroidSentenceTtsQueue? = null
 
     // Jane Phone Tools (Phase 1 scaffolding): dispatcher + action queue.
     // The dispatcher's handler registry is empty in Phase 1; Phase 2 populates
@@ -298,14 +301,25 @@ class ChatViewModel(
                 val newVoice = _state.value.voice.copy(
                     isCapturingCommand = active,
                     transcriptPreview = if (!active) "" else _state.value.voice.transcriptPreview,
+                    inputLevel = if (active) _state.value.voice.inputLevel else 0f,
                     status = if (active) "Listening..." else null,
                 )
                 _state.value = _state.value.copy(voice = newVoice)
             }
             com.vessences.android.SttResultBus.onPartialResult = { preview ->
                 _state.value = _state.value.copy(
-                    voice = _state.value.voice.copy(transcriptPreview = preview)
+                    voice = _state.value.voice.copy(
+                        transcriptPreview = preview,
+                        status = "Hearing you...",
+                    )
                 )
+            }
+            com.vessences.android.SttResultBus.onRmsChanged = { level ->
+                if (_state.value.voice.isCapturingCommand) {
+                    _state.value = _state.value.copy(
+                        voice = _state.value.voice.copy(inputLevel = level.coerceIn(0f, 1f))
+                    )
+                }
             }
             com.vessences.android.SttResultBus.onResult = { spoken ->
                 // Clear listening UI immediately
@@ -313,6 +327,7 @@ class ChatViewModel(
                     voice = _state.value.voice.copy(
                         isCapturingCommand = false,
                         transcriptPreview = "",
+                        inputLevel = 0f,
                         status = null,
                     )
                 )
@@ -409,6 +424,7 @@ class ChatViewModel(
     fun cancelCurrentResponse() {
         currentStreamJob?.cancel()
         currentStreamJob = null
+        stopSentenceTtsQueues()
         releaseStreamWakeLock()
         // Finalize any streaming AI message
         val msgs = _state.value.messages
@@ -462,9 +478,19 @@ class ChatViewModel(
             var gotDone = false
             // Sentence-level TTS: accumulate text, fire TTS per sentence during streaming
             var sentenceQueue: SentenceTtsQueue? = null
+            var androidSentenceQueue: AndroidSentenceTtsQueue? = null
             val sentenceBuffer = StringBuilder()
             var sentenceSpeechFedChars = 0
             var sentenceTtsActive = false
+            // TTS-latency debug. Timestamps (ms since turn start) for each
+            // phase of the streaming response so we can see where the gap
+            // between "text visible" and "audio plays" lives. Grep logcat
+            // for "ttsdbg" to correlate with server-side tts_first_delta /
+            // tts_done_raw_emit / tts_done_yielded logs.
+            val turnT0 = System.currentTimeMillis()
+            var firstDeltaAt: Long = -1
+            var lastDeltaAt: Long = -1
+            var doneReceivedAt: Long = -1
             try {
                 // If there's a file attachment, upload it first
                 var resolvedFileContext = fileContext
@@ -516,6 +542,8 @@ class ChatViewModel(
                         updateAiMessage(currentMsgId, "Error: $msg", isStreaming = false)
                     }
                     gotDone = true
+                    stopSentenceTtsQueues()
+                    sentenceTtsActive = false
                     onSendComplete(fromVoice, null)
                 }.collect { event ->
                     when (event.type) {
@@ -553,6 +581,8 @@ class ChatViewModel(
                         }
                         "provider_error" -> {
                             gotDone = true
+                            stopSentenceTtsQueues()
+                            sentenceTtsActive = false
                             try {
                                 val errJson = com.google.gson.Gson().fromJson(event.data, com.google.gson.JsonObject::class.java)
                                 val provider = errJson.get("provider")?.asString ?: "provider"
@@ -606,6 +636,12 @@ class ChatViewModel(
                             serverConversationEnd = true
                         }
                         "delta" -> {
+                            val nowMs = System.currentTimeMillis() - turnT0
+                            if (firstDeltaAt < 0) {
+                                firstDeltaAt = nowMs
+                                android.util.Log.i("ttsdbg", "first_delta at +${nowMs}ms session=${sessionId.take(12)} chars=${event.data.length}")
+                            }
+                            lastDeltaAt = nowMs
                             // Incremental ACK parser — never leaks ACK markup into visible text
                             for (ch in event.data) {
                                 if (inAckBlock) {
@@ -645,13 +681,23 @@ class ChatViewModel(
                             accumulated = assistantTextForDisplay(rawAccumulated)
                             val ackStatus = if (statusLog.isNotEmpty()) statusLog.last() else null
 
-                            // Sentence-level TTS: detect complete sentences and submit for generation
-                            if (fromVoice && HybridTtsManager.USE_SERVER_TTS) {
+                            // Sentence-level TTS: detect complete sentences and submit them to
+                            // the active queue. Server TTS generates audio; local Android TTS
+                            // speaks sequentially so sentence N+1 does not interrupt sentence N.
+                            if (fromVoice) {
                                 // Initialize queue on first delta
-                                if (sentenceQueue == null) {
-                                    sentenceQueue = SentenceTtsQueue(appContext.cacheDir, viewModelScope)
-                                    sentenceQueue!!.startPlayback()
+                                if (!sentenceTtsActive) {
+                                    if (HybridTtsManager.USE_SERVER_TTS) {
+                                        sentenceQueue = SentenceTtsQueue(appContext.cacheDir, viewModelScope)
+                                        sentenceQueue!!.startPlayback()
+                                        activeServerSentenceQueue = sentenceQueue
+                                    } else {
+                                        androidSentenceQueue = AndroidSentenceTtsQueue(tts.localTts, viewModelScope)
+                                        androidSentenceQueue!!.startPlayback()
+                                        activeAndroidSentenceQueue = androidSentenceQueue
+                                    }
                                     sentenceTtsActive = true
+                                    _state.value = _state.value.copy(isSpeaking = true)
                                 }
                                 // Feed the sanitized accumulated speech text instead of
                                 // per-delta regex cleanup. Tags can split across SSE
@@ -671,17 +717,17 @@ class ChatViewModel(
                                     for (m in matches) {
                                         val sentence = m.groupValues[1].trim()
                                         if (sentence.length > 3) {  // skip tiny fragments
-                                            sentenceQueue!!.submitSentence(sentence)
+                                            sentenceQueue?.submitSentence(sentence)
+                                            androidSentenceQueue?.submitSentence(sentence)
                                         }
                                     }
                                     sentenceBuffer.delete(0, consumed)
                                 }
                             }
 
-                            // In voice mode with server TTS, hide text while speaking —
-                            // the user hears it via audio, text reveals when TTS finishes.
-                            // For Android TTS or non-voice mode, show text normally.
-                            if (sentenceTtsActive) {
+                            // Server TTS hides text while speaking because it generates
+                            // external audio; local Android TTS keeps the streamed text visible.
+                            if (sentenceTtsActive && HybridTtsManager.USE_SERVER_TTS) {
                                 updateAiMessage(currentMsgId, "", isStreaming = true, status = "Speaking\u2026", statusLog = statusLog.toList())
                             } else {
                                 updateAiMessage(currentMsgId, accumulated, isStreaming = true, status = ackStatus, statusLog = statusLog.toList())
@@ -689,6 +735,9 @@ class ChatViewModel(
                         }
                         "done" -> {
                             gotDone = true
+                            doneReceivedAt = System.currentTimeMillis() - turnT0
+                            val gapSinceLastDelta = if (lastDeltaAt >= 0) doneReceivedAt - lastDeltaAt else -1
+                            android.util.Log.i("ttsdbg", "done_received at +${doneReceivedAt}ms (gap_since_last_delta=${gapSinceLastDelta}ms) session=${sessionId.take(12)}")
                             var rawText = if (event.data.isNotEmpty()) event.data else accumulated
                             files = event.files
                             // Strip [ACK] tags (already spoken during streaming)
@@ -748,6 +797,12 @@ class ChatViewModel(
                                 val toolResults = allToolResults.filter { it.tool !in FIRE_AND_FORGET }
                                 if (toolResults.isNotEmpty()) {
                                     android.util.Log.i("ChatVM", "Got ${toolResults.size} tool result(s) — auto-sending follow-up")
+                                    sentenceQueue?.stop()
+                                    androidSentenceQueue?.stop()
+                                    sentenceTtsActive = false
+                                    activeServerSentenceQueue = null
+                                    activeAndroidSentenceQueue = null
+                                    sentenceBuffer.clear()
                                     // Build the tool result prefix
                                     val sb = StringBuilder()
                                     for (r in toolResults) {
@@ -771,15 +826,20 @@ class ChatViewModel(
                                 // If no results after 10s, fall through to normal completion
                                 android.util.Log.w("ChatVM", "Tool result wait timed out — completing normally")
                             }
-                            if (sentenceTtsActive && sentenceQueue != null) {
+                            if (sentenceTtsActive && (sentenceQueue != null || androidSentenceQueue != null)) {
                                 val remaining = sentenceBuffer.toString().trim()
                                 if (remaining.length > 3) {
-                                    sentenceQueue!!.submitSentence(remaining)
+                                    sentenceQueue?.submitSentence(remaining)
+                                    androidSentenceQueue?.submitSentence(remaining)
                                 }
                                 sentenceBuffer.clear()
-                                sentenceQueue!!.finishSubmitting()
-                                sentenceQueue!!.awaitCompletion()
+                                sentenceQueue?.finishSubmitting()
+                                androidSentenceQueue?.finishSubmitting()
+                                sentenceQueue?.awaitCompletion()
+                                androidSentenceQueue?.awaitCompletion()
                                 sentenceTtsActive = false
+                                activeServerSentenceQueue = null
+                                activeAndroidSentenceQueue = null
                                 // Now reveal the full text after TTS finished
                                 updateAiMessage(
                                     currentMsgId, displayText, isStreaming = false, files = files,
@@ -796,7 +856,8 @@ class ChatViewModel(
                                     val lastUserMsg = _state.value.messages.lastOrNull { it.isUser }?.text ?: ""
                                     val convEnding = isConversationEnding(lastUserMsg)
                                     val autoListen = chatPrefs.isAutoListenEnabled()
-                                    if (!serverConversationEnd && !convEnding && autoListen) {
+                                    val musicPlaying = !com.vessences.android.voice.WakeWordBridge.sttActive
+                                    if (!serverConversationEnd && !convEnding && !musicPlaying && autoListen) {
                                         com.vessences.android.DiagnosticReporter.voiceFlow(
                                             "relaunch_launched",
                                             mapOf("path" to "sentence_tts")
@@ -806,6 +867,7 @@ class ChatViewModel(
                                         val reason = when {
                                             serverConversationEnd -> "server_end"
                                             convEnding -> "user_ended_phrase"
+                                            musicPlaying -> "music_playing"
                                             !autoListen -> "autolisten_off"
                                             else -> "unknown"
                                         }
@@ -845,6 +907,8 @@ class ChatViewModel(
                         }
                         "error" -> {
                             gotDone = true
+                            stopSentenceTtsQueues()
+                            sentenceTtsActive = false
                             val errorText = event.data ?: ""
                             // Detect server-restart/busy errors and handle gracefully:
                             // speak a friendly message, auto-retry after a delay, resume listening.
@@ -888,11 +952,15 @@ class ChatViewModel(
                 }
                 // If the stream ended without a done/error event, finalize the message
                 if (!gotDone) {
+                    stopSentenceTtsQueues()
+                    sentenceTtsActive = false
                     val finalText = if (accumulated.isNotBlank()) accumulated else "No response received."
                     updateAiMessage(currentMsgId, finalText, isStreaming = false)
                     onSendComplete(fromVoice, finalText)
                 }
             } catch (e: Exception) {
+                stopSentenceTtsQueues()
+                sentenceTtsActive = false
                 val msg = e.message ?: ""
                 // Send full error details to server diagnostics so we can see
                 // the real stack trace and exception class instead of just "abort"
@@ -1042,11 +1110,13 @@ class ChatViewModel(
             // If VoiceController is waiting for a reply, use it (handles TTS + auto re-listen)
             if (voiceController != null && voiceController.isWaitingForReply()) {
                 _state.value = _state.value.copy(isSpeaking = true)
+                android.util.Log.i("ttsdbg", "onSendComplete -> voiceController.onAssistantReply chars=${textToSpeak.length}")
                 voiceController.onAssistantReply(textToSpeak, chatPrefs.isAutoListenEnabled() && !conversationOver && !musicPlaying)
             } else {
                 // Voice came from Android SpeechRecognizer (mic button / wake word), not VoiceController
                 viewModelScope.launch {
                     _state.value = _state.value.copy(isSpeaking = true)
+                    android.util.Log.i("ttsdbg", "onSendComplete -> tts.speak chars=${textToSpeak.length}")
                     tts.speak(textToSpeak)
                     // Previously checked !_state.value.isSpeaking as a proxy for
                     // "user tapped Stop" — but that flag was getting flipped to
@@ -1084,7 +1154,7 @@ class ChatViewModel(
                             "relaunch_launched",
                             mapOf("path" to "non_sentence_tts")
                         )
-                        // Unified path: trigger Google STT popup (same as mic button + wake word)
+                        // Trigger headless STT so silence/errors restore always-listen hands-free.
                         com.vessences.android.MainActivity.instance?.launchStt()
                     } else {
                         com.vessences.android.DiagnosticReporter.voiceFlow(
@@ -1133,6 +1203,7 @@ class ChatViewModel(
         _state.value = _state.value.copy(ttsEnabled = newValue)
         chatPrefs.setTtsEnabled(backendKey, newValue)
         if (!newValue) {
+            stopSentenceTtsQueues()
             tts.stop()
             _state.value = _state.value.copy(isSpeaking = false)
         }
@@ -1140,6 +1211,7 @@ class ChatViewModel(
 
     fun stopSpeaking() {
         stopSpeakingInvoked = true
+        stopSentenceTtsQueues()
         tts.stop()
         voiceController?.stopTts()
         _state.value = _state.value.copy(isSpeaking = false)
@@ -1149,6 +1221,13 @@ class ChatViewModel(
 
     fun speakText(text: String) {
         speakIfEnabled(text)
+    }
+
+    private fun stopSentenceTtsQueues() {
+        activeServerSentenceQueue?.stop()
+        activeServerSentenceQueue = null
+        activeAndroidSentenceQueue?.stop()
+        activeAndroidSentenceQueue = null
     }
 
     private var chatMediaPlayer: android.media.MediaPlayer? = null
@@ -1227,7 +1306,7 @@ class ChatViewModel(
     }
 
     private fun autoListenAfterTts() {
-        // Trigger the same Google STT UI as the mic button and wake word
+        // Trigger headless STT so silence/errors restore always-listen hands-free.
         com.vessences.android.MainActivity.instance?.launchStt()
     }
 
@@ -1472,6 +1551,7 @@ class ChatViewModel(
         }
         try { appContext.unregisterReceiver(sharedSummaryReceiver) } catch (_: Exception) {}
         super.onCleared()
+        stopSentenceTtsQueues()
         voiceController?.release()
         tts.shutdown()
         liveListener.stop()

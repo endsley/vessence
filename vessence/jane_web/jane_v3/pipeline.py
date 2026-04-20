@@ -1,15 +1,15 @@
-"""jane_v3 pipeline — simplified routing via FIFO-aware Haiku classification.
+"""jane_v3 pipeline — simplified routing via FIFO-aware qwen classification.
 
 Flow per request:
   1. Canonical session id + FIFO context (reuse v2 helpers).
-  2. Classify via `intent_classifier/v3/classifier.classify()`.
-     - Returns ("<class>", "Very High"|"High") when Haiku is confident AND
-       the class has a registered Stage 2 handler.
-     - Returns ("others", "Low") on any ambiguity / pivot / error — the
-       caller treats that as "escalate to Stage 3".
+  2. Classify via `intent_classifier/v3/classifier.classify()`. The single
+     qwen call decides intent class, confidence, AND unclear-detection:
+     - ("<class>", "Very High"|"High") → Stage 2 handler runs.
+     - ("unclear", …) → short-circuit with "Sorry, could you say that again?".
+     - ("others"|class, Medium|Low) → escalate to Stage 3.
   3. If Stage-2-bound: invoke the handler directly (no gate check, no
      continuation check, no pending_action_resolver STAGE2_FOLLOWUP branch
-     — Haiku has already taken all three decisions upstream).
+     — qwen has already taken all three decisions upstream).
   4. Otherwise: escalate to Stage 3 via v2's `stage3_escalate.escalate_stream`
      (or v2's non-streaming brain chat for the non-stream entry point).
 
@@ -18,13 +18,14 @@ under `jane_web/jane_v2/` — streaming helpers, Stage 3 escalation, FIFO
 persistence, ack generation — is imported directly; no code is copied.
 
 Dropping from v2 (on purpose):
-  - `_gate_check` — Haiku's confidence gate supersedes it.
-  - `_continuation_check` — Haiku+FIFO natively handles follow-up vs pivot.
+  - `_gate_check` — classifier confidence supersedes it.
+  - `_continuation_check` — classifier+FIFO natively handles follow-up vs pivot.
   - `pending_action_resolver` STAGE2_FOLLOWUP routing — same.
-  - SMS confirmation / draft short-circuits — Haiku sees the FIFO marker
+  - Separate `unclear_prompt.is_unclear` pass — folded into the classifier as
+    the `unclear` class. One qwen call instead of two.
+  - SMS confirmation / draft short-circuits — classifier sees the FIFO marker
     ("about to send: <body>") and classifies "yes"/"send it" as
     `send_message`; the handler reads its own pending state from FIFO.
-    (If this misroutes in practice, re-add the resolver as a pre-check.)
 
 v2 is never imported into anything that runs under the v2 flag.
 """
@@ -54,6 +55,35 @@ from jane_web.jane_v2.pipeline import (
 )
 from jane_web.session_context import set_current_session_id
 from intent_classifier.v3 import classifier as v3_classifier
+
+
+def _persist_turn_to_ledger(session_id: str, user_prompt: str, jane_response: str,
+                            *, stage: str = "stage2") -> None:
+    """Write a completed stage2 turn to the SQLite ledger (and ChromaDB).
+
+    v3's stage2 short-circuit (weather, time, end_conversation, etc.) bypasses
+    jane_proxy._persist_turns_async, which is where stage3 turns normally get
+    their ledger row via ConversationManager._log_to_ledger. Without this,
+    stage2 turns — including every "Ok." end-conversation — never make it into
+    the per-session transcript, so debugging tools (show_transcript.py) see a
+    gap. Best-effort: failures are logged and swallowed.
+    """
+    if not session_id or not jane_response:
+        return
+    try:
+        from jane_web.jane_proxy import _get_session, _persist_turns_async
+        state = _get_session(session_id)
+        user_turn = {"role": "user", "content": user_prompt or ""}
+        assistant_turn = {"role": "assistant", "content": jane_response, "handler": "v3_stage2"}
+        _persist_turns_async(
+            session_id, state.conv_manager,
+            user_turn, assistant_turn,
+            user_prompt or "", jane_response,
+            stage=stage,
+        )
+    except Exception as e:
+        logger.warning("jane_v3: ledger persist failed for %s: %s",
+                       session_id[:12] if session_id else "?", e)
 
 
 # ── Shared routing decision ──────────────────────────────────────────────────
@@ -98,10 +128,29 @@ async def _classify_and_maybe_handle(prompt: str, session_id: str) -> dict:
         "force_stage3": False,
     }
 
+    # ── Unclear short-circuit ───────────────────────────────────────────
+    # The classifier now folds STT-noise detection into its single qwen
+    # call — if the user's message was cut off or incoherent, qwen
+    # returns `"unclear"`. Previously this was a second qwen pass
+    # (`unclear_prompt.is_unclear`) called from five separate sites; one
+    # call is both cheaper and simpler. Canned response is the same.
+    if cls == "unclear":
+        from jane_web.jane_v2 import unclear_prompt as _unclear
+        state["result"] = {
+            "text": _unclear.REPEAT_REPLY,
+            "unclear_prompt": True,
+        }
+        state["force_stage3"] = False
+        state["stage2_ack"] = None
+        state["fallback_ack"] = None
+        state["stage2_ms"] = 0
+        logger.info("jane_v3 pipeline: unclear short-circuit (classifier verdict)")
+        return state
+
     # The v3 classifier already enforces the confidence gate — it only
     # returns a real class when confidence is "Very High" or "High" AND
     # the class has a registered handler. Anything else comes back as
-    # ("others", "Low") which we escalate here.
+    # ("others", "Low") and is Stage-3-bound.
     if cls == "others" or conf not in ("Very High", "High"):
         state["force_stage3"] = True
         state["stage2_ack"] = None
@@ -182,7 +231,9 @@ async def _classify_and_maybe_handle(prompt: str, session_id: str) -> dict:
         result = None
     state["stage2_ms"] = int((time.perf_counter() - t2) * 1000)
 
-    # Handler declined OR returned an invalid shape → escalate.
+    # Handler declined OR returned an invalid shape → escalate. No second
+    # unclear check — the classifier already decided "unclear" vs real
+    # class in a single qwen call.
     if not isinstance(result, dict) or "text" not in result:
         logger.info("jane_v3: handler %r returned invalid shape → Stage 3", cls)
         state["force_stage3"] = True
@@ -270,6 +321,7 @@ async def handle_chat(body, request: Request):
                 if isinstance(state["result"], dict) else None,
             extras=extras,
         )
+        _persist_turn_to_ledger(canonical_sid, prompt, visible_text or text, stage="stage2")
         return JSONResponse(resp)
 
     # ── Stage 3 escalation: delegate to v1's brain via v2's helper ──────
@@ -384,6 +436,7 @@ async def handle_chat_stream(body, request: Request):
                 handler_structured=structured,
                 extras=extras,
             )
+            _persist_turn_to_ledger(canonical_sid, prompt, visible_text or text, stage="stage2")
             return
 
         # ── Stage 3 escalation — reuse v2's streaming path ──────────────

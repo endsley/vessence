@@ -103,7 +103,10 @@ async def handle(prompt: str) -> dict | None:
         ),
         "stream": False,
         "think": False,
-        "options": {"temperature": 0.2, "num_predict": 120, "num_ctx": LOCAL_LLM_NUM_CTX},
+        # 1-2 sentence voice reply — 120 tokens budget ran 6-8s generating
+        # prose it never used. 60 is enough for every measured response and
+        # cuts handler latency roughly in half (transcript 2026-04-18 Issue 4).
+        "options": {"temperature": 0.2, "num_predict": 60, "num_ctx": LOCAL_LLM_NUM_CTX},
         "keep_alive": -1,
     }
     try:

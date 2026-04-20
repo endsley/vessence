@@ -21,10 +21,20 @@ class AndroidTtsManager(
     private var isInitialized = false
     private var initError: String? = null
 
+    // TTS-latency debug: per-utterance start timestamp so onStart can log
+    // the synthesis latency (speak() called -> audio playback begins).
+    private val speakCalledAt = ConcurrentHashMap<String, Long>()
+
     private val textToSpeech = TextToSpeech(appContext, this).apply {
         setOnUtteranceProgressListener(
             object : UtteranceProgressListener() {
-                override fun onStart(utteranceId: String?) = Unit
+                override fun onStart(utteranceId: String?) {
+                    utteranceId?.let {
+                        val t0 = speakCalledAt.remove(it) ?: return@let
+                        val latencyMs = System.currentTimeMillis() - t0
+                        android.util.Log.i("ttsdbg", "audio_playback_start latency=${latencyMs}ms uid=${it.take(8)}")
+                    }
+                }
 
                 override fun onDone(utteranceId: String?) {
                     utteranceId?.let { pending.remove(it)?.resume(Unit) }
@@ -63,14 +73,24 @@ class AndroidTtsManager(
 
     suspend fun speak(text: String) {
         if (text.isBlank()) return
+        val speakEntered = System.currentTimeMillis()
         awaitReady()
         if (!isInitialized) return
+        val readyAt = System.currentTimeMillis()
+        if (readyAt - speakEntered > 5) {
+            android.util.Log.i("ttsdbg", "awaitReady blocked for ${readyAt - speakEntered}ms")
+        }
 
         withContext(Dispatchers.Main.immediate) {
             suspendCancellableCoroutine { continuation ->
                 val utteranceId = UUID.randomUUID().toString()
                 pending[utteranceId] = continuation
-                continuation.invokeOnCancellation { pending.remove(utteranceId) }
+                speakCalledAt[utteranceId] = System.currentTimeMillis()
+                continuation.invokeOnCancellation {
+                    pending.remove(utteranceId)
+                    speakCalledAt.remove(utteranceId)
+                }
+                android.util.Log.i("ttsdbg", "tts.speak queued chars=${text.length} uid=${utteranceId.take(8)}")
                 textToSpeech.speak(text, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
             }
         }

@@ -53,9 +53,9 @@ def is_text(filename: str) -> bool:
     return ext(filename) in TEXT_EXTS
 
 
-def safe_vault_path(rel_path: str) -> Path:
-    """Resolve a relative path safely within VAULT_DIR."""
-    vault = Path(VAULT_DIR).resolve()
+def safe_vault_path(rel_path: str, root_dir: str | Path | None = None) -> Path:
+    """Resolve a relative path safely within a vault root."""
+    vault = Path(root_dir or VAULT_DIR).resolve()
     target = (vault / rel_path.lstrip("/")).resolve()
     if not str(target).startswith(str(vault)):
         raise ValueError("Path traversal detected")
@@ -105,9 +105,9 @@ def make_descriptive_filename(original_name: str, description: str) -> str:
     return f"{stem}{ext_name}"
 
 
-def build_file_index_document(rel_path: str, description: str, mime_type: str) -> str:
+def build_file_index_document(rel_path: str, description: str, mime_type: str, root_dir: str | Path | None = None) -> str:
     filename = Path(rel_path).name
-    full_path = safe_vault_path(rel_path)
+    full_path = safe_vault_path(rel_path, root_dir=root_dir)
     details = (description or "").strip() or f"File '{filename}' stored in the vault."
     return f"Vault file: '{filename}' at path {full_path}. {details} File type: {mime_type}."
 
@@ -140,10 +140,11 @@ def upsert_file_index_entry(rel_path: str, description: str, mime_type: str, upd
         return False
 
 
-def list_directory(rel_path: str = "") -> dict:
+def list_directory(rel_path: str = "", root_dir: str | Path | None = None) -> dict:
     """List files and folders at a vault path."""
+    vault_root = Path(root_dir or VAULT_DIR).resolve()
     try:
-        target = safe_vault_path(rel_path)
+        target = safe_vault_path(rel_path, root_dir=vault_root)
     except ValueError:
         return {"error": "Invalid path"}
 
@@ -160,7 +161,7 @@ def list_directory(rel_path: str = "") -> dict:
             file_count = sum(1 for f in item.rglob("*") if f.is_file() and not f.name.startswith("."))
             folders.append({
                 "name": item.name,
-                "path": str(item.relative_to(VAULT_DIR)),
+                "path": str(item.relative_to(vault_root)),
                 "type": "folder",
                 "file_count": file_count,
             })
@@ -169,7 +170,7 @@ def list_directory(rel_path: str = "") -> dict:
             file_ext = ext(item.name)
             entry = {
                 "name": item.name,
-                "path": str(item.relative_to(VAULT_DIR)),
+                "path": str(item.relative_to(vault_root)),
                 "type": "file",
                 "ext": file_ext,
                 "icon": file_icon(item.name),
@@ -192,10 +193,10 @@ def list_directory(rel_path: str = "") -> dict:
     }
 
 
-def get_file_metadata(rel_path: str) -> dict:
+def get_file_metadata(rel_path: str, root_dir: str | Path | None = None) -> dict:
     """Get file info + ChromaDB description."""
     try:
-        target = safe_vault_path(rel_path)
+        target = safe_vault_path(rel_path, root_dir=root_dir)
     except ValueError:
         return {"error": "Invalid path"}
 
@@ -268,10 +269,10 @@ def get_last_change_timestamp() -> str:
         return row["changed_at"] if row else ""
 
 
-def generate_thumbnail(rel_path: str) -> bytes | None:
+def generate_thumbnail(rel_path: str, root_dir: str | Path | None = None) -> bytes | None:
     """Generate a JPEG thumbnail for an image."""
     try:
-        target = safe_vault_path(rel_path)
+        target = safe_vault_path(rel_path, root_dir=root_dir)
         if not target.exists() or not is_image(target.name):
             return None
         with Image.open(target) as img:

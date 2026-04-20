@@ -4,6 +4,7 @@ GUI for recording wake word samples.
 Big buttons, waveform display, sample management.
 """
 
+import re
 import sys
 import threading
 import time
@@ -17,8 +18,32 @@ from tkinter import ttk, messagebox
 
 from config import WakeWordConfig
 
-SAMPLES_DIR = Path("samples")
+# Anchor to the script's own directory so Save always writes into
+# wake_word/samples/ regardless of the caller's current working directory.
+SAMPLES_DIR = Path(__file__).resolve().parent / "samples"
 SAMPLES_DIR.mkdir(exist_ok=True)
+
+_SAMPLE_NUM_RE = re.compile(r"hey_jane_(\d+)\.(?:wav|ogg)$")
+
+
+def _next_sample_num(samples_dir: Path) -> int:
+    """Return the next unused numeric suffix in samples_dir.
+
+    Uses max(existing) + 1 — NOT len(existing) — so deleted files don't
+    cause the next save to overwrite a still-present neighbor.
+    Gaps are left in place (stable filenames matter for rollback).
+    Considers both .ogg (current) and .wav (legacy) so the counter
+    doesn't collide with leftover WAVs during the OGG migration.
+    """
+    highest = -1
+    for patt in ("hey_jane_*.ogg", "hey_jane_*.wav"):
+        for p in samples_dir.glob(patt):
+            m = _SAMPLE_NUM_RE.search(p.name)
+            if m:
+                n = int(m.group(1))
+                if n > highest:
+                    highest = n
+    return highest + 1
 
 cfg = WakeWordConfig()
 
@@ -33,6 +58,7 @@ class RecorderApp:
         self.recording = False
         self.current_audio = None
         self._os_gain_pct = 35  # current OS mic gain percentage
+        self._playback_gain = 3.0  # multiplicative boost applied at playback only; never saved
         # Set initial mic level
         import subprocess
         subprocess.run(["amixer", "sset", "Capture", "35%"], capture_output=True)
@@ -71,6 +97,17 @@ class RecorderApp:
             command=self._toggle_record, activebackground="#c0392b",
         )
         self.record_btn.pack(side=tk.LEFT, padx=10)
+
+        # Playback of the just-recorded (not-yet-saved) buffer, so the user
+        # can audition before committing to Save. Same enable/disable window
+        # as Save — live from recording-done until save clears the buffer.
+        self.play_btn = tk.Button(
+            btn_frame, text="▶ PLAY", font=("Helvetica", 18, "bold"),
+            bg="#16213e", fg="white", width=12, height=2,
+            command=self._play_current, state=tk.DISABLED,
+            activebackground="#1a5276",
+        )
+        self.play_btn.pack(side=tk.LEFT, padx=10)
 
         self.save_btn = tk.Button(
             btn_frame, text="💾 SAVE", font=("Helvetica", 18, "bold"),
@@ -116,11 +153,30 @@ class RecorderApp:
             font=("Helvetica", 12, "bold"), fg="#e94560", bg="#1a1a2e",
         ).pack(side=tk.LEFT, padx=20)
 
+        # Playback-only volume boost. Recordings go through silence trimming
+        # and peak can be well under 0.1, so laptop speakers hear almost
+        # nothing at 1x. The slider scales audio at play time only — the
+        # saved .wav files are never multiplied, so training stays clean.
+        tk.Label(
+            bottom_frame, text="Volume:",
+            font=("Helvetica", 11), fg="#aaaaaa", bg="#1a1a2e",
+        ).pack(side=tk.LEFT, padx=(15, 2))
+        self.volume_var = tk.DoubleVar(value=self._playback_gain)
+        self.volume_scale = tk.Scale(
+            bottom_frame, from_=1.0, to=10.0, resolution=0.5,
+            orient=tk.HORIZONTAL, length=140, showvalue=True,
+            variable=self.volume_var, command=self._on_volume_change,
+            bg="#16213e", fg="#e0e0e0", troughcolor="#0f3460",
+            highlightthickness=0,
+        )
+        self.volume_scale.pack(side=tk.LEFT)
+
     def _toggle_record(self):
         if not self.recording:
             self.recording = True
             self.record_btn.configure(text="⏹ STOP", bg="#c0392b")
             self.save_btn.configure(state=tk.DISABLED)
+            self.play_btn.configure(state=tk.DISABLED)
             self.status_var.set("Recording... say 'Hey Jane'")
             self.canvas.delete("all")
             threading.Thread(target=self._record_thread, daemon=True).start()
@@ -197,8 +253,9 @@ class RecorderApp:
             self.status_var.set(f"Too quiet (peak={peak:.4f}) — speak louder or check mic")
             return
 
-        self.status_var.set(f"Recorded {duration:.2f}s (peak={peak:.3f}) — Save or re-record")
+        self.status_var.set(f"Recorded {duration:.2f}s (peak={peak:.3f}) — Play, Save, or re-record")
         self.save_btn.configure(state=tk.NORMAL)
+        self.play_btn.configure(state=tk.NORMAL)
         self._draw_waveform(self.current_audio)
 
     def _draw_waveform(self, audio: np.ndarray):
@@ -232,57 +289,94 @@ class RecorderApp:
         if self.current_audio is None:
             return
 
-        existing = sorted(SAMPLES_DIR.glob("hey_jane_*.wav"))
-        next_num = len(existing)
-        path = SAMPLES_DIR / f"hey_jane_{next_num:03d}.wav"
+        next_num = _next_sample_num(SAMPLES_DIR)
+        # Saving as OGG Vorbis rather than PCM WAV — ~22% of the WAV size,
+        # transparent for voice MFCC features, tracked in git (WAVs are
+        # gitignored). soundfile handles encoding via libsndfile+libvorbis.
+        path = SAMPLES_DIR / f"hey_jane_{next_num:03d}.ogg"
 
-        audio_int16 = (self.current_audio * 32767).clip(-32768, 32767).astype(np.int16)
-        with wave.open(str(path), "w") as wf:
-            wf.setnchannels(1)
-            wf.setsampwidth(2)
-            wf.setframerate(cfg.sample_rate)
-            wf.writeframes(audio_int16.tobytes())
+        import soundfile as sf
+        sf.write(
+            str(path),
+            self.current_audio.astype(np.float32, copy=False),
+            cfg.sample_rate,
+            format="OGG", subtype="VORBIS",
+        )
 
         self.status_var.set(f"Saved: {path.name}")
         self.save_btn.configure(state=tk.DISABLED)
+        self.play_btn.configure(state=tk.DISABLED)
         self.current_audio = None
         self._refresh_samples()
 
+    @staticmethod
+    def _list_samples():
+        """Return sorted list of all sample files — OGG and legacy WAV."""
+        import itertools
+        return sorted(itertools.chain(
+            SAMPLES_DIR.glob("hey_jane_*.ogg"),
+            SAMPLES_DIR.glob("hey_jane_*.wav"),
+        ))
+
     def _refresh_samples(self):
         self.sample_listbox.delete(0, tk.END)
-        wavs = sorted(SAMPLES_DIR.glob("hey_jane_*.wav"))
-        for wav in wavs:
+        import soundfile as sf
+        samples = self._list_samples()
+        for s in samples:
             try:
-                with wave.open(str(wav), "r") as wf:
-                    dur = wf.getnframes() / wf.getframerate()
-                self.sample_listbox.insert(tk.END, f"  {wav.name}  ({dur:.2f}s)")
+                info = sf.info(str(s))
+                dur = info.frames / info.samplerate
+                self.sample_listbox.insert(tk.END, f"  {s.name}  ({dur:.2f}s)")
             except Exception:
-                self.sample_listbox.insert(tk.END, f"  {wav.name}  (error)")
-        self.count_var.set(f"{len(wavs)} samples")
+                self.sample_listbox.insert(tk.END, f"  {s.name}  (error)")
+        self.count_var.set(f"{len(samples)} samples")
+
+    def _on_volume_change(self, val):
+        try:
+            self._playback_gain = float(val)
+        except (TypeError, ValueError):
+            pass
+
+    def _boosted(self, audio: np.ndarray) -> np.ndarray:
+        """Apply the playback gain with clipping protection. Non-destructive."""
+        return np.clip(audio * self._playback_gain, -1.0, 1.0).astype(np.float32)
+
+    def _play_current(self):
+        """Play the in-memory, not-yet-saved recording."""
+        if self.current_audio is None or len(self.current_audio) < 100:
+            return
+        try:
+            sd.stop()
+            sd.play(self._boosted(self.current_audio), cfg.sample_rate)
+            self._draw_waveform(self.current_audio)
+        except Exception as e:
+            self.status_var.set(f"Playback failed: {e}")
 
     def _play_selected(self):
         sel = self.sample_listbox.curselection()
         if not sel:
             return
         idx = sel[0]
-        wavs = sorted(SAMPLES_DIR.glob("hey_jane_*.wav"))
-        if idx >= len(wavs):
+        samples = self._list_samples()
+        if idx >= len(samples):
             return
-        with wave.open(str(wavs[idx]), "r") as wf:
-            data = np.frombuffer(wf.readframes(wf.getnframes()), dtype=np.int16)
-            audio = data.astype(np.float32) / 32768.0
+        import soundfile as sf
+        audio, _sr = sf.read(str(samples[idx]), dtype="float32", always_2d=False)
+        if audio.ndim > 1:
+            audio = audio.mean(axis=1)
         self._draw_waveform(audio)
-        sd.play(audio, cfg.sample_rate)
+        sd.stop()
+        sd.play(self._boosted(audio), cfg.sample_rate)
 
     def _delete_selected(self):
         sel = self.sample_listbox.curselection()
         if not sel:
             return
         idx = sel[0]
-        wavs = sorted(SAMPLES_DIR.glob("hey_jane_*.wav"))
-        if idx >= len(wavs):
+        samples = self._list_samples()
+        if idx >= len(samples):
             return
-        wavs[idx].unlink()
+        samples[idx].unlink()
         self._refresh_samples()
         self.status_var.set(f"Deleted sample")
 

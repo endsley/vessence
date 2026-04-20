@@ -54,6 +54,7 @@ This document is a detailed index of Jane's major capabilities. It maps a high-l
     -   **Librarian synthesis:** `memory_retrieval.py:get_memory_summary(query)` — calls `build_memory_sections` then synthesizes via local LLM (Qwen Librarian)
     -   **Jane wrapper:** `$VESSENCE_HOME/agent_skills/search_memory.py:get_memory_summary(query)` — thin wrapper that calls `memory_retrieval.get_memory_summary` with `assistant_name="Jane"`
     -   **Full result:** `memory_retrieval.py:retrieve_memory_context(query)` — returns `MemoryRetrievalResult` with sections, facts_block, and summary (with embedding cache)
+    -   **Codex MCP bridge:** `$VESSENCE_HOME/startup_code/codex_memory_mcp.py` — stdio MCP server registered as `jane-memory` for OpenAI Codex sessions; exposes `query_jane_memory(query, max_chars=12000)` and `jane_memory_paths()`
 
 -   **Capability:** Gemma Sub-Agent Delegation
     -   **File:** `$VESSENCE_HOME/agent_skills/gemma_query.py`
@@ -76,6 +77,12 @@ This document is a detailed index of Jane's major capabilities. It maps a high-l
     -   **File:** `$VESSENCE_HOME/agent_skills/conversation_manager.py`
     -   **Method:** `ConversationManager._run_archival()` — triages short-term memories into long-term/forgettable/discard via LLM
     -   **Triggers:** idle timer callback (`_on_idle`) and session close (`close()`)
+
+-   **Capability:** Google Calendar Read (server-side)
+    -   **File:** `$VESSENCE_HOME/agent_skills/calendar_tools.py`
+    -   **Key Functions:** `list_events_in_range(range_hint, max_results)`, `resolve_range(hint)` (today/tomorrow/this_week/next_week/weekend/next/YYYY-MM-DD), `list_events(time_min_iso, time_max_iso)`, `create_event`, `update_event`, `delete_event`, `quick_add`
+    -   **OAuth:** reuses the Gmail OAuth grant (`calendar.events` scope already included); accepts `calendar.readonly` for pure reads
+    -   **Wiring:** `READ_CALENDAR` intent class fetches events server-side and injects `[CALENDAR DATA]` into the brain context — see `jane_web/jane_proxy.py` (v2 path + legacy read_calendar branch) and `intent_classifier/v2/classes/read_calendar.py`
 
 ---
 
@@ -110,8 +117,8 @@ This document is a detailed index of Jane's major capabilities. It maps a high-l
 
 -   **Capability:** User Manager (Per-User Configuration)
     -   **File:** `agent_skills/user_manager.py`
-    -   **Functions:** `get_user_config(user_id)`, `create_user_space(user_id, display_name)`, `set_user_personality(user_id, personality)`, `get_personality_content(personality)`, `list_personalities()`, `ensure_user_space_from_email(email)`
-    -   **Purpose:** Manages per-user directories, config files, and personality preferences at `$VESSENCE_DATA_HOME/users/<user_id>/config.json`
+    -   **Functions:** `normalize_user_id(user_id)`, `get_user_config(user_id)`, `create_user_space(user_id, display_name, ...)`, `seed_user_memory(user_id, facts)`, `list_users()`, `set_user_personality(user_id, personality)`, `get_personality_content(personality)`, `list_personalities()`, `ensure_user_space_from_email(email)`
+    -   **Purpose:** Manages per-user email-derived directories, config files, capability flags, personality preferences, private ChromaDB memory, and private vault roots at `$VESSENCE_DATA_HOME/users/<sanitized_email>/`
 
 -   **Capability:** Multi-User Auth Support
     -   **File:** `vault_web/auth.py`

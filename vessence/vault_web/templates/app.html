@@ -770,6 +770,75 @@
         </div>
       </section>
 
+      <!-- Users -->
+      <section x-show="usersAdminAvailable" x-cloak>
+        <h2 class="text-lg font-bold text-white mb-4">Users</h2>
+        <div class="bg-slate-800 rounded-xl p-4 border border-slate-700 space-y-4">
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <label class="block">
+              <span class="text-sm text-slate-300 block mb-1.5">Email</span>
+              <input x-model="newUser.email" type="email" placeholder="person@example.com"
+                class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-violet-500">
+            </label>
+            <label class="block">
+              <span class="text-sm text-slate-300 block mb-1.5">Display Name</span>
+              <input x-model="newUser.displayName" type="text" placeholder="Name"
+                class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-violet-500">
+            </label>
+          </div>
+          <div>
+            <span class="text-sm text-slate-300 block mb-2">Capabilities</span>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <template x-for="cap in userCapabilityOptions" :key="cap.id">
+                <label class="flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-300">
+                  <input type="checkbox"
+                    :checked="newUser.capabilities.includes(cap.id)"
+                    @change="toggleNewUserCapability(cap.id, $event.target.checked)"
+                    class="rounded border-slate-600 bg-slate-950 text-violet-600 focus:ring-violet-500">
+                  <span x-text="cap.label"></span>
+                </label>
+              </template>
+            </div>
+          </div>
+          <label class="block">
+            <span class="text-sm text-slate-300 block mb-1.5">Initial Memory</span>
+            <textarea x-model="newUser.seedMemories" rows="3"
+              placeholder="One seed memory per line"
+              class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-violet-500"></textarea>
+          </label>
+          <div class="flex items-center gap-3">
+            <button @click="createManagedUser()" :disabled="creatingUser"
+              class="bg-violet-600 hover:bg-violet-500 disabled:bg-slate-700 disabled:text-slate-400 text-white text-sm font-medium px-4 py-2 rounded-lg transition">
+              <span x-text="creatingUser ? 'Creating...' : 'Create User'"></span>
+            </button>
+            <p class="text-xs" :class="createUserMessage.startsWith('Created') ? 'text-emerald-400' : 'text-slate-400'" x-text="createUserMessage"></p>
+          </div>
+        </div>
+
+        <div class="space-y-2 mt-4">
+          <template x-for="user in users" :key="user.user_id">
+            <div class="bg-slate-800 rounded-xl p-4 border border-slate-700">
+              <div class="flex flex-col md:flex-row md:items-start gap-2 md:gap-4">
+                <div class="flex-1 min-w-0">
+                  <p class="text-white text-sm font-medium truncate" x-text="user.display_name || user.email || user.user_id"></p>
+                  <p class="text-slate-500 text-xs mt-0.5 break-all">
+                    <span x-text="user.email || user.user_id"></span>
+                    <span x-show="user.created_at"> · Created <span x-text="formatDate(user.created_at)"></span></span>
+                  </p>
+                  <p class="text-slate-500 text-xs mt-1 break-all">Memory: <span x-text="user.memory_chromadb_path"></span></p>
+                  <p class="text-slate-500 text-xs mt-0.5 break-all">Vault: <span x-text="user.vault_root_path"></span></p>
+                </div>
+                <div class="flex flex-wrap gap-1">
+                  <template x-for="cap in user.capabilities" :key="cap">
+                    <span class="text-[10px] uppercase bg-slate-900 border border-slate-700 text-slate-300 px-2 py-1 rounded" x-text="cap"></span>
+                  </template>
+                </div>
+              </div>
+            </div>
+          </template>
+        </div>
+      </section>
+
       <!-- Trusted Devices -->
       <section>
         <h2 class="text-lg font-bold text-white mb-4">🔑 Trusted Devices</h2>
@@ -1105,6 +1174,17 @@ function vaultApp() {
     janePersonality: 'default',
     personalityOptions: [],
     personalitySaved: false,
+    usersAdminAvailable: false,
+    users: [],
+    userCapabilityOptions: [],
+    creatingUser: false,
+    createUserMessage: '',
+    newUser: {
+      email: '',
+      displayName: '',
+      capabilities: ['chat', 'memory'],
+      seedMemories: '',
+    },
 
     async init() {
       if (this.isAndroidWebView) {
@@ -1888,6 +1968,63 @@ function vaultApp() {
       const pData = await pR.json();
       this.janePersonality = pData.current || 'default';
       this.personalityOptions = pData.available || [];
+      await this.loadManagedUsers();
+    },
+
+    async loadManagedUsers() {
+      try {
+        const r = await fetch('/api/admin/users');
+        if (!r.ok) {
+          this.usersAdminAvailable = false;
+          return;
+        }
+        const data = await r.json();
+        this.usersAdminAvailable = true;
+        this.users = data.users || [];
+        this.userCapabilityOptions = data.capabilities || [];
+      } catch {
+        this.usersAdminAvailable = false;
+      }
+    },
+
+    toggleNewUserCapability(capability, enabled) {
+      const current = new Set(this.newUser.capabilities || []);
+      if (enabled) current.add(capability);
+      else current.delete(capability);
+      this.newUser.capabilities = Array.from(current);
+    },
+
+    async createManagedUser() {
+      if (this.creatingUser) return;
+      this.creatingUser = true;
+      this.createUserMessage = '';
+      const seedMemories = (this.newUser.seedMemories || '')
+        .split('\n')
+        .map(line => line.trim())
+        .filter(Boolean);
+      try {
+        const r = await fetch('/api/admin/users', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: this.newUser.email,
+            display_name: this.newUser.displayName,
+            capabilities: this.newUser.capabilities,
+            seed_memories: seedMemories,
+          }),
+        });
+        const data = await r.json();
+        if (!r.ok) {
+          throw new Error(data.detail || 'Could not create user');
+        }
+        this.createUserMessage = `Created ${data.user.display_name || data.user.email}`;
+        this.newUser = { email: '', displayName: '', capabilities: ['chat', 'memory'], seedMemories: '' };
+        await this.loadManagedUsers();
+      } catch (error) {
+        this.createUserMessage = error.message || 'Could not create user';
+      } finally {
+        this.creatingUser = false;
+      }
     },
 
     async savePersonality() {

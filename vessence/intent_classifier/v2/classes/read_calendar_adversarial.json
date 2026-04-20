@@ -1,0 +1,252 @@
+{
+  "class": "READ_CALENDAR",
+  "phrases": [
+    "schedule a meeting with bob tomorrow",
+    "add a dentist appointment to my calendar",
+    "create an event for friday",
+    "cancel my meeting today",
+    "delete the 3pm appointment",
+    "move my meeting to tomorrow",
+    "reschedule my appointment",
+    "what time is it",
+    "what day is it today",
+    "what's the date today",
+    "set a timer for 30 minutes",
+    "remind me in an hour",
+    "how's the weather today",
+    "what's the weather tomorrow",
+    "is it going to rain this weekend",
+    "text my wife I'm running late to the meeting",
+    "email bob about tomorrow's meeting",
+    "tell kathia I have a meeting today",
+    "any new emails",
+    "any new text messages",
+    "check my messages",
+    "read my email",
+    "play some calendar music",
+    "I have a meeting in an hour what should I wear",
+    "what did we talk about in yesterday's meeting",
+    "add buy milk to my shopping list",
+    "add meeting prep to my todo list",
+    "what's on my todo list today",
+    "book a flight for next week",
+    "find a restaurant for tomorrow night"
+  ],
+  "results": [
+    {
+      "phrase": "schedule a meeting with bob tomorrow",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.6,
+      "margin": 0.2,
+      "false_positive": false
+    },
+    {
+      "phrase": "add a dentist appointment to my calendar",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.6,
+      "margin": 0.2,
+      "false_positive": false
+    },
+    {
+      "phrase": "create an event for friday",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.4,
+      "margin": 0.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "cancel my meeting today",
+      "classification": "END_CONVERSATION",
+      "confidence": 0.6,
+      "margin": 0.2,
+      "false_positive": false
+    },
+    {
+      "phrase": "delete the 3pm appointment",
+      "classification": "TIMER",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "move my meeting to tomorrow",
+      "classification": "READ_CALENDAR",
+      "confidence": 0.6,
+      "margin": 0.2,
+      "false_positive": true
+    },
+    {
+      "phrase": "reschedule my appointment",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.4,
+      "margin": 0.2,
+      "false_positive": false
+    },
+    {
+      "phrase": "what time is it",
+      "classification": "GET_TIME",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "what day is it today",
+      "classification": "GET_TIME",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "what's the date today",
+      "classification": "GET_TIME",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "set a timer for 30 minutes",
+      "classification": "TIMER",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "remind me in an hour",
+      "classification": "TIMER",
+      "confidence": 0.6,
+      "margin": 0.2,
+      "false_positive": false
+    },
+    {
+      "phrase": "how's the weather today",
+      "classification": "WEATHER",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "what's the weather tomorrow",
+      "classification": "WEATHER",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "is it going to rain this weekend",
+      "classification": "WEATHER",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "text my wife I'm running late to the meeting",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.4,
+      "margin": 0.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "email bob about tomorrow's meeting",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.6,
+      "margin": 0.4,
+      "false_positive": false
+    },
+    {
+      "phrase": "tell kathia I have a meeting today",
+      "classification": "READ_CALENDAR",
+      "confidence": 0.6,
+      "margin": 0.2,
+      "false_positive": true
+    },
+    {
+      "phrase": "any new emails",
+      "classification": "READ_EMAIL",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "any new text messages",
+      "classification": "READ_MESSAGES",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "check my messages",
+      "classification": "READ_MESSAGES",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "read my email",
+      "classification": "READ_EMAIL",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "play some calendar music",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.4,
+      "margin": 0.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "I have a meeting in an hour what should I wear",
+      "classification": "WEATHER",
+      "confidence": 0.6,
+      "margin": 0.2,
+      "false_positive": false
+    },
+    {
+      "phrase": "what did we talk about in yesterday's meeting",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.4,
+      "margin": 0.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "add buy milk to my shopping list",
+      "classification": "SHOPPING_LIST",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "add meeting prep to my todo list",
+      "classification": "TODO_LIST",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "what's on my todo list today",
+      "classification": "TODO_LIST",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "book a flight for next week",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "find a restaurant for tomorrow night",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.4,
+      "margin": 0.2,
+      "false_positive": false
+    }
+  ],
+  "false_positive_count": 2,
+  "false_positives": [
+    "move my meeting to tomorrow",
+    "tell kathia I have a meeting today"
+  ]
+}

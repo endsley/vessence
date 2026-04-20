@@ -1,290 +1,234 @@
 #!/usr/bin/env python3
 """
-show_transcript.py — read Jane conversation transcripts from adk/session.db
+show_transcript.py — read Jane conversation transcripts from the ledger DB.
+
+Every turn Jane completes is logged by `ConversationManager._log_to_ledger`
+into a single SQLite file, regardless of which underlying brain (Claude CLI,
+Gemini CLI, Codex, …) produced the response:
+
+    $VAULT_HOME/conversation_history_ledger.db
+
+Schema:
+    turns(id INTEGER PRIMARY KEY, session_id TEXT, timestamp DATETIME,
+          role TEXT, content TEXT, tokens INTEGER, latency_ms REAL)
+
+Because it's plain SQLite, any external tool can read it directly:
+
+    # Last 4 turns of the most recent Android session:
+    sqlite3 $VAULT_HOME/conversation_history_ledger.db \\
+      "SELECT role, content FROM turns
+         WHERE session_id = (SELECT session_id FROM turns
+                             WHERE session_id LIKE 'jane_android_%'
+                             ORDER BY id DESC LIMIT 1)
+         ORDER BY id DESC LIMIT 4"
+
+This script is a convenience wrapper over the same queries.
 
 Usage:
-    python show_transcript.py                        # list all sessions with preview
-    python show_transcript.py --android              # list only jane_android_* sessions
-    python show_transcript.py <session_id>           # print full transcript
-    python show_transcript.py --latest               # print most recent session
-    python show_transcript.py --latest-android       # print most recent Android session
-    python show_transcript.py --search <keyword>     # find sessions containing keyword
-
-Session DB: $AMBIENT_BASE/vessence-data/adk/session.db
-Android sessions use IDs like: jane_android_xxxxxxxx
-
-The --search flag is the main tool for picking the right session when there are
-multiple: e.g. --search "login screen" or --search "tax" finds the right one fast.
+    python show_transcript.py                           # list recent sessions
+    python show_transcript.py --latest                  # dump most recent session
+    python show_transcript.py --latest-android          # dump most recent Android session
+    python show_transcript.py --android                 # list only Android sessions
+    python show_transcript.py --turns N <args>          # limit to last N turns
+    python show_transcript.py <session_id>              # dump a specific session
+    python show_transcript.py --search <keyword>        # grep across transcripts
 """
+from __future__ import annotations
 
-import json
 import os
 import sqlite3
 import sys
-from datetime import datetime
+from pathlib import Path
 
-DB_PATH = os.path.expandvars(
-    os.path.join(os.environ.get("AMBIENT_BASE", os.path.expanduser("~/ambient")),
-                 "vessence-data/adk/session.db")
-)
+AMBIENT_BASE = os.environ.get("AMBIENT_BASE", os.path.expanduser("~/ambient"))
+VAULT_HOME = os.environ.get("VAULT_HOME", os.path.join(AMBIENT_BASE, "vault"))
+LEDGER_DB = Path(VAULT_HOME) / "conversation_history_ledger.db"
 
 
-def get_conn():
-    if not os.path.exists(DB_PATH):
-        print(f"ERROR: DB not found at {DB_PATH}", file=sys.stderr)
+def _connect() -> sqlite3.Connection:
+    if not LEDGER_DB.exists():
+        print(f"ERROR: ledger DB not found at {LEDGER_DB}", file=sys.stderr)
         sys.exit(1)
-    return sqlite3.connect(DB_PATH)
+    con = sqlite3.connect(f"file:{LEDGER_DB}?mode=ro", uri=True)
+    con.row_factory = sqlite3.Row
+    return con
 
 
-def _first_user_message(cur, session_id, max_len=70):
-    """Return the first meaningful user message text from a session."""
-    cur.execute("""
-        SELECT event_data FROM events
-        WHERE session_id = ?
-        ORDER BY timestamp
-        LIMIT 30
-    """, (session_id,))
-    for (event_data,) in cur.fetchall():
-        try:
-            data = json.loads(event_data)
-        except json.JSONDecodeError:
-            continue
-        content = data.get("content", {})
-        if content.get("role") != "user":
-            continue
-        parts = content.get("parts", [])
-        text = " ".join(p.get("text", "") for p in parts if "text" in p).strip()
-        # Skip pure system injections (they start with [WEB CHAT or [SYSTEM)
-        if text.startswith("[WEB CHAT") or text.startswith("[SYSTEM") or text.startswith("[ANDROID"):
-            # Try to find the real user text after the injection block
-            bracket_end = text.find("]", text.find("["))
-            remainder = text[bracket_end + 1:].strip() if bracket_end != -1 else ""
-            if len(remainder) > 10:
-                text = remainder
-            else:
-                continue
-        if len(text) > max_len:
-            text = text[:max_len] + "…"
-        return text
-    return "(no user messages)"
+def _latest_session(con: sqlite3.Connection, android_only: bool = False) -> str | None:
+    q = (
+        "SELECT session_id FROM turns "
+        + ("WHERE session_id LIKE 'jane_android_%' " if android_only else "")
+        + "ORDER BY id DESC LIMIT 1"
+    )
+    row = con.execute(q).fetchone()
+    return row["session_id"] if row else None
 
 
-def list_sessions(android_only=False):
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("""
-        SELECT s.id, s.app_name, s.update_time,
-               COUNT(e.id) as msg_count
-        FROM sessions s
-        LEFT JOIN events e ON e.session_id = s.id
-        GROUP BY s.id
-        ORDER BY s.update_time DESC
-    """)
-    rows = cur.fetchall()
+def _print_session(con: sqlite3.Connection, session_id: str, max_turns: int | None) -> None:
+    if max_turns and max_turns > 0:
+        rows = list(con.execute(
+            "SELECT timestamp, role, content FROM turns "
+            "WHERE session_id = ? ORDER BY id DESC LIMIT ?",
+            (session_id, max_turns * 2),
+        ))
+        rows.reverse()
+    else:
+        rows = list(con.execute(
+            "SELECT timestamp, role, content FROM turns "
+            "WHERE session_id = ? ORDER BY id ASC",
+            (session_id,),
+        ))
+    meta = con.execute(
+        "SELECT COUNT(*) AS c, MIN(timestamp) AS s, MAX(timestamp) AS e "
+        "FROM turns WHERE session_id = ?",
+        (session_id,),
+    ).fetchone()
+    print(f"Session: {session_id}")
+    print(f"Range  : {meta['s']} → {meta['e']}  |  total turns: {meta['c']}  |  shown: {len(rows)}")
+    print("=" * 72)
+    for r in rows:
+        label = "YOU" if r["role"] == "user" else "JANE"
+        print(f"\n[{r['timestamp']}] {label}:")
+        print(r["content"])
+    print("\n" + "=" * 72)
 
-    if android_only:
-        rows = [r for r in rows if r[0].startswith("jane_android_")]
 
+def list_sessions(con: sqlite3.Connection, android_only: bool = False, limit: int = 25) -> None:
+    q = """
+        SELECT session_id,
+               COUNT(*) AS turns,
+               MAX(timestamp) AS last_ts,
+               MIN(timestamp) AS first_ts
+        FROM turns
+        {where}
+        GROUP BY session_id
+        ORDER BY last_ts DESC
+        LIMIT ?
+    """.format(where="WHERE session_id LIKE 'jane_android_%'" if android_only else "")
+    rows = list(con.execute(q, (limit,)))
     if not rows:
         print("No sessions found.")
-        conn.close()
         return
-
-    print(f"{'SESSION ID':<40} {'UPDATED':<17} {'EVT':>4}  FIRST MESSAGE")
-    print("-" * 100)
-    for sid, app, ts, count in rows:
-        dt = datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M") if ts else "?"
-        preview = _first_user_message(cur, sid)
-        marker = "[android] " if sid.startswith("jane_android_") else ""
-        print(f"{sid:<40} {dt:<17} {count:>4}  {marker}{preview}")
-
-    conn.close()
+    print(f"{'LAST UPDATE':<20} {'TURNS':>6}  {'SESSION ID':<30}  FIRST USER MESSAGE")
+    print("-" * 120)
+    for r in rows:
+        preview = _first_user_preview(con, r["session_id"])
+        print(f"{r['last_ts']:<20} {r['turns']:>6}  {r['session_id']:<30}  {preview}")
 
 
-def print_transcript(session_id):
-    conn = get_conn()
-    cur = conn.cursor()
-
-    # Verify session exists
-    cur.execute("SELECT id, app_name, update_time FROM sessions WHERE id = ?", (session_id,))
-    row = cur.fetchone()
+def _first_user_preview(con: sqlite3.Connection, session_id: str, max_len: int = 80) -> str:
+    row = con.execute(
+        "SELECT content FROM turns WHERE session_id = ? AND role = 'user' "
+        "ORDER BY id ASC LIMIT 1",
+        (session_id,),
+    ).fetchone()
     if not row:
-        # Fuzzy match
-        cur.execute("SELECT id FROM sessions WHERE id LIKE ?", (f"%{session_id}%",))
-        matches = cur.fetchall()
-        if not matches:
-            print(f"Session not found: {session_id}", file=sys.stderr)
-            sys.exit(1)
-        if len(matches) == 1:
-            session_id = matches[0][0]
-            cur.execute("SELECT id, app_name, update_time FROM sessions WHERE id = ?", (session_id,))
-            row = cur.fetchone()
-        else:
-            print(f"Ambiguous match for '{session_id}':", file=sys.stderr)
-            for m in matches:
-                print(f"  {m[0]}", file=sys.stderr)
-            sys.exit(1)
-
-    sid, app, ts = row
-    dt = datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M") if ts else "?"
-    print(f"Session: {sid}  |  app={app}  |  updated={dt}")
-    print("=" * 70)
-
-    cur.execute("""
-        SELECT event_data, timestamp FROM events
-        WHERE session_id = ?
-        ORDER BY timestamp
-    """, (session_id,))
-    events = cur.fetchall()
-    conn.close()
-
-    if not events:
-        print("(no events)")
-        return
-
-    for event_data, ts in events:
-        try:
-            data = json.loads(event_data)
-        except json.JSONDecodeError:
-            continue
-
-        content = data.get("content", {})
-        role = content.get("role", "")
-        parts = content.get("parts", [])
-
-        if not role or not parts:
-            continue
-
-        text_parts = [p.get("text", "") for p in parts if "text" in p]
-        text = "\n".join(text_parts).strip()
-        if not text:
-            continue
-
-        # Skip system injection noise (long prefixes injected by Jane)
-        if role == "user" and len(text) > 2000 and "[SYSTEM" in text[:500]:
-            text = text[:300] + "\n...[system context truncated]..."
-
-        dt_str = datetime.fromtimestamp(ts).strftime("%H:%M:%S") if ts else ""
-        label = "YOU" if role == "user" else "JANE"
-        print(f"\n[{dt_str}] {label}:")
-        print(text)
-
-    print("\n" + "=" * 70)
+        return "(no user turns)"
+    text = " ".join(str(row["content"]).split())
+    for prefix in ("[CURRENT CONVERSATION STATE]", "[Recent exchanges]",
+                   "[WEB CHAT", "[ANDROID"):
+        if text.startswith(prefix):
+            tail = text.find("]")
+            if tail != -1 and len(text) > tail + 2:
+                text = text[tail + 1:].strip()
+            break
+    return (text[:max_len] + "…") if len(text) > max_len else text
 
 
-def search_sessions(keyword, android_only=False):
-    """Find sessions whose event content contains keyword. Shows matching snippets."""
-    conn = get_conn()
-    cur = conn.cursor()
-
-    cur.execute("""
-        SELECT e.session_id, e.event_data, e.timestamp,
-               s.update_time
-        FROM events e
-        JOIN sessions s ON s.id = e.session_id
-        ORDER BY e.timestamp
-    """)
-
-    # Group hits by session
-    hits = {}  # session_id -> [(timestamp, role, snippet), ...]
-    kw_lower = keyword.lower()
-    for session_id, event_data, ts, update_time in cur.fetchall():
-        if android_only and not session_id.startswith("jane_android_"):
-            continue
-        try:
-            data = json.loads(event_data)
-        except json.JSONDecodeError:
-            continue
-        content = data.get("content", {})
-        role = content.get("role", "")
-        parts = content.get("parts", [])
-        text = " ".join(p.get("text", "") for p in parts if "text" in p)
-        if kw_lower not in text.lower():
-            continue
-        # Extract a snippet around the keyword
-        idx = text.lower().find(kw_lower)
-        start = max(0, idx - 40)
-        end = min(len(text), idx + len(keyword) + 60)
-        snippet = ("…" if start > 0 else "") + text[start:end].strip() + ("…" if end < len(text) else "")
-        snippet = snippet.replace("\n", " ")
-        if session_id not in hits:
-            hits[session_id] = {"update_time": update_time, "matches": []}
-        hits[session_id]["matches"].append((ts, role, snippet))
-
-    conn.close()
-
-    if not hits:
+def search_sessions(con: sqlite3.Connection, keyword: str, android_only: bool = False,
+                    limit: int = 20) -> None:
+    q = """
+        SELECT session_id, MAX(timestamp) AS last_ts, COUNT(*) AS hits
+        FROM turns
+        WHERE content LIKE ?
+        {android}
+        GROUP BY session_id
+        ORDER BY last_ts DESC
+        LIMIT ?
+    """.format(android="AND session_id LIKE 'jane_android_%'" if android_only else "")
+    rows = list(con.execute(q, (f"%{keyword}%", limit)))
+    if not rows:
         print(f"No sessions found containing: {keyword!r}")
         return
-
-    # Sort sessions by most recently updated
-    sorted_sessions = sorted(hits.items(), key=lambda x: x[1]["update_time"], reverse=True)
-
-    print(f"Found {len(hits)} session(s) containing {keyword!r}:\n")
-    for sid, info in sorted_sessions:
-        dt = datetime.fromtimestamp(info["update_time"]).strftime("%Y-%m-%d %H:%M")
-        marker = "[android] " if sid.startswith("jane_android_") else ""
-        print(f"  {marker}{sid}  (updated {dt})")
-        for ts, role, snippet in info["matches"][:3]:  # show up to 3 hits per session
-            ts_str = datetime.fromtimestamp(ts).strftime("%H:%M") if ts else ""
-            label = "YOU" if role == "user" else "JANE"
-            print(f"    [{ts_str}] {label}: {snippet}")
-        if len(info["matches"]) > 3:
-            print(f"    … and {len(info['matches']) - 3} more matches")
-        print()
-
-    print(f"To read a full transcript: python show_transcript.py <session_id>")
+    print(f"Found {len(rows)} session(s) containing {keyword!r}:\n")
+    for r in rows:
+        print(f"  {r['last_ts']}  {r['session_id']:<30} ({r['hits']} hit(s))")
 
 
-def get_latest_session(android_only=False):
-    conn = get_conn()
-    cur = conn.cursor()
-    if android_only:
-        cur.execute("""
-            SELECT id FROM sessions
-            WHERE id LIKE 'jane_android_%'
-            ORDER BY update_time DESC LIMIT 1
-        """)
-    else:
-        cur.execute("SELECT id FROM sessions ORDER BY update_time DESC LIMIT 1")
-    row = cur.fetchone()
-    conn.close()
-    return row[0] if row else None
+def _parse_turns_flag(args: list[str]) -> tuple[int | None, list[str]]:
+    if "--turns" not in args:
+        return None, args
+    i = args.index("--turns")
+    if i + 1 >= len(args):
+        print("--turns requires a number", file=sys.stderr)
+        sys.exit(1)
+    try:
+        n = int(args[i + 1])
+    except ValueError:
+        print(f"--turns: not an integer: {args[i + 1]}", file=sys.stderr)
+        sys.exit(1)
+    return n, args[:i] + args[i + 2:]
+
+
+def _resolve_session(con: sqlite3.Connection, name: str) -> str | None:
+    row = con.execute("SELECT 1 FROM turns WHERE session_id = ? LIMIT 1", (name,)).fetchone()
+    if row:
+        return name
+    rows = list(con.execute(
+        "SELECT DISTINCT session_id FROM turns WHERE session_id LIKE ? ORDER BY session_id",
+        (f"%{name}%",),
+    ))
+    if len(rows) == 1:
+        return rows[0]["session_id"]
+    if len(rows) > 1:
+        print(f"Ambiguous match for {name!r}:", file=sys.stderr)
+        for r in rows[:10]:
+            print(f"  {r['session_id']}", file=sys.stderr)
+        sys.exit(1)
+    return None
 
 
 def main():
     args = sys.argv[1:]
-
-    if not args:
-        list_sessions()
-    elif args[0] == "--android":
-        list_sessions(android_only=True)
-    elif args[0] == "--latest":
-        sid = get_latest_session()
-        if sid:
-            print_transcript(sid)
+    max_turns, args = _parse_turns_flag(args)
+    con = _connect()
+    try:
+        if not args:
+            list_sessions(con)
+            return
+        head = args[0]
+        if head == "--android":
+            list_sessions(con, android_only=True)
+        elif head == "--latest":
+            sid = _latest_session(con)
+            if sid:
+                _print_session(con, sid, max_turns)
+            else:
+                print("No sessions found.")
+        elif head == "--latest-android":
+            sid = _latest_session(con, android_only=True)
+            if sid:
+                _print_session(con, sid, max_turns)
+            else:
+                print("No Android sessions found.")
+        elif head == "--search":
+            if len(args) < 2:
+                print("Usage: show_transcript.py --search <keyword>", file=sys.stderr)
+                sys.exit(1)
+            search_sessions(con, " ".join(args[1:]))
+        elif head == "--search-android":
+            if len(args) < 2:
+                print("Usage: show_transcript.py --search-android <keyword>", file=sys.stderr)
+                sys.exit(1)
+            search_sessions(con, " ".join(args[1:]), android_only=True)
         else:
-            print("No sessions found.")
-    elif args[0] == "--latest-android":
-        sid = get_latest_session(android_only=True)
-        if sid:
-            print_transcript(sid)
-        else:
-            print("No Android sessions found. Android sessions use IDs like: jane_android_xxxxxxxx")
-    elif args[0] == "--search":
-        if len(args) < 2:
-            print("Usage: show_transcript.py --search <keyword>", file=sys.stderr)
-            sys.exit(1)
-        keyword = " ".join(args[1:])
-        search_sessions(keyword)
-    elif args[0] == "--search-android":
-        if len(args) < 2:
-            print("Usage: show_transcript.py --search-android <keyword>", file=sys.stderr)
-            sys.exit(1)
-        keyword = " ".join(args[1:])
-        search_sessions(keyword, android_only=True)
-    else:
-        print_transcript(args[0])
+            sid = _resolve_session(con, head)
+            if sid is None:
+                print(f"Session not found: {head}", file=sys.stderr)
+                sys.exit(1)
+            _print_session(con, sid, max_turns)
+    finally:
+        con.close()
 
 
 if __name__ == "__main__":

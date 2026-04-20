@@ -44,7 +44,9 @@ android/.gradle/
 *.apk
 *.idsig
 
-# Wake word voice samples (biometric data)
+# Wake word voice samples — PCM WAVs stay out of git. The active set of
+# recordings is committed as OGG Vorbis in wake_word/samples/*.ogg, which
+# is ~22% of the WAV size and is what train_oww.py now reads.
 wake_word/samples/*.wav
 
 # Distribution / installer binaries (NEVER commit)

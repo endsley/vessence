@@ -1,5 +1,5 @@
 # Code Map — Android (Kotlin)
-_Auto-generated on 2026-04-18 08:15 UTC by `generate_code_map.py`_
+_Auto-generated on 2026-04-19 08:15 UTC by `generate_code_map.py`_
 
 ## android:.../ArticleReaderV2Activity.kt (241 lines)
   class ArticleReaderV2Activity → L36
@@ -86,17 +86,22 @@ _Auto-generated on 2026-04-18 08:15 UTC by `generate_code_map.py`_
     override onGetSession() → L16
     override onDestroy() → L20
 
-## android:.../ShareReceiverActivity.kt (253 lines)
-  class ShareReceiverActivity → L34
-    override onCreate() → L36
-    extractUrl() → L83
-    summarizeNowV2() → L88
-    summarizeNow() → L100
-    addToBriefing() → L152
-  object ShareSummarizer → L194
-    postSummaryReady() → L201
-    postSummaryFailed() → L229
-    ensureChannel() → L242
+## android:.../ShareReceiverActivity.kt (336 lines)
+  class ShareReceiverActivity → L39
+    override onCreate() → L41
+    extractUrl() → L88
+    summarizeNowV2() → L93
+    summarizeNow() → L105
+    addToBriefing() → L157
+  object ShareSummarizer → L199
+    postSummaryReady() → L206
+    speakHeadsUp() → L240
+    getOrCreateTts() → L257
+    buildFocusRequest() → L267
+    suspend requestFocus() → L285
+    suspend releaseFocus() → L301
+    postSummaryFailed() → L312
+    ensureChannel() → L325
 
 ## android:.../SharedIntentState.kt (30 lines)
   object SharedIntentState → L11
@@ -107,6 +112,20 @@ _Auto-generated on 2026-04-18 08:15 UTC by `generate_code_map.py`_
 ## android:.../SttResultBus.kt (32 lines)
   object SttResultBus → L16
     postResult() → L23
+
+## android:.../SummaryReaderActivity.kt (242 lines)
+  class SummaryReaderActivity → L55
+    EXTRA_TITLE → L58
+    EXTRA_SUMMARY → L59
+    EXTRA_URL → L60
+    override onCreate() → L69
+    override onDestroy() → L92
+    startSpeaking() → L99
+    stopSpeaking() → L117
+    buildFocusRequest() → L123
+    suspend requestFocus() → L138
+    suspend releaseFocus() → L154
+  @Composable ReaderScreen() → L167
 
 ## android:.../VessencesApp.kt (257 lines)
   @Composable VessencesApp() → L49
@@ -166,6 +185,14 @@ _Auto-generated on 2026-04-18 08:15 UTC by `generate_code_map.py`_
     suspend getDevices() → L18
     suspend revokeDevice() → L21
     suspend getModelSettings() → L24
+
+## android:.../data/api/DocsApi.kt (68 lines)
+  object DocsApi → L21
+  class DocSummary → L23
+  class DocBody → L30
+  class DocsListResp → L39
+    suspend list() → L45
+    suspend fetch() → L57
 
 ## android:.../data/api/EssenceApi.kt (25 lines)
   interface EssenceApi → L7
@@ -270,6 +297,16 @@ _Auto-generated on 2026-04-18 08:15 UTC by `generate_code_map.py`_
     initSession() → L134
     suspend endJaneSession() → L157
 
+## android:.../data/repository/DocsCache.kt (79 lines)
+  class DocsCache → L21
+    getList() → L30
+    putList() → L37
+    getDoc() → L44
+    putDoc() → L51
+    invalidateDoc() → L59
+    ensureVersionFresh() → L63
+    keyDoc() → L72
+
 ## android:.../data/repository/EssenceRepository.kt (73 lines)
   class EssenceRepository → L6
     suspend listEssences() → L8
@@ -338,6 +375,16 @@ _Auto-generated on 2026-04-18 08:15 UTC by `generate_code_map.py`_
     ensureChannels() → L27
     showReplyNotification() → L62
 
+## android:.../notifications/IncomingMessageAnnouncer.kt (214 lines)
+  object IncomingMessageAnnouncer → L51
+    override removeEldestEntry() → L62
+    onMessagesPosted() → L88
+    suspend announce() → L106
+    getOrCreateTts() → L156
+    buildFocusRequest() → L168
+    suspend requestFocus() → L188
+    suspend releaseFocus() → L204
+
 ## android:.../notifications/NotificationSafety.kt (119 lines)
   object NotificationSafety → L21
     MAX_BODY_CHARS → L24
@@ -356,15 +403,15 @@ _Auto-generated on 2026-04-18 08:15 UTC by `generate_code_map.py`_
     size() → L77
     clear() → L80
 
-## android:.../notifications/VessenceNotificationListener.kt (198 lines)
+## android:.../notifications/VessenceNotificationListener.kt (211 lines)
   class VessenceNotificationListener → L33
     override onListenerConnected() → L35
     override onListenerDisconnected() → L42
     override onNotificationPosted() → L55
     handlePosted() → L63
-    extractMessages() → L93
-    snapshotActiveMessages() → L162
-    setLive() → L194
+    extractMessages() → L106
+    snapshotActiveMessages() → L175
+    setLive() → L207
 
 ## android:.../tools/ActionQueue.kt (90 lines)
   class ActionQueue → L24
@@ -684,31 +731,31 @@ _Auto-generated on 2026-04-18 08:15 UTC by `generate_code_map.py`_
   @Composable PlayerScreen() → L166
   formatTime() → L320
 
-## android:.../ui/music/MusicViewModel.kt (344 lines)
+## android:.../ui/music/MusicViewModel.kt (370 lines)
   class MusicUiState → L26
   class MusicViewModel → L41
     override onMediaItemTransition() → L68
     override onPlayerError() → L72
     override onPlaybackStateChanged() → L81
     override onIsPlayingChanged() → L91
-    checkPendingPlay() → L125
-    loadPlaylists() → L139
-    openPlaylist() → L150
-    deletePlaylist() → L159
-    closePlaylist() → L174
-    preparePlaylist() → L185
-    ensurePlayerReady() → L198
-    playTrack() → L215
-    togglePlayPause() → L230
-    next() → L245
-    previous() → L259
-    seekTo() → L265
-    toggleShuffle() → L271
-    toggleRepeat() → L275
-    startProgressUpdates() → L279
-    syncCookiesForMedia() → L303
-    buildCookieHeaders() → L318
-    override onCleared() → L332
+    checkPendingPlay() → L134
+    loadPlaylists() → L157
+    openPlaylist() → L168
+    deletePlaylist() → L185
+    closePlaylist() → L200
+    preparePlaylist() → L211
+    ensurePlayerReady() → L224
+    playTrack() → L241
+    togglePlayPause() → L256
+    next() → L271
+    previous() → L285
+    seekTo() → L291
+    toggleShuffle() → L297
+    toggleRepeat() → L301
+    startProgressUpdates() → L305
+    syncCookiesForMedia() → L329
+    buildCookieHeaders() → L344
+    override onCleared() → L358
 
 ## android:.../ui/settings/SettingsScreen.kt (586 lines)
   @Composable SettingsScreen() → L48
@@ -728,25 +775,21 @@ _Auto-generated on 2026-04-18 08:15 UTC by `generate_code_map.py`_
 ## android:.../ui/settings/SettingsViewModelFactory.kt (22 lines)
   class SettingsViewModelFactory → L8
 
-## android:.../ui/settings/SystemArchitectureScreen.kt (574 lines)
-  @Composable SystemArchitectureScreen() → L40
-  @Composable ArchitectureHub() → L65
-  @Composable SectionHeader() → L207
-  @Composable NavCard() → L219
-  @Composable DetailPage() → L244
-  @Composable InfoCard() → L268
-  @Composable BulletList() → L284
-  @Composable OverviewContent() → L302
-  @Composable JaneContent() → L328
-  @Composable LlmTiersContent() → L354
-  @Composable MemoryContent() → L396
-  @Composable EssencesContent() → L421
-  @Composable VaultContent() → L447
-  @Composable StandingBrainContent() → L465
-  @Composable ProviderSwitchContent() → L491
-  @Composable DockerContent() → L509
-  @Composable CronContent() → L531
-  @Composable SecurityContent() → L551
+## android:.../ui/settings/SystemArchitectureScreen.kt (409 lines)
+  @Composable SystemArchitectureScreen() → L78
+  @Composable ArchitectureHub() → L101
+    refresh() → L113
+  @Composable DocDetailPage() → L195
+    refresh() → L207
+  @Composable DocBody() → L247
+  @Composable TopBar() → L266
+  @Composable SectionHeader() → L292
+  @Composable DocRow() → L303
+  @Composable LlmTiersCard() → L327
+  @Composable LoadingRow() → L368
+  @Composable ErrorRow() → L381
+  @Composable CenterLoading() → L393
+  @Composable CenterError() → L400
 
 ## android:.../ui/settings/TtsVoicePicker.kt (160 lines)
   @Composable TtsVoicePickerSheet() → L33
@@ -830,7 +873,7 @@ _Auto-generated on 2026-04-18 08:15 UTC by `generate_code_map.py`_
     toChatMessage() → L53
     from() → L63
 
-## android:.../util/ChatPreferences.kt (46 lines)
+## android:.../util/ChatPreferences.kt (61 lines)
   class ChatPreferences → L8
     getJaneSessionId() → L12
     resetJaneSessionId() → L20
@@ -840,6 +883,8 @@ _Auto-generated on 2026-04-18 08:15 UTC by `generate_code_map.py`_
     setTtsVoice() → L36
     isAutoListenEnabled() → L40
     setAutoListenEnabled() → L43
+    isIncomingMessageAnnounceEnabled() → L55
+    setIncomingMessageAnnounceEnabled() → L58
 
 ## android:.../util/Constants.kt (27 lines)
   object Constants → L3

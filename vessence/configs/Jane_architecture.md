@@ -125,6 +125,7 @@ When a user sends a message through any interface, this is the complete flow:
   - `SHOPPING_LIST` → server injects list data, Opus responds
   - `READ_MESSAGES` → server emits `messages.read_inbox` tool call to Android
   - `READ_EMAIL` → server pre-fetches inbox via Gmail API server-side
+  - `READ_CALENDAR` → server pre-fetches events via Google Calendar API server-side (shares Gmail OAuth grant)
   - `DELEGATE_OPUS` → everything else (SMS, calls, complex questions, code)
 - Pre-warmed at startup via Ollama `keep_alive: -1` (~300ms classification)
 - Classification determines **two things**: quick ack content AND context depth
@@ -248,6 +249,7 @@ This separation is intentional: provider-specific handlers are isolated so chang
 | Collection | Path | Contents | TTL |
 |:-----------|:-----|:---------|:----|
 | `user_memories` | `$VESSENCE_DATA_HOME/vector_db/` | Permanent + long-term Jane memories. `memory_type: "permanent"` or `"long_term"` | None |
+| `user_memories` | `$VESSENCE_DATA_HOME/users/<user_id>/memory/vector_db/` | Managed-user private long-term memory, seeded at user creation | None |
 | `long_term_knowledge` | `$VESSENCE_DATA_HOME/vector_db/long_term_memory/` | Archivist output: curated high-signal facts promoted from short-term | None |
 | `short_term_memory` | `$VESSENCE_DATA_HOME/vector_db/short_term_memory/` | Compact turn summaries + time-limited facts | 14 days |
 | `file_index_memories` | `$VESSENCE_DATA_HOME/vector_db/file_index_memory/` | Vault file paths, MIME types, content-derived descriptions | None |
@@ -256,11 +258,14 @@ This separation is intentional: provider-specific handlers are isolated so chang
 
 **Per-essence isolation:** Each essence gets its own ChromaDB instance at `<essence_folder>/knowledge/chromadb/`. When an essence is deleted, its memory can be optionally ported into Jane's universal `user_memories` (re-keyed with source tags).
 
+**Managed-user isolation:** The admin UI can create managed users under `$VESSENCE_DATA_HOME/users/<sanitized_email>/`, where the folder name is derived from the user's login email (for example `person_at_example_com`) and `config.json` stores the raw email. Each managed user gets a config file, a private ChromaDB at `memory/vector_db/`, and a private vault root at `vault/`. When Jane web sees a session for that managed user, context building bypasses the global user/short-term/file-index retrieval lanes and queries that user's private `user_memories` collection instead. Sessions without a managed config keep the legacy shared-memory behavior.
+
 ### 4.2 Retrieval Optimization
 
 - **Greeting bypass:** Skips memory search for simple greetings or short follow-ups (<20 chars)
 - **Fast-pass:** If semantic search returns near-perfect match (distance < 0.35), returns raw fact directly — skips 2-5s librarian synthesis
 - **Intent-gated routing:** `file_index_memories` only queried when `_is_file_query()` detects file-related intent
+- **Managed-user routing:** `build_jane_context_async(..., user_id=...)` passes managed users into `build_memory_sections(..., user_memory_path=...)`; prewarm and prefetch use the same scoped path.
 - **Memory daemon:** Persistent HTTP service on port 8083 for fast (~200ms) memory retrieval; direct ChromaDB fallback if daemon is down
 
 ### 4.3 Maintenance Pipeline
@@ -422,6 +427,26 @@ For Jane web UI sessions (`JANE_WEB_PERMISSIONS=1`):
 - Read-only bash commands auto-approved; dangerous patterns (`rm -rf`, `git push --force`, `DROP TABLE`) always flagged
 - Flow: CLI tool call → hook fires → HTTP POST to `permission_broker.py` → SSE event → web UI dialog → user approve/deny → hook unblocks
 - 5-minute timeout → auto-deny. Fail-open if web server unreachable.
+
+### 7.5 OpenAI Codex CLI Memory Bridge
+
+OpenAI Codex CLI does not use Claude Code's `UserPromptSubmit`,
+`PreToolUse`, `PostToolUse`, or `Stop` hook stack on this machine. To keep
+Codex Jane connected to live memory, Codex is configured with a local stdio
+MCP server:
+
+- **Server name:** `jane-memory`
+- **File:** `startup_code/codex_memory_mcp.py`
+- **Tools:** `query_jane_memory(query, max_chars=12000)`, `jane_memory_paths()`
+- **Retrieval backend:** `memory.v1.memory_retrieval.build_memory_sections()`
+  against `$VESSENCE_DATA_HOME/vector_db`
+
+This is not a true automatic prompt hook: Codex must call the MCP tool before
+answering memory-sensitive prompts. The Codex runtime rules in `AGENTS.md`
+therefore require explicit ChromaDB lookup for prompts involving "remember",
+"recently", prior decisions, project history, preferences, personal/family
+context, or architecture/debugging rationale. Current runtime behavior still
+requires code/log verification after memory recall.
 
 ---
 

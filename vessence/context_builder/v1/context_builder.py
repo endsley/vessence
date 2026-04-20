@@ -418,12 +418,62 @@ def _normalize_memory_summary(memory_summary: str, fallback_summary: str | None 
     return ""
 
 
+def _managed_user_runtime_context(user_id: str | None) -> tuple[dict, str | None, str]:
+    if not user_id:
+        return {}, None, ""
+    try:
+        from agent_skills.user_manager import AVAILABLE_CAPABILITIES, get_user_config, user_config_exists
+        if not user_config_exists(user_id):
+            return {}, None, ""
+        config = get_user_config(user_id)
+    except Exception:
+        logger.exception("Failed to load managed user config for %s", user_id)
+        return {}, None, ""
+    if not config.get("managed"):
+        return {}, None, ""
+
+    capability_labels = {cap["id"]: cap["label"] for cap in AVAILABLE_CAPABILITIES}
+    capabilities = config.get("capabilities") or []
+    enabled_labels = [capability_labels.get(cap, cap) for cap in capabilities]
+    memory_path = config.get("memory_chromadb_path") if "memory" in capabilities else None
+    lines = [
+        "## Active Managed User",
+        f"User ID: {config.get('user_id') or user_id}",
+        f"Display name: {config.get('display_name') or config.get('email') or user_id}",
+        "Personal memory scope: private ChromaDB for this user" if memory_path else "Personal memory scope: disabled for this user",
+        "Enabled capabilities: " + (", ".join(enabled_labels) if enabled_labels else "none"),
+        (
+            "Capability boundary: use only the enabled user-facing capabilities for this user. "
+            "If a requested capability is not enabled, say it is not enabled for this user."
+        ),
+    ]
+    return config, memory_path, "\n".join(lines)
+
+
 def _safe_get_memory_summary(
     message: str,
     conversation_summary: str,
     session_id: str,
     fallback_summary: str | None = None,
+    user_id: str | None = None,
 ) -> str:
+    _managed_user_config, user_memory_path, _user_context = _managed_user_runtime_context(user_id)
+    if _managed_user_config and not user_memory_path:
+        return ""
+    if user_memory_path:
+        try:
+            sections = build_memory_sections(
+                message,
+                assistant_name="Jane",
+                user_memory_path=user_memory_path,
+                user_id=user_id,
+            )
+            memory_summary = "\n\n".join(sections) if sections else "No relevant context found."
+        except Exception:
+            logger.exception("Managed user memory retrieval failed for %s", user_id)
+            return _normalize_memory_summary("", fallback_summary)
+        return _normalize_memory_summary(memory_summary, fallback_summary)
+
     # Fast path: use the memory daemon (port 8083) if available
     try:
         import urllib.parse, urllib.request, json as _json
@@ -452,6 +502,7 @@ def _safe_get_memory_summary(
             message,
             assistant_name="Jane",
             essence_chromadb_path=essence_chromadb,
+            user_id=user_id,
         )
         memory_summary = "\n\n".join(sections) if sections else "No relevant context found."
     except Exception:
@@ -862,6 +913,25 @@ def _build_system_sections(
     system_sections.append(
         "Prefer the user's most recent explicit message when it conflicts with older memory."
     )
+    system_sections.append(
+        "## Conversational Hygiene (IMPORTANT)\n"
+        "Everything you emit is spoken or displayed to the user. Treat your reply as a "
+        "message to a person, not a shell transcript.\n"
+        "- Do NOT name internal Python functions, APIs, or parameter names "
+        "(e.g. 'create_event', 'quick_add', 'sms_draft_update'). Describe capabilities "
+        "in plain human terms: say 'I can add it to your calendar', not 'I have a "
+        "create_event function'.\n"
+        "- Do NOT emit reasoning preambles, meta-commentary, or narration of your process "
+        "(e.g. 'The user is asking me to...', 'Let me think about this...', 'No evidence "
+        "needed for...'). Just respond as Jane. If a hook asks you for evidence on a "
+        "purely conversational turn, briefly answer and move on — do not narrate why.\n"
+        "- Do NOT mention tool result fields, API shapes, or raw IDs unless the user asked "
+        "for them.\n"
+        "- When you confirm you did something, verify against the tool's returned value "
+        "(e.g. the actual start time in the calendar event), not the value you sent in. "
+        "Google and other APIs may normalize timezones or fields; the response is ground "
+        "truth."
+    )
     return system_sections
 
 
@@ -939,14 +1009,16 @@ def build_jane_context(
     tts_enabled: bool = False,
     intent_level: str | None = None,
     tool_context: str | None = None,
+    user_id: str | None = None,
 ) -> JaneRequestContext:
     data_root = Path(VESSENCE_DATA_HOME)
     vessence_root = Path(VESSENCE_HOME)
     profile = _classify_prompt_profile(message, file_context, intent_level=intent_level, tool_context=tool_context)
+    managed_user_config, _user_memory_path, managed_user_block = _managed_user_runtime_context(user_id)
     current_task_state = _cached("task_state",
         lambda: _read_json_summary(vessence_root / "configs" / "project_specs" / "current_task_state.json"),
         ttl=30) if profile.include_task_state else ""
-    personal_facts = _cached("personal_facts",
+    personal_facts = {} if managed_user_config else _cached("personal_facts",
         lambda: _load_personal_facts(data_root),
         ttl=300)  # 5 min — rarely changes
     skip_memory_for_anaphora = _is_short_anaphoric(message)
@@ -960,6 +1032,7 @@ def build_jane_context(
             conversation_summary=conversation_summary,
             session_id=session_id,
             fallback_summary=memory_summary_fallback,
+            user_id=user_id,
         )
     else:
         memory_summary = _normalize_memory_summary("", memory_summary_fallback)
@@ -978,6 +1051,8 @@ def build_jane_context(
 
     if tts_enabled:
         system_sections.append(TTS_SPOKEN_BLOCK_INSTRUCTION)
+    if managed_user_block:
+        system_sections.append(managed_user_block)
 
     recent_history = _format_recent_history(history)
     user_sections: list[str] = []
@@ -1006,6 +1081,7 @@ async def build_jane_context_async(
     intent_level: str | None = None,
     tool_context: str | None = None,
     on_status: "Callable[[str], None] | None" = None,
+    user_id: str | None = None,
 ) -> JaneRequestContext:
     _status = on_status or (lambda s: None)
     data_root = Path(VESSENCE_DATA_HOME)
@@ -1013,6 +1089,7 @@ async def build_jane_context_async(
 
     _status("Classifying prompt profile...")
     profile = _classify_prompt_profile(message, file_context, intent_level=intent_level, tool_context=tool_context)
+    managed_user_config, _user_memory_path, managed_user_block = _managed_user_runtime_context(user_id)
 
     _status("Loading task state...")
     current_task_state = _cached("task_state",
@@ -1020,7 +1097,7 @@ async def build_jane_context_async(
         ttl=30) if profile.include_task_state else ""
 
     _status("Loading personal facts...")
-    personal_facts = _cached("personal_facts",
+    personal_facts = {} if managed_user_config else _cached("personal_facts",
         lambda: _load_personal_facts(data_root),
         ttl=300)  # 5 min — rarely changes
 
@@ -1044,6 +1121,7 @@ async def build_jane_context_async(
                 conversation_summary,
                 session_id,
                 memory_summary_fallback,
+                user_id,
             )
         )
     else:
@@ -1095,6 +1173,8 @@ async def build_jane_context_async(
 
     if tts_enabled:
         system_sections.append(TTS_SPOKEN_BLOCK_INSTRUCTION)
+    if managed_user_block:
+        system_sections.append(managed_user_block)
 
     recent_history = _format_recent_history(history)
     user_sections: list[str] = []

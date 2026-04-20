@@ -142,6 +142,8 @@ from vault_web.auth import (
     get_session_user, verify_otp,
     get_trusted_devices, revoke_device,
     device_fingerprint_from_request,
+    default_user_id as auth_default_user_id,
+    user_id_from_email,
 )
 from vault_web.oauth import oauth, allowed_email, build_external_url, google_oauth_configured
 from vault_web.files import (
@@ -167,8 +169,8 @@ try:
     ANDROID_VERSION = _version_data["version_name"]
     _ANDROID_VERSION_CODE = _version_data["version_code"]
 except FileNotFoundError:
-    ANDROID_VERSION = "0.2.56"
-    _ANDROID_VERSION_CODE = 287
+    ANDROID_VERSION = "0.2.60"
+    _ANDROID_VERSION_CODE = 291
 
 # Startup validation: ensure the APK for the advertised version actually exists
 _expected_apk = MARKETING_DOWNLOADS_DIR / f"vessences-android-v{ANDROID_VERSION}.apk"
@@ -975,6 +977,92 @@ def _default_user_id() -> str:
     return "_".join(user_name.split()) if user_name else "user"
 
 
+def _identity_variants(identifier: str | None) -> set[str]:
+    value = (identifier or "").strip().lower()
+    if not value:
+        return set()
+    variants = {value, "_".join(value.replace("@", "_at_").replace(".", "_").split())}
+    if "@" in value:
+        variants.add(user_id_from_email(value))
+    return variants
+
+
+def _configured_admin_variants() -> set[str]:
+    configured = []
+    for env_name in ("VESSENCE_ADMIN_USERS", "ADMIN_EMAILS"):
+        configured.extend([v.strip() for v in os.getenv(env_name, "").split(",") if v.strip()])
+    allowed = [e.strip() for e in os.getenv("ALLOWED_GOOGLE_EMAILS", "").split(",") if e.strip()]
+    if not configured and allowed:
+        configured.append(allowed[0])
+    if not configured:
+        configured.append(auth_default_user_id())
+
+    variants: set[str] = set()
+    for item in configured:
+        variants.update(_identity_variants(item))
+    return variants
+
+
+def _is_user_admin(user_id: str | None) -> bool:
+    variants = _identity_variants(user_id)
+    if variants & _configured_admin_variants():
+        return True
+    try:
+        from agent_skills.user_manager import get_user_config, user_config_exists
+        if user_config_exists(user_id or ""):
+            config = get_user_config(user_id or "")
+            return "user_admin" in (config.get("capabilities") or [])
+    except Exception:
+        _logger.exception("Failed checking user_admin capability for %s", user_id)
+    return False
+
+
+def _require_admin_session(session_id: str) -> str:
+    user_id = get_session_user(session_id) or _default_user_id()
+    if not _is_user_admin(user_id):
+        raise HTTPException(status_code=403, detail="User administration is not enabled for this account.")
+    return user_id
+
+
+def _write_env_var(key: str, value: str) -> None:
+    env_path = Path(ENV_FILE_PATH)
+    lines = env_path.read_text().splitlines() if env_path.exists() else []
+    found = False
+    updated = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#") and "=" in stripped:
+            existing_key = stripped.split("=", 1)[0].strip()
+            if existing_key == key:
+                updated.append(f"{key}={value}")
+                found = True
+                continue
+        updated.append(line)
+    if not found:
+        updated.append(f"{key}={value}")
+    env_path.parent.mkdir(parents=True, exist_ok=True)
+    env_path.write_text("\n".join(updated) + "\n")
+    os.environ[key] = value
+
+
+def _add_allowed_google_email(email: str) -> bool:
+    normalized = (email or "").strip().lower()
+    current = [e.strip().lower() for e in os.getenv("ALLOWED_GOOGLE_EMAILS", "").split(",") if e.strip()]
+    if normalized in current:
+        return False
+    current.append(normalized)
+    _write_env_var("ALLOWED_GOOGLE_EMAILS", ",".join(current))
+    return True
+
+
+def _scoped_conversation_session_id(user_id: str | None, session_id: str | None) -> str:
+    try:
+        from agent_skills.user_manager import scoped_session_id
+        return scoped_session_id(user_id, session_id)
+    except Exception:
+        return (session_id or "").strip() or "default"
+
+
 def get_trusted_device_cookie_id(request: Request) -> Optional[str]:
     return request.cookies.get(TRUSTED_DEVICE_COOKIE)
 
@@ -997,7 +1085,7 @@ def get_or_bootstrap_session(request: Request) -> tuple[Optional[str], Optional[
             bool(get_trusted_device_cookie_id(request)),
             _client_ip(request),
         )
-        prewarm_session(session_id)
+        prewarm_session(session_id, get_session_user(session_id) or _default_user_id())
         return session_id, get_trusted_device_cookie_id(request)
 
     trusted_cookie_id = get_trusted_device_cookie_id(request)
@@ -1017,7 +1105,7 @@ def get_or_bootstrap_session(request: Request) -> tuple[Optional[str], Optional[
             trusted_row["id"],
             _client_ip(request),
         )
-        prewarm_session(session_id)
+        prewarm_session(session_id, trusted_row["label"] or _default_user_id())
         return session_id, trusted_row["id"]
 
     trusted_row = get_trusted_device_by_fingerprint(fp)
@@ -1033,7 +1121,7 @@ def get_or_bootstrap_session(request: Request) -> tuple[Optional[str], Optional[
             trusted_row["id"],
             _client_ip(request),
         )
-        prewarm_session(session_id)
+        prewarm_session(session_id, trusted_row["label"] or _default_user_id())
         return session_id, trusted_row["id"]
 
     if _is_local_browser_access(request):
@@ -1044,7 +1132,7 @@ def get_or_bootstrap_session(request: Request) -> tuple[Optional[str], Optional[
             request.headers.get("host", ""),
             _client_ip(request),
         )
-        prewarm_session(session_id)
+        prewarm_session(session_id, _default_user_id())
         return session_id, None
 
     _logger.info(
@@ -1794,7 +1882,7 @@ async def auth_google_callback(request: Request):
         _logger.warning("Failed to store Gmail token: %s", exc)
 
     session_id = create_session(fp, trusted=True, user_id=email)
-    prewarm_session(session_id)
+    prewarm_session(session_id, email)
     resp = RedirectResponse(url="/")
     resp.set_cookie(SESSION_COOKIE, session_id, httponly=True, secure=_cookie_secure_flag(request), samesite="lax",
                     max_age=60 * 60 * 24 * 30)  # 30 days
@@ -1832,7 +1920,7 @@ async def auth_google_token(request: Request):
         trusted_row = get_trusted_device_by_fingerprint(fp)
         trusted_device_id = trusted_row["id"] if trusted_row else register_trusted_device(fp, email)
     session_id = create_session(fp, trusted=True, user_id=email)
-    prewarm_session(session_id)
+    prewarm_session(session_id, email)
     resp = JSONResponse({"ok": True, "session_id": session_id, "trusted_device_id": trusted_device_id})
     resp.set_cookie(SESSION_COOKIE, session_id, httponly=True, secure=_cookie_secure_flag(request), samesite="lax",
                     max_age=60 * 60 * 24 * 30)
@@ -1866,7 +1954,7 @@ async def verify_totp_login(request: Request, body: dict):
     trusted_row = get_trusted_device_by_fingerprint(fp)
     trusted_device_id = trusted_row["id"] if trusted_row else register_trusted_device(fp, user_id)
     session_id = create_session(fp, trusted=True, user_id=user_id)
-    prewarm_session(session_id)
+    prewarm_session(session_id, user_id)
 
     response = JSONResponse({"ok": True})
     response.set_cookie(SESSION_COOKIE, session_id, httponly=True, secure=_cookie_secure_flag(request), samesite="lax",
@@ -1955,6 +2043,78 @@ async def trigger_sms_sync(_=Depends(require_auth)):
     """Server-initiated SMS sync. Queues a command for the Android app."""
     queue_device_command("sync_sms")
     return {"status": "queued", "message": "SMS sync will trigger on next Android poll"}
+
+
+# ─── User Administration ─────────────────────────────────────────────────────
+
+class CreateManagedUserRequest(BaseModel):
+    email: str
+    display_name: Optional[str] = None
+    capabilities: Optional[list[str]] = None
+    seed_memories: Optional[list[str]] = None
+
+
+def _public_user_config(config: dict) -> dict:
+    return {
+        "user_id": config.get("user_id"),
+        "email": config.get("email", ""),
+        "display_name": config.get("display_name", ""),
+        "personality": config.get("personality", "default"),
+        "memory_namespace": config.get("memory_namespace", config.get("user_id", "")),
+        "memory_chromadb_path": config.get("memory_chromadb_path", ""),
+        "vault_root_path": config.get("vault_root_path", ""),
+        "capabilities": config.get("capabilities", []),
+        "created_at": config.get("created_at", ""),
+        "seeded_memory_count": config.get("seeded_memory_count", 0),
+    }
+
+
+@app.get("/api/admin/users")
+async def list_managed_users(session_id: str = Depends(require_auth)):
+    _require_admin_session(session_id)
+    from agent_skills.user_manager import AVAILABLE_CAPABILITIES, list_users
+    return {
+        "users": [_public_user_config(config) for config in list_users()],
+        "capabilities": AVAILABLE_CAPABILITIES,
+    }
+
+
+@app.post("/api/admin/users")
+async def create_managed_user(body: CreateManagedUserRequest, session_id: str = Depends(require_auth)):
+    admin_user = _require_admin_session(session_id)
+    email = (body.email or "").strip().lower()
+    if not email or "@" not in email:
+        raise HTTPException(status_code=400, detail="A valid email address is required.")
+
+    from agent_skills.user_manager import create_user_space, normalize_user_id, user_config_exists
+
+    user_id = normalize_user_id(email)
+    if user_config_exists(user_id):
+        raise HTTPException(status_code=409, detail=f"User {email} already exists.")
+
+    display_name = (body.display_name or "").strip() or email.split("@", 1)[0]
+    seed_memories = [m.strip() for m in (body.seed_memories or []) if str(m or "").strip()]
+    config = create_user_space(
+        user_id,
+        display_name,
+        email=email,
+        capabilities=body.capabilities,
+        seed_memories=seed_memories,
+    )
+    allowlist_updated = _add_allowed_google_email(email)
+    _logger.info(
+        "Managed user created by %s: user_id=%s email=%s capabilities=%s allowlist_updated=%s",
+        admin_user,
+        user_id,
+        email,
+        config.get("capabilities"),
+        allowlist_updated,
+    )
+    return {
+        "ok": True,
+        "user": _public_user_config(config),
+        "allowlist_updated": allowlist_updated,
+    }
 
 
 # ─── Brain Model Settings ────────────────────────────────────────────────────
@@ -2110,7 +2270,7 @@ async def prefetch_memory(request: Request):
     session_id, _ = get_or_bootstrap_session(request)
     if not session_id:
         raise HTTPException(status_code=401, detail="Not authenticated")
-    run_prefetch_memory(session_id)
+    run_prefetch_memory(session_id, get_session_user(session_id) or _default_user_id())
     return {"status": "ok", "cached": True}
 
 
@@ -3235,12 +3395,13 @@ async def _handle_jane_chat_stream(body: ChatMessage, request: Request):
     # not the cookie-based auth session. The Android app maintains a stable
     # session_id ("jane_android_xxxx") across requests — using the cookie-based
     # session would create a new conversation state on every request.
-    conversation_session_id = body.session_id or session_id
+    requested_conversation_session_id = body.session_id or session_id
     async def event_stream():
         # Track concurrent streams per IP
         _active_streams[stream_ip] = _active_streams.get(stream_ip, 0) + 1
         _logger.debug("Stream opened for %s (now %d active)", stream_ip, _active_streams[stream_ip])
         user_id = get_session_user(session_id) or _default_user_id()
+        conversation_session_id = _scoped_conversation_session_id(user_id, requested_conversation_session_id)
         _logger.info(
             "Starting jane stream generator session=%s user=%s",
             _session_log_id(conversation_session_id),
@@ -3405,6 +3566,7 @@ async def jane_init_session(body: SessionControl, request: Request):
                 session_id=body.session_id or session_id,
                 platform="web",
                 on_status=_emit_status,
+                user_id=user_id,
             )
 
             # Drain and yield all queued status events

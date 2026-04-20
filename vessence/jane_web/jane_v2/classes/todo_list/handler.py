@@ -307,7 +307,7 @@ _CATEGORY_ALIASES = {
 # Short-response threshold: if the user's reply is this short, it's
 # likely a direct answer to "which category?". Longer replies get
 # stricter matching to avoid false positives from incidental words.
-_SHORT_REPLY_WORDS = 6
+_SHORT_REPLY_WORDS = 10
 
 
 # Category names that this handler DOES NOT read back. If the user's

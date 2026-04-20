@@ -33,19 +33,21 @@ OUTPUT_PATH = os.path.join(WORK_DIR, "..", "android", "app",
 
 
 def load_wav(path):
-    """Load WAV as float32 normalized to [-1, 1]."""
-    with wave.open(path, 'rb') as wf:
-        if wf.getsampwidth() != 2:
-            raise ValueError(f"Expected 16-bit WAV: {path}")
-        frames = wf.readframes(wf.getnframes())
-        samples = np.frombuffer(frames, dtype=np.int16).astype(np.float32) / 32768.0
-        if wf.getnchannels() == 2:
-            samples = samples[::2]
-        sr = wf.getframerate()
-        if sr != SAMPLE_RATE:
-            from scipy.signal import resample
-            samples = resample(samples, int(len(samples) * SAMPLE_RATE / sr)).astype(np.float32)
-        return samples
+    """Load an audio clip as float32 mono at SAMPLE_RATE, normalized to [-1, 1].
+
+    Historically read only PCM WAV via wave.open(); now uses soundfile so
+    the positives can live as OGG Vorbis in git (much smaller) while the
+    large negatives pool stays as WAV on disk. Name is kept for back-compat
+    with the rest of this module.
+    """
+    import soundfile as _sf
+    data, sr = _sf.read(path, dtype="float32", always_2d=False)
+    if data.ndim > 1:
+        data = data.mean(axis=1).astype(np.float32)
+    if sr != SAMPLE_RATE:
+        from scipy.signal import resample
+        data = resample(data, int(len(data) * SAMPLE_RATE / sr)).astype(np.float32)
+    return data
 
 
 def pad_or_trim(audio, target_len):
@@ -270,7 +272,10 @@ def main():
 
     # Real recordings (most valuable)
     pos_sources = {}  # source_id -> raw audio
-    pos_files = sorted(glob.glob(os.path.join(SAMPLES_DIR, "hey_jane_*.wav")))
+    # Positives ship as OGG Vorbis so they fit in git. Legacy WAVs in
+    # the same folder (gitignored, possible stale mirrors) are ignored
+    # to avoid double-counting the same recording.
+    pos_files = sorted(glob.glob(os.path.join(SAMPLES_DIR, "hey_jane_*.ogg")))
     print(f"  Real recordings: {len(pos_files)}")
     for f in pos_files:
         source_id = f"real_{os.path.basename(f)}"
@@ -608,7 +613,7 @@ def main():
         return sess.run(None, {"x": features})[0][0][0]
 
     print("  Positive (real recordings):")
-    for f in sorted(glob.glob(os.path.join(SAMPLES_DIR, "hey_jane_*.wav"))):
+    for f in sorted(glob.glob(os.path.join(SAMPLES_DIR, "hey_jane_*.ogg"))):
         s = score_wav(f)
         print(f"    {os.path.basename(f)}: {s:.4f}")
 

@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -48,13 +49,20 @@ class MainActivity : ComponentActivity() {
     /** Active headless STT recognizer (main-thread only). Replaced on each call. */
     private var activeRecognizer: android.speech.SpeechRecognizer? = null
 
+    // Held to keep the Android system TTS service warm. The real Jane TTS
+    // instances live in ChatViewModel / VoiceController; this one exists only
+    // so the system com.google.android.tts engine finishes loading before the
+    // user's first turn. Otherwise the first speak() pays ~1-3s of onInit lag.
+    private var ttsPrewarm: android.speech.tts.TextToSpeech? = null
+
     /**
      * Launch headless STT (no system dialog). Uses Android SpeechRecognizer directly
      * so errors auto-dismiss without requiring a manual tap. On no-speech / error,
      * AlwaysListening is silently restored. On success, result flows to SttResultBus.
      */
     fun launchStt() {
-        DiagnosticReporter.voiceFlow("stt_launch")
+        val launchStartedMs = SystemClock.elapsedRealtime()
+        DiagnosticReporter.voiceFlow("stt_launch", mapOf("ui" to "headless"))
         // Timestamp the launch so restoreAlwaysListening() and onResume() can
         // see "we JUST tried STT" and avoid racing AL.start on top of a
         // recognizer that hasn't finished releasing the mic.
@@ -93,28 +101,53 @@ class MainActivity : ComponentActivity() {
                 putExtra(android.speech.RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 2000L)
                 putExtra(android.speech.RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 4000L)
                 putExtra(android.speech.RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 4000L)
+                putExtra(android.speech.RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
                 putExtra(android.speech.RecognizerIntent.EXTRA_MAX_RESULTS, 1)
             }
 
             var done = false
+            var readyAtMs: Long? = null
+            var speechStartedAtMs: Long? = null
+            var speechEndedAtMs: Long? = null
+            var firstPartialAtMs: Long? = null
+            var lastRmsUiMs = 0L
+
+            fun timingDetails(extra: Map<String, Any?> = emptyMap()): Map<String, Any?> {
+                val now = SystemClock.elapsedRealtime()
+                val details = mutableMapOf<String, Any?>(
+                    "ui" to "headless",
+                    "elapsed_ms" to (now - launchStartedMs),
+                    "ready_ms" to readyAtMs?.let { it - launchStartedMs },
+                    "speech_start_ms" to speechStartedAtMs?.let { it - launchStartedMs },
+                    "speech_end_ms" to speechEndedAtMs?.let { it - launchStartedMs },
+                    "first_partial_ms" to firstPartialAtMs?.let { it - launchStartedMs },
+                    "saw_beginning" to (speechStartedAtMs != null),
+                    "saw_partial" to (firstPartialAtMs != null),
+                )
+                details.putAll(extra)
+                return details
+            }
+
             recognizer.setRecognitionListener(object : android.speech.RecognitionListener {
                 override fun onResults(results: android.os.Bundle?) {
                     if (done) return; done = true
                     activeRecognizer = null
                     recognizer.destroy()
                     SttResultBus.onListening?.invoke(false)
+                    SttResultBus.onRmsChanged?.invoke(0f)
                     val matches = results?.getStringArrayList(
                         android.speech.SpeechRecognizer.RESULTS_RECOGNITION)
                     val spoken = matches?.firstOrNull()?.trim()
                     if (!spoken.isNullOrBlank()) {
                         DiagnosticReporter.voiceFlow(
                             "stt_result",
-                            mapOf("text_len" to spoken.length)
+                            timingDetails(mapOf("text_len" to spoken.length))
                         )
                         SttResultBus.onResult?.invoke(spoken)
                     } else {
                         DiagnosticReporter.voiceFlow(
-                            "stt_error", mapOf("reason" to "empty_transcript")
+                            "stt_error",
+                            timingDetails(mapOf("reason" to "empty_transcript"))
                         )
                         restoreAlwaysListening()
                     }
@@ -125,6 +158,7 @@ class MainActivity : ComponentActivity() {
                     activeRecognizer = null
                     recognizer.destroy()
                     SttResultBus.onListening?.invoke(false)
+                    SttResultBus.onRmsChanged?.invoke(0f)
                     // Map numeric codes to a readable label so the diagnostic log
                     // tells us WHY STT died (was it mic contention, no-speech, etc).
                     // Codes from android.speech.SpeechRecognizer.
@@ -142,13 +176,15 @@ class MainActivity : ComponentActivity() {
                     }
                     DiagnosticReporter.voiceFlow(
                         "stt_error",
-                        mapOf("reason" to codeLabel, "code" to error)
+                        timingDetails(mapOf("reason" to codeLabel, "code" to error))
                     )
                     // No speech or recognizer error — silently restore always-listen
                     restoreAlwaysListening()
                 }
 
                 override fun onReadyForSpeech(params: android.os.Bundle?) {
+                    readyAtMs = SystemClock.elapsedRealtime()
+                    DiagnosticReporter.voiceFlow("stt_ready", timingDetails())
                     // Notify UI that we're actively listening
                     SttResultBus.onListening?.invoke(true)
                     // Play a short beep so the user knows it's their turn to speak
@@ -160,15 +196,34 @@ class MainActivity : ComponentActivity() {
                             .postDelayed({ tg.release() }, 300)
                     } catch (_: Exception) {}
                 }
-                override fun onBeginningOfSpeech() {}
-                override fun onRmsChanged(rmsdB: Float) {}
+                override fun onBeginningOfSpeech() {
+                    speechStartedAtMs = SystemClock.elapsedRealtime()
+                    DiagnosticReporter.voiceFlow("stt_begin", timingDetails())
+                }
+                override fun onRmsChanged(rmsdB: Float) {
+                    val now = SystemClock.elapsedRealtime()
+                    if (now - lastRmsUiMs < 100L) return
+                    lastRmsUiMs = now
+                    val normalized = ((rmsdB + 2f) / 12f).coerceIn(0f, 1f)
+                    SttResultBus.onRmsChanged?.invoke(normalized)
+                }
                 override fun onBufferReceived(buffer: ByteArray?) {}
-                override fun onEndOfSpeech() {}
+                override fun onEndOfSpeech() {
+                    speechEndedAtMs = SystemClock.elapsedRealtime()
+                    DiagnosticReporter.voiceFlow("stt_end", timingDetails())
+                }
                 override fun onPartialResults(partial: android.os.Bundle?) {
                     val preview = partial?.getStringArrayList(
                         android.speech.SpeechRecognizer.RESULTS_RECOGNITION
                     )?.firstOrNull()?.trim()
                     if (!preview.isNullOrBlank()) {
+                        if (firstPartialAtMs == null) {
+                            firstPartialAtMs = SystemClock.elapsedRealtime()
+                            DiagnosticReporter.voiceFlow(
+                                "stt_partial",
+                                timingDetails(mapOf("text_len" to preview.length))
+                            )
+                        }
                         SttResultBus.onPartialResult?.invoke(preview)
                     }
                 }
@@ -272,6 +327,12 @@ class MainActivity : ComponentActivity() {
         CrashReporter.install(applicationContext)
         DiagnosticReporter.init(applicationContext)
         ApiClient.init(applicationContext)
+        // Prewarm the system TTS engine so ChatViewModel / VoiceController's
+        // TextToSpeech instances see a warm service when they spin up. Avoids
+        // the ~1-3s first-speak init delay after app launch.
+        try {
+            ttsPrewarm = android.speech.tts.TextToSpeech(applicationContext) { _ -> }
+        } catch (_: Exception) {}
         // Sync contacts and SMS messages to server on startup
         CoroutineScope(Dispatchers.IO).launch {
             try { ContactsSyncManager.syncIfNeeded(applicationContext) } catch (_: Exception) {}
@@ -498,6 +559,8 @@ class MainActivity : ComponentActivity() {
             activeRecognizer?.destroy()
             activeRecognizer = null
         }
+        try { ttsPrewarm?.shutdown() } catch (_: Exception) {}
+        ttsPrewarm = null
         if (instance === this) instance = null
     }
 

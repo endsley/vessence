@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import AsyncIterator
 
 from memory.v1.conversation_manager import ConversationManager
-from memory.v1.memory_retrieval import build_memory_sections, invalidate_memory_summary_cache
+from memory.v1.memory_retrieval import invalidate_memory_summary_cache
 from llm_brain.v1.brain_adapters import BrainAdapterError, ExecutionProfile, build_execution_profile, get_brain_adapter, resolve_timeout_seconds
 from context_builder.v1.context_builder import build_jane_context_async
 from jane.config import ENV_FILE_PATH, LOGS_DIR
@@ -665,6 +665,17 @@ CODE_MAP_KEYWORDS = (
     "short",
     "per",
     "generated",
+    # Auto-evolved from daily conversations
+    "recent",
+    "clinic",
+    "list",
+    "category",
+    "others",
+    "add",
+    "item",
+    "runtime",
+    "multi",
+    "home",
 )
 
 
@@ -704,7 +715,7 @@ _PREFETCH_CACHE_MAX = 100  # hard cap on entries to prevent unbounded growth
 PREFETCH_TTL = 60  # seconds
 
 
-def run_prefetch_memory(session_id: str) -> None:
+def run_prefetch_memory(session_id: str, user_id: str | None = None) -> None:
     """Query ChromaDB with a broad context query and cache the result for 60s.
 
     Called from the /api/jane/prefetch-memory endpoint. Runs the query in a
@@ -719,14 +730,14 @@ def run_prefetch_memory(session_id: str) -> None:
     def _worker() -> None:
         start = time.perf_counter()
         try:
-            import urllib.parse
-            import urllib.request as _req
-            import json as _json
             query = "recent context and topics"
-            url = f"http://127.0.0.1:8083/query?q={urllib.parse.quote(query)}"
-            with _req.urlopen(url, timeout=5) as resp:
-                data = _json.loads(resp.read())
-                result = data.get("result", "")
+            from context_builder.v1.context_builder import _safe_get_memory_summary
+            result = _safe_get_memory_summary(
+                query,
+                conversation_summary="",
+                session_id=session_id,
+                user_id=user_id,
+            )
         except Exception:
             result = ""
         _prefetch_cache[session_id] = {"result": result, "timestamp": time.time()}
@@ -1047,7 +1058,7 @@ def _message_for_persistence(message: str, file_context: str | None) -> str:
     return f"{base}\n\n{file_context}".strip()
 
 
-def prewarm_session(session_id: str) -> None:
+def prewarm_session(session_id: str, user_id: str | None = None) -> None:
     state = _get_session(session_id)
     if state.bootstrap_complete or state.bootstrap_in_progress:
         logger.info(
@@ -1066,18 +1077,13 @@ def prewarm_session(session_id: str) -> None:
         try:
             summary_text = format_session_summary(load_session_summary(session_id))
             query = "What durable context would most help Jane respond in this session?"
-            # Fast path: use memory daemon
-            memory_summary = ""
-            try:
-                import urllib.parse, urllib.request, json as _json
-                url = f"http://127.0.0.1:8083/query?q={urllib.parse.quote(query)}"
-                with urllib.request.urlopen(url, timeout=5) as resp:
-                    data = _json.loads(resp.read())
-                    memory_summary = data.get("result", "")
-            except Exception:
-                # Fallback to slow path (direct ChromaDB, no Ollama librarian)
-                sections = build_memory_sections(query, assistant_name="Jane")
-                memory_summary = "\n\n".join(sections) if sections else ""
+            from context_builder.v1.context_builder import _safe_get_memory_summary
+            memory_summary = _safe_get_memory_summary(
+                query,
+                conversation_summary=summary_text,
+                session_id=session_id,
+                user_id=user_id,
+            )
             if memory_summary and memory_summary != "No relevant context found.":
                 state.bootstrap_memory_summary = memory_summary
             state.bootstrap_complete = True
@@ -1380,7 +1386,6 @@ def _persist_turns_async(
 
 async def send_message(user_id: str, session_id: str, message: str, file_context: str = None, platform: str = None, tts_enabled: bool = False) -> dict:
     broadcast_user_id = user_id
-    del user_id  # single-user system for now
     request_start = time.perf_counter()
     # Broadcast start
     _sync_broadcaster = StreamBroadcaster(broadcast_user_id, session_id, platform or "", message)
@@ -1401,7 +1406,7 @@ async def send_message(user_id: str, session_id: str, message: str, file_context
     try:
         return await _send_message_inner(
             state, session_id, message, file_context, platform, tts_enabled,
-            _sync_broadcaster, broadcast_user_id, request_start,
+            _sync_broadcaster, broadcast_user_id, request_start, user_id,
         )
     finally:
         if _gate_acquired:
@@ -1411,7 +1416,7 @@ async def send_message(user_id: str, session_id: str, message: str, file_context
 async def _send_message_inner(
     state, session_id: str, message: str, file_context: str,
     platform: str, tts_enabled: bool, _sync_broadcaster, broadcast_user_id: str,
-    request_start: float,
+    request_start: float, user_id: str,
 ) -> dict:
     """Inner send_message logic, always runs under request_gate."""
     # Phone tools: extract any [TOOL_RESULT:{json}] markers the Android client
@@ -1486,6 +1491,7 @@ async def _send_message_inner(
             memory_summary_fallback=_memory_fallback,
             platform=platform,
             tts_enabled=tts_enabled,
+            user_id=user_id,
         )
     if request_ctx.retrieved_memory_summary:
         state.bootstrap_memory_summary = request_ctx.retrieved_memory_summary
@@ -1846,8 +1852,7 @@ async def stream_message(
     bugs like v2 correctly demoting END_CONVERSATION then v1 re-picking
     it and short-circuiting with a canned "Ok." reply.
     """
-    broadcast_user_id = user_id  # keep for broadcast; not used for anything else yet
-    del user_id  # single-user system for now
+    broadcast_user_id = user_id
     request_start = time.perf_counter()
     state = _get_session(session_id)
     # Serialize requests per session — prevents conversation offset bug where
@@ -1919,6 +1924,10 @@ async def stream_message(
     _ack_seen = False  # tracks whether brain has emitted an [ACK] block
     _accumulated_deltas = ""  # accumulates delta text to detect [ACK]
     _tool_extractor = ToolMarkerExtractor()  # phone-tools marker extraction (see class docstring)
+    # TTS-latency debug instrumentation. These track the gap between the last
+    # delta the client sees and the done event that triggers TTS on Android.
+    _tts_first_delta_logged = False
+    _tts_last_delta_time: float | None = None
 
     def _raw_emit(event_type: str, payload: str | None = None) -> None:
         item = (event_type, payload)
@@ -1931,7 +1940,13 @@ async def stream_message(
         loop.call_soon_threadsafe(queue.put_nowait, item)
 
     def emit(event_type: str, payload: str | None = None) -> None:
-        nonlocal _ack_seen, _accumulated_deltas
+        nonlocal _ack_seen, _accumulated_deltas, _tts_first_delta_logged, _tts_last_delta_time
+        # TTS-latency debug: stamp first delta and keep rolling "last delta" time.
+        if event_type == "delta" and payload:
+            _tts_last_delta_time = time.perf_counter()
+            if not _tts_first_delta_logged:
+                _tts_first_delta_logged = True
+                _log_stage(session_id, "tts_first_delta", request_start, chars=len(payload))
         # Track ACK in delta text
         if event_type == "delta" and payload:
             _accumulated_deltas += payload
@@ -1962,6 +1977,14 @@ async def stream_message(
                 _raw_emit("delta", visible)
             return
         if event_type == "done":
+            # TTS-latency debug: stamp when the done-event processing starts
+            # and how long since the last delta the client saw. The gap between
+            # tts_last_delta_seen (below) and tts_done_raw_emit is where
+            # post-text server work lives (tool flush, music fallback, etc.).
+            _log_stage(session_id, "tts_done_emit_start", request_start,
+                       gap_since_last_delta_ms=(
+                           int((time.perf_counter() - _tts_last_delta_time) * 1000)
+                           if _tts_last_delta_time is not None else -1))
             # Final flush of any buffered tool markers at stream end.
             visible_tail, tail_calls = _tool_extractor.flush()
             for tc in tail_calls:
@@ -2022,6 +2045,10 @@ async def stream_message(
             _done_visible, _ = _done_extractor.feed(payload)
             _done_tail, _ = _done_extractor.flush()
             payload = _done_visible + _done_tail
+
+        if event_type == "done":
+            _log_stage(session_id, "tts_done_raw_emit", request_start,
+                       payload_chars=len(payload or ""))
 
         _raw_emit(event_type, payload)
 
@@ -2183,6 +2210,37 @@ async def stream_message(
                 except Exception as _v2_email_err:
                     logger.error("[%s] v2 email fetch failed: %s", session_id[:12], _v2_email_err)
                     _v2_task_ctx = f"[EMAIL ERROR]\nFailed to fetch emails: {_v2_email_err}\n[END EMAIL ERROR]"
+            elif _s1_cls == "READ_CALENDAR":
+                _stage2_delegate_ack = "Let me check your calendar..."
+                _v2_range = (_stage1.get("range") or "today").strip()
+                try:
+                    from agent_skills.calendar_tools import list_events_in_range as _v2_list_cal
+                    _v2_events = _v2_list_cal(_v2_range, max_results=25)
+                    if _v2_events:
+                        import json as _v2cj
+                        _v2_task_ctx = (
+                            f"[CALENDAR DATA — range={_v2_range}, fetched server-side]\n"
+                            + _v2cj.dumps(_v2_events, indent=2, default=str)
+                            + "\n[END CALENDAR DATA]"
+                        )
+                    else:
+                        _v2_task_ctx = (
+                            f"[CALENDAR DATA — range={_v2_range}]\n"
+                            f"No events found.\n[END CALENDAR DATA]"
+                        )
+                    logger.info("[%s] v2 READ_CALENDAR: fetched %d events (range=%s)",
+                                session_id[:12], len(_v2_events) if _v2_events else 0, _v2_range)
+                except RuntimeError as _v2_cal_err:
+                    _v2_task_ctx = (
+                        f"[CALENDAR ERROR]\nGoogle Calendar not set up: {_v2_cal_err}\n"
+                        f"[END CALENDAR ERROR]"
+                    )
+                except Exception as _v2_cal_err:
+                    logger.error("[%s] v2 calendar fetch failed: %s", session_id[:12], _v2_cal_err)
+                    _v2_task_ctx = (
+                        f"[CALENDAR ERROR]\nFailed to fetch calendar: {_v2_cal_err}\n"
+                        f"[END CALENDAR ERROR]"
+                    )
             elif _s1_cls == "MUSIC_PLAY":
                 _v2_query = _stage1.get("query", "")
                 _stage2_delegate_ack = f"Playing {_v2_query}..." if _v2_query else "Playing music..."
@@ -2303,6 +2361,15 @@ async def stream_message(
                 logger.info("[%s] Keyword override: %s → read_email", session_id[:12], _classification)
                 _classification = "read_email"
                 _router_response = "read_email"
+        if _classification != "read_calendar" and any(kw in _msg_lower for kw in ("calendar", "agenda", "schedule")):
+            if any(kw in _msg_lower for kw in ("read", "check", "see", "show", "what's on", "what is on",
+                                               "what do i have", "anything on", "pull up", "look at",
+                                               "am i busy", "am i free", "my day look")):
+                # Avoid stealing "schedule a meeting" — only fire on "my schedule" or "schedule today/..."
+                if "calendar" in _msg_lower or "agenda" in _msg_lower or "my schedule" in _msg_lower:
+                    logger.info("[%s] Keyword override: %s → read_calendar", session_id[:12], _classification)
+                    _classification = "read_calendar"
+                    _router_response = "today"
         if _classification != "read_messages" and _classification != "sync_messages" and any(kw in _msg_lower for kw in ("text msg", "text message", "texts", "sms")):
             if any(kw in _msg_lower for kw in ("read", "check", "see", "show", "any new", "what")):
                 logger.info("[%s] Keyword override: %s → read_messages", session_id[:12], _classification)
@@ -2509,6 +2576,68 @@ async def stream_message(
             # Inject email data into the brain message
             if _email_data_ctx:
                 message = message + _email_data_ctx
+        elif _classification == "read_calendar":
+            # Calendar is server-side (same OAuth grant as Gmail). Same pattern
+            # as read_email: fetch events here and inject as context.
+            logger.info("[%s] Gemma router: read_calendar → fetching server-side",
+                        session_id[:12])
+            _stage2_delegate_ack = "Let me check your calendar..."
+            _gemma_short_circuit = False
+            _cal_data_ctx = ""
+            # Parse range hint from router response (default today) and from user msg
+            _cal_range = (_router_response or "today").strip().lower() or "today"
+            if "tomorrow" in _msg_lower:
+                _cal_range = "tomorrow"
+            elif "this week" in _msg_lower:
+                _cal_range = "this_week"
+            elif "next week" in _msg_lower:
+                _cal_range = "next_week"
+            elif "this weekend" in _msg_lower or "weekend" in _msg_lower:
+                _cal_range = "weekend"
+            elif "coming up" in _msg_lower or "next 7" in _msg_lower:
+                _cal_range = "next"
+            try:
+                from agent_skills.calendar_tools import list_events_in_range as _list_cal_range
+                _cal_events = _list_cal_range(_cal_range, max_results=25)
+                if _cal_events:
+                    import json as _cj
+                    _cal_data_ctx = (
+                        f"\n\n[CALENDAR DATA — range={_cal_range}, fetched server-side just now]\n"
+                        + _cj.dumps(_cal_events, indent=2, default=str)
+                        + "\n[END CALENDAR DATA]\n\n"
+                        "Summarize these events naturally. Count them, mention titles and start times, "
+                        "flag back-to-back meetings or conflicts. If the user asked about a specific "
+                        "person/topic, filter accordingly. Times are in the user's local timezone."
+                    )
+                else:
+                    _cal_data_ctx = (
+                        f"\n\n[CALENDAR DATA — range={_cal_range}, fetched server-side just now]\n"
+                        "No events found.\n"
+                        "[END CALENDAR DATA]\n\n"
+                        f"Tell the user their {_cal_range.replace('_', ' ')} is clear."
+                    )
+                logger.info("[%s] Fetched %d calendar events server-side (range=%s)",
+                            session_id[:12], len(_cal_events), _cal_range)
+            except RuntimeError as _cal_err:
+                _cal_data_ctx = (
+                    "\n\n[CALENDAR ERROR]\n"
+                    f"Google Calendar is not set up: {_cal_err}\n"
+                    "Tell the user they need to sign in with Google on the Vessence web UI "
+                    "to enable calendar access.\n"
+                    "[END CALENDAR ERROR]"
+                )
+                logger.warning("[%s] Calendar fetch failed (no credentials): %s",
+                               session_id[:12], _cal_err)
+            except Exception as _cal_err:
+                _cal_data_ctx = (
+                    "\n\n[CALENDAR ERROR]\n"
+                    f"Failed to fetch calendar: {_cal_err}\n"
+                    "Apologize and suggest trying again.\n"
+                    "[END CALENDAR ERROR]"
+                )
+                logger.error("[%s] Calendar fetch failed: %s", session_id[:12], _cal_err)
+            if _cal_data_ctx:
+                message = message + _cal_data_ctx
         elif _classification == "shopping_list":
             # Shopping list intent — handle add/remove directly, delegate queries to brain.
             logger.info("[%s] Gemma router: shopping_list action='%s'", session_id[:12], _router_response)
@@ -2729,6 +2858,7 @@ async def stream_message(
                             conversation_summary=summary_text or "",
                             session_id=session_id,
                             fallback_summary=state.bootstrap_memory_summary or "",
+                            user_id=user_id,
                         )
                         if _sb_memory and _sb_memory != "No relevant context found.":
                             safety_parts.append(f"[Retrieved Memory]\n{_sb_memory}")
@@ -2799,6 +2929,7 @@ async def stream_message(
                     platform=platform,
                     tts_enabled=tts_enabled,
                     on_status=lambda s: emit("status", s),
+                    user_id=user_id,
                 )
                 logger.info("[%s] Shopping list context injected, ChromaDB skipped", session_id[:12])
             else:
@@ -2818,6 +2949,7 @@ async def stream_message(
                     intent_level=_intent_level,
                     tool_context=_tool_context,
                     on_status=lambda s: emit("status", s),
+                    user_id=user_id,
                 )
 
             # If Gemma already emitted a quick ack, inject context so Claude follows up naturally
@@ -3015,6 +3147,11 @@ async def stream_message(
                 _log_stage(session_id, "first_visible_event", request_start, event_type=event_type)
                 first_visible_event_logged = True
             yield json.dumps({"type": event_type, "data": payload}, ensure_ascii=True) + "\n"
+            if event_type == "done":
+                # TTS-latency debug: stamp the moment done is yielded to the
+                # HTTP response body. Compare to tts_done_raw_emit — if this
+                # gap is large, it points at queue/coroutine scheduling lag.
+                _log_stage(session_id, "tts_done_yielded", request_start)
             if event_type == "delta":
                 broadcaster.feed_delta(payload or "")
             elif event_type == "done":

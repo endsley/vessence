@@ -491,13 +491,13 @@ def _is_low_signal_shared_memory(doc: str, meta: dict | None) -> bool:
 # `_apply_evidence_policy` followed by jane_proxy's context builder, both
 # running for the same turn) don't re-embed and re-query Chroma for the
 # identical prompt. Keyed by (query, assistant_name, essence_path).
-_SECTIONS_CACHE: dict[tuple[str, str, str], tuple[float, list[str]]] = {}
+_SECTIONS_CACHE: dict[tuple[str, str, str, str, str], tuple[float, list[str]]] = {}
 _SECTIONS_CACHE_LOCK = threading.Lock()
 _SECTIONS_CACHE_TTL_S = 60.0
 _SECTIONS_CACHE_MAX_ENTRIES = 64
 
 
-def _sections_cache_get(key: tuple[str, str, str]) -> list[str] | None:
+def _sections_cache_get(key: tuple[str, str, str, str, str]) -> list[str] | None:
     import time as _t
     with _SECTIONS_CACHE_LOCK:
         entry = _SECTIONS_CACHE.get(key)
@@ -510,7 +510,7 @@ def _sections_cache_get(key: tuple[str, str, str]) -> list[str] | None:
         return list(sections)
 
 
-def _sections_cache_put(key: tuple[str, str, str], sections: list[str]) -> None:
+def _sections_cache_put(key: tuple[str, str, str, str, str], sections: list[str]) -> None:
     import time as _t
     with _SECTIONS_CACHE_LOCK:
         if len(_SECTIONS_CACHE) >= _SECTIONS_CACHE_MAX_ENTRIES:
@@ -520,17 +520,34 @@ def _sections_cache_put(key: tuple[str, str, str], sections: list[str]) -> None:
         _SECTIONS_CACHE[key] = (_t.time(), list(sections))
 
 
-def build_memory_sections(query: str, assistant_name: str = "Jane", essence_chromadb_path: str | None = None) -> list[str]:
-    cache_key = (query or "", assistant_name or "", essence_chromadb_path or "")
+def build_memory_sections(
+    query: str,
+    assistant_name: str = "Jane",
+    essence_chromadb_path: str | None = None,
+    user_memory_path: str | None = None,
+    user_id: str | None = None,
+) -> list[str]:
+    cache_key = (
+        query or "",
+        assistant_name or "",
+        essence_chromadb_path or "",
+        user_memory_path or "",
+        user_id or "",
+    )
     cached = _sections_cache_get(cache_key)
     if cached is not None:
         return cached
 
     intent = _classify_query_intent(query)
-    use_shared = True
-    use_jane_long_term = assistant_name.strip().lower() != "amber" and intent in {"project_work", "general"}
-    use_short_term = True  # Always include short-term — recent context is valuable for all intents
-    use_file_index = intent == "file_lookup"
+    use_user_memory = bool(user_memory_path and os.path.exists(user_memory_path))
+    use_shared = not use_user_memory
+    use_jane_long_term = (
+        not use_user_memory
+        and assistant_name.strip().lower() != "amber"
+        and intent in {"project_work", "general"}
+    )
+    use_short_term = not use_user_memory  # Managed users use their private memory plus live session history.
+    use_file_index = intent == "file_lookup" and not use_user_memory
     use_essence = bool(essence_chromadb_path and os.path.exists(essence_chromadb_path))
 
     # Pre-compute embedding ONCE — pass to all queries to avoid re-embedding
@@ -539,10 +556,10 @@ def build_memory_sections(query: str, assistant_name: str = "Jane", essence_chro
     # --- Submit all applicable queries in parallel ---
     futures: dict[str, "Future"] = {}
     with ThreadPoolExecutor(max_workers=5) as executor:
-        if use_shared:
+        if use_user_memory or use_shared:
             futures["user_memories"] = executor.submit(
                 _query_collection,
-                VECTOR_DB_USER_MEMORIES,
+                user_memory_path if use_user_memory else VECTOR_DB_USER_MEMORIES,
                 CHROMA_COLLECTION_USER_MEMORIES,
                 query,
                 CHROMA_SEARCH_LIMIT,
@@ -593,12 +610,12 @@ def build_memory_sections(query: str, assistant_name: str = "Jane", essence_chro
         except Exception:
             return [], [], []
 
-    # -- user_memories (shared) --
+    # -- user_memories (shared or managed-user private Chroma) --
     permanent_facts: list[str] = []
     long_term_facts: list[str] = []
     legacy_short_term_facts: list[str] = []
 
-    if use_shared:
+    if use_user_memory or use_shared:
         docs, metas, distances = _safe_get("user_memories")
         for doc, meta, distance in zip(docs, metas, distances):
             meta = meta or {}
@@ -729,7 +746,8 @@ def build_memory_sections(query: str, assistant_name: str = "Jane", essence_chro
     if permanent_facts:
         sections.append("## Permanent Memory\n" + "\n".join(permanent_facts))
     if long_term_facts:
-        sections.append("## Long-Term Memory (shared)\n" + "\n".join(long_term_facts))
+        section_label = "## Long-Term Memory (current user)" if use_user_memory else "## Long-Term Memory (shared)"
+        sections.append(section_label + "\n" + "\n".join(long_term_facts))
     if jane_long_term_facts:
         sections.append("## Long-Term Memory (Jane archived)\n" + "\n".join(jane_long_term_facts))
     if short_term_facts:
@@ -751,7 +769,6 @@ def build_memory_sections(query: str, assistant_name: str = "Jane", essence_chro
         sections.append("## Essence Memory\n" + "\n".join(essence_facts))
     _sections_cache_put(cache_key, sections)
     return sections
-
 
 
 
