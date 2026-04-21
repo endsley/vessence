@@ -370,10 +370,53 @@ GLSETTINGS
 esac
 
 # ═════════════════════════════════════════════════════════════════════════════
-# Phase 7 — Test Run
+# Phase 7 — Ollama + Local LLM
 # ═════════════════════════════════════════════════════════════════════════════
 
-header "Phase 7: Test run"
+header "Phase 7: Installing Ollama + qwen2.5:7b"
+
+OLLAMA_MODEL="qwen2.5:7b"
+
+# Install Ollama if not present
+if ! command -v ollama &>/dev/null; then
+    info "Ollama not found — installing..."
+    if curl -fsSL https://ollama.com/install.sh | sh; then
+        ok "Ollama installed"
+    else
+        fail "Ollama install failed. Install manually: https://ollama.com/download"
+        warn "Continuing without Ollama — Stage 2 fast-path and short-term memory will be unavailable"
+    fi
+else
+    ok "Ollama already installed ($(ollama --version 2>/dev/null || echo 'version unknown'))"
+fi
+
+# Ensure Ollama service is running
+if command -v ollama &>/dev/null; then
+    if ! curl -s http://localhost:11434/api/tags &>/dev/null; then
+        info "Starting Ollama service..."
+        ollama serve &>/dev/null &
+        sleep 3
+    fi
+
+    # Pull qwen2.5:7b if not already present
+    if ollama list 2>/dev/null | grep -q "qwen2.5:7b"; then
+        ok "qwen2.5:7b already present"
+    else
+        info "Pulling qwen2.5:7b (this may take a few minutes)..."
+        if ollama pull "$OLLAMA_MODEL"; then
+            ok "qwen2.5:7b downloaded"
+        else
+            warn "Failed to pull qwen2.5:7b — Stage 2 fast-path will be unavailable until model is downloaded"
+            info "Pull manually later:  ollama pull qwen2.5:7b"
+        fi
+    fi
+fi
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Phase 8 — Test Run
+# ═════════════════════════════════════════════════════════════════════════════
+
+header "Phase 8: Test run"
 
 info "Starting Jane briefly to verify the server works..."
 
@@ -406,10 +449,10 @@ else
 fi
 
 # ═════════════════════════════════════════════════════════════════════════════
-# Phase 8 — Auto-Start on Boot
+# Phase 9 — Auto-Start on Boot
 # ═════════════════════════════════════════════════════════════════════════════
 
-header "Phase 8: Setting up auto-start"
+header "Phase 9: Setting up auto-start"
 
 OS_TYPE="$(uname -s)"
 
@@ -507,10 +550,10 @@ else
 fi
 
 # ═════════════════════════════════════════════════════════════════════════════
-# Phase 9 — Remote Access (Optional)
+# Phase 10 — Remote Access (Optional)
 # ═════════════════════════════════════════════════════════════════════════════
 
-header "Phase 9: Remote access (optional)"
+header "Phase 10: Remote access (optional)"
 
 echo ""
 echo -e "  Jane is running locally at ${CYAN}http://localhost:8081${NC}."
@@ -545,10 +588,10 @@ else
 fi
 
 # ═════════════════════════════════════════════════════════════════════════════
-# Phase 10 — Get to Know You (Optional)
+# Phase 11 — Get to Know You (Optional)
 # ═════════════════════════════════════════════════════════════════════════════
 
-header "Phase 10: Quick intro (optional)"
+header "Phase 11: Quick intro (optional)"
 
 echo ""
 echo "  A few quick questions so Jane already knows you when you first meet."
@@ -618,10 +661,10 @@ if [ -n "$GOALS" ]; then
 fi
 
 # ═════════════════════════════════════════════════════════════════════════════
-# Phase 11 — Cron Jobs
+# Phase 12 — Cron Jobs
 # ═════════════════════════════════════════════════════════════════════════════
 
-header "Phase 11: Installing cron jobs"
+header "Phase 12: Installing cron jobs"
 
 # Build the full crontab from scratch so it's idempotent.
 # Env header fixes the "$VESSENCE_HOME expands to empty in cron" bug —
