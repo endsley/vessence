@@ -618,6 +618,78 @@ if [ -n "$GOALS" ]; then
 fi
 
 # ═════════════════════════════════════════════════════════════════════════════
+# Phase 11 — Cron Jobs
+# ═════════════════════════════════════════════════════════════════════════════
+
+header "Phase 11: Installing cron jobs"
+
+# Build the full crontab from scratch so it's idempotent.
+# Env header fixes the "$VESSENCE_HOME expands to empty in cron" bug —
+# cron does not inherit the login shell's environment.
+CRONTAB_CONTENT="# Jane cron jobs — managed by setup.sh, do not edit manually
+AMBIENT_BASE=${REPO_ROOT}
+VESSENCE_HOME=${REPO_ROOT}/vessence
+VESSENCE_DATA_HOME=${REPO_ROOT}/vessence-data
+VAULT_HOME=${REPO_ROOT}/vault
+ESSENCES_DIR=${REPO_ROOT}/essences
+PYTHONPATH=${REPO_ROOT}/vessence
+PYTHON=${REPO_ROOT}/venv/bin/python
+SHELL=/bin/bash
+
+# Auto-pull: fetch + fast-forward every 2 hours; reinstall deps / restart if needed
+0 */2 * * * /bin/bash ${REPO_ROOT}/vessence/startup_code/auto_pull.sh
+
+# Memory janitor: expire short-term, merge duplicates, verify code memories vs codebase
+15 2 * * * \${PYTHON} ${REPO_ROOT}/vessence/memory/v1/janitor_memory.py
+
+# Nightly self-improvement: doc drift audit, code audit, pipeline audit, dead code scan
+0 1 * * * \${PYTHON} ${REPO_ROOT}/vessence/agent_skills/nightly_self_improve.py
+
+# Identity essay regeneration (self-reflection from memories)
+0 3 * * * \${PYTHON} ${REPO_ROOT}/vessence/agent_skills/generate_identity_essay.py
+
+# Jane context regeneration (rebuild boot context from configs)
+15 3 * * * \${PYTHON} ${REPO_ROOT}/vessence/startup_code/regenerate_jane_context.py
+
+# Code map regeneration (file/function/route index)
+15 4 * * * \${PYTHON} ${REPO_ROOT}/vessence/agent_skills/generate_code_map.py
+
+# System janitor: temp files, log rotation, old session transcript pruning
+0 3 * * * \${PYTHON} ${REPO_ROOT}/vessence/agent_skills/janitor_system.py
+
+# Essence scheduler: dispatch scheduled essence tasks every minute
+* * * * * \${PYTHON} ${REPO_ROOT}/vessence/agent_skills/essence_scheduler.py
+
+# Job queue runner: process pending jobs every 5 minutes
+*/5 * * * * \${PYTHON} ${REPO_ROOT}/vessence/agent_skills/job_queue_runner.py
+
+# Process watchdog: kill zombie Docker containers, idle daemons, memory hogs
+*/5 * * * * \${PYTHON} ${REPO_ROOT}/vessence/agent_skills/process_watchdog.py
+
+# USB incremental sync backup (daily at 2:00 AM)
+0 2 * * * \${PYTHON} ${REPO_ROOT}/vessence/startup_code/usb_sync.py
+
+# Evolve code map keywords from today's user messages
+10 2 * * * \${PYTHON} ${REPO_ROOT}/vessence/agent_skills/evolve_code_map_keywords.py
+
+# Daily briefing fetch (news, TTS audio)
+10 2 * * * /bin/bash -c 'timeout 30m \${PYTHON} ${REPO_ROOT}/tools/daily_briefing/functions/run_briefing.py'
+
+# Screen dimmer: dim monitor after sunset every 30 minutes
+*/30 * * * * \${PYTHON} ${REPO_ROOT}/vessence/agent_skills/screen_dimmer.py
+"
+
+if command -v crontab &>/dev/null; then
+    echo "$CRONTAB_CONTENT" | crontab -
+    ok "Crontab installed ($(echo "$CRONTAB_CONTENT" | grep -c '^\*\|^[0-9]') jobs)"
+    info "Memory janitor + code-memory verifier runs nightly at 2:15 AM"
+    info "Self-improvement orchestrator runs nightly at 1:00 AM"
+else
+    warn "crontab command not found — skipping cron setup"
+    info "Install cron: sudo apt install -y cron"
+fi
+
+# ═════════════════════════════════════════════════════════════════════════════
 # Done
 # ═════════════════════════════════════════════════════════════════════════════
 
