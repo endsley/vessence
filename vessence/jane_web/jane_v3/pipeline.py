@@ -105,6 +105,62 @@ async def _classify_and_maybe_handle(prompt: str, session_id: str) -> dict:
         "force_stage3":    bool,
       }
     """
+    # ── Pre-classifier resolver — STAGE3_FOLLOWUP fast-path ──────────────
+    # When Opus's prior turn ended with an `[[AWAITING:<topic>]]` marker, v2
+    # persists a pending_action of type `STAGE3_FOLLOWUP` in the FIFO. The
+    # next user turn is always answering that open question — classifying it
+    # through the normal qwen+chroma pipeline is brittle (short replies like
+    # "yeah"/"ok" embed too close to end_conversation exemplars, and the
+    # classifier had no pending_class to anchor on because free-form
+    # AWAITING topics aren't registered handler classes).
+    #
+    # Mirror v2's stage3_followup route: if the resolver detects a pending
+    # STAGE3_FOLLOWUP, skip stage 1/2 entirely and force stage 3 so Opus can
+    # interpret the reply with full conversation context.
+    #
+    # Only handles STAGE3_FOLLOWUP. Other resolver actions (SMS draft
+    # confirm/cancel, STAGE2 followups) still flow through the classifier's
+    # pending_class injection so v3 remains a single-qwen-call pipeline for
+    # the common case.
+    try:
+        from jane_web.jane_v2 import pending_action_resolver as _par
+        _resolved = _par.resolve(session_id, prompt)
+    except Exception as _par_exc:
+        logger.warning("jane_v3: resolver failed (non-fatal): %s", _par_exc)
+        _resolved = None
+    if _resolved and _resolved.get("action") == "stage3_followup":
+        pending = _resolved.get("pending") or {}
+        awaiting = pending.get("awaiting") or "previous_question"
+        original_cls = pending.get("original_class") or (pending.get("data") or {}).get("original_class")
+        logger.info(
+            "jane_v3 pipeline: resolver → stage3_followup (awaiting=%s original_class=%s)",
+            awaiting, original_cls or "-",
+        )
+        # Mark the pending slot as resolved so that if Opus finishes WITHOUT
+        # emitting a new AWAITING, the slot clears (mirrors v2's behavior).
+        try:
+            from jane_web.jane_v2.pipeline import _pending_consumed_marker as _consume
+            consumed_marker = _consume(pending, status="resolved", resolution="answered")
+        except Exception:
+            consumed_marker = None
+        state: dict[str, Any] = {
+            "cls": "stage3_followup",
+            "conf": "High",
+            "classification": "stage3_followup:High",
+            "stage1_ms": 0,
+            "stage2_ms": 0,
+            "result": None,
+            "stage2_ack": None,
+            "fallback_ack": None,
+            "force_stage3": True,
+            "stage3_followup_topic": awaiting,
+        }
+        if original_cls:
+            state["stage3_followup_original_class"] = original_cls
+        if consumed_marker:
+            state["resolve_pending_action"] = consumed_marker
+        return state
+
     # ── Stage 1 (v3): Haiku classification ───────────────────────────────
     t1 = time.perf_counter()
     try:

@@ -141,6 +141,29 @@ When a user sends a message through any interface, this is the complete flow:
 - Ack covers the latency of server pre-fetch + Opus thinking
 - In voice mode: ack is spoken via TTS. In text mode: suppressed (typing indicator instead).
 
+### Phase 2.5: Stage 2 Fast Handler (SQL short-circuit, no LLM)
+
+Some intent classes have a **Stage 2 handler** — a deterministic Python function that answers directly from a local data source (SQLite, file, etc.) without invoking any LLM.
+
+**Pipeline (`jane_web/jane_v2/pipeline.py`):**
+1. **Stage 1** — embedding classifier (`intent_classifier/v2/`) identifies the class via bge-small-en-v1.5 + qwen2.5 validation
+2. **Stage 2** — if the matched class has a handler at `jane_web/jane_v2/classes/<class>/handler.py`, the handler is called. If it returns a `dict`, the response is streamed and **Opus is never invoked** (typical latency: ~20–50ms)
+3. **Stage 3** — fallback to Opus (current standing brain) if Stage 2 returns `None` or no handler exists
+
+**Logging:** Each turn logs `jane_v3 pipeline: stage2 <class name> handler (<Nms>)` or `stage3` for auditing.
+
+**Current Stage 2 handlers:**
+
+| Class | Handler | Data source | Typical answer |
+|:------|:--------|:------------|:---------------|
+| `clinic_schedules_info` | `jane_web/jane_v2/classes/clinic_schedules_info/handler.py` | `$VESSENCE_DATA_HOME/schedule.db` SQLite | Patient count or names per day of week |
+
+**Adding a new Stage 2 handler:**
+1. Create `jane_web/jane_v2/classes/<class_name>/handler.py` with `async def handle(prompt: str) -> dict | None`
+2. Create `jane_web/jane_v2/classes/<class_name>/metadata.py` with `METADATA` dict (name, priority, description, few_shot, ack)
+3. Add a matching intent class in `intent_classifier/v2/classes/<class_name>.py`
+4. Add adversarial test cases in `intent_classifier/v2/classes/<class_name>_adversarial.json`
+
 ### Phase 3: Context Assembly (`context_builder/v1/context_builder.py`)
 - **Gemma classification → intent_level mapping** (`CLASSIFICATION_TO_INTENT`):
   - `self_handle` → `greeting` intent (no memory, no tools, no history)

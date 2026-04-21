@@ -722,6 +722,9 @@ def _assemble_music_text(result: dict) -> str:
 def _stage2_response_parts(result: dict) -> tuple[str, dict[str, Any]]:
     """Normalize a Stage 2 handler result into (user-visible text, extras)."""
     text = _assemble_music_text(result)
+    # If the handler set a "print" block (too long to speak), append it as text
+    if result.get("print"):
+        text = text.rstrip() + "\n\n" + result["print"]
     extras: dict[str, Any] = {}
     if result.get("playlist_id"):
         extras["playlist_id"] = result["playlist_id"]

@@ -153,10 +153,11 @@ dependencies {
     // Image loading
     implementation("io.coil-kt:coil-compose:2.7.0")
 
-    // Google Sign-In (Credential Manager)
+    // Google Sign-In (Credential Manager + legacy fallback for older Play Services)
     implementation("androidx.credentials:credentials:1.3.0")
     implementation("androidx.credentials:credentials-play-services-auth:1.3.0")
     implementation("com.google.android.libraries.identity.googleid:googleid:1.1.1")
+    implementation("com.google.android.gms:play-services-auth:21.3.0")
 
     // Media3 (ExoPlayer)
     implementation("androidx.media3:media3-exoplayer:1.4.1")

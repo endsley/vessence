@@ -519,7 +519,10 @@ class ChatViewModel(
                 // the user-visible bubble before showing the persisted message.
                 val outgoingText = prependPendingToolResults(text)
 
-                val flow = repo.streamChat(backend, outgoingText, sessionId, resolvedFileContext, ttsEnabled = fromVoice)
+                // Per-turn idempotency key (job_076). Same UUID reused across
+                // any repo-level retries so the server dedupes correctly.
+                val turnId = java.util.UUID.randomUUID().toString()
+                val flow = repo.streamChat(backend, outgoingText, sessionId, resolvedFileContext, ttsEnabled = fromVoice, turnId = turnId)
                 var accumulated = ""
                 var statusLog = mutableListOf<String>()
                 // Incremental ACK parser state
@@ -534,13 +537,31 @@ class ChatViewModel(
                 var serverConversationEnd = false  // server signalled END_CONVERSATION
 
                 flow.catch { e ->
-                    val msg = e.message ?: ""
-                    if (msg.contains("stream", ignoreCase = true) || msg.contains("reset", ignoreCase = true) || msg.contains("timeout", ignoreCase = true)) {
-                        // Network glitch — show friendly message instead of raw error
-                        updateAiMessage(currentMsgId, if (accumulated.isNotBlank()) accumulated else "Connection interrupted. Please try again.", isStreaming = false)
-                    } else {
-                        updateAiMessage(currentMsgId, "Error: $msg", isStreaming = false)
+                    // Classify using the new exception taxonomy (job_076).
+                    // - OfflineError: device has no connectivity. Show a canned
+                    //   message; repo will naturally fail to retry until online.
+                    // - TransientError after exhausting repo retries: network is
+                    //   flaky or server is genuinely down. Show friendly message.
+                    // - FatalError: permanent failure. Surface to user.
+                    val friendly = when (e) {
+                        is com.vessences.android.data.model.OfflineError ->
+                            "You're offline. I'll try again once you're back online."
+                        is com.vessences.android.data.model.TransientError -> {
+                            val detail = e.message ?: "Please try again"
+                            if (accumulated.isNotBlank()) accumulated else "Connection interrupted — $detail"
+                        }
+                        is com.vessences.android.data.model.FatalError ->
+                            "Error: ${e.message}"
+                        else -> {
+                            val msg = e.message ?: ""
+                            if (msg.contains("stream", ignoreCase = true) || msg.contains("reset", ignoreCase = true) || msg.contains("timeout", ignoreCase = true)) {
+                                if (accumulated.isNotBlank()) accumulated else "Connection interrupted. Please try again."
+                            } else {
+                                "Error: $msg"
+                            }
+                        }
                     }
+                    updateAiMessage(currentMsgId, friendly, isStreaming = false)
                     gotDone = true
                     stopSentenceTtsQueues()
                     sentenceTtsActive = false

@@ -63,6 +63,7 @@ class ClientToolDispatcher(
         register(MessagesFetchUnreadHandler)
         register(MessagesReadInboxHandler)
         register(SyncForceSmsHandler)
+        register(MessagesDismissHandler)
         register(DeviceSpeakTimeHandler)
         register(TimerHandler)
         TimerHandler.ALIASES.forEach { alias ->

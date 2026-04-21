@@ -140,3 +140,41 @@ This document is a detailed index of Jane's major capabilities. It maps a high-l
     -   **Classes:** `User` dataclass
     -   **Functions:** `create_user()`, `create_user_from_google()`, `get_user_by_email()`, `get_user_by_relay_token()`, `regenerate_relay_token()`
     -   **Purpose:** SQLite-backed account system for the Vessence relay server (registration, Google OAuth, relay tokens, marketplace purchases)
+
+---
+
+## Web Sequences (Browser Automation Skills)
+
+A **WebSequence** is a named, reusable Playwright browser automation script. Each subclass implements `steps(page)` and the base class handles browser lifecycle. Sequences are classifiable by the Stage 1 intent pipeline and answered at Stage 2 (fast SQL) with no LLM required.
+
+-   **Base Class:** `skills/web_sequences/base.py` — `WebSequence(ABC)`
+    -   `run()`: launches headless Playwright, calls `steps()`, optionally saves to ChromaDB
+    -   `steps(page)`: abstract — implement the browser actions
+    -   `_save(data)`: saves results to ChromaDB collection `web_sequence_data`
+
+-   **Registry:** `skills/web_sequences/registry.py` — `registry` singleton
+    -   Auto-discovers `WebSequence` subclasses via `pkgutil.iter_modules`
+    -   `registry.get(name)` → class, `registry.names()` → list
+
+-   **Sequence: Clinic Schedule Scraper**
+    -   **File:** `skills/web_sequences/kathia_schedule.py`
+    -   **Class:** `KathiaScheduleSequence` (name=`kathia_schedule`)
+    -   **What it does:** Logs into Water Lily Wellness (acubliss.app), navigates to Kathia Kirschner's FullCalendar week view, extracts appointments from `fc-timegrid-col[data-date]` DOM elements, parses patient name / appointment type / start-end times via regex, stores rows in `$VESSENCE_DATA_HOME/schedule.db` SQLite.
+    -   **Credentials:** `WATERLILY_USERNAME` / `WATERLILY_PASSWORD` from `$VESSENCE_DATA_HOME/.env`
+    -   **Trigger:** Run manually or via cron (cron not yet configured)
+
+-   **Intent Class:** `intent_classifier/v2/classes/clinic_schedules_info.py` — `CLINIC_SCHEDULES_INFO`
+    -   Routes questions about the acupuncturist's current-week schedule (patient count per day, who's coming in) to Stage 2 — bypasses Opus entirely
+    -   18 positive examples using "she/her" pronouns only (no practitioner names in embeddings)
+    -   Counter-examples in `DELEGATE_OPUS` pull named-practitioner queries away from this class
+
+-   **Stage 2 Handler:** `jane_web/jane_v2/classes/clinic_schedules_info/handler.py`
+    -   Resolves day of week (today/tomorrow → actual day name)
+    -   COUNT queries: `SELECT COUNT(*) WHERE day_of_week=? AND week_start=?`
+    -   WHO queries: `SELECT patient_name ORDER BY start_time` (first 4 + "and N more")
+    -   Weekly summary: `GROUP BY day_of_week ORDER BY cnt DESC`
+    -   Falls through to Stage 3 only if DB is missing
+
+-   **SQLite Schema:** `$VESSENCE_DATA_HOME/schedule.db`, table `appointments`
+    -   Columns: `week_start`, `day_of_week`, `patient_name`, `appt_type`, `visit_number`, `start_time`, `end_time`, `practitioner`, `scraped_at`
+    -   On each scrape: DELETEs current week's rows for the practitioner, then inserts fresh

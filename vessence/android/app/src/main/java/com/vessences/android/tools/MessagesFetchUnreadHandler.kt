@@ -94,6 +94,7 @@ object MessagesFetchUnreadHandler : ClientToolHandler {
                 addProperty("body", entry.body.take(NotificationSafety.MAX_BODY_CHARS))
                 addProperty("timestamp", entry.timestamp)
                 addProperty("app", entry.packageName)
+                addProperty("is_reaction", entry.isReaction)
             }
             unreadArray.add(obj)
         }

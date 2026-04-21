@@ -124,6 +124,18 @@ def prune_old_transcripts():
         )
 
 
+def prune_turn_dedupe():
+    """Drop turn_dedupe rows older than 24h. See jane_web/turn_dedupe.py."""
+    try:
+        import sys
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+        from jane_web import turn_dedupe
+        n = turn_dedupe.prune_old(24 * 60 * 60)
+        print(f"turn_dedupe: pruned {n} rows older than 24h.")
+    except Exception as e:
+        print(f"turn_dedupe prune failed: {e}")
+
+
 def archive_completed_jobs():
     try:
         from agent_skills.job_queue_utils import archive_completed
@@ -148,5 +160,6 @@ if __name__ == "__main__":
     rotate_logs()
     prune_old_logs()
     prune_old_transcripts()
+    prune_turn_dedupe()
     archive_completed_jobs()
     print("System Janitor finished.")

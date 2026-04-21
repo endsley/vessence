@@ -169,8 +169,8 @@ try:
     ANDROID_VERSION = _version_data["version_name"]
     _ANDROID_VERSION_CODE = _version_data["version_code"]
 except FileNotFoundError:
-    ANDROID_VERSION = "0.2.60"
-    _ANDROID_VERSION_CODE = 291
+    ANDROID_VERSION = "0.2.65"
+    _ANDROID_VERSION_CODE = 296
 
 # Startup validation: ensure the APK for the advertised version actually exists
 _expected_apk = MARKETING_DOWNLOADS_DIR / f"vessences-android-v{ANDROID_VERSION}.apk"
@@ -240,9 +240,10 @@ def _resolve_android_apk_path(filename: str) -> "Path | None":
         return path if path.exists() else None
     return None
 
-# Unversioned aliases that resolve to the latest versioned installer zip at request time
+# Unversioned aliases that resolve to the latest versioned installer at request time
 _INSTALLER_GLOBS = {
     "vessence-windows-installer.zip": "vessence-windows-installer-v*.zip",
+    "vessence-windows-installer.exe": "vessence-windows-installer-v*.exe",
     "vessence-mac-installer.zip": "vessence-mac-installer-v*.zip",
     "vessence-linux-installer.zip": "vessence-linux-installer-v*.zip",
 }
@@ -436,6 +437,12 @@ _background_tasks: set[asyncio.Task] = set()  # prevent GC of fire-and-forget ta
 async def startup():
     init_db()
     _auto_load_essences()
+    # Idempotency dedupe table for Android streaming chat retries (job_076).
+    try:
+        from jane_web import turn_dedupe
+        turn_dedupe.init_schema()
+    except Exception as _td_exc:
+        _logger.warning("turn_dedupe init_schema failed: %s", _td_exc)
     # Start periodic reaper for stale Claude/Gemini sessions (prevents memory leaks)
     reaper = asyncio.create_task(_reap_stale_sessions_loop())
     _background_tasks.add(reaper)
@@ -810,6 +817,33 @@ def _get_essence_runtime():
 async def health():
     brain = os.getenv("JANE_BRAIN", "gemini")
     return {"status": "ok", "service": "jane", "brain": brain}
+
+
+@app.get("/healthz")
+async def healthz():
+    """Richer health endpoint for Android client retry-probe.
+
+    Returns the brain warm/cold status so the client can decide whether
+    retrying a TransientServerError is worth the round-trip. Replies fast
+    (no LLM calls) so it's safe to poll during rolling restarts.
+    """
+    brain = os.getenv("JANE_BRAIN", "gemini")
+    warm = "unknown"
+    model = ""
+    try:
+        from llm_brain.v1.standing_brain import get_standing_brain_manager
+        mgr = get_standing_brain_manager()
+        h = await mgr.health_check()
+        warm = h.get("status", "unknown")
+        model = h.get("model", "")
+    except Exception:
+        pass
+    return {
+        "status": "ok",
+        "brain": brain,
+        "brain_status": warm,      # "warm" | "cold" | "unknown"
+        "brain_model": model,
+    }
 
 
 @app.post("/api/admin/reset-gate")
@@ -1270,13 +1304,9 @@ async def worklog_page(request: Request, _=Depends(require_auth)):
 @app.get("/api/job-queue")
 async def get_job_queue(_=Depends(require_auth)):
     """Return job queue as structured JSON for client-side rendering."""
-    import subprocess as _sp
     try:
-        r = _sp.run(
-            [sys.executable, os.path.join(CODE_ROOT, "agent_skills", "show_job_queue.py")],
-            capture_output=True, text=True, timeout=5,
-        )
-        return json.loads(r.stdout) if r.stdout.strip() else {"columns": [], "jobs": [], "count": 0}
+        from agent_skills.show_job_queue import get_job_queue_data
+        return get_job_queue_data()
     except Exception:
         return {"columns": [], "jobs": [], "count": 0}
 
@@ -1284,13 +1314,9 @@ async def get_job_queue(_=Depends(require_auth)):
 @app.get("/api/job-queue/completed")
 async def get_completed_jobs(_=Depends(require_auth)):
     """Return completed jobs as structured JSON for client-side rendering."""
-    import subprocess as _sp
     try:
-        r = _sp.run(
-            [sys.executable, os.path.join(CODE_ROOT, "agent_skills", "show_job_queue.py"), "--completed"],
-            capture_output=True, text=True, timeout=5,
-        )
-        return json.loads(r.stdout) if r.stdout.strip() else {"columns": [], "jobs": [], "count": 0}
+        from agent_skills.show_job_queue import get_completed_jobs_data
+        return get_completed_jobs_data()
     except Exception:
         return {"columns": [], "jobs": [], "count": 0}
 
@@ -2115,6 +2141,53 @@ async def create_managed_user(body: CreateManagedUserRequest, session_id: str = 
         "user": _public_user_config(config),
         "allowlist_updated": allowlist_updated,
     }
+
+
+@app.delete("/api/admin/users/{user_id}")
+async def delete_managed_user(user_id: str, session_id: str = Depends(require_auth)):
+    """Delete a managed user's config, memory, and vault. Admin-only.
+
+    Refuses to delete the admin's own account. Allowlist (ALLOWED_GOOGLE_EMAILS)
+    is also cleaned up if the user had an email attached.
+    """
+    admin_user = _require_admin_session(session_id)
+    from agent_skills.user_manager import (
+        delete_user_space,
+        get_user_config,
+        normalize_user_id,
+        user_config_exists,
+    )
+
+    target = normalize_user_id(user_id)
+    if not user_config_exists(target):
+        raise HTTPException(status_code=404, detail=f"User {user_id} not found.")
+    if target == normalize_user_id(admin_user):
+        raise HTTPException(status_code=400, detail="Cannot delete your own account.")
+
+    # Pull email so we can also remove from the Google allowlist.
+    email = (get_user_config(target).get("email") or "").strip().lower()
+
+    result = delete_user_space(target)
+    if not result.get("removed"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Could not delete user: {result.get('reason', 'unknown')}",
+        )
+
+    allowlist_updated = False
+    if email:
+        current = [e.strip().lower() for e in os.getenv("ALLOWED_GOOGLE_EMAILS", "").split(",") if e.strip()]
+        if email in current:
+            current.remove(email)
+            _write_env_var("ALLOWED_GOOGLE_EMAILS", ",".join(current))
+            os.environ["ALLOWED_GOOGLE_EMAILS"] = ",".join(current)
+            allowlist_updated = True
+
+    _logger.info(
+        "Managed user deleted by %s: user_id=%s email=%s allowlist_updated=%s",
+        admin_user, target, email, allowlist_updated,
+    )
+    return {"ok": True, "user_id": target, "allowlist_updated": allowlist_updated}
 
 
 # ─── Brain Model Settings ────────────────────────────────────────────────────
@@ -3261,9 +3334,8 @@ def _check_instant_command(message: str, platform: str = "web") -> str | None:
     }
     if msg in _JOB_QUEUE_PHRASES:
         try:
-            r = _sp.run([python_bin, os.path.join(CODE_ROOT, "agent_skills", "show_job_queue.py"), "--markdown"],
-                        capture_output=True, text=True, timeout=5)
-            return r.stdout.strip() if r.stdout.strip() else "Job queue is empty."
+            from agent_skills.show_job_queue import format_markdown_table, get_job_queue_data
+            return format_markdown_table(get_job_queue_data()) or "Job queue is empty."
         except Exception:
             return "Could not load job queue."
 
@@ -3273,9 +3345,8 @@ def _check_instant_command(message: str, platform: str = "web") -> str | None:
     }
     if msg in _COMPLETED_JOBS_PHRASES:
         try:
-            r = _sp.run([python_bin, os.path.join(CODE_ROOT, "agent_skills", "show_job_queue.py"), "--completed", "--markdown"],
-                        capture_output=True, text=True, timeout=5)
-            return r.stdout.strip() if r.stdout.strip() else "No completed jobs."
+            from agent_skills.show_job_queue import format_markdown_table, get_completed_jobs_data
+            return format_markdown_table(get_completed_jobs_data()) or "No completed jobs."
         except Exception:
             return "Could not load completed jobs."
 
@@ -3327,6 +3398,56 @@ async def _handle_jane_chat_stream(body: ChatMessage, request: Request):
             _client_ip(request),
         )
         raise HTTPException(status_code=401, detail="Not authenticated")
+
+    # ── Idempotency dedupe (job_076) ────────────────────────────────────────
+    # Android's ChatRepository attaches X-Request-ID per voice turn. A retry
+    # of the same turn_id within DEDUPE_TTL_SECONDS must NOT re-dispatch the
+    # brain, or side-effecting tools (SMS, calendar write) fire twice.
+    turn_id = request.headers.get("X-Request-ID", "").strip()
+    if turn_id:
+        from jane_web import turn_dedupe
+        existing = turn_dedupe.lookup(turn_id)
+        if existing is not None:
+            if existing.status == "completed" and existing.response_json:
+                _logger.info(
+                    "[%s] turn_dedupe COMPLETED replay turn_id=%s",
+                    _session_log_id(session_id), turn_id[:8],
+                )
+                async def _replay():
+                    for line in (existing.response_json or "").splitlines():
+                        if line.strip():
+                            yield line + "\n"
+                return StreamingResponse(_replay(), media_type="application/x-ndjson")
+            if existing.status == "pending":
+                _logger.info(
+                    "[%s] turn_dedupe PENDING join-wait turn_id=%s",
+                    _session_log_id(session_id), turn_id[:8],
+                )
+                # Block in a thread until the original completes (or fails/timeout).
+                cached = await asyncio.to_thread(
+                    turn_dedupe.wait_for_completion, turn_id,
+                )
+                if cached:
+                    async def _joined():
+                        for line in cached.splitlines():
+                            if line.strip():
+                                yield line + "\n"
+                    return StreamingResponse(_joined(), media_type="application/x-ndjson")
+                # Timeout / failed → fall through and try_begin will overwrite.
+        begun = turn_dedupe.try_begin(turn_id, session_id)
+        if not begun:
+            # Race: another retry took ownership between lookup and begin.
+            # Re-read and either replay or fall through.
+            row2 = turn_dedupe.lookup(turn_id)
+            if row2 and row2.status == "completed" and row2.response_json:
+                async def _replay2():
+                    for line in (row2.response_json or "").splitlines():
+                        if line.strip():
+                            yield line + "\n"
+                return StreamingResponse(_replay2(), media_type="application/x-ndjson")
+            # Give up on dedupe; proceed without it for this request.
+            turn_id = ""
+    # ── End idempotency dedupe ──────────────────────────────────────────────
     _logger.info(
         "Accepted jane stream request session=%s msg_len=%d file_ctx=%s body_session=%s ip=%s",
         _session_log_id(session_id),
@@ -3407,17 +3528,24 @@ async def _handle_jane_chat_stream(body: ChatMessage, request: Request):
             _session_log_id(conversation_session_id),
             user_id,
         )
+        # Capture emitted NDJSON so turn_dedupe can replay it for retries.
+        _captured: list[str] = []
+        _had_error = False
         try:
             async with asyncio.timeout(1800):  # 30 minute timeout (matches Claude idle timeout)
                 async for chunk in stream_message(user_id, conversation_session_id, body.message, body.file_context, platform=body.platform, tts_enabled=body.tts_enabled or False):
+                    if turn_id:
+                        _captured.append(chunk)
                     yield chunk
         except (ConnectionError, OSError) as exc:
+            _had_error = True
             _logger.warning(
                 "jane_chat_stream connection error session=%s user=%s: %s",
                 _session_log_id(session_id), user_id, exc,
             )
             yield json.dumps({"type": "error", "data": "⚠️ Connection lost. Please try again."}) + "\n"
         except Exception as exc:
+            _had_error = True
             _logger.exception(
                 "jane_chat_stream failed active_session=%s body_session=%s user=%s: %s",
                 _session_log_id(session_id),
@@ -3433,6 +3561,15 @@ async def _handle_jane_chat_stream(body: ChatMessage, request: Request):
                 _active_streams.pop(stream_ip, None)
             _logger.debug("Stream closed for %s (now %d active)", stream_ip, _active_streams.get(stream_ip, 0))
             _logger.info("Jane stream generator closed session=%s", _session_log_id(session_id))
+            if turn_id:
+                from jane_web import turn_dedupe
+                try:
+                    if _had_error:
+                        turn_dedupe.mark_failed(turn_id)
+                    else:
+                        turn_dedupe.mark_completed(turn_id, "".join(_captured))
+                except Exception as _e:
+                    _logger.warning("turn_dedupe finalize failed: %s", _e)
 
     response = StreamingResponse(
         event_stream(),

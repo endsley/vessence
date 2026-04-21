@@ -1,5 +1,5 @@
 # Code Map — Android (Kotlin)
-_Auto-generated on 2026-04-19 08:15 UTC by `generate_code_map.py`_
+_Auto-generated on 2026-04-20 08:15 UTC by `generate_code_map.py`_
 
 ## android:.../ArticleReaderV2Activity.kt (241 lines)
   class ArticleReaderV2Activity → L36
@@ -44,32 +44,33 @@ _Auto-generated on 2026-04-19 08:15 UTC by `generate_code_map.py`_
     nonFatalError() → L198
     voiceFlow() → L219
 
-## android:.../MainActivity.kt (508 lines)
-  class MainActivity → L27
-    launchStt() → L56
-    override onResults() → L101
-    override onError() → L123
-    override onReadyForSpeech() → L151
-    override onBeginningOfSpeech() → L163
-    override onRmsChanged() → L164
-    override onBufferReceived() → L165
-    override onEndOfSpeech() → L166
-    override onPartialResults() → L167
-    override onEvent() → L175
-    startAlwaysListeningGuarded() → L191
-    restoreAlwaysListening() → L227
-    override onResume() → L234
-    override onPause() → L257
-    override onCreate() → L264
-    override onNewIntent() → L323
-    handleSharedSummaryIntent() → L337
-    handleWakeWordIntent() → L358
-    handleNotificationIntent() → L382
-    handleIncomingShareIntent() → L390
-    requestNotificationPermissionIfNeeded() → L423
-    requestPhoneToolsPermissionsIfNeeded() → L442
-    promptNotificationListenerIfNeeded() → L461
-    override onDestroy() → L494
+## android:.../MainActivity.kt (571 lines)
+  class MainActivity → L28
+    launchStt() → L63
+    timingDetails() → L115
+    override onResults() → L132
+    override onError() → L156
+    override onReadyForSpeech() → L185
+    override onBeginningOfSpeech() → L199
+    override onRmsChanged() → L203
+    override onBufferReceived() → L210
+    override onEndOfSpeech() → L211
+    override onPartialResults() → L215
+    override onEvent() → L230
+    startAlwaysListeningGuarded() → L246
+    restoreAlwaysListening() → L282
+    override onResume() → L289
+    override onPause() → L312
+    override onCreate() → L319
+    override onNewIntent() → L384
+    handleSharedSummaryIntent() → L398
+    handleWakeWordIntent() → L419
+    handleNotificationIntent() → L443
+    handleIncomingShareIntent() → L451
+    requestNotificationPermissionIfNeeded() → L484
+    requestPhoneToolsPermissionsIfNeeded() → L503
+    promptNotificationListenerIfNeeded() → L522
+    override onDestroy() → L555
 
 ## android:.../MusicPlayNavigationState.kt (24 lines)
   object MusicPlayNavigationState → L11
@@ -86,22 +87,22 @@ _Auto-generated on 2026-04-19 08:15 UTC by `generate_code_map.py`_
     override onGetSession() → L16
     override onDestroy() → L20
 
-## android:.../ShareReceiverActivity.kt (336 lines)
+## android:.../ShareReceiverActivity.kt (362 lines)
   class ShareReceiverActivity → L39
     override onCreate() → L41
     extractUrl() → L88
     summarizeNowV2() → L93
     summarizeNow() → L105
-    addToBriefing() → L157
-  object ShareSummarizer → L199
-    postSummaryReady() → L206
-    speakHeadsUp() → L240
-    getOrCreateTts() → L257
-    buildFocusRequest() → L267
-    suspend requestFocus() → L285
-    suspend releaseFocus() → L301
-    postSummaryFailed() → L312
-    ensureChannel() → L325
+    addToBriefing() → L183
+  object ShareSummarizer → L225
+    postSummaryReady() → L232
+    speakHeadsUp() → L266
+    getOrCreateTts() → L283
+    buildFocusRequest() → L293
+    suspend requestFocus() → L311
+    suspend releaseFocus() → L327
+    postSummaryFailed() → L338
+    ensureChannel() → L351
 
 ## android:.../SharedIntentState.kt (30 lines)
   object SharedIntentState → L11
@@ -109,9 +110,9 @@ _Auto-generated on 2026-04-19 08:15 UTC by `generate_code_map.py`_
     setSharedText() → L22
     clear() → L26
 
-## android:.../SttResultBus.kt (32 lines)
-  object SttResultBus → L16
-    postResult() → L23
+## android:.../SttResultBus.kt (35 lines)
+  object SttResultBus → L17
+    postResult() → L26
 
 ## android:.../SummaryReaderActivity.kt (242 lines)
   class SummaryReaderActivity → L55
@@ -595,61 +596,62 @@ _Auto-generated on 2026-04-19 08:15 UTC by `generate_code_map.py`_
 ## android:.../ui/chat/ChatMessageList.kt (68 lines)
   @Composable ChatMessageList() → L22
 
-## android:.../ui/chat/ChatScreen.kt (557 lines)
+## android:.../ui/chat/ChatScreen.kt (575 lines)
   @Composable ChatScreen() → L66
     hasMicPermission() → L122
   @Composable ChatHeader() → L333
   @Composable LiveActivityBanner() → L422
   @Composable VoiceStatusBanner() → L459
-  @Composable ErrorBanner() → L526
+  @Composable ErrorBanner() → L544
 
-## android:.../ui/chat/ChatViewModel.kt (1484 lines)
-  class PendingMessage → L35
-  class ChatUiState → L41
-  class ChatViewModel → L59
-    removeTrailingPartialAwaitingMarker() → L115
-    stripAssistantTags() → L126
-    assistantTextForDisplay() → L134
-    assistantTextForSpeech() → L143
-    extractedSpokenBlock() → L156
-    acquireStreamWakeLock() → L159
-    releaseStreamWakeLock() → L168
-    consumeMusicPlayRequest() → L176
-    override onReceive() → L211
-    initSession() → L333
-    sendMessage() → L382
-    cancelCurrentResponse() → L409
-    executeSend() → L430
-    FIRE_AND_FORGET → L740
-    isConversationEnding() → L954
-    onSendComplete() → L971
-    processNextInQueue() → L1106
-    clearError() → L1116
-    dismissUpdate() → L1120
-    installUpdate() → L1124
-    toggleTts() → L1131
-    stopSpeaking() → L1141
-    speakText() → L1150
-    speakIfEnabled() → L1156
-    suspend tryServerTts() → L1167
-    autoListenAfterTts() → L1229
-    endVoiceConversation() → L1243
-    isConversationEndPhrase() → L1259
-    showSystemMessage() → L1281
-    clearSession() → L1290
-    setAlwaysListeningEnabled() → L1303
-    syncVoicePreferences() → L1310
-    clearWakeWordTrigger() → L1314
-    triggerWakeWord() → L1319
-    startPushToTalk() → L1324
-    stopPushToTalk() → L1328
-    cancelListening() → L1332
-    stopListeningAndReturnToWakeWord() → L1337
-    clearVoiceError() → L1346
-    updateAiMessage() → L1350
-    switchProvider() → L1378
-    suspend prependPendingToolResults() → L1441
-    override onCleared() → L1467
+## android:.../ui/chat/ChatViewModel.kt (1564 lines)
+  class PendingMessage → L36
+  class ChatUiState → L42
+  class ChatViewModel → L60
+    removeTrailingPartialAwaitingMarker() → L118
+    stripAssistantTags() → L129
+    assistantTextForDisplay() → L137
+    assistantTextForSpeech() → L146
+    extractedSpokenBlock() → L159
+    acquireStreamWakeLock() → L162
+    releaseStreamWakeLock() → L171
+    consumeMusicPlayRequest() → L179
+    override onReceive() → L214
+    initSession() → L348
+    sendMessage() → L397
+    cancelCurrentResponse() → L424
+    executeSend() → L446
+    FIRE_AND_FORGET → L789
+    isConversationEnding() → L1022
+    onSendComplete() → L1039
+    processNextInQueue() → L1176
+    clearError() → L1186
+    dismissUpdate() → L1190
+    installUpdate() → L1194
+    toggleTts() → L1201
+    stopSpeaking() → L1212
+    speakText() → L1222
+    stopSentenceTtsQueues() → L1226
+    speakIfEnabled() → L1235
+    suspend tryServerTts() → L1246
+    autoListenAfterTts() → L1308
+    endVoiceConversation() → L1322
+    isConversationEndPhrase() → L1338
+    showSystemMessage() → L1360
+    clearSession() → L1369
+    setAlwaysListeningEnabled() → L1382
+    syncVoicePreferences() → L1389
+    clearWakeWordTrigger() → L1393
+    triggerWakeWord() → L1398
+    startPushToTalk() → L1403
+    stopPushToTalk() → L1407
+    cancelListening() → L1411
+    stopListeningAndReturnToWakeWord() → L1416
+    clearVoiceError() → L1425
+    updateAiMessage() → L1429
+    switchProvider() → L1457
+    suspend prependPendingToolResults() → L1520
+    override onCleared() → L1546
 
 ## android:.../ui/chat/ChatViewModelFactory.kt (24 lines)
   class ChatViewModelFactory → L9
@@ -951,18 +953,26 @@ _Auto-generated on 2026-04-19 08:15 UTC by `generate_code_map.py`_
     CONFIRMATION_FRAMES → L485
     onWakeWordDetected() → L554
 
-## android:.../voice/AndroidTtsManager.kt (110 lines)
+## android:.../voice/AndroidSentenceTtsQueue.kt (73 lines)
+  class AndroidSentenceTtsQueue → L18
+    startPlayback() → L30
+    submitSentence() → L47
+    finishSubmitting() → L58
+    suspend awaitCompletion() → L62
+    stop() → L66
+
+## android:.../voice/AndroidTtsManager.kt (130 lines)
   class AndroidTtsManager → L15
-    override onStart() → L27
-    override onDone() → L29
-    override onError() → L34
-    override onError() → L38
-    override onStop() → L46
-    override onInit() → L53
-    suspend speak() → L64
-    stop() → L79
-    shutdown() → L95
-    suspend awaitReady() → L102
+    override onStart() → L31
+    override onDone() → L39
+    override onError() → L44
+    override onError() → L48
+    override onStop() → L56
+    override onInit() → L63
+    suspend speak() → L74
+    stop() → L99
+    shutdown() → L115
+    suspend awaitReady() → L122
 
 ## android:.../voice/HybridTtsManager.kt (75 lines)
   class HybridTtsManager → L14
@@ -1020,34 +1030,34 @@ _Auto-generated on 2026-04-19 08:15 UTC by `generate_code_map.py`_
   class VessenceVoiceInteractionSession → L24
     override onShow() → L27
 
-## android:.../voice/VoiceController.kt (358 lines)
+## android:.../voice/VoiceController.kt (359 lines)
   class VoiceState → L27
-  class VoiceController → L37
-    isWaitingForReply() → L66
-    setAlwaysListeningEnabled() → L75
-    setTriggerPhrase() → L84
-    startPushToTalk() → L89
-    stopPushToTalk() → L97
-    cancelListening() → L101
-    startWakeWordListening() → L105
-    onAssistantReply() → L116
-    stopTts() → L144
-    clearError() → L148
-    release() → L152
-    startListeningWithTimeout() → L160
-    startWakeDetection() → L169
-    suspend startCommandCapture() → L269
-    override onResults() → L294
-    override onPartialResults() → L300
-    override onError() → L307
-    override onReadyForSpeech() → L311
-    override onBeginningOfSpeech() → L312
-    override onRmsChanged() → L313
-    override onBufferReceived() → L314
-    override onEndOfSpeech() → L315
-    override onEvent() → L316
-    stopListening() → L343
-    emitState() → L354
+  class VoiceController → L38
+    isWaitingForReply() → L67
+    setAlwaysListeningEnabled() → L76
+    setTriggerPhrase() → L85
+    startPushToTalk() → L90
+    stopPushToTalk() → L98
+    cancelListening() → L102
+    startWakeWordListening() → L106
+    onAssistantReply() → L117
+    stopTts() → L145
+    clearError() → L149
+    release() → L153
+    startListeningWithTimeout() → L161
+    startWakeDetection() → L170
+    suspend startCommandCapture() → L270
+    override onResults() → L295
+    override onPartialResults() → L301
+    override onError() → L308
+    override onReadyForSpeech() → L312
+    override onBeginningOfSpeech() → L313
+    override onRmsChanged() → L314
+    override onBufferReceived() → L315
+    override onEndOfSpeech() → L316
+    override onEvent() → L317
+    stopListening() → L344
+    emitState() → L355
 
 ## android:.../voice/WakeWordBridge.kt (39 lines)
   object WakeWordBridge → L11

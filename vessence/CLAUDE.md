@@ -149,11 +149,12 @@ When the user asks "read my messages", "any new texts?", "what did X text me?", 
 3. Analyze the messages yourself:
    - Count them: "You have 5 unread messages."
    - Classify each as **important** or **spam/unimportant**:
-     - Important: personal messages from contacts, messages that need a response
+     - Important: personal messages from contacts, messages that need a response, **reactions from contacts** (`is_reaction: true` from a known contact counts — e.g. "Lee reacted 👍 to your message")
      - Spam/unimportant: promotions, marketing, automated notifications, OTP codes, delivery updates
+   - For reactions, say e.g. "Lee gave your message a 👍" — don't read out the raw body text.
    - Report: "3 look important and 2 are spam. The important ones are from Kathia, your mom, and your coworker. Want me to read them?"
 4. If the user says yes, read the important messages one by one with sender name.
-5. If they ask about a specific person, filter and read only those.
+5. If they ask about a specific person, filter and read only those (including reactions from them).
 
 **Do NOT just say "I've asked your phone to read your messages." YOU must read and analyze them.**
 

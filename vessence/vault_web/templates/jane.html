@@ -317,7 +317,7 @@
         </svg>
         <span>Stop</span>
       </button>
-      <button @click="settingsOpen = !settingsOpen; if (settingsOpen) loadModelSettings()" class="text-slate-400 hover:text-white transition p-1.5 rounded-lg hover:bg-slate-800" :class="settingsOpen ? 'text-violet-400 bg-slate-800' : ''" title="Jane Settings">
+      <button @click="settingsOpen = !settingsOpen; if (settingsOpen) { loadModelSettings(); loadManagedUsersAdmin(); }" class="text-slate-400 hover:text-white transition p-1.5 rounded-lg hover:bg-slate-800" :class="settingsOpen ? 'text-violet-400 bg-slate-800' : ''" title="Jane Settings">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
@@ -484,6 +484,60 @@
                 x-text="opt.label"></button>
             </template>
           </div>
+        </div>
+      </section>
+
+      <!-- Managed Users (admin only) — hidden unless GET /api/admin/users returns 200 -->
+      <section x-show="usersAdminAvailable" x-cloak class="pt-6 border-t border-slate-800">
+        <h3 class="text-sm font-bold text-white mb-1">Managed Users</h3>
+        <p class="text-xs text-slate-500 mb-3">Create and delete users. Each user gets an isolated memory and vault.</p>
+
+        <!-- Existing users list -->
+        <div class="space-y-1.5 mb-4">
+          <template x-for="u in managedUsers" :key="u.user_id">
+            <div class="flex items-center justify-between bg-slate-800/60 border border-slate-700 rounded-lg px-3 py-2">
+              <div class="min-w-0 flex-1">
+                <div class="text-xs text-white font-medium truncate" x-text="u.display_name || u.user_id"></div>
+                <div class="text-[10px] text-slate-500 truncate" x-text="u.email || u.user_id"></div>
+              </div>
+              <button @click="deleteManagedUser(u)"
+                :disabled="deletingUserId === u.user_id"
+                class="ml-2 text-[10px] text-red-400 hover:text-red-300 disabled:text-slate-600 disabled:cursor-wait px-2 py-1 rounded border border-red-900/50 hover:border-red-700 transition">
+                <span x-show="deletingUserId !== u.user_id">Delete</span>
+                <span x-show="deletingUserId === u.user_id">...</span>
+              </button>
+            </div>
+          </template>
+          <div x-show="managedUsers.length === 0" class="text-[11px] text-slate-600 italic px-1">No managed users yet.</div>
+        </div>
+
+        <!-- Create user form -->
+        <div class="space-y-2 bg-slate-950/50 border border-slate-800 rounded-lg p-3">
+          <div class="text-[11px] font-bold text-slate-400 uppercase tracking-widest">Add user</div>
+          <input type="email" x-model="newUser.email" placeholder="email@example.com"
+            class="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs text-white placeholder-slate-600 focus:border-violet-500 outline-none" />
+          <input type="text" x-model="newUser.displayName" placeholder="Display name (optional)"
+            class="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs text-white placeholder-slate-600 focus:border-violet-500 outline-none" />
+          <div class="grid grid-cols-2 gap-1 pt-1">
+            <template x-for="cap in userCapabilityOptions" :key="cap.id">
+              <label class="flex items-center gap-1.5 text-[11px] text-slate-300 cursor-pointer">
+                <input type="checkbox" :value="cap.id"
+                  :checked="newUser.capabilities.includes(cap.id)"
+                  @change="toggleNewUserCapability(cap.id, $event.target.checked)"
+                  class="accent-violet-500 rounded" />
+                <span x-text="cap.label"></span>
+              </label>
+            </template>
+          </div>
+          <button @click="createManagedUser()"
+            :disabled="creatingUser || !newUser.email"
+            class="w-full bg-violet-600 hover:bg-violet-500 disabled:bg-slate-700 disabled:cursor-not-allowed text-white text-xs font-medium py-1.5 rounded transition">
+            <span x-show="!creatingUser">Create user</span>
+            <span x-show="creatingUser">Creating...</span>
+          </button>
+          <div x-show="userAdminMsg" x-transition class="text-[11px] py-1 px-2 rounded text-center"
+            :class="userAdminError ? 'bg-red-900/40 text-red-400' : 'bg-green-900/40 text-green-400'"
+            x-text="userAdminMsg"></div>
         </div>
       </section>
 
@@ -916,6 +970,16 @@
         modelTiers: [],
         modelSaveMsg: '',
         modelSaveError: false,
+
+        // Managed-users admin (only visible if GET /api/admin/users returns 200)
+        usersAdminAvailable: false,
+        managedUsers: [],
+        userCapabilityOptions: [],
+        newUser: { email: '', displayName: '', capabilities: ['chat', 'memory'] },
+        creatingUser: false,
+        deletingUserId: '',
+        userAdminMsg: '',
+        userAdminError: false,
 
         formatStatusEntry(entry) {
           const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
@@ -2054,6 +2118,82 @@
 
         resetModelDefaults() {
           this.selectedModel = this.defaultModel;
+        },
+
+        // ── Managed Users admin (only shown to admins; 403 → hidden) ──────
+        async loadManagedUsersAdmin() {
+          try {
+            const r = await fetch('/api/admin/users');
+            if (!r.ok) {
+              this.usersAdminAvailable = false;
+              return;
+            }
+            const data = await r.json();
+            this.usersAdminAvailable = true;
+            this.managedUsers = (data.users || []).filter(u => u.managed !== false);
+            this.userCapabilityOptions = data.capabilities || [];
+          } catch (e) {
+            this.usersAdminAvailable = false;
+          }
+        },
+
+        toggleNewUserCapability(capId, enabled) {
+          const set = new Set(this.newUser.capabilities || []);
+          if (enabled) set.add(capId); else set.delete(capId);
+          this.newUser.capabilities = Array.from(set);
+        },
+
+        async createManagedUser() {
+          if (this.creatingUser) return;
+          this.creatingUser = true;
+          this.userAdminMsg = '';
+          this.userAdminError = false;
+          try {
+            const r = await fetch('/api/admin/users', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                email: (this.newUser.email || '').trim(),
+                display_name: (this.newUser.displayName || '').trim() || null,
+                capabilities: this.newUser.capabilities,
+              }),
+            });
+            const data = await r.json();
+            if (!r.ok) throw new Error(data.detail || 'Could not create user');
+            this.userAdminMsg = `Created ${data.user?.display_name || data.user?.user_id}.`;
+            this.newUser = { email: '', displayName: '', capabilities: ['chat', 'memory'] };
+            await this.loadManagedUsersAdmin();
+          } catch (e) {
+            this.userAdminError = true;
+            this.userAdminMsg = e.message || 'Create failed';
+          } finally {
+            this.creatingUser = false;
+            setTimeout(() => { this.userAdminMsg = ''; }, 5000);
+          }
+        },
+
+        async deleteManagedUser(user) {
+          if (!user || !user.user_id) return;
+          const name = user.display_name || user.email || user.user_id;
+          if (!confirm(`Delete user "${name}"? This removes their memory and vault. This cannot be undone.`)) return;
+          this.deletingUserId = user.user_id;
+          this.userAdminMsg = '';
+          this.userAdminError = false;
+          try {
+            const r = await fetch(`/api/admin/users/${encodeURIComponent(user.user_id)}`, {
+              method: 'DELETE',
+            });
+            const data = await r.json().catch(() => ({}));
+            if (!r.ok) throw new Error(data.detail || 'Could not delete user');
+            this.userAdminMsg = `Deleted ${name}.`;
+            await this.loadManagedUsersAdmin();
+          } catch (e) {
+            this.userAdminError = true;
+            this.userAdminMsg = e.message || 'Delete failed';
+          } finally {
+            this.deletingUserId = '';
+            setTimeout(() => { this.userAdminMsg = ''; }, 5000);
+          }
         },
 
         cancelResponse() {

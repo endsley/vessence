@@ -1,5 +1,8 @@
 package com.vessences.android.ui.auth
 
+import android.app.Activity
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -7,6 +10,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -32,6 +36,24 @@ fun LoginScreen(viewModel: LoginViewModel) {
     val isSigningIn by viewModel.isSigningIn.collectAsState()
     val error by viewModel.error.collectAsState()
     val context = LocalContext.current
+
+    // Legacy Google Sign-In fallback launcher (for devices without Credential Manager support)
+    val legacyLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            viewModel.handleLegacyResult(result.data)
+        } else {
+            viewModel.clearError()
+        }
+    }
+
+    // Observe the ViewModel's legacy sign-in intent event and launch it
+    LaunchedEffect(Unit) {
+        viewModel.legacySignInIntent.collect { intent ->
+            legacyLauncher.launch(intent)
+        }
+    }
 
     Box(
         modifier = Modifier

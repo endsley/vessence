@@ -32,6 +32,9 @@ logger = logging.getLogger("jane.standing_brain")
 # Each provider maps to a list of (substring, category) tuples.
 _STDERR_ERROR_PATTERNS: dict[str, list[tuple[str, str]]] = {
     "claude": [
+        ("Not logged in", "auth"),
+        ("Please run /login", "auth"),
+        ("not authenticated", "auth"),
         ("rate_limit", "rate_limit"),
         ("overloaded", "overloaded"),
         ("billing", "billing"),
@@ -205,6 +208,11 @@ class StandingBrainManager:
         self._started = False
         self._reaper_task: Optional[asyncio.Task] = None
         self._on_provider_error: Optional[callable] = None  # callback(error_dict)
+        self._pending_notifications: list[str] = []  # user-facing notices to prepend to next response
+
+    def pop_pending_notification(self) -> Optional[str]:
+        """Return and clear the next pending user-facing notification, or None."""
+        return self._pending_notifications.pop(0) if self._pending_notifications else None
 
     @property
     def brain(self) -> Optional[BrainProcess]:
@@ -363,6 +371,14 @@ class StandingBrainManager:
                     logger.warning("Brain [%s] stderr error detected [%s]: %s",
                                    bp.model, category, text[:200])
                     _log_crash(f"Provider error [{_PROVIDER}/{category}]: {text[:200]}")
+                    if category == "auth":
+                        # Auth failure means the CLI session is dead — auto-switch to Gemini.
+                        fallback = "gemini" if _PROVIDER != "gemini" else "openai"
+                        logger.warning("Auth failure on %s — auto-switching to %s", _PROVIDER, fallback)
+                        self._pending_notifications.append(
+                            "Due to Authorization switch, we now default to use Gemini."
+                        )
+                        asyncio.create_task(self.switch_provider(fallback, persist=False))
                     if self._on_provider_error:
                         try:
                             self._on_provider_error(error_info)
@@ -388,7 +404,7 @@ class StandingBrainManager:
         if self._brain:
             self._brain.last_stderr_error = None
 
-    async def switch_provider(self, new_provider: str) -> dict:
+    async def switch_provider(self, new_provider: str, persist: bool = True) -> dict:
         """Switch to a different LLM provider at runtime.
 
         1. Kill the current CLI process
@@ -481,8 +497,9 @@ class StandingBrainManager:
         else:
             logger.info("Provider %s uses direct execution path; skipping standing-brain spawn", new_provider)
 
-        # 6. Update .env for persistence
-        self._update_env_file(new_provider)
+        # 6. Update .env for persistence (skipped for temporary auth-fallback switches)
+        if persist:
+            self._update_env_file(new_provider)
 
         # 7. Report provider switch result
         result = {

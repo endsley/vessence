@@ -60,7 +60,13 @@ NEAR_IDENTICAL_DIST = float(os.environ.get("JANE_V3_NEAR_IDENTICAL_DIST", "0.05"
 # somewhere right based on session of course" matched "talk later" at 0.241
 # and short-circuited to end_conversation ("Ok.") when it was a topical
 # statement that belonged on Opus.
-STAGE2_MAX_DISTANCE = float(os.environ.get("JANE_V3_STAGE2_MAX_DISTANCE", "0.15"))
+STAGE2_MAX_DISTANCE = float(os.environ.get("JANE_V3_STAGE2_MAX_DISTANCE", "0.22"))
+# When v2 votes this many or more out of 5 AND best distance <= this value,
+# trust v2's winner class even if qwen disagrees (qwen sees "schedule" and
+# confuses clinic queries with personal calendar). Override only when qwen
+# picks a valid Stage-2 class — if qwen says "others" we still respect it.
+STAGE2_V2_LOCK_VOTES = int(os.environ.get("JANE_V3_V2_LOCK_VOTES", "4"))
+STAGE2_V2_LOCK_DIST  = float(os.environ.get("JANE_V3_V2_LOCK_DIST", "0.12"))
 # Per-call timeout for the qwen HTTP call. Reads the SINGLE source of
 # truth from jane_web.jane_v2.models so every Ollama caller agrees.
 # JANE_V3_LLM_TIMEOUT_S overrides for this specific call site if needed.
@@ -479,7 +485,7 @@ async def classify(
         if start >= 0 and end > start:
             text = text[start : end + 1]
         parsed = json.loads(text)
-        cls = str(parsed.get("class", "")).strip().lower()
+        cls = str(parsed.get("class", "")).strip().lower().strip("[]").strip()
         conf = str(parsed.get("confidence", "Low")).strip().title()
         if conf not in ("Very High", "High", "Medium", "Low"):
             conf = "Low"
@@ -503,24 +509,61 @@ async def classify(
         logger.warning("v3: parse failed (%s) — raw=%r", e, raw[:160])
         return ("others", "Low")
 
-    # 6. Stage 2 distance gate — floor confidence when qwen agreed with a
-    # chroma winner whose embedding distance is too loose for a canned
-    # short-circuit. "Same vibe, different sentence" territory (0.15–0.30 for
-    # bge-small-en) is where short farewell exemplars outrank topical
-    # statements. Only applies when qwen's returned class equals the chroma
-    # winner — if qwen picked the pending-action class or overruled chroma,
-    # we don't penalize based on chroma's distance (which isn't the evidence
-    # qwen used). Doesn't affect already-Medium/Low results.
+    # 5b. V2 supermajority lock — when the embedding model votes ≥4/5 with a
+    # very tight distance AND qwen didn't say "others", trust v2's winner.
+    # Prevents qwen from overriding strong embedding agreement with surface-
+    # word pattern matching (e.g. "schedule" pulling clinic queries into
+    # read_calendar). Still respect qwen saying "others" — that means the
+    # query is genuinely off-topic regardless of embedding similarity.
+    if (
+        cls != "others"
+        and winner["count"] >= STAGE2_V2_LOCK_VOTES
+        and float(winner.get("best_distance", 1.0)) <= STAGE2_V2_LOCK_DIST
+        and cls != winner_handler
+    ):
+        logger.info(
+            "v3: v2 supermajority lock: overriding qwen %r → %r (v2 votes=%d dist=%.3f)",
+            cls, winner_handler, winner["count"], float(winner.get("best_distance", 1.0)),
+        )
+        cls = winner_handler
+        conf = "High"
+
+    # 6. Stage 2 distance gate — floor confidence when qwen's CHOSEN class
+    # has no tight chroma support.
+    #
+    # Previous version only fired when `cls == winner_handler`, which missed
+    # the case seen on 2026-04-20 08:23:54: chroma winner was 'shopping list'
+    # (4/5, d=0.265), runnerup was 'end conversation' (1 vote), qwen picked
+    # 'end conversation' Very High. The floor skipped because qwen overruled
+    # chroma — but the chosen class itself had weak embedding support.
+    #
+    # New rule: find qwen's chosen class in the ranked chroma list and gate
+    # on THAT entry's best distance. If the chosen class isn't in chroma at
+    # all (0 votes), treat as weak → floor. Pending-mode exemption: when
+    # qwen picks the pending-action class, skip the floor (the FIFO context
+    # is the evidence, not chroma).
     winner_best_distance = float(winner.get("best_distance", 1.0))
+    chosen_distance = None
+    for rec in ranked:
+        if rec["class"].lower().replace("_", " ") == cls:
+            chosen_distance = float(rec["best_distance"])
+            break
+    pending_class_normalized = (pending_class or "").lower().strip()
+    is_pending_choice = bool(pending_class_normalized) and cls == pending_class_normalized
+    # Only floor when the chosen class IS in chroma top-K with a loose
+    # distance. If chosen isn't in top-K at all, qwen is making a non-chroma-
+    # supported call (FIFO context, world knowledge like "bye") and we trust
+    # it — flooring there would penalize legitimate short farewells.
     if (
         conf in _STAGE2_CONFS
         and cls != "others"
-        and cls == winner_handler
-        and winner_best_distance > STAGE2_MAX_DISTANCE
+        and not is_pending_choice
+        and chosen_distance is not None
+        and chosen_distance > STAGE2_MAX_DISTANCE
     ):
         logger.info(
-            "v3: distance floor (winner_dist=%.3f > %.3f) — %s:%s → Medium (escalate)",
-            winner_best_distance, STAGE2_MAX_DISTANCE, cls, conf,
+            "v3: distance floor (chosen=%s dist=%.3f > %.3f, winner=%s dist=%.3f) — %s:%s → Medium (escalate)",
+            cls, chosen_distance, STAGE2_MAX_DISTANCE, winner_handler, winner_best_distance, cls, conf,
         )
         conf = "Medium"
 

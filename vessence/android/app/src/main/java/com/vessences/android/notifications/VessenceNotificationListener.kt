@@ -103,12 +103,24 @@ class VessenceNotificationListener : NotificationListenerService() {
      * Returns null if the notification should be skipped entirely (wrong
      * category, own package, no parseable content).
      */
+    private fun looksLikeReaction(body: String): Boolean {
+        val lower = body.lowercase()
+        return lower.contains("reacted to") || lower.contains("reacted with") ||
+            lower.matches(Regex("""[\p{So}\p{Sk}\uFE0F️]+\s*.*"""))
+    }
+
     private fun extractMessages(sbn: StatusBarNotification): List<RecentMessagesBuffer.Entry>? {
         val n: Notification = sbn.notification
-        if (n.category != Notification.CATEGORY_MESSAGE) return null
         if (sbn.packageName == packageName) return null
-
+        // Accept CATEGORY_MESSAGE always; also accept CATEGORY_SOCIAL/null if the
+        // body looks like a reaction — some apps don't use CATEGORY_MESSAGE for reactions.
         val extras: Bundle = n.extras ?: return null
+        val isMessageCategory = n.category == Notification.CATEGORY_MESSAGE
+        if (!isMessageCategory) {
+            val previewBody = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()?.trim().orEmpty()
+            if (!looksLikeReaction(previewBody)) return null
+        }
+
         val now = System.currentTimeMillis()
 
         // Preferred path: MessagingStyle notifications carry a typed message
@@ -139,6 +151,7 @@ class VessenceNotificationListener : NotificationListenerService() {
                         timestamp = if (msg.timestamp > 0) msg.timestamp else now,
                         packageName = sbn.packageName,
                         sbnKey = "${sbn.key}#$idx",
+                        isReaction = looksLikeReaction(bodyStr),
                     )
                 )
             }
@@ -156,6 +169,7 @@ class VessenceNotificationListener : NotificationListenerService() {
                 timestamp = n.`when`.takeIf { it > 0 } ?: now,
                 packageName = sbn.packageName,
                 sbnKey = sbn.key,
+                isReaction = looksLikeReaction(textStr),
             )
         )
     }

@@ -327,6 +327,7 @@ class MainActivity : ComponentActivity() {
         CrashReporter.install(applicationContext)
         DiagnosticReporter.init(applicationContext)
         ApiClient.init(applicationContext)
+        com.vessences.android.util.NetworkMonitor.init(applicationContext)
         // Prewarm the system TTS engine so ChatViewModel / VoiceController's
         // TextToSpeech instances see a warm service when they spin up. Avoids
         // the ~1-3s first-speak init delay after app launch.

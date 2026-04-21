@@ -1,0 +1,249 @@
+{
+  "class": "SEND_EMAIL",
+  "phrases": [
+    "check my email",
+    "any new emails",
+    "did Alice email me",
+    "read my email",
+    "how many unread emails do I have",
+    "what's in my inbox",
+    "show me my emails",
+    "summarize my emails",
+    "did my boss email me back",
+    "are there any emails from Kathia",
+    "is there an email about the meeting",
+    "how does the email tool work",
+    "how does send_email work",
+    "what is the Gmail API",
+    "what's Alice's email address",
+    "how do I configure my email",
+    "email me the list",
+    "email me when you're done",
+    "I should email Bob later today",
+    "remind me to email Bob tomorrow",
+    "I was just about to email her",
+    "compose a song about the weekend",
+    "draft a plan for Q3",
+    "write a letter to my accountant",
+    "text my wife I'll be late",
+    "tell my mom I'm on my way",
+    "call Sarah right now",
+    "forget about the email",
+    "nevermind I already sent that email yesterday",
+    "email is broken again"
+  ],
+  "results": [
+    {
+      "phrase": "check my email",
+      "classification": "READ_EMAIL",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "any new emails",
+      "classification": "READ_EMAIL",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "did Alice email me",
+      "classification": "READ_EMAIL",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "read my email",
+      "classification": "READ_EMAIL",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "how many unread emails do I have",
+      "classification": "READ_EMAIL",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "what's in my inbox",
+      "classification": "READ_EMAIL",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "show me my emails",
+      "classification": "READ_EMAIL",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "summarize my emails",
+      "classification": "READ_EMAIL",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "did my boss email me back",
+      "classification": "READ_EMAIL",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "are there any emails from Kathia",
+      "classification": "READ_EMAIL",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "is there an email about the meeting",
+      "classification": "READ_EMAIL",
+      "confidence": 0.6,
+      "margin": 0.2,
+      "false_positive": false
+    },
+    {
+      "phrase": "how does the email tool work",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "how does send_email work",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.6,
+      "margin": 0.2,
+      "false_positive": false
+    },
+    {
+      "phrase": "what is the Gmail API",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.6,
+      "margin": 0.2,
+      "false_positive": false
+    },
+    {
+      "phrase": "what's Alice's email address",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.4,
+      "margin": 0.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "how do I configure my email",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.6,
+      "margin": 0.2,
+      "false_positive": false
+    },
+    {
+      "phrase": "email me the list",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.4,
+      "margin": 0.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "email me when you're done",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.4,
+      "margin": 0.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "I should email Bob later today",
+      "classification": "TIMER",
+      "confidence": 0.6,
+      "margin": 0.4,
+      "false_positive": false
+    },
+    {
+      "phrase": "remind me to email Bob tomorrow",
+      "classification": "TIMER",
+      "confidence": 0.6,
+      "margin": 0.2,
+      "false_positive": false
+    },
+    {
+      "phrase": "I was just about to email her",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.6,
+      "margin": 0.2,
+      "false_positive": false
+    },
+    {
+      "phrase": "compose a song about the weekend",
+      "classification": "MUSIC_PLAY",
+      "confidence": 0.6,
+      "margin": 0.4,
+      "false_positive": false
+    },
+    {
+      "phrase": "draft a plan for Q3",
+      "classification": "FORCE_STAGE3",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "write a letter to my accountant",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.4,
+      "margin": 0.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "text my wife I'll be late",
+      "classification": "READ_MESSAGES",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "tell my mom I'm on my way",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.4,
+      "margin": 0.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "call Sarah right now",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "forget about the email",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.4,
+      "margin": 0.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "nevermind I already sent that email yesterday",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "email is broken again",
+      "classification": "READ_EMAIL",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    }
+  ],
+  "false_positive_count": 0,
+  "false_positives": []
+}

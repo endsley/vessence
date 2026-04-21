@@ -39,12 +39,10 @@ EXAMPLES = [
     "show me my agenda today",
     "read my agenda today",
     "check my agenda",
-    # "schedule" noun — kept only in clear read-shapes (avoid overlap with
-    # "schedule a meeting")
-    "read my schedule today",
-    "show me my schedule today",
-    "what does my schedule look like today",
-    "what does my schedule look like tomorrow",
+    # "schedule" noun — kept only with explicit "calendar" or clear personal context
+    # (avoid overlap with clinic schedule queries — "my schedule" is ambiguous)
+    "read my calendar schedule today",
+    "show me my calendar schedule today",
     # Explicit "events on my calendar" phrasings
     "what events are on my calendar today",
     "what events are on my calendar tomorrow",

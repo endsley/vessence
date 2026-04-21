@@ -1,0 +1,249 @@
+{
+  "class": "CLINIC_SCHEDULES_INFO",
+  "phrases": [
+    "what's my schedule for today",
+    "how many patients does Ariel have on Tuesday",
+    "book a patient for Kathia on Thursday",
+    "cancel Kathia's appointment on Wednesday",
+    "schedule me an appointment with Kathia",
+    "add a patient to Tuesday's calendar",
+    "how many patients did the clinic see last month",
+    "how many patients total does the clinic have",
+    "what time does the clinic open on Monday",
+    "who are the practitioners at the clinic",
+    "set up an appointment for Kathia next week",
+    "remind me about Kathia's schedule tomorrow morning",
+    "what's the weather like for Kathia today",
+    "how do you access the scheduling system",
+    "can you log into the schedule portal",
+    "I need to reschedule my appointment on Friday",
+    "how many appointments are still available today",
+    "check if there are open slots on Wednesday",
+    "don't check Kathia's schedule right now",
+    "I don't need to know her patient list",
+    "how many hours does Kathia work this week",
+    "what's Lace Ronald's schedule on Friday",
+    "who's working at the clinic on Saturday",
+    "how many patients does the clinic see per week",
+    "is the clinic open on Sunday",
+    "what are Kathia's work hours",
+    "show me today's appointments for all practitioners",
+    "how many patients did Kathia see last week",
+    "can you book an acupuncture appointment for me",
+    "what does a follow-up acupuncture appointment involve"
+  ],
+  "results": [
+    {
+      "phrase": "what's my schedule for today",
+      "classification": "READ_CALENDAR",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "how many patients does Ariel have on Tuesday",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "book a patient for Kathia on Thursday",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.6,
+      "margin": 0.2,
+      "false_positive": false
+    },
+    {
+      "phrase": "cancel Kathia's appointment on Wednesday",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.4,
+      "margin": 0.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "schedule me an appointment with Kathia",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "add a patient to Tuesday's calendar",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.4,
+      "margin": 0.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "how many patients did the clinic see last month",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "how many patients total does the clinic have",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "what time does the clinic open on Monday",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.6,
+      "margin": 0.2,
+      "false_positive": false
+    },
+    {
+      "phrase": "who are the practitioners at the clinic",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "set up an appointment for Kathia next week",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "remind me about Kathia's schedule tomorrow morning",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.4,
+      "margin": 0.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "what's the weather like for Kathia today",
+      "classification": "WEATHER",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "how do you access the scheduling system",
+      "classification": "TIMER",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "can you log into the schedule portal",
+      "classification": "READ_CALENDAR",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "I need to reschedule my appointment on Friday",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "how many appointments are still available today",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "check if there are open slots on Wednesday",
+      "classification": "READ_CALENDAR",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "don't check Kathia's schedule right now",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.0,
+      "margin": 0.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "I don't need to know her patient list",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.0,
+      "margin": 0.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "how many hours does Kathia work this week",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.6,
+      "margin": 0.2,
+      "false_positive": false
+    },
+    {
+      "phrase": "what's Lace Ronald's schedule on Friday",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.4,
+      "margin": 0.2,
+      "false_positive": false
+    },
+    {
+      "phrase": "who's working at the clinic on Saturday",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.6,
+      "margin": 0.2,
+      "false_positive": false
+    },
+    {
+      "phrase": "how many patients does the clinic see per week",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "is the clinic open on Sunday",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "what are Kathia's work hours",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "show me today's appointments for all practitioners",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.6,
+      "margin": 0.2,
+      "false_positive": false
+    },
+    {
+      "phrase": "how many patients did Kathia see last week",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.6,
+      "margin": 0.2,
+      "false_positive": false
+    },
+    {
+      "phrase": "can you book an acupuncture appointment for me",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "what does a follow-up acupuncture appointment involve",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    }
+  ],
+  "false_positive_count": 0,
+  "false_positives": []
+}

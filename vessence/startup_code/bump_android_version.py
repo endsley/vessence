@@ -75,7 +75,7 @@ def build_apk() -> Path:
         cwd=str(ANDROID_DIR),
         capture_output=True,
         text=True,
-        timeout=600,
+        timeout=1800,
         env=build_env,
     )
     if result.returncode != 0:

@@ -65,6 +65,24 @@ KNOWN_CLASSES = [
     "get time", "others",
 ]
 
+# Stage 3 escalation prepends system context (<jane_architecture>, <class_protocol>,
+# <memory_verify>, [CURRENT CONVERSATION STATE]) to the message before it reaches
+# the prompt dump. Strip these so the audit replays the user's actual words.
+_SYSTEM_XML_RE = re.compile(
+    r"<(?:jane_architecture|class_protocol|memory_verify|verify_first|standing_brain_context)"
+    r"[^>]*>[\s\S]*?</(?:jane_architecture|class_protocol|memory_verify|verify_first|standing_brain_context)>\s*",
+)
+_CONV_STATE_RE = re.compile(
+    r"\[CURRENT CONVERSATION STATE\][\s\S]*?\[END CURRENT CONVERSATION STATE\]\s*",
+)
+
+
+def _strip_system_context(msg: str) -> str:
+    """Remove system context markers injected by Stage 3 escalation."""
+    cleaned = _SYSTEM_XML_RE.sub("", msg)
+    cleaned = _CONV_STATE_RE.sub("", cleaned)
+    return cleaned.strip()
+
 
 # ── Data collection ─────────────────────────────────────────────────────────
 
@@ -79,10 +97,13 @@ def load_recent_prompts(n: int = 100) -> list[dict]:
             try:
                 d = json.loads(line)
                 msg = (d.get("message") or "").strip()
-                # Skip system prefixes — we want the user's actual words
-                if not msg or msg.startswith("[") or msg.startswith("("):
+                if not msg:
                     continue
+                msg = _strip_system_context(msg)
                 if len(msg) < 3:
+                    continue
+                # Skip system prefixes that remain after stripping
+                if msg.startswith("[") or msg.startswith("("):
                     continue
                 rows.append({"prompt": msg, "ts": d.get("timestamp", "")})
             except Exception:
@@ -106,7 +127,7 @@ async def classify_only(prompt: str) -> str:
     try:
         sys.path.insert(0, str(VESSENCE_HOME)) if str(VESSENCE_HOME) not in sys.path else None
         from jane_web.jane_v2.stage1_classifier import classify
-        cls, conf = await classify(prompt)
+        cls, conf, dist = await classify(prompt)
         return f"{cls}:{conf}"
     except Exception as e:
         return f"error:{e}"

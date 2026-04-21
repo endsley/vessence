@@ -1,7 +1,7 @@
 ---
 Title: Android streaming-chat resilience (retry + idempotency + network-awareness)
 Priority: 1
-Status: pending
+Status: incomplete
 Created: 2026-04-19
 Supersedes: job_073_chat_error_networkexception.md, job_075_chat_error_transientservererror.md
 Reviewed-by: gemini (2026-04-19) — see "Review fixes applied" below
@@ -242,3 +242,6 @@ Key "don't bother" signals:
 - Stream-resumption after partial NDJSON (too complex; accept loss of partial output, surface error).
 - Full circuit breaker.
 - Background queuing of failed turns across app-kill.
+
+## Result
+Jane web is not running — skipping

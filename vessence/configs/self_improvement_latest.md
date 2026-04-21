@@ -1,16 +1,16 @@
 # Most Recent Nightly Self-Improvement
 
-- Run started: 2026-04-19 01:00:01
-- Report generated: 2026-04-19 01:39:11
-- Total runtime: 2349s
-- Jobs: 8 total, 6 ok, 1 timeout, 1 failed
+- Run started: 2026-04-20 01:00:01
+- Report generated: 2026-04-20 01:19:41
+- Total runtime: 1178s
+- Jobs: 8 total, 7 ok, 1 timeout, 0 failed
 - Stable latest report path: `/home/chieh/ambient/vessence/configs/self_improvement_latest.md`
-- Archived copy: `/home/chieh/ambient/vessence-data/reports/self_improvement/self_improvement_20260419_010001.md`
+- Archived copy: `/home/chieh/ambient/vessence-data/reports/self_improvement/self_improvement_20260420_010001.md`
 
 ## Executive Summary
 
-- 2 stage(s) need attention because they timed out or exited non-zero.
-- 5 concrete improvement/fix signals were found in logs or reports.
+- 1 stage(s) need attention because they timed out or exited non-zero.
+- 4 concrete improvement/fix signals were found in logs or reports.
 
 ## Stage 1: Auto-Commit WIP (pre)
 
@@ -27,7 +27,7 @@
 
 ### Improvements It Made
 
-- 2026-04-19 01:00:02,110 INFO Committed 101 file(s).
+- 2026-04-20 01:00:02,636 INFO Committed 120 file(s).
 
 ### Evidence Files
 
@@ -69,7 +69,7 @@
 
 ### Problems It Found
 
-- 2026-04-19 01:15:02,246 [WARNING] Working tree has uncommitted changes — skipping audit.
+- 2026-04-20 01:15:02,759 [WARNING] Working tree has uncommitted changes — skipping audit.
 
 ### Improvements It Made
 
@@ -84,7 +84,7 @@
 ## Stage 4: Pipeline Audit (30 prompts)
 
 - Status: `ok`
-- Duration: 621s (10.3 min)
+- Duration: 269s (4.5 min)
 
 ### What It Did
 
@@ -92,13 +92,13 @@
 
 ### Problems It Found
 
-- Prompts audited: 30.
-- Classification failures: 21.
-- Response failures: 26.
-- **well that is a problem can you fix that** (error/stage2): Sorry, could you say that again?
-- **I don't understand why there's a short circuit there should not be short circuit** (error/stage2): Sorry, could you say that again?
-- **no we designed a three-stage specifically for this reason so we can capture erro** (error/stage2): Sorry, could you say that again?
+- Prompts audited: 13.
+- Classification failures: 6.
+- Response failures: 8.
+- **<jane_architecture>
+- **<jane_architecture>
 - **<memory_verify priority="critical">
+- **<jane_architecture>
 
 ### Improvements It Made
 
@@ -140,8 +140,8 @@
 
 ## Stage 6: Transcript Quality Review
 
-- Status: `exit-1`
-- Duration: 824s (13.7 min)
+- Status: `ok`
+- Duration: 3s (0.1 min)
 
 ### What It Did
 
@@ -149,24 +149,12 @@
 
 ### Problems It Found
 
-- Job ended with status `exit-1`.
-- Transcript review found 20 issues: 4 critical, 1 low, 15 medium.
-- Obvious time request was routed as a stale Stage 3 follow-up instead of going through Stage 1/Stage 2 get-time fast path.
-- Air-quality weather request was classified correctly but Stage 2 rejected it and escalated to slow Stage 3.
-- Greeting fast path was correct but too slow for a Stage 2 handler.
-- Weather fast path was correct but took 7.5 seconds in Stage 2.
+- No problems were detected in the available logs/reports.
 
 ### Improvements It Made
 
-- 2026-04-19 01:29:08,727 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (20 issues)
-- 2026-04-19 01:29:08,728 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 4 critical, 15 medium, 1 minor issues. The most urgent
-
-### Follow-Up Fixes Recommended
-
-- Add a resolver pre-check for high-precision interrupt intents such as GET_TIME, WEATHER, TIMER, SMS, and CANCEL; if matched, clear or suspend the pending action and run normal Stage 1 classification.
-- Extend the weather handler gate and handler implementation to support air-quality queries; do not self-correct valid class-labeled utterances into DELEGATE_OPUS until a reviewer or post-check verifies the class was actually wrong.
-- Make greeting responses fully local and nonblocking; remove any memory, broadcast, or external calls from the greeting handler path and add a latency assertion for greetings under 500ms.
-- Instrument the weather handler by sub-step, cache current weather reads briefly, and enforce a timeout/fallback response so Stage 2 weather does not block voice UX for multiple seconds.
+- 2026-04-20 01:19:35,986 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (0 issues)
+- 2026-04-20 01:19:35,987 INFO self_improve_log: recorded [info] Transcript Review — I reviewed yesterday's conversations and nothing looked off — all turns handled cleanly.
 
 ### Evidence Files
 
@@ -197,7 +185,7 @@
 ## Stage 8: Auto-Commit + Push (post)
 
 - Status: `ok`
-- Duration: 1s (0.0 min)
+- Duration: 3s (0.1 min)
 
 ### What It Did
 
@@ -209,8 +197,7 @@
 
 ### Improvements It Made
 
-- 2026-04-19 01:39:10,053 INFO Committed 10 file(s).
-- 2026-04-19 01:39:11,291 INFO Pushed successfully.
+- 2026-04-20 01:19:40,767 INFO Pushed successfully.
 
 ### Evidence Files
 

@@ -195,6 +195,22 @@ def create_user_space(
     return config
 
 
+def delete_user_space(user_id: str) -> dict:
+    """Remove a managed user's config, memory, and vault. Returns what was
+    deleted. Refuses to act on non-managed users (admin accounts / primary
+    user) to prevent wiping the host.
+    """
+    import shutil
+    normalized = normalize_user_id(user_id)
+    user_dir = USERS_DIR / normalized
+    if not user_dir.exists():
+        return {"user_id": normalized, "removed": False, "reason": "not found"}
+    if not is_managed_user(normalized):
+        return {"user_id": normalized, "removed": False, "reason": "not a managed user"}
+    shutil.rmtree(user_dir, ignore_errors=True)
+    return {"user_id": normalized, "removed": True}
+
+
 def list_users() -> list[dict]:
     """List managed users with non-sensitive runtime metadata."""
     users = []

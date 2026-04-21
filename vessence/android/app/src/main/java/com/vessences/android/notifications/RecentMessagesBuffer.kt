@@ -32,6 +32,7 @@ object RecentMessagesBuffer {
         val timestamp: Long,
         val packageName: String,
         val sbnKey: String,
+        val isReaction: Boolean = false,
     )
 
     private const val CAPACITY = 20

@@ -85,11 +85,34 @@ class ToolMarkerExtractor:
         If a marker was opened but never closed, the partial marker becomes
         visible text (fail-open) — users see raw `[[CLIENT_TOOL:...` which is
         a clear signal something went wrong server-side, not a silent miss.
+
+        Post-process: strip orphan trailing `]]` that has no matching `[[`
+        opener in what we're about to emit. Opus occasionally emits an extra
+        `]]` past the real marker close (seen 2026-04-20 08:48:02: response
+        was "Message sent. [[CLIENT_TOOL:...]]]]" — the real marker got
+        stripped cleanly, leaving a stray `]]` in visible text).
         """
         visible, calls = self._drain(final=True)
         tail = self._buffer
         self._buffer = ""
-        return visible + tail, calls
+        out = visible + tail
+        out = self._strip_orphan_close(out)
+        return out, calls
+
+    @classmethod
+    def _strip_orphan_close(cls, text: str) -> str:
+        """Remove trailing `]]` that is not paired with an earlier `[[`."""
+        stripped = text.rstrip()
+        while stripped.endswith(cls._CLOSE) and cls._OPEN not in stripped:
+            # Trim the trailing `]]` and any whitespace before it.
+            stripped = stripped[: -len(cls._CLOSE)].rstrip()
+        # Preserve original trailing whitespace behaviour — if the removed
+        # tail was the only change, don't accidentally trim legit content
+        # newlines. Simpler: return stripped + any trailing whitespace the
+        # original had after its last non-whitespace char except the `]]`.
+        if stripped == text.rstrip():
+            return text
+        return stripped
 
     # ── internals ───────────────────────────────────────────────────────────
     def _drain(self, final: bool = False) -> tuple[str, list[dict]]:
@@ -676,6 +699,17 @@ CODE_MAP_KEYWORDS = (
     "runtime",
     "multi",
     "home",
+    # Auto-evolved from daily conversations
+    "entities",
+    "todo",
+    "calendar",
+    "contract",
+    "metadata",
+    "class_protocol",
+    "instructions",
+    "description",
+    "follow",
+    "guidance",
 )
 
 
@@ -1561,6 +1595,14 @@ async def _send_message_inner(
                 session_id[:12], _total_sync_calls,
             )
 
+    try:
+        from llm_brain.v1.standing_brain import get_standing_brain_manager as _get_sbm
+        _notice = _get_sbm().pop_pending_notification()
+        if _notice:
+            response = f"{_notice}\n\n{response}"
+    except Exception:
+        pass
+
     return {"text": response, "files": []}
 
 
@@ -2045,6 +2087,11 @@ async def stream_message(
             _done_visible, _ = _done_extractor.feed(payload)
             _done_tail, _ = _done_extractor.flush()
             payload = _done_visible + _done_tail
+        # Always strip orphan trailing `]]` from the done payload — Opus
+        # occasionally emits an extra `]]` past the real marker close.
+        # (See 2026-04-20 08:48:02: "Message sent. ]]" landed in the ledger.)
+        if event_type == "done" and payload:
+            payload = ToolMarkerExtractor._strip_orphan_close(payload)
 
         if event_type == "done":
             _log_stage(session_id, "tts_done_raw_emit", request_start,
@@ -3055,6 +3102,13 @@ async def stream_message(
                                session_id[:12], elapsed_ms)
                 emit("error", "⚠️ Jane's brain returned an empty response. This usually means the model is overloaded — please try again.")
             else:
+                try:
+                    from llm_brain.v1.standing_brain import get_standing_brain_manager as _get_sbm
+                    _notice = _get_sbm().pop_pending_notification()
+                    if _notice:
+                        response = f"{_notice}\n\n{response}"
+                except Exception:
+                    pass
                 final_response = response
                 emit("done", response)
         except asyncio.CancelledError:

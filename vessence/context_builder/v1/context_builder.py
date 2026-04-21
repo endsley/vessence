@@ -18,57 +18,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "vault_web"))
 MAX_DOC_CHARS = 4000
 
 
-# ── Contact lookup helper (used by Jane for email/phone resolution) ───────────
-
-def lookup_contact(name: str) -> list[dict]:
-    """Look up a contact by name from the synced contacts database.
-
-    Returns a list of dicts with keys: display_name, phone_number, email,
-    is_primary, contact_id. Returns empty list if no match or DB unavailable.
-    """
-    try:
-        from database import get_db
-        query = f"%{name.strip()}%"
-        with get_db() as conn:
-            rows = conn.execute(
-                "SELECT display_name, phone_number, email, is_primary, contact_id "
-                "FROM contacts WHERE display_name LIKE ? ORDER BY display_name LIMIT 20",
-                (query,),
-            ).fetchall()
-        return [dict(r) for r in rows]
-    except Exception as e:
-        logger.warning("Contact lookup failed for '%s': %s", name, e)
-        return []
-
-
-def format_contact_info(name: str) -> str:
-    """Format contact lookup results as a human-readable string for Jane's context.
-
-    Returns empty string if no contacts found.
-    """
-    results = lookup_contact(name)
-    if not results:
-        return ""
-    lines = [f"[Contact Info for '{name}']"]
-    # Group by display_name
-    by_name: dict[str, dict] = {}
-    for r in results:
-        dn = r["display_name"]
-        if dn not in by_name:
-            by_name[dn] = {"phones": [], "emails": []}
-        if r.get("phone_number"):
-            by_name[dn]["phones"].append(r["phone_number"])
-        if r.get("email"):
-            by_name[dn]["emails"].append(r["email"])
-    for dn, info in by_name.items():
-        parts = [dn]
-        if info["phones"]:
-            parts.append(f"Phone: {', '.join(info['phones'])}")
-        if info["emails"]:
-            parts.append(f"Email: {', '.join(info['emails'])}")
-        lines.append(" | ".join(parts))
-    return "\n".join(lines)
-
 # ── In-memory cache for static context parts ─────────────────────────────────
 _context_cache: dict[str, tuple[float, object]] = {}
 _CACHE_TTL = 300  # 5 minutes — static parts rarely change
@@ -984,13 +933,17 @@ TTS_SPOKEN_BLOCK_INSTRUCTION = (
     "- Be concise. Answer in 2-5 short sentences like you're talking face to face.\n"
     "- No markdown, no bullet lists, no code blocks, no tables in your main response.\n"
     "- No parentheses, brackets, asterisks, or symbols that sound awkward spoken aloud.\n"
-    "- If the user asks something that genuinely needs detail (code, long explanation), "
-    "put the short spoken answer in a <spoken> tag and the full detail after it.\n"
+    "- If the user asks something that genuinely needs detail (code, long explanation, "
+    "lists, patient notes, schedules, specs), put the short spoken answer in a <spoken> "
+    "tag and the full detail after it. The spoken part MUST explicitly tell the user "
+    "you've written the full details on screen (e.g. \"I've printed the full notes on "
+    "screen\", \"the details are on screen for you to read\"). The user is listening, "
+    "not looking — if you don't say it out loud, they'll never know the written part exists.\n"
     "- For casual/simple questions, just reply naturally — no <spoken> tag needed.\n\n"
     "Example (simple question):\n"
     "Yeah, the timeout was set to 10 seconds. I bumped it to 30 and it should be fine now.\n\n"
     "Example (needs detail):\n"
-    "<spoken>I fixed the timeout issue. The change is on line 42 of the config file.</spoken>\n\n"
+    "<spoken>I fixed the timeout issue — I've printed the change on screen for you to read.</spoken>\n\n"
     "Here's what I changed:\n"
     "- `timeout` was set to `10` — I bumped it to `30`\n"
     "```python\ntimeout = 30\n```"

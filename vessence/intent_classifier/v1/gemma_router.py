@@ -662,21 +662,7 @@ _PROVIDER_DISPATCH = {
 
 # ── Legacy public constants ──────────────────────────────────────────────────
 #
-# ROUTER_MODEL is the model name that was active at module-import time. It is
-# kept for backward compatibility with `from jane_web.gemma_router import
-# ROUTER_MODEL` (used by jane_web/jane_proxy.py to label which model generated
-# a given ack in the UI). If the env changes, restart jane-web to refresh.
-# For dynamic per-call lookup, use `get_active_model()` instead.
 ROUTER_MODEL = _resolve_model(_resolve_provider())
-
-
-def get_active_model() -> str:
-    """Return the currently-active (provider, model) resolved from env, live.
-
-    Useful for UI emission when the process is long-lived and env may have
-    been updated externally; otherwise prefer the ROUTER_MODEL constant.
-    """
-    return _resolve_model(_resolve_provider())
 
 
 # ── Public entry point ───────────────────────────────────────────────────────

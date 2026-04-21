@@ -1,6 +1,6 @@
 # v2 3-Stage Prompt Pipeline
 
-**Last updated:** 2026-04-16
+**Last updated:** 2026-04-20
 
 ---
 
@@ -70,21 +70,28 @@ User prompt
 - `JANE_V2_MARGIN` — min vote gap (default 0.40)
 - `JANE_V2_MAX_DISTANCE` — max cosine distance (default 0.30)
 
-### Current Classes (11)
+### Current Classes (16 in _CLASS_MAP)
 
 | ChromaDB Name | Pipeline Name | Exemplars | Stage 2 Handler? |
 |---|---|---|---|
-| WEATHER | weather | ~60 | Yes — gemma4:e2b + cached weather.json |
-| MUSIC_PLAY | music play | ~75 | Yes — qwen2.5:7b + playlist DB |
-| GREETING | greeting | ~130 | Yes — qwen2.5:7b, 1-sentence contextual reply |
-| READ_MESSAGES | read messages | ~78 | No → Stage 3 |
-| SEND_MESSAGE | send message | ~78 | Yes — qwen2.5:7b extracts recipient+body, resolves contact, fast-path sends |
-| SYNC_MESSAGES | sync messages | ~68 | No → Stage 3 |
-| SELF_HANDLE | self handle | ~110 | No → Stage 3 |
-| SHOPPING_LIST | shopping list | ~51 | Yes — qwen2.5:7b extracts action+items, reads/writes JSON store |
-| READ_EMAIL | read email | ~49 | No → Stage 3 |
-| END_CONVERSATION | end conversation | ~88 | No → Stage 3 |
-| DELEGATE_OPUS | others | ~130 | No → Stage 3 (catch-all) |
+| WEATHER | weather | ~66 | Yes — gemma4:e2b + cached weather.json |
+| MUSIC_PLAY | music play | ~97 | Yes — qwen2.5:7b + playlist DB |
+| GREETING | greeting | ~121 | Yes — qwen2.5:7b, 1-sentence contextual reply |
+| SEND_MESSAGE | send message | ~25 | Yes — qwen2.5:7b extracts recipient+body, resolves contact, fast-path sends |
+| SHOPPING_LIST | shopping list | ~50 | Yes — qwen2.5:7b extracts action+items, reads/writes JSON store |
+| TODO_LIST | todo list | ~82 | Yes — reads cached TODO, groups by category, pivots to Stage 3 for open questions |
+| GET_TIME | get time | ~16 | Yes — returns current time/date |
+| TIMER | timer | ~67 | Yes — sets/manages timers |
+| SELF_IMPROVEMENT | self improvement | ~0 | Yes — triggers self-improvement routines |
+| READ_CALENDAR | read calendar | ~35 | No → Stage 3 |
+| READ_MESSAGES | read messages | ~76 | No → Stage 3 |
+| SYNC_MESSAGES | sync messages | ~71 | No → Stage 3 |
+| READ_EMAIL | read email | ~48 | No → Stage 3 |
+| END_CONVERSATION | end conversation | ~81 | No → Stage 3 |
+| DELEGATE_OPUS | others | ~249 | No → Stage 3 (catch-all) |
+| FORCE_STAGE3 | others | ~25 | No → Stage 3 (explicit user escalation) |
+
+**Additional exemplar-only classes** (ChromaDB has exemplars but _CLASS_MAP maps them to "others"): BUILD_APK (~39), RESTART_SERVER (~47), WEB_AUTOMATION (~37).
 
 ### Adding a New Class
 
@@ -174,6 +181,18 @@ col.add(
 - Queries playlist DB via qwen2.5:7b
 - Creates temporary playlists, resolves song/artist/genre
 - Returns playlist_id that Android client picks up for playback
+
+**Get Time** (`jane_web/jane_v2/classes/get_time/handler.py`):
+- Returns current time, date, or day of week
+- Pure code, no LLM call needed
+
+**Timer** (`jane_web/jane_v2/classes/timer/handler.py`):
+- Sets, cancels, and queries countdown timers
+- Emits client tool calls for the Android timer UI
+
+**Self Improvement** (`jane_web/jane_v2/classes/self_improvement/handler.py`):
+- Triggers nightly self-improvement routines on demand
+- Used when the user explicitly asks Jane to review/improve herself
 
 ### Handler Return Format
 ```python

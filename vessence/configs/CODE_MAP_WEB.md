@@ -1,5 +1,5 @@
 # Code Map — Web Frontend
-_Auto-generated on 2026-04-19 08:15 UTC by `generate_code_map.py`_
+_Auto-generated on 2026-04-20 08:15 UTC by `generate_code_map.py`_
 
 ## vault_web/templates/jane.html (2469 lines)
   setChatSize() → L453
@@ -86,11 +86,11 @@ _Auto-generated on 2026-04-19 08:15 UTC by `generate_code_map.py`_
   async toggle() → L2449
   async fetchItems() → L2459
 
-## vault_web/templates/app.html (1969 lines)
+## vault_web/templates/app.html (2106 lines)
   setSize() → L750
-  event.type === 'status' → L1431
-  event.type === 'done' → L1433
-  event.type === 'error' → L1437
+  event.type === 'status' → L1511
+  event.type === 'done' → L1513
+  event.type === 'error' → L1517
 
 ## vault_web/templates/briefing.html (1361 lines)
   topicColor() → L826
