@@ -269,9 +269,11 @@ case "$JANE_BRAIN" in
         # simply placing the file in .claude/hooks/ has no effect.
         mkdir -p .claude/hooks
         ln -sf ../../vessence/startup_code/claude_smart_context.py .claude/hooks/context_build.py 2>/dev/null || true
+        ln -sf ../../vessence/startup_code/stop_hook_memory.py .claude/hooks/stop_memory.py 2>/dev/null || true
         ok "Claude hooks directory set up"
 
-        HOOK_CMD="${REPO_ROOT}/venv/bin/python ${REPO_ROOT}/.claude/hooks/context_build.py"
+        CONTEXT_HOOK="${REPO_ROOT}/venv/bin/python ${REPO_ROOT}/.claude/hooks/context_build.py"
+        STOP_HOOK="${REPO_ROOT}/venv/bin/python ${REPO_ROOT}/.claude/hooks/stop_memory.py"
 
         # Write project-level settings.json (fires when running from ~/ambient)
         cat > .claude/settings.json << CLSETTINGS
@@ -282,7 +284,17 @@ case "$JANE_BRAIN" in
         "hooks": [
           {
             "type": "command",
-            "command": "${HOOK_CMD}"
+            "command": "${CONTEXT_HOOK}"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${STOP_HOOK}"
           }
         ]
       }
@@ -290,28 +302,33 @@ case "$JANE_BRAIN" in
   }
 }
 CLSETTINGS
-        ok "Wrote .claude/settings.json (project hook)"
+        ok "Wrote .claude/settings.json (context + memory hooks)"
 
-        # Merge hook into global ~/.claude/settings.json so it fires from any directory
+        # Merge both hooks into global ~/.claude/settings.json so they fire from any directory
         GLOBAL_SETTINGS="${HOME}/.claude/settings.json"
         if [ -f "$GLOBAL_SETTINGS" ]; then
-            # Use Python to merge without clobbering existing keys
-            "${REPO_ROOT}/venv/bin/python" - "$GLOBAL_SETTINGS" "$HOOK_CMD" << 'PYMERGE'
+            "${REPO_ROOT}/venv/bin/python" - "$GLOBAL_SETTINGS" "$CONTEXT_HOOK" "$STOP_HOOK" << 'PYMERGE'
 import json, sys
-path, hook_cmd = sys.argv[1], sys.argv[2]
+path, context_cmd, stop_cmd = sys.argv[1], sys.argv[2], sys.argv[3]
 with open(path) as f:
     cfg = json.load(f)
-cfg.setdefault("hooks", {}).setdefault("UserPromptSubmit", [])
-entry = {"hooks": [{"type": "command", "command": hook_cmd}]}
-# Replace any existing Jane hook entry, or append
-existing = cfg["hooks"]["UserPromptSubmit"]
-cfg["hooks"]["UserPromptSubmit"] = [e for e in existing if "context_build" not in str(e)]
-cfg["hooks"]["UserPromptSubmit"].append(entry)
+hooks = cfg.setdefault("hooks", {})
+
+# UserPromptSubmit — replace any existing Jane entry
+ups = hooks.setdefault("UserPromptSubmit", [])
+hooks["UserPromptSubmit"] = [e for e in ups if "context_build" not in str(e)]
+hooks["UserPromptSubmit"].append({"hooks": [{"type": "command", "command": context_cmd}]})
+
+# Stop — replace any existing Jane entry
+stops = hooks.setdefault("Stop", [])
+hooks["Stop"] = [e for e in stops if "stop_memory" not in str(e)]
+hooks["Stop"].append({"hooks": [{"type": "command", "command": stop_cmd}]})
+
 with open(path, "w") as f:
     json.dump(cfg, f, indent=2)
     f.write("\n")
 PYMERGE
-            ok "Merged context hook into global ~/.claude/settings.json"
+            ok "Merged context + memory hooks into global ~/.claude/settings.json"
         else
             cat > "$GLOBAL_SETTINGS" << GLSETTINGS
 {
@@ -321,7 +338,17 @@ PYMERGE
         "hooks": [
           {
             "type": "command",
-            "command": "${HOOK_CMD}"
+            "command": "${CONTEXT_HOOK}"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${STOP_HOOK}"
           }
         ]
       }
@@ -329,7 +356,7 @@ PYMERGE
   }
 }
 GLSETTINGS
-            ok "Wrote global ~/.claude/settings.json (context hook)"
+            ok "Wrote global ~/.claude/settings.json (context + memory hooks)"
         fi
         ;;
     gemini)
