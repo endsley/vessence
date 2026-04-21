@@ -257,9 +257,107 @@ case "$JANE_BRAIN" in
     claude)
         ln -sf vessence/CLAUDE.md ./CLAUDE.md
         ok "Linked CLAUDE.md"
+
+        # Also symlink CLAUDE.md into $HOME so Jane's identity loads from any directory
+        if [ "$(realpath "${REPO_ROOT}")" != "$(realpath "${HOME}")" ]; then
+            ln -sf "${REPO_ROOT}/CLAUDE.md" "${HOME}/CLAUDE.md" 2>/dev/null || true
+            ok "Linked CLAUDE.md to \$HOME"
+        fi
+
+        # Hook: context_build.py — pipes each user prompt through ChromaDB and returns
+        # relevant memory as additionalContext. Must be registered in settings.json;
+        # simply placing the file in .claude/hooks/ has no effect.
         mkdir -p .claude/hooks
         ln -sf ../../vessence/startup_code/claude_smart_context.py .claude/hooks/context_build.py 2>/dev/null || true
+        ln -sf ../../vessence/startup_code/stop_hook_memory.py .claude/hooks/stop_memory.py 2>/dev/null || true
         ok "Claude hooks directory set up"
+
+        CONTEXT_HOOK="${REPO_ROOT}/venv/bin/python ${REPO_ROOT}/.claude/hooks/context_build.py"
+        STOP_HOOK="${REPO_ROOT}/venv/bin/python ${REPO_ROOT}/.claude/hooks/stop_memory.py"
+
+        # Write project-level settings.json (fires when running from ~/ambient)
+        cat > .claude/settings.json << CLSETTINGS
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CONTEXT_HOOK}"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${STOP_HOOK}"
+          }
+        ]
+      }
+    ]
+  }
+}
+CLSETTINGS
+        ok "Wrote .claude/settings.json (context + memory hooks)"
+
+        # Merge both hooks into global ~/.claude/settings.json so they fire from any directory
+        GLOBAL_SETTINGS="${HOME}/.claude/settings.json"
+        if [ -f "$GLOBAL_SETTINGS" ]; then
+            "${REPO_ROOT}/venv/bin/python" - "$GLOBAL_SETTINGS" "$CONTEXT_HOOK" "$STOP_HOOK" << 'PYMERGE'
+import json, sys
+path, context_cmd, stop_cmd = sys.argv[1], sys.argv[2], sys.argv[3]
+with open(path) as f:
+    cfg = json.load(f)
+hooks = cfg.setdefault("hooks", {})
+
+# UserPromptSubmit — replace any existing Jane entry
+ups = hooks.setdefault("UserPromptSubmit", [])
+hooks["UserPromptSubmit"] = [e for e in ups if "context_build" not in str(e)]
+hooks["UserPromptSubmit"].append({"hooks": [{"type": "command", "command": context_cmd}]})
+
+# Stop — replace any existing Jane entry
+stops = hooks.setdefault("Stop", [])
+hooks["Stop"] = [e for e in stops if "stop_memory" not in str(e)]
+hooks["Stop"].append({"hooks": [{"type": "command", "command": stop_cmd}]})
+
+with open(path, "w") as f:
+    json.dump(cfg, f, indent=2)
+    f.write("\n")
+PYMERGE
+            ok "Merged context + memory hooks into global ~/.claude/settings.json"
+        else
+            cat > "$GLOBAL_SETTINGS" << GLSETTINGS
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CONTEXT_HOOK}"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${STOP_HOOK}"
+          }
+        ]
+      }
+    ]
+  }
+}
+GLSETTINGS
+            ok "Wrote global ~/.claude/settings.json (context + memory hooks)"
+        fi
         ;;
     gemini)
         ln -sf vessence/GEMINI.md ./GEMINI.md
@@ -272,10 +370,53 @@ case "$JANE_BRAIN" in
 esac
 
 # ═════════════════════════════════════════════════════════════════════════════
-# Phase 7 — Test Run
+# Phase 7 — Ollama + Local LLM
 # ═════════════════════════════════════════════════════════════════════════════
 
-header "Phase 7: Test run"
+header "Phase 7: Installing Ollama + qwen2.5:7b"
+
+OLLAMA_MODEL="qwen2.5:7b"
+
+# Install Ollama if not present
+if ! command -v ollama &>/dev/null; then
+    info "Ollama not found — installing..."
+    if curl -fsSL https://ollama.com/install.sh | sh; then
+        ok "Ollama installed"
+    else
+        fail "Ollama install failed. Install manually: https://ollama.com/download"
+        warn "Continuing without Ollama — Stage 2 fast-path and short-term memory will be unavailable"
+    fi
+else
+    ok "Ollama already installed ($(ollama --version 2>/dev/null || echo 'version unknown'))"
+fi
+
+# Ensure Ollama service is running
+if command -v ollama &>/dev/null; then
+    if ! curl -s http://localhost:11434/api/tags &>/dev/null; then
+        info "Starting Ollama service..."
+        ollama serve &>/dev/null &
+        sleep 3
+    fi
+
+    # Pull qwen2.5:7b if not already present
+    if ollama list 2>/dev/null | grep -q "qwen2.5:7b"; then
+        ok "qwen2.5:7b already present"
+    else
+        info "Pulling qwen2.5:7b (this may take a few minutes)..."
+        if ollama pull "$OLLAMA_MODEL"; then
+            ok "qwen2.5:7b downloaded"
+        else
+            warn "Failed to pull qwen2.5:7b — Stage 2 fast-path will be unavailable until model is downloaded"
+            info "Pull manually later:  ollama pull qwen2.5:7b"
+        fi
+    fi
+fi
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Phase 8 — Test Run
+# ═════════════════════════════════════════════════════════════════════════════
+
+header "Phase 8: Test run"
 
 info "Starting Jane briefly to verify the server works..."
 
@@ -308,10 +449,10 @@ else
 fi
 
 # ═════════════════════════════════════════════════════════════════════════════
-# Phase 8 — Auto-Start on Boot
+# Phase 9 — Auto-Start on Boot
 # ═════════════════════════════════════════════════════════════════════════════
 
-header "Phase 8: Setting up auto-start"
+header "Phase 9: Setting up auto-start"
 
 OS_TYPE="$(uname -s)"
 
@@ -409,10 +550,10 @@ else
 fi
 
 # ═════════════════════════════════════════════════════════════════════════════
-# Phase 9 — Remote Access (Optional)
+# Phase 10 — Remote Access (Optional)
 # ═════════════════════════════════════════════════════════════════════════════
 
-header "Phase 9: Remote access (optional)"
+header "Phase 10: Remote access (optional)"
 
 echo ""
 echo -e "  Jane is running locally at ${CYAN}http://localhost:8081${NC}."
@@ -447,10 +588,10 @@ else
 fi
 
 # ═════════════════════════════════════════════════════════════════════════════
-# Phase 10 — Get to Know You (Optional)
+# Phase 11 — Get to Know You (Optional)
 # ═════════════════════════════════════════════════════════════════════════════
 
-header "Phase 10: Quick intro (optional)"
+header "Phase 11: Quick intro (optional)"
 
 echo ""
 echo "  A few quick questions so Jane already knows you when you first meet."
@@ -517,6 +658,87 @@ read -r GOALS
 if [ -n "$GOALS" ]; then
     add_fact "User wants help with: $GOALS" "projects"
     ok "Noted"
+fi
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Phase 12 — Cron Jobs
+# ═════════════════════════════════════════════════════════════════════════════
+
+header "Phase 12: Installing cron jobs"
+
+# Build the full crontab from scratch so it's idempotent.
+# Env header fixes the "$VESSENCE_HOME expands to empty in cron" bug —
+# cron does not inherit the login shell's environment.
+CRONTAB_CONTENT="# Jane cron jobs — managed by setup.sh, do not edit manually
+AMBIENT_BASE=${REPO_ROOT}
+VESSENCE_HOME=${REPO_ROOT}/vessence
+VESSENCE_DATA_HOME=${REPO_ROOT}/vessence-data
+VAULT_HOME=${REPO_ROOT}/vault
+ESSENCES_DIR=${REPO_ROOT}/essences
+PYTHONPATH=${REPO_ROOT}/vessence
+PYTHON=${REPO_ROOT}/venv/bin/python
+SHELL=/bin/bash
+
+# Auto-pull: fetch + fast-forward every 2 hours; reinstall deps / restart if needed
+0 */2 * * * /bin/bash ${REPO_ROOT}/vessence/startup_code/auto_pull.sh
+
+# Memory janitor: expire short-term, merge duplicates, verify code memories vs codebase
+15 2 * * * \${PYTHON} ${REPO_ROOT}/vessence/memory/v1/janitor_memory.py
+
+# Nightly self-improvement: doc drift audit, code audit, pipeline audit, dead code scan
+0 1 * * * \${PYTHON} ${REPO_ROOT}/vessence/agent_skills/nightly_self_improve.py
+
+# Identity essay regeneration (self-reflection from memories)
+0 3 * * * \${PYTHON} ${REPO_ROOT}/vessence/agent_skills/generate_identity_essay.py
+
+# Jane context regeneration (rebuild boot context from configs)
+15 3 * * * \${PYTHON} ${REPO_ROOT}/vessence/startup_code/regenerate_jane_context.py
+
+# Code map regeneration (file/function/route index)
+15 4 * * * \${PYTHON} ${REPO_ROOT}/vessence/agent_skills/generate_code_map.py
+
+# System janitor: temp files, log rotation, old session transcript pruning
+0 3 * * * \${PYTHON} ${REPO_ROOT}/vessence/agent_skills/janitor_system.py
+
+# Essence scheduler: dispatch scheduled essence tasks every minute
+* * * * * \${PYTHON} ${REPO_ROOT}/vessence/agent_skills/essence_scheduler.py
+
+# Job queue runner: process pending jobs every 5 minutes
+*/5 * * * * \${PYTHON} ${REPO_ROOT}/vessence/agent_skills/job_queue_runner.py
+
+# Process watchdog: kill zombie Docker containers, idle daemons, memory hogs
+*/5 * * * * \${PYTHON} ${REPO_ROOT}/vessence/agent_skills/process_watchdog.py
+
+# USB incremental sync backup (daily at 2:00 AM)
+0 2 * * * \${PYTHON} ${REPO_ROOT}/vessence/startup_code/usb_sync.py
+
+# Evolve code map keywords from today's user messages
+10 2 * * * \${PYTHON} ${REPO_ROOT}/vessence/agent_skills/evolve_code_map_keywords.py
+
+# Daily briefing fetch (news, TTS audio)
+10 2 * * * /bin/bash -c 'timeout 30m \${PYTHON} ${REPO_ROOT}/tools/daily_briefing/functions/run_briefing.py'
+
+# Screen dimmer: dim monitor after sunset every 30 minutes
+*/30 * * * * \${PYTHON} ${REPO_ROOT}/vessence/agent_skills/screen_dimmer.py
+"
+
+if command -v crontab &>/dev/null; then
+    echo "$CRONTAB_CONTENT" | crontab -
+    ok "Crontab installed ($(echo "$CRONTAB_CONTENT" | grep -c '^\*\|^[0-9]') jobs)"
+    info "Memory janitor + code-memory verifier runs nightly at 2:15 AM"
+    info "Self-improvement orchestrator runs nightly at 1:00 AM"
+else
+    warn "crontab command not found — skipping cron setup"
+    info "Install cron: sudo apt install -y cron"
+fi
+
+# Run the memory janitor immediately so the first session doesn't have to
+# wait until 2:15 AM for themes to be archived and code memories verified.
+info "Running memory janitor for the first time..."
+if "${REPO_ROOT}/venv/bin/python" "${REPO_ROOT}/vessence/memory/v1/janitor_memory.py" 2>/dev/null; then
+    ok "Memory janitor completed"
+else
+    warn "Memory janitor exited with an error (non-fatal — will retry tonight at 2:15 AM)"
 fi
 
 # ═════════════════════════════════════════════════════════════════════════════
