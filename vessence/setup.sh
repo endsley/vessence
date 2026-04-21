@@ -257,9 +257,80 @@ case "$JANE_BRAIN" in
     claude)
         ln -sf vessence/CLAUDE.md ./CLAUDE.md
         ok "Linked CLAUDE.md"
+
+        # Also symlink CLAUDE.md into $HOME so Jane's identity loads from any directory
+        if [ "$(realpath "${REPO_ROOT}")" != "$(realpath "${HOME}")" ]; then
+            ln -sf "${REPO_ROOT}/CLAUDE.md" "${HOME}/CLAUDE.md" 2>/dev/null || true
+            ok "Linked CLAUDE.md to \$HOME"
+        fi
+
+        # Hook: context_build.py — pipes each user prompt through ChromaDB and returns
+        # relevant memory as additionalContext. Must be registered in settings.json;
+        # simply placing the file in .claude/hooks/ has no effect.
         mkdir -p .claude/hooks
         ln -sf ../../vessence/startup_code/claude_smart_context.py .claude/hooks/context_build.py 2>/dev/null || true
         ok "Claude hooks directory set up"
+
+        HOOK_CMD="${REPO_ROOT}/venv/bin/python ${REPO_ROOT}/.claude/hooks/context_build.py"
+
+        # Write project-level settings.json (fires when running from ~/ambient)
+        cat > .claude/settings.json << CLSETTINGS
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${HOOK_CMD}"
+          }
+        ]
+      }
+    ]
+  }
+}
+CLSETTINGS
+        ok "Wrote .claude/settings.json (project hook)"
+
+        # Merge hook into global ~/.claude/settings.json so it fires from any directory
+        GLOBAL_SETTINGS="${HOME}/.claude/settings.json"
+        if [ -f "$GLOBAL_SETTINGS" ]; then
+            # Use Python to merge without clobbering existing keys
+            "${REPO_ROOT}/venv/bin/python" - "$GLOBAL_SETTINGS" "$HOOK_CMD" << 'PYMERGE'
+import json, sys
+path, hook_cmd = sys.argv[1], sys.argv[2]
+with open(path) as f:
+    cfg = json.load(f)
+cfg.setdefault("hooks", {}).setdefault("UserPromptSubmit", [])
+entry = {"hooks": [{"type": "command", "command": hook_cmd}]}
+# Replace any existing Jane hook entry, or append
+existing = cfg["hooks"]["UserPromptSubmit"]
+cfg["hooks"]["UserPromptSubmit"] = [e for e in existing if "context_build" not in str(e)]
+cfg["hooks"]["UserPromptSubmit"].append(entry)
+with open(path, "w") as f:
+    json.dump(cfg, f, indent=2)
+    f.write("\n")
+PYMERGE
+            ok "Merged context hook into global ~/.claude/settings.json"
+        else
+            cat > "$GLOBAL_SETTINGS" << GLSETTINGS
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${HOOK_CMD}"
+          }
+        ]
+      }
+    ]
+  }
+}
+GLSETTINGS
+            ok "Wrote global ~/.claude/settings.json (context hook)"
+        fi
         ;;
     gemini)
         ln -sf vessence/GEMINI.md ./GEMINI.md
