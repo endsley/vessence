@@ -689,6 +689,15 @@ else
     info "Install cron: sudo apt install -y cron"
 fi
 
+# Run the memory janitor immediately so the first session doesn't have to
+# wait until 2:15 AM for themes to be archived and code memories verified.
+info "Running memory janitor for the first time..."
+if "${REPO_ROOT}/venv/bin/python" "${REPO_ROOT}/vessence/memory/v1/janitor_memory.py" 2>/dev/null; then
+    ok "Memory janitor completed"
+else
+    warn "Memory janitor exited with an error (non-fatal — will retry tonight at 2:15 AM)"
+fi
+
 # ═════════════════════════════════════════════════════════════════════════════
 # Done
 # ═════════════════════════════════════════════════════════════════════════════
