@@ -33,6 +33,7 @@ from collections import defaultdict
 from pathlib import Path
 
 VESSENCE_HOME = Path(os.environ.get("VESSENCE_HOME", str(Path(__file__).resolve().parents[1])))
+HOME = Path(os.environ.get("HOME", str(Path.home())))
 REPORT_PATH = VESSENCE_HOME / "configs" / "dead_code_report.md"
 
 # Directories to scan
@@ -58,6 +59,14 @@ HARD_KEEP = {
 # Auto-delete only if file is at least this old AND truly unreferenced
 AUTO_DELETE_AGE_DAYS = 60
 MAX_AUTO_DELETE_LINES = 500
+
+# Directories outside vessence/ that can invoke vessence scripts — hooks, systemd
+# units, etc. grep these too or we miss real references and delete live code.
+EXTERNAL_SEARCH_ROOTS = [
+    HOME / ".claude" / "hooks",
+    HOME / ".claude" / "commands",
+    HOME / ".config" / "systemd" / "user",
+]
 
 _dead_files: list[Path] = []
 _dead_functions: list[tuple[Path, str]] = []
@@ -88,19 +97,114 @@ def gather_python_files() -> list[Path]:
 
 
 def grep_references(name: str, exclude: Path | None = None) -> int:
-    """Count references to a Python name across the tree, excluding the file itself."""
+    """Count references to a Python name inside vessence/, invoker files in
+    external roots (shell hooks, systemd units — NOT arbitrary markdown which
+    would give false positives from docs), and the live crontab. On ANY
+    lookup error, returns 1 ("fail safe — assume referenced")."""
     try:
-        cmd = [
-            "grep", "-r", "--include=*.py", "--include=*.md", "--include=*.json",
+        # Inside the tree: search code + our own config/doc files.
+        cmd_internal = [
+            "grep", "-r",
+            "--include=*.py", "--include=*.md", "--include=*.json",
+            "--include=*.sh", "--include=*.service", "--include=*.timer",
             "-l", "-w", name, str(VESSENCE_HOME),
         ]
-        r = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        r = subprocess.run(cmd_internal, capture_output=True, text=True, check=False)
         files = [ln for ln in r.stdout.splitlines() if ln.strip()]
         if exclude:
             files = [f for f in files if Path(f).resolve() != exclude.resolve()]
-        return len(files)
+        count = len(files)
+
+        # Outside the tree: only actual invoker files. Skip *.md because
+        # e.g. ~/.claude/commands/*.md contain chat-history prose that
+        # mentions filenames without invoking them.
+        for root in EXTERNAL_SEARCH_ROOTS:
+            if not root.exists():
+                continue
+            cmd_ext = [
+                "grep", "-r",
+                "--include=*.sh", "--include=*.service", "--include=*.timer",
+                "--include=*.py",
+                "-l", "-w", name, str(root),
+            ]
+            r = subprocess.run(cmd_ext, capture_output=True, text=True, check=False)
+            count += sum(1 for ln in r.stdout.splitlines() if ln.strip())
     except Exception:
         return 1  # fail safe: assume referenced
+
+    # Also check the live crontab — cron entries reference scripts by path.
+    try:
+        r = subprocess.run(
+            ["crontab", "-l"], capture_output=True, text=True, check=False,
+        )
+        if r.returncode == 0 and re.search(rf"\b{re.escape(name)}\b", r.stdout):
+            count += 1
+    except Exception:
+        pass
+
+    return count
+
+
+# Cache of importlib.import_module() prefix patterns discovered in the tree.
+# A file at e.g. intent_classifier/v2/classes/restart_server.py is "referenced"
+# if any python file does importlib.import_module(f"intent_classifier.v2.classes.{x}")
+# — grep on the stem won't catch that dynamic import.
+_DYNAMIC_IMPORT_PREFIXES: set[str] | None = None
+
+
+def _collect_dynamic_import_prefixes() -> set[str]:
+    """Scan the tree once for importlib.import_module / __import__ call sites
+    with a string prefix (e.g. f"package.subpackage.{name}"), return the set
+    of dotted prefixes like {"intent_classifier.v2.classes"}."""
+    global _DYNAMIC_IMPORT_PREFIXES
+    if _DYNAMIC_IMPORT_PREFIXES is not None:
+        return _DYNAMIC_IMPORT_PREFIXES
+
+    prefixes: set[str] = set()
+    patterns = [
+        # importlib.import_module(f"pkg.sub.{name}") or with . concat
+        re.compile(r"""import_module\(\s*f?['"]([a-zA-Z_][\w.]*?)\.\{"""),
+        re.compile(r"""import_module\(\s*['"]([a-zA-Z_][\w.]*?)\.['"]\s*\+"""),
+        re.compile(r"""__import__\(\s*f?['"]([a-zA-Z_][\w.]*?)\.\{"""),
+    ]
+    # Only scan our own source tree — SCAN_DIRS. Otherwise rglob walks into
+    # any .venv/site-packages that happens to live inside and returns junk
+    # prefixes like scipy, torch, pip._vendor.
+    for sub in SCAN_DIRS:
+        d = VESSENCE_HOME / sub
+        if not d.exists():
+            continue
+        for py in d.rglob("*.py"):
+            rel = str(py.relative_to(VESSENCE_HOME))
+            if in_hard_skip(rel) or "/__pycache__/" in rel:
+                continue
+            try:
+                text = py.read_text()
+            except Exception:
+                continue
+            for pat in patterns:
+                for m in pat.finditer(text):
+                    prefix = m.group(1)
+                    # Only trust prefixes that correspond to a real dir in our tree.
+                    candidate = VESSENCE_HOME / prefix.replace(".", "/")
+                    if candidate.is_dir():
+                        prefixes.add(prefix)
+
+    _DYNAMIC_IMPORT_PREFIXES = prefixes
+    log(f"Dynamic-import prefixes detected: {sorted(prefixes)}")
+    return prefixes
+
+
+def is_dynamically_imported(f: Path) -> bool:
+    """Return True if f sits under a directory that's the target of an
+    importlib dynamic load. The classifier does this for v2/classes; other
+    plugin-style paths will be picked up automatically."""
+    rel = str(f.relative_to(VESSENCE_HOME))
+    dotted_dir = rel.replace("/", ".").rsplit(".", 1)[0].rsplit(".", 1)[0]
+    for prefix in _collect_dynamic_import_prefixes():
+        if dotted_dir == prefix or dotted_dir.startswith(prefix + "."):
+            return True
+    return False
 
 
 # ── Phase 1: dead files (zero references anywhere) ──────────────────────────
@@ -111,6 +215,10 @@ def scan_dead_files(files: list[Path]) -> None:
     for f in files:
         rel = str(f.relative_to(VESSENCE_HOME))
         if f.name in HARD_KEEP:
+            continue
+        # Files sitting in a directory that other code loads via
+        # importlib.import_module(f"pkg.{name}") look dead to grep but aren't.
+        if is_dynamically_imported(f):
             continue
         # Module-style import path: agent_skills/foo.py → "agent_skills.foo"
         module = rel.replace("/", ".").rsplit(".py", 1)[0]
@@ -185,9 +293,14 @@ def scan_duplicates(files: list[Path]) -> None:
 
 def can_auto_delete(f: Path) -> bool:
     rel = str(f.relative_to(VESSENCE_HOME))
-    if not (rel.startswith("agent_skills/") or rel.startswith("test_code/")):
+    # Skip anything that still has HTTP route side-effects or dynamic loading.
+    # jane_web/ has Flask blueprint registrations that grep can't see; intent
+    # classes are caught by is_dynamically_imported already.
+    if rel.startswith("jane_web/"):
         return False
     if f.name in HARD_KEEP:
+        return False
+    if is_dynamically_imported(f):
         return False
     try:
         if f.stat().st_size > MAX_AUTO_DELETE_LINES * 200:  # rough byte cap

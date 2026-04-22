@@ -423,23 +423,25 @@ def run_janitor(max_sessions: int = 2, max_topics: int = 3):
 
     # Filter to topics that actually need merging
     consolidate_candidates = [t for t, mems in topic_groups.items() if len(mems) >= 3]
-    
-    if not consolidate_candidates:
-        logger.info(f"No topics need consolidation. (Skipped {permanent_count} permanent memories)")
-        return
 
-    # 4. Limit consolidation to a few topics per run to save tokens/time
-    target_topics = consolidate_candidates[:max_topics]
-    logger.info(f"Consolidating {len(target_topics)} topics (out of {len(consolidate_candidates)} needing work)...")
-
-    # 5. Purge old logs
+    # Purge old logs and set up image cluster placeholder — these run every
+    # cycle regardless of whether consolidation has work to do.
     log_files_purged = purge_old_log_files()
+    self_improve_reports_purged = purge_old_self_improve_reports()
     # cluster_vault_images() disabled — uses Opus for folder proposals,
     # too expensive to run nightly. Re-enable when cost is acceptable.
     image_cluster_result = {"images_moved": 0, "folders_created": []}
 
     total_reduced = 0
     merge_log = []
+
+    if not consolidate_candidates:
+        logger.info(f"No topics need consolidation. (Skipped {permanent_count} permanent memories)")
+        target_topics = []
+    else:
+        # 4. Limit consolidation to a few topics per run to save tokens/time
+        target_topics = consolidate_candidates[:max_topics]
+        logger.info(f"Consolidating {len(target_topics)} topics (out of {len(consolidate_candidates)} needing work)...")
 
     for topic in target_topics:
         memories = topic_groups[topic]
@@ -747,6 +749,12 @@ def verify_code_memories(
         logger.info("verify_code_memories: no code-referencing memories found")
         return {"checked": 0, "stale": 0, "fixed": 0}
 
+    # Shuffle so the orchestrator's per-stage time budget cuts a different
+    # slice every night. Without this, truncated runs keep re-verifying the
+    # same prefix and later memories never get touched.
+    import random as _random
+    _random.shuffle(code_mems)
+
     logger.info("verify_code_memories: checking %d memories one at a time", len(code_mems))
 
     checked = 0
@@ -892,6 +900,44 @@ def purge_old_log_files(max_age_days: int = LOG_MAX_AGE_DAYS) -> int:
         logger.info(f"Purged {deleted} log files older than {max_age_days} days.")
     else:
         logger.info("No old log files to purge.")
+    return deleted
+
+
+SELF_IMPROVE_REPORT_MAX_AGE_DAYS = 14
+
+
+def purge_old_self_improve_reports(
+    max_age_days: int = SELF_IMPROVE_REPORT_MAX_AGE_DAYS,
+) -> int:
+    """Drop archived nightly self-improvement reports older than the cutoff.
+
+    The orchestrator writes a timestamped .md to
+    $VESSENCE_DATA_HOME/reports/self_improvement/ every night. These build up
+    indefinitely because purge_old_log_files() only touches .log/.jsonl.
+    """
+    data_home = os.environ.get("VESSENCE_DATA_HOME")
+    if not data_home:
+        return 0
+    reports_dir = os.path.join(data_home, "reports", "self_improvement")
+    if not os.path.isdir(reports_dir):
+        return 0
+
+    cutoff = datetime.datetime.utcnow().timestamp() - (max_age_days * 86400)
+    deleted = 0
+    for fname in os.listdir(reports_dir):
+        if not fname.startswith("self_improvement_") or not fname.endswith(".md"):
+            continue
+        fpath = os.path.join(reports_dir, fname)
+        try:
+            if os.path.getmtime(fpath) < cutoff:
+                os.remove(fpath)
+                logger.info(f"Deleted old self-improve report: {fpath}")
+                deleted += 1
+        except Exception as e:
+            logger.warning(f"Could not delete {fpath}: {e}")
+
+    if deleted:
+        logger.info(f"Purged {deleted} self-improve reports older than {max_age_days} days.")
     return deleted
 
 
@@ -1060,3 +1106,7 @@ IMAGES:
     }
     logger.info(f"Image clustering complete: {images_moved} moved, folders: {folders_created}")
     return result
+
+
+if __name__ == "__main__":
+    run_janitor()

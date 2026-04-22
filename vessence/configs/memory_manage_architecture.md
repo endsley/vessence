@@ -205,6 +205,21 @@ In addition to the semantic vector databases, the system maintains a structured,
     - `content`: The raw text of the message.
     - `tokens`: The calculated token count for that specific message.
     - `latency_ms`: The turn-around time for the agent's response.
+    - `cls`: The classifier output (class name) for the turn, or NULL for legacy rows. Added by ALTER TABLE migration; new rows populated from `add_messages(..., cls=...)`.
+
+### 3.1a. Privacy Split: Ledger vs. FIFO
+
+For classes marked `privacy="local_only"` (see `Jane_architecture.md` §16.1), the ledger and the in-memory FIFO (`vault_web.recent_turns`) diverge intentionally:
+
+| Layer | Content for private classes | Reason |
+|-------|-----------------------------|--------|
+| **Ledger** (SQLite, on-disk) | **Full turn**, plus `cls` label | Never leaves the box. Required for `show_transcript.py`, crash recovery, and audit. |
+| **FIFO** (short-term, ~20 turns, in-memory) | **Full turn content** plus `privacy="local_only"` marker on the record | Stage 2 is fully local — classifier, `pending_action_resolver`, and handler resume branches all need the real user text + full `pending_action.data` to continue follow-up flows ("yes I would", "patient 2"). Redaction happens at the cloud-bound read boundary, not write. |
+| **Stage 3 FIFO projection** (`recent_context.render_stage3_context`, `redact_local_only=True`) | `[private turn — class: <name>]` placeholder in place of each private turn's summary | This is the actual cloud boundary. Opus prompts and Opus ack generation project each local_only record through the placeholder so a subsequent non-private escalation cannot replay prior private turn content. |
+| **Thematic short-term memory** (ChromaDB, Haiku-summarized) | **Skipped unconditionally** | Haiku is a cloud call. Explicit privacy gate in `_persist_turns_async` runs independently of stage. |
+| **Session summary** (ChromaDB, qwen-summarized) | **Skipped unconditionally** | Same gate — even though qwen is local today, the writeback is collocated with the Haiku path and skipping both keeps the privacy boundary clean. |
+
+The ledger is the only persistent complete record. The FIFO holds full content in-memory so Stage 2 resume works; the redaction is applied at read time for any cloud-bound consumer. Tools that need to replay private content (debugging, transcript viewing) read the ledger directly and stay on-box.
 
 ### 3.2. Role in Debugging and Crash Recovery
 The ledger provides Jane with a deterministic way to investigate unexpected failures:

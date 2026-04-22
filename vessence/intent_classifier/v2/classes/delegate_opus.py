@@ -111,11 +111,11 @@ EXAMPLES = [
     "yes and I want you to read the log files to see what the Android app is doing",
     "I would like you to read the last 3 turns in Jane web",
     "how many from last yesterday",
-    # Generic affirmatives that need context (NOT send message)
-    "yeah please", "yes please", "yeah please do that",
-    "ok do it", "go ahead", "sure", "yep", "alright",
-    "yes please flip that on", "yeah that's fine",
-    "ok sounds good", "okay sounds good",
+    # Bare affirmatives removed — "yes", "sure", "ok", etc. have no
+    # inherent routing semantics; when they appear after a STAGE2_FOLLOWUP
+    # question they belong to that handler's class, not here. Keeping them
+    # caused the Chroma supermajority lock to override qwen and pull clinic
+    # (or any other) follow-ups into delegate_opus / Stage 3.
     # Questions about contacts/people (NOT sending a message)
     "do you have the contact information for x",
     "do you have to contact information for x",
@@ -138,7 +138,7 @@ EXAMPLES = [
     "restart the jane service", "bring the server back up",
     "kill and restart the server", "bounce the server",
     # Ambiguous "play" / "let's" (NOT music play)
-    "let's play", "let's do it", "let's go", "let's get started",
+    "let's get started",
     "I need to think about that for now let's",
     "let's move on", "let's talk about something else",
     "let's work on the next thing", "let's switch topics",
@@ -217,42 +217,6 @@ EXAMPLES = [
     "which person should I text",
     "should I text someone",
     "who needs a text",
-    # Status updates after the user did something outside Jane. These are
-    # not commands to send a new SMS and not conversation-ending phrases.
-    "ok sent it",
-    "ok, sent it",
-    "okay sent it",
-    "I sent it",
-    "sent it",
-    "done, I sent it",
-    "ok I sent that",
-    "I already sent it",
-    "I just sent the message",
-    # Clinic queries that are NOT about reading the current week's booked list
-    "how many patients does Ariel have on Tuesday",
-    "how many patients does Ariel have on Wednesday",
-    "how many patients does Ariel have on Thursday",
-    "how many patients does Lace have on Monday",
-    "how many patients does Lace have on Wednesday",
-    "how many patients does Annie have on Friday",
-    "who are the patients for Ariel on Tuesday",
-    "who are the patients for Lace on Wednesday",
-    "how many patients does Dr. Smith have on Tuesday",
-    "book a patient for the practitioner on Thursday",
-    "book a patient for Kathia on Thursday",
-    "book an appointment for Thursday",
-    "how many patients did the clinic see last month",
-    "how many patients total does the clinic have",
-    "who are the practitioners at the clinic",
-    "who's working at the clinic on Saturday",
-    "who is working at the clinic on Friday",
-    "how many patients does the clinic see per week",
-    "how many patients did she see last week",
-    "how many patients did Kathia see last week",
-    "what are her work hours",
-    "how many hours does she work this week",
-    "set up an appointment for her next week",
-    "how many appointments are still available today",
     # Past-tense browsing anecdotes — NOT commands to drive a browser now.
     # These get pulled toward WEB_AUTOMATION by surface word overlap but
     # have no actionable intent. Route to DELEGATE_OPUS so Opus can

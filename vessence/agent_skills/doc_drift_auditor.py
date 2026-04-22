@@ -56,7 +56,8 @@ def audit_cron() -> None:
         warn("CRON_JOBS.md missing")
         return
 
-    # Get actual crontab entries (script paths)
+    # Get actual crontab entries (script paths). Only uncommented lines count
+    # as "active" — commented lines in crontab are historical/disabled.
     try:
         r = subprocess.run(["crontab", "-l"], capture_output=True, text=True, check=False)
         if r.returncode != 0:
@@ -67,28 +68,55 @@ def audit_cron() -> None:
         warn(f"crontab read failed: {e}")
         return
 
-    # Extract script names from crontab (last python file in each line)
     actual_scripts = set()
     for ln in actual_lines:
         s = ln.strip()
-        if not s or s.startswith("#") or "=" in s and not s.startswith("0") and "*" not in s[:5]:
+        if not s or s.startswith("#"):
+            continue
+        # Skip env-var assignments like SHELL=/bin/sh
+        if "=" in s and not s.startswith(("0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "*", "@")):
             continue
         for tok in s.split():
             if tok.endswith(".py") or tok.endswith(".sh"):
                 actual_scripts.add(Path(tok).name)
 
-    # Extract documented script names
+    # Extract documented script names ONLY from **Script Path:** lines. Inline
+    # mentions in prose (e.g. "appends to CODE_MAP_KEYWORDS in jane_proxy.py")
+    # must not be treated as cron entries.
     doc_text = cron_path.read_text()
-    doc_scripts = set(re.findall(r"`\$VESSENCE_HOME/[^`]*?/([^/`]+\.(?:py|sh))`", doc_text))
-    doc_scripts |= set(re.findall(r"`/home/chieh/ambient/vessence/[^`]*?/([^/`]+\.(?:py|sh))`", doc_text))
+    script_path_re = re.compile(
+        r"\*\*Script Path:\*\*\s*`[^`]*?/([^/`]+\.(?:py|sh))`"
+    )
+    doc_scripts = set(script_path_re.findall(doc_text))
+
+    # Identify entries documented as INACTIVE so they don't fire false positives:
+    # - anything under "Removed Jobs" or "Non-Cron Scheduled Scripts" sections
+    # - any entry whose section header contains "DISABLED" or "COMMENTED OUT"
+    inactive_scripts: set[str] = set()
+    sections = re.split(r"^##\s+", doc_text, flags=re.MULTILINE)
+    for sec in sections:
+        if not sec.strip():
+            continue
+        header = sec.splitlines()[0]
+        inactive_section = any(
+            key in header
+            for key in ("Removed Jobs", "Non-Cron Scheduled Scripts")
+        )
+        disabled_entry = any(
+            key in header for key in ("DISABLED", "COMMENTED OUT")
+        )
+        if inactive_section or disabled_entry:
+            inactive_scripts |= set(script_path_re.findall(sec))
+
+    active_doc_scripts = doc_scripts - inactive_scripts
 
     missing_in_doc = actual_scripts - doc_scripts
-    missing_in_cron = doc_scripts - actual_scripts
+    missing_in_cron = active_doc_scripts - actual_scripts
 
     for s in sorted(missing_in_doc):
         warn(f"CRON_JOBS.md missing entry for active cron script: {s}")
     for s in sorted(missing_in_cron):
-        warn(f"CRON_JOBS.md mentions {s} but no matching cron entry exists")
+        warn(f"CRON_JOBS.md claims {s} is active but no matching cron entry exists")
 
 
 # ── Audit 2: auditable_modules.md whitelist files exist ─────────────────────
@@ -176,9 +204,53 @@ def audit_skills_registry() -> None:
     referenced = set(re.findall(r"`agent_skills/([^`]+\.py)`", text))
     referenced |= set(re.findall(r"\$VESSENCE_HOME/agent_skills/([^\s`]+\.py)", text))
     skills_dir = VESSENCE_HOME / "agent_skills"
-    for f in referenced:
-        if not (skills_dir / f).exists():
-            warn(f"SKILLS_REGISTRY.md references missing file: agent_skills/{f}")
+    missing = {f for f in referenced if not (skills_dir / f).exists()}
+    if not missing:
+        return
+
+    # Auto-remove capability blocks that point at a missing skill file. The
+    # registry is structured as blank-line-separated "- **Capability:**" blocks;
+    # drop whole blocks whose body mentions a missing file.
+    blocks = text.split("\n\n")
+    kept: list[str] = []
+    removed_caps: list[str] = []
+    for blk in blocks:
+        stripped = blk.lstrip()
+        is_capability_block = (
+            stripped.startswith("- **Capability:**")
+            or stripped.startswith("-   **Capability:**")
+        )
+        if not is_capability_block:
+            kept.append(blk)
+            continue
+        touches_missing = any(fname in blk for fname in missing)
+        if touches_missing:
+            header = blk.splitlines()[0].strip()
+            cap_name = header.split("**Capability:**", 1)[-1].strip()
+            removed_caps.append(cap_name)
+        else:
+            kept.append(blk)
+
+    if removed_caps:
+        new_text = "\n\n".join(kept)
+        if not new_text.endswith("\n"):
+            new_text += "\n"
+        p.write_text(new_text)
+        record_change(
+            p,
+            f"removed {len(removed_caps)} stale capability block(s) "
+            f"pointing at missing file(s): {', '.join(sorted(missing))}",
+        )
+
+    # Anything still mentioned in prose (not inside a capability block) has
+    # to be reviewed by hand — auto-editing prose is too risky.
+    leftover_text = "\n\n".join(kept)
+    still_referenced = {f for f in missing if f in leftover_text}
+    for f in sorted(still_referenced):
+        warn(
+            f"SKILLS_REGISTRY.md still mentions missing file agent_skills/{f} "
+            f"in non-capability prose — needs human review"
+        )
 
 
 # ── Report + commit ─────────────────────────────────────────────────────────

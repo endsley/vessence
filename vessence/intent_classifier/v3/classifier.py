@@ -38,76 +38,13 @@ import re
 logger = logging.getLogger(__name__)
 
 
-# ── Deterministic pre-classifier rules ────────────────────────────────────────
+# ── Output-parsing guards ─────────────────────────────────────────────────────
 #
-# Some phrasings are unambiguous enough that running qwen on them is wasted
-# latency AND risks misclassification. These rules short-circuit the model
-# call for high-confidence lexical matches. Each rule returns
-# ("<class>", "Very High") or None.
-#
-# Added 2026-04-21 after the transcript review for 2026-04-20 revealed
-# repeated clinic-schedule queries being misrouted to read_calendar (which
-# has no handler) or delegate_opus, burning Stage 3 time for deterministic
-# questions against a small local SQLite DB. See transcript review Issues
-# 4, 7, 9, 12, 16.
-
-# Explicit clinic/patient schedule phrasings that should ALWAYS route to
-# clinic_schedules_info regardless of what chroma+qwen say. These are the
-# ones with zero ambiguity — if they fire, we're confident.
-_CLINIC_FAST_PATH_RE = re.compile(
-    r"(?:"
-    # Explicit "clinic schedule" phrases
-    r"\bclinic\s+schedule[s]?\b"
-    # "how many patients" / "any patients" / "which patients"
-    r"|\b(?:how\s+many|which|any|my)\s+patient(?:s)?\b"
-    # "patients (today|tomorrow|this week|on <day>)"
-    r"|\bpatient(?:s)?\s+(?:today|tomorrow|this\s+week|this\s+month|on\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday))\b"
-    # "who's coming in" / "who is coming in"
-    r"|\bwho(?:'s|\s+is|\s+are)\s+coming\s+in\b"
-    # "is she working (on <day>|today|tomorrow)"
-    r"|\bis\s+she\s+working\b"
-    # "how busy is she"
-    r"|\bhow\s+busy\s+is\s+she\b"
-    # "any cancellations" / "patients canceled"
-    r"|\bany\s+cancellation[s]?\b"
-    r"|\bpatient(?:s)?\s+(?:are\s+|were\s+|that\s+)?cancel(?:led|ed)\b"
-    r"|\bwhich\s+patient(?:s)?\s+cancel(?:led|ed)\b"
-    r")",
-    re.IGNORECASE,
-)
-
-
-def _clinic_fast_path(user_prompt: str) -> tuple[str, str] | None:
-    """Return ('clinic schedules info', 'Very High') if the prompt matches
-    an unambiguous clinic-schedule phrase, else None.
-
-    Guard rails: skip when the prompt contains send/text/email/call verbs
-    — "text my wife the clinic schedule" is a send_message, not a lookup.
-    """
-    if not user_prompt:
-        return None
-    txt = user_prompt.strip()
-    if not txt:
-        return None
-    low = txt.lower()
-    # Don't hijack send/email/call intents that happen to mention clinic words.
-    # "tell me (about …)" is a lookup request, not SMS — only block "tell <3rd
-    # person>" phrasings (e.g. "tell my wife", "tell Kathia", "tell them").
-    if re.search(
-        r"\b(?:text|message|sms|email|call|phone)\b",
-        low,
-    ):
-        return None
-    # "tell my wife", "tell mom", "tell kathia" etc. — but NOT "tell me".
-    # Match "tell" followed by a recipient token that's not "me" / "us" / "him"
-    # in the subject sense (these are almost always lookups).
-    m = re.search(r"\btell\s+(\w+)", low)
-    if m and m.group(1) not in {"me", "us"}:
-        return None
-    if _CLINIC_FAST_PATH_RE.search(low):
-        return ("clinic schedules info", "Very High")
-    return None
-
+# These run AFTER qwen and only correct narrow parse-layer failures.
+# They do NOT add new classifier logic and do NOT bypass chroma+qwen —
+# classifier fixes belong in exemplars / class descriptions, per the
+# pipeline architecture guideline in
+# agent_skills/transcript_quality_review.py.
 
 # Guard against "delete" phrasing being misclassified as send_email. After
 # a read_messages / read_email turn, "delete it / delete that / delete them"
@@ -501,14 +438,6 @@ async def classify(
     """
     if not user_prompt or not user_prompt.strip():
         return ("others", "Low")
-
-    # 0. Deterministic clinic schedule fast path — skips qwen for the most
-    # unambiguous phrasings (e.g. "clinic schedule", "how many patients
-    # today", "who's coming in tomorrow", "is she working on Monday").
-    clinic_hit = _clinic_fast_path(user_prompt)
-    if clinic_hit is not None:
-        logger.info("v3: clinic fast path matched → %s:%s", *clinic_hit)
-        return clinic_hit
 
     # 1. Embedding top-5 with distance filter
     candidates = _top_k_candidates(user_prompt)

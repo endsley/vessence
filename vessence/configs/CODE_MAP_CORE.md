@@ -78,113 +78,113 @@ for historical context.
 <!-- AUTO-GENERATED BELOW — do not edit below this line -->
 
 # Code Map — Core (Python Backend)
-_Auto-generated on 2026-04-20 08:15 UTC by `generate_code_map.py`_
+_Auto-generated on 2026-04-21 08:15 UTC by `generate_code_map.py`_
 
 ## Priority Files
 
-### jane_web/jane_proxy.py (3283 lines)
-  class ToolMarkerExtractor → L51-315
-  class _SkipRouterSignal → L331-335
-  class JaneSessionState → L701-714
+### jane_web/jane_proxy.py (3337 lines)
+  class ToolMarkerExtractor → L51-338
+  class _SkipRouterSignal → L354-358
+  class JaneSessionState → L735-748
     __init__() → L65-67
     feed() → L70-80
-    flush() → L82-92
-    _drain() → L95-182
-    _partial_opener_suffix_len() → L185-192
-    _partial_fence_suffix_len() → L195-202
-    _find_marker_end() → L205-288
-    _parse_marker() → L291-315
-  _extract_tool_results() → L342-411
-  _neutralize_delimiters() → L424-444
-  _format_tool_results_for_brain() → L447-487
-  _execute_email_tool_serverside() → L490-553
-  _maybe_prepend_code_map() → L693-697
-  run_prefetch_memory() → L729-765
-  get_prefetch_result() → L768-773
-  _get_brain_name() → L776-789
-  _session_log_id() → L792-793
-  _get_timeout_seconds() → L796-797
-  _get_execution_profile() → L800-801
-  _use_gemini_api() → L804-806
-  _use_persistent_gemini() → L808-810
-  _use_persistent_claude() → L813-814
-  _use_persistent_codex() → L817-818
-  _get_web_chat_model() → L821-840
-  _prune_stale_sessions() → L843-856
-  _execute_brain_sync() → L859-925
-  _execute_brain_stream() → L928-1009
-  _get_session() → L1012-1028
-  _resolve_file_context() → L1053-1062
-  _message_for_persistence() → L1065-1069
-  prewarm_session() → L1072-1118
-  _await_prewarm_if_running() → L1121-1138
-  end_session() → L1141-1213
-  _progress_snapshot() → L1216-1230
-  _truncate_log_if_needed() → L1236-1243
-  _log_stage() → L1246-1257
-  _log_start() → L1260-1268
-  _dump_prompt() → L1271-1303
-  _persist_turns_async() → L1306-1390
-  send_message() → L1398-1424
-  _send_message_inner() → L1427-1575
-  _pick_ack() → L1578-1844
-  stream_message() → L1847-3266
-  _log_chat_to_work_log() → L3269-3271
-  get_active_brain() → L3274-3276
-  get_tunnel_url() → L3279-3283
-  _TOOL_RESULT_OPEN = ... → L338
+    flush() → L82-100
+    _strip_orphan_close() → L103-115
+    _drain() → L118-205
+    _partial_opener_suffix_len() → L208-215
+    _partial_fence_suffix_len() → L218-225
+    _find_marker_end() → L228-311
+    _parse_marker() → L314-338
+  _extract_tool_results() → L365-434
+  _neutralize_delimiters() → L447-467
+  _format_tool_results_for_brain() → L470-510
+  _execute_email_tool_serverside() → L513-576
+  _maybe_prepend_code_map() → L727-731
+  run_prefetch_memory() → L763-799
+  get_prefetch_result() → L802-807
+  _get_brain_name() → L810-823
+  _session_log_id() → L826-827
+  _get_timeout_seconds() → L830-831
+  _get_execution_profile() → L834-835
+  _use_gemini_api() → L838-840
+  _use_persistent_gemini() → L842-844
+  _use_persistent_claude() → L847-848
+  _use_persistent_codex() → L851-852
+  _get_web_chat_model() → L855-874
+  _prune_stale_sessions() → L877-890
+  _execute_brain_sync() → L893-959
+  _execute_brain_stream() → L962-1043
+  _get_session() → L1046-1062
+  _resolve_file_context() → L1087-1096
+  _message_for_persistence() → L1099-1103
+  prewarm_session() → L1106-1152
+  _await_prewarm_if_running() → L1155-1172
+  end_session() → L1175-1247
+  _progress_snapshot() → L1250-1264
+  _truncate_log_if_needed() → L1270-1277
+  _log_stage() → L1280-1291
+  _log_start() → L1294-1302
+  _dump_prompt() → L1305-1337
+  _persist_turns_async() → L1340-1424
+  send_message() → L1432-1458
+  _send_message_inner() → L1461-1617
+  _pick_ack() → L1620-1886
+  stream_message() → L1889-3320
+  _log_chat_to_work_log() → L3323-3325
+  get_active_brain() → L3328-3330
+  get_tunnel_url() → L3333-3337
 
-### jane_web/main.py (5633 lines)
+### jane_web/main.py (5770 lines)
   class RateLimiter → L104-130
-  class CreateManagedUserRequest → L2050-2054
-  class ChatMessage → L2981-2986
-  class SessionControl → L2989-2990
-  class SwitchProviderRequest → L3083-3084
-  GET /health → L810
-  POST /api/admin/reset-gate → L816
-  POST /api/jane/warmup → L850
-  GET /sw.js → L875
-  GET /manifest.webmanifest → L880
-  GET / → L1174
-  GET /share → L1200
-  GET /vault → L1205
-  GET /guide → L1228
-  GET /architecture → L1234
-  GET /chat → L1240
-  GET /essences → L1263
-  GET /worklog → L1267
-  GET /api/job-queue → L1271
-  GET /api/job-queue/completed → L1285
-  GET /briefing → L1299
-  POST /api/crash-report → L1304
-  POST /api/contacts/sync → L1317
-  GET /api/contacts/search → L1353
-  GET /api/contacts → L1377
-  POST /api/contacts/alias → L1387
-  POST /api/messages/sync → L1412
-  GET /api/messages/search → L1473
-  GET /api/messages/recent → L1496
-  POST /api/device-diagnostics → L1511
-  GET /api/device-diagnostics → L1541
-  GET /settings/devices → L1560
-  GET /downloads/{filename} → L1566
-  GET /api/tts-server/health → L1666
-  POST /api/tts-server/generate → L1672
-  POST /api/tts-server/stream → L1680
-  POST /api/tts/generate → L1692
-  GET /api/app/settings → L1776
-  PUT /api/app/settings → L1782
-  POST /api/app/installed → L1792
-  GET /api/app/latest-version → L1804
-  GET /auth/google → L1837
-  GET /auth/google/callback → L1851
-  POST /api/auth/google-token → L1895
-  POST /api/auth/verify-share → L1933
-  POST /api/auth/verify-otp → L1943
-  POST /api/auth/logout → L1968
-  GET /api/auth/devices → L1980
-  DELETE /api/auth/devices/{device_id} → L1985
-  POST /api/auth/check → L1991
+  class CreateManagedUserRequest → L2076-2080
+  class ChatMessage → L3054-3059
+  class SessionControl → L3062-3063
+  class SwitchProviderRequest → L3156-3157
+  GET /health → L817
+  GET /healthz → L823
+  POST /api/admin/reset-gate → L850
+  POST /api/jane/warmup → L884
+  GET /sw.js → L909
+  GET /manifest.webmanifest → L914
+  GET / → L1208
+  GET /share → L1234
+  GET /vault → L1239
+  GET /guide → L1262
+  GET /architecture → L1268
+  GET /chat → L1274
+  GET /essences → L1297
+  GET /worklog → L1301
+  GET /api/job-queue → L1305
+  GET /api/job-queue/completed → L1315
+  GET /briefing → L1325
+  POST /api/crash-report → L1330
+  POST /api/contacts/sync → L1343
+  GET /api/contacts/search → L1379
+  GET /api/contacts → L1403
+  POST /api/contacts/alias → L1413
+  POST /api/messages/sync → L1438
+  GET /api/messages/search → L1499
+  GET /api/messages/recent → L1522
+  POST /api/device-diagnostics → L1537
+  GET /api/device-diagnostics → L1567
+  GET /settings/devices → L1586
+  GET /downloads/{filename} → L1592
+  GET /api/tts-server/health → L1692
+  POST /api/tts-server/generate → L1698
+  POST /api/tts-server/stream → L1706
+  POST /api/tts/generate → L1718
+  GET /api/app/settings → L1802
+  PUT /api/app/settings → L1808
+  POST /api/app/installed → L1818
+  GET /api/app/latest-version → L1830
+  GET /auth/google → L1863
+  GET /auth/google/callback → L1877
+  POST /api/auth/google-token → L1921
+  POST /api/auth/verify-share → L1959
+  POST /api/auth/verify-otp → L1969
+  POST /api/auth/logout → L1994
+  GET /api/auth/devices → L2006
+  DELETE /api/auth/devices/{device_id} → L2011
 
 ### jane_web/broadcast.py (259 lines)
   SUMMARY_INTERVAL_SECONDS = ... → L16
@@ -475,7 +475,7 @@ _Auto-generated on 2026-04-20 08:15 UTC by `generate_code_map.py`_
   run_scheduler() → L101-187
   _acquire_singleton_lock() → L190-221
 
-### agent_skills/janitor_system.py (152 lines)
+### agent_skills/janitor_system.py (165 lines)
   TEMP_FILES = ... → L13
   MAX_LOG_SIZE_MB = ... → L18
   LOG_RETENTION_DAYS = ... → L19
@@ -488,7 +488,8 @@ _Auto-generated on 2026-04-20 08:15 UTC by `generate_code_map.py`_
   prune_old_logs() → L53-73
   _truncate_log_tail() → L76-94
   prune_old_transcripts() → L96-124
-  archive_completed_jobs() → L127-134
+  prune_turn_dedupe() → L127-136
+  archive_completed_jobs() → L139-146
 
 ### agent_skills/nightly_audit.py (322 lines)
   ENV_FILE = ... → L30
@@ -638,20 +639,6 @@ _Auto-generated on 2026-04-20 08:15 UTC by `generate_code_map.py`_
   web_search() → L178-180
   synthesize_with_openai() → L184-229
   main() → L237-327
-
-### agent_skills/llm_summarize.py (204 lines)
-  _REQUIRED_PYTHON = ... → L19
-  TRANSCRIPT_DIR = ... → L27
-  SHORT_TERM_DB = ... → L31
-  TURNS_TO_INCLUDE = ... → L48
-  MIN_TEXT_LEN = ... → L49
-  silence_stderr() → L52-58
-  restore_stderr() → L61-63
-  extract_text_from_content() → L66-84
-  read_recent_turns() → L87-120
-  summarize_with_local_llm() → L123-145
-  save_to_short_term() → L148-175
-  main() → L178-200
 
 ### agent_skills/qwen_orchestrator.py (260 lines)
   class QwenOrchestrator → L27-175
@@ -879,6 +866,23 @@ _Auto-generated on 2026-04-20 08:15 UTC by `generate_code_map.py`_
     cleanup_stale() → L138-151
   get_permission_broker() → L160-166
 
+### jane_web/turn_dedupe.py (224 lines)
+  VAULT_HOME = ... → L35
+  LEDGER_DB = ... → L39
+  DEDUPE_TTL_SECONDS = ... → L43
+  JOIN_WAIT_SECONDS = ... → L47
+  _conn() → L52-55
+  init_schema() → L58-76
+  class DedupeRow → L80-96
+    age_seconds() → L89-96
+  _get_row() → L99-115
+  lookup() → L118-130
+  try_begin() → L133-166
+  mark_completed() → L169-177
+  mark_failed() → L180-192
+  wait_for_completion() → L195-209
+  prune_old() → L212-224
+
 ### jane_web/verify_first_policy.py (299 lines)
   _CODE_TRIGGER_RE = ... → L44
   _MEMORY_TRIGGER_RE = ... → L82
@@ -903,12 +907,12 @@ _Auto-generated on 2026-04-20 08:15 UTC by `generate_code_map.py`_
   _WAKE_WORD_MATCHES = ... → L31
   verify_wake_word() → L34-73
 
-### jane_web/jane_v3/pipeline.py (463 lines)
+### jane_web/jane_v3/pipeline.py (519 lines)
   _persist_turn_to_ledger() → L60-86
-  _classify_and_maybe_handle() → L92-269
-  handle_chat() → L275-372
-  _ndjson() → L378-383
-  handle_chat_stream() → L386-463
+  _classify_and_maybe_handle() → L92-325
+  handle_chat() → L331-428
+  _ndjson() → L434-439
+  handle_chat_stream() → L442-519
 
 ### jane_web/jane_v2/models.py (91 lines)
   LOCAL_LLM = ... → L43
@@ -933,7 +937,7 @@ _Auto-generated on 2026-04-20 08:15 UTC by `generate_code_map.py`_
   _is_edit_intent() → L187-196
   resolve() → L199-366
 
-### jane_web/jane_v2/pipeline.py (1829 lines)
+### jane_web/jane_v2/pipeline.py (1832 lines)
   _DEFAULT_ESCALATE_ACK = ... → L51
   _AWAITING_RE = ... → L57
   _inject_self_improvement_context() → L62-142
@@ -1086,7 +1090,7 @@ _Auto-generated on 2026-04-20 08:15 UTC by `generate_code_map.py`_
   _check_open_draft() → L152-225
   handle() → L228-348
 
-### jane_web/jane_v2/classes/send_message/metadata.py (52 lines)
+### jane_web/jane_v2/classes/send_message/metadata.py (67 lines)
   METADATA = ... → L3
 
 ### jane_web/jane_v2/classes/music_play/handler.py (148 lines)
@@ -1136,6 +1140,47 @@ _Auto-generated on 2026-04-20 08:15 UTC by `generate_code_map.py`_
   _VAULT_WEB_DIR = ... → L8
   _escalation_context() → L15-63
   METADATA = ... → L66
+
+### jane_web/jane_v2/classes/send_email/handler.py (343 lines)
+  _SKILLS_DIR = ... → L36
+  _VAULT_WEB_DIR = ... → L39
+  _PENDING_TYPE = ... → L49
+  _WRONG_CLASS_SENTINEL = ... → L50
+  _EXTRACT_PROMPT = ... → L52
+  _EMAIL_RE = ... → L82
+  _parse_extraction() → L85-117
+  _is_confirm() → L120-125
+  _is_cancel() → L128-133
+  _is_edit_intent() → L136-142
+  _check_open_draft() → L145-244
+  handle() → L247-343
+
+### jane_web/jane_v2/classes/send_email/metadata.py (54 lines)
+  METADATA = ... → L3
+
+### jane_web/jane_v2/classes/clinic_schedules_info/handler.py (249 lines)
+  DB_PATH = ... → L22
+  _DAYS = ... → L24
+  _FOLLOW_UP = ... → L30
+  _DAY_RE = ... → L32
+  _COUNT_RE = ... → L36
+  _WHO_RE = ... → L40
+  _DETAIL_RE = ... → L44
+  _NAME_RE = ... → L49
+  _parse_time() → L56-62
+  _db_conn() → L65-68
+  _current_week_start() → L71-81
+  handle() → L84-115
+  _count_for_day() → L118-141
+  _names_for_day() → L144-174
+  _patient_detail() → L177-224
+  _weekly_summary() → L227-249
+
+### jane_web/jane_v2/classes/clinic_schedules_info/metadata.py (67 lines)
+  DB_PATH = ... → L10
+  _description() → L13-36
+  _escalation_context() → L39-51
+  METADATA = ... → L54
 
 ### jane_web/jane_v2/classes/timer/handler.py (485 lines)
   _CANCEL_WORDS = ... → L36
@@ -1193,17 +1238,6 @@ _Auto-generated on 2026-04-20 08:15 UTC by `generate_code_map.py`_
   VESSENCE_HOME = ... → L28
   _git() → L33-39
   main() → L42-94
-
-### agent_skills/backfill_file_index_descriptions.py (138 lines)
-  _REQUIRED_PYTHON = ... → L8
-  class _silence → L13-25
-    __enter__() → L14-18
-    __exit__() → L20-25
-  _resolve_path() → L41-52
-  _extract_path_from_doc() → L55-60
-  _mime_for_path() → L63-65
-  _build_memory_text() → L68-69
-  backfill() → L72-128
 
 ### agent_skills/browser_skill.py (59 lines)
   class BrowserContextManager → L8-59
@@ -1418,20 +1452,6 @@ _Auto-generated on 2026-04-20 08:15 UTC by `generate_code_map.py`_
   fetch_weather() → L88-155
   main() → L158-162
 
-### agent_skills/gemma_summarize.py (204 lines)
-  _REQUIRED_PYTHON = ... → L22
-  TRANSCRIPT_DIR = ... → L30
-  SHORT_TERM_DB = ... → L34
-  TURNS_TO_INCLUDE = ... → L48
-  MIN_TEXT_LEN = ... → L49
-  silence_stderr() → L52-58
-  restore_stderr() → L61-63
-  extract_text_from_content() → L66-84
-  read_recent_turns() → L87-120
-  summarize_with_local_llm() → L123-145
-  save_to_short_term() → L148-175
-  main() → L178-200
-
 ### agent_skills/generate_identity_essay.py (152 lines)
   DB_PATH = ... → L13
   _USER_NAME = ... → L14
@@ -1547,19 +1567,22 @@ _Auto-generated on 2026-04-20 08:15 UTC by `generate_code_map.py`_
   CHANNEL_ID = ... → L19
   send_notification() → L21-54
 
-### agent_skills/pipeline_audit_100.py (410 lines)
+### agent_skills/pipeline_audit_100.py (431 lines)
   VESSENCE_HOME = ... → L38
   VESSENCE_DATA_HOME = ... → L39
   PROMPT_DUMP = ... → L40
   REPORT_PATH = ... → L41
   SERVER = ... → L57
   KNOWN_CLASSES = ... → L62
-  load_recent_prompts() → L72-98
-  classify_only() → L104-112
-  run_through_pipeline() → L115-177
-  judge() → L183-239
-  add_exemplar() → L245-271
-  main() → L277-400
+  _SYSTEM_XML_RE = ... → L71
+  _CONV_STATE_RE = ... → L75
+  _strip_system_context() → L80-84
+  load_recent_prompts() → L90-119
+  classify_only() → L125-133
+  run_through_pipeline() → L136-198
+  judge() → L204-260
+  add_exemplar() → L266-292
+  main() → L298-421
 
 ### agent_skills/process_watchdog.py (151 lines)
   PROTECTED_NAMES = ... → L26
@@ -1676,7 +1699,7 @@ _Auto-generated on 2026-04-20 08:15 UTC by `generate_code_map.py`_
   run_claude_fixes() → L434-473
   main() → L479-533
 
-### agent_skills/user_manager.py (253 lines)
+### agent_skills/user_manager.py (269 lines)
   USERS_DIR = ... → L22
   PERSONALITIES_DIR = ... → L23
   VALID_PERSONALITIES = ... → L26
@@ -1693,10 +1716,10 @@ _Auto-generated on 2026-04-20 08:15 UTC by `generate_code_map.py`_
   _validate_capabilities() → L110-117
   seed_user_memory() → L120-148
   create_user_space() → L151-195
-  list_users() → L198-210
-  set_user_personality() → L213-222
-  get_personality_content() → L225-232
-  list_personalities() → L235-243
+  delete_user_space() → L198-211
+  list_users() → L214-226
+  set_user_personality() → L229-238
+  get_personality_content() → L241-248
 
 ### agent_skills/vault_tunnel_url.py (55 lines)
   LOG_PATHS = ... → L12

@@ -1,21 +1,21 @@
 # Most Recent Nightly Self-Improvement
 
-- Run started: 2026-04-20 01:00:01
-- Report generated: 2026-04-20 01:19:41
-- Total runtime: 1178s
+- Run started: 2026-04-21 01:00:01
+- Report generated: 2026-04-21 01:38:16
+- Total runtime: 2294s
 - Jobs: 8 total, 7 ok, 1 timeout, 0 failed
 - Stable latest report path: `/home/chieh/ambient/vessence/configs/self_improvement_latest.md`
-- Archived copy: `/home/chieh/ambient/vessence-data/reports/self_improvement/self_improvement_20260420_010001.md`
+- Archived copy: `/home/chieh/ambient/vessence-data/reports/self_improvement/self_improvement_20260421_010001.md`
 
 ## Executive Summary
 
 - 1 stage(s) need attention because they timed out or exited non-zero.
-- 4 concrete improvement/fix signals were found in logs or reports.
+- 5 concrete improvement/fix signals were found in logs or reports.
 
 ## Stage 1: Auto-Commit WIP (pre)
 
 - Status: `ok`
-- Duration: 0s (0.0 min)
+- Duration: 116s (1.9 min)
 
 ### What It Did
 
@@ -27,7 +27,7 @@
 
 ### Improvements It Made
 
-- 2026-04-20 01:00:02,636 INFO Committed 120 file(s).
+- 2026-04-21 01:01:58,297 INFO Committed 88 file(s).
 
 ### Evidence Files
 
@@ -35,8 +35,8 @@
 
 ## Stage 2: Dead Code Auditor
 
-- Status: `timeout`
-- Duration: 900s (15.0 min)
+- Status: `ok`
+- Duration: 891s (14.8 min)
 
 ### What It Did
 
@@ -44,14 +44,13 @@
 
 ### Problems It Found
 
-- Job ended with status `timeout`.
-- Dead files — review needed: 10.
-- Possibly-dead functions: 47.
-- Duplicate function bodies: 21 groups.
+- Dead files — review needed: 40.
+- Possibly-dead functions: 35.
+- Duplicate function bodies: 9 groups.
 
 ### Improvements It Made
 
-- No concrete improvement was recorded in the available logs/reports.
+- [dead-code] Done — 0 auto-deleted, 40 flagged, 35 dead funcs, 9 dup groups
 
 ### Evidence Files
 
@@ -69,7 +68,7 @@
 
 ### Problems It Found
 
-- 2026-04-20 01:15:02,759 [WARNING] Working tree has uncommitted changes — skipping audit.
+- 2026-04-21 01:16:49,561 [WARNING] Working tree has uncommitted changes — skipping audit.
 
 ### Improvements It Made
 
@@ -84,7 +83,7 @@
 ## Stage 4: Pipeline Audit (30 prompts)
 
 - Status: `ok`
-- Duration: 269s (4.5 min)
+- Duration: 531s (8.8 min)
 
 ### What It Did
 
@@ -92,13 +91,13 @@
 
 ### Problems It Found
 
-- Prompts audited: 13.
-- Classification failures: 6.
-- Response failures: 8.
-- **<jane_architecture>
-- **<jane_architecture>
-- **<memory_verify priority="critical">
-- **<jane_architecture>
+- Prompts audited: 30.
+- Classification failures: 7.
+- Response failures: 18.
+- **who's coming in tomorrow** (clinic schedules info/stage2): On Wednesday she has 8 active patients: John Meeks, Mock Patient, Prabitha Natarajan, Suprama Datta, and 4 more. Cancelled: Prabitha Natarajan, Meliss
+- **how about tomorrow** (clinic schedules info/stage2): She has 8 active patients on Wednesday, with 2 cancellations (10 total booked). Would you like to know about another day?
+- **casual look like tomorrow** (weather/stage3): Tomorrow she has 10 slots on the books. Two are cancelled — Melissa Solomon at 8 AM and Prabitha Natarajan at 11. That leaves 8 active patients, start
+- **what does my schedule look like tomorrow** (others/stage3): Your calendar is clear tomorrow — nothing scheduled for Wednesday.
 
 ### Improvements It Made
 
@@ -120,14 +119,10 @@
 
 ### Problems It Found
 
-- CRON_JOBS.md missing entry for active cron script: daily_code_review.py
-- CRON_JOBS.md missing entry for active cron script: fetch_todo_list.py
-- CRON_JOBS.md missing entry for active cron script: fetch_weather.py
 - CRON_JOBS.md missing entry for active cron script: run_briefing.py
-- CRON_JOBS.md mentions ambient_heartbeat.py but no matching cron entry exists
-- CRON_JOBS.md mentions audit_auto_fixer.py but no matching cron entry exists
-- CRON_JOBS.md mentions auto_pull.sh but no matching cron entry exists
 - CRON_JOBS.md mentions bot_watchdog.sh but no matching cron entry exists
+- CRON_JOBS.md mentions prompt_queue_runner.py but no matching cron entry exists
+- SKILLS_REGISTRY.md references missing file: agent_skills/gemma_query.py
 
 ### Improvements It Made
 
@@ -141,7 +136,7 @@
 ## Stage 6: Transcript Quality Review
 
 - Status: `ok`
-- Duration: 3s (0.1 min)
+- Duration: 634s (10.6 min)
 
 ### What It Did
 
@@ -149,12 +144,23 @@
 
 ### Problems It Found
 
-- No problems were detected in the available logs/reports.
+- Transcript review found 18 issues: 5 critical, 1 low, 12 medium.
+- SMS confirmation attempted to send with no open draft.
+- Direct SMS request missed the Stage 2 send-message fast path.
+- Clinic schedule request was routed to Stage 3 instead of the clinic schedule handler.
+- Clinic-style schedule query was classified as read calendar, which has no Stage 2 handler.
 
 ### Improvements It Made
 
-- 2026-04-20 01:19:35,986 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (0 issues)
-- 2026-04-20 01:19:35,987 INFO self_improve_log: recorded [info] Transcript Review — I reviewed yesterday's conversations and nothing looked off — all turns handled cleanly.
+- 2026-04-21 01:28:37,653 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (18 issues)
+- 2026-04-21 01:28:37,654 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 5 critical, 12 medium, 1 minor issues. The most urgent
+
+### Follow-Up Fixes Recommended
+
+- Make SMS confirmation state authoritative: first turn must emit contacts.sms_draft with a stable draft_id, pending_action_resolver must route 'yes send it' to sms_send for that draft_id, and sms_send should never be emitted without an existing draft.
+- Add classifier examples and deterministic pre-rules for 'tell/contact my wife/husband/spouse' as send message, including family aliases.
+- Canonicalize classifier labels by stripping brackets, underscores, and case/spacing variants before validation.
+- Route provider/patient schedule phrasing in clinic test sessions to clinic schedules info, or implement a read calendar handler instead of always escalating.
 
 ### Evidence Files
 
@@ -184,8 +190,8 @@
 
 ## Stage 8: Auto-Commit + Push (post)
 
-- Status: `ok`
-- Duration: 3s (0.1 min)
+- Status: `timeout`
+- Duration: 120s (2.0 min)
 
 ### What It Did
 
@@ -193,11 +199,11 @@
 
 ### Problems It Found
 
-- No problems were detected in the available logs/reports.
+- Job ended with status `timeout`.
 
 ### Improvements It Made
 
-- 2026-04-20 01:19:40,767 INFO Pushed successfully.
+- 2026-04-21 01:36:16,751 INFO Committed 7 file(s).
 
 ### Evidence Files
 

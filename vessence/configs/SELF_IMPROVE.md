@@ -18,9 +18,9 @@ does, where its artifacts live, and how Jane surfaces the results to the user.
 |---|-----|--------|---------|
 | 1 | Dead Code Auditor | `agent_skills/dead_code_auditor.py` | 15 min |
 | 2 | Code Auditor | `agent_skills/nightly_code_auditor.py` | 30 min |
-| 3 | Pipeline Audit (30 prompts) | `agent_skills/pipeline_audit_100.py --n 30` | 20 min |
+| 3 | Pipeline Audit (30 prompts) | `agent_skills/pipeline_audit_100.py --n 30 --no-fixes` | 20 min |
 | 4 | Doc Drift Auditor | `agent_skills/doc_drift_auditor.py` | 5 min |
-| 5 | Transcript Quality Review | `agent_skills/transcript_quality_review.py` | 20 min |
+| 5 | Transcript Quality Review | `agent_skills/transcript_quality_review.py --skip-fixes` | 20 min |
 
 ### What each one does
 
@@ -33,19 +33,20 @@ does, where its artifacts live, and how Jane surfaces the results to the user.
   Safety gate: only runs when the working tree is clean *except* for
   expected nightly report files.
 - **Pipeline Audit** — Replays the last 30 user prompts through the v2
-  3-stage pipeline, uses a local LLM as judge, auto-corrects obvious
-  misclassifications by adding exemplars to ChromaDB. Harder issues go to
-  `configs/pipeline_audit_report.md`.
+  3-stage pipeline and uses a local LLM as judge. The nightly run is
+  report-only: it writes misclassifications and response failures to
+  `configs/pipeline_audit_report.md` but does not add ChromaDB exemplars.
+  A manual `--apply-fixes` run is required for classifier data changes.
 - **Doc Drift Auditor** — Compares `configs/*.md` (cron registry,
   pipeline class map, SKILLS_REGISTRY, etc.) against reality (crontab,
   `_CLASS_MAP`, `agent_skills/*.py`). Auto-fixes safe drift, flags rest
   in `configs/doc_drift_report.md`.
-- **Transcript Quality Review** — Two stage:
+- **Transcript Quality Review** — Nightly report-only review:
   1. Codex reads yesterday's conversations + pipeline/client logs,
      evaluates each stage (Gemma classifier → handler → Opus → client),
      and writes `configs/transcript_review_report.md`.
-  2. Claude validates each issue against the code, implements the fix,
-     and writes a unit test for each fix (so regressions can't recur).
+  2. The nightly run stops there. Claude validation/code fixes are disabled
+     unless the script is run manually with `--apply-fixes`.
 
 ## Artifacts
 

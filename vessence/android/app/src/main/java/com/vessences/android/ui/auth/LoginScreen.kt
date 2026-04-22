@@ -24,6 +24,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.vessences.android.DiagnosticReporter
 import com.vessences.android.R
 
 private val SlateBackground = Color(0xFF0F172A)
@@ -41,16 +42,26 @@ fun LoginScreen(viewModel: LoginViewModel) {
     val legacyLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
-        if (result.resultCode == Activity.RESULT_OK) {
+        val dataPresent = result.data != null
+        if (result.resultCode == Activity.RESULT_OK || dataPresent) {
+            DiagnosticReporter.report("auth", "auth[legacy_activity_result]", mapOf(
+                "result_code" to result.resultCode,
+                "data_present" to dataPresent,
+            ))
             viewModel.handleLegacyResult(result.data)
         } else {
-            viewModel.clearError()
+            DiagnosticReporter.report("auth", "auth[legacy_activity_canceled]", mapOf(
+                "result_code" to result.resultCode,
+                "data_present" to false,
+            ))
+            viewModel.cancelSignIn()
         }
     }
 
     // Observe the ViewModel's legacy sign-in intent event and launch it
     LaunchedEffect(Unit) {
         viewModel.legacySignInIntent.collect { intent ->
+            DiagnosticReporter.report("auth", "auth[legacy_intent_launched]")
             legacyLauncher.launch(intent)
         }
     }

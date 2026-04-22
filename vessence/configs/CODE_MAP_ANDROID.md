@@ -1,5 +1,5 @@
 # Code Map — Android (Kotlin)
-_Auto-generated on 2026-04-20 08:15 UTC by `generate_code_map.py`_
+_Auto-generated on 2026-04-21 08:15 UTC by `generate_code_map.py`_
 
 ## android:.../ArticleReaderV2Activity.kt (241 lines)
   class ArticleReaderV2Activity → L36
@@ -44,7 +44,7 @@ _Auto-generated on 2026-04-20 08:15 UTC by `generate_code_map.py`_
     nonFatalError() → L198
     voiceFlow() → L219
 
-## android:.../MainActivity.kt (571 lines)
+## android:.../MainActivity.kt (572 lines)
   class MainActivity → L28
     launchStt() → L63
     timingDetails() → L115
@@ -62,15 +62,15 @@ _Auto-generated on 2026-04-20 08:15 UTC by `generate_code_map.py`_
     override onResume() → L289
     override onPause() → L312
     override onCreate() → L319
-    override onNewIntent() → L384
-    handleSharedSummaryIntent() → L398
-    handleWakeWordIntent() → L419
-    handleNotificationIntent() → L443
-    handleIncomingShareIntent() → L451
-    requestNotificationPermissionIfNeeded() → L484
-    requestPhoneToolsPermissionsIfNeeded() → L503
-    promptNotificationListenerIfNeeded() → L522
-    override onDestroy() → L555
+    override onNewIntent() → L385
+    handleSharedSummaryIntent() → L399
+    handleWakeWordIntent() → L420
+    handleNotificationIntent() → L444
+    handleIncomingShareIntent() → L452
+    requestNotificationPermissionIfNeeded() → L485
+    requestPhoneToolsPermissionsIfNeeded() → L504
+    promptNotificationListenerIfNeeded() → L523
+    override onDestroy() → L556
 
 ## android:.../MusicPlayNavigationState.kt (24 lines)
   object MusicPlayNavigationState → L11
@@ -244,6 +244,14 @@ _Auto-generated on 2026-04-20 08:15 UTC by `generate_code_map.py`_
     suspend createShare() → L84
     suspend revokeShare() → L87
 
+## android:.../data/model/AppExceptions.kt (50 lines)
+  class VessencesException → L6
+  class TransientError → L18
+  class FatalError → L29
+  class OfflineError → L38
+  class NetworkException → L46
+  class TransientServerError → L50
+
 ## android:.../data/model/BriefingModels.kt (38 lines)
   class BriefingArticle → L5
   class BriefingTopic → L21
@@ -283,20 +291,26 @@ _Auto-generated on 2026-04-20 08:15 UTC by `generate_code_map.py`_
     suspend poll() → L47
     handleDeviceCommand() → L88
 
-## android:.../data/repository/AuthRepository.kt (147 lines)
-  class AuthRepository → L19
-    suspend checkAuth() → L25
-    isServerDown() → L39
-    suspend signInWithGoogle() → L64
-    suspend logout() → L140
+## android:.../data/repository/AuthRepository.kt (188 lines)
+  class LegacySignInFallbackNeeded → L25
+  class AuthRepository → L27
+    suspend checkAuth() → L33
+    isServerDown() → L47
+    suspend signInWithGoogle() → L66
+    getLegacySignInIntent() → L119
+    suspend handleLegacySignInResult() → L128
+    suspend _sendTokenToBackends() → L147
+    suspend logout() → L181
 
-## android:.../data/repository/ChatRepository.kt (162 lines)
-  class UploadResult → L28
-  class ChatRepository → L35
-    suspend uploadFile() → L42
-    streamChat() → L95
-    initSession() → L134
-    suspend endJaneSession() → L157
+## android:.../data/repository/ChatRepository.kt (289 lines)
+  class UploadResult → L45
+  class ChatRepository → L52
+    suspend uploadFile() → L59
+    streamChat() → L137
+    retryWithBackoff() → L219
+    suspend probeHealth() → L250
+    initSession() → L261
+    suspend endJaneSession() → L284
 
 ## android:.../data/repository/DocsCache.kt (79 lines)
   class DocsCache → L21
@@ -396,23 +410,24 @@ _Auto-generated on 2026-04-20 08:15 UTC by `generate_code_map.py`_
     isListenerEnabled() → L86
     filterSafe() → L109
 
-## android:.../notifications/RecentMessagesBuffer.kt (83 lines)
+## android:.../notifications/RecentMessagesBuffer.kt (84 lines)
   object RecentMessagesBuffer → L16
   class Entry → L29
-    record() → L58
-    snapshot() → L73
-    size() → L77
-    clear() → L80
+    record() → L59
+    snapshot() → L74
+    size() → L78
+    clear() → L81
 
-## android:.../notifications/VessenceNotificationListener.kt (211 lines)
+## android:.../notifications/VessenceNotificationListener.kt (225 lines)
   class VessenceNotificationListener → L33
     override onListenerConnected() → L35
     override onListenerDisconnected() → L42
     override onNotificationPosted() → L55
     handlePosted() → L63
-    extractMessages() → L106
-    snapshotActiveMessages() → L175
-    setLive() → L207
+    looksLikeReaction() → L106
+    extractMessages() → L112
+    snapshotActiveMessages() → L189
+    setLive() → L221
 
 ## android:.../tools/ActionQueue.kt (90 lines)
   class ActionQueue → L24
@@ -433,27 +448,27 @@ _Auto-generated on 2026-04-20 08:15 UTC by `generate_code_map.py`_
   class NeedsUser → L60
   class ToolResult → L72
 
-## android:.../tools/ClientToolDispatcher.kt (401 lines)
+## android:.../tools/ClientToolDispatcher.kt (402 lines)
   class ClientToolDispatcher → L40
-    register() → L74
-    registerAlias() → L83
-    dispatchRaw() → L92
-    dispatch() → L105
-    parseCall() → L179
-    toToolResult() → L209
-  class SeenEntry → L229
-    pruneSeen() → L231
-    isDuplicate() → L240
-    recordSeen() → L248
-    pruneSharedPrefsOnce() → L265
-    isFeatureEnabled() → L288
-    shutdown() → L299
-    reportHandlerDiagnostic() → L313
-  object PendingToolResultBuffer → L358
-    record() → L368
-    suspend awaitAndDrainAll() → L378
-    drainAll() → L391
-    isEmpty() → L400
+    register() → L75
+    registerAlias() → L84
+    dispatchRaw() → L93
+    dispatch() → L106
+    parseCall() → L180
+    toToolResult() → L210
+  class SeenEntry → L230
+    pruneSeen() → L232
+    isDuplicate() → L241
+    recordSeen() → L249
+    pruneSharedPrefsOnce() → L266
+    isFeatureEnabled() → L289
+    shutdown() → L300
+    reportHandlerDiagnostic() → L314
+  object PendingToolResultBuffer → L359
+    record() → L369
+    suspend awaitAndDrainAll() → L379
+    drainAll() → L392
+    isEmpty() → L401
 
 ## android:.../tools/ClientToolHandler.kt (40 lines)
   interface ClientToolHandler → L22
@@ -490,7 +505,16 @@ _Auto-generated on 2026-04-20 08:15 UTC by `generate_code_map.py`_
   JsonElement() → L41
   JsonObject() → L60
 
-## android:.../tools/MessagesFetchUnreadHandler.kt (113 lines)
+## android:.../tools/MessagesDismissHandler.kt (223 lines)
+  object MessagesDismissHandler → L38
+    suspend handle() → L45
+  class SmsDeleteResult → L113
+    suspend deleteSmsMessages() → L119
+    normalizeNumber() → L157
+  class NotifDismissResult → L163
+    dismissNotifications() → L168
+
+## android:.../tools/MessagesFetchUnreadHandler.kt (114 lines)
   object MessagesFetchUnreadHandler → L30
     suspend handle() → L38
 
@@ -534,14 +558,15 @@ _Auto-generated on 2026-04-20 08:15 UTC by `generate_code_map.py`_
     override onDone() → L300
     override onError() → L304
 
-## android:.../ui/auth/LoginScreen.kt (150 lines)
-  @Composable LoginScreen() → L31
+## android:.../ui/auth/LoginScreen.kt (172 lines)
+  @Composable LoginScreen() → L35
 
-## android:.../ui/auth/LoginViewModel.kt (50 lines)
-  class LoginViewModel → L13
-    signIn() → L29
-    logout() → L41
-    clearError() → L47
+## android:.../ui/auth/LoginViewModel.kt (78 lines)
+  class LoginViewModel → L18
+    signIn() → L38
+    handleLegacyResult() → L58
+    logout() → L69
+    clearError() → L75
 
 ## android:.../ui/briefing/BriefingScreen.kt (1080 lines)
   @Composable BriefingScreen() → L97
@@ -604,7 +629,7 @@ _Auto-generated on 2026-04-20 08:15 UTC by `generate_code_map.py`_
   @Composable VoiceStatusBanner() → L459
   @Composable ErrorBanner() → L544
 
-## android:.../ui/chat/ChatViewModel.kt (1564 lines)
+## android:.../ui/chat/ChatViewModel.kt (1585 lines)
   class PendingMessage → L36
   class ChatUiState → L42
   class ChatViewModel → L60
@@ -621,37 +646,37 @@ _Auto-generated on 2026-04-20 08:15 UTC by `generate_code_map.py`_
     sendMessage() → L397
     cancelCurrentResponse() → L424
     executeSend() → L446
-    FIRE_AND_FORGET → L789
-    isConversationEnding() → L1022
-    onSendComplete() → L1039
-    processNextInQueue() → L1176
-    clearError() → L1186
-    dismissUpdate() → L1190
-    installUpdate() → L1194
-    toggleTts() → L1201
-    stopSpeaking() → L1212
-    speakText() → L1222
-    stopSentenceTtsQueues() → L1226
-    speakIfEnabled() → L1235
-    suspend tryServerTts() → L1246
-    autoListenAfterTts() → L1308
-    endVoiceConversation() → L1322
-    isConversationEndPhrase() → L1338
-    showSystemMessage() → L1360
-    clearSession() → L1369
-    setAlwaysListeningEnabled() → L1382
-    syncVoicePreferences() → L1389
-    clearWakeWordTrigger() → L1393
-    triggerWakeWord() → L1398
-    startPushToTalk() → L1403
-    stopPushToTalk() → L1407
-    cancelListening() → L1411
-    stopListeningAndReturnToWakeWord() → L1416
-    clearVoiceError() → L1425
-    updateAiMessage() → L1429
-    switchProvider() → L1457
-    suspend prependPendingToolResults() → L1520
-    override onCleared() → L1546
+    FIRE_AND_FORGET → L810
+    isConversationEnding() → L1043
+    onSendComplete() → L1060
+    processNextInQueue() → L1197
+    clearError() → L1207
+    dismissUpdate() → L1211
+    installUpdate() → L1215
+    toggleTts() → L1222
+    stopSpeaking() → L1233
+    speakText() → L1243
+    stopSentenceTtsQueues() → L1247
+    speakIfEnabled() → L1256
+    suspend tryServerTts() → L1267
+    autoListenAfterTts() → L1329
+    endVoiceConversation() → L1343
+    isConversationEndPhrase() → L1359
+    showSystemMessage() → L1381
+    clearSession() → L1390
+    setAlwaysListeningEnabled() → L1403
+    syncVoicePreferences() → L1410
+    clearWakeWordTrigger() → L1414
+    triggerWakeWord() → L1419
+    startPushToTalk() → L1424
+    stopPushToTalk() → L1428
+    cancelListening() → L1432
+    stopListeningAndReturnToWakeWord() → L1437
+    clearVoiceError() → L1446
+    updateAiMessage() → L1450
+    switchProvider() → L1478
+    suspend prependPendingToolResults() → L1541
+    override onCleared() → L1567
 
 ## android:.../ui/chat/ChatViewModelFactory.kt (24 lines)
   class ChatViewModelFactory → L9
@@ -920,6 +945,15 @@ _Auto-generated on 2026-04-20 08:15 UTC by `generate_code_map.py`_
 ## android:.../util/NdjsonParser.kt (43 lines)
   object NdjsonParser → L14
     parse() → L17
+
+## android:.../util/NetworkMonitor.kt (98 lines)
+  object NetworkMonitor → L27
+    override onAvailable() → L44
+    override onLost() → L45
+    override onCapabilitiesChanged() → L46
+    init() → L53
+    recompute() → L70
+    bumpTransition() → L95
 
 ## android:.../util/SettingsSync.kt (101 lines)
   object SettingsSync → L21

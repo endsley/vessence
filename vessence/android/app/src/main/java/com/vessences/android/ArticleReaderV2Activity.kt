@@ -2,6 +2,7 @@ package com.vessences.android
 
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.content.Intent
 import android.os.Bundle
 import android.text.method.ScrollingMovementMethod
 import android.view.Gravity
@@ -15,6 +16,8 @@ import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
+import com.vessences.android.data.api.ApiClient
+import com.vessences.android.util.Constants
 import com.vessences.android.voice.HybridTtsManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -22,21 +25,20 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 
-/**
- * Summarize Now v2: local Android WebView article reader.
- *
- * This intentionally does not call or modify the existing server-side
- * ShareReceiverActivity.summarizeNow() v1 path. It loads the shared URL on
- * the phone, extracts rendered page text with JavaScript, cleans it locally,
- * and sends that text straight to Android TTS.
- */
 class ArticleReaderV2Activity : Activity() {
 
     companion object {
         const val EXTRA_URL = "article_reader_v2_url"
+        const val EXTRA_MODE = "article_reader_v2_mode"
+        const val MODE_SUMMARIZE = "summarize"
+        const val MODE_BRIEFING = "briefing"
         private const val MAX_ARTICLE_CHARS = 40_000
         private const val TTS_CHUNK_CHARS = 2_800
     }
@@ -47,11 +49,20 @@ class ArticleReaderV2Activity : Activity() {
     private lateinit var preview: TextView
     private lateinit var webView: WebView
     private var extracted = false
+    private var mode = MODE_SUMMARIZE
+    private var articleUrl = ""
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         tts = HybridTtsManager(applicationContext)
+        mode = intent.getStringExtra(EXTRA_MODE) ?: MODE_SUMMARIZE
+
+        try {
+            ApiClient.getOkHttpClient()
+        } catch (_: UninitializedPropertyAccessException) {
+            ApiClient.init(applicationContext)
+        }
 
         val url = intent.getStringExtra(EXTRA_URL)
         if (url.isNullOrBlank()) {
@@ -59,6 +70,7 @@ class ArticleReaderV2Activity : Activity() {
             finish()
             return
         }
+        articleUrl = url
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -151,20 +163,106 @@ class ArticleReaderV2Activity : Activity() {
             val title = obj?.optString("title").orEmpty().trim()
             val raw = obj?.optString("textContent").orEmpty()
             val cleaned = cleanArticleText(title, raw)
-            if (cleaned.length < 150) { // Reduced threshold slightly
+            if (cleaned.length < 150) {
                 status.text = "I could not extract enough article text from this page."
                 preview.text = "This page may require login, block WebView, or render text in a way Android cannot read."
                 return@evaluateJavascript
             }
 
-            status.text = "Reading article..."
-            preview.text = cleaned.take(3_000)
-            scope.launch {
-                for (chunk in splitForTts(cleaned)) {
-                    tts.speak(chunk)
-                }
-                status.text = "Finished reading."
+            when (mode) {
+                MODE_BRIEFING -> submitToBriefing(title, cleaned)
+                else -> summarizeViaServer(title, cleaned)
             }
+        }
+    }
+
+    private fun summarizeViaServer(title: String, text: String) {
+        status.text = "Sending to Jane for summarization..."
+        preview.text = text.take(3_000)
+
+        val prefs = applicationContext.getSharedPreferences(Constants.PREFS_NAME, MODE_PRIVATE)
+        val serverUrl = prefs.getString(Constants.PREF_JANE_URL, Constants.DEFAULT_JANE_BASE_URL)
+            ?: Constants.DEFAULT_JANE_BASE_URL
+
+        scope.launch {
+            val result = try {
+                withContext(Dispatchers.IO) {
+                    val client = ApiClient.getOkHttpClient()
+                    val body = JSONObject().apply {
+                        put("title", title)
+                        put("text", text)
+                        put("url", articleUrl)
+                    }.toString().toRequestBody("application/json".toMediaType())
+                    val request = Request.Builder()
+                        .url("${serverUrl.trimEnd('/')}/api/briefing/articles/summarize_text")
+                        .post(body)
+                        .build()
+                    client.newCall(request).execute().use { response ->
+                        val responseBody = response.body?.string().orEmpty()
+                        if (response.isSuccessful && responseBody.isNotEmpty()) {
+                            val obj = JSONObject(responseBody)
+                            val summaryTitle = obj.optString("title", title)
+                            val summary = obj.optString("summary", "")
+                            if (summary.isNotEmpty()) Pair(summaryTitle, summary) else null
+                        } else null
+                    }
+                }
+            } catch (_: Exception) {
+                null
+            }
+
+            if (result != null) {
+                startActivity(Intent(this@ArticleReaderV2Activity, SummaryReaderActivity::class.java).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                    putExtra(SummaryReaderActivity.EXTRA_TITLE, result.first)
+                    putExtra(SummaryReaderActivity.EXTRA_SUMMARY, result.second)
+                    putExtra(SummaryReaderActivity.EXTRA_URL, articleUrl)
+                })
+                finish()
+            } else {
+                status.text = "Server unavailable — reading raw article instead..."
+                scope.launch {
+                    for (chunk in splitForTts(text)) {
+                        tts.speak(chunk)
+                    }
+                    status.text = "Finished reading."
+                }
+            }
+        }
+    }
+
+    private fun submitToBriefing(title: String, text: String) {
+        status.text = "Submitting to daily briefing..."
+
+        val prefs = applicationContext.getSharedPreferences(Constants.PREFS_NAME, MODE_PRIVATE)
+        val serverUrl = prefs.getString(Constants.PREF_JANE_URL, Constants.DEFAULT_JANE_BASE_URL)
+            ?: Constants.DEFAULT_JANE_BASE_URL
+
+        scope.launch {
+            val success = try {
+                withContext(Dispatchers.IO) {
+                    val client = ApiClient.getOkHttpClient()
+                    val body = JSONObject().apply {
+                        put("url", articleUrl)
+                        put("title", title)
+                        put("text", text)
+                    }.toString().toRequestBody("application/json".toMediaType())
+                    val request = Request.Builder()
+                        .url("${serverUrl.trimEnd('/')}/api/briefing/articles/submit")
+                        .post(body)
+                        .build()
+                    client.newCall(request).execute().use { it.isSuccessful }
+                }
+            } catch (_: Exception) {
+                false
+            }
+
+            Toast.makeText(
+                applicationContext,
+                if (success) "Article queued for briefing" else "Failed to queue article",
+                Toast.LENGTH_SHORT,
+            ).show()
+            finish()
         }
     }
 

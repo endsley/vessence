@@ -16,11 +16,14 @@ easy-to-read stage-by-stage report to
 
 Current job registry:
   1. Auto-Commit WIP (pre): commits current local WIP before auditors run.
-  2. Dead Code Auditor: finds dead files/functions and safe duplicates.
-  3. Code Auditor: generates tests for one whitelisted module and fixes it.
-  4. Pipeline Audit (30 prompts): checks recent real prompts through stages 1-3.
+  2. Code Auditor: generates tests for one whitelisted module and fixes it.
+     Runs FIRST after the pre-commit because it requires a clean tree.
+  3. Dead Code Auditor: finds dead files/functions and safe duplicates.
+  4. Pipeline Audit (30 prompts): checks recent real prompts through stages 1-3
+     in report-only mode.
   5. Doc Drift Auditor: compares docs/registries with live filesystem/cron state.
-  6. Transcript Quality Review: audits real turns against server/client logs.
+  6. Transcript Quality Review: audits real turns against server/client logs
+     in report-only mode.
   7. Memory Janitor: purges, consolidates, and verifies Chroma memory.
   8. Auto-Commit + Push (post): commits and pushes generated fixes/reports.
 
@@ -61,7 +64,9 @@ JOB_PURPOSES = {
     ),
     "Pipeline Audit (30 prompts)": (
         "Replayed recent real prompts through Stage 1, Stage 2, and Stage 3 "
-        "to catch routing and response failures."
+        "to catch routing and response failures. Runs report-only during "
+        "nightly self-improvement; classifier exemplar auto-fixes require "
+        "a separate manual --apply-fixes run."
     ),
     "Doc Drift Auditor": (
         "Compared source-of-truth docs against live cron, class, and file "
@@ -69,7 +74,9 @@ JOB_PURPOSES = {
     ),
     "Transcript Quality Review": (
         "Read real user transcripts plus server/client logs to identify "
-        "stage-by-stage failures Jane actually experienced."
+        "stage-by-stage failures Jane actually experienced. Runs report-only "
+        "during nightly self-improvement; code fixes require a separate "
+        "manual --apply-fixes run."
     ),
     "Memory Janitor": (
         "Cleaned and verified Jane's Chroma memory stores."
@@ -432,6 +439,35 @@ def _job_details(result: dict) -> dict:
     if raw_log_path:
         artifacts.append(raw_log_path)
 
+    # Compact lists for the TL;DR block at the top of the report — the user
+    # wants "list of problems you found and the fix you applied" as the
+    # minimum info, so we emit up to 3 of each per stage, truncated.
+    def _condense(items: list[str], skip_prefixes: tuple[str, ...] = ()) -> list[str]:
+        out: list[str] = []
+        for it in items:
+            text = it.lstrip("- ").strip()
+            if not text:
+                continue
+            if skip_prefixes and text.startswith(skip_prefixes):
+                continue
+            # Collapse whitespace so multi-line bullets render as one line.
+            text = " ".join(text.split())
+            if len(text) > 160:
+                text = text[:157].rstrip() + "..."
+            out.append(text)
+            if len(out) >= 3:
+                break
+        return out
+
+    problems_tldr_list = _condense(
+        problems,
+        skip_prefixes=("Job ended with status",),
+    )
+    fixes_tldr_list = _condense(
+        improvements,
+        skip_prefixes=("No concrete improvement",),
+    )
+
     return {
         "name": name,
         "status": result["status"],
@@ -441,6 +477,8 @@ def _job_details(result: dict) -> dict:
         "improvements": improvements or [_bullet("No concrete improvement was recorded in the available logs/reports.")],
         "followups": followups,
         "artifacts": artifacts,
+        "problems_tldr_list": problems_tldr_list,
+        "fixes_tldr_list": fixes_tldr_list,
     }
 
 
@@ -465,6 +503,40 @@ def write_readable_report(results: list[dict], started: dt.datetime, total_s: fl
                 break
             counter += 1
 
+    # TL;DR block — designed so anyone (or an assistant) can read the first
+    # ~40 lines and give a full-picture answer without scanning the whole
+    # report. Per stage: header line, then indented "Problems:" and "Fixes:"
+    # sub-lists (each capped at 3 items, truncated to ~160 chars).
+    status_emoji = {"ok": "✓", "timeout": "⏱", }
+    tldr_stage_lines = []
+    for idx, (r, d) in enumerate(zip(results, details), 1):
+        mark = status_emoji.get(r["status"], "✗")
+        minutes = d["elapsed_s"] / 60
+        tldr_stage_lines.append(
+            f"- {idx}. {mark} {d['name']} ({minutes:.1f}m)"
+        )
+        problems_tldr_list = d.get("problems_tldr_list") or []
+        fixes_tldr_list = d.get("fixes_tldr_list") or []
+        if problems_tldr_list:
+            tldr_stage_lines.append("  - Problems:")
+            for p in problems_tldr_list:
+                tldr_stage_lines.append(f"    - {p}")
+        if fixes_tldr_list:
+            tldr_stage_lines.append("  - Fixes:")
+            for f in fixes_tldr_list:
+                tldr_stage_lines.append(f"    - {f}")
+        if not problems_tldr_list and not fixes_tldr_list:
+            tldr_stage_lines.append("  - Problems: none detected")
+            tldr_stage_lines.append("  - Fixes: none applied")
+
+    top_followups = []
+    for d in details:
+        for f in (d.get("followups") or [])[:2]:
+            # Strip leading "- " so we can re-indent under TL;DR bullet
+            top_followups.append(f.lstrip("- ").strip())
+        if len(top_followups) >= 3:
+            break
+
     lines = [
         "# Most Recent Nightly Self-Improvement",
         "",
@@ -475,9 +547,22 @@ def write_readable_report(results: list[dict], started: dt.datetime, total_s: fl
         f"- Stable latest report path: `{LATEST_READABLE_REPORT}`",
         f"- Archived copy: `{archive_path}`",
         "",
-        "## Executive Summary",
+        "## TL;DR",
+        "",
+        *tldr_stage_lines,
         "",
     ]
+    if top_followups:
+        lines.append("**Top follow-ups:**")
+        lines.append("")
+        for f in top_followups[:3]:
+            lines.append(f"- {f}")
+        lines.append("")
+
+    lines.extend([
+        "## Executive Summary",
+        "",
+    ])
 
     if failed or timeout:
         lines.append(_bullet(f"{timeout + failed} stage(s) need attention because they timed out or exited non-zero."))
@@ -560,15 +645,12 @@ JOBS = [
         [],
         2,
     ),
-    # Dead-code auditor runs FIRST so subsequent jobs (and the doc drift
-    # auditor) reflect the post-cleanup state. Removing files first avoids
-    # tests being generated for code that's about to be deleted.
-    (
-        "Dead Code Auditor",
-        "agent_skills/dead_code_auditor.py",
-        [],
-        15,
-    ),
+    # Code Auditor runs BEFORE Dead Code Auditor. It needs a clean working
+    # tree (it skips itself otherwise), so it must run right after the
+    # pre-commit above, before any later stage modifies files. Swapping
+    # these two fixes the "skipped: uncommitted changes" pattern that
+    # happened every night while Dead Code Auditor ran first and deleted
+    # files before Code Auditor got its turn.
     (
         "Code Auditor",
         "agent_skills/nightly_code_auditor.py",
@@ -576,9 +658,15 @@ JOBS = [
         30,
     ),
     (
+        "Dead Code Auditor",
+        "agent_skills/dead_code_auditor.py",
+        [],
+        15,
+    ),
+    (
         "Pipeline Audit (30 prompts)",
         "agent_skills/pipeline_audit_100.py",
-        ["--n", "30"],
+        ["--n", "30", "--no-fixes"],
         20,
     ),
     # Doc drift auditor runs LAST so it picks up any docs that drifted
@@ -590,12 +678,12 @@ JOBS = [
         5,
     ),
     # Transcript quality review: Codex audits yesterday's conversations
-    # per-stage (classification, handler, Opus, client), then Claude
-    # validates findings and fixes code + writes tests.
+    # per-stage (classification, handler, Opus, client). Nightly runs are
+    # report-only; Claude validation/fixes require a manual --apply-fixes run.
     (
         "Transcript Quality Review",
         "agent_skills/transcript_quality_review.py",
-        [],
+        ["--skip-fixes"],
         20,
     ),
     # Memory Janitor runs LAST — purges expired short-term memories,

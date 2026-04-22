@@ -29,12 +29,9 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 
 /**
- * Transparent activity that handles shared URLs with a picker dialog:
- *   - "Summarize Now" — kicks off server summarization in the background and
- *     dismisses immediately; a notification appears when the summary is ready.
- *   - "Add to Briefing" — queues for daily briefing (existing behavior).
- *
- * If the shared text is not a URL, forwards the intent to MainActivity.
+ * Handles shared URLs via a two-option dialog. Both paths send only the URL
+ * to the server — the server handles fetching (HTTP + headless browser fallback)
+ * and LLM summarization.
  */
 class ShareReceiverActivity : ComponentActivity() {
 
@@ -74,11 +71,10 @@ class ShareReceiverActivity : ComponentActivity() {
 
         AlertDialog.Builder(this)
             .setTitle("Share Article")
-            .setItems(arrayOf("Summarize Now", "Summarize Now v2 (WebView)", "Add to Briefing")) { _, which ->
+            .setItems(arrayOf("Summarize Now", "Add to Briefing")) { _, which ->
                 when (which) {
                     0 -> summarizeNow(url)
-                    1 -> summarizeNowV2(url)
-                    2 -> addToBriefing(url)
+                    1 -> addToBriefing(url)
                 }
             }
             .setOnCancelListener { finish() }
@@ -90,17 +86,9 @@ class ShareReceiverActivity : ComponentActivity() {
         return urlPattern.find(text)?.value
     }
 
-    private fun summarizeNowV2(url: String) {
-        startActivity(Intent(this, ArticleReaderV2Activity::class.java).apply {
-            putExtra(ArticleReaderV2Activity.EXTRA_URL, url)
-        })
-        finish()
-    }
-
     /**
-     * Foreground summarization: keep Vessence open while the server summarizes,
-     * then switch directly into the summary reader when ready. If the user
-     * sends it to background, fall back to the notification path.
+     * Send URL to the server. The server fetches it (HTTP first, headless
+     * browser fallback) and returns an LLM summary. No WebView extraction.
      */
     private fun summarizeNow(url: String) {
         val appCtx = applicationContext
@@ -110,20 +98,11 @@ class ShareReceiverActivity : ComponentActivity() {
 
         val progress = AlertDialog.Builder(this)
             .setTitle("Summarizing article")
-            .setMessage("Jane is preparing the summary. This will open automatically when it is ready.")
-            .setNegativeButton("Run in background") { _, _ ->
-                Toast.makeText(
-                    appCtx,
-                    "Summarizing in background — Jane will ping you when ready.",
-                    Toast.LENGTH_SHORT,
-                ).show()
-                finish()
-            }
+            .setMessage("Jane is fetching and summarizing...")
+            .setNegativeButton("Cancel") { _, _ -> finish() }
             .setOnCancelListener { finish() }
             .show()
 
-        // Launch on the app-scoped coroutine so the work survives if the user
-        // chooses "Run in background" or Android destroys the share activity.
         ShareSummarizer.scope.launch {
             val result = try {
                 withContext(Dispatchers.IO) {
@@ -141,9 +120,7 @@ class ShareReceiverActivity : ComponentActivity() {
                             val obj = JSONObject(responseBody)
                             val title = obj.optString("title", "")
                             val summary = obj.optString("summary", "")
-                            if (summary.isNotEmpty()) {
-                                Pair(title.ifEmpty { "Article" }, summary)
-                            } else null
+                            if (summary.isNotEmpty()) Pair(title.ifEmpty { "Article" }, summary) else null
                         } else null
                     }
                 }
@@ -152,68 +129,58 @@ class ShareReceiverActivity : ComponentActivity() {
             }
 
             withContext(Dispatchers.Main) {
-                if (!isFinishing && !isDestroyed) {
-                    progress.dismiss()
-                    if (result != null) {
-                        startActivity(Intent(this@ShareReceiverActivity, SummaryReaderActivity::class.java).apply {
-                            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-                            putExtra(SummaryReaderActivity.EXTRA_TITLE, result.first)
-                            putExtra(SummaryReaderActivity.EXTRA_SUMMARY, result.second)
-                            putExtra(SummaryReaderActivity.EXTRA_URL, url)
-                        })
-                        finish()
-                    } else {
-                        Toast.makeText(
-                            appCtx,
-                            "Could not summarize this article.",
-                            Toast.LENGTH_LONG,
-                        ).show()
-                        ShareSummarizer.postSummaryFailed(appCtx, url)
-                        finish()
-                    }
-                } else if (result != null) {
-                    ShareSummarizer.postSummaryReady(appCtx, url, result.first, result.second)
+                if (!isFinishing && !isDestroyed) progress.dismiss()
+                if (result != null) {
+                    startActivity(Intent(this@ShareReceiverActivity, SummaryReaderActivity::class.java).apply {
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                        putExtra(SummaryReaderActivity.EXTRA_TITLE, result.first)
+                        putExtra(SummaryReaderActivity.EXTRA_SUMMARY, result.second)
+                        putExtra(SummaryReaderActivity.EXTRA_URL, url)
+                    })
                 } else {
-                    ShareSummarizer.postSummaryFailed(appCtx, url)
+                    Toast.makeText(appCtx, "Could not fetch or summarize this article", Toast.LENGTH_LONG).show()
                 }
+                finish()
             }
         }
     }
 
+    /**
+     * Send URL to the server's briefing queue. The server will extract
+     * and summarize it in the background when the briefing runs.
+     */
     private fun addToBriefing(url: String) {
         val appCtx = applicationContext
         val prefs = appCtx.getSharedPreferences(Constants.PREFS_NAME, MODE_PRIVATE)
         val serverUrl = prefs.getString(Constants.PREF_JANE_URL, Constants.DEFAULT_JANE_BASE_URL)
             ?: Constants.DEFAULT_JANE_BASE_URL
 
-        val client = ApiClient.getOkHttpClient()
-        val json = JSONObject().apply { put("url", url) }
-        val body = json.toString().toRequestBody("application/json".toMediaType())
-        val request = Request.Builder()
-            .url("${serverUrl.trimEnd('/')}/api/briefing/articles/submit")
-            .post(body)
-            .build()
-
-        Toast.makeText(appCtx, "Queuing article for briefing…", Toast.LENGTH_SHORT).show()
-
         ShareSummarizer.scope.launch {
             val success = try {
                 withContext(Dispatchers.IO) {
+                    val client = ApiClient.getOkHttpClient()
+                    val body = JSONObject().apply { put("url", url) }
+                        .toString()
+                        .toRequestBody("application/json".toMediaType())
+                    val request = Request.Builder()
+                        .url("${serverUrl.trimEnd('/')}/api/briefing/articles/submit")
+                        .post(body)
+                        .build()
                     client.newCall(request).execute().use { it.isSuccessful }
                 }
             } catch (_: Exception) {
                 false
             }
+
             withContext(Dispatchers.Main) {
                 Toast.makeText(
                     appCtx,
                     if (success) "Article queued for briefing" else "Failed to queue article",
                     Toast.LENGTH_SHORT,
                 ).show()
+                finish()
             }
         }
-
-        finish()
     }
 }
 

@@ -58,7 +58,7 @@ from intent_classifier.v3 import classifier as v3_classifier
 
 
 def _persist_turn_to_ledger(session_id: str, user_prompt: str, jane_response: str,
-                            *, stage: str = "stage2") -> None:
+                            *, stage: str = "stage2", cls: str | None = None) -> None:
     """Write a completed stage2 turn to the SQLite ledger (and ChromaDB).
 
     v3's stage2 short-circuit (weather, time, end_conversation, etc.) bypasses
@@ -67,6 +67,10 @@ def _persist_turn_to_ledger(session_id: str, user_prompt: str, jane_response: st
     stage2 turns — including every "Ok." end-conversation — never make it into
     the per-session transcript, so debugging tools (show_transcript.py) see a
     gap. Best-effort: failures are logged and swallowed.
+
+    `cls` is the v3 classification. It is forwarded to _persist_turns_async so
+    the Haiku/summary privacy gate can skip cloud writeback for classes marked
+    `privacy="local_only"`.
     """
     if not session_id or not jane_response:
         return
@@ -80,6 +84,7 @@ def _persist_turn_to_ledger(session_id: str, user_prompt: str, jane_response: st
             user_turn, assistant_turn,
             user_prompt or "", jane_response,
             stage=stage,
+            cls=cls,
         )
     except Exception as e:
         logger.warning("jane_v3: ledger persist failed for %s: %s",
@@ -287,10 +292,28 @@ async def _classify_and_maybe_handle(prompt: str, session_id: str) -> dict:
         result = None
     state["stage2_ms"] = int((time.perf_counter() - t2) * 1000)
 
-    # Handler declined OR returned an invalid shape → escalate. No second
-    # unclear check — the classifier already decided "unclear" vs real
-    # class in a single qwen call.
+    # Private-class safety net. Classes flagged `no_stage3 = True` must
+    # never escalate to Stage 3 — the cloud brain must not see data from
+    # these domains. If the handler crashed, returned an invalid shape,
+    # requested escalation, or flagged wrong_class, we substitute a
+    # class-agnostic deflection and return as a Stage 2 success.
+    from agent_skills.private_handler_utils import is_no_stage3, safe_deflection
+    no_stage3 = is_no_stage3(cls)
+
+    def _terminal_deflection(reason: str) -> dict:
+        logger.warning(
+            "jane_v3: no_stage3 class %r — %s, returning safe deflection", cls, reason,
+        )
+        state["result"] = safe_deflection(cls)
+        state["stage2_ack"] = _ack_for(cls, escalate=False)
+        state["fallback_ack"] = None
+        state["force_stage3"] = False
+        return state
+
+    # Handler declined OR returned an invalid shape.
     if not isinstance(result, dict) or "text" not in result:
+        if no_stage3:
+            return _terminal_deflection("handler returned invalid shape")
         logger.info("jane_v3: handler %r returned invalid shape → Stage 3", cls)
         state["force_stage3"] = True
         state["fallback_ack"] = _ack_for(cls, escalate=True)
@@ -298,6 +321,8 @@ async def _classify_and_maybe_handle(prompt: str, session_id: str) -> dict:
 
     # Handler explicitly wants Stage 3 (abandon_pending / force_stage3).
     if result.get("abandon_pending") or result.get("force_stage3"):
+        if no_stage3:
+            return _terminal_deflection("handler requested escalation")
         logger.info("jane_v3: handler %r requested escalation → Stage 3", cls)
         state["force_stage3"] = True
         state["fallback_ack"] = _ack_for(cls, escalate=True)
@@ -308,8 +333,10 @@ async def _classify_and_maybe_handle(prompt: str, session_id: str) -> dict:
         return state
 
     # Handler says WRONG_CLASS — Haiku's guess was wrong even after its own
-    # second-check inside the handler. Escalate.
+    # second-check inside the handler.
     if result.get("wrong_class"):
+        if no_stage3:
+            return _terminal_deflection("handler flagged WRONG_CLASS")
         logger.info("jane_v3: handler %r flagged WRONG_CLASS → Stage 3", cls)
         state["force_stage3"] = True
         state["fallback_ack"] = _ack_for(cls, escalate=True)
@@ -377,7 +404,7 @@ async def handle_chat(body, request: Request):
                 if isinstance(state["result"], dict) else None,
             extras=extras,
         )
-        _persist_turn_to_ledger(canonical_sid, prompt, visible_text or text, stage="stage2")
+        _persist_turn_to_ledger(canonical_sid, prompt, visible_text or text, stage="stage2", cls=state["cls"])
         return JSONResponse(resp)
 
     # ── Stage 3 escalation: delegate to v1's brain via v2's helper ──────
@@ -492,7 +519,7 @@ async def handle_chat_stream(body, request: Request):
                 handler_structured=structured,
                 extras=extras,
             )
-            _persist_turn_to_ledger(canonical_sid, prompt, visible_text or text, stage="stage2")
+            _persist_turn_to_ledger(canonical_sid, prompt, visible_text or text, stage="stage2", cls=state["cls"])
             return
 
         # ── Stage 3 escalation — reuse v2's streaming path ──────────────

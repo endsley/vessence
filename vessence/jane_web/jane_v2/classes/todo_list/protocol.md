@@ -72,8 +72,17 @@ from `todo_list` with `resolution: "pivoted_to_stage3"`, ignore it. It
 records that Stage 2 escalated — do not try to resume the "which
 category?" flow. Answer the user's real question.
 
-## 7. Read-only
+## 7. Editing — use the Google Doc tools
 
-This class never edits the list. Editing happens in the Google Doc
-directly. If the user asks to add/remove an item, say so and point them
-at the doc.
+When the user asks to add or remove an item, use the Google Doc editing
+tools (available via `agent_skills.docs_tools`):
+
+    from agent_skills.docs_tools import todo_add_item, todo_remove_item
+    todo_add_item(item_text, category_name)
+    todo_remove_item(item_text, category=None)
+
+After editing, refresh the local cache by running:
+    $VESSENCE_HOME/agent_skills/fetch_todo_list.py
+
+The Google Doc is the single source of truth. NEVER write TODO items to
+ChromaDB — that is for memories only.

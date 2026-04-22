@@ -9,7 +9,7 @@ This document logs all scheduled tasks (cron jobs) for the system. It must be up
 ## 1. Nightly Self-Improve Orchestrator
 - **Schedule:** `0 1 * * *` (Runs daily at 1:00 AM)
 - **Script Path:** `$VESSENCE_HOME/agent_skills/nightly_self_improve.py`
-- **Description:** Single entry point that runs ALL nightly self-improvement jobs sequentially with per-job time budgets. Currently dispatches: (1) `doc_drift_auditor.py` — compares registries against filesystem/cron state, auto-fixes safe drifts; (2) `nightly_code_auditor.py` — picks one module, generates tests via Opus, attempts fixes; (3) `pipeline_audit_100.py --n 30` — replays real prompts through the pipeline, auto-fixes misclassifications; (4) `dead_code_auditor.py` — scans for unreferenced files/functions/duplicates. Summary written to `configs/self_improve_log.md`.
+- **Description:** Single entry point that runs ALL nightly self-improvement jobs sequentially with per-job time budgets. Currently dispatches: (1) `doc_drift_auditor.py` — compares registries against filesystem/cron state, auto-fixes safe drifts; (2) `nightly_code_auditor.py` — picks one module, generates tests via Opus, attempts fixes; (3) `pipeline_audit_100.py --n 30 --no-fixes` — replays real prompts through the pipeline and reports misclassifications/response failures without mutating classifier data; (4) `transcript_quality_review.py --skip-fixes` — reviews real transcripts/logs and writes suggested fixes without editing code; (5) `dead_code_auditor.py` — scans for unreferenced files/functions/duplicates. Summary written to `configs/self_improve_log.md`.
 
 ## 2. USB Incremental Sync Backup
 - **Schedule:** `0 2 * * *` (Runs daily at 2:00 AM)
@@ -97,7 +97,8 @@ This document logs all scheduled tasks (cron jobs) for the system. It must be up
 - **Schedule:** `0 */4 * * *` (every 4 hours)
 - **Script Path:** `$VESSENCE_HOME/startup_code/run_kathia_schedule.py`
 - **Log:** `$VESSENCE_DATA_HOME/logs/kathia_schedule.log`
-- **Description:** Two-phase Playwright scrape of Kathia Kirschner's weekly schedule on waterlilywellness.acubliss.app. Phase 1: clicks each appointment and triggers AI summary generation ("Give it a try") for any patient that hasn't had one yet. Waits 30 minutes for AI to finish generating. Phase 2: clicks each appointment again and extracts visit_reason, health_concerns, recommendations, visit_summary from the modal. Saves all data to `$VESSENCE_DATA_HOME/schedule.db` (appointments table). The 30-min wait is skipped if all summaries are already generated.
+- **Tracker:** `$VESSENCE_DATA_HOME/clinic_last_pull.json` (last attempt/success timestamp, row count, AI-trigger count, days window)
+- **Description:** Two-phase Playwright scrape of Kathia Kirschner's weekly schedule on waterlilywellness.acubliss.app. Phase 1: clicks each appointment and triggers AI summary generation ("Give it a try") for any patient that hasn't had one yet. Waits 30 minutes for AI to finish generating. Phase 2: clicks each appointment again and extracts visit_reason, health_concerns, recommendations, visit_summary from the modal. Saves all data to `$VESSENCE_DATA_HOME/schedule.db` (appointments table). The 30-min wait is skipped if all summaries are already generated. On each run, the wrapper writes `clinic_last_pull.json` atomically — success overwrites, failure preserves the prior `last_success_at`.
 
 ---
 

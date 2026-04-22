@@ -1,3 +1,24 @@
+### 2026-04-21: Clinic Privacy Hardening (Job #82)
+
+Clinic schedule data (patient names, health concerns, visit summaries from `$VESSENCE_DATA_HOME/schedule.db`) must never leave the local process. Three leak paths closed: Stage 3 escalation (classifier could route clinic to cloud Opus), Haiku thematic writeback (cloud summarizer on every turn), and FIFO replay (a non-clinic follow-up escalating to Stage 3 replayed prior clinic turns verbatim — the observed leak).
+
+**Approach — per-class privacy declarations.** Two metadata flags now drive policy:
+- `no_stage3 = True`: Stage 2 handler IS the final answer-giver. Pipeline guards at every escalation point (v2 `handle_chat`, v2 `handle_chat_stream`, v3 `_classify_and_maybe_handle`) substitute a class-agnostic `SAFE_CLINIC_DEFLECTION` ("I'm not sure about that one — can you rephrase?") on handler crash, invalid shape, explicit escalation request, or wrong-class flag.
+- `privacy = "local_only"`: `_persist_turn_to_fifo` redacts `user_text`/`assistant_text`/`summary` to `[private turn — class: <name>]`, strips `entities`/`tool_results`/`evidence`, keeps `pending_action` bookkeeping fields only. `_persist_turns_async` in `jane_proxy.py` has an explicit privacy gate (independent of stage) that skips Haiku thematic memory + qwen session summary for local-only turns — a deliberate rule, not a Stage-2 coincidence.
+
+**Ledger split.** The SQLite ledger at `$VAULT_HOME/conversation_history_ledger.db` retains full clinic content (on-disk, never cloud-facing) and now carries a `cls` column per turn (CREATE + ALTER TABLE migration; legacy rows keep NULL `cls`). `show_transcript.py` and crash recovery stay functional; only the FIFO → cloud prompt path is scrubbed.
+
+**Files:** `agent_skills/private_handler_utils.py` (new), `jane_web/jane_v2/classes/clinic_schedules_info/{metadata,handler}.py`, `jane_web/jane_v2/pipeline.py`, `jane_web/jane_v3/pipeline.py`, `jane_web/jane_proxy.py`, `memory/v1/conversation_manager.py`, `configs/Jane_architecture.md` §16.1, `configs/memory_manage_architecture.md` §3.1a.
+
+**Side-quest bug fix in the same handler (turn 5463):** `_extract_selection_id` handled digits but not word-number ordinals, so "patient number two" fell through to a SQL LIKE on the full phrase and returned a garbled "I don't have detail records for okay can you tell me more patient number two". Added `_ID_WORD_PREFIXED_RE` (one–twelve, first–twelfth, with/without "the") plus `_ID_PURE_WORD_RE` for bare-word replies ("two.", "the second.").
+
+**AI review panel (Gemini) caught three real issues, all fixed before marking done:**
+1. *Functional regression.* FIFO redaction stripped `patient_list` from `pending_action.data` — breaking the "patient 2" follow-up entirely for clinic. The list IS the PII, so storing it in the FIFO defeats the purpose; storing it nowhere breaks the feature. Resolution: in-process session-keyed cache inside the handler (`_PENDING_SELECTION_CACHE`) keeps the list local; resume logic falls back to the cache when FIFO's copy is empty. Module-level dict, TTL'd with the existing `_expires_at`, opportunistic GC on insert.
+2. *Bare-word ordinal gap.* Fixed as described above.
+3. *v2 ledger gap.* v2 Stage 2 success paths only wrote to FIFO, never to the ledger. Contradicted the "ledger retains full clinic turns" invariant when `JANE_USE_V3_PIPELINE` is unset. Fix: mirror v3's `_persist_turn_to_ledger` call in v2 `handle_chat` + `handle_chat_stream` + both deflection paths, narrowly scoped to `is_no_stage3(cls)` so non-private v2 behavior is unchanged.
+
+Codex timed out during the review; the other reviewer confirmed privacy invariants hold.
+
 ### 2026-04-16: Local-LLM Thrashing Fix, Thread-Leak Fix, Verify-First Hardening
 
 Investigation-driven session. Three major issues diagnosed and fixed; one still open.

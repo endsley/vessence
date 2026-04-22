@@ -33,6 +33,15 @@ def _self_correct_classification(prompt: str, wrong_class: str):
     This teaches Stage 1 to not repeat the same mistake. Runs in a separate
     thread so it doesn't block the response.
     """
+    # DISABLED per user request (2026-04-21). Writes to Chroma are
+    # ephemeral (wiped on next source-edit rebuild) and were biasing the
+    # DELEGATE_OPUS corpus toward bare affirmatives. Re-enable by removing
+    # this early return.
+    logger.info(
+        "self-correct DISABLED: would have added %r (wrong_class=%s) to DELEGATE_OPUS",
+        prompt[:60], wrong_class,
+    )
+    return
     try:
         from intent_classifier.v2.classifier import CHROMA_PATH, _embed_fn, _load, _collection
         from jane.config import get_chroma_client

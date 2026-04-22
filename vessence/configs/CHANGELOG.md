@@ -1,5 +1,35 @@
 # Vessence Changelog
 
+## v0.2.75 (2026-04-21)
+- Version bump.
+
+## v0.2.74 (2026-04-21)
+- Version bump.
+
+## v0.2.73 (2026-04-21)
+- Version bump.
+
+## v0.2.72 (2026-04-21)
+- Version bump.
+
+## v0.2.71 (2026-04-21)
+- Version bump.
+
+## v0.2.70 (2026-04-21)
+- Version bump.
+
+## v0.2.69 (2026-04-21)
+- Version bump.
+
+## v0.2.68 (2026-04-21)
+- Version bump.
+
+## v0.2.67 (2026-04-21)
+- Version bump.
+
+## v0.2.66 (2026-04-21)
+- Version bump.
+
 ## v0.2.65 (2026-04-20)
 - Android: legacy Google Sign-In fallback for devices where Credential Manager provider is unavailable (fixes TYPE_GET_CREDENTIAL_PROVIDER_CONFIGURATION_EXCEPTION on second devices).
 

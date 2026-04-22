@@ -28,10 +28,25 @@ DEFAULT_MAX_TURNS = 10
 DEFAULT_MAX_TOKENS = 600
 
 
+def _redact_summary_for_cloud(record: dict) -> str:
+    """Return a cloud-safe summary for a structured FIFO record.
+
+    When ``privacy == "local_only"``, swap the turn's summary for a
+    class-labeled placeholder. Otherwise return the stored summary.
+    Callers bound for cloud (Stage 3, Haiku, Opus ack) pass records
+    through this before joining.
+    """
+    if record.get("privacy") == "local_only":
+        cls = record.get("intent") or "private"
+        return f"[private turn — class: {cls}]"
+    return record.get("summary") or ""
+
+
 def get_recent_context(
     session_id: str | None,
     max_turns: int = DEFAULT_MAX_TURNS,
     max_tokens: int = DEFAULT_MAX_TOKENS,
+    redact_local_only: bool = False,
 ) -> str:
     """Return a newline-joined block of recent turn summaries, oldest-first.
 
@@ -42,6 +57,10 @@ def get_recent_context(
                     via a 4-chars-per-token heuristic). When exceeded,
                     we drop the OLDEST turns first so the newest context
                     is always preserved.
+        redact_local_only: if True, turns whose record carries
+                    ``privacy="local_only"`` are replaced with a
+                    class-labeled placeholder. Set True for any
+                    cloud-bound caller (Stage 3, Haiku, Opus ack).
 
     Returns empty string if no session id, no history, or any failure.
     Never raises.
@@ -49,13 +68,17 @@ def get_recent_context(
     if not session_id:
         return ""
     try:
-        from vault_web.recent_turns import get_recent
+        from vault_web.recent_turns import get_recent, get_recent_structured
     except Exception as e:
         logger.warning("recent_context: failed to import FIFO: %s", e)
         return ""
 
     try:
-        turns = get_recent(session_id, n=max_turns)
+        if redact_local_only:
+            records = get_recent_structured(session_id, n=max_turns)
+            turns = [_redact_summary_for_cloud(r) for r in records]
+        else:
+            turns = get_recent(session_id, n=max_turns)
     except Exception as e:
         logger.warning("recent_context: fifo read failed: %s", e)
         return ""
@@ -157,7 +180,7 @@ def render_stage3_context(session_id: str | None, max_turns: int = 10) -> str:
     """
     if not session_id:
         return ""
-    prose = get_recent_context(session_id, max_turns=max_turns)
+    prose = get_recent_context(session_id, max_turns=max_turns, redact_local_only=True)
     packet = get_stage1_context_packet(session_id)
     if not (packet.get("pending_action") or packet.get("last_intent")):
         return prose
@@ -183,18 +206,37 @@ def _render_state_header(packet: dict) -> str:
     return "[STATE: " + "; ".join(parts) + "]" if parts else ""
 
 
+def _is_private_class(cls: str | None) -> bool:
+    """True when `cls` is marked privacy='local_only'. Safe for unknown classes."""
+    if not cls:
+        return False
+    try:
+        from agent_skills.private_handler_utils import privacy_for
+        return privacy_for(cls) == "local_only"
+    except Exception:
+        return False
+
+
 def _render_state_block(packet: dict) -> str:
-    """Multi-line state block for Stage 3 (Opus)."""
+    """Multi-line state block for Stage 3 (Opus).
+
+    Cloud-bound. For local_only classes, the pending_action type still
+    appears (so Opus knows something is pending) but all `data` fields
+    (recipient, body, patient names, etc.) are suppressed. Entities are
+    likewise dropped when the source class is private.
+    """
     lines = ["[CURRENT CONVERSATION STATE]"]
     intent = packet.get("last_intent") or ""
     if intent:
         lines.append(f"- Last intent: {intent}.")
     pa = packet.get("pending_action") or {}
+    pa_cls = pa.get("handler_class") or intent
+    pa_private = _is_private_class(pa_cls)
     if pa:
         ptype = pa.get("type", "pending action")
         data = pa.get("data") or {}
-        who = data.get("display_name") or data.get("recipient")
-        body = data.get("body") or data.get("message_body")
+        who = None if pa_private else (data.get("display_name") or data.get("recipient"))
+        body = None if pa_private else (data.get("body") or data.get("message_body"))
         if ptype == "SEND_MESSAGE_CONFIRMATION":
             if who and body:
                 lines.append(f'- Pending action: awaiting confirmation to SMS {who}: "{body}".')
@@ -206,7 +248,7 @@ def _render_state_block(packet: dict) -> str:
         else:
             lines.append(f"- Pending action: {ptype}.")
     entities = packet.get("last_entities") or {}
-    if entities and not pa:
+    if entities and not pa and not _is_private_class(intent):
         ent_str = ", ".join(f"{k}={v}" for k, v in list(entities.items())[:4])
         lines.append(f"- Recent entities: {ent_str}.")
     lines.append("[END CURRENT CONVERSATION STATE]")

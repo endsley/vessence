@@ -82,15 +82,18 @@ def _inject_structured_state(body):
         return body
     try:
         from . import recent_context
-        block = recent_context.render_stage3_context(session_id, max_turns=10)
+        block = recent_context.render_stage3_context(session_id, max_turns=5)
     except Exception:
         return body
     if not block or "[CURRENT CONVERSATION STATE]" not in block:
         return body
-    # Only prepend the state block — the FIFO prose part is already in v1's
-    # own context memory, and we don't want to duplicate that.
-    header_only = block.split("\n\n", 1)[0].strip()
-    new_message = header_only + "\n\n" + (body.message or "")
+    # Prepend the full rendered block (state header + FIFO prose). The
+    # prior assumption that v1's standing brain already has the history
+    # is false when the previous turn was handled by Stage 2 — those
+    # turns never touched v1, so v1's context is blank. Always passing
+    # the last few FIFO turns is the simplest way to keep Opus oriented
+    # across Stage 2 → Stage 3 transitions.
+    new_message = block.strip() + "\n\n" + (body.message or "")
     try:
         return body.model_copy(update={"message": new_message})
     except AttributeError:

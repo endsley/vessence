@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.vessences.android.DiagnosticReporter
 import com.vessences.android.data.repository.AuthRepository
 import com.vessences.android.data.repository.AuthState
 import com.vessences.android.data.repository.LegacySignInFallbackNeeded
@@ -46,8 +47,18 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
                 }
             } catch (e: LegacySignInFallbackNeeded) {
                 // Credential Manager not available — fall back to legacy Google Sign-In
+                DiagnosticReporter.report("auth", "auth[legacy_launch]", mapOf(
+                    "reason" to e.message,
+                ))
                 val intent = authRepository.getLegacySignInIntent(activityContext)
-                _legacySignInIntent.tryEmit(intent)
+                val emitted = _legacySignInIntent.tryEmit(intent)
+                DiagnosticReporter.report("auth", "auth[legacy_intent_emitted]", mapOf(
+                    "emitted" to emitted,
+                ))
+                if (!emitted) {
+                    _isSigningIn.value = false
+                    _error.value = "Google sign-in could not start. Please try again."
+                }
                 // isSigningIn stays true while the legacy activity is open
                 return@launch
             }
@@ -74,5 +85,10 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
 
     fun clearError() {
         _error.value = null
+    }
+
+    fun cancelSignIn() {
+        _error.value = null
+        _isSigningIn.value = false
     }
 }

@@ -710,6 +710,17 @@ CODE_MAP_KEYWORDS = (
     "description",
     "follow",
     "guidance",
+    # Auto-evolved from daily conversations
+    "schedules",
+    "info",
+    "conflicting",
+    "handling",
+    "sms",
+    "needs",
+    "opus",
+    "side",
+    "wants",
+    "via",
 )
 
 
@@ -1335,6 +1346,7 @@ def _persist_turns_async(
     assistant_message: str,
     *,
     stage: str = "stage3",
+    cls: str | None = None,
 ) -> None:
     """Persist a completed turn. The scope of work depends on `stage`:
 
@@ -1349,25 +1361,41 @@ def _persist_turns_async(
       subprocess fork + up to 90 s of qwen time per turn, and the
       resulting "topics" have no durable value.
 
+    If the class metadata marks this turn as `privacy="local_only"`, the
+    thematic/session-summary work is skipped unconditionally — those
+    writebacks invoke cloud LLMs (Haiku) that must not see private data.
+    The skip is explicit (not a Stage-2 coincidence) so future changes to
+    the stage routing don't accidentally expose private content to cloud
+    writeback.
+
     Investigation 2026-04-18: persistence-worker subprocess pressure on
     a 1.4 GB jane-web process correlated with event-loop stalls of 45-50 s.
     Gating stage3-tier work on actual stage3 routing eliminates this for
     the common case (voice Q&A handled by v2 handlers).
     """
     is_stage3 = (stage or "stage3").lower() == "stage3"
+    # Explicit privacy gate (independent of stage). Looked up once up-front
+    # so the worker thread doesn't have to re-import.
+    privacy_local_only = False
+    try:
+        from agent_skills.private_handler_utils import privacy_for
+        privacy_local_only = (privacy_for(cls) == "local_only") if cls else False
+    except Exception:
+        privacy_local_only = False
 
     def _worker() -> None:
         logger.info(
-            "[%s] Persistence worker started stage=%s user_chars=%d assistant_chars=%d",
+            "[%s] Persistence worker started stage=%s cls=%s user_chars=%d assistant_chars=%d",
             _session_log_id(session_id),
             stage,
+            cls or "-",
             len(user_message or ""),
             len(assistant_message or ""),
         )
         try:
             stage_start = time.perf_counter()
             if conv_manager:
-                conv_manager.add_messages([user_turn, assistant_turn])
+                conv_manager.add_messages([user_turn, assistant_turn], cls=cls)
                 invalidate_memory_summary_cache(session_id)
                 _log_stage(session_id, "short_term_writeback_async", stage_start)
             else:
@@ -1375,6 +1403,19 @@ def _persist_turns_async(
         except Exception as exc:
             logger.exception("[%s] Short-term writeback failed", session_id[:12])
             _log_stage(session_id, "short_term_writeback_async_error", stage_start, error=type(exc).__name__)
+
+        if privacy_local_only:
+            # Explicit privacy skip — class is marked local_only. Thematic
+            # memory (Haiku CLI) and session summary (qwen subprocess) would
+            # embed verbatim content and cannot run. Independent of stage
+            # so a future reroute of a private class does not accidentally
+            # send data to cloud writeback.
+            _log_stage(session_id, "persistence_privacy_skip_haiku_summary", time.perf_counter())
+            logger.info(
+                "[%s] Persistence worker finished (privacy=local_only cls=%s — skipped thematic + summary)",
+                _session_log_id(session_id), cls or "-",
+            )
+            return
 
         if not is_stage3:
             # Stage 2 short-circuit — skip thematic + session summary. These
@@ -2783,6 +2824,7 @@ async def stream_message(
             user_turn, assistant_turn,
             persisted_user_message, _router_response,
             stage="stage2",
+            cls=_classification,
         )
         total_ms = int((time.perf_counter() - request_start) * 1000)
         logger.info("[%s] Gemma short-circuit complete in %dms, response=%d chars",

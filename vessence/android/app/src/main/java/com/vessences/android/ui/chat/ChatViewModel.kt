@@ -1232,9 +1232,12 @@ class ChatViewModel(
 
     fun stopSpeaking() {
         stopSpeakingInvoked = true
+        com.vessences.android.DiagnosticReporter.voiceFlow("stop_speaking_requested")
         stopSentenceTtsQueues()
-        tts.stop()
-        voiceController?.stopTts()
+        runCatching { tts.stop() }
+            .onFailure { reportStopSpeakingFailure("hybrid_tts_stop", it) }
+        runCatching { voiceController?.stopTts() }
+            .onFailure { reportStopSpeakingFailure("voice_controller_stop", it) }
         _state.value = _state.value.copy(isSpeaking = false)
         // Stop Speaking = conversation ends immediately (no STT), but always-listen resumes
         endVoiceConversation()
@@ -1245,10 +1248,24 @@ class ChatViewModel(
     }
 
     private fun stopSentenceTtsQueues() {
-        activeServerSentenceQueue?.stop()
+        runCatching { activeServerSentenceQueue?.stop() }
+            .onFailure { reportStopSpeakingFailure("server_sentence_queue_stop", it) }
         activeServerSentenceQueue = null
-        activeAndroidSentenceQueue?.stop()
+        runCatching { activeAndroidSentenceQueue?.stop() }
+            .onFailure { reportStopSpeakingFailure("android_sentence_queue_stop", it) }
         activeAndroidSentenceQueue = null
+    }
+
+    private fun reportStopSpeakingFailure(step: String, throwable: Throwable) {
+        android.util.Log.w("ChatVM", "Stop speaking cleanup failed at $step", throwable)
+        com.vessences.android.DiagnosticReporter.voiceFlow(
+            "stop_speaking_cleanup_failed",
+            mapOf(
+                "step" to step,
+                "exception_class" to throwable.javaClass.name,
+                "message" to (throwable.message ?: ""),
+            ),
+        )
     }
 
     private var chatMediaPlayer: android.media.MediaPlayer? = null
@@ -1344,8 +1361,20 @@ class ChatViewModel(
         com.vessences.android.voice.WakeWordBridge.sttActive = false
         // Restart wake word service if always-listen is enabled
         if (voiceSettings?.isAlwaysListeningEnabled() == true) {
-            com.vessences.android.voice.AlwaysListeningService.start(appContext)
-            android.util.Log.i("ChatVM", "Restarted AlwaysListeningService after conversation end")
+            runCatching {
+                com.vessences.android.voice.AlwaysListeningService.start(appContext)
+            }.onSuccess {
+                android.util.Log.i("ChatVM", "Restarted AlwaysListeningService after conversation end")
+            }.onFailure {
+                android.util.Log.w("ChatVM", "Failed to restart AlwaysListeningService after conversation end", it)
+                com.vessences.android.DiagnosticReporter.voiceFlow(
+                    "always_listening_restart_failed",
+                    mapOf(
+                        "exception_class" to it.javaClass.name,
+                        "message" to (it.message ?: ""),
+                    ),
+                )
+            }
         }
         // If we came from wake word trigger, return app to background (lock screen)
         if (cameFromWakeWord) {

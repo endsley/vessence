@@ -64,4 +64,13 @@ METADATA = {
     ],
     "ack": "Checking the schedule…",
     "escalate_ack": "Let me look that up in the schedule…",
+    # Privacy: patient data (names, health concerns, recommendations, visit
+    # summaries) must never leave the local process. The pipeline:
+    #   (1) refuses to escalate this class to Stage 3 (no_stage3=True),
+    #   (2) redacts FIFO writes so a subsequent non-clinic turn that DOES
+    #       escalate can't replay prior clinic content to Claude,
+    #   (3) skips the Haiku thematic-memory writeback (cloud call).
+    # The handler below is the terminal answer-giver. See Job #82.
+    "no_stage3": True,
+    "privacy": "local_only",
 }

@@ -155,7 +155,7 @@ class ConversationManager:
     # LLM-based compaction repeatedly fails (e.g. Ollama is down).
     _MAX_HISTORY_ENTRIES = 200
 
-    def add_message(self, message: dict, latency_ms: float = 0):
+    def add_message(self, message: dict, latency_ms: float = 0, cls: str | None = None):
         """
         Adds a message to the in-memory history, logs to SQLite ledger,
         resets the idle timer, and compacts the context window if needed.
@@ -167,7 +167,7 @@ class ConversationManager:
         if len(self.conversation_history) > self._MAX_HISTORY_ENTRIES:
             excess = len(self.conversation_history) - self._MAX_HISTORY_ENTRIES
             self.conversation_history = self.conversation_history[excess:]
-        self._log_to_ledger(message, latency_ms)
+        self._log_to_ledger(message, latency_ms, cls=cls)
 
         # Reset idle timer — archival fires when user goes quiet long enough.
         self._last_activity_ts = time.time()
@@ -176,14 +176,14 @@ class ConversationManager:
         # Compact the in-memory context window if it is getting full.
         return self._compact_context_window_if_needed()
 
-    def add_messages(self, messages: list[dict], latency_ms: float = 0):
+    def add_messages(self, messages: list[dict], latency_ms: float = 0, cls: str | None = None):
         """Batch variant used when a user/assistant turn pair is available together."""
         pending = [msg for msg in messages if msg]
         if not pending:
             return None
         for message in pending:
             self.conversation_history.append(message)
-            self._log_to_ledger(message, latency_ms)
+            self._log_to_ledger(message, latency_ms, cls=cls)
 
         self._last_activity_ts = time.time()
         self._reset_idle_timer()
@@ -681,12 +681,20 @@ class ConversationManager:
                 role TEXT,
                 content TEXT,
                 tokens INTEGER,
-                latency_ms REAL
+                latency_ms REAL,
+                cls TEXT
             )
         """)
+        # Migrate existing databases that predate the cls column. sqlite3
+        # raises OperationalError("duplicate column") on re-run, which we
+        # swallow so the app keeps booting.
+        try:
+            cursor.execute("ALTER TABLE turns ADD COLUMN cls TEXT")
+        except sqlite3.OperationalError:
+            pass
         self.db_conn.commit()
 
-    def _log_to_ledger(self, message: dict, latency_ms: float):
+    def _log_to_ledger(self, message: dict, latency_ms: float, cls: str | None = None):
         if not self.db_conn:
             return
         try:
@@ -695,11 +703,12 @@ class ConversationManager:
                        if isinstance(message.get("content"), str)
                        else str(message.get("content", "")))
             tokens = get_token_count(content)
+            effective_cls = cls or message.get("cls")
             with self._db_lock:
                 cursor = self.db_conn.cursor()
                 cursor.execute(
-                    "INSERT INTO turns (session_id, role, content, tokens, latency_ms) VALUES (?, ?, ?, ?, ?)",
-                    (self.session_id, role, content, tokens, latency_ms)
+                    "INSERT INTO turns (session_id, role, content, tokens, latency_ms, cls) VALUES (?, ?, ?, ?, ?, ?)",
+                    (self.session_id, role, content, tokens, latency_ms, effective_cls)
                 )
                 self.db_conn.commit()
         except Exception as e:

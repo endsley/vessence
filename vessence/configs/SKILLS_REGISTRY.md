@@ -56,10 +56,6 @@ This document is a detailed index of Jane's major capabilities. It maps a high-l
     -   **Full result:** `memory_retrieval.py:retrieve_memory_context(query)` — returns `MemoryRetrievalResult` with sections, facts_block, and summary (with embedding cache)
     -   **Codex MCP bridge:** `$VESSENCE_HOME/startup_code/codex_memory_mcp.py` — stdio MCP server registered as `jane-memory` for OpenAI Codex sessions; exposes `query_jane_memory(query, max_chars=12000)` and `jane_memory_paths()`
 
--   **Capability:** Gemma Sub-Agent Delegation
-    -   **File:** `$VESSENCE_HOME/agent_skills/gemma_query.py`
-    -   **Function:** `query_gemma`
-
 -   **Capability:** Qwen Sub-Agent Delegation
     -   **File:** `$VESSENCE_HOME/agent_skills/qwen_query.py`
     -   **Function:** `query_qwen`

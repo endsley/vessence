@@ -11,7 +11,7 @@ Two-stage self-improvement job:
     6. Codex traces logs to explain the root cause of each issue
     7. Writes a structured report to configs/transcript_review_report.md
 
-  Stage B (Claude):
+  Stage B (Claude, manual only with --apply-fixes):
     1. Reads Codex's report
     2. Validates each issue against the actual codebase
     3. For valid issues: implements a fix + writes a test
@@ -19,6 +19,7 @@ Two-stage self-improvement job:
 
 Run manually:
   python agent_skills/transcript_quality_review.py [--date 2026-04-15]
+  python agent_skills/transcript_quality_review.py --apply-fixes [--date 2026-04-15]
 
 Run as part of nightly self-improvement:
   Added to JOBS list in nightly_self_improve.py
@@ -362,8 +363,9 @@ def _log_vocal_summary_for_review(issues: list[dict], date_str: str) -> None:
             "These would have degraded your experience if left alone"
         ),
         what_was_done=(
-            "The full details are in the transcript review report, "
-            "and I've queued code fixes for the real ones"
+            "The full details and suggested fixes are in the transcript "
+            "review report. Code fixes are disabled unless the job is run "
+            "manually with apply-fixes."
         ),
         severity=spoken_sev,
     )
@@ -425,6 +427,50 @@ IMPORTANT:
 - Do NOT restart the server — the nightly job runner handles that.
 - If you can't fix an issue, document why in the report.
 
+PIPELINE ARCHITECTURE — DO NOT CHANGE:
+The intent pipeline has a fixed, intentional structure:
+    chroma (embedding top-K) → classifier LLM (qwen) → Stage 2 handler → Stage 3 (Opus)
+When fixing misclassifications, your fix MUST stay WITHIN this structure.
+The correct tools for a misclassified turn are, in priority order:
+  1. Add/adjust exemplars in intent_classifier/v2/classes/<class>.py so
+     chroma pulls the right class into the top-K.
+  2. Improve the class's description/example list in
+     jane_web/jane_v2/classes/<class>/metadata.py so qwen picks it.
+  3. Tune chroma distance thresholds (e.g. JANE_V3_STAGE2_MAX_DISTANCE)
+     when a wrong class's exemplars are winning on distance.
+  4. Fix output-parsing bugs in intent_classifier/v3/classifier.py
+     (e.g. label normalization — stripping brackets/underscores).
+  5. Improve the Stage 2 handler itself (emit pending context, handle
+     follow-ups) or the Stage 3 escalation path.
+FORBIDDEN:
+  - Do NOT add regex/keyword "fast paths" in the classifier that bypass
+    chroma+qwen. One-off lexical short-circuits duplicate chroma's job
+    and create two sources of truth that drift. The only exception
+    already in the tree is a narrow output-parsing guard (e.g. the
+    delete-intent post-validation demote); do not add new ones without
+    Chieh's explicit approval.
+  - Do NOT add new classifier stages, new pre-classifiers, or new
+    routers. If a turn is misrouted, the fix is in the data
+    (exemplars/descriptions) or the existing stage, not a new shortcut.
+
+EXEMPLAR SPECIFICITY — MANDATORY when adding to chroma:
+Every exemplar you add to intent_classifier/v2/classes/<class>.py MUST
+contain wording that is specific to that class (its signature noun or
+verb). Generic phrasings that could plausibly belong to another class
+or to general conversational speech are FORBIDDEN — they pollute chroma
+and hijack unrelated turns.
+  - GOOD (clinic): "how many patients do I have today" — "patients" anchors it.
+  - BAD  (clinic): "how busy is she on Monday" — no clinic-specific noun;
+                    could match any schedule/calendar class.
+  - BAD  (clinic): "who's coming in today" — hijacks any turn with "coming in".
+  - BAD  (clinic): "what about Tuesday" — pure weekday; would hijack every
+                    turn that mentions a day. Short topical follow-ups
+                    like this belong in a Stage 2 handler's
+                    STAGE2_FOLLOWUP pending_action, NOT in chroma.
+Rule of thumb: if removing the class's signature noun still leaves a
+sensible English sentence, the exemplar is too generic — reword it or
+drop it.
+
 Report contents:
 
 {report_content}
@@ -484,9 +530,14 @@ def main() -> int:
         help="Date to review (YYYY-MM-DD). Default: yesterday.",
     )
     parser.add_argument(
+        "--apply-fixes",
+        action="store_true",
+        help="After writing the report, run Claude to validate issues and apply code fixes.",
+    )
+    parser.add_argument(
         "--skip-fixes",
         action="store_true",
-        help="Run Codex review only, skip Claude fixes.",
+        help="Run Codex review only, skip Claude fixes. This is the default.",
     )
     parser.add_argument(
         "--codex-timeout",
@@ -525,10 +576,10 @@ def main() -> int:
     write_codex_report(issues, date_str)
     _log_vocal_summary_for_review(issues, date_str)
 
-    if args.skip_fixes or not issues:
+    if args.skip_fixes or not args.apply_fixes or not issues:
         return 0
 
-    # Stage B: Claude validation + fixes
+    # Stage B: Claude validation + fixes (manual --apply-fixes only)
     ok = run_claude_fixes(timeout=args.claude_timeout)
     return 0 if ok else 1
 

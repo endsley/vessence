@@ -1,90 +1,94 @@
 # Code Map — Web Frontend
-_Auto-generated on 2026-04-20 08:15 UTC by `generate_code_map.py`_
+_Auto-generated on 2026-04-21 08:15 UTC by `generate_code_map.py`_
 
-## vault_web/templates/jane.html (2469 lines)
+## vault_web/templates/jane.html (2609 lines)
   setChatSize() → L453
   setStepSize() → L457
-  formatStatusEntry() → L920
-  async send() → L954
-  setResponseMode() → L962
-  enqueueMessage() → L971
-  moveQueueItem() → L984
-  removeQueueItem() → L993
-  async processQueue() → L1008
-  async consumeStream() → L1094
-  async requestJaneFallback() → L1128
-  async readJaneError() → L1171
-  applyStreamEvent() → L1190
-  event.type === 'heartbeat' → L1218
-  event.type === 'offloaded' → L1220
-  event.type === 'model' → L1231
-  event.type === 'ack' → L1235
-  event.type === 'status' → L1244
-  event.type === 'permission_request' → L1252
-  event.type === 'thought' → L1262
-  event.type === 'tool_use' → L1270
-  event.type === 'tool_result' → L1278
-  event.type === 'delta' → L1285
-  event.type === 'done' → L1310
-  event.type === 'error' → L1335
-  event.type === 'provider_error' → L1343
-  event.type === 'error' → L1367
-  event.type === 'conversation_end' → L1373
-  event.type === 'done' → L1378
-  _previousBubbleVisible() → L1381
-  _initScrollTracker() → L1393
-  scrollBottom() → L1395
-  formatMessage() → L1412
-  _renderMath() → L1534
-  hasMathPreview() → L1542
-  autoResize() → L1544
-  async onJaneFilePick() → L1551
-  openJanePicker() → L1558
-  isImageUpload() → L1569
-  async collectJaneUploadDescriptions() → L1573
-  async uploadJaneFiles() → L1594
-  removeJaneAttachment() → L1630
-  buildJaneFileContext() → L1634
-  async registerNotifications() → L1643
-  async toggleNotifications() → L1653
-  async notifyReply() → L1675
-  async fetchAnnouncements() → L1696
-  toggleTtsMute() → L1736
-  toggleMic() → L1745
-  _startMicListening() → L1756
-  _stopMicListening() → L1795
-  speakText() → L1803
-  stopSpeech() → L1824
-  resetSpeechState() → L1832
-  async respondPermission() → L1850
-  async checkPendingPermissions() → L1873
-  focusInput() → L1893
-  endSession() → L1897
-  clearSession() → L1905
-  copyText() → L1917
-  async switchProvider() → L1931
-  async _runProviderAuth() → L1974
-  async loadModelSettings() → L2015
-  async saveModelSettings() → L2033
-  resetModelDefaults() → L2055
-  cancelResponse() → L2059
-  async checkHealth() → L2076
-  init() → L2094
-  async loadActiveEssence() → L2149
-  async activateEssenceAndInit() → L2166
-  async deactivateEssence() → L2202
-  async initSession() → L2219
-  event.type === 'status' → L2275
-  event.type === 'done' → L2278
-  async startLiveListener() → L2299
-  async toggle() → L2378
-  async refresh() → L2382
-  async switchTo() → L2392
-  init() → L2416
-  async toggle() → L2426
-  async fetchItems() → L2436
-  async toggle() → L2449
-  async fetchItems() → L2459
+  formatStatusEntry() → L984
+  async send() → L1018
+  setResponseMode() → L1026
+  enqueueMessage() → L1035
+  moveQueueItem() → L1048
+  removeQueueItem() → L1057
+  async processQueue() → L1072
+  async consumeStream() → L1158
+  async requestJaneFallback() → L1192
+  async readJaneError() → L1235
+  applyStreamEvent() → L1254
+  event.type === 'heartbeat' → L1282
+  event.type === 'offloaded' → L1284
+  event.type === 'model' → L1295
+  event.type === 'ack' → L1299
+  event.type === 'status' → L1308
+  event.type === 'permission_request' → L1316
+  event.type === 'thought' → L1326
+  event.type === 'tool_use' → L1334
+  event.type === 'tool_result' → L1342
+  event.type === 'delta' → L1349
+  event.type === 'done' → L1374
+  event.type === 'error' → L1399
+  event.type === 'provider_error' → L1407
+  event.type === 'error' → L1431
+  event.type === 'conversation_end' → L1437
+  event.type === 'done' → L1442
+  _previousBubbleVisible() → L1445
+  _initScrollTracker() → L1457
+  scrollBottom() → L1459
+  formatMessage() → L1476
+  _renderMath() → L1598
+  hasMathPreview() → L1606
+  autoResize() → L1608
+  async onJaneFilePick() → L1615
+  openJanePicker() → L1622
+  isImageUpload() → L1633
+  async collectJaneUploadDescriptions() → L1637
+  async uploadJaneFiles() → L1658
+  removeJaneAttachment() → L1694
+  buildJaneFileContext() → L1698
+  async registerNotifications() → L1707
+  async toggleNotifications() → L1717
+  async notifyReply() → L1739
+  async fetchAnnouncements() → L1760
+  toggleTtsMute() → L1800
+  toggleMic() → L1809
+  _startMicListening() → L1820
+  _stopMicListening() → L1859
+  speakText() → L1867
+  stopSpeech() → L1888
+  resetSpeechState() → L1896
+  async respondPermission() → L1914
+  async checkPendingPermissions() → L1937
+  focusInput() → L1957
+  endSession() → L1961
+  clearSession() → L1969
+  copyText() → L1981
+  async switchProvider() → L1995
+  async _runProviderAuth() → L2038
+  async loadModelSettings() → L2079
+  async saveModelSettings() → L2097
+  resetModelDefaults() → L2119
+  async loadManagedUsersAdmin() → L2124
+  toggleNewUserCapability() → L2140
+  async createManagedUser() → L2146
+  async deleteManagedUser() → L2175
+  cancelResponse() → L2199
+  async checkHealth() → L2216
+  init() → L2234
+  async loadActiveEssence() → L2289
+  async activateEssenceAndInit() → L2306
+  async deactivateEssence() → L2342
+  async initSession() → L2359
+  event.type === 'status' → L2415
+  event.type === 'done' → L2418
+  async startLiveListener() → L2439
+  async toggle() → L2518
+  async refresh() → L2522
+  async switchTo() → L2532
+  init() → L2556
+  async toggle() → L2566
+  async fetchItems() → L2576
+  async toggle() → L2589
+  async fetchItems() → L2599
 
 ## vault_web/templates/app.html (2106 lines)
   setSize() → L750

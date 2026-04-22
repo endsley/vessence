@@ -907,6 +907,25 @@ All hardcoded name references in agent prompts replaced with `os.environ.get('US
 - **Background task wrapper:** `agent_skills/claude_cli_llm.py` provides `completion()`, `completion_smart()`, `completion_json()` — routes to correct CLI based on `JANE_BRAIN`.
 - **Task spine enforcement:** Persistent `task_spine.json` + `interrupt_stack.json` for pausing/resuming long-running work.
 
+### 16.1 Per-class Privacy + Routing Flags
+
+Two optional fields in a class's `metadata.py` `METADATA` dict control cloud exposure:
+
+| Flag | Values | Effect |
+|------|--------|--------|
+| `no_stage3` | `True` / unset | Never escalates to Stage 3 (cloud brain). Stage 2 handler IS the final answer-giver. On handler crash / invalid shape / explicit escalation request / wrong_class, the pipeline substitutes a safe class-agnostic deflection (`SAFE_CLINIC_DEFLECTION`) and returns as a Stage 2 success. |
+| `privacy` | `"local_only"` / unset | Content must never leave the local process. Cloud-bound FIFO reads (Stage 3 transcript, Opus ack) project the turn as `[private turn — class: <name>]`; the persistence worker unconditionally skips Haiku thematic memory + session summary for this turn, independent of stage. FIFO itself stores the full turn (Stage 2 is entirely local — classifier, resolver, and handlers need the real content to resume follow-up flows). |
+
+Enforcement layers (in `jane_web/jane_v2/pipeline.py` + `jane_web/jane_v2/recent_context.py` + `jane_web/jane_v3/pipeline.py` + `jane_web/jane_proxy.py`):
+1. **Stage 3 guard** (both v2 non-streaming and streaming, v3 `_classify_and_maybe_handle`) — intercepts every escalation decision.
+2. **Cloud-bound read-time redaction** (`recent_context.get_recent_context(..., redact_local_only=True)`) — `render_stage3_context` passes `redact_local_only=True` so the Opus prompt sees only `[private turn — class: <name>]` for `privacy=local_only` turns. `render_stage2_context` (used by Stage 2 handlers, classifier v3, and `pending_action_resolver`) passes `False` and sees full content — required so `pending_action.data` fields like `day_of_week` / `last_detail_type` survive across turns. FIFO stores full content in both cases; redaction is a read-side projection keyed off the `privacy` field on each record.
+3. **Ledger writeback** (`memory/v1/conversation_manager.py`) — stores the full turn on-disk (not cloud-facing) along with the `cls` column for audit. `show_transcript.py` reads the ledger.
+4. **Haiku/summary skip** (`jane_proxy._persist_turns_async`) — explicit privacy gate *before* the Stage-2 skip so a future reroute of a private class can't accidentally expose content to cloud writeback.
+
+Shared utilities: `agent_skills/private_handler_utils.py` — `is_no_stage3(cls)`, `privacy_for(cls)`, `safe_deflection(cls)`, `SAFE_CLINIC_DEFLECTION`. Lookup tolerates both `"clinic schedules info"` and `"clinic_schedules_info"` forms.
+
+Currently marked `local_only`: **`clinic_schedules_info` only** (patient data from `$VESSENCE_DATA_HOME/schedule.db`). No other class is private by default.
+
 ---
 
 ## 17. AI Review Panel — Multi-Model Consultation

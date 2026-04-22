@@ -169,8 +169,8 @@ try:
     ANDROID_VERSION = _version_data["version_name"]
     _ANDROID_VERSION_CODE = _version_data["version_code"]
 except FileNotFoundError:
-    ANDROID_VERSION = "0.2.65"
-    _ANDROID_VERSION_CODE = 296
+    ANDROID_VERSION = "0.2.75"
+    _ANDROID_VERSION_CODE = 306
 
 # Startup validation: ensure the APK for the advertised version actually exists
 _expected_apk = MARKETING_DOWNLOADS_DIR / f"vessences-android-v{ANDROID_VERSION}.apk"
@@ -1534,8 +1534,12 @@ async def recent_messages(days: int = 5, limit: int = 50, _=Depends(require_auth
 
 
 @app.post("/api/device-diagnostics")
-async def receive_device_diagnostics(request: Request, _=Depends(require_auth)):
+async def receive_device_diagnostics(request: Request):
     """Receive diagnostic data from Android: wake word status, mic state, errors, scores, etc.
+
+    This endpoint intentionally accepts unauthenticated writes because the
+    most important diagnostics happen before login has succeeded.
+    Reading diagnostics remains authenticated.
 
     When a `chat_error` category lands, automatically file an audit job
     into configs/job_queue/ so the next `run job queue:` reviews the
@@ -4151,8 +4155,10 @@ async def submit_briefing_article(request: Request, _=Depends(require_auth)):
     url = body.get("url", "").strip()
     if not url or not re.match(r'^https?://', url):
         raise HTTPException(status_code=400, detail="A valid URL starting with http(s):// is required")
+    title = (body.get("title") or "").strip()
+    text = (body.get("text") or "").strip()
     bt = _briefing_tools()
-    result = bt.submit_article(url)
+    result = bt.submit_article(url, title=title, text=text)
 
     # Spawn detached processor subprocess — survives server restarts.
     # The processor uses a file lock so only one instance runs at a time.
@@ -4199,6 +4205,35 @@ async def summarize_article_now(request: Request, _=Depends(require_auth)):
         )
     else:
         summary = title
+
+    return {"status": "ok", "title": title, "summary": summary}
+
+
+@app.post("/api/briefing/articles/summarize_text")
+async def summarize_article_text(request: Request, _=Depends(require_auth)):
+    """Accept pre-extracted article text from the Android WebView and return an LLM summary.
+
+    Body: {"title": "...", "text": "...", "url": "..."}
+    Returns: {"status": "ok", "title": "...", "summary": "..."}
+    """
+    body = await request.json()
+    title = (body.get("title") or "").strip()
+    text = (body.get("text") or "").strip()
+
+    if not text:
+        raise HTTPException(status_code=400, detail="Article text is required")
+
+    if _BRIEFING_FUNCTIONS_DIR not in sys.path:
+        sys.path.insert(0, _BRIEFING_FUNCTIONS_DIR)
+
+    try:
+        from news_fetcher import summarize_full
+    except ImportError as e:
+        raise HTTPException(status_code=503, detail=f"Briefing module unavailable: {e}")
+
+    summary = await asyncio.get_event_loop().run_in_executor(
+        None, lambda: summarize_full(title or "Untitled", text)
+    )
 
     return {"status": "ok", "title": title, "summary": summary}
 

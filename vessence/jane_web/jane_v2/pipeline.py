@@ -443,11 +443,23 @@ def _persist_turn_to_fifo(
     Handlers can opt into richer context by returning a ``structured``
     field alongside ``text``; it's merged in here (entities / pending_action
     / safety etc.).
+
+    Privacy: the FIFO stores full turn content for every class, including
+    ``privacy="local_only"``. Stage 2 is entirely in-process (Qwen classifier,
+    pending_action_resolver, handlers) so full fidelity is required for
+    continuation flows ("yes I would", "patient 2") to resume correctly.
+    Redaction is applied at the Stage 3 / cloud-bound READ boundary in
+    ``recent_context.render_stage3_context`` (via ``redact_local_only=True``),
+    not here. The record carries ``privacy="local_only"`` as the marker
+    cloud readers key off of.
     """
     if not session_id or not jane_response:
         return
     try:
         from vault_web.recent_turns import add_structured, _format_turn_compact
+        from agent_skills.private_handler_utils import privacy_for
+
+        privacy = privacy_for(intent)
         record: dict = {
             "user_text": user_prompt or "",
             "assistant_text": jane_response,
@@ -455,10 +467,11 @@ def _persist_turn_to_fifo(
             "stage": stage,
             "intent": intent or "",
         }
+        if privacy:
+            record["privacy"] = privacy
         if confidence:
             record["confidence"] = confidence
         if handler_structured:
-            # Shallow merge: handler-provided fields win.
             for k, v in handler_structured.items():
                 if v is not None:
                     record[k] = v
@@ -1374,7 +1387,63 @@ async def handle_chat(body, request: Request):
             handler_structured=handler_structured,
             extras=extras,
         )
+        # For private classes, also write to the SQLite ledger — the FIFO
+        # entry is redacted, and `no_stage3 = True` blocks escalation, so
+        # without this the full turn would only live in volatile memory
+        # and debugging tools (show_transcript.py) couldn't replay it.
+        # v3's Stage 2 path already does this; we mirror it here so the
+        # invariant holds regardless of which pipeline runs.
+        try:
+            from agent_skills.private_handler_utils import is_no_stage3
+            if is_no_stage3(state.get("cls")):
+                from jane_web.jane_v3.pipeline import _persist_turn_to_ledger
+                _persist_turn_to_ledger(
+                    canonical_sid, prompt, visible_text or text,
+                    stage="stage2", cls=state["cls"],
+                )
+        except Exception as _ledger_err:
+            logger.warning("jane_v2: private-class ledger persist failed: %s", _ledger_err)
         return JSONResponse(resp)
+
+    # Private-class gate: classes flagged `no_stage3 = True` must never
+    # reach the cloud brain. If Stage 2 returned None (declined / crash /
+    # invalid shape) and the class is private, substitute a safe deflection
+    # and return as Stage 2 instead of falling through to Stage 3.
+    try:
+        from agent_skills.private_handler_utils import is_no_stage3, SAFE_CLINIC_DEFLECTION
+        if is_no_stage3(state.get("cls")):
+            logger.warning(
+                "jane_v2: no_stage3 class %r — Stage 2 produced no result, "
+                "returning safe deflection instead of escalating.",
+                state.get("cls"),
+            )
+            deflection_text = SAFE_CLINIC_DEFLECTION
+            _persist_turn_to_fifo(
+                canonical_sid, prompt, deflection_text,
+                stage="stage2",
+                intent=state["cls"],
+                confidence=state["conf"],
+            )
+            try:
+                from jane_web.jane_v3.pipeline import _persist_turn_to_ledger
+                _persist_turn_to_ledger(
+                    canonical_sid, prompt, deflection_text,
+                    stage="stage2", cls=state["cls"],
+                )
+            except Exception as _ledger_err:
+                logger.warning("jane_v2: deflection ledger persist failed: %s", _ledger_err)
+            return JSONResponse({
+                "response": deflection_text,
+                "ack": None,
+                "classification": state["classification"],
+                "stage": "stage2",
+                "stage1_ms": state["stage1_ms"],
+                "stage2_ms": state["stage2_ms"],
+                "stage3_ms": 0,
+                "files": [],
+            })
+    except Exception as _no_stage3_err:
+        logger.warning("jane_v2: no_stage3 guard failed: %s", _no_stage3_err)
 
     # ── Stage 3: delegate to v1's non-streaming brain ───────────────────
     # Generate a contextual ack first (uses v1's classify_prompt — topic
@@ -1684,7 +1753,52 @@ async def handle_chat_stream(body, request: Request):
                 handler_structured=handler_structured,
                 extras=extras,
             )
+            # For private classes, mirror the ledger write v3 already does
+            # (see handle_chat non-streaming block for rationale).
+            try:
+                from agent_skills.private_handler_utils import is_no_stage3
+                if is_no_stage3(state.get("cls")):
+                    from jane_web.jane_v3.pipeline import _persist_turn_to_ledger
+                    _persist_turn_to_ledger(
+                        canonical_sid, prompt, visible_text or text,
+                        stage="stage2", cls=state["cls"],
+                    )
+            except Exception as _ledger_err:
+                logger.warning("jane_v2 stream: private-class ledger persist failed: %s", _ledger_err)
             return
+
+        # Private-class gate (streaming): classes flagged `no_stage3 = True`
+        # must never reach the cloud brain. If Stage 2 returned None and the
+        # class is private, emit the safe deflection via the NDJSON stream
+        # instead of falling through to Stage 3.
+        try:
+            from agent_skills.private_handler_utils import is_no_stage3, SAFE_CLINIC_DEFLECTION
+            if is_no_stage3(state.get("cls")):
+                logger.warning(
+                    "jane_v2 stream: no_stage3 class %r — Stage 2 produced no result, "
+                    "emitting safe deflection instead of escalating.",
+                    state.get("cls"),
+                )
+                deflection_text = SAFE_CLINIC_DEFLECTION
+                yield _ndjson("delta", deflection_text)
+                yield _ndjson("done", deflection_text)
+                _persist_turn_to_fifo(
+                    canonical_sid, prompt, deflection_text,
+                    stage="stage2",
+                    intent=state["cls"],
+                    confidence=state["conf"],
+                )
+                try:
+                    from jane_web.jane_v3.pipeline import _persist_turn_to_ledger
+                    _persist_turn_to_ledger(
+                        canonical_sid, prompt, deflection_text,
+                        stage="stage2", cls=state["cls"],
+                    )
+                except Exception as _ledger_err:
+                    logger.warning("jane_v2 stream: deflection ledger persist failed: %s", _ledger_err)
+                return
+        except Exception as _no_stage3_err:
+            logger.warning("jane_v2 stream: no_stage3 guard failed: %s", _no_stage3_err)
 
         # ── Stage 3: delegate to v1's streaming brain ──────────────────
         # Generate a contextual ack via v1's classify_prompt (topic

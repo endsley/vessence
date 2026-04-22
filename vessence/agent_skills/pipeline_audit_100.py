@@ -7,9 +7,9 @@ evaluate each stage:
   - Stage 2: did the handler do the right thing? (or correctly escalate?)
   - Stage 3: did Opus's response actually answer the user?
 
-For Stage 1 misclassifications with a clear correct class, automatically
-adds the prompt as an exemplar to the correct ChromaDB class (the same
-self-correct mechanism already in stage2_dispatcher).
+By default this is report-only: it does not mutate classifier training
+data. With --apply-fixes, Stage 1 misclassifications with a clear correct
+class are added as exemplars to the correct ChromaDB class.
 
 Stage 2 and Stage 3 issues get logged to configs/pipeline_audit_report.md
 for human review — these usually require code changes, not data fixes.
@@ -265,9 +265,18 @@ RESPONSE_OK: yes | no
 
 def add_exemplar(prompt: str, target_class: str) -> bool:
     """Add prompt as an exemplar to the named class in ChromaDB."""
+    # DISABLED per user request (2026-04-21). Nightly Chroma writes are
+    # ephemeral (wiped on next source-edit rebuild) and the judge's
+    # verdict is not reliable enough to auto-mutate the corpus. Re-enable
+    # by removing this early return.
     cls_upper = target_class.upper().replace(" ", "_")
     if cls_upper == "OTHERS":
         cls_upper = "DELEGATE_OPUS"
+    logger.info(
+        "add_exemplar DISABLED: would have added %r → %s",
+        prompt[:60], cls_upper,
+    )
+    return False
     try:
         # Ensure VESSENCE_HOME is on sys.path for intent_classifier import
         if str(VESSENCE_HOME) not in sys.path:
@@ -295,7 +304,7 @@ def add_exemplar(prompt: str, target_class: str) -> bool:
 # ── Main loop ───────────────────────────────────────────────────────────────
 
 
-async def main(n: int = 100, apply_fixes: bool = True) -> int:
+async def main(n: int = 100, apply_fixes: bool = False) -> int:
     started = datetime.datetime.now()
     logger.info("Loading last %d prompts from %s", n, PROMPT_DUMP)
     prompts = load_recent_prompts(n)
@@ -423,9 +432,11 @@ async def main(n: int = 100, apply_fixes: bool = True) -> int:
 
 if __name__ == "__main__":
     n = 100
-    apply = True
+    apply = False
     if "--n" in sys.argv:
         n = int(sys.argv[sys.argv.index("--n") + 1])
+    if "--apply-fixes" in sys.argv:
+        apply = True
     if "--no-fixes" in sys.argv:
         apply = False
     sys.exit(asyncio.run(main(n=n, apply_fixes=apply)))
