@@ -1,503 +1,340 @@
-# Transcript Quality Review — 2026-04-20
+# Transcript Quality Review — 2026-04-21
 
-Generated: 2026-04-21 01:28:37
+Generated: 2026-04-22 01:35:17
 
-## Issue 1 [CRITICAL]
+## Issue 1 [LOW]
 
-**Turn:** 2026-04-20 08:47:53
-**User said:** yes send it
+**Turn:** 2026-04-21 11:13:22
+**User said:** have you compiled a new Android version for me so that I can test the webview updates
 
-**Problem:** SMS confirmation attempted to send with no open draft.
+**Problem:** Build/APK request was not recognized as a first-class intent and fell through as others.
 
-**Root cause:** The prior SMS request should have created a contacts.sms_draft and pending confirmation, but the later client tool result shows contacts.sms_send had no draft to send.
+**Root cause:** The classifier produced an unsupported label, `build apk`, which was mapped to `others:Low`. The turn still escalated to Stage 3, but routing depended on fallback instead of an explicit build/delegate intent.
 
-**Suggested fix:** Make SMS confirmation state authoritative: first turn must emit contacts.sms_draft with a stable draft_id, pending_action_resolver must route 'yes send it' to sms_send for that draft_id, and sms_send should never be emitted without an existing draft.
+**Suggested fix:** Add `build apk` / `compile android` / `new Android version` aliases to the classifier schema, mapped to a no-handler Stage 3/delegate class.
 
 **Log evidence:**
 ```
-[2026-04-20 08:47:34] (jane_android) can you ask Lee what time she's going to be there today
+2026-04-21 11:13:22 WARNING [intent_classifier.v3.classifier] v3: qwen returned unknown class 'build apk' → others
 ```
 ```
-[2026-04-20 08:47:53] (jane_android) yes send it
+2026-04-21 11:13:22 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (770ms)
 ```
 ```
-[2026-04-20 09:06:03] (jane_android) [TOOL_RESULT:{"tool":"contacts.sms_send","call_id":"400a4d96-f84f-4670-ad5a-989157d22aa5","status":"failed","message":"no open draft to send"}]
+2026-04-21 11:13:23 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=225 sid_override=True class_protocol=n/a
 ```
 
 ---
 
 ## Issue 2 [MEDIUM]
 
-**Turn:** 2026-04-20 15:32:08
-**User said:** can you tell my wife that I took out daughter back home
+**Turn:** 2026-04-21 15:23:48
+**User said:** I don't think the solution you have for the sunrise now is a good one
 
-**Problem:** Direct SMS request missed the Stage 2 send-message fast path.
+**Problem:** Stage 3 lost active conversation context after a standing-brain restart.
 
-**Root cause:** Stage 1 classified a clear 'tell my wife' message as others:Low and escalated to Stage 3 before a later send-message handler invocation appeared.
+**Root cause:** A new standing brain was started at 15:20:26, then the 15:23 turn was sent with `history=0`, even though it was a direct continuation of the summarize-now discussion.
 
-**Suggested fix:** Add classifier examples and deterministic pre-rules for 'tell/contact my wife/husband/spouse' as send message, including family aliases.
+**Suggested fix:** Persist recent conversation history outside the standing-brain process and always inject session history after brain restarts; do not let process restarts reset conversational context.
 
 **Log evidence:**
 ```
-2026-04-20 15:32:07 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (919ms)
+2026-04-21 15:20:26 INFO [jane.standing_brain] Standing brain started: provider=claude model=claude-opus-4-6 pid=2927363
 ```
 ```
-2026-04-20 15:32:07 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=143 sid_override=True class_protocol=n/a
+2026-04-21 15:23:47 INFO [jane.proxy] [jane_android] stream_message brain=Claude history=0 msg_len=209 file_ctx=False
 ```
 ```
-2026-04-20 15:32:51 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 send message:Very High (839ms)
+2026-04-21 15:23:54 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage3 end-to-end (6345ms)
 ```
 
 ---
 
-## Issue 3 [MEDIUM]
+## Issue 3 [LOW]
 
-**Turn:** 2026-04-20 18:34:16
-**User said:** how many patients do I have today
+**Turn:** 2026-04-21 15:38:11
+**User said:** have you compiled the latest bump of Android version
 
-**Problem:** Clinic schedule request was routed to Stage 3 instead of the clinic schedule handler.
+**Problem:** Build/APK request was again classified as an unknown class and routed through fallback.
 
-**Root cause:** Qwen returned '[clinic schedules info]' with brackets; the classifier treated it as an unknown class and normalized to others:Low.
+**Root cause:** The classifier again emitted unsupported class `build apk`, which became `others:Low`; this caused fallback Stage 3 routing instead of an intentional build/delegate route.
 
-**Suggested fix:** Canonicalize classifier labels by stripping brackets, underscores, and case/spacing variants before validation.
+**Suggested fix:** Normalize build-related classifier outputs before schema validation, or add `build apk` as a supported delegate-to-Stage-3 class.
 
 **Log evidence:**
 ```
-2026-04-20 18:34:15 WARNING [intent_classifier.v3.classifier] v3: qwen returned unknown class '[clinic schedules info]' -> others
+2026-04-21 15:38:11 WARNING [intent_classifier.v3.classifier] v3: qwen returned unknown class 'build apk' → others
 ```
 ```
-2026-04-20 18:34:15 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (849ms)
+2026-04-21 15:38:11 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (1163ms)
 ```
 ```
-2026-04-20 18:34:15 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=125 sid_override=True class_protocol=n/a
+2026-04-21 15:38:12 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=192 sid_override=True class_protocol=n/a
 ```
 
 ---
 
-## Issue 4 [MEDIUM]
+## Issue 4 [CRITICAL]
 
-**Turn:** 2026-04-20 19:08:00
-**User said:** what does her schedule look like this week
+**Turn:** 2026-04-21 16:27:35
+**User said:** for the clinic to do list I would like to add that I want to add texting capability
 
-**Problem:** Clinic-style schedule query was classified as read calendar, which has no Stage 2 handler.
+**Problem:** Stage 3 appeared to acknowledge a to-do add without actually using the Stage 2 to-do-list source of truth.
 
-**Root cause:** Stage 1 selected read calendar:Very High, then the pipeline escalated because read calendar has no handler.
+**Root cause:** The explicit add-item request was classified as unknown `delegate_opus` then `others:Low`, so it escalated to Stage 3 with no class protocol. The later user complaint shows the item was not actually added.
 
-**Suggested fix:** Route provider/patient schedule phrasing in clinic test sessions to clinic schedules info, or implement a read calendar handler instead of always escalating.
+**Suggested fix:** Route `add item to clinic to-do list` directly to the todo-list handler, or give Stage 3 a real Google Docs-backed todo tool/protocol and require tool execution before confirming completion.
 
 **Log evidence:**
 ```
-2026-04-20 19:07:59 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 read calendar:Very High (863ms)
+2026-04-21 16:27:34 WARNING [intent_classifier.v3.classifier] v3: qwen returned unknown class 'delegate_opus' → others
 ```
 ```
-2026-04-20 19:07:59 INFO [jane_web.jane_v3.pipeline] jane_v3: class 'read calendar' has no handler -> Stage 3
+2026-04-21 16:27:34 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (1055ms)
 ```
 ```
-2026-04-20 19:08:00 INFO [jane.proxy] [c6cf9268b21b] send_message (sync) brain=Claude history=0 msg_len=42 file_ctx=False
+2026-04-21 16:27:34 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=230 sid_override=True class_protocol=n/a
+```
+```
+2026-04-21 16:28:48 INFO [jane.proxy] [jane_android] stream_message brain=Claude history=4 msg_len=172 file_ctx=False
 ```
 
 ---
 
 ## Issue 5 [MEDIUM]
 
-**Turn:** 2026-04-20 19:08:54
-**User said:** how busy is she on Wednesday
+**Turn:** 2026-04-21 16:28:30
+**User said:** I thought I asked you to add a new item
 
-**Problem:** Clinic schedule follow-up was over-delegated to Stage 3.
+**Problem:** Follow-up complaint was misrouted to the todo-list Stage 2 handler instead of treated as a repair/diagnostic turn.
 
-**Root cause:** Stage 1 classified the pronoun-based schedule question as delegate opus:Very High, and that class has no handler.
+**Root cause:** The classifier matched `todo list:Very High` and Stage 2 handled it directly, but the user was asking why the previous add failed, not making a clean todo-list query.
 
-**Suggested fix:** Teach the classifier and pending resolver that 'how busy is she on <day>' after clinic context maps to clinic schedules info.
+**Suggested fix:** Add repair-intent detection for phrases like `I thought I asked`, `why didn't you`, and route them to Stage 3 with recent action logs instead of deterministic handlers.
 
 **Log evidence:**
 ```
-2026-04-20 19:08:53 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 delegate opus:Very High (751ms)
+2026-04-21 16:28:30 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 todo list:Very High (967ms)
 ```
 ```
-2026-04-20 19:08:53 INFO [jane_web.jane_v3.pipeline] jane_v3: class 'delegate opus' has no handler -> Stage 3
+2026-04-21 16:28:30 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage2 todo list handler (0ms)
+```
+```
+2026-04-21 16:28:30 INFO [jane.proxy] [jane_android] Persistence worker started stage=stage2 user_chars=38 assistant_chars=161
 ```
 
 ---
 
 ## Issue 6 [MEDIUM]
 
-**Turn:** 2026-04-20 19:10:02
-**User said:** is she working on Monday
+**Turn:** 2026-04-21 17:43:30
+**User said:** yes
 
-**Problem:** Clinic schedule availability question was over-delegated to Stage 3.
+**Problem:** Pending clinic-schedule follow-up was detected, but the confirmation still escalated to Stage 3 instead of being handled by Stage 2.
 
-**Root cause:** Stage 1 classified 'is she working on Monday' as delegate opus:Very High instead of clinic schedules info.
+**Root cause:** The resolver routed the `yes` follow-up to `clinic schedules info`, but Stage 1 then classified the enriched prompt as `delegate opus:High`, causing unnecessary Stage 3 escalation.
 
-**Suggested fix:** Add clinic availability examples for 'is she working', 'is <provider> in', and pronoun follow-ups.
+**Suggested fix:** When pending_action_resolver resolves a Stage 2 follow-up, bypass Stage 1 entirely and invoke the target handler with the pending context.
 
 **Log evidence:**
 ```
-2026-04-20 19:10:02 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 delegate opus:Very High (774ms)
+2026-04-21 17:43:28 INFO [jane_web.jane_v2.pending_action_resolver] resolver: followup → clinic schedules info (awaiting=names_for_day_confirm)
 ```
 ```
-2026-04-20 19:10:02 INFO [jane_web.jane_v3.pipeline] jane_v3: class 'delegate opus' has no handler -> Stage 3
+2026-04-21 17:43:29 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 delegate opus:High (1024ms)
+```
+```
+2026-04-21 17:43:29 INFO [jane_web.jane_v3.pipeline] jane_v3: class 'delegate opus' has no handler → Stage 3
 ```
 
 ---
 
-## Issue 7 [MEDIUM]
+## Issue 7 [CRITICAL]
 
-**Turn:** 2026-04-20 19:11:12
-**User said:** who's coming in tomorrow
+**Turn:** 2026-04-21 17:44:30
+**User said:** what do you mean you lost the thread you have the history of the conversation right
 
-**Problem:** Patient schedule query was classified as read calendar and escalated.
+**Problem:** Stage 2 clinic handler returned an invalid response shape, forcing Stage 3 and causing confusing conversation flow.
 
-**Root cause:** Stage 1 did not map 'who's coming in' to clinic schedules info; read calendar has no handler.
+**Root cause:** The pending follow-up was correctly associated with `clinic schedules info`, but the handler produced an invalid shape. The pipeline escalated to Stage 3 with the clinic protocol instead of returning the expected deterministic response.
 
-**Suggested fix:** Add clinic schedule examples for 'who is coming in', 'patients tomorrow', and 'appointments tomorrow'.
+**Suggested fix:** Fix the clinic-schedules handler return contract for `names_for_day_confirm`/follow-up branches and add schema tests that fail on invalid handler shapes.
 
 **Log evidence:**
 ```
-2026-04-20 19:11:11 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 read calendar:Very High (844ms)
+2026-04-21 17:44:28 INFO [jane_web.jane_v2.pending_action_resolver] resolver: followup → clinic schedules info (awaiting=names_for_day_confirm)
 ```
 ```
-2026-04-20 19:11:11 INFO [jane_web.jane_v3.pipeline] jane_v3: class 'read calendar' has no handler -> Stage 3
+2026-04-21 17:44:29 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 clinic schedules info:Very High (873ms)
+```
+```
+2026-04-21 17:44:29 INFO [jane_web.jane_v3.pipeline] jane_v3: handler 'clinic schedules info' returned invalid shape → Stage 3
 ```
 
 ---
 
 ## Issue 8 [CRITICAL]
 
-**Turn:** 2026-04-20 19:18:02
-**User said:** how about tomorrow
+**Turn:** 2026-04-21 18:54:07
+**User said:** user: what's the clinic schedule look like for Thursday jane: She has 5 active patients
 
-**Problem:** Relative-date clinic follow-up bypassed the fast path and took about 3 minutes in Stage 3.
+**Problem:** Clinic-schedule follow-up again hit the invalid handler-shape path and escalated to Stage 3.
 
-**Root cause:** No pending clinic schedule context was resolved; Stage 1 classified the follow-up as delegate opus and Stage 3 ran for 180585ms.
+**Root cause:** The resolver detected `names_for_day_confirm`, Stage 1 classified clinic schedules correctly, but the handler returned an invalid shape. This repeated the same Stage 2 contract bug.
 
-**Suggested fix:** Have the clinic schedule handler set pending context for relative follow-ups, and make pending_action_resolver catch 'how about tomorrow/next week/Wednesday'.
+**Suggested fix:** Repair the clinic handler branch that handles affirmative roster requests and validate every handler response against the pipeline schema before release.
 
 **Log evidence:**
 ```
-2026-04-20 19:18:01 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 delegate opus:Very High (820ms)
+2026-04-21 18:54:05 INFO [jane_web.jane_v2.pending_action_resolver] resolver: followup → clinic schedules info (awaiting=names_for_day_confirm)
 ```
 ```
-2026-04-20 19:18:02 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=delegate opus:Very High voice=False prompt_len=1411 sid_override=True class_protocol=loaded:delegate_opus
+2026-04-21 18:54:06 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 clinic schedules info:Very High (845ms)
 ```
 ```
-2026-04-20 19:21:02 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage3 end-to-end (180585ms)
+2026-04-21 18:54:06 INFO [jane_web.jane_v3.pipeline] jane_v3: handler 'clinic schedules info' returned invalid shape → Stage 3
 ```
 
 ---
 
-## Issue 9 [MEDIUM]
+## Issue 9 [CRITICAL]
 
-**Turn:** 2026-04-20 19:24:33
-**User said:** can you tell me about the clinic schedule on Wednesday
+**Turn:** 2026-04-21 21:45:05
+**User said:** user: what's the clinic schedule for Friday look like jane: She has 5 active patients
 
-**Problem:** Explicit clinic schedule request was classified as read calendar.
+**Problem:** Affirmative clinic roster follow-up escalated because the Stage 2 handler returned an invalid shape.
 
-**Root cause:** Despite the words 'clinic schedule', Stage 1 chose read calendar:Very High; no read calendar handler exists, so the turn escalated.
+**Root cause:** The pending resolver correctly identified `names_for_day_confirm`, but the Stage 2 clinic handler failed its response contract and the pipeline had to call Stage 3.
 
-**Suggested fix:** Prioritize exact 'clinic schedule' lexical matches to clinic schedules info before model classification.
+**Suggested fix:** Unify the clinic handler response object across normal schedule, roster confirmation, and patient-detail branches; add a regression test for `yes` after `Would you like to know the names?`.
 
 **Log evidence:**
 ```
-2026-04-20 19:24:33 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 read calendar:Very High (883ms)
+2026-04-21 21:45:04 INFO [jane_web.jane_v2.pending_action_resolver] resolver: followup → clinic schedules info (awaiting=names_for_day_confirm)
 ```
 ```
-2026-04-20 19:24:33 INFO [jane_web.jane_v3.pipeline] jane_v3: class 'read calendar' has no handler -> Stage 3
+2026-04-21 21:45:05 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 clinic schedules info:Very High (887ms)
+```
+```
+2026-04-21 21:45:05 INFO [jane_web.jane_v3.pipeline] jane_v3: handler 'clinic schedules info' returned invalid shape → Stage 3
 ```
 
 ---
 
-## Issue 10 [CRITICAL]
+## Issue 10 [MEDIUM]
 
-**Turn:** 2026-04-20 19:31:49
-**User said:** casual look like tomorrow
+**Turn:** 2026-04-21 21:55:29
+**User said:** yes
 
-**Problem:** The user-facing request produced no completed answer because the stream was cancelled after client disconnect.
+**Problem:** Android diagnostics and announcement polling were rate limited during an active voice flow.
 
-**Root cause:** The transcript appears to be an STT error for a schedule question, Stage 1 classified it as others:Low, and the brain execution was cancelled after 2835ms due to client disconnect or timeout.
+**Root cause:** The client emitted frequent diagnostics/announcement calls from the same IP while voice relaunch and follow-up STT were active, triggering server rate limits.
 
-**Suggested fix:** Do not cancel server-side brain work immediately on transient Android stream disconnect; cache the result for reconnect, and add STT correction for 'casual' -> 'schedule' in schedule contexts.
+**Suggested fix:** Throttle Android diagnostic and announcement polling, batch diagnostics, and exempt authenticated device telemetry from generic web rate limits with a separate quota.
 
 **Log evidence:**
 ```
-2026-04-20 19:31:47 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (833ms)
+2026-04-21 21:55:29 WARNING [jane.web] Rate limited 172.56.197.171 on /api/device-diagnostics (api)
 ```
 ```
-2026-04-20 19:31:51 INFO [jane.proxy] [jane_android] Client disconnected - waiting for adapter task to finish (brain still working)
+2026-04-21 21:55:32 WARNING [jane.web] Rate limited 172.56.197.171 on /api/jane/announcements (api)
 ```
 ```
-2026-04-20 19:31:52 WARNING [jane.proxy] [jane_android] Brain execution cancelled (stream) after 2835ms - likely client disconnect or timeout.
+2026-04-21T21:55:30.658Z [voice_flow] voice_flow[relaunch_launched] path=sentence_tts
+```
+```
+2026-04-21T21:55:33.344Z [voice_flow] voice_flow[send_message] text_len=3 fromVoice=True
 ```
 
 ---
 
-## Issue 11 [LOW]
+## Issue 11 [CRITICAL]
 
-**Turn:** 2026-04-20 19:32:09
-**User said:** what does my schedule look like tomorrow
+**Turn:** 2026-04-21 22:20:14
+**User said:** user: what's the clinic schedule for Wednesday look like jane: She has 8 active patients
 
-**Problem:** Classifier alias was rejected, losing the intended read-calendar protocol.
+**Problem:** Patient-detail follow-up from a clinic roster escalated due to invalid Stage 2 handler shape.
 
-**Root cause:** Qwen returned 'read_calendar' with an underscore; the classifier treated it as unknown and converted it to others:Low.
+**Root cause:** The resolver correctly identified `patient_selection_from_list`, but the clinic schedules handler returned an invalid response shape and Stage 3 handled the turn.
 
-**Suggested fix:** Normalize underscores to spaces when validating classifier labels.
+**Suggested fix:** Fix and test the `patient_selection_from_list` branch so patient-number selections return a valid Stage 2 response with the selected patient's details.
 
 **Log evidence:**
 ```
-2026-04-20 19:32:08 WARNING [intent_classifier.v3.classifier] v3: qwen returned unknown class 'read_calendar' -> others
+2026-04-21 22:20:13 INFO [jane_web.jane_v2.pending_action_resolver] resolver: followup → clinic schedules info (awaiting=patient_selection_from_list)
 ```
 ```
-2026-04-20 19:32:08 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (890ms)
+2026-04-21 22:20:13 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 clinic schedules info:Very High (847ms)
 ```
 ```
-2026-04-20 19:32:09 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=141 sid_override=True class_protocol=n/a
+2026-04-21 22:20:13 INFO [jane_web.jane_v3.pipeline] jane_v3: handler 'clinic schedules info' returned invalid shape → Stage 3
 ```
 
 ---
 
 ## Issue 12 [MEDIUM]
 
-**Turn:** 2026-04-20 19:32:33
-**User said:** what is my clinic schedule look like tomorrow
+**Turn:** 2026-04-21 23:16:28
+**User said:** user: okay can you tell me more about patient number two jane: I don't have detail records
 
-**Problem:** Explicit clinic schedule request was sent to read calendar and escalated.
+**Problem:** Clinic-schedule request was misclassified as `others`, bypassing the clinic Stage 2 handler.
 
-**Root cause:** Stage 1 chose read calendar:Very High even though the request said 'clinic schedule'; read calendar has no Stage 2 handler.
+**Root cause:** The turn contained clinic schedule context and patient-number detail intent, but Stage 1 returned `others:Low`, so Stage 3 had to reconstruct context from chat history.
 
-**Suggested fix:** Add a high-priority rule mapping 'my clinic schedule' to clinic schedules info.
+**Suggested fix:** Add classifier examples for transcript-style clinic follow-ups and patient-number detail requests; preserve structured clinic pending context rather than relying on raw conversation text.
 
 **Log evidence:**
 ```
-2026-04-20 19:32:32 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 read calendar:Very High (1007ms)
+2026-04-21 23:16:27 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (1406ms)
 ```
 ```
-2026-04-20 19:32:32 INFO [jane_web.jane_v3.pipeline] jane_v3: class 'read calendar' has no handler -> Stage 3
+2026-04-21 23:16:28 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=1635 sid_override=True class_protocol=n/a
 ```
 
 ---
 
 ## Issue 13 [MEDIUM]
 
-**Turn:** 2026-04-20 20:53:52
-**User said:** any cancellations
+**Turn:** 2026-04-21 23:18:46
+**User said:** user: what's this Wednesday schedule look like jane: She has 8 active patients
 
-**Problem:** Clinic cancellation follow-up did not use prior clinic schedule context.
+**Problem:** Clinic schedule summary transcript was misclassified as `others` instead of clinic schedules.
 
-**Root cause:** After a clinic schedules info Stage 2 turn, the follow-up 'any cancellations' was classified as others:Low and escalated to Stage 3 for 41442ms.
+**Root cause:** The classifier did not handle pasted transcript/context-summary prompts that clearly contained a clinic schedule request.
 
-**Suggested fix:** Set pending clinic context after schedule responses and route cancellation follow-ups to the clinic schedule handler.
+**Suggested fix:** Preprocess transcript-style user messages to extract the latest actual user request, then classify that extracted request.
 
 **Log evidence:**
 ```
-2026-04-20 20:53:41 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 clinic schedules info:High (814ms)
+2026-04-21 23:18:45 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (962ms)
 ```
 ```
-2026-04-20 20:53:51 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (681ms)
-```
-```
-2026-04-20 20:54:33 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage3 end-to-end (41442ms)
+2026-04-21 23:18:46 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=2120 sid_override=True class_protocol=n/a
 ```
 
 ---
 
 ## Issue 14 [CRITICAL]
 
-**Turn:** 2026-04-20 21:13:17
-**User said:** for the first patient I would like to know more details about the patient
+**Turn:** 2026-04-21 23:47:58
+**User said:** yes
 
-**Problem:** Patient-detail follow-up lost the clinic schedule context.
+**Problem:** No-Stage3 safety deflection replaced the expected clinic roster response.
 
-**Root cause:** The prior clinic schedule answer came from Stage 2, but this follow-up went to Stage 3 with history=0, so Stage 3 had no prior patient list to resolve 'the first patient'.
+**Root cause:** The resolver identified the pending clinic names confirmation, but the clinic handler returned an invalid shape. Because the class was marked `no_stage3`, the pipeline returned a safe deflection instead of escalating or answering.
 
-**Suggested fix:** Persist Stage 2 clinic schedule outputs into short-term conversational state and have pending_action_resolver route ordinal follow-ups like 'first patient' to the clinic detail handler.
-
-**Log evidence:**
-```
-2026-04-20 21:12:52 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage2 clinic schedules info handler (1ms)
-```
-```
-2026-04-20 21:13:16 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (894ms)
-```
-```
-2026-04-20 21:13:17 INFO [jane.proxy] [jane_android] stream_message brain=Claude history=0 msg_len=174 file_ctx=False
-```
-```
-2026-04-20 21:13:43 INFO [jane.standing_brain] Brain [claude-opus-4-6] turn 1 complete in 25249ms (33 chars, 5 raw events)
-```
-
----
-
-## Issue 15 [CRITICAL]
-
-**Turn:** 2026-04-20 21:28:47
-**User said:** can you delete it for me
-
-**Problem:** Contextual delete request was misclassified as send email and the handler returned an invalid shape.
-
-**Root cause:** After reading messages and the user saying the item was junk, Stage 1 chose send email:Very High for 'delete it'; the send email handler could not produce a valid response and escalated.
-
-**Suggested fix:** Add delete-message/delete-email contextual intents and make pending_action_resolver bind 'delete it' to the last read item instead of using send email.
+**Suggested fix:** Do not mark clinic schedules `no_stage3` until every follow-up handler branch returns a valid response. Keep a controlled Stage 3 fallback for invalid handler output, and fix the handler contract.
 
 **Log evidence:**
 ```
-2026-04-20 21:28:04 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 read messages:Very High (1357ms)
+2026-04-21 23:47:57 INFO [jane_web.jane_v2.pending_action_resolver] resolver: followup → clinic schedules info (awaiting=names_for_day_confirm)
 ```
 ```
-2026-04-20 21:28:26 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (885ms)
+2026-04-21 23:47:58 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 clinic schedules info:Very High (823ms)
 ```
 ```
-2026-04-20 21:28:45 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 send email:Very High (820ms)
-```
-```
-2026-04-20 21:28:46 INFO [jane_web.jane_v3.pipeline] jane_v3: handler 'send email' returned invalid shape -> Stage 3
+2026-04-21 23:47:58 WARNING [jane_web.jane_v3.pipeline] jane_v3: no_stage3 class 'clinic schedules info' — handler returned invalid shape, returning safe deflection
 ```
 
 ---
-
-## Issue 16 [MEDIUM]
-
-**Turn:** 2026-04-20 21:30:10
-**User said:** no I would like to know which patients canceled
-
-**Problem:** Clinic cancellation query was classified as others instead of clinic schedules info.
-
-**Root cause:** The classifier did not recognize 'which patients canceled' as a clinic schedule query and escalated to Stage 3.
-
-**Suggested fix:** Add cancellation-specific clinic examples and a deterministic rule for 'patients canceled/cancelled'.
-
-**Log evidence:**
-```
-2026-04-20 21:30:09 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (790ms)
-```
-```
-2026-04-20 21:30:09 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=148 sid_override=True class_protocol=n/a
-```
-
----
-
-## Issue 17 [MEDIUM]
-
-**Turn:** 2026-04-20 21:31:37
-**User said:** no I would like to know more details about the first patient
-
-**Problem:** Repeated ordinal patient-detail follow-up was not routed to the clinic handler.
-
-**Root cause:** Stage 1 again classified a 'first patient' detail request as others:Low, relying on Stage 3 and conversation history instead of deterministic clinic context.
-
-**Suggested fix:** Keep the last clinic schedule result in structured session state and resolve ordinal patient references before Stage 1.
-
-**Log evidence:**
-```
-2026-04-20 21:31:14 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage2 clinic schedules info handler (1ms)
-```
-```
-2026-04-20 21:31:37 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (858ms)
-```
-```
-2026-04-20 21:31:37 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=161 sid_override=True class_protocol=n/a
-```
-
----
-
-## Issue 18 [MEDIUM]
-
-**Turn:** 2026-04-20 21:40:06
-**User said:** I'm talking about the first patient on Wednesday
-
-**Problem:** Disambiguated clinic patient-detail request still missed the clinic fast path.
-
-**Root cause:** Even with 'first patient on Wednesday', Stage 1 returned others:Low and escalated; the clinic handler never received the structured date plus ordinal request.
-
-**Suggested fix:** Extend clinic schedules info intent coverage to ordinal patient details with explicit dates, and add a Stage 2 detail lookup path.
-
-**Log evidence:**
-```
-2026-04-20 21:40:05 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (853ms)
-```
-```
-2026-04-20 21:40:06 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=149 sid_override=True class_protocol=n/a
-```
-
----
-
-## Fixes Applied (2026-04-21)
-
-### `intent_classifier/v3/classifier.py` — deterministic clinic fast path
-
-Added `_clinic_fast_path()` that short-circuits qwen for unambiguous
-clinic-schedule phrasings. When the prompt matches patterns like
-"clinic schedule", "how many patients today", "who's coming in tomorrow",
-"is she working on <day>", "any cancellations", or "which patients
-canceled", the classifier returns `("clinic schedules info", "Very High")`
-directly — skipping the ~800ms qwen call AND the chroma-induced
-`read_calendar` / `delegate_opus` misclassifications seen in the
-transcripts.
-
-Guard rails: the fast path intentionally defers to the model when the
-prompt contains SMS/email/call verbs ("text my wife the clinic
-schedule"), the "tell <someone>" pattern where someone is not "me"/"us",
-or genuinely ambiguous follow-ups ("how about tomorrow", "more details
-about the first patient") that need FIFO context to resolve.
-
-Addresses: Issues 4 (MEDIUM), 6 (MEDIUM), 7 (MEDIUM), 9 (MEDIUM),
-12 (MEDIUM), 13 (MEDIUM), 16 (MEDIUM). Partially addresses Issue 5
-(MEDIUM — pronoun "she" still slips through without explicit clinic
-keyword).
-
-### `intent_classifier/v3/classifier.py` — delete-intent guard
-
-Added `_is_delete_intent()` + a post-validation guard that demotes
-`send email` / `send message` classifications back to `others:Low`
-whenever the raw prompt starts with "delete it/that/them/…". This
-prevents the failure mode from Issue 15 where "can you delete it for
-me" chroma-matched send_email exemplars, invoked the send_email
-handler (which has no way to satisfy a delete), and wasted a full
-Stage 2 → Stage 3 round trip.
-
-Addresses: Issue 15 (CRITICAL).
-
-### `test_code/test_v3_classifier_rules.py` — unit tests
-
-Added 38 parametrized tests covering:
-- Clinic fast-path positive matches for the exact transcript phrasings
-  that misrouted on 2026-04-20.
-- Negative cases (generic calendar queries, ambiguous follow-ups, empty
-  input).
-- Send-intent exclusions ("text my wife the clinic schedule" must not
-  hijack to the clinic handler).
-- Delete-intent matches + rejections (send/read commands, mid-sentence
-  "delete" mentions).
-
-All 38 tests pass against the new helpers.
-
-### Issues not fixed this cycle
-
-- **Issue 1 (CRITICAL)** — SMS confirm with no open draft. Needs a
-  deeper audit of the draft state lifecycle between server-side
-  FIFO (`SEND_MESSAGE_DRAFT_OPEN`) and the Android client's local
-  draft store. Likely a draft TTL / reconnect mismatch, not a
-  classifier bug. Out of scope for this pass.
-- **Issue 2 (MEDIUM)** — "tell my wife that I took out daughter back
-  home" classified others:Low on the first try, then correctly as
-  send_message on a retry. The chroma training set lacks "tell my
-  <family_member>" exemplars; best fix is a seed-DB addition, not a
-  code edit.
-- **Issue 8 (CRITICAL)** — "how about tomorrow" follow-up that ran
-  Stage 3 for 180s. Root cause is the clinic handler not emitting
-  STAGE2_FOLLOWUP pending context; the fast path doesn't help
-  because "how about tomorrow" has no clinic keywords. Proper fix is
-  to stash clinic context into `pending_action` (STAGE2_FOLLOWUP) so
-  the resolver catches relative-date follow-ups — larger handler
-  refactor.
-- **Issue 10 (CRITICAL)** — "casual look like tomorrow" cancelled
-  after 2.8s due to client disconnect. STT-error downstream of the
-  pipeline; needs stream-reconnect handling in jane_proxy, not
-  classifier work.
-- **Issue 11 (LOW)** — skipped per instructions; the `.strip("[]")`
-  patch in c9819c3 already resolves the bracket form of the same
-  problem.
-- **Issue 14 (CRITICAL), 17 (MEDIUM), 18 (MEDIUM)** — patient-detail
-  ordinal follow-ups. Same root cause as Issue 8: clinic handler
-  doesn't emit STAGE2_FOLLOWUP pending with the last patient list,
-  so "first patient" has no referent. Needs handler refactor.
-
 

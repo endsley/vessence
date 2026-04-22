@@ -1,22 +1,20 @@
 TODO list — Stage 3 extension.
 
 Stage 2's fast-path handler is `classes/todo_list/handler.py`. It answers
-from `$VESSENCE_DATA_HOME/todo_list_cache.json` (override: env var
-`TODO_CACHE_PATH`), which a cron job mirrors from Chieh's Google Doc
-every 30 minutes. Stage 2 escalates here when the prompt asks something
-the fast-path can't answer (broad reasoning, the excluded Ambient
-project category, ambiguous category match, pivot mid-flow).
+from a local cache of the Google Doc. Stage 2 escalates here when the
+prompt asks something the fast-path can't answer (broad reasoning, the
+excluded Ambient project category, ambiguous category match, pivot
+mid-flow).
 
-## 1. Read the cache before answering
+## 1. TODO data is already in your context
 
-The cache is the source of truth. Stage 2 does not inject the contents
-into your prompt, so read it yourself with the Read tool:
+The full TODO list has been fetched live from Google Docs and injected
+into the escalation context above (in the `<class_protocol>` block).
+You do NOT need to read any cache file or make any tool calls to access
+the list — just refer to the data already provided.
 
-    $VESSENCE_DATA_HOME/todo_list_cache.json
-
-Shape: `{"categories": [{"name": "...", "items": ["...", ...]}, ...]}`.
-If the file is missing or empty, say "I don't have a cached copy of your
-TODO list yet — the cron job may not have run since Jane last started."
+If the escalation context says the list is unavailable, tell the user
+you could not reach the TODO list and ask them to try again shortly.
 Do not invent items.
 
 ## 2. Match categories the way Stage 2 does
@@ -61,9 +59,9 @@ the items as a personal-errand list.
 
 If the user asks something the fast-path couldn't reduce to a single
 category ("how many things are on my list?", "what's the heaviest
-category?", "anything in common between home and clinic?"), read the
-cache and answer from it directly. Do not ask "which category?" again —
-Stage 2 already tried that route and abandoned it.
+category?", "anything in common between home and clinic?"), answer from
+the TODO data already in your context. Do not ask "which category?"
+again — Stage 2 already tried that route and abandoned it.
 
 ## 6. Stale STAGE2_FOLLOWUP is stale
 

@@ -1,8 +1,11 @@
 """todo_list class — classifier metadata."""
 
 import json
+import logging
 import os
 from pathlib import Path
+
+_logger = logging.getLogger(__name__)
 
 _VESSENCE_DATA_HOME = Path(os.environ.get(
     "VESSENCE_DATA_HOME",
@@ -14,20 +17,73 @@ _TODO_CACHE_PATH = Path(os.environ.get(
 ))
 
 
-def _escalation_context() -> str:
-    """Inject the cached TODO list and category aliases so Stage 3 (Opus)
-    can read/edit the list without re-fetching."""
+def _fetch_live_todo_text() -> str | None:
+    """Fetch the TODO list live from Google Docs and return formatted text.
+
+    Returns None on any failure so the caller can fall back to cache.
+    """
     try:
-        data = _TODO_CACHE_PATH.read_text(encoding="utf-8")
+        from agent_skills.fetch_todo_list import fetch_doc_text, parse_categories
+        raw_text = fetch_doc_text()
+        categories = parse_categories(raw_text)
+        if not categories:
+            return None
+        lines = []
+        for cat in categories:
+            lines.append(f"## {cat['name']}")
+            for i, item in enumerate(cat["items"], 1):
+                lines.append(f"  {i}. {item}")
+            lines.append("")
+        return "\n".join(lines).strip()
+    except Exception as e:
+        _logger.warning("todo_list metadata: live fetch failed: %s", e)
+        return None
+
+
+def _format_cache_data() -> str | None:
+    """Read the local cache file and return formatted text as fallback."""
+    try:
+        raw = _TODO_CACHE_PATH.read_text(encoding="utf-8")
+        data = json.loads(raw)
     except Exception:
-        data = None
+        return None
+    categories = data.get("categories", [])
+    if not categories:
+        return None
+    lines = []
+    for cat in categories:
+        lines.append(f"## {cat['name']}")
+        for i, item in enumerate(cat["items"], 1):
+            lines.append(f"  {i}. {item}")
+        lines.append("")
+    return "\n".join(lines).strip()
+
+
+def _escalation_context() -> str:
+    """Inject the live TODO list from Google Docs so Stage 3 (Opus)
+    has the data in-context without needing a tool call.
+
+    Fetches live from Google Docs (single source of truth). Falls back
+    to the local cache if the live fetch fails (network error, auth
+    issue, etc.).
+    """
+    # Try live fetch first — Google Doc is the source of truth
+    todo_text = _fetch_live_todo_text()
+    source = "live from Google Docs"
+    if todo_text is None:
+        # Fall back to cache
+        todo_text = _format_cache_data()
+        source = f"local cache ({_TODO_CACHE_PATH})"
 
     lines = []
-    if data:
-        lines.append(f"TODO list cache ({_TODO_CACHE_PATH}):")
-        lines.append(data)
+    if todo_text:
+        lines.append(f"Current TODO list ({source}):")
+        lines.append(todo_text)
     else:
-        lines.append("TODO list cache is unavailable (cron may not have run yet).")
+        lines.append(
+            "TODO list is unavailable (live fetch failed and no cached copy). "
+            "Ask the user to try again later."
+        )
 
     lines.append("")
     lines.append(

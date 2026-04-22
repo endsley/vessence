@@ -1,64 +1,104 @@
-# Pipeline Audit Report — 2026-04-21 01:16
+# Pipeline Audit Report — 2026-04-22 01:14
 
 - Prompts audited: **30**
-- Elapsed: 529s
-- Classification failures: **7**
-- Response failures: **18**
+- Elapsed: 1154s
+- Classification failures: **10**
+- Response failures: **23**
 - Auto-fixes applied (exemplars added): **0**
 
 ## Stage breakdown
-- stage3: 20
-- stage2: 10
+- stage3: 23
+- stage2: 7
 
 ## Classification breakdown
-- others: 14
+- others: 19
 - clinic schedules info: 6
-- read email: 4
-- unclear: 2
-- weather: 1
-- read messages: 1
-- end conversation: 1
-- get time: 1
+- end conversation: 2
+- read messages: 2
+- send message: 1
 
 ## Classification failures (top 30)
 | Prompt | Got | Should be |
 |---|---|---|
-| is she working on Monday | clinic schedules info | others |
-| who's coming in tomorrow | clinic schedules info | others |
-| how about tomorrow | clinic schedules info | others |
-| casual look like tomorrow | weather | others |
-| ping | others | others |
-| scary mixed up | unclear | others |
-| how can you enforce yourself to do this | unclear | others |
+| then what did you not read it when I asked you for it | read messages | read messages |
+| why did you not add a previously | others | others |
+| okay you should for stage 3 use Google Docs as the truth | others | others |
+| yes | end conversation | end conversation |
+| user: what's the clinic schedule look like for Thursday
+jane: She has 5 active p | clinic schedules info | others |
+| user: what's the clinic schedule for Wednesday look like
+jane: She has 8 active  | clinic schedules info | others |
+| user: okay can you tell me more about patient number two
+jane: I don't have deta | clinic schedules info | others |
+| user: what's this Wednesday schedule look like
+jane: She has 8 active patients o | clinic schedules info | others |
+| user: what's the clinic schedule like for Thursday
+jane: She has 5 active patien | clinic schedules info | others |
+| **Updated Summary:**
+
+Clinic schedules info protocol established—Stage 2 handler | others | others |
 
 ## Response failures (top 20) — usually need code changes
-- **who's coming in tomorrow** (clinic schedules info/stage2): On Wednesday she has 8 active patients: John Meeks, Mock Patient, Prabitha Natarajan, Suprama Datta, and 4 more. Cancelled: Prabitha Natarajan, Meliss
-- **how about tomorrow** (clinic schedules info/stage2): She has 8 active patients on Wednesday, with 2 cancellations (10 total booked). Would you like to know about another day?
-- **casual look like tomorrow** (weather/stage3): Tomorrow she has 10 slots on the books. Two are cancelled — Melissa Solomon at 8 AM and Prabitha Natarajan at 11. That leaves 8 active patients, start
-- **what does my schedule look like tomorrow** (others/stage3): Your calendar is clear tomorrow — nothing scheduled for Wednesday.
-- **what is my clinic schedule look like tomorrow** (clinic schedules info/stage2): She has 8 active patients on Wednesday, with 2 cancellations (10 total booked). Would you like to know about another day?
-- **ping** (others/stage3): Hey Chieh, I'm here.
-- **scary mixed up** (unclear/stage2): Sorry, could you say that again?
-- **any cancellations** (end conversation/stage2): Ok.
-- **can you check my latest email from my wife** (read email/stage3): 
+- **yeah** (end conversation/stage2): Ok.
+- **yes please** (send message/stage3): 
+- **I thought I asked you to add a new item** (others/stage3): 
 
-[ACK]Checking your email for messages from Kathia.[/ACK]warded you the Mulberry Forest April Break Enrichment Week details — looks like it's from Em
-- **can you read my latest email from my wife again** (read email/stage3): 
+You're right — I did add it. Here's the confirmation from the system: **"Added item to For the clinic: Add texting capability to the laptop"**. It's
+- **then what did you not read it when I asked you for it** (read messages/stage3): 
 
-<spoken>Sure. Kathia forwarded the Mulberry Forest April Break Enrichment Week email. The program runs 9 to 3 at Whip Hill Park in Stoneham. Kids ne
-- **for the first patient I would like to know more details about the patient** (others/stage3): The first active patient on Wednesday is Caile Hanlon at 8 AM. It's a follow-up visit, but unfortunately there are no health concerns, recommendations
-- **can you answer my previous question** (others/stage3): This is a fresh conversation — I don't have any previous messages from you here. What was the question? Happy to help.
-- **can you delete it for me** (others/stage3): Found it. There are **350 entries** in `long_term_knowledge`, all from `conversation_archivist` — raw conversation snippets. These are the junk entrie
-- **no I would like to know more details about the first patient** (others/stage3): 
+You're right, that's on me. Let me read the clinic list for you now.oden block for the door at the clinic
+3. Create a clinic Gmail account
+4. Put mi
+- **why did you not add a previously** (others/stage3): 
 
-Let me pull up whatever details are in memory about Melissa Solomon's appointment.ay (Apr 21) — **cancelled**. Also had an 8:00 AM Wednesday (Apr 22
-- **okay is that done for both stage 2 and stage 3** (others/stage3): 
+[ACK]Fair point — let me look at exactly what happened.[/ACK]
 
-Good question — let me verify both paths.
+Let me trace what actually happened in this conversation to give you a straight answe
+- **we should not have multiple sources of the same data right it should just use th** (others/stage3): You're right. Here's how it works now:
 
-**Stage 2** (the handler): Yes, confirmed. `_names_for_day()` in `handler.py:157` sorts by `_parse_time()
-- **how can you enforce yourself to do this** (unclear/stage2): Sorry, could you say that again?
-- **are you enforcing the stage 3 thing we just talk about** (others/stage3): 
+- **Writes** (add/remove) go directly to Google Docs via the API — Docs is the source of truth
+- **Reads** hit
+- **okay we definitely already have a to-do list on Google Docs and Stage 2 has been** (others/stage3): 
 
-Honestly — it's a prompt instruction, not code enforcement. Opus *should* follow it, but there's no guarantee it will sort correctly every time. The
-- **okay then** (others/stage3): Sounds good — what's next?ke to do next?
+[ACK]Let me check how Stage 3 handles todo-related queries.[/ACK]ndler.py` reads the cache directly and handles add/remove/read operations with zero
+- **okay you should for stage 3 use Google Docs as the truth** (others/stage3): 
+
+Understood. I'll update the job spec — Stage 3 should read directly from the Google Doc API (via `docs_tools`), not the cache file. Google Docs is t
+- **okay so right now if we escalate to stage 3 stage 3 is going to use the Google D** (others/stage3): No, not yet. Right now Stage 3's `protocol.md` tells Opus to read the local **cache file** (`todo_list_cache.json`). And even that is unreliable since
+- **yes** (end conversation/stage3): 
+
+[ACK]On it — implementing the Stage 3 TODO context injection now.[/ACK]hes directly from Google Docs using the existing `fetch_doc_text()` and `pars
+- **user: what's the clinic schedule look like for Thursday
+jane: She has 5 active p** (clinic schedules info/stage2): I don't have detail records for Thursday
+jane this week.
+- **user: what's the clinic schedule for Friday look like
+jane: She has 5 active pat** (clinic schedules info/stage2): I don't have detail records for Friday look like
+jane this week.
+- **user: what's the clinic schedule for Wednesday look like
+jane: She has 8 active ** (clinic schedules info/stage2): I have listed the patients in the chat for your view. Is there a specific patient you want more details of? If so tell me the patient ID.
+
+1. 8:00am C
+- **user: okay can you tell me more about patient number two
+jane: I don't have deta** (clinic schedules info/stage2): I don't have detail records for okay can you tell me more patient number two this week this week.
+- **user: what's this Wednesday schedule look like
+jane: She has 8 active patients o** (clinic schedules info/stage2): I don't have detail records for these patients this week.
+- **user: yes
+jane: I have listed the patients in the chat for your view. Is there a** (others/stage3): There's no "CLS" column in the schedule database. Where are you seeing it — is it in the Jane App interface (Kathia's scheduling software), a spreadsh
+- **user: what's the clinic schedule like for Thursday
+jane: She has 5 active patien** (clinic schedules info/stage2): I don't have detail records for Thursday
+jane this week.
+- ****Updated Summary:**
+
+Clinic schedules info protocol established—Stage 2 handler** (others/stage3): 
+
+[ACK]Let me read job 82 and the current class architecture to assess the impact.[/ACK]age3 = False`, `privacy = None`. Every class that doesn't expl
+- ****Updated Summary:**
+
+Clinic schedules info protocol established—Stage 2 handler** (others/stage3): 
+
+Looks like your message got cut off — what were you going to say? [[AWAITING:continue_thought]]ual claim to verify here. The message was cut off mid
+- ****Updated Summary:**
+
+Clinic schedules info protocol established—Stage 2 handler** (others/stage3): 
+
+Looks like your message got cut off again — just "if." Take your time, I'm here when you're ready. [[AWAITING:complete_thought]]g to verify; the mes
