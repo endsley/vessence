@@ -94,25 +94,36 @@ def update_session_summary_async(session_id: str, user_message: str, assistant_m
     thread.start()
 
 
+def _strip_system_metadata(text: str) -> str:
+    """Remove class protocol blocks and system metadata that confuse Qwen."""
+    cleaned = re.sub(
+        r"\*\*Class Protocol:.*?(?=\n\n|\Z)", "", text, flags=re.DOTALL
+    )
+    cleaned = re.sub(
+        r"\[STANDING BRAIN MODE\].*?(?=\n\n|\Z)", "", cleaned, flags=re.DOTALL
+    )
+    cleaned = re.sub(
+        r"\[Retrieved Memory\].*?(?=\n\n|\Z)", "", cleaned, flags=re.DOTALL
+    )
+    return cleaned.strip()
+
+
 def _update_session_summary(session_id: str, user_message: str, assistant_message: str) -> None:
     current = load_session_summary(session_id)
+    user_clean = _strip_system_metadata(user_message)[:1500]
+    assistant_clean = _strip_system_metadata(assistant_message)[:2500]
+    if not user_clean and not assistant_clean:
+        return
     prompt = (
-        "Return ONLY valid JSON with this exact schema:\n"
-        '{"topics":[{"topic":"...","state":"...","open_loop":"..."}]}\n\n'
-        "Task: update the persistent Jane web conversation summary for one session.\n"
-        "Keep only the latest 3 distinct central topics from the conversation.\n"
-        "Each topic should be compact and durable across stateless web requests.\n"
-        "Rules:\n"
-        "- Merge related updates into an existing topic instead of creating duplicates.\n"
-        "- 'topic' is a short label.\n"
-        "- 'state' captures what is currently known, decided, or in progress.\n"
-        "- 'open_loop' captures the next unresolved question, risk, or pending step. Leave blank if none.\n"
-        "- Prefer concrete names of files, systems, or projects when relevant.\n"
-        "- Do not include greetings, filler, or transient chit-chat.\n"
-        "- Keep each field short.\n\n"
-        f"Current summary JSON:\n{json.dumps(current, ensure_ascii=True)}\n\n"
-        f"Latest user message:\n{user_message}\n\n"
-        f"Latest Jane response:\n{assistant_message[:2500]}"
+        f"Current summary:\n{json.dumps(current, ensure_ascii=True)}\n\n"
+        f"Latest user message:\n{user_clean}\n\n"
+        f"Latest Jane response:\n{assistant_clean}\n\n"
+        "Update the summary above. Keep max 3 topics. Merge related updates.\n"
+        "Rules: 'topic' = short label. 'state' = current status. "
+        "'open_loop' = next unresolved step (blank if none). Keep fields short.\n"
+        "Do NOT explain, narrate, or ask questions. "
+        "Output ONLY the JSON object, nothing else.\n"
+        '```json\n{"topics":['
     )
 
     try:
@@ -125,7 +136,10 @@ def _update_session_summary(session_id: str, user_message: str, assistant_messag
     except Exception:
         return
 
-    parsed = _extract_json_object(result.stdout)
+    raw = result.stdout or ""
+    if not raw.strip().startswith("{"):
+        raw = '{"topics":[' + raw
+    parsed = _extract_json_object(raw)
     if parsed is None:
         summary = _fallback_summary(current, user_message, assistant_message)
     else:

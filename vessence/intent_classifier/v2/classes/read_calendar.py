@@ -52,6 +52,15 @@ EXAMPLES = [
     "what events are on my calendar today",
     "what events are on my calendar tomorrow",
     "list the events on my calendar today",
+    # "next event" / upcoming phrasings
+    "what's my next event",
+    "when is my next event",
+    "tell me my next event",
+    "what's coming up on my calendar",
+    "do I have anything coming up",
+    "what's next on my calendar",
+    "when's my next appointment",
+    "what's my next meeting",
 ]
 
 CONTEXT = """\

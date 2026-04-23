@@ -33,6 +33,9 @@ from jane_web.jane_v2.models import (
 logger = logging.getLogger(__name__)
 
 _RANGE_PATTERNS: list[tuple[re.Pattern, str]] = [
+    (re.compile(r"\bnext\s+(?:event|thing|appointment|meeting)\b", re.I), "next"),
+    (re.compile(r"\bupcoming\b", re.I), "next"),
+    (re.compile(r"\bwhat'?s\s+(?:coming\s+up|next)\b", re.I), "next"),
     (re.compile(r"\btoday\b", re.I), "today"),
     (re.compile(r"\btomorrow\b", re.I), "tomorrow"),
     (re.compile(r"\bthis week\b", re.I), "this week"),
@@ -135,7 +138,8 @@ _FORCE_ESCALATE_PHRASES = (
     "move my", "reschedule", "change my",
 )
 
-_DETAIL_OFFER = " Want details on any of them?"
+_DETAIL_OFFER_PLURAL = " Want details on any of them?"
+_DETAIL_OFFER_SINGLE = " Want details on it?"
 
 _DETAIL_TEMPLATE = """\
 You are Jane, a personal assistant. Give a short spoken summary of \
@@ -334,8 +338,9 @@ async def handle(prompt: str, pending: dict | None = None) -> dict | None:
     logger.info("calendar handler: answered in %d chars (range=%s, events=%d, summary_len=%d)",
                 len(text), range_hint, event_count, len(events_summary))
 
-    if event_count >= 2:
-        offer = _DETAIL_OFFER
+    if event_count >= 1:
+        offer = _DETAIL_OFFER_SINGLE if event_count == 1 else _DETAIL_OFFER_PLURAL
+        question = "Want details on it?" if event_count == 1 else "Want details on any of them?"
         slim_events = [
             {"summary": ev.get("summary", ""), "start": ev.get("start", ""),
              "end": ev.get("end", ""), "description": ev.get("description", "")}
@@ -349,7 +354,7 @@ async def handle(prompt: str, pending: dict | None = None) -> dict | None:
                 "pending_action": _pending(
                     "event_detail",
                     {"events": slim_events},
-                    question="Want details on any of them?",
+                    question=question,
                 ),
             },
         }

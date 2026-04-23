@@ -1,104 +1,95 @@
-# Pipeline Audit Report — 2026-04-22 01:14
+# Pipeline Audit Report — 2026-04-23 01:15
 
 - Prompts audited: **30**
-- Elapsed: 1154s
-- Classification failures: **10**
-- Response failures: **23**
+- Elapsed: 1006s
+- Classification failures: **6**
+- Response failures: **25**
 - Auto-fixes applied (exemplars added): **0**
 
 ## Stage breakdown
-- stage3: 23
-- stage2: 7
+- stage3: 26
+- stage2: 4
 
 ## Classification breakdown
-- others: 19
-- clinic schedules info: 6
-- end conversation: 2
-- read messages: 2
-- send message: 1
+- others: 26
+- read calendar: 3
+- timer: 1
 
 ## Classification failures (top 30)
 | Prompt | Got | Should be |
 |---|---|---|
-| then what did you not read it when I asked you for it | read messages | read messages |
-| why did you not add a previously | others | others |
-| okay you should for stage 3 use Google Docs as the truth | others | others |
-| yes | end conversation | end conversation |
-| user: what's the clinic schedule look like for Thursday
-jane: She has 5 active p | clinic schedules info | others |
-| user: what's the clinic schedule for Wednesday look like
-jane: She has 8 active  | clinic schedules info | others |
-| user: okay can you tell me more about patient number two
-jane: I don't have deta | clinic schedules info | others |
-| user: what's this Wednesday schedule look like
-jane: She has 8 active patients o | clinic schedules info | others |
-| user: what's the clinic schedule like for Thursday
-jane: She has 5 active patien | clinic schedules info | others |
 | **Updated Summary:**
 
 Clinic schedules info protocol established—Stage 2 handler | others | others |
+| user: hey Jane how's it going
+jane: Hey there! Just checking in and seeing how y | others | greeting |
+| **Send Message Protocol (Stage 2 Handler Present)**: SMS requests route through  | others | others |
+| I need clarification. The "new turn" you provided is class protocol metadata (de | others | others |
+| I understand the read_calendar protocol. The server fetches your Google Calendar | others | others |
+| user: [TOOL_RESULT:{"tool":"timer.set","call_id":"292da6ff-bff9-490a-b046-aeaccb | timer | others |
 
 ## Response failures (top 20) — usually need code changes
-- **yeah** (end conversation/stage2): Ok.
-- **yes please** (send message/stage3): 
-- **I thought I asked you to add a new item** (others/stage3): 
+- ****Updated Summary:**
 
-You're right — I did add it. Here's the confirmation from the system: **"Added item to For the clinic: Add texting capability to the laptop"**. It's
-- **then what did you not read it when I asked you for it** (read messages/stage3): 
-
-You're right, that's on me. Let me read the clinic list for you now.oden block for the door at the clinic
-3. Create a clinic Gmail account
-4. Put mi
-- **why did you not add a previously** (others/stage3): 
-
-[ACK]Fair point — let me look at exactly what happened.[/ACK]
-
-Let me trace what actually happened in this conversation to give you a straight answe
-- **we should not have multiple sources of the same data right it should just use th** (others/stage3): You're right. Here's how it works now:
-
-- **Writes** (add/remove) go directly to Google Docs via the API — Docs is the source of truth
-- **Reads** hit
-- **okay we definitely already have a to-do list on Google Docs and Stage 2 has been** (others/stage3): 
-
-[ACK]Let me check how Stage 3 handles todo-related queries.[/ACK]ndler.py` reads the cache directly and handles add/remove/read operations with zero
-- **okay you should for stage 3 use Google Docs as the truth** (others/stage3): 
-
-Understood. I'll update the job spec — Stage 3 should read directly from the Google Doc API (via `docs_tools`), not the cache file. Google Docs is t
-- **okay so right now if we escalate to stage 3 stage 3 is going to use the Google D** (others/stage3): No, not yet. Right now Stage 3's `protocol.md` tells Opus to read the local **cache file** (`todo_list_cache.json`). And even that is unreliable since
-- **yes** (end conversation/stage3): 
-
-[ACK]On it — implementing the Stage 3 TODO context injection now.[/ACK]hes directly from Google Docs using the existing `fetch_doc_text()` and `pars
-- **user: what's the clinic schedule look like for Thursday
-jane: She has 5 active p** (clinic schedules info/stage2): I don't have detail records for Thursday
-jane this week.
-- **user: what's the clinic schedule for Friday look like
-jane: She has 5 active pat** (clinic schedules info/stage2): I don't have detail records for Friday look like
-jane this week.
-- **user: what's the clinic schedule for Wednesday look like
-jane: She has 8 active ** (clinic schedules info/stage2): I have listed the patients in the chat for your view. Is there a specific patient you want more details of? If so tell me the patient ID.
-
-1. 8:00am C
-- **user: okay can you tell me more about patient number two
-jane: I don't have deta** (clinic schedules info/stage2): I don't have detail records for okay can you tell me more patient number two this week this week.
-- **user: what's this Wednesday schedule look like
-jane: She has 8 active patients o** (clinic schedules info/stage2): I don't have detail records for these patients this week.
-- **user: yes
-jane: I have listed the patients in the chat for your view. Is there a** (others/stage3): There's no "CLS" column in the schedule database. Where are you seeing it — is it in the Jane App interface (Kathia's scheduling software), a spreadsh
-- **user: what's the clinic schedule like for Thursday
-jane: She has 5 active patien** (clinic schedules info/stage2): I don't have detail records for Thursday
-jane this week.
+Clinic schedules info protocol established—Stage 2 handler** (others/stage3): No, it shouldn't touch the other classes at all. The design is opt-in — the two new metadata flags default to false and public when they're not set. O
 - ****Updated Summary:**
 
 Clinic schedules info protocol established—Stage 2 handler** (others/stage3): 
 
-[ACK]Let me read job 82 and the current class architecture to assess the impact.[/ACK]age3 = False`, `privacy = None`. Every class that doesn't expl
+But what? I'm listening.
+
+[[AWAITING:finish_thought]]?
+
+[[AWAITING:finish_thought
 - ****Updated Summary:**
 
-Clinic schedules info protocol established—Stage 2 handler** (others/stage3): 
+Clinic schedules info protocol established—Stage 2 handler** (others/stage3): If what? Go ahead, I'm here.
 
-Looks like your message got cut off — what were you going to say? [[AWAITING:continue_thought]]ual claim to verify here. The message was cut off mid
+[[AWAITING:finish_thought
 - ****Updated Summary:**
 
-Clinic schedules info protocol established—Stage 2 handler** (others/stage3): 
+Clinic schedules info protocol established—Stage 2 handler** (others/stage3): <spoken>There are three layers of defense in the code. Let me walk you through the key idea — I've put the details on screen.</spoken>
 
-Looks like your message got cut off again — just "if." Take your time, I'm here when you're ready. [[AWAITING:complete_thought]]g to verify; the mes
+The enforcemen
+- ****Updated Summary:**
+
+Clinic schedules info protocol established—Stage 2 handler** (others/stage3): Sorry — are you asking about how to write the handler itself to be robust enough, since there's no Stage 3 to fall back on? Or something else?
+
+[[AWAI
+- **Clinic schedules info protocol established—Stage 2 handler active, SQLite data s** (others/stage3): No. The clinic handler doesn't use an LLM prompt at all for most paths — it's deterministic code. Regex matches the user's intent, SQL queries the sch
+- **user: hey Jane how's it going
+jane: Hey there! Just checking in and seeing how y** (others/stage3): <spoken>I checked the logs. You're not actually crashing — what's happening is systemd is killing the service during restarts because it takes too lon
+- **user: the clinic
+jane: 6 items for the clinic. Curtain rods at kathia’s clinic; ** (others/stage3): I think you mean "A Sky Full of Stars" by Coldplay — I played that one for you earlier. Let me queue it up again.
+
+
+- ****Clinic tasks, music playback, and todo list query.** User listed 6 clinic item** (others/stage3): High of about 55, low of 37, partly cloudy on Friday.
+
+[[AWAITING:more_weather_or_topic_change
+- **user: how's it going
+jane: Going well, thanks for asking. What's up?
+user: I was** (others/stage3): No, I'm here and online. What's up?
+- **user: the home
+jane: 3 items for home. Put the TV from kathia’s room to the gym;** (others/stage3): Message sent. 
+- **user: how about for the clinic
+jane: 6 items for the clinic. Curtain rods at kat** (others/stage3): Two things today — helping Catherine with an exam from 10 to 11, then ML Reading Group from 11 to 12:30.
+- ****Summary:**
+Stage 2 and 3 use Google Docs (synced to `todo_list_cache.json` eve** (others/stage3): I can't find the specific classification log for that request in the timing logs — they only show session prewarm and audit entries, not the Stage 1/S
+- ****Summary:**
+Stage 2 and 3 use Google Docs (synced to `todo_list_cache.json` eve** (others/stage3): You're right, it's there. The read_calendar handler exists at `jane_web/jane_v2/classes/read_calendar/handler.py`, the metadata is set up correctly, a
+- ****Send Message Protocol (Stage 2 Handler Present)**: SMS requests route through ** (others/stage3): Yeah — the read_calendar Stage 2 handler exists, it works, and you've built and tested it. The calendar request should have been answered there and ne
+- ****Class Protocol: Read Calendar**
+
+The `read_calendar` class handles user reques** (others/stage3): Nice, good timing. You were getting some weird behavior earlier — those repeated "I need clarification" blocks in the summaries looked like the summar
+- ****Class Protocol: Read Calendar**
+
+The `read_calendar` class handles user reques** (others/stage3): The `read_calendar` class is already fully built and wired into the pipeline:
+
+- **Classifier exemplars**: 55 examples in `intent_classifier/v2/classe
+- **I need clarification. The "new turn" you provided is class protocol metadata (de** (others/stage3): **Qwen** (qwen2.5:7b), via the session summary system at `jane/session_summary.py`.
+
+After each non-trivial turn, `update_session_summary_async()` spa
+- **user: can you sing deeply and tell me a joke
+jane: Sorry, could you say that aga** (read calendar/stage2): You've got two events tomorrow. ML Reading Group from 11am to 12:30pm. Want details on any of them?
+- **user: what's my calendar like today
+jane: You're clear today, nothing on the cal** (read calendar/stage2): You've got a ML Reading Group from 11am to 12:30pm tomorrow. Want details on any of them?
