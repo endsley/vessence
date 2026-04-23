@@ -709,7 +709,19 @@ private fun ChatInputBar(
                 }
             } else {
                 IconButton(
-                    onClick = { launchSpeechRecognition() },
+                    onClick = {
+                        // Headless STT: fires partials through SttResultBus so
+                        // the VoiceStatusBanner shows real-time transcription
+                        // in-app (instead of Google's system dialog).
+                        val hasMicPerm = ContextCompat.checkSelfPermission(
+                            context, Manifest.permission.RECORD_AUDIO
+                        ) == PackageManager.PERMISSION_GRANTED
+                        if (hasMicPerm) {
+                            com.vessences.android.MainActivity.instance?.launchStt()
+                        } else {
+                            micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                        }
+                    },
                     modifier = Modifier.size(40.dp),
                 ) {
                     Icon(

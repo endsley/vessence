@@ -53,32 +53,35 @@ class CodexPersistentManager:
         self._active_procs: dict[str, asyncio.subprocess.Process] = {}
         self._workdir = os.environ.get("VESSENCE_HOME", str(Path.home() / "ambient" / "vessence"))
 
-    async def get(self, session_id: str) -> CodexPersistentSession:
+    async def get(self, user_id: str, session_id: str) -> CodexPersistentSession:
+        composite_key = f"{user_id}:{session_id}"
         async with self._lock:
-            session = self._sessions.get(session_id)
+            session = self._sessions.get(composite_key)
             if session is None:
                 if len(self._sessions) >= self._MAX_SESSIONS:
-                    oldest_id = min(self._sessions, key=lambda sid: self._sessions[sid].last_used)
-                    self._sessions.pop(oldest_id, None)
-                    proc = self._active_procs.pop(oldest_id, None)
+                    oldest_key = min(self._sessions, key=lambda k: self._sessions[k].last_used)
+                    self._sessions.pop(oldest_key, None)
+                    proc = self._active_procs.pop(oldest_key, None)
                     if proc and proc.returncode is None:
                         _kill_process_tree(proc)
                     logger.info("[%s] Evicted oldest Codex session to stay under %d cap",
-                                oldest_id[:12], self._MAX_SESSIONS)
+                                oldest_key[:12], self._MAX_SESSIONS)
                 session = CodexPersistentSession(session_id=session_id)
-                self._sessions[session_id] = session
+                self._sessions[composite_key] = session
             session.last_used = time.time()
             return session
 
-    async def end(self, session_id: str) -> None:
+    async def end(self, user_id: str, session_id: str) -> None:
+        composite_key = f"{user_id}:{session_id}"
         async with self._lock:
-            self._sessions.pop(session_id, None)
-            proc = self._active_procs.pop(session_id, None)
+            self._sessions.pop(composite_key, None)
+            proc = self._active_procs.pop(composite_key, None)
             if proc and proc.returncode is None:
                 _kill_process_tree(proc)
 
     async def run_turn(
         self,
+        user_id: str,
         session_id: str,
         prompt_text: str,
         on_delta: Callable[[str], None] | None = None,
@@ -90,14 +93,17 @@ class CodexPersistentManager:
         model: str | None = None,
         yolo: bool = False,
     ) -> str:
-        session = await self.get(session_id)
+        session = await self.get(user_id, session_id)
         cmd = self._build_cmd(session, prompt_text, model=model, yolo=yolo)
 
         logger.info(
-            "[%s] Running Codex turn %d (thread=%s, prompt_len=%d)",
-            session_id[:12],
+            "[%s:%s] Running Codex turn %d (thread=%s, prompt_len=%d)",
+            user_id[:8],
+            session_id[:8],
             session.turn_count + 1,
             session.codex_thread_id or "new",
+            len(prompt_text),
+        )
             len(prompt_text),
         )
 
@@ -110,6 +116,7 @@ class CodexPersistentManager:
             on_tool_result=on_tool_result,
             timeout_seconds=timeout_seconds,
             session_id=session_id,
+            user_id=user_id,
         )
 
         if thread_id:
@@ -118,8 +125,9 @@ class CodexPersistentManager:
         session.last_used = time.time()
 
         logger.info(
-            "[%s] Codex turn %d complete (thread=%s, response_len=%d)",
-            session_id[:12],
+            "[%s:%s] Codex turn %d complete (thread=%s, response_len=%d)",
+            user_id[:8],
+            session_id[:8],
             session.turn_count,
             session.codex_thread_id or "unknown",
             len(response_text),
@@ -156,7 +164,9 @@ class CodexPersistentManager:
         on_tool_result: Callable[[str], None] | None,
         timeout_seconds: float,
         session_id: str,
+        user_id: str,
     ) -> tuple[str, str | None]:
+        composite_key = f"{user_id}:{session_id}"
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
@@ -164,7 +174,7 @@ class CodexPersistentManager:
             cwd=self._workdir,
             start_new_session=True,
         )
-        self._active_procs[session_id] = proc
+        self._active_procs[composite_key] = proc
 
         final_response = ""
         thread_id = None

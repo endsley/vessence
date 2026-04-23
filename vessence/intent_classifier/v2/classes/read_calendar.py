@@ -39,10 +39,15 @@ EXAMPLES = [
     "show me my agenda today",
     "read my agenda today",
     "check my agenda",
-    # "schedule" noun — kept only with explicit "calendar" or clear personal context
-    # (avoid overlap with clinic schedule queries — "my schedule" is ambiguous)
+    # "schedule" noun — personal schedule means Google Calendar. Bare
+    # "the schedule" stays available for clinic schedule routing.
     "read my calendar schedule today",
     "show me my calendar schedule today",
+    "what's my schedule today",
+    "what's my schedule tomorrow",
+    "what's my schedule for Thursday",
+    "what does my schedule look like Thursday",
+    "show me my schedule for Thursday",
     # Explicit "events on my calendar" phrasings
     "what events are on my calendar today",
     "what events are on my calendar tomorrow",

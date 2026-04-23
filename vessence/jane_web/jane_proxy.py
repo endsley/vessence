@@ -721,6 +721,17 @@ CODE_MAP_KEYWORDS = (
     "side",
     "wants",
     "via",
+    # Auto-evolved from daily conversations
+    "schedule",
+    "data",
+    "solomon",
+    "patients",
+    "active",
+    "patient",
+    "melissa",
+    "apr",
+    "cancelled",
+    "names",
 )
 
 
@@ -876,21 +887,26 @@ def _get_web_chat_model(brain_name: str) -> str:
 
 def _prune_stale_sessions(now: float | None = None) -> None:
     now_ts = time.time() if now is None else now
-    expired_ids = [
-        session_id
-        for session_id, state in list(_sessions.items())
+    expired_keys = [
+        composite_key
+        for composite_key, state in list(_sessions.items())
         if now_ts - state.last_accessed_at > SESSION_IDLE_TTL_SECONDS
     ]
-    for session_id in expired_ids:
+    for composite_key in expired_keys:
         logger.info(
             "[%s] Expiring idle Jane web session after %ds",
-            session_id[:12],
-            int(now_ts - _sessions[session_id].last_accessed_at),
+            composite_key[:12],
+            int(now_ts - _sessions[composite_key].last_accessed_at),
         )
-        end_session(session_id)
+        user_id, _, session_id = composite_key.partition(":")
+        if not session_id:
+            # Malformed key — drop without calling end_session to avoid crash.
+            _sessions.pop(composite_key, None)
+            continue
+        end_session(user_id, session_id)
 
 
-async def _execute_brain_sync(session_id: str, brain_name: str, adapter, request_ctx) -> str:
+async def _execute_brain_sync(user_id: str, session_id: str, brain_name: str, adapter, request_ctx) -> str:
     if _use_gemini_api(brain_name):
         from llm_brain.v1.gemini_api_brain import get_gemini_api_brain
         brain = get_gemini_api_brain()
@@ -902,7 +918,7 @@ async def _execute_brain_sync(session_id: str, brain_name: str, adapter, request
         )
     if _use_persistent_gemini(brain_name):
         manager = get_gemini_persistent_manager("/tmp")
-        worker = await manager.get(session_id)
+        worker = await manager.get(user_id, session_id)
         prompt_text = f"{request_ctx.system_prompt}\n\n{request_ctx.transcript}".strip()
         return await worker.run_turn(
             prompt_text,
@@ -913,7 +929,7 @@ async def _execute_brain_sync(session_id: str, brain_name: str, adapter, request
         manager = get_claude_persistent_manager()
         profile = _get_execution_profile(brain_name)
         # First turn sends full context; subsequent turns only send the new message
-        session = await manager.get(session_id)
+        session = await manager.get(user_id, session_id)
         if session.is_fresh():
             prompt_text = f"{request_ctx.system_prompt}\n\n{request_ctx.transcript}".strip()
         elif not request_ctx.system_prompt:
@@ -939,7 +955,7 @@ async def _execute_brain_sync(session_id: str, brain_name: str, adapter, request
         from llm_brain.v1.persistent_codex import get_codex_persistent_manager
         manager = get_codex_persistent_manager()
         profile = _get_execution_profile(brain_name)
-        session = await manager.get(session_id)
+        session = await manager.get(user_id, session_id)
         if session.is_fresh():
             prompt_text = f"{request_ctx.system_prompt}\n\n{request_ctx.transcript}".strip()
         elif not request_ctx.system_prompt:
@@ -959,7 +975,7 @@ async def _execute_brain_sync(session_id: str, brain_name: str, adapter, request
     return await asyncio.to_thread(adapter.execute, request_ctx.system_prompt, request_ctx.transcript)
 
 
-async def _execute_brain_stream(session_id: str, brain_name: str, adapter, request_ctx, emit) -> str:
+async def _execute_brain_stream(user_id: str, session_id: str, brain_name: str, adapter, request_ctx, emit) -> str:
     if _use_gemini_api(brain_name):
         from llm_brain.v1.gemini_api_brain import get_gemini_api_brain
         brain = get_gemini_api_brain()
@@ -974,7 +990,7 @@ async def _execute_brain_stream(session_id: str, brain_name: str, adapter, reque
         )
     if _use_persistent_gemini(brain_name):
         manager = get_gemini_persistent_manager("/tmp")
-        worker = await manager.get(session_id)
+        worker = await manager.get(user_id, session_id)
         prompt_text = f"{request_ctx.system_prompt}\n\n{request_ctx.transcript}".strip()
         return await worker.run_turn(
             prompt_text,
@@ -985,7 +1001,7 @@ async def _execute_brain_stream(session_id: str, brain_name: str, adapter, reque
         from llm_brain.v1.persistent_claude import get_claude_persistent_manager
         manager = get_claude_persistent_manager()
         profile = _get_execution_profile(brain_name)
-        session = await manager.get(session_id)
+        session = await manager.get(user_id, session_id)
         if session.is_fresh():
             prompt_text = f"{request_ctx.system_prompt}\n\n{request_ctx.transcript}".strip()
         elif not request_ctx.system_prompt:
@@ -1012,7 +1028,7 @@ async def _execute_brain_stream(session_id: str, brain_name: str, adapter, reque
         from llm_brain.v1.persistent_codex import get_codex_persistent_manager
         manager = get_codex_persistent_manager()
         profile = _get_execution_profile(brain_name)
-        session = await manager.get(session_id)
+        session = await manager.get(user_id, session_id)
         if session.is_fresh():
             prompt_text = f"{request_ctx.system_prompt}\n\n{request_ctx.transcript}".strip()
         elif not request_ctx.system_prompt:
@@ -1043,21 +1059,23 @@ async def _execute_brain_stream(session_id: str, brain_name: str, adapter, reque
     )
 
 
-def _get_session(session_id: str) -> JaneSessionState:
+def _get_session(user_id: str, session_id: str) -> JaneSessionState:
     _prune_stale_sessions()
-    state = _sessions.get(session_id)
+    composite_key = f"{user_id}:{session_id}"
+    state = _sessions.get(composite_key)
     if state is None:
         # Evict oldest session if at capacity
         if len(_sessions) >= _MAX_SESSIONS:
-            oldest_id = min(_sessions, key=lambda sid: _sessions[sid].last_accessed_at)
-            logger.info("[%s] Evicting oldest session to stay under %d cap", oldest_id[:12], _MAX_SESSIONS)
-            end_session(oldest_id)
-        state = JaneSessionState(conv_manager=ConversationManager(session_id))
-        _sessions[session_id] = state
-        logger.info("[%s] Created in-memory Jane session state (total=%d)", _session_log_id(session_id), len(_sessions))
+            oldest_key = min(_sessions, key=lambda k: _sessions[k].last_accessed_at)
+            logger.info("[%s] Evicting oldest session to stay under %d cap", oldest_key[:12], _MAX_SESSIONS)
+            _sessions.pop(oldest_key, None)
+
+        state = JaneSessionState(conv_manager=ConversationManager(session_id, user_id=user_id))
+        _sessions[composite_key] = state
+        logger.info("[%s:%s] Created in-memory Jane session state (total=%d)", user_id[:8], _session_log_id(session_id), len(_sessions))
     elif state.conv_manager is None:
-        state.conv_manager = ConversationManager(session_id)
-        logger.info("[%s] Recreated ConversationManager for existing session state", _session_log_id(session_id))
+        state.conv_manager = ConversationManager(session_id, user_id=user_id)
+        logger.info("[%s:%s] Recreated ConversationManager for existing session state", user_id[:8], _session_log_id(session_id))
     state.last_accessed_at = time.time()
     return state
 
@@ -1103,8 +1121,8 @@ def _message_for_persistence(message: str, file_context: str | None) -> str:
     return f"{base}\n\n{file_context}".strip()
 
 
-def prewarm_session(session_id: str, user_id: str | None = None) -> None:
-    state = _get_session(session_id)
+def prewarm_session(session_id: str, user_id: str) -> None:
+    state = _get_session(user_id, session_id)
     if state.bootstrap_complete or state.bootstrap_in_progress:
         logger.info(
             "[%s] Skipping prewarm complete=%s in_progress=%s",
@@ -1172,17 +1190,18 @@ async def _await_prewarm_if_running(session_id: str, state: JaneSessionState, ti
     )
 
 
-def end_session(session_id: str) -> None:
-    state = _sessions.pop(session_id, None)
+def end_session(user_id: str, session_id: str) -> None:
+    composite_key = f"{user_id}:{session_id}"
+    state = _sessions.pop(composite_key, None)
     if state and state.conv_manager:
         conv_manager = state.conv_manager
         state.conv_manager = None
 
         def _close_conversation_manager() -> None:
             try:
-                logger.info("[%s] Background-closing Jane session state", _session_log_id(session_id))
+                logger.info("[%s:%s] Background-closing Jane session state", user_id[:8], _session_log_id(session_id))
                 conv_manager.close()
-                logger.info("[%s] Background session close complete", _session_log_id(session_id))
+                logger.info("[%s:%s] Background session close complete", user_id[:8], _session_log_id(session_id))
             except Exception:
                 logger.exception("[%s] Failed while background-closing ConversationManager", _session_log_id(session_id))
 
@@ -1465,7 +1484,7 @@ async def send_message(user_id: str, session_id: str, message: str, file_context
     # Broadcast start
     _sync_broadcaster = StreamBroadcaster(broadcast_user_id, session_id, platform or "", message)
     _sync_broadcaster.start()
-    state = _get_session(session_id)
+    state = _get_session(user_id, session_id)
     # Serialize requests per session — prevents conversation desync where
     # concurrent requests race on history, causing Jane to answer the wrong question.
     # Previously only the stream path had this gate; the sync path was unprotected.
@@ -1592,7 +1611,7 @@ async def _send_message_inner(
     )
 
     stage_start = time.perf_counter()
-    response = await _execute_brain_sync(session_id, brain_name, adapter, request_ctx)
+    response = await _execute_brain_sync(user_id, session_id, brain_name, adapter, request_ctx)
     elapsed_ms = int((time.perf_counter() - stage_start) * 1000)
     logger.info("[%s] Brain responded (sync) in %dms, %d chars", session_id[:12], elapsed_ms, len(response or ""))
     _log_stage(session_id, "brain_execute", stage_start, response_chars=len(response or ""))
@@ -1937,7 +1956,7 @@ async def stream_message(
     """
     broadcast_user_id = user_id
     request_start = time.perf_counter()
-    state = _get_session(session_id)
+    state = _get_session(user_id, session_id)
     # Serialize requests per session — prevents conversation offset bug where
     # concurrent requests race on history, causing Jane to answer the wrong question.
     # Timeout after 90s to prevent permanent deadlock if a previous request got stuck.
@@ -3135,7 +3154,7 @@ async def stream_message(
                 else:
                     emit("model", adapter.label)
                     emit("status", f"Handing the request to Jane's {adapter.label} brain.")
-                response = await _execute_brain_stream(session_id, brain_name, adapter, request_ctx, emit)
+                response = await _execute_brain_stream(user_id, session_id, brain_name, adapter, request_ctx, emit)
             elapsed_ms = int((time.perf_counter() - stage_start) * 1000)
             logger.info("[%s] Brain responded (stream) in %dms, %d chars", session_id[:12], elapsed_ms, len(response or ""))
             _log_stage(session_id, "brain_execute", stage_start, response_chars=len(response or ""))

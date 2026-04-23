@@ -1,21 +1,66 @@
 # Most Recent Nightly Self-Improvement
 
-- Run started: 2026-04-21 01:00:01
-- Report generated: 2026-04-21 01:38:16
-- Total runtime: 2294s
-- Jobs: 8 total, 7 ok, 1 timeout, 0 failed
+- Run started: 2026-04-22 01:00:01
+- Report generated: 2026-04-22 02:07:22
+- Total runtime: 4036s
+- Jobs: 8 total, 6 ok, 2 timeout, 0 failed
 - Stable latest report path: `/home/chieh/ambient/vessence/configs/self_improvement_latest.md`
-- Archived copy: `/home/chieh/ambient/vessence-data/reports/self_improvement/self_improvement_20260421_010001.md`
+- Archived copy: `/home/chieh/ambient/vessence-data/reports/self_improvement/self_improvement_20260422_010001.md`
+
+## TL;DR
+
+- 1. ✓ Auto-Commit WIP (pre) (0.0m)
+  - Fixes:
+    - 2026-04-22 01:00:02,455 INFO Committed 74 file(s).
+- 2. ✓ Code Auditor (0.0m)
+  - Problems:
+    - 2026-04-22 01:00:02,555 [WARNING] Working tree has uncommitted changes — skipping audit.
+- 3. ✓ Dead Code Auditor (14.5m)
+  - Problems:
+    - Dead files — review needed: 1.
+    - Possibly-dead functions: 13.
+    - Duplicate function bodies: 9 groups.
+  - Fixes:
+    - [dead-code] Done — 0 auto-deleted, 1 flagged, 13 dead funcs, 9 dup groups
+- 4. ✓ Pipeline Audit (30 prompts) (19.2m)
+  - Problems:
+    - Prompts audited: 30.
+    - Classification failures: 10.
+    - Response failures: 23.
+- 5. ✓ Doc Drift Auditor (0.0m)
+  - Problems: none detected
+  - Fixes: none applied
+- 6. ✓ Transcript Quality Review (1.5m)
+  - Problems:
+    - Transcript review found 14 issues: 6 critical, 2 low, 6 medium.
+    - Build/APK request was not recognized as a first-class intent and fell through as others.
+    - Stage 3 lost active conversation context after a standing-brain restart.
+  - Fixes:
+    - 2026-04-22 01:35:17,972 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (14 issues)
+    - 2026-04-22 01:35:17,973 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 6 critical, 6 medium, 2...
+- 7. ⏱ Memory Janitor (30.0m)
+  - Problems:
+    - roviderInfo_TensorRT] /onnxruntime_src/onnxruntime/core/session/provider_bridge_ort.cc:1952 onnxruntime::Provider& onnxruntime::ProviderLibrary::Get() [ONNXR...
+    - [1;31m2026-04-22 01:58:33.299038799 [E:onnxruntime:Default, provider_bridge_ort.cc:2331 TryGetProviderInfo_TensorRT] /onnxruntime_src/onnxruntime/core/sessi...
+    - [1;31m2026-04-22 01:59:49.391762979 [E:onnxruntime:Default, provider_bridge_ort.cc:2331 TryGetProviderInfo_TensorRT] /onnxruntime_src/onnxruntime/core/sessi...
+- 8. ⏱ Auto-Commit + Push (post) (2.0m)
+  - Fixes:
+    - 2026-04-22 02:05:22,615 INFO Committed 13 file(s).
+
+**Top follow-ups:**
+
+- Add `build apk` / `compile android` / `new Android version` aliases to the classifier schema, mapped to a no-handler Stage 3/delegate class.
+- Persist recent conversation history outside the standing-brain process and always inject session history after brain restarts; do not let process restarts reset conversational context.
 
 ## Executive Summary
 
-- 1 stage(s) need attention because they timed out or exited non-zero.
+- 2 stage(s) need attention because they timed out or exited non-zero.
 - 5 concrete improvement/fix signals were found in logs or reports.
 
 ## Stage 1: Auto-Commit WIP (pre)
 
 - Status: `ok`
-- Duration: 116s (1.9 min)
+- Duration: 0s (0.0 min)
 
 ### What It Did
 
@@ -27,37 +72,13 @@
 
 ### Improvements It Made
 
-- 2026-04-21 01:01:58,297 INFO Committed 88 file(s).
+- 2026-04-22 01:00:02,455 INFO Committed 74 file(s).
 
 ### Evidence Files
 
 - /home/chieh/ambient/vessence-data/logs/self_improve_auto_commit_wip.log
 
-## Stage 2: Dead Code Auditor
-
-- Status: `ok`
-- Duration: 891s (14.8 min)
-
-### What It Did
-
-- Scanned the codebase for dead files, unreferenced functions, and duplicate function bodies.
-
-### Problems It Found
-
-- Dead files — review needed: 40.
-- Possibly-dead functions: 35.
-- Duplicate function bodies: 9 groups.
-
-### Improvements It Made
-
-- [dead-code] Done — 0 auto-deleted, 40 flagged, 35 dead funcs, 9 dup groups
-
-### Evidence Files
-
-- /home/chieh/ambient/vessence/configs/dead_code_report.md
-- /home/chieh/ambient/vessence-data/logs/self_improve_dead_code_auditor.log
-
-## Stage 3: Code Auditor
+## Stage 2: Code Auditor
 
 - Status: `ok`
 - Duration: 0s (0.0 min)
@@ -68,7 +89,7 @@
 
 ### Problems It Found
 
-- 2026-04-21 01:16:49,561 [WARNING] Working tree has uncommitted changes — skipping audit.
+- 2026-04-22 01:00:02,555 [WARNING] Working tree has uncommitted changes — skipping audit.
 
 ### Improvements It Made
 
@@ -80,24 +101,48 @@
 - /home/chieh/ambient/vessence/configs/audit_failures.md
 - /home/chieh/ambient/vessence-data/logs/self_improve_nightly_code_auditor.log
 
-## Stage 4: Pipeline Audit (30 prompts)
+## Stage 3: Dead Code Auditor
 
 - Status: `ok`
-- Duration: 531s (8.8 min)
+- Duration: 868s (14.5 min)
 
 ### What It Did
 
-- Replayed recent real prompts through Stage 1, Stage 2, and Stage 3 to catch routing and response failures.
+- Scanned the codebase for dead files, unreferenced functions, and duplicate function bodies.
+
+### Problems It Found
+
+- Dead files — review needed: 1.
+- Possibly-dead functions: 13.
+- Duplicate function bodies: 9 groups.
+
+### Improvements It Made
+
+- [dead-code] Done — 0 auto-deleted, 1 flagged, 13 dead funcs, 9 dup groups
+
+### Evidence Files
+
+- /home/chieh/ambient/vessence/configs/dead_code_report.md
+- /home/chieh/ambient/vessence-data/logs/self_improve_dead_code_auditor.log
+
+## Stage 4: Pipeline Audit (30 prompts)
+
+- Status: `ok`
+- Duration: 1155s (19.2 min)
+
+### What It Did
+
+- Replayed recent real prompts through Stage 1, Stage 2, and Stage 3 to catch routing and response failures. Runs report-only during nightly self-improvement; classifier exemplar auto-fixes require a separate manual --apply-fixes run.
 
 ### Problems It Found
 
 - Prompts audited: 30.
-- Classification failures: 7.
-- Response failures: 18.
-- **who's coming in tomorrow** (clinic schedules info/stage2): On Wednesday she has 8 active patients: John Meeks, Mock Patient, Prabitha Natarajan, Suprama Datta, and 4 more. Cancelled: Prabitha Natarajan, Meliss
-- **how about tomorrow** (clinic schedules info/stage2): She has 8 active patients on Wednesday, with 2 cancellations (10 total booked). Would you like to know about another day?
-- **casual look like tomorrow** (weather/stage3): Tomorrow she has 10 slots on the books. Two are cancelled — Melissa Solomon at 8 AM and Prabitha Natarajan at 11. That leaves 8 active patients, start
-- **what does my schedule look like tomorrow** (others/stage3): Your calendar is clear tomorrow — nothing scheduled for Wednesday.
+- Classification failures: 10.
+- Response failures: 23.
+- **yeah** (end conversation/stage2): Ok.
+- **yes please** (send message/stage3):
+- **I thought I asked you to add a new item** (others/stage3):
+- **then what did you not read it when I asked you for it** (read messages/stage3):
 
 ### Improvements It Made
 
@@ -119,10 +164,7 @@
 
 ### Problems It Found
 
-- CRON_JOBS.md missing entry for active cron script: run_briefing.py
-- CRON_JOBS.md mentions bot_watchdog.sh but no matching cron entry exists
-- CRON_JOBS.md mentions prompt_queue_runner.py but no matching cron entry exists
-- SKILLS_REGISTRY.md references missing file: agent_skills/gemma_query.py
+- No problems were detected in the available logs/reports.
 
 ### Improvements It Made
 
@@ -136,31 +178,31 @@
 ## Stage 6: Transcript Quality Review
 
 - Status: `ok`
-- Duration: 634s (10.6 min)
+- Duration: 91s (1.5 min)
 
 ### What It Did
 
-- Read real user transcripts plus server/client logs to identify stage-by-stage failures Jane actually experienced.
+- Read real user transcripts plus server/client logs to identify stage-by-stage failures Jane actually experienced. Runs report-only during nightly self-improvement; code fixes require a separate manual --apply-fixes run.
 
 ### Problems It Found
 
-- Transcript review found 18 issues: 5 critical, 1 low, 12 medium.
-- SMS confirmation attempted to send with no open draft.
-- Direct SMS request missed the Stage 2 send-message fast path.
-- Clinic schedule request was routed to Stage 3 instead of the clinic schedule handler.
-- Clinic-style schedule query was classified as read calendar, which has no Stage 2 handler.
+- Transcript review found 14 issues: 6 critical, 2 low, 6 medium.
+- Build/APK request was not recognized as a first-class intent and fell through as others.
+- Stage 3 lost active conversation context after a standing-brain restart.
+- Build/APK request was again classified as an unknown class and routed through fallback.
+- Stage 3 appeared to acknowledge a to-do add without actually using the Stage 2 to-do-list source of truth.
 
 ### Improvements It Made
 
-- 2026-04-21 01:28:37,653 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (18 issues)
-- 2026-04-21 01:28:37,654 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 5 critical, 12 medium, 1 minor issues. The most urgent
+- 2026-04-22 01:35:17,972 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (14 issues)
+- 2026-04-22 01:35:17,973 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 6 critical, 6 medium, 2 minor issues. The most urgent
 
 ### Follow-Up Fixes Recommended
 
-- Make SMS confirmation state authoritative: first turn must emit contacts.sms_draft with a stable draft_id, pending_action_resolver must route 'yes send it' to sms_send for that draft_id, and sms_send should never be emitted without an existing draft.
-- Add classifier examples and deterministic pre-rules for 'tell/contact my wife/husband/spouse' as send message, including family aliases.
-- Canonicalize classifier labels by stripping brackets, underscores, and case/spacing variants before validation.
-- Route provider/patient schedule phrasing in clinic test sessions to clinic schedules info, or implement a read calendar handler instead of always escalating.
+- Add `build apk` / `compile android` / `new Android version` aliases to the classifier schema, mapped to a no-handler Stage 3/delegate class.
+- Persist recent conversation history outside the standing-brain process and always inject session history after brain restarts; do not let process restarts reset conversational context.
+- Normalize build-related classifier outputs before schema validation, or add `build apk` as a supported delegate-to-Stage-3 class.
+- Route `add item to clinic to-do list` directly to the todo-list handler, or give Stage 3 a real Google Docs-backed todo tool/protocol and require tool execution before confirming completion.
 
 ### Evidence Files
 
@@ -169,8 +211,8 @@
 
 ## Stage 7: Memory Janitor
 
-- Status: `ok`
-- Duration: 1s (0.0 min)
+- Status: `timeout`
+- Duration: 1800s (30.0 min)
 
 ### What It Did
 
@@ -178,7 +220,12 @@
 
 ### Problems It Found
 
-- No problems were detected in the available logs/reports.
+- Job ended with status `timeout`.
+- roviderInfo_TensorRT] /onnxruntime_src/onnxruntime/core/session/provider_bridge_ort.cc:1952 onnxruntime::Provider& onnxruntime::ProviderLibrary::Get() [ONNXRuntimeError] : 1 : FAIL : Failed to load library /home/chieh/google-adk-env/adk-venv/lib/python3.13/site-packages/onnxruntime/capi/libonnxruntime_providers_tensorrt.so with error: libnvinfer.so.10: cannot open shared object file: No such file or directory
+- [1;31m2026-04-22 01:58:33.299038799 [E:onnxruntime:Default, provider_bridge_ort.cc:2331 TryGetProviderInfo_TensorRT] /onnxruntime_src/onnxruntime/core/session/provider_bridge_ort.cc:1952 onnxruntime::Provider& onnxruntime::ProviderLibrary::Get() [ONNXRuntimeError] : 1 : FAIL : Failed to load library /home/chieh/google-adk-env/adk-venv/lib/python3.13/site-packages/onnxruntime/capi/libonnxruntime_providers_tensorrt.so with error: libnvinfer.so.10: cannot open shared object file: No such file or directory
+- [1;31m2026-04-22 01:59:49.391762979 [E:onnxruntime:Default, provider_bridge_ort.cc:2331 TryGetProviderInfo_TensorRT] /onnxruntime_src/onnxruntime/core/session/provider_bridge_ort.cc:1952 onnxruntime::Provider& onnxruntime::ProviderLibrary::Get() [ONNXRuntimeError] : 1 : FAIL : Failed to load library /home/chieh/google-adk-env/adk-venv/lib/python3.13/site-packages/onnxruntime/capi/libonnxruntime_providers_tensorrt.so with error: libnvinfer.so.10: cannot open shared object file: No such file or directory
+- *************** EP Error ***************
+- EP Error /onnxruntime_src/onnxruntime/python/onnxruntime_pybind_state.cc:539 void onnxruntime::python::RegisterTensorRTPluginsAsCustomOps(PySessionOptions&, const onnxruntime::ProviderOptions&) Please install TensorRT libraries as mentioned in the GPU requirements page, make sure they're in the PATH or LD_LIBRARY_PATH, and that your GPU is supported.
 
 ### Improvements It Made
 
@@ -203,7 +250,7 @@
 
 ### Improvements It Made
 
-- 2026-04-21 01:36:16,751 INFO Committed 7 file(s).
+- 2026-04-22 02:05:22,615 INFO Committed 13 file(s).
 
 ### Evidence Files
 

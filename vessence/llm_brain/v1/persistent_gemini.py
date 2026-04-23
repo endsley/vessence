@@ -351,38 +351,49 @@ class GeminiPersistentManager:
         self._sessions: dict[str, GeminiPersistentSession] = {}
         self._lock = asyncio.Lock()
 
-    async def get(self, session_id: str) -> GeminiPersistentSession:
+    async def get(self, user_id: str, session_id: str) -> GeminiPersistentSession:
+        composite_key = f"{user_id}:{session_id}"
         async with self._lock:
-            session = self._sessions.get(session_id)
+            session = self._sessions.get(composite_key)
             if session is None:
                 # Evict oldest session if at capacity
                 if len(self._sessions) >= self._MAX_SESSIONS:
                     await self._evict_oldest_locked()
-                session = GeminiPersistentSession(session_id=session_id, cwd=self.cwd)
-                self._sessions[session_id] = session
+
+                # User-specific CWD (vault root)
+                try:
+                    from agent_skills.user_manager import get_user_config
+                    config = get_user_config(user_id)
+                    user_cwd = config.get("vault_root_path", self.cwd)
+                except Exception:
+                    user_cwd = self.cwd
+
+                session = GeminiPersistentSession(session_id=session_id, cwd=user_cwd)
+                self._sessions[composite_key] = session
             return session
 
-    async def shutdown(self, session_id: str) -> None:
+    async def shutdown(self, user_id: str, session_id: str) -> None:
+        composite_key = f"{user_id}:{session_id}"
         async with self._lock:
-            session = self._sessions.pop(session_id, None)
+            session = self._sessions.pop(composite_key, None)
         if session:
             await session.shutdown()
 
     # Alias for consistency with ClaudePersistentManager
-    async def end(self, session_id: str) -> None:
-        await self.shutdown(session_id)
+    async def end(self, user_id: str, session_id: str) -> None:
+        await self.shutdown(user_id, session_id)
 
     async def reap_stale_sessions(self) -> int:
         """Kill sessions unused for >30 minutes. Returns count of reaped sessions."""
         now = time.time()
         reaped = 0
         async with self._lock:
-            stale_ids = [
-                sid for sid, sess in self._sessions.items()
+            stale_keys = [
+                key for key, sess in self._sessions.items()
                 if hasattr(sess, '_last_activity') and now - getattr(sess, '_last_activity', now) > self._STALE_SESSION_SECS
             ]
-            for sid in stale_ids:
-                session = self._sessions.pop(sid, None)
+            for key in stale_keys:
+                session = self._sessions.pop(key, None)
                 if session:
                     try:
                         await session.shutdown()
@@ -395,16 +406,27 @@ class GeminiPersistentManager:
         """Evict the least-recently-used session when at capacity. Must hold _lock."""
         if not self._sessions:
             return
-        oldest_id = min(
+        oldest_key = min(
             self._sessions,
-            key=lambda sid: getattr(self._sessions[sid], '_last_activity', 0),
+            key=lambda k: getattr(self._sessions[k], '_last_activity', 0),
         )
-        session = self._sessions.pop(oldest_id, None)
+        session = self._sessions.pop(oldest_key, None)
         if session:
             try:
                 await session.shutdown()
             except Exception:
                 pass
+
+    async def run_turn(
+        self,
+        user_id: str,
+        session_id: str,
+        prompt_text: str,
+        on_delta: Callable[[str], None] | None = None,
+        timeout_seconds: float = 180.0,
+    ) -> str:
+        session = await self.get(user_id, session_id)
+        return await session.run_turn(prompt_text, on_delta=on_delta, timeout_seconds=timeout_seconds)
 
 
 _manager: GeminiPersistentManager | None = None

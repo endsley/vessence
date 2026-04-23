@@ -108,6 +108,11 @@ class ChatViewModel(
     private val spokenBlockRegex = Regex("<spoken>([\\s\\S]*?)</spoken>", RegexOption.IGNORE_CASE)
     private val spokenOpenRegex = Regex("<spoken>", RegexOption.IGNORE_CASE)
     private val spokenCloseRegex = Regex("</spoken>", RegexOption.IGNORE_CASE)
+    // Chars to accumulate before committing streaming-TTS on a <spoken>-less
+    // reply. If the tag hasn't opened by this many raw chars, assume the
+    // response is plain prose and start speaking normally. 400 chars ≈
+    // 300-500ms of additional latency at typical SSE streaming rates.
+    private val SPOKEN_SNIFF_CHARS = 400
     private val visualBlockRegex = Regex("<visual>([\\s\\S]*?)</visual>", RegexOption.IGNORE_CASE)
     private val assistantTagRegex = Regex("</?(?:spoken|visual|think|thinking|artifact)>", RegexOption.IGNORE_CASE)
     private val trailingPartialAssistantTagRegex = Regex("</?(?:spoken|visual|think|thinking|artifact)[^>]*$", RegexOption.IGNORE_CASE)
@@ -724,11 +729,27 @@ class ChatViewModel(
                                 // per-delta regex cleanup. Tags can split across SSE
                                 // chunks, and per-delta cleanup can leak fragments like
                                 // </spoken> into TTS.
-                                val speechAccumulated = assistantTextForSpeech(rawAccumulated, trim = false)
-                                if (speechAccumulated.length >= sentenceSpeechFedChars) {
-                                    val cleanDelta = speechAccumulated.substring(sentenceSpeechFedChars)
-                                    sentenceSpeechFedChars = speechAccumulated.length
-                                    sentenceBuffer.append(cleanDelta)
+                                //
+                                // Sniff-threshold gate: when the brain emits a long
+                                // technical reply with a <spoken> TL;DR, the tag often
+                                // lands AFTER hundreds of chars of markdown/paths/code.
+                                // Eagerly feeding the pre-tag content causes TTS to
+                                // voice file paths, backticks, and code identifiers
+                                // before <spoken> ever opens. Wait until either (a)
+                                // <spoken> has opened (assistantTextForSpeech then
+                                // returns only the tag's interior) or (b) SPOKEN_SNIFF
+                                // chars have streamed with no tag in sight — at which
+                                // point it's safe to assume the whole reply is plain
+                                // prose and speak it normally.
+                                val spokenOpened = spokenOpenRegex.containsMatchIn(rawAccumulated)
+                                val sniffReady = rawAccumulated.length >= SPOKEN_SNIFF_CHARS
+                                if (spokenOpened || sniffReady) {
+                                    val speechAccumulated = assistantTextForSpeech(rawAccumulated, trim = false)
+                                    if (speechAccumulated.length >= sentenceSpeechFedChars) {
+                                        val cleanDelta = speechAccumulated.substring(sentenceSpeechFedChars)
+                                        sentenceSpeechFedChars = speechAccumulated.length
+                                        sentenceBuffer.append(cleanDelta)
+                                    }
                                 }
                                 // Extract complete sentences (ending with . ! ?)
                                 val sentenceRegex = Regex("([^.!?]+[.!?])\\s*")
@@ -1231,16 +1252,29 @@ class ChatViewModel(
     }
 
     fun stopSpeaking() {
-        stopSpeakingInvoked = true
-        com.vessences.android.DiagnosticReporter.voiceFlow("stop_speaking_requested")
-        stopSentenceTtsQueues()
-        runCatching { tts.stop() }
-            .onFailure { reportStopSpeakingFailure("hybrid_tts_stop", it) }
-        runCatching { voiceController?.stopTts() }
-            .onFailure { reportStopSpeakingFailure("voice_controller_stop", it) }
+        // Flip UI state FIRST on the main thread so the red banner dismisses
+        // even if cleanup below hangs or throws. This is what the user sees.
         _state.value = _state.value.copy(isSpeaking = false)
-        // Stop Speaking = conversation ends immediately (no STT), but always-listen resumes
-        endVoiceConversation()
+        stopSpeakingInvoked = true
+        com.vessences.android.DiagnosticReporter.voiceFlow(
+            "stop_speaking_requested",
+            mapOf("thread" to Thread.currentThread().name),
+        )
+
+        // Run cleanup off the main thread. The MediaPlayer/TTS engine calls
+        // below can block on some vendor devices, and AlwaysListeningService
+        // startForeground can take >100ms. Blocking main = ANR → perceived crash.
+        viewModelScope.launch(Dispatchers.Default) {
+            runCatching { stopSentenceTtsQueues() }
+                .onFailure { reportStopSpeakingFailure("sentence_queues_stop", it) }
+            runCatching { tts.stop() }
+                .onFailure { reportStopSpeakingFailure("hybrid_tts_stop", it) }
+            runCatching { voiceController?.stopTts() }
+                .onFailure { reportStopSpeakingFailure("voice_controller_stop", it) }
+            runCatching { endVoiceConversation() }
+                .onFailure { reportStopSpeakingFailure("end_voice_conversation", it) }
+            com.vessences.android.DiagnosticReporter.voiceFlow("stop_speaking_complete")
+        }
     }
 
     fun speakText(text: String) {
@@ -1359,29 +1393,38 @@ class ChatViewModel(
 
     private fun endVoiceConversation() {
         com.vessences.android.voice.WakeWordBridge.sttActive = false
-        // Restart wake word service if always-listen is enabled
+        // Restart wake word service if always-listen is enabled.
+        // Dispatch to IO: AlwaysListeningService.start() eventually calls
+        // startForeground(), which can block for >100ms on slow devices.
+        // Running it on the UI thread used to cause ANRs when triggered from
+        // the Stop Speaking button.
         if (voiceSettings?.isAlwaysListeningEnabled() == true) {
-            runCatching {
-                com.vessences.android.voice.AlwaysListeningService.start(appContext)
-            }.onSuccess {
-                android.util.Log.i("ChatVM", "Restarted AlwaysListeningService after conversation end")
-            }.onFailure {
-                android.util.Log.w("ChatVM", "Failed to restart AlwaysListeningService after conversation end", it)
-                com.vessences.android.DiagnosticReporter.voiceFlow(
-                    "always_listening_restart_failed",
-                    mapOf(
-                        "exception_class" to it.javaClass.name,
-                        "message" to (it.message ?: ""),
-                    ),
-                )
+            viewModelScope.launch(Dispatchers.IO) {
+                runCatching {
+                    com.vessences.android.voice.AlwaysListeningService.start(appContext)
+                }.onSuccess {
+                    android.util.Log.i("ChatVM", "Restarted AlwaysListeningService after conversation end")
+                }.onFailure {
+                    android.util.Log.w("ChatVM", "Failed to restart AlwaysListeningService after conversation end", it)
+                    com.vessences.android.DiagnosticReporter.voiceFlow(
+                        "always_listening_restart_failed",
+                        mapOf(
+                            "exception_class" to it.javaClass.name,
+                            "message" to (it.message ?: ""),
+                        ),
+                    )
+                }
             }
         }
-        // If we came from wake word trigger, return app to background (lock screen)
+        // If we came from wake word trigger, return app to background (lock screen).
+        // moveTaskToBack must run on the main thread.
         if (cameFromWakeWord) {
             cameFromWakeWord = false
-            val activity = appContext as? android.app.Activity
-            activity?.moveTaskToBack(true)
-            android.util.Log.i("ChatVM", "Returning to background after wake-word conversation")
+            viewModelScope.launch(Dispatchers.Main) {
+                val activity = appContext as? android.app.Activity
+                activity?.moveTaskToBack(true)
+                android.util.Log.i("ChatVM", "Returning to background after wake-word conversation")
+            }
         }
     }
 

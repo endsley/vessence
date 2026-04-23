@@ -95,8 +95,10 @@ class ConversationManager:
     """
 
     def __init__(self, session_id: str, max_tokens: int = 8192,
-                 idle_timeout: int = IDLE_TIMEOUT_SECONDS):
+                 idle_timeout: int = IDLE_TIMEOUT_SECONDS,
+                 user_id: str | None = None):
         self.session_id = session_id
+        self.user_id = user_id
         self.max_tokens = max_tokens
         self.compaction_threshold = int(self.max_tokens * COMPACTION_THRESHOLD_PERCENT)
         self.idle_timeout = idle_timeout

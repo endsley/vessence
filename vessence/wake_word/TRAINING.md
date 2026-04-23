@@ -200,18 +200,80 @@ bash ../startup_code/graceful_restart.sh
 
 ## Known-good metrics (reference points)
 
-| Version | Real hey_jane scores | FPR@0.6 on speech | Best F1 | Notes |
+| Version | Real hey_jane scores | FPR@0.6 on validation | Best F1 | Notes |
 |---|---|---|---|---|
 | v6 | 0.9994 – 0.9999 | 0.78 % | 0.9089 | +10k LibriSpeech dev-clean+test-clean negatives |
-| v7 (deployed) | ≥ 0.9988 | 0.56 % | 0.8790 | +15k train-clean-100 + 5k vault music negatives (~30k total) |
+| v7 backup / previous deployed | ≥ 0.9988 | 0.56 % | 0.8790 | +15k train-clean-100 + 5k vault music negatives (~30k total) |
+| v8-era current `hey_jane.onnx` | 0.9984 – 0.9997 | 0.45 % | 0.9161 | 23 real positives, 47 English TTS voices, 35,785 negative sources, 79,840 negative clips; run log only exists at `/tmp/train_v8.log` |
 
 F1 went *down* v6 → v7 because precision fell on the music-heavy val
 split, but the real-world metric — FPR on actual speech and music —
 improved. Keep the F1 numbers in context of what the val mix looks like.
 
+## v8-era Training Provenance (2026-04-19)
+
+The current `android/app/src/main/assets/openwakeword/hey_jane.onnx` is newer
+than `hey_jane_v7_backup.onnx`, but the repository did not get a clean
+`hey_jane_v8_backup.onnx` or changelog entry. The v8-era evidence is:
+
+- Active model timestamp: `2026-04-19 21:24:10 -0400`
+- Active model SHA-256:
+  `aa46e37a850fdb10433c35a26b058c97a57d737ee163d2d36b9a3d6b12d5d3bf`
+- v7 backup SHA-256:
+  `dc982a383d31c6bf865adff3099ff814375362bdbbd14a9d25c9ad499154049a`
+- Android release merged asset SHA-256 matches the active model.
+- `/tmp/train_v8.log` was written at `2026-04-19 21:28:28 -0400` and records
+  the run that saved to `../android/app/src/main/assets/openwakeword/hey_jane.onnx`.
+- Git commit `42ffbcad03f80478a23a8f43f99ff824bc4baf31` modified
+  `hey_jane.onnx`, added `hey_jane_v7_backup.onnx`, added this document, and
+  modified `train_oww.py`.
+
+Training run details from `/tmp/train_v8.log`:
+
+| Item | Value |
+|---|---:|
+| Real recordings | 23 |
+| English edge-tts voices | 47 |
+| Synthetic positive clips | 188 |
+| Total positive sources | 211 |
+| Positive clips before jitter | 2,635 |
+| TTS negative sources | 4,085 |
+| Total negative sources including disk | 35,785 |
+| Total negative clips | 79,840 |
+| Train sources | 169 pos, 28,668 neg |
+| Validation sources | 42 pos, 7,167 neg |
+| Train features | 12,198 pos, 127,856 neg |
+| Validation features | 602 pos, 15,912 neg |
+| Early stopping | epoch 229 |
+| Best F1 during training | 0.9161 |
+| ONNX/PyTorch max diff | 0.00000042 |
+| Exported model size | 2,398,347 bytes |
+
+Final validation metrics:
+
+| Threshold | Precision | Recall | F1 | FPR |
+|---:|---:|---:|---:|---:|
+| 0.3 | 0.8754 | 0.9568 | 0.9143 | 0.0052 |
+| 0.4 | 0.8806 | 0.9551 | 0.9163 | 0.0049 |
+| 0.5 | 0.8829 | 0.9518 | 0.9161 | 0.0048 |
+| 0.6 | 0.8882 | 0.9502 | 0.9181 | 0.0045 |
+| 0.7 | 0.8910 | 0.9369 | 0.9134 | 0.0043 |
+
+Post-export verification:
+
+- Real positives: all 23 `hey_jane_*.ogg` samples scored `0.9984` to `0.9997`.
+- Speech Commands negatives: `0/500 (0.0%)` false positives.
+- Silence and random noise both scored `0.0000`.
+
+Runtime caveat: the Android app currently defaults to threshold `0.8` and
+requires 5 consecutive above-threshold frames. The v8-era training log reports
+threshold metrics only through `0.7`, so misses with near-threshold scores
+should be treated as a runtime threshold/confirmation tuning issue before
+assuming the model needs retraining.
+
 ## Known limitations / things worth fixing later
 
-1. **Single-speaker enrollment** — current `samples/` has 11 real
+1. **Single-speaker enrollment** — current v8-era `samples/` has 23 real
    recordings, all one voice. Multi-speaker improvements should just
    mean adding each person's "hey Jane" clips into `samples/` and
    re-running `train_oww.py`. The trainer does not assume one speaker.

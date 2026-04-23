@@ -49,9 +49,22 @@ logger = logging.getLogger(__name__)
 
 
 _DEFAULT_ESCALATE_ACK = "Let me think about that…"
+_STAGE2_FIFO_TURNS_DEFAULT = 3
+_STAGE2_FIFO_TURNS_PRIVATE = 7
 
 
 # ─── shared helpers ──────────────────────────────────────────────────────────
+
+
+def _stage2_fifo_turns(cls: str | None, *, default: int = _STAGE2_FIFO_TURNS_DEFAULT) -> int:
+    """Private Stage 2 handlers get deeper local FIFO context."""
+    try:
+        from agent_skills.private_handler_utils import privacy_for
+        if privacy_for(cls) == "local_only":
+            return _STAGE2_FIFO_TURNS_PRIVATE
+    except Exception:
+        pass
+    return default
 
 
 _AWAITING_RE = __import__("re").compile(
@@ -1184,7 +1197,10 @@ async def _classify_and_try_stage2(
                 pending_for_dispatch["question"] = pending.get("question")
             fifo_ctx = ""
             try:
-                fifo_ctx = recent_context.render_stage2_context(session_id, max_turns=3)
+                fifo_ctx = recent_context.render_stage2_context(
+                    session_id,
+                    max_turns=_stage2_fifo_turns(handler_class),
+                )
             except Exception:
                 pass
             try:
@@ -1278,7 +1294,10 @@ async def _classify_and_try_stage2(
     if result is None and conf in ("High", "Medium") and cls == "end conversation":
         fifo_ctx = ""
         try:
-            fifo_ctx = recent_context.render_stage2_context(session_id, max_turns=3)
+            fifo_ctx = recent_context.render_stage2_context(
+                session_id,
+                max_turns=_stage2_fifo_turns("end conversation"),
+            )
         except Exception:
             pass
         if await stage2_dispatcher._gate_check("end conversation", prompt, fifo_ctx):
@@ -1289,7 +1308,10 @@ async def _classify_and_try_stage2(
     if result is None and conf in ("High", "Medium") and cls != "others":
         fifo_ctx = ""
         try:
-            fifo_ctx = recent_context.render_stage2_context(session_id, max_turns=3)
+            fifo_ctx = recent_context.render_stage2_context(
+                session_id,
+                max_turns=_stage2_fifo_turns(cls),
+            )
         except Exception:
             pass
         _t2 = time.perf_counter()

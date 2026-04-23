@@ -44,11 +44,21 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from jane.config import get_chroma_client, VECTOR_DB_USER_MEMORIES, CHROMA_COLLECTION_USER_MEMORIES
 
 
-def add_fact(fact: str, topic: str = "General", subtopic: str = "", author: str = "jane", user_id: str = None) -> str:
+def add_fact(
+    fact: str,
+    topic: str = "General",
+    subtopic: str = "",
+    author: str = "jane",
+    user_id: str = None,
+    memory_path: str | None = None,
+) -> str:
     if user_id is None:
         user_id = os.environ.get("USER_NAME", "user")
+    # Managed users write to their private memory db. Falls back to the global
+    # shared path when no per-user path is provided (legacy host behavior).
+    resolved_path = memory_path or os.environ.get("VESSENCE_USER_MEMORY_PATH") or VECTOR_DB_USER_MEMORIES
     with _silence():
-        client = get_chroma_client(path=VECTOR_DB_USER_MEMORIES)
+        client = get_chroma_client(path=resolved_path)
         collection = client.get_or_create_collection(
             name=CHROMA_COLLECTION_USER_MEMORIES,
             metadata={"hnsw:space": "cosine"}
@@ -78,7 +88,19 @@ if __name__ == "__main__":
     parser.add_argument("--subtopic", default="", help="Optional subtopic label.")
     parser.add_argument("--author", default="jane", help="Author tag (default: jane).")
     parser.add_argument("--user-id", default=os.environ.get("USER_NAME", "user"), help="User ID tag.")
+    parser.add_argument(
+        "--memory-path",
+        default=os.environ.get("VESSENCE_USER_MEMORY_PATH", ""),
+        help="Override the ChromaDB path. Set to a managed user's memory/vector_db to keep their writes private.",
+    )
     args = parser.parse_args()
 
-    result = add_fact(args.fact, topic=args.topic, subtopic=args.subtopic, author=args.author, user_id=args.user_id)
+    result = add_fact(
+        args.fact,
+        topic=args.topic,
+        subtopic=args.subtopic,
+        author=args.author,
+        user_id=args.user_id,
+        memory_path=(args.memory_path or None),
+    )
     print(result)

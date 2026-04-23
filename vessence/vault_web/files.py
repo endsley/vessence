@@ -112,7 +112,14 @@ def build_file_index_document(rel_path: str, description: str, mime_type: str, r
     return f"Vault file: '{filename}' at path {full_path}. {details} File type: {mime_type}."
 
 
-def upsert_file_index_entry(rel_path: str, description: str, mime_type: str, updated_by: str = "web_ui") -> bool:
+def upsert_file_index_entry(
+    rel_path: str,
+    description: str,
+    mime_type: str,
+    updated_by: str = "web_ui",
+    root_dir: str | Path | None = None,
+    user_id: str | None = None,
+) -> bool:
     """Persist a vault file record into the dedicated file-index collection."""
     try:
         client = get_chroma_client(VECTOR_DB_FILE_INDEX)
@@ -121,19 +128,22 @@ def upsert_file_index_entry(rel_path: str, description: str, mime_type: str, upd
             metadata={"hnsw:space": "cosine"},
         )
         filename = Path(rel_path).name
-        doc_id = f"vault_file_{rel_path.replace('/', '_').replace('.', '_')}"
+        scope = (user_id or "host").strip() or "host"
+        doc_id = f"vault_file_{scope}_{rel_path.replace('/', '_').replace('.', '_')}"
+        metadata = {
+            "source": "vault",
+            "topic": "file_index",
+            "memory_type": "file_index",
+            "path": rel_path,
+            "filename": filename,
+            "mime_type": mime_type,
+            "updated_by": updated_by,
+            "user_id": scope,
+        }
         coll.upsert(
             ids=[doc_id],
-            documents=[build_file_index_document(rel_path, description, mime_type)],
-            metadatas=[{
-                "source": "vault",
-                "topic": "file_index",
-                "memory_type": "file_index",
-                "path": rel_path,
-                "filename": filename,
-                "mime_type": mime_type,
-                "updated_by": updated_by,
-            }],
+            documents=[build_file_index_document(rel_path, description, mime_type, root_dir=root_dir)],
+            metadatas=[metadata],
         )
         return True
     except Exception:
@@ -248,10 +258,22 @@ def get_file_metadata(rel_path: str, root_dir: str | Path | None = None) -> dict
     return meta
 
 
-def update_description(rel_path: str, description: str):
+def update_description(
+    rel_path: str,
+    description: str,
+    root_dir: str | Path | None = None,
+    user_id: str | None = None,
+):
     """Update file description in ChromaDB."""
     try:
-        if not upsert_file_index_entry(rel_path, description, get_mime(rel_path), updated_by="web_ui"):
+        if not upsert_file_index_entry(
+            rel_path,
+            description,
+            get_mime(rel_path),
+            updated_by="web_ui",
+            root_dir=root_dir,
+            user_id=user_id,
+        ):
             return False
         # Log change to file_changes for polling
         with get_db() as conn:

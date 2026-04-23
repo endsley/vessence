@@ -1,10 +1,55 @@
 ---
 Title: Multi-user account isolation - users, memory, vaults, capabilities
 Priority: 1
-Status: pending
+Status: completed
 Created: 2026-04-20
+Completed: 2026-04-22
 Source: user_request
 ---
+
+## Completion Notes (2026-04-22)
+
+Shipped Slice A (vault + capability isolation), Slice B (canonical conversation key helper),
+Slice C (add_fact writeback scoping), and unit-test coverage.
+
+Wired per-user vault root + capability checks into every `/api/files/*` endpoint:
+  list_root, list_path, file_meta, update_file_description, thumbnail, serve_file,
+  find_file, search_files, play_audio_file, get_file_content, save_file_content,
+  upload_files, upload_single_file. Per-user root_dir also threaded into
+  `safe_vault_path`, `list_directory`, `get_file_metadata`, `generate_thumbnail`,
+  `update_description`, `upsert_file_index_entry`.
+
+Added `_user_vault_context`, `_require_capability`, `_request_vault_root`,
+`_user_memory_path`, and `resolve_conversation_key` helpers in `jane_web/main.py`.
+The canonical conversation key follows `<sanitized_user_id>__<device_id>__<client_session_uuid>`
+per Section 5.1. Unmanaged (Chieh's) sessions keep their raw `body.session_id`.
+
+Capability gates added to contacts/messages/device-sms endpoints (phone capability).
+Admin endpoints (`/api/admin/users*`) already gated via `_require_admin_session`.
+
+`agent_skills/add_fact.py` (via `memory/v1/add_fact.py`) now honors a
+`--memory-path` flag and a `VESSENCE_USER_MEMORY_PATH` env var so managed-user
+writeback lands in the private ChromaDB instead of the shared pool. The two
+upload endpoints pass `--user-id` and `--memory-path` explicitly.
+
+`search_files` now filters Chroma hits by `user_id` metadata so a managed user
+cannot see a same-named file's description from another account.
+
+`test_code/test_multi_user_isolation.py` covers normalize_user_id,
+create_user_space, scoped_session_id behavior, default capabilities,
+vault_root containment, delete_user_space refusing unmanaged accounts, and the
+device/user distinctness invariants for the canonical key.
+
+Deferred to a follow-up (tracked here for clarity):
+- Per-user standing-brain CLI process (Section 5 — currently one shared brain
+  with scoped session IDs at the ConversationManager/SQLite ledger level).
+- Android device_id protocol change (Section 5.1 migration bullets) — requires
+  Android APK rebuild and client code changes.
+- Per-user SQLite contacts/messages partitioning — currently we hard-deny with
+  capability gates; full schema partitioning is a separate job.
+- Android response-hygiene fix (timer double-confirmation + exposed internal
+  reasoning) — separate job.
+
 
 ## Goal
 
@@ -95,7 +140,7 @@ User creation must write:
   "memory_namespace": "person_at_example_com",
   "memory_chromadb_path": "$VESSENCE_DATA_HOME/users/person_at_example_com/memory/vector_db",
   "vault_root_path": "$VESSENCE_DATA_HOME/users/person_at_example_com/vault",
-  "capabilities": ["chat", "memory"],
+  "capabilities": ["chat", "memory", "vault_read", "vault_write"],
   "managed": true,
   "created_at": "...",
   "seeded_at": "...",
@@ -114,7 +159,7 @@ It should support:
 
 - Email
 - Display name
-- Capability checkboxes
+- Capability checkboxes (Admin can grant/revoke any skill/tool)
 - Initial memory textarea, one seed fact per line
 - Existing user list with email, display name, memory path, vault path,
   capabilities, and created date
@@ -146,7 +191,20 @@ Important remaining gap: retrieval is only half the job. Conversation writeback
 still needs audit. `memory/v1/conversation_manager.py` and any add-fact paths
 must not write managed-user turns into Chieh's shared memory lanes.
 
-### 5. Conversation State Isolation
+### 5. Multi-User Execution Lifecycle (NEW)
+
+To ensure absolute isolation while sharing system resources:
+
+- **Per-User Processes:** Spawn a dedicated "standing brain" CLI process for each
+  active managed user. Do not reuse Chieh's process or a shared pool.
+- **Shared API Keys:** All users use the system-configured API keys (Google,
+  Anthropic, etc.) from the server's `.env`. No per-user keys for now.
+- **Capability Gating:** All tool/skill calls must check the user's `config.json`
+  capabilities list before execution.
+- **Private Librarian:** Every account comes with its own instance of the
+  `archivist` essence/tooling to manage its private vault.
+
+### 6. Conversation-Bleed Prevention Spec
 
 Conversation state keys must include the managed user ID. This prevents one
 phone or browser from reusing `jane_android` or another generic session ID

@@ -118,27 +118,29 @@ class ClaudePersistentManager:
         self._claude_bin = os.environ.get("CLAUDE_BIN", shutil.which("claude") or "claude")
         self._active_procs: dict[str, asyncio.subprocess.Process] = {}  # track running subprocesses
 
-    async def get(self, session_id: str) -> "ClaudePersistentSession":
+    async def get(self, user_id: str, session_id: str) -> "ClaudePersistentSession":
+        composite_key = f"{user_id}:{session_id}"
         async with self._lock:
-            session = self._sessions.get(session_id)
+            session = self._sessions.get(composite_key)
             if session is None:
                 # Evict oldest session if at capacity
                 if len(self._sessions) >= self._MAX_SESSIONS:
-                    oldest_id = min(self._sessions, key=lambda sid: self._sessions[sid].last_used)
-                    old = self._sessions.pop(oldest_id, None)
-                    proc = self._active_procs.pop(oldest_id, None)
+                    oldest_key = min(self._sessions, key=lambda k: self._sessions[k].last_used)
+                    self._sessions.pop(oldest_key, None)
+                    proc = self._active_procs.pop(oldest_key, None)
                     if proc and proc.returncode is None:
                         _kill_process_tree(proc)
-                    logger.info("[%s] Evicted oldest session to stay under %d cap", oldest_id[:12], self._MAX_SESSIONS)
+                    logger.info("[%s] Evicted oldest session to stay under %d cap", oldest_key[:12], self._MAX_SESSIONS)
                 session = ClaudePersistentSession(session_id=session_id)
-                self._sessions[session_id] = session
+                self._sessions[composite_key] = session
             session.last_used = time.time()
             return session
 
-    async def end(self, session_id: str) -> None:
+    async def end(self, user_id: str, session_id: str) -> None:
+        composite_key = f"{user_id}:{session_id}"
         async with self._lock:
-            self._sessions.pop(session_id, None)
-            proc = self._active_procs.pop(session_id, None)
+            self._sessions.pop(composite_key, None)
+            proc = self._active_procs.pop(composite_key, None)
             if proc and proc.returncode is None:
                 _kill_process_tree(proc)
 
@@ -163,13 +165,13 @@ class ClaudePersistentManager:
         now = time.time()
         reaped = 0
         async with self._lock:
-            stale_ids = [
-                sid for sid, sess in self._sessions.items()
+            stale_keys = [
+                key for key, sess in self._sessions.items()
                 if now - sess.last_used > self._STALE_SESSION_SECS
             ]
-            for sid in stale_ids:
-                self._sessions.pop(sid, None)
-                proc = self._active_procs.pop(sid, None)
+            for key in stale_keys:
+                self._sessions.pop(key, None)
+                proc = self._active_procs.pop(key, None)
                 if proc and proc.returncode is None:
                     _kill_process_tree(proc)
                 reaped += 1

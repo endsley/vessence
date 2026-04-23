@@ -156,7 +156,7 @@ Some intent classes have a **Stage 2 handler** — a deterministic Python functi
 
 | Class | Handler | Data source | Typical answer |
 |:------|:--------|:------------|:---------------|
-| `clinic_schedules_info` | `jane_web/jane_v2/classes/clinic_schedules_info/handler.py` | `$VESSENCE_DATA_HOME/schedule.db` SQLite | Patient count or names per day of week |
+| `clinic_schedules_info` | `jane_web/jane_v2/classes/clinic_schedules_info/handler.py` | `$VESSENCE_DATA_HOME/schedule.db` SQLite | Patient count or names per day of week; "next/current patient" reply now offers to read the patient's Visit Summary via a STAGE2_FOLLOWUP (`awaiting: "next_patient_details_confirm"`) |
 
 **Adding a new Stage 2 handler:**
 1. Create `jane_web/jane_v2/classes/<class_name>/handler.py` with `async def handle(prompt: str) -> dict | None`
@@ -282,6 +282,8 @@ This separation is intentional: provider-specific handlers are isolated so chang
 **Per-essence isolation:** Each essence gets its own ChromaDB instance at `<essence_folder>/knowledge/chromadb/`. When an essence is deleted, its memory can be optionally ported into Jane's universal `user_memories` (re-keyed with source tags).
 
 **Managed-user isolation:** The admin UI can create managed users under `$VESSENCE_DATA_HOME/users/<sanitized_email>/`, where the folder name is derived from the user's login email (for example `person_at_example_com`) and `config.json` stores the raw email. Each managed user gets a config file, a private ChromaDB at `memory/vector_db/`, and a private vault root at `vault/`. When Jane web sees a session for that managed user, context building bypasses the global user/short-term/file-index retrieval lanes and queries that user's private `user_memories` collection instead. Sessions without a managed config keep the legacy shared-memory behavior.
+
+**Vault + capability enforcement (Job #77):** Every `/api/files/*` endpoint resolves the per-request vault root via `_require_capability(session_id, "vault_read" | "vault_write")`. Unmanaged accounts get implicit full access; managed accounts must list the capability in `config.json`. `search_files` additionally filters Chroma description hits by `user_id` metadata, so two users with a same-named file never see each other's description. Writeback through `add_fact.py` accepts `--memory-path` and `--user-id`; upload endpoints pass the managed user's private path so their facts never land in the shared pool. `resolve_conversation_key(request, body)` produces the canonical `<sanitized_user_id>__<device_id>__<client_session_uuid>` key used downstream (deferred wiring into v2/v3 pipeline — currently those still use `scoped_session_id(user_id, sid)`). Phone/SMS endpoints (`/api/contacts*`, `/api/messages*`, `/api/device/sync-sms`) require the `phone` capability. Admin endpoints (`/api/admin/users*`) require `user_admin` or a configured admin email.
 
 ### 4.2 Retrieval Optimization
 
@@ -523,6 +525,18 @@ FastAPI server (~3500 lines) serving all routes. Vault web (port 8080) functiona
 - `GET /api/briefing/audio/{id}/{type}` — TTS for article
 - `POST /api/briefing/fetch` — Trigger immediate fetch
 - `GET /api/briefing/search` — Semantic search via ChromaDB
+- `GET/POST/PUT/DELETE /api/briefing/topics[/{name}]` — List / add / rename-or-edit / remove tracked topics (UI: Topics Modal on `/briefing` with per-row inline edit)
+
+**Facebook Marketplace**
+- `GET/POST /api/marketplace/searches` — List / create saved-search bundles
+- `GET/DELETE /api/marketplace/search/{name}` — Detail + flat listings / remove
+- `GET /api/marketplace/listing/{name}/{slug}/{id}` — Full listing (description, photos[])
+- `GET /api/marketplace/summary/{name}` — Stage-2 LLM (qwen2.5:7b) brief written by `summarize.py`
+- `GET/POST /api/marketplace/refresh/{name}` — Poll status / spawn background harvest+summarize subprocess
+- `GET /marketplace-image/{name}/{slug}/{id}/{photo_name}` — Serve saved photo
+- Harvester module: `agent_skills/marketplace/` — `harvester` (Playwright), `summarize` (Ollama), `refresh` (background runner with pid-alive status file); uses stored `facebook_julius` browser profile so no 2FA
+- Cron: `startup_code/run_marketplace_cron.sh` at 2am daily (headless-forced)
+- UI: third pill ("Marketplace") on `/briefing` — saved-search grid → listings grid + AI summary panel → single-listing detail with photo gallery; per-card Pull-now / Edit / Delete + header-bar Pull-now / Edit; shared editor modal for create + edit
 
 **Tax Accountant**
 - `POST /api/tax/interview/start` / `answer` — Guided interview
@@ -644,7 +658,7 @@ Conversation turns flow through a triage pipeline:
 | Component | File | Purpose |
 |:----------|:-----|:--------|
 | AlwaysListeningService | `voice/AlwaysListeningService.kt` | Foreground service with wake lock. Runs OpenWakeWord detector on mic audio. On detection: vibrates, wakes screen, signals bridge, launches activity. Sends periodic heartbeat diagnostics. |
-| OpenWakeWordDetector | `voice/OpenWakeWordDetector.kt` | ONNX Runtime pipeline: raw PCM → mel spectrogram → audio embeddings → wake word classifier. Model: `hey_jarvis_v0.1.onnx` (stopgap — `hey_jane` model is broken, needs retraining). Configurable threshold (default 0.3). Achieves 0.98+ detection scores. ~4% single ARM core. |
+| OpenWakeWordDetector | `voice/OpenWakeWordDetector.kt` | ONNX Runtime pipeline: raw PCM → mel spectrogram → audio embeddings → wake word classifier. Current model is `openwakeword/hey_jane.onnx`, the April 19 v8-era classifier. Runtime threshold defaults to `Constants.DEFAULT_WAKE_WORD_THRESHOLD = 0.8f`; the service requires 5 consecutive above-threshold frames before triggering. |
 | WakeWordBridge | `voice/WakeWordBridge.kt` | Singleton bridge between service and ChatViewModel. `activated` StateFlow signals wake word detection. `sttActive` flag keeps service paused while conversation is ongoing. |
 | VoiceController | `voice/VoiceController.kt` | Vosk-based offline STT (fallback for SpeechRecognizer) |
 | AndroidTtsManager | `voice/AndroidTtsManager.kt` | Kotlin coroutine wrapper around Android TTS engine |
@@ -656,6 +670,69 @@ Conversation turns flow through a triage pipeline:
 3. `WakeWordBridge.sttActive = true` keeps service stopped for entire conversation
 4. User speaks → `SpeechRecognizer.onResults` → `sendMessage(fromVoice=true)` → Jane streams response → TTS → auto-listen → repeat
 5. Conversation ends (STT timeout / no speech) → `sttActive = false` → service restarts wake word detection
+
+#### Wake Word Model Provenance: `hey_jane.onnx` v8-era Model
+
+The deployed `android/app/src/main/assets/openwakeword/hey_jane.onnx` is not the v7 backup. It was overwritten by a later OpenWakeWord training run on 2026-04-19 and then packaged into the Android release assets.
+
+Evidence:
+- Active source asset: `android/app/src/main/assets/openwakeword/hey_jane.onnx`
+  - timestamp: `2026-04-19 21:24:10 -0400`
+  - size: `2,398,347` bytes
+  - SHA-256: `aa46e37a850fdb10433c35a26b058c97a57d737ee163d2d36b9a3d6b12d5d3bf`
+- Release merged asset has the same SHA-256, so the packaged release asset matches the source asset.
+- v7 backup: `android/app/src/main/assets/openwakeword/hey_jane_v7_backup.onnx`
+  - timestamp: `2026-04-19 14:12:24 -0400`
+  - SHA-256: `dc982a383d31c6bf865adff3099ff814375362bdbbd14a9d25c9ad499154049a`
+- Git provenance: commit `42ffbcad03f80478a23a8f43f99ff824bc4baf31` modified `hey_jane.onnx`, added `hey_jane_v7_backup.onnx`, added `wake_word/TRAINING.md`, and modified `wake_word/train_oww.py`.
+- Run provenance: `/tmp/train_v8.log`, timestamp `2026-04-19 21:28:28 -0400`, records the training run that saved to `.../android/app/src/main/assets/openwakeword/hey_jane.onnx`.
+
+Training process from `/tmp/train_v8.log`:
+- Trainer banner: `OpenWakeWord 'hey jane' classifier training v3`; source-disjoint splits, temporal jitter, reviewed fixes.
+- Positives:
+  - `23` real recordings from `wake_word/samples/hey_jane_*.ogg`.
+  - `47` English `edge-tts` voices.
+  - `188` synthetic positive clips generated from four phrase capitalizations.
+  - `211` total positive sources.
+  - `2,635` positive clips before temporal jitter.
+- Negatives:
+  - hard TTS confusables and general voice-assistant/background-speech phrases generated with the same `47` English voices.
+  - `2,489` valid hard-negative TTS clips and `1,596` valid general-negative TTS clips.
+  - `4,085` TTS negative sources.
+  - `35,785` total negative sources including disk negatives.
+  - `79,840` total negative clips.
+- Split:
+  - train sources: `169` positive, `28,668` negative.
+  - validation sources: `42` positive, `7,167` negative.
+  - source-disjoint split prevents augmented copies of the same source from crossing train/validation.
+- Feature extraction:
+  - train features: `12,198` positive, `127,856` negative.
+  - validation features: `602` positive, `15,912` negative.
+  - features are OpenWakeWord embedding windows shaped `(16, 96)`.
+- Training:
+  - DNN classifier trained on CPU; the run's stage label says `Training DNN classifier (with hard negative mining)`.
+  - epoch 0: `P=0.3719 R=0.9817 F1=0.5395 FPR=0.0627`.
+  - epoch 40: `P=0.8151 R=0.9518 F1=0.8782 FPR=0.0082`.
+  - epoch 80: `P=0.8589 R=0.9302 F1=0.8931 FPR=0.0058`.
+  - epoch 200: `P=0.8422 R=0.9485 F1=0.8922 FPR=0.0067`.
+  - early stopped at epoch `229`; best F1 during training was `0.9161`.
+- Final validation thresholds:
+  - `thr=0.3`: `P=0.8754 R=0.9568 F1=0.9143 FPR=0.0052`
+  - `thr=0.4`: `P=0.8806 R=0.9551 F1=0.9163 FPR=0.0049`
+  - `thr=0.5`: `P=0.8829 R=0.9518 F1=0.9161 FPR=0.0048`
+  - `thr=0.6`: `P=0.8882 R=0.9502 F1=0.9181 FPR=0.0045`
+  - `thr=0.7`: `P=0.8910 R=0.9369 F1=0.9134 FPR=0.0043`
+- Export:
+  - ONNX opset 18.
+  - weights inlined; stale `.onnx.data` sidecar removed.
+  - ONNX vs PyTorch max diff: `0.00000042`.
+  - output size: `2,398,347` bytes (`2342.1 KB`).
+- Verification:
+  - all 23 real recordings scored `0.9984` to `0.9997`.
+  - Speech Commands false positives: `0/500 (0.0%)` at the script's verification threshold.
+  - silence: `0.0000`; random noise: `0.0000`.
+
+Operational note: v8 validation metrics were reported for thresholds `0.3` through `0.7`, but Android currently defaults to `0.8` and also requires 5 consecutive detections. If "Hey Jane" misses in background speech or noisy rooms while logs show near-miss scores below `0.8`, investigate threshold/confirmation policy before assuming the model file is wrong.
 
 ### 10.4 Streaming Protocol
 

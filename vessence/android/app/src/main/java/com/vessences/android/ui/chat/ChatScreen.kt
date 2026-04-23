@@ -143,11 +143,22 @@ fun ChatScreen(
     // matching web Jane's behavior of pausing once they've scrolled up to read older content.
     // Uses scrollToItem (instant) instead of animateScrollToItem to avoid animation queue buildup
     // when deltas arrive rapidly during streaming.
+    //
+    // Follow-the-bottom check includes BOTH the sentinel (last item) and the
+    // preceding item. When a fresh Jane bubble is laid out below the viewport,
+    // the sentinel is momentarily off-screen but the user's own bubble (second
+    // to last) is still visible — that still means "the user was at the bottom"
+    // and we should scroll to reveal Jane's new bubble.
     val totalMessages = state.messages.size
     val lastMessageText = state.messages.lastOrNull()?.text ?: ""
     LaunchedEffect(totalMessages, lastMessageText.length) {
         if (state.messages.isNotEmpty() && !state.messages.last().isUser) {
-            if (!userDetachedFromBottom) {
+            val layout = listState.layoutInfo
+            val total = layout.totalItemsCount
+            val followingBottom = total > 0 && layout.visibleItemsInfo.any { info ->
+                info.index == total - 1 || info.index == total - 2
+            }
+            if (followingBottom) {
                 listState.scrollToItem(state.messages.size) // scroll to sentinel
             }
         }

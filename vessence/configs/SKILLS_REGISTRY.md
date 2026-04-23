@@ -174,3 +174,19 @@ A **WebSequence** is a named, reusable Playwright browser automation script. Eac
 -   **SQLite Schema:** `$VESSENCE_DATA_HOME/schedule.db`, table `appointments`
     -   Columns: `week_start`, `day_of_week`, `patient_name`, `appt_type`, `visit_number`, `start_time`, `end_time`, `practitioner`, `scraped_at`
     -   On each scrape: DELETEs current week's rows for the practitioner, then inserts fresh
+
+-   **Skill: Facebook Marketplace Harvester**
+    -   **Module:** `agent_skills/marketplace/` (`config.py`, `harvester.py`)
+    -   **What it does:** Runs a saved-search bundle against Facebook Marketplace, applies the car-filter pipeline (miles<max, price<max, "clean title" in description, suspicion rule that flags >5-year-old cars with <3k mi/yr), and saves surviving listings + photos to disk. Uses the `facebook_julius` profile (stored cookies → no 2FA prompt).
+    -   **Entry points:**
+        -   `config.list_searches() / get_search(name) / save_search(name, label=..., queries=[...], filters=..., location_id=...)`
+        -   `harvester.harvest(search_name)` — blocking, runs the full pipeline
+        -   `harvester.listings_for(search_name)` — reads the latest saved summary
+        -   `harvester.listing_detail(name, slug, id)`, `harvester.photo_path(...)` — detail/photo helpers
+    -   **CLI:** `python -m agent_skills.marketplace.harvester <search_name>`
+    -   **Config:** `$VESSENCE_DATA_HOME/config/marketplace_searches.json`
+    -   **Data:** `$VESSENCE_DATA_HOME/data/facebook_marketplace_finds/<search_name>/<query_slug>/<listing_id>/listing.json` + `photo_NN.jpg`
+    -   **Default search `cars`:** queries `Toyota corolla`, `Honda civic`, `Honda fit`; filters `max_price=15000`, `max_miles=60000`, `require_clean_title=True`, `suspicion_filter=True`; Medford MA (`109352265750998`)
+    -   **Web UI:** Marketplace pill in `/briefing` — card grid of saved searches, drill-in to listings, drill-in to listing detail with photo gallery
+    -   **API:** `GET/POST /api/marketplace/searches`, `GET/DELETE /api/marketplace/search/{name}`, `GET /api/marketplace/listing/{name}/{slug}/{id}`, `GET /marketplace-image/{name}/{slug}/{id}/{photo}`
+    -   **Trigger:** Intended for cron (not yet configured) — call `harvest("cars")` nightly

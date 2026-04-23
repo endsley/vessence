@@ -169,8 +169,8 @@ try:
     ANDROID_VERSION = _version_data["version_name"]
     _ANDROID_VERSION_CODE = _version_data["version_code"]
 except FileNotFoundError:
-    ANDROID_VERSION = "0.2.76"
-    _ANDROID_VERSION_CODE = 307
+    ANDROID_VERSION = "0.2.80"
+    _ANDROID_VERSION_CODE = 311
 
 # Startup validation: ensure the APK for the advertised version actually exists
 _expected_apk = MARKETING_DOWNLOADS_DIR / f"vessences-android-v{ANDROID_VERSION}.apk"
@@ -285,10 +285,16 @@ _RATE_LIMIT_AUTH_PATHS = frozenset({
     "/api/cli-login/code",
 })
 _RATE_LIMIT_UPLOAD_PATHS = frozenset({"/api/files/upload", "/api/tax/upload"})
+# Internal telemetry — phone's DiagnosticReporter bursts up to 50 queued
+# events after a network blip, which trips the 60/min generic bucket. Not
+# an abuse vector (no brain work, write-only), so exempt outright.
+_RATE_LIMIT_EXEMPT_PATHS = frozenset({"/api/device-diagnostics"})
 
 
 def _rate_limit_category(path: str) -> tuple[str, int, float]:
     """Return (category_suffix, max_requests, window_seconds) for a path."""
+    if path in _RATE_LIMIT_EXEMPT_PATHS:
+        return ("", 0, 0)
     if path in _RATE_LIMIT_CHAT_PATHS:
         return ("chat", 30, 60)
     if path in _RATE_LIMIT_AUTH_PATHS:
@@ -1097,6 +1103,137 @@ def _scoped_conversation_session_id(user_id: str | None, session_id: str | None)
         return (session_id or "").strip() or "default"
 
 
+# ── Per-user vault + capability resolution ──────────────────────────────────
+#
+# Unmanaged accounts (Chieh's primary account, admin-only installs) keep the
+# legacy behavior: global VAULT_DIR, all capabilities. Managed accounts created
+# through /api/admin/users carry a private vault root plus an explicit
+# capability list stored in config.json; every vault/tool endpoint must resolve
+# the per-request vault root and deny tool access missing from the list.
+
+def _user_vault_context(session_id: str | None) -> tuple[str, list[str], bool, str]:
+    """Return (vault_root, capabilities, is_managed, user_id) for a session."""
+    user_id = (get_session_user(session_id) if session_id else None) or _default_user_id()
+    try:
+        from agent_skills.user_manager import AVAILABLE_CAPABILITIES, get_user_config, is_managed_user
+    except Exception:
+        return str(VAULT_DIR), [], False, user_id
+    all_caps = [c["id"] for c in AVAILABLE_CAPABILITIES]
+    if not is_managed_user(user_id):
+        return str(VAULT_DIR), all_caps, False, user_id
+    config = get_user_config(user_id)
+    vault_root = config.get("vault_root_path") or str(VAULT_DIR)
+    caps = list(config.get("capabilities") or [])
+    return vault_root, caps, True, user_id
+
+
+def _require_capability(session_id: str | None, cap: str) -> tuple[str, list[str], bool, str]:
+    """Ensure the session's user holds `cap`. Returns the vault context tuple.
+
+    Unmanaged accounts are not gated — they have implicit full access.
+    Managed accounts must list `cap` in their config.json capabilities.
+    """
+    vault_root, caps, is_managed, user_id = _user_vault_context(session_id)
+    if is_managed and cap not in caps:
+        raise HTTPException(status_code=403, detail=f"Missing capability: {cap}")
+    return vault_root, caps, is_managed, user_id
+
+
+def _request_vault_root(request: Request) -> str:
+    """Determine the vault root for a request.
+
+    For an authenticated managed user, returns their private vault root.
+    For host/unmanaged or share-code requests, returns the global VAULT_DIR.
+    Never raises — suitable for handlers that have already auth-checked.
+    """
+    try:
+        session_id = get_session_id(request)
+        vault_root, _caps, _managed, _uid = _user_vault_context(session_id)
+        return vault_root
+    except Exception:
+        return str(VAULT_DIR)
+
+
+def _user_memory_path(user_id: str | None) -> str:
+    """Return the ChromaDB path a managed user should write facts into.
+
+    Returns an empty string for unmanaged accounts so add_fact.py falls
+    through to the global shared path (legacy behavior).
+    """
+    if not user_id:
+        return ""
+    try:
+        from agent_skills.user_manager import get_user_config, is_managed_user
+        if not is_managed_user(user_id):
+            return ""
+        config = get_user_config(user_id)
+        return config.get("memory_chromadb_path") or ""
+    except Exception:
+        return ""
+
+
+def resolve_conversation_key(request: Request, body) -> dict:
+    """Produce the canonical conversation key for a chat request.
+
+    Single source of truth per Job #77 Section 5.1. All chat entry points
+    should call this helper and thread the returned `conversation_key`
+    through any downstream state lookup (ConversationManager, FIFO, pending
+    action resolver, standing brain manager, etc).
+
+    Shape of the canonical key:
+        <sanitized_user_id>__<device_id>__<client_session_id>
+
+    Unmanaged (Chieh) accounts preserve their legacy `body.session_id`
+    verbatim to avoid breaking in-flight conversations.
+    """
+    raw_client_sid = (getattr(body, "session_id", None) or "").strip()
+    # Pull the auth session off the cookie (may be None for share-code fallbacks)
+    auth_session_id = None
+    try:
+        auth_session_id = get_session_id(request)
+    except Exception:
+        auth_session_id = None
+    user_id = (get_session_user(auth_session_id) if auth_session_id else None) or _default_user_id()
+    try:
+        from agent_skills.user_manager import is_managed_user, normalize_user_id
+        sanitized_user_id = normalize_user_id(user_id)
+        managed = is_managed_user(user_id)
+    except Exception:
+        sanitized_user_id = user_id
+        managed = False
+
+    header_device_id = (request.headers.get("x-jane-device-id") or "").strip()
+    trusted_cookie = None
+    try:
+        trusted_cookie = get_trusted_device_cookie_id(request)
+    except Exception:
+        trusted_cookie = None
+    # Trusted-device cookie is a stable per-install token — use it when header absent.
+    device_id = header_device_id or (trusted_cookie or "")[:32]
+    if not device_id:
+        try:
+            device_id = device_fingerprint_from_request(request)[:16]
+        except Exception:
+            device_id = "nodevice"
+
+    client_session_id = raw_client_sid or auth_session_id or "default"
+
+    if managed:
+        conversation_key = f"{sanitized_user_id}__{device_id}__{client_session_id}"
+    else:
+        # Legacy Chieh sessions keep their raw client session to avoid churn.
+        conversation_key = raw_client_sid or auth_session_id or "default"
+
+    return {
+        "user_id": user_id,
+        "sanitized_user_id": sanitized_user_id,
+        "device_id": device_id,
+        "client_session_id": client_session_id,
+        "conversation_key": conversation_key,
+        "managed": managed,
+    }
+
+
 def get_trusted_device_cookie_id(request: Request) -> Optional[str]:
     return request.cookies.get(TRUSTED_DEVICE_COOKIE)
 
@@ -1340,8 +1477,9 @@ async def receive_crash_report(request: Request, _=Depends(require_auth)):
 # ── Contacts sync ─────────────────────────────────────────────────────────────
 
 @app.post("/api/contacts/sync")
-async def sync_contacts(request: Request, _=Depends(require_auth)):
+async def sync_contacts(request: Request, session_id: str = Depends(require_auth)):
     """Full-replace sync: delete all existing contacts and insert fresh from Android."""
+    _require_capability(session_id, "phone")
     try:
         contacts = await request.json()
     except Exception:
@@ -1376,8 +1514,9 @@ async def sync_contacts(request: Request, _=Depends(require_auth)):
 
 
 @app.get("/api/contacts/search")
-async def search_contacts(q: str = "", _=Depends(require_auth)):
+async def search_contacts(q: str = "", session_id: str = Depends(require_auth)):
     """Search contacts by name, return aggregated per person (phones + emails merged)."""
+    _require_capability(session_id, "phone")
     if not q.strip():
         raise HTTPException(status_code=400, detail="Query parameter 'q' is required")
     query = f"%{q.strip()}%"
@@ -1400,8 +1539,9 @@ async def search_contacts(q: str = "", _=Depends(require_auth)):
 
 
 @app.get("/api/contacts")
-async def list_contacts(request: Request, _=Depends(require_auth)):
+async def list_contacts(request: Request, session_id: str = Depends(require_auth)):
     """List all synced contacts."""
+    _require_capability(session_id, "phone")
     with get_db() as conn:
         rows = conn.execute(
             "SELECT display_name, phone_number, email, is_primary, contact_id, synced_at FROM contacts ORDER BY display_name"
@@ -1410,7 +1550,8 @@ async def list_contacts(request: Request, _=Depends(require_auth)):
 
 
 @app.post("/api/contacts/alias")
-async def add_contact_alias(request: Request, _=Depends(require_auth)):
+async def add_contact_alias(request: Request, session_id: str = Depends(require_auth)):
+    _require_capability(session_id, "phone")
     """Write a relational alias → phone number mapping.
 
     Used by Opus when it resolves an unknown relational name (e.g. "my wife")
@@ -1435,7 +1576,8 @@ async def add_contact_alias(request: Request, _=Depends(require_auth)):
 # ── SMS message sync ──────────────────────────────────────────────────────────
 
 @app.post("/api/messages/sync")
-async def sync_messages(request: Request, _=Depends(require_auth)):
+async def sync_messages(request: Request, session_id: str = Depends(require_auth)):
+    _require_capability(session_id, "phone")
     """Full-replace sync for recent SMS messages from Android.
 
     Accepts a JSON array of message objects with keys:
@@ -2069,8 +2211,9 @@ def _drain_pending_commands() -> list[dict]:
 
 
 @app.post("/api/device/sync-sms")
-async def trigger_sms_sync(_=Depends(require_auth)):
+async def trigger_sms_sync(session_id: str = Depends(require_auth)):
     """Server-initiated SMS sync. Queues a command for the Android app."""
+    _require_capability(session_id, "phone")
     queue_device_command("sync_sms")
     return {"status": "queued", "message": "SMS sync will trigger on next Android poll"}
 
@@ -2371,9 +2514,10 @@ async def list_root(
     request: Request,
     offset: int = 0,
     limit: int = 0,
-    _=Depends(require_auth),
+    session_id: str = Depends(require_auth),
 ):
-    return _paginate_listing(list_directory(""), offset, limit)
+    vault_root, _caps, _managed, _uid = _require_capability(session_id, "vault_read")
+    return _paginate_listing(list_directory("", root_dir=vault_root), offset, limit)
 
 
 @app.get("/api/files/list/{path:path}")
@@ -2382,9 +2526,10 @@ async def list_path(
     request: Request,
     offset: int = 0,
     limit: int = 0,
-    _=Depends(require_auth),
+    session_id: str = Depends(require_auth),
 ):
-    return _paginate_listing(list_directory(path), offset, limit)
+    vault_root, _caps, _managed, _uid = _require_capability(session_id, "vault_read")
+    return _paginate_listing(list_directory(path, root_dir=vault_root), offset, limit)
 
 
 def _paginate_listing(listing: dict, offset: int, limit: int) -> dict:
@@ -2407,20 +2552,23 @@ def _paginate_listing(listing: dict, offset: int, limit: int) -> dict:
 
 
 @app.get("/api/files/meta/{path:path}")
-async def file_meta(path: str, request: Request, _=Depends(require_auth)):
-    return get_file_metadata(path)
+async def file_meta(path: str, request: Request, session_id: str = Depends(require_auth)):
+    vault_root, _caps, _managed, _uid = _require_capability(session_id, "vault_read")
+    return get_file_metadata(path, root_dir=vault_root)
 
 
 @app.patch("/api/files/description/{path:path}")
-async def update_file_description(path: str, body: dict, _=Depends(require_auth)):
-    ok = update_description(path, body.get("description", ""))
+async def update_file_description(path: str, body: dict, session_id: str = Depends(require_auth)):
+    vault_root, _caps, _managed, uid = _require_capability(session_id, "vault_write")
+    ok = update_description(path, body.get("description", ""), root_dir=vault_root, user_id=uid)
     return {"ok": ok}
 
 
 @app.get("/api/files/thumbnail/{path:path}")
 async def thumbnail(path: str, request: Request):
     check_share_or_auth(request, path)
-    data = generate_thumbnail(path)
+    vault_root = _request_vault_root(request)
+    data = generate_thumbnail(path, root_dir=vault_root)
     if not data:
         raise HTTPException(status_code=404)
     return Response(content=data, media_type="image/jpeg")
@@ -2429,8 +2577,9 @@ async def thumbnail(path: str, request: Request):
 @app.get("/api/files/serve/{path:path}")
 async def serve_file(path: str, request: Request):
     check_share_or_auth(request, path)
+    vault_root = _request_vault_root(request)
     try:
-        target = safe_vault_path(path)
+        target = safe_vault_path(path, root_dir=vault_root)
     except ValueError:
         raise HTTPException(status_code=403)
     if not target.exists() or not target.is_file():
@@ -2481,11 +2630,12 @@ async def file_changes(_=Depends(require_auth)):
 
 
 @app.get("/api/files/find")
-async def find_file(name: str, _=Depends(require_auth)):
+async def find_file(name: str, session_id: str = Depends(require_auth)):
+    vault_root, _caps, _managed, _uid = _require_capability(session_id, "vault_read")
     name = os.path.basename(name)
-    for root, dirs, files in os.walk(VAULT_DIR):
+    for root, dirs, files in os.walk(vault_root):
         if name in files:
-            rel = os.path.relpath(os.path.join(root, name), VAULT_DIR)
+            rel = os.path.relpath(os.path.join(root, name), vault_root)
             return {"path": rel}
     raise HTTPException(status_code=404, detail="File not found in vault")
 
@@ -2507,17 +2657,18 @@ def _detect_file_type(filename: str) -> str:
 
 
 @app.get("/api/files/search")
-async def search_files(q: str, type: Optional[str] = None, _=Depends(require_auth)):
+async def search_files(q: str, type: Optional[str] = None, session_id: str = Depends(require_auth)):
     """Search vault files by name and ChromaDB description."""
     if not q or not q.strip():
         return {"results": []}
 
+    vault_root, _caps, _managed, _uid = _require_capability(session_id, "vault_read")
     query = q.strip().lower()
     results_map: dict[str, dict] = {}  # keyed by relative path
 
     # 1. Walk vault and match filenames
     type_exts = _FILE_TYPE_EXTENSIONS.get(type) if type else None
-    for root, _dirs, files in os.walk(VAULT_DIR):
+    for root, _dirs, files in os.walk(vault_root):
         for fname in files:
             if fname.startswith("."):
                 continue
@@ -2525,7 +2676,7 @@ async def search_files(q: str, type: Optional[str] = None, _=Depends(require_aut
                 ext = os.path.splitext(fname)[1].lower()
                 if type_exts and ext not in type_exts:
                     continue
-                rel = os.path.relpath(os.path.join(root, fname), VAULT_DIR)
+                rel = os.path.relpath(os.path.join(root, fname), vault_root)
                 ftype = _detect_file_type(fname)
                 results_map[rel] = {
                     "name": fname,
@@ -2547,20 +2698,33 @@ async def search_files(q: str, type: Optional[str] = None, _=Depends(require_aut
         vector_db = os.environ.get(
             "VESSENCE_DATA_HOME", os.path.expanduser("~/ambient/vessence-data")
         ) + "/memory/v1/vector_db"
+        # Managed users must never see another user's description, even if two
+        # users happen to have a same-named file. We filter by the user_id
+        # metadata tag written by upsert_file_index_entry.
+        allowed_scope = _uid if _managed else None
         for collection_name in ("vault_files", "facts"):
             try:
                 docs, metas, _dists = _query_collection(vector_db, collection_name, q, 20)
                 for doc, meta in zip(docs, metas):
+                    meta = meta or {}
+                    # Scope check: managed user may only see rows tagged with
+                    # their id (or legacy untagged rows in their own vault).
+                    row_scope = (meta.get("user_id") or "").strip()
+                    if allowed_scope and row_scope and row_scope != allowed_scope:
+                        continue
                     # Try to extract a path from metadata
-                    fpath = (meta or {}).get("path", "") or (meta or {}).get("file", "") or ""
+                    fpath = meta.get("path", "") or meta.get("file", "") or ""
                     if not fpath:
                         continue
-                    # Make relative to vault
+                    # Make relative to this user's vault
                     if os.path.isabs(fpath):
                         try:
-                            fpath = os.path.relpath(fpath, VAULT_DIR)
+                            fpath = os.path.relpath(fpath, vault_root)
                         except ValueError:
                             continue
+                    # Exclude any path that walks outside the user's vault
+                    if fpath.startswith(".."):
+                        continue
                     fname = os.path.basename(fpath)
                     ftype = _detect_file_type(fname)
                     if type_exts:
@@ -2568,8 +2732,8 @@ async def search_files(q: str, type: Optional[str] = None, _=Depends(require_aut
                         if ext not in type_exts:
                             continue
                     if fpath not in results_map:
-                        # Verify the file actually exists
-                        full = os.path.join(VAULT_DIR, fpath)
+                        # Verify the file actually exists in the user's vault
+                        full = os.path.join(vault_root, fpath)
                         if not os.path.isfile(full):
                             continue
                         results_map[fpath] = {
@@ -2594,10 +2758,11 @@ async def search_files(q: str, type: Optional[str] = None, _=Depends(require_aut
 
 
 @app.get("/api/files/play/{path:path}")
-async def play_audio_file(path: str, _=Depends(require_auth)):
+async def play_audio_file(path: str, session_id: str = Depends(require_auth)):
     """Serve an audio file with appropriate headers for streaming playback."""
+    vault_root, _caps, _managed, _uid = _require_capability(session_id, "vault_read")
     try:
-        target = safe_vault_path(path)
+        target = safe_vault_path(path, root_dir=vault_root)
     except ValueError:
         raise HTTPException(status_code=403)
     if not target.exists() or not target.is_file():
@@ -2611,9 +2776,10 @@ async def play_audio_file(path: str, _=Depends(require_auth)):
 
 
 @app.get("/api/files/content/{path:path}")
-async def get_file_content(path: str, _=Depends(require_auth)):
+async def get_file_content(path: str, session_id: str = Depends(require_auth)):
+    vault_root, _caps, _managed, _uid = _require_capability(session_id, "vault_read")
     try:
-        target = safe_vault_path(path)
+        target = safe_vault_path(path, root_dir=vault_root)
     except ValueError:
         raise HTTPException(status_code=403)
     if not target.exists() or not target.is_file():
@@ -2628,9 +2794,10 @@ async def get_file_content(path: str, _=Depends(require_auth)):
 
 
 @app.put("/api/files/content/{path:path}")
-async def save_file_content(path: str, body: dict, _=Depends(require_auth)):
+async def save_file_content(path: str, body: dict, session_id: str = Depends(require_auth)):
+    vault_root, _caps, _managed, _uid = _require_capability(session_id, "vault_write")
     try:
-        target = safe_vault_path(path)
+        target = safe_vault_path(path, root_dir=vault_root)
     except ValueError:
         raise HTTPException(status_code=403)
     if not target.exists() or not target.is_file():
@@ -2649,9 +2816,10 @@ async def upload_files(
     files: list[UploadFile] = File(...),
     destination: str = Form(""),
     descriptions_json: str = Form("[]"),
-    _=Depends(require_auth),
+    session_id: str = Depends(require_auth),
 ):
-    vault_root = Path(VAULT_DIR)
+    vault_root_str, _caps, _managed, upload_user_id = _require_capability(session_id, "vault_write")
+    vault_root = Path(vault_root_str)
     hash_index_path = vault_root / ".hash_index.json"
     try:
         descriptions = json.loads(descriptions_json or "[]")
@@ -2714,15 +2882,27 @@ async def upload_files(
             "path": rel_path,
             "description": description,
         }
-        upsert_file_index_entry(rel_path, description, mime, updated_by="jane_web_upload")
+        upsert_file_index_entry(
+            rel_path,
+            description,
+            mime,
+            updated_by="jane_web_upload",
+            root_dir=vault_root,
+            user_id=upload_user_id,
+        )
 
         try:
-            subprocess.run([
+            _add_fact_cmd = [
                 ADK_VENV_PYTHON,
                 ADD_FACT_SCRIPT,
                 f"File uploaded via web UI: {dest_path.name} saved to vault/{subdir}/",
                 "--topic", "vault", "--subtopic", "upload",
-            ], timeout=10, capture_output=True)
+                "--user-id", upload_user_id,
+            ]
+            _memory_path = _user_memory_path(upload_user_id)
+            if _memory_path:
+                _add_fact_cmd += ["--memory-path", _memory_path]
+            subprocess.run(_add_fact_cmd, timeout=10, capture_output=True)
         except Exception:
             pass
 
@@ -2761,7 +2941,8 @@ async def upload_single_file(
     if not session_id:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    vault_root = Path(VAULT_DIR)
+    vault_root_str, _caps, _managed, upload_user_id = _require_capability(session_id, "vault_write")
+    vault_root = Path(vault_root_str)
     data = await file.read()
     mime = file.content_type or get_mime(file.filename or "")
     subdir = "working_files/android_uploads"
@@ -2785,19 +2966,31 @@ async def upload_single_file(
     # Index in ChromaDB so Jane and memory system can find the file
     try:
         from vault_web.files import upsert_file_index_entry
-        upsert_file_index_entry(rel_path, f"File uploaded from Android: {dest_path.name}", mime, updated_by="android_upload")
+        upsert_file_index_entry(
+            rel_path,
+            f"File uploaded from Android: {dest_path.name}",
+            mime,
+            updated_by="android_upload",
+            root_dir=vault_root,
+            user_id=upload_user_id,
+        )
     except Exception:
         pass
 
     # Save to memory
     try:
         import subprocess as _sp
-        _sp.run([
+        _add_fact_cmd = [
             sys.executable,
             str(Path(__file__).resolve().parents[1] / "agent_skills" / "add_fact.py"),
             f"File uploaded from Android: {dest_path.name} saved to vault/{subdir}/",
             "--topic", "vault", "--subtopic", "upload",
-        ], timeout=10, capture_output=True)
+            "--user-id", upload_user_id,
+        ]
+        _memory_path = _user_memory_path(upload_user_id)
+        if _memory_path:
+            _add_fact_cmd += ["--memory-path", _memory_path]
+        _sp.run(_add_fact_cmd, timeout=10, capture_output=True)
     except Exception:
         pass
 
@@ -3144,7 +3337,8 @@ async def jane_end_session(body: SessionControl, request: Request):
         _session_log_id(body.session_id),
         _client_ip(request),
     )
-    end_session(session_id)
+    user_id = get_session_user(session_id) or _default_user_id()
+    end_session(user_id, session_id)
     response = JSONResponse({"ok": True})
     if get_session_id(request) != session_id:
         response.set_cookie(SESSION_COOKIE, session_id, httponly=True, secure=_cookie_secure_flag(request), samesite="lax",
@@ -3683,7 +3877,8 @@ async def jane_init_session(body: SessionControl, request: Request):
         from llm_brain.v1.persistent_codex import get_codex_persistent_manager
         manager = get_codex_persistent_manager()
         init_status = "Sending init prompt to Codex..."
-    session = await manager.get(body.session_id or session_id)
+    session_user_id = get_session_user(session_id) or _default_user_id()
+    session = await manager.get(session_user_id, body.session_id or session_id)
 
     if not session.is_fresh():
         # Already warm — no init needed
@@ -4081,6 +4276,30 @@ async def add_briefing_topic(body: dict, _=Depends(require_auth)):
         raise HTTPException(status_code=422, detail="name and keywords are required")
     category = body.get("category", "General")
     return bt.add_topic(name, keywords, priority, category)
+
+
+@app.put("/api/briefing/topics/{topic_name}")
+async def update_briefing_topic(topic_name: str, body: dict, _=Depends(require_auth)):
+    """Update a topic. Body may contain: new_name, keywords, priority, category."""
+    bt = _briefing_tools()
+    update_fn = getattr(bt, "update_topic", None)
+    if update_fn is None:
+        raise HTTPException(status_code=501, detail="update_topic not available in daily_briefing tools")
+    kwargs = {}
+    if "new_name" in body and body["new_name"]:
+        kwargs["new_name"] = body["new_name"]
+    if "keywords" in body and body["keywords"] is not None:
+        kwargs["keywords"] = body["keywords"]
+    if "priority" in body and body["priority"]:
+        kwargs["priority"] = body["priority"]
+    if "category" in body and body["category"]:
+        kwargs["category"] = body["category"]
+    result = update_fn(topic_name, **kwargs)
+    if result.get("status") == "error":
+        msg = result.get("message", "")
+        code = 409 if "already exists" in msg else 404
+        raise HTTPException(status_code=code, detail=msg)
+    return result
 
 
 @app.delete("/api/briefing/topics/{topic_name}")
@@ -4824,6 +5043,191 @@ async def get_archived_briefing(date: str, _=Depends(require_auth)):
     async with aiofiles.open(file_path, "r") as f:
         data = json.loads(await f.read())
     return data
+
+
+# ─── Facebook Marketplace Routes ─────────────────────────────────────────────
+#
+# Saved searches live in vessence-data/config/marketplace_searches.json and
+# harvested listings in vessence-data/data/facebook_marketplace_finds/<name>/.
+# The harvester (agent_skills.marketplace.harvester) is intended to run via
+# cron; these endpoints are read-mostly so the UI stays fast.
+
+
+def _mk_mods():
+    from agent_skills.marketplace import config as mk_config
+    from agent_skills.marketplace import harvester as mk_harvester
+    return mk_config, mk_harvester
+
+
+def _mk_summarize():
+    from agent_skills.marketplace import summarize as mk_summarize
+    return mk_summarize
+
+
+def _mk_refresh():
+    from agent_skills.marketplace import refresh as mk_refresh
+    return mk_refresh
+
+
+_SAFE_MK_NAME = re.compile(r"^[a-z0-9_-]{1,40}$")
+
+
+def _ensure_safe_mk_name(name: str) -> None:
+    if not _SAFE_MK_NAME.match(name):
+        raise HTTPException(status_code=400, detail="invalid search name")
+
+
+@app.get("/api/marketplace/searches")
+async def marketplace_searches(_=Depends(require_auth)):
+    """List all saved Marketplace searches (with per-search passed_count)."""
+    cfg, harv = _mk_mods()
+    out = []
+    for s in cfg.list_searches():
+        summary = harv.listings_for(s["name"])
+        out.append({
+            "name": s["name"],
+            "label": s.get("label", s["name"]),
+            "queries": s.get("queries", []),
+            "filters": s.get("filters", {}),
+            "location_id": s.get("location_id"),
+            "created": s.get("created"),
+            "updated": s.get("updated"),
+            "last_refreshed": summary.get("last_refreshed"),
+            "passed_count": summary.get("passed_count", 0),
+        })
+    return JSONResponse({"searches": out})
+
+
+@app.post("/api/marketplace/searches")
+async def marketplace_create_search(request: Request, _=Depends(require_auth)):
+    body = await request.json()
+    cfg, _h = _mk_mods()
+    name = (body.get("name") or "").strip()
+    _ensure_safe_mk_name(name)
+    queries = body.get("queries") or []
+    if not isinstance(queries, list) or not queries:
+        raise HTTPException(status_code=400, detail="queries required")
+    try:
+        saved = cfg.save_search(
+            name,
+            label=body.get("label") or name,
+            queries=[str(q).strip() for q in queries if str(q).strip()],
+            filters=body.get("filters"),
+            location_id=body.get("location_id") or cfg.DEFAULT_LOCATION_ID,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return JSONResponse({"name": name, **saved})
+
+
+@app.get("/api/marketplace/search/{name}")
+async def marketplace_get_search(name: str, _=Depends(require_auth)):
+    _ensure_safe_mk_name(name)
+    cfg, harv = _mk_mods()
+    search = cfg.get_search(name)
+    if search is None:
+        raise HTTPException(status_code=404, detail="search not found")
+    summary = harv.listings_for(name)
+    return JSONResponse({
+        "name": name,
+        "label": search.get("label", name),
+        "queries": search.get("queries", []),
+        "filters": search.get("filters", {}),
+        "last_refreshed": summary.get("last_refreshed"),
+        "passed_count": summary.get("passed_count", 0),
+        "listings": summary.get("listings", []),
+    })
+
+
+@app.delete("/api/marketplace/search/{name}")
+async def marketplace_delete_search(name: str, _=Depends(require_auth)):
+    _ensure_safe_mk_name(name)
+    cfg, _h = _mk_mods()
+    if not cfg.delete_search(name):
+        raise HTTPException(status_code=404, detail="search not found")
+    return JSONResponse({"deleted": name})
+
+
+@app.get("/api/marketplace/listing/{name}/{slug}/{listing_id}")
+async def marketplace_listing_detail(name: str, slug: str, listing_id: str,
+                                     _=Depends(require_auth)):
+    _ensure_safe_mk_name(name)
+    if not re.match(r"^[a-z0-9_-]{1,60}$", slug) or not re.match(r"^[0-9]{4,25}$", listing_id):
+        raise HTTPException(status_code=400, detail="invalid slug or id")
+    _cfg, harv = _mk_mods()
+    d = harv.listing_detail(name, slug, listing_id)
+    if d is None:
+        raise HTTPException(status_code=404, detail="listing not found")
+    return JSONResponse(d)
+
+
+@app.get("/api/marketplace/summary/{name}")
+async def marketplace_get_summary(name: str, _=Depends(require_auth)):
+    _ensure_safe_mk_name(name)
+    s = _mk_summarize().get_summary(name)
+    if s is None:
+        return JSONResponse({"search": name, "summary": None,
+                             "generated_at": None})
+    return JSONResponse(s)
+
+
+@app.get("/api/marketplace/refresh/{name}")
+async def marketplace_refresh_status(name: str, _=Depends(require_auth)):
+    _ensure_safe_mk_name(name)
+    return JSONResponse(_mk_refresh().get_status(name))
+
+
+@app.post("/api/marketplace/refresh/{name}")
+async def marketplace_refresh_now(name: str, _=Depends(require_auth)):
+    """Kick off harvester+summarizer in the background. Returns immediately.
+
+    The client should poll GET /api/marketplace/refresh/{name} until
+    ``state`` goes back to ``idle`` (or ``error``).
+    """
+    _ensure_safe_mk_name(name)
+    cfg, _h = _mk_mods()
+    if cfg.get_search(name) is None:
+        raise HTTPException(status_code=404, detail="search not found")
+    r = _mk_refresh()
+    current = r.get_status(name)
+    if current.get("state") == "running":
+        return JSONResponse({"state": "already_running", **current})
+
+    python_bin = os.environ.get("PYTHON_BIN", sys.executable)
+    cwd = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    log_dir = Path(os.environ.get("VESSENCE_DATA_HOME",
+                                  os.path.expanduser("~/ambient/vessence-data"))) / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = log_dir / f"marketplace_refresh_{name}.log"
+    env = {**os.environ}
+    # Playwright runs headless here too — the web server has no display.
+    env.pop("DISPLAY", None)
+    env.pop("WAYLAND_DISPLAY", None)
+    logf = open(log_path, "a")
+    logf.write(f"\n=== manual refresh {name} at "
+               f"{datetime.now().isoformat(timespec='seconds')} ===\n")
+    logf.flush()
+    subprocess.Popen(
+        [python_bin, "-m", "agent_skills.marketplace.refresh", name],
+        cwd=cwd, env=env, stdout=logf, stderr=logf,
+        start_new_session=True,
+    )
+    return JSONResponse({"state": "started", "search": name})
+
+
+@app.get("/marketplace-image/{name}/{slug}/{listing_id}/{photo_name}")
+async def marketplace_image(name: str, slug: str, listing_id: str,
+                            photo_name: str, _=Depends(require_auth)):
+    _ensure_safe_mk_name(name)
+    if not re.match(r"^[a-z0-9_-]{1,60}$", slug) or not re.match(r"^[0-9]{4,25}$", listing_id):
+        raise HTTPException(status_code=400, detail="invalid slug or id")
+    if not re.match(r"^photo_\d{2,3}\.(jpg|jpeg|png|webp)$", photo_name):
+        raise HTTPException(status_code=400, detail="invalid photo name")
+    _cfg, harv = _mk_mods()
+    p = harv.photo_path(name, slug, listing_id, photo_name)
+    if p is None:
+        raise HTTPException(status_code=404, detail="photo not found")
+    return FileResponse(str(p))
 
 
 # ─── Tax Accountant 2025 Routes ──────────────────────────────────────────────

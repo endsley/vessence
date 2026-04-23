@@ -1,20 +1,25 @@
 # Code Map — Android (Kotlin)
-_Auto-generated on 2026-04-21 08:15 UTC by `generate_code_map.py`_
+_Auto-generated on 2026-04-22 08:15 UTC by `generate_code_map.py`_
 
-## android:.../ArticleReaderV2Activity.kt (241 lines)
-  class ArticleReaderV2Activity → L36
-    EXTRA_URL → L39
-    override onCreate() → L52
-    override onPageFinished() → L116
-    override onReceivedError() → L126
-    extractAndSpeak() → L139
-    readAsset() → L171
-    parseJsString() → L179
-    cleanArticleText() → L184
-    splitForTts() → L201
-    flush() → L205
-    articleExtractionJs() → L226
-    override onDestroy() → L233
+## android:.../ArticleReaderV2Activity.kt (339 lines)
+  class ArticleReaderV2Activity → L35
+    EXTRA_URL → L38
+    EXTRA_MODE → L39
+    MODE_SUMMARIZE → L40
+    MODE_BRIEFING → L41
+    override onCreate() → L56
+    override onPageFinished() → L128
+    override onReceivedError() → L138
+    extractAndSpeak() → L151
+    summarizeViaServer() → L179
+    submitToBriefing() → L234
+    readAsset() → L269
+    parseJsString() → L277
+    cleanArticleText() → L282
+    splitForTts() → L299
+    flush() → L303
+    articleExtractionJs() → L324
+    override onDestroy() → L331
 
 ## android:.../CrashReporter.kt (118 lines)
   object CrashReporter → L17
@@ -87,22 +92,21 @@ _Auto-generated on 2026-04-21 08:15 UTC by `generate_code_map.py`_
     override onGetSession() → L16
     override onDestroy() → L20
 
-## android:.../ShareReceiverActivity.kt (362 lines)
-  class ShareReceiverActivity → L39
-    override onCreate() → L41
-    extractUrl() → L88
-    summarizeNowV2() → L93
-    summarizeNow() → L105
-    addToBriefing() → L183
-  object ShareSummarizer → L225
-    postSummaryReady() → L232
-    speakHeadsUp() → L266
-    getOrCreateTts() → L283
-    buildFocusRequest() → L293
-    suspend requestFocus() → L311
-    suspend releaseFocus() → L327
-    postSummaryFailed() → L338
-    ensureChannel() → L351
+## android:.../ShareReceiverActivity.kt (329 lines)
+  class ShareReceiverActivity → L36
+    override onCreate() → L38
+    extractUrl() → L84
+    summarizeNow() → L93
+    addToBriefing() → L152
+  object ShareSummarizer → L192
+    postSummaryReady() → L199
+    speakHeadsUp() → L233
+    getOrCreateTts() → L250
+    buildFocusRequest() → L260
+    suspend requestFocus() → L278
+    suspend releaseFocus() → L294
+    postSummaryFailed() → L305
+    ensureChannel() → L318
 
 ## android:.../SharedIntentState.kt (30 lines)
   object SharedIntentState → L11
@@ -114,19 +118,23 @@ _Auto-generated on 2026-04-21 08:15 UTC by `generate_code_map.py`_
   object SttResultBus → L17
     postResult() → L26
 
-## android:.../SummaryReaderActivity.kt (242 lines)
-  class SummaryReaderActivity → L55
-    EXTRA_TITLE → L58
-    EXTRA_SUMMARY → L59
-    EXTRA_URL → L60
-    override onCreate() → L69
-    override onDestroy() → L92
-    startSpeaking() → L99
-    stopSpeaking() → L117
-    buildFocusRequest() → L123
-    suspend requestFocus() → L138
-    suspend releaseFocus() → L154
-  @Composable ReaderScreen() → L167
+## android:.../SummaryReaderActivity.kt (360 lines)
+  class SummaryReaderActivity → L66
+    EXTRA_TITLE → L69
+    EXTRA_SUMMARY → L70
+    EXTRA_URL → L71
+    override onCreate() → L92
+    override onDestroy() → L120
+    play() → L129
+    pause() → L141
+    seek() → L151
+    launchPlayback() → L168
+    buildFocusRequest() → L201
+    requestFocus() → L217
+    releaseFocus() → L231
+  class ReaderState → L242
+  buildSentences() → L251
+  @Composable ReaderScreen() → L274
 
 ## android:.../VessencesApp.kt (257 lines)
   @Composable VessencesApp() → L49
@@ -291,16 +299,20 @@ _Auto-generated on 2026-04-21 08:15 UTC by `generate_code_map.py`_
     suspend poll() → L47
     handleDeviceCommand() → L88
 
-## android:.../data/repository/AuthRepository.kt (188 lines)
-  class LegacySignInFallbackNeeded → L25
-  class AuthRepository → L27
-    suspend checkAuth() → L33
-    isServerDown() → L47
-    suspend signInWithGoogle() → L66
-    getLegacySignInIntent() → L119
-    suspend handleLegacySignInResult() → L128
-    suspend _sendTokenToBackends() → L147
-    suspend logout() → L181
+## android:.../data/repository/AuthRepository.kt (336 lines)
+  class LegacySignInFallbackNeeded → L33
+  class AuthRepository → L35
+    authDiagnostics() → L41
+    authEnvironment() → L50
+    signingSha1Prefix() → L69
+    idTokenClaims() → L94
+    suspend checkAuth() → L109
+    isServerDown() → L123
+    suspend signInWithGoogle() → L142
+    getLegacySignInIntent() → L210
+    suspend handleLegacySignInResult() → L223
+    suspend _sendTokenToBackends() → L267
+    suspend logout() → L329
 
 ## android:.../data/repository/ChatRepository.kt (289 lines)
   class UploadResult → L45
@@ -558,15 +570,16 @@ _Auto-generated on 2026-04-21 08:15 UTC by `generate_code_map.py`_
     override onDone() → L300
     override onError() → L304
 
-## android:.../ui/auth/LoginScreen.kt (172 lines)
-  @Composable LoginScreen() → L35
+## android:.../ui/auth/LoginScreen.kt (183 lines)
+  @Composable LoginScreen() → L36
 
-## android:.../ui/auth/LoginViewModel.kt (78 lines)
-  class LoginViewModel → L18
-    signIn() → L38
-    handleLegacyResult() → L58
-    logout() → L69
-    clearError() → L75
+## android:.../ui/auth/LoginViewModel.kt (94 lines)
+  class LoginViewModel → L19
+    signIn() → L39
+    handleLegacyResult() → L69
+    logout() → L80
+    clearError() → L86
+    cancelSignIn() → L90
 
 ## android:.../ui/briefing/BriefingScreen.kt (1080 lines)
   @Composable BriefingScreen() → L97
@@ -629,7 +642,7 @@ _Auto-generated on 2026-04-21 08:15 UTC by `generate_code_map.py`_
   @Composable VoiceStatusBanner() → L459
   @Composable ErrorBanner() → L544
 
-## android:.../ui/chat/ChatViewModel.kt (1585 lines)
+## android:.../ui/chat/ChatViewModel.kt (1614 lines)
   class PendingMessage → L36
   class ChatUiState → L42
   class ChatViewModel → L60
@@ -655,28 +668,29 @@ _Auto-generated on 2026-04-21 08:15 UTC by `generate_code_map.py`_
     installUpdate() → L1215
     toggleTts() → L1222
     stopSpeaking() → L1233
-    speakText() → L1243
-    stopSentenceTtsQueues() → L1247
-    speakIfEnabled() → L1256
-    suspend tryServerTts() → L1267
-    autoListenAfterTts() → L1329
-    endVoiceConversation() → L1343
-    isConversationEndPhrase() → L1359
-    showSystemMessage() → L1381
-    clearSession() → L1390
-    setAlwaysListeningEnabled() → L1403
-    syncVoicePreferences() → L1410
-    clearWakeWordTrigger() → L1414
-    triggerWakeWord() → L1419
-    startPushToTalk() → L1424
-    stopPushToTalk() → L1428
-    cancelListening() → L1432
-    stopListeningAndReturnToWakeWord() → L1437
-    clearVoiceError() → L1446
-    updateAiMessage() → L1450
-    switchProvider() → L1478
-    suspend prependPendingToolResults() → L1541
-    override onCleared() → L1567
+    speakText() → L1246
+    stopSentenceTtsQueues() → L1250
+    reportStopSpeakingFailure() → L1259
+    speakIfEnabled() → L1273
+    suspend tryServerTts() → L1284
+    autoListenAfterTts() → L1346
+    endVoiceConversation() → L1360
+    isConversationEndPhrase() → L1388
+    showSystemMessage() → L1410
+    clearSession() → L1419
+    setAlwaysListeningEnabled() → L1432
+    syncVoicePreferences() → L1439
+    clearWakeWordTrigger() → L1443
+    triggerWakeWord() → L1448
+    startPushToTalk() → L1453
+    stopPushToTalk() → L1457
+    cancelListening() → L1461
+    stopListeningAndReturnToWakeWord() → L1466
+    clearVoiceError() → L1475
+    updateAiMessage() → L1479
+    switchProvider() → L1507
+    suspend prependPendingToolResults() → L1570
+    override onCleared() → L1596
 
 ## android:.../ui/chat/ChatViewModelFactory.kt (24 lines)
   class ChatViewModelFactory → L9

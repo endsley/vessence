@@ -93,6 +93,7 @@ PROVEN_CLASSES = {
     "MUSIC_PLAY",
     "SEND_MESSAGE",
     "TIMER",
+    "CLINIC_SCHEDULES_INFO",
     "END_CONVERSATION",  # has its own 0.80 floor below; still "proven"
 }
 
@@ -169,6 +170,14 @@ def _strict_keyword_ok(raw_cls: str, cleaned_prompt: str) -> bool:
     return False
 
 
+def _clinic_schedule_ok(cleaned_prompt: str) -> bool:
+    """Keep first-person personal schedule phrasing out of clinic routing."""
+    lc = cleaned_prompt.lower()
+    if "my schedule" not in lc:
+        return True
+    return any(k in lc for k in ("clinic", "patient", "patients", "kathia", "her schedule"))
+
+
 def _end_conversation_phrase_ok(cleaned_prompt: str) -> bool:
     """Only allow END_CONVERSATION for complete ending utterances.
 
@@ -192,6 +201,7 @@ _CLASS_MAP = {
     "SHOPPING_LIST":     "shopping list",
     "READ_EMAIL":        "read email",
     "READ_CALENDAR":     "read calendar",
+    "CLINIC_SCHEDULES_INFO": "clinic schedules info",
     "END_CONVERSATION":  "end conversation",
     "GET_TIME":          "get time",
     "TIMER":             "timer",
@@ -309,6 +319,12 @@ async def classify(
         conf = "Low"
     elif raw_cls == "END_CONVERSATION" and confidence < 0.80:
         # Extra floor: a wrong END_CONVERSATION destroys the session.
+        conf = "Low"
+    elif raw_cls == "CLINIC_SCHEDULES_INFO" and not _clinic_schedule_ok(cleaned):
+        logger.info(
+            "stage1_classifier: CLINIC_SCHEDULES_INFO rejected personal schedule phrasing %r",
+            cleaned[:100],
+        )
         conf = "Low"
     elif confidence < gate["conf"] or margin < gate["margin"]:
         # Below this class's maturity gate → demote so Stage 3 decides.

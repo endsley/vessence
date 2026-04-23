@@ -105,11 +105,30 @@ class AndroidTtsManager(
         // tool-handler TTS deadlock: chat TTS called stop() mid-tool-utterance,
         // the tool's continuation never resumed, the handler never completed,
         // and PendingToolResultBuffer never received the result.
+        //
+        // isActive guard: onDone/onError/onStop callbacks run on the TTS
+        // engine thread and may race with this iteration. ConcurrentHashMap
+        // serializes the remove(), but by the time we call resume() a cancel
+        // could have landed. resume() on an already-resumed or cancelled
+        // continuation throws IllegalStateException. Check isActive first.
         val orphaned = pending.keys.toList()
         for (id in orphaned) {
-            pending.remove(id)?.resume(Unit)
+            pending.remove(id)?.let { continuation ->
+                if (continuation.isActive) {
+                    try {
+                        continuation.resume(Unit)
+                    } catch (t: Throwable) {
+                        android.util.Log.w("AndroidTtsManager", "resume on pending=$id failed", t)
+                    }
+                }
+            }
         }
-        textToSpeech.stop()
+        // Some vendor TTS engines (Samsung/Huawei) can throw from stop().
+        try {
+            textToSpeech.stop()
+        } catch (t: Throwable) {
+            android.util.Log.w("AndroidTtsManager", "textToSpeech.stop() failed", t)
+        }
     }
 
     fun shutdown() {

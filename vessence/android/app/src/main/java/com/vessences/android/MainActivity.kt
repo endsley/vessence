@@ -185,16 +185,11 @@ class MainActivity : ComponentActivity() {
                 override fun onReadyForSpeech(params: android.os.Bundle?) {
                     readyAtMs = SystemClock.elapsedRealtime()
                     DiagnosticReporter.voiceFlow("stt_ready", timingDetails())
-                    // Notify UI that we're actively listening
+                    // Notify UI that we're actively listening.
+                    // Google's SpeechRecognizer plays its own mic-open chime,
+                    // so we no longer emit a ToneGenerator beep here — that
+                    // caused a double-beep on every STT turn.
                     SttResultBus.onListening?.invoke(true)
-                    // Play a short beep so the user knows it's their turn to speak
-                    try {
-                        val tg = android.media.ToneGenerator(
-                            android.media.AudioManager.STREAM_MUSIC, 100)
-                        tg.startTone(android.media.ToneGenerator.TONE_PROP_BEEP, 120)
-                        android.os.Handler(android.os.Looper.getMainLooper())
-                            .postDelayed({ tg.release() }, 300)
-                    } catch (_: Exception) {}
                 }
                 override fun onBeginningOfSpeech() {
                     speechStartedAtMs = SystemClock.elapsedRealtime()

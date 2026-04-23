@@ -110,7 +110,10 @@ def _run_task(
         history: list[dict] = []
         try:
             from jane_web.jane_proxy import _get_session
-            state = _get_session(session_id)
+            from vault_web.auth import get_session_user
+            from jane_web.main import _default_user_id
+            _offload_user_id = get_session_user(session_id) or _default_user_id()
+            state = _get_session(_offload_user_id, session_id)
             history = list(state.history) if state and state.history else []
         except Exception as exc:
             logger.warning("Could not load session history for offloaded task %s: %s", task_id, exc)

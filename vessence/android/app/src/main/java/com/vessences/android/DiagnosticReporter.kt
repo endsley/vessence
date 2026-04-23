@@ -32,6 +32,7 @@ object DiagnosticReporter {
     private const val TAG = "Diagnostics"
     private const val PREFS = "diagnostic_reporter"
     private const val PENDING_KEY = "pending_queue"
+    private const val LAST_VOICE_CHECKPOINT_KEY = "last_voice_flow_checkpoint"
     private const val MAX_PENDING = 50
     private var appVersion: String = "unknown"
     private var versionCode: Long = -1
@@ -51,6 +52,7 @@ object DiagnosticReporter {
         try {
             prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         } catch (_: Exception) {}
+        reportPreviousVoiceCheckpoint()
     }
 
     private fun loadPending(): MutableList<String> {
@@ -220,5 +222,45 @@ object DiagnosticReporter {
         val payload = mutableMapOf<String, Any?>("stage" to stage)
         payload.putAll(details)
         report("voice_flow", "voice_flow[$stage]", payload)
+    }
+
+    /**
+     * Durable breadcrumb for failure paths where the process may die before the
+     * fire-and-forget diagnostic POST has a chance to finish.
+     */
+    fun voiceFlowCheckpoint(stage: String, details: Map<String, Any?> = emptyMap()) {
+        val payload = mutableMapOf<String, Any?>(
+            "stage" to stage,
+            "thread" to Thread.currentThread().name,
+            "is_main_thread" to (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()),
+        )
+        payload.putAll(details)
+        persistVoiceCheckpoint(payload)
+        report("voice_flow", "voice_flow[$stage]", payload)
+    }
+
+    private fun persistVoiceCheckpoint(payload: Map<String, Any?>) {
+        val p = prefs ?: return
+        try {
+            val json = JSONObject().apply {
+                put("timestamp", SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).format(Date()))
+                for ((k, v) in payload) put(k, v)
+            }.toString()
+            p.edit().putString(LAST_VOICE_CHECKPOINT_KEY, json).commit()
+        } catch (_: Exception) {}
+    }
+
+    private fun reportPreviousVoiceCheckpoint() {
+        val p = prefs ?: return
+        val raw = try {
+            p.getString(LAST_VOICE_CHECKPOINT_KEY, null)
+        } catch (_: Exception) {
+            null
+        } ?: return
+        report(
+            "voice_flow",
+            "previous_voice_flow_checkpoint",
+            mapOf("checkpoint" to raw),
+        )
     }
 }

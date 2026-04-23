@@ -51,6 +51,7 @@ from jane_web.jane_v2.pipeline import (
     _ack_for,
     _canonical_session_id,
     _persist_turn_to_fifo,
+    _stage2_fifo_turns,
     _stage2_response_parts,
 )
 from jane_web.session_context import set_current_session_id
@@ -76,7 +77,10 @@ def _persist_turn_to_ledger(session_id: str, user_prompt: str, jane_response: st
         return
     try:
         from jane_web.jane_proxy import _get_session, _persist_turns_async
-        state = _get_session(session_id)
+        from vault_web.auth import get_session_user
+        from jane_web.main import _default_user_id
+        _pl_user_id = get_session_user(session_id) or _default_user_id()
+        state = _get_session(_pl_user_id, session_id)
         user_turn = {"role": "user", "content": user_prompt or ""}
         assistant_turn = {"role": "assistant", "content": jane_response, "handler": "v3_stage2"}
         _persist_turns_async(
@@ -258,7 +262,10 @@ async def _classify_and_maybe_handle(prompt: str, session_id: str) -> dict:
     try:
         from jane_web.jane_v2 import recent_context
         from vault_web.recent_turns import get_active_state
-        fifo_ctx = recent_context.render_stage2_context(session_id, max_turns=4) or ""
+        fifo_ctx = recent_context.render_stage2_context(
+            session_id,
+            max_turns=_stage2_fifo_turns(cls, default=4),
+        ) or ""
         active_state = get_active_state(session_id) or {}
         pa = active_state.get("pending_action") or {}
         if pa.get("handler_class") == cls and pa.get("status") == "awaiting_user":

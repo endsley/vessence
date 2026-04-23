@@ -93,6 +93,14 @@ This document logs all scheduled tasks (cron jobs) for the system. It must be up
 
 ---
 
+## 18. Marketplace Harvester + Summarizer
+- **Schedule:** `0 2 * * *` (daily 2:00 AM)
+- **Script Path:** `$VESSENCE_HOME/startup_code/run_marketplace_cron.sh`
+- **Log:** `$VESSENCE_DATA_HOME/logs/marketplace_harvest.log`
+- **Description:** Iterates every saved search in `$VESSENCE_DATA_HOME/config/marketplace_searches.json` and for each one runs `python -m agent_skills.marketplace.refresh <name>` — Playwright-based Facebook Marketplace harvest followed by a Stage-2 LLM (qwen2.5:7b via Ollama) summary written to `summary_ai.json` in the search's data dir. The script explicitly unsets `DISPLAY`/`WAYLAND_DISPLAY` so Playwright runs headless regardless of the calling environment. Install line: `0 2 * * * $VESSENCE_HOME/startup_code/run_marketplace_cron.sh`.
+
+---
+
 ## 14. Kathia Schedule Scraper
 - **Schedule:** `0 */4 * * *` (every 4 hours)
 - **Script Path:** `$VESSENCE_HOME/startup_code/run_kathia_schedule.py`

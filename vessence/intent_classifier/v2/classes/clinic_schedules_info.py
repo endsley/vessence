@@ -1,11 +1,10 @@
 """CLINIC_SCHEDULES_INFO — read a practitioner's current-week booked appointment list.
 
-Chroma exemplars here MUST contain a clinic-specific noun — "patient(s)",
-"clinic", or a "clinic schedule"-style phrase. Generic wording like
-"how busy is she on Monday" or "who's coming in today" is deliberately
-excluded: those phrases could plausibly belong to other classes (personal
-calendar, general scheduling) and would pollute chroma. See the
-`class_exemplar_specificity` entry in preference_registry.json.
+Chroma exemplars here should usually contain a clinic-specific noun —
+"patient(s)", "clinic", or a "clinic schedule"-style phrase. Generic
+"the schedule" read questions are also included because Chieh uses that
+wording conversationally for Kathia's current-week clinic schedule. Keep
+"my schedule" calendar phrasing out of this class.
 
 Short topical follow-ups like "what about Tuesday" or "how about next
 Monday" are NOT in chroma either — the clinic handler attaches a
@@ -51,6 +50,11 @@ EXAMPLES = [
     "what does the clinic schedule look like on Friday",
     "what is the clinic schedule for Thursday",
     "give me the clinic schedule for Tuesday",
+    "what's the schedule like for Thursday",
+    "what does the schedule look like for Thursday",
+    "how does the schedule look for Thursday",
+    "what's the schedule look like tomorrow",
+    "what does the schedule look like tomorrow",
     "what does my clinic schedule look like tomorrow",
     "what is my clinic schedule look like tomorrow",
     "what does my clinic schedule look like on Wednesday",

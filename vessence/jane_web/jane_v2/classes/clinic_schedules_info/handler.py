@@ -17,6 +17,7 @@ Falls through to Stage 3 if the question can't be matched.
 from __future__ import annotations
 
 import datetime as _dt
+import json
 import logging
 import os
 import re
@@ -37,14 +38,21 @@ _DAYS = {
 _FOLLOW_UP_QUESTION = "Would you like to know about another day?"
 _FOLLOW_UP = f" {_FOLLOW_UP_QUESTION}"
 
-_PATIENT_FOLLOW_UP_QUESTION = "Any other patients you would like to know about?"
+_PATIENT_FOLLOW_UP_QUESTION = (
+    "Any other patients you want to know more about, or would you like me "
+    "to read the full summary so you can hear it?"
+)
 
 _LIST_FOLLOW_UP_QUESTION = (
     "Is there a specific patient you want more details of? "
-    "If so tell me the patient ID."
+    "If so tell me the patient name or ID."
 )
 
 _COUNT_FOLLOW_UP_QUESTION = "Would you like to know the names of these patients?"
+
+_NEXT_PATIENT_DETAILS_FOLLOW_UP_QUESTION = (
+    "Would you like to know more details about this patient?"
+)
 
 _CONFIRM_RE = re.compile(
     r"\b(yes|yeah|yep|yup|sure|ok|okay|please|list|tell me|go ahead|"
@@ -54,6 +62,12 @@ _CONFIRM_RE = re.compile(
 
 _DECLINE_RE = re.compile(
     r"^\s*(no|no thanks|nope|none|that'?s all|i'?m good|all good|nothing else|done|stop)\s*\.?\s*$",
+    re.IGNORECASE,
+)
+_READ_SUMMARY_RE = re.compile(
+    r"\b(read|say|speak|tell me|hear|out loud|aloud)\b.*\b(summary|it|that|this|full)\b"
+    r"|\b(read|say|speak)\s+(it|that|this)\b"
+    r"|\b(full summary|read it|say it|speak it|out loud|aloud)\b",
     re.IGNORECASE,
 )
 
@@ -150,7 +164,11 @@ def _pending_patient_selection(patient_list: list) -> dict:
     }
 
 
-def _pending_patient_followup(detail_type: str, patient_name: str) -> dict:
+def _pending_patient_followup(
+    detail_type: str,
+    patient_name: str,
+    appointment_time: str | None = None,
+) -> dict:
     """STAGE2_FOLLOWUP marker after answering about a specific patient.
 
     Remembers the last detail_type so a bare-name reply ("Jeremy") gets
@@ -166,8 +184,32 @@ def _pending_patient_followup(detail_type: str, patient_name: str) -> dict:
             "awaiting": "another_patient",
             "last_detail_type": detail_type,
             "last_patient": patient_name,
+            "last_appointment_time": appointment_time,
         },
         "question": _PATIENT_FOLLOW_UP_QUESTION,
+        "expires_at": _expires_at(),
+    }
+
+
+def _pending_next_patient_followup(
+    patient_name: str,
+    appointment_time: str | None,
+) -> dict:
+    """STAGE2_FOLLOWUP after naming the next/current patient.
+
+    A yes reply pulls the Visit Summary for the same patient + slot.
+    """
+    return {
+        "type": "STAGE2_FOLLOWUP",
+        "handler_class": "clinic schedules info",
+        "status": "awaiting_user",
+        "awaiting": "next_patient_details_confirm",
+        "data": {
+            "awaiting": "next_patient_details_confirm",
+            "patient_name": patient_name,
+            "appointment_time": appointment_time,
+        },
+        "question": _NEXT_PATIENT_DETAILS_FOLLOW_UP_QUESTION,
         "expires_at": _expires_at(),
     }
 
@@ -219,6 +261,19 @@ _DETAIL_RE = re.compile(
     r"\b(health concern|recommendation|visit summary|summary|concerns?)\b",
     re.IGNORECASE,
 )
+# "Next patient" / "current patient" family. Matched BEFORE detail/day/who
+# so phrases like "who am I seeing next" don't get swallowed by _WHO_RE.
+_NEXT_PATIENT_RE = re.compile(
+    r"\bnext patient\b|\bcurrent patient\b|\bupcoming patient\b|"
+    r"\bnext appointment\b|\bcurrent appointment\b|"
+    r"\bwho'?s\s+(?:my\s+)?(?:next|current)\b|"
+    r"\bwho am i seeing next\b",
+    re.IGNORECASE,
+)
+# How many minutes in the past we still consider "upcoming" — accounts for
+# patients running late so "who's my current patient" works even when the
+# slot started a few minutes ago.
+_LATE_BUFFER_MINUTES = 15
 # Match "for John Doe", "John Doe's", or "of John Doe" — case-insensitive
 _NAME_RE = re.compile(
     r"(?:\bfor\s+|\bof\s+)([A-Za-z][a-z]+(?:\s+[A-Za-z][a-z]+)+)"
@@ -252,6 +307,67 @@ def _db_conn():
     return sqlite3.connect(DB_PATH)
 
 
+def _next_patient() -> dict | None:
+    """Return the earliest not-yet-seen patient for today's date.
+
+    "Not yet seen" = appointment start_time is at or after (now − 15 min).
+    The 15-min backward buffer lets "who's my current patient" still resolve
+    when the slot started a few minutes ago (patient running late).
+    """
+    conn = _db_conn()
+    if not conn:
+        return None
+    try:
+        now = datetime.now()
+        cutoff = now - timedelta(minutes=_LATE_BUFFER_MINUTES)
+        day_of_week = now.strftime("%A")
+        week_start = _current_week_start()
+        rows = conn.execute(
+            "SELECT patient_name, start_time, status FROM appointments "
+            "WHERE day_of_week=? AND week_start=?",
+            (day_of_week, week_start),
+        ).fetchall()
+        if not rows:
+            return {"text": f"No patients scheduled on {day_of_week}."}
+        today = now.date()
+        candidates: list[tuple[datetime, str, str]] = []
+        for name, t_str, status in rows:
+            if status == "cancelled-out":
+                continue
+            parsed = _parse_time(t_str)
+            if parsed == datetime.min:
+                continue
+            appt_dt = datetime.combine(today, parsed.time())
+            if appt_dt >= cutoff:
+                candidates.append((appt_dt, name, t_str))
+        if not candidates:
+            return {"text": "You have no more patients scheduled today."}
+        candidates.sort(key=lambda r: r[0])
+        appt_dt, name, t_str = candidates[0]
+        pretty = _fmt_time(t_str)
+        delta_min = int((appt_dt - now).total_seconds() // 60)
+        if delta_min < 0:
+            when_phrase = f"scheduled for {pretty} — {-delta_min} minute{'s' if -delta_min != 1 else ''} ago"
+        elif delta_min == 0:
+            when_phrase = f"scheduled for {pretty}, right now"
+        elif delta_min < 60:
+            when_phrase = f"scheduled for {pretty}, in {delta_min} minute{'s' if delta_min != 1 else ''}"
+        else:
+            when_phrase = f"scheduled for {pretty}"
+        return {
+            "text": (
+                f"Your next patient is {name}, {when_phrase}. "
+                f"{_NEXT_PATIENT_DETAILS_FOLLOW_UP_QUESTION}"
+            ),
+            "structured": {
+                "intent": "clinic schedules info",
+                "pending_action": _pending_next_patient_followup(name, t_str),
+            },
+        }
+    finally:
+        conn.close()
+
+
 def _current_week_start() -> str | None:
     conn = _db_conn()
     if not conn:
@@ -276,10 +392,17 @@ async def handle(prompt: str, pending: dict | None = None) -> dict | None:
         if awaiting == "names_for_day_confirm":
             return _resume_count_followup(prompt, pending)
         if awaiting == "patient_selection_from_list":
-            return _resume_patient_selection(prompt, pending)
+            return await _resume_patient_selection(prompt, pending)
         if awaiting == "another_patient":
-            return _resume_another_patient(prompt, pending)
+            return await _resume_another_patient(prompt, pending)
+        if awaiting == "next_patient_details_confirm":
+            return _resume_next_patient_details(prompt, pending)
         # "another_day" or untagged fall through to the standard logic below.
+
+    # "Who's my next / current patient" — earliest future appointment today,
+    # with a 15-min backward buffer so late-arriving current patients count.
+    if _NEXT_PATIENT_RE.search(p):
+        return _next_patient()
 
     # Patient-specific detail query (health concerns, recommendations, visit summary)
     if _DETAIL_RE.search(p):
@@ -385,7 +508,94 @@ def _extract_selection_id(prompt: str) -> int | None:
     return None
 
 
-def _resume_patient_selection(prompt: str, pending_data: dict) -> dict | None:
+async def _semantic_selection_id(prompt: str, patient_list: list[dict]) -> int | None:
+    """Use the local LLM as a semantic parser for natural patient selections.
+
+    This stays inside Stage 2 and sends data only to local Ollama. It is a
+    fallback for natural speech like "yeah the first patient" after cheap
+    deterministic parsing fails.
+    """
+    if not prompt or not patient_list:
+        return None
+    try:
+        import httpx
+        from jane_web.jane_v2.models import (
+            LOCAL_LLM as model,
+            LOCAL_LLM_NUM_CTX,
+            LOCAL_LLM_TIMEOUT,
+            OLLAMA_KEEP_ALIVE,
+            OLLAMA_URL,
+        )
+
+        rows = "\n".join(
+            f"{i}. {e.get('time', '')} {e.get('name', '')}".strip()
+            for i, e in enumerate(patient_list, start=1)
+        )
+        parse_prompt = f"""You are a local JSON parser for a private clinic schedule.
+Given a numbered patient list and the user's reply, identify which numbered
+patient the user means. The reply may be natural speech with filler words.
+
+Return ONLY JSON: {{"patient_index": <number or null>}}
+
+Rules:
+- Use 1-based indexes from the list.
+- "first patient", "the first one", "patient number two", "the 8:30 patient",
+  or a visible patient name can identify a patient.
+- If the reply is a new question, a day change, a decline, or no single patient
+  is identifiable, return null.
+
+Patient list:
+{rows}
+
+User reply: {json.dumps(prompt)}
+
+JSON:"""
+        body = {
+            "model": model,
+            "prompt": parse_prompt,
+            "stream": False,
+            "think": False,
+            "options": {
+                "temperature": 0.0,
+                "num_predict": 40,
+                "num_ctx": LOCAL_LLM_NUM_CTX,
+            },
+            "keep_alive": OLLAMA_KEEP_ALIVE,
+        }
+        timeout = min(float(LOCAL_LLM_TIMEOUT), 8.0)
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            r = await client.post(OLLAMA_URL, json=body)
+            r.raise_for_status()
+            raw = (r.json().get("response") or "").strip()
+        try:
+            from jane_web.jane_v2.models import record_ollama_activity
+            record_ollama_activity()
+        except Exception:
+            pass
+
+        text = raw.strip().strip("`").strip()
+        if text.lower().startswith("json"):
+            text = text.split("\n", 1)[-1].strip()
+        start = text.find("{")
+        end = text.rfind("}")
+        if start >= 0 and end > start:
+            text = text[start : end + 1]
+        parsed = json.loads(text)
+        if not isinstance(parsed, dict):
+            return None
+        idx = parsed.get("patient_index")
+        if idx is None:
+            return None
+        idx_int = int(idx)
+        if 1 <= idx_int <= len(patient_list):
+            return idx_int
+        return None
+    except Exception as e:
+        logger.warning("clinic: local semantic patient parser failed: %s", e)
+        return None
+
+
+async def _resume_patient_selection(prompt: str, pending_data: dict) -> dict | None:
     """Reply to 'Is there a specific patient...?' — accept number or name."""
     patient_list = pending_data.get("patient_list") or []
     if not patient_list:
@@ -452,10 +662,52 @@ def _resume_patient_selection(prompt: str, pending_data: dict) -> dict | None:
                 }
             names = ", ".join(e["name"] for e in hits[:4])
             return {"text": f"I found multiple patients matching '{name_candidate}': {names}. Which one did you mean?"}
+        # Natural speech fallback after visible-name matching misses. This
+        # preserves the local-only privacy boundary: the numbered patient list
+        # goes to local Ollama, never Stage 3/cloud.
+        n = await _semantic_selection_id(p, patient_list)
+        if n is not None:
+            entry = patient_list[n - 1]
+            return _patient_detail(
+                p.lower(), entry["name"],
+                appointment_time=entry.get("db_time"),
+            )
         # Name wasn't in the visible list — defer to _patient_detail to search
         # the full week, using the user's detail keywords if any.
         return _patient_detail(p.lower(), name_candidate)
 
+    # No clear name found; try local semantic parsing before abandoning.
+    n = await _semantic_selection_id(p, patient_list)
+    if n is not None:
+        entry = patient_list[n - 1]
+        return _patient_detail(
+            p.lower(), entry["name"],
+            appointment_time=entry.get("db_time"),
+        )
+
+    return {"abandon_pending": True}
+
+
+def _resume_next_patient_details(prompt: str, pending_data: dict) -> dict | None:
+    """Reply to 'Would you like to know more details about this patient?'.
+
+    Affirmative → pull Visit Summary for the remembered patient + slot.
+    Decline or anything else → abandon so the pipeline re-routes the raw prompt.
+    """
+    patient_name = pending_data.get("patient_name")
+    appointment_time = pending_data.get("appointment_time")
+    p = (prompt or "").strip()
+    if not p or _DECLINE_RE.match(p):
+        return {"abandon_pending": True}
+    if not patient_name:
+        return {"abandon_pending": True}
+    if _CONFIRM_RE.search(p):
+        synthetic_p = f"visit summary for {patient_name}".lower()
+        return _patient_detail(
+            synthetic_p,
+            patient_name,
+            appointment_time=appointment_time,
+        )
     return {"abandon_pending": True}
 
 
@@ -483,19 +735,57 @@ def _resume_count_followup(prompt: str, pending_data: dict) -> dict | None:
     return {"abandon_pending": True}
 
 
-def _resume_another_patient(prompt: str, pending_data: dict) -> dict | None:
+async def _resume_another_patient(prompt: str, pending_data: dict) -> dict | None:
     """Handle a reply to 'Any other patients you would like to know about?'."""
-    name_candidate = _extract_name_from_reply(prompt)
-    if not name_candidate:
-        return {"abandon_pending": True}
     last_type = pending_data.get("last_detail_type") or "Visit Summary"
-    # Synthesize a prompt that steers _patient_detail to the same field
-    # the user asked about last time.
+    last_patient = pending_data.get("last_patient")
+    last_appointment_time = pending_data.get("last_appointment_time")
     type_keyword = {
         "Health Concerns": "health concerns",
         "Recommendations": "recommendations",
         "Visit Summary": "visit summary",
     }.get(last_type, "visit summary")
+
+    if _READ_SUMMARY_RE.search(prompt or "") and last_patient:
+        synthetic_p = f"{type_keyword} for {last_patient}".lower()
+        return _patient_detail(
+            synthetic_p,
+            last_patient,
+            appointment_time=last_appointment_time,
+            speak_summary=True,
+        )
+
+    patient_list = []
+    try:
+        from jane_web.session_context import get_current_session_id
+        patient_list = _selection_cache_get(get_current_session_id()) or []
+    except Exception:
+        patient_list = []
+
+    n = _extract_selection_id(prompt)
+    if n is None and patient_list:
+        n = await _semantic_selection_id(prompt, patient_list)
+    if n is not None and patient_list:
+        if 1 <= n <= len(patient_list):
+            entry = patient_list[n - 1]
+            synthetic_p = f"{type_keyword} for {entry['name']}".lower()
+            return _patient_detail(
+                synthetic_p,
+                entry["name"],
+                appointment_time=entry.get("db_time"),
+            )
+        return {
+            "text": (
+                f"I only see {len(patient_list)} patient{'s' if len(patient_list) != 1 else ''} "
+                f"in the list. Which patient ID did you mean?"
+            )
+        }
+
+    name_candidate = _extract_name_from_reply(prompt)
+    if not name_candidate:
+        return {"abandon_pending": True}
+    # Synthesize a prompt that steers _patient_detail to the same field
+    # the user asked about last time.
     synthetic_p = f"{type_keyword} for {name_candidate}".lower()
     return _patient_detail(synthetic_p, name_candidate)
 
@@ -572,11 +862,11 @@ def _names_for_day(day_of_week: str) -> dict | None:
         if cancelled:
             c_lines = [f"- {_fmt_time(t)} {n} (cancelled)" for n, t in cancelled]
             printed += "\n\n" + "\n".join(c_lines)
+        # Append the follow-up question AFTER the list so the visual order is
+        # list → question. The spoken `text` above is a brief lead-in only.
+        printed += "\n\n" + _LIST_FOLLOW_UP_QUESTION
 
-        spoken = (
-            f"I have listed the patients in the chat for your view. "
-            f"{_LIST_FOLLOW_UP_QUESTION}"
-        )
+        spoken = f"Here are the patients scheduled for {day_of_week}."
         # Stash the list in the local-only session cache so a follow-up
         # ("patient 2", "Melissa") can still resolve even though the FIFO
         # record strips patient_list out of pending_action.data.
@@ -601,10 +891,14 @@ def _patient_detail(
     p: str,
     patient_name: str | None,
     appointment_time: str | None = None,
+    *,
+    speak_summary: bool = False,
 ) -> dict | None:
     """Return health_concerns / recommendations / visit_summary for a named patient.
 
-    These fields are too long to speak — response uses spoken + text blocks.
+    By default, prints the full field value once and speaks only a short
+    prompt. If `speak_summary` is true, speaks the full field value because
+    the user explicitly asked to hear it.
     When `appointment_time` is provided (DB format like '8:00a'), the query
     pins down that exact slot so a patient with multiple appointments this
     week resolves to a single row instead of an ambiguity prompt.
@@ -661,18 +955,29 @@ def _patient_detail(
         if not value:
             return {"text": f"No {field_label.lower()} data available for {name} yet."}
 
-        spoken = (
-            f"That's too long to speak — I've printed {name}'s {field_label} on screen. "
-            f"{_PATIENT_FOLLOW_UP_QUESTION}"
-        )
-        return {
+        value_clean = value.strip()
+        if value_clean and value_clean[-1] not in ".!?":
+            value_clean += "."
+        if speak_summary:
+            spoken = f"{value_clean} {_PATIENT_FOLLOW_UP_QUESTION}"
+            printed = None
+        else:
+            spoken = f"I have printed the patient summary in the chat. {_PATIENT_FOLLOW_UP_QUESTION}"
+            printed = f"**{name} — {field_label}**\n\n{value}"
+        response = {
             "text": spoken,
-            "print": f"**{name} — {field_label}**\n\n{value}",
             "structured": {
                 "intent": "clinic schedules info",
-                "pending_action": _pending_patient_followup(field_label, name),
+                "pending_action": _pending_patient_followup(
+                    field_label,
+                    name,
+                    appointment_time,
+                ),
             },
         }
+        if printed:
+            response["print"] = printed
+        return response
     finally:
         conn.close()
 

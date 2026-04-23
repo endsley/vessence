@@ -38,7 +38,7 @@ AVAILABLE_CAPABILITIES = [
     {"id": "essences", "label": "Essences"},
     {"id": "user_admin", "label": "Create users"},
 ]
-DEFAULT_CAPABILITIES = ["chat", "memory"]
+DEFAULT_CAPABILITIES = ["chat", "memory", "vault_read", "vault_write"]
 
 
 def normalize_user_id(user_id: str) -> str:
