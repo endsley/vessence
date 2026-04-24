@@ -51,14 +51,54 @@ def _escalation_context() -> str:
     )
 
 
+# Stage 1 (v3 classifier qwen call) extracts these fields from the user
+# prompt + FIFO and emits them alongside the class name + confidence.
+# The handler's job is then mechanical: pick the loader keyed by `loader`
+# and pass through any string args. No regex, no Python intent detection.
+#
+# The schema is presented verbatim to qwen — keep descriptions tight and
+# unambiguous, and keep the enum closed so qwen can't invent loader names.
+PARAMS_SCHEMA = {
+    "loader": (
+        "enum REQUIRED — one of: "
+        "today_overview | day | cancellations | next_patient | patient_detail | weekly. "
+        "Pick today_overview for vague check-ins ('how's the schedule', "
+        "'what's today look like'). Pick day when a specific weekday is named. "
+        "Pick cancellations when the user explicitly asks about cancelled / no-show "
+        "patients. Pick next_patient for 'who's next' / 'who's my current patient'. "
+        "Pick patient_detail when a specific patient is named OR referenced by "
+        "position ('first patient', 'patient 2'). Pick weekly for 'how does the "
+        "week look' / 'rest of the week'."
+    ),
+    "day": (
+        "string|null — Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday, "
+        "or 'today', or 'tomorrow'. Null if no day was mentioned."
+    ),
+    "patient_name": (
+        "string|null — full or partial patient name as the user said it, with "
+        "original capitalization. Null if no name was mentioned."
+    ),
+    "patient_index": (
+        "int|null — 1-based position when the user references a patient by "
+        "ordinal ('first' → 1, 'second' → 2, 'patient 3' → 3). Null otherwise."
+    ),
+}
+
+
 METADATA = {
     "name": "clinic schedules info",
     "priority": 15,
     "description": _description,
     "escalation_context": _escalation_context,
+    "params_schema": PARAMS_SCHEMA,
     "few_shot": [
         ("how many patients does she have on Tuesday", "clinic_schedules_info:High"),
         ("who are the patients for her on Thursday", "clinic_schedules_info:High"),
+        ("who's her next patient", "clinic_schedules_info:High"),
+        ("who's her current patient", "clinic_schedules_info:High"),
+        ("tell me about the first patient", "clinic_schedules_info:High"),
+        ("who's patient number two", "clinic_schedules_info:High"),
+        ("what are the recommendations for the third patient", "clinic_schedules_info:High"),
         ("how many patients does Ariel have on Tuesday", "others:Low"),
         ("book a patient for Thursday", "others:Low"),
     ],

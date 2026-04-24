@@ -1,5 +1,29 @@
 """Send email class — compose / send / delete email via Gmail API."""
 
+PARAMS_SCHEMA = {
+    "to": (
+        "string|null — recipient name or email address as the user said it "
+        "('Bob', 'alice@example.com', 'my accountant'). Handler resolves names "
+        "to addresses. Null means user didn't specify a recipient."
+    ),
+    "subject": (
+        "string|null — explicit subject if the user dictated one. Usually null; "
+        "handler infers from the body when missing."
+    ),
+    "body": (
+        "string|null — the message content the user wants sent, in their voice. "
+        "Rewrite from third person to first person ('tell Bob I'm late' → "
+        "'I'm running late'). Null when the user only named a recipient and "
+        "intent without dictating content."
+    ),
+    "confirm_signal": (
+        "enum|null — for follow-up turns confirming/cancelling an open draft. "
+        "One of: send | cancel | edit. Null when this is a fresh request, not "
+        "a draft response."
+    ),
+}
+
+
 METADATA = {
     "name": "send email",
     "priority": 10,
@@ -28,6 +52,7 @@ METADATA = {
         "  - \"email me the list\" → 'others' (meta: Jane is NOT a recipient)\n"
         "  - \"how does the email tool work\" → 'others' (meta question)"
     ),
+    "params_schema": PARAMS_SCHEMA,
     "few_shot": [
         ("email Bob about the Q3 report", "send email:High"),
         ("send an email to alice@example.com saying I'll be late", "send email:High"),

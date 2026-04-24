@@ -69,6 +69,39 @@ def _maybe_voice_wrap(body):
         return body.copy(update={"message": new_message})
 
 
+def _inject_extracted_params(body, params: dict | None):
+    """Prepend an EXTRACTED PARAMS block to the user message when Stage 1's
+    qwen extracted structured fields for the chosen class.
+
+    Stage 1 (v3 classifier) emits {class, confidence, params} where params
+    is keyed by the class's PARAMS_SCHEMA. For escalating handlers the
+    handler doesn't run, so without this injection Stage 3 (Opus) would
+    have to re-derive intent fields from the prose. Threading the
+    pre-extracted slot values saves Opus a parse and keeps slot
+    interpretation consistent with what Stage 1 already decided.
+
+    No-op when params is empty/None — keeps Stage 3 prompt clean for
+    classes that don't declare a schema.
+    """
+    if not params:
+        return body
+    try:
+        non_null = {k: v for k, v in params.items() if v not in (None, "", {}, [])}
+    except Exception:
+        return body
+    if not non_null:
+        return body
+    lines = ["[EXTRACTED PARAMS] (from Stage 1 classifier — already parsed from the user's prompt):"]
+    for k, v in non_null.items():
+        lines.append(f"- {k}: {v!r}")
+    block = "\n".join(lines)
+    new_message = block + "\n\n" + (body.message or "")
+    try:
+        return body.model_copy(update={"message": new_message})
+    except AttributeError:
+        return body.copy(update={"message": new_message})
+
+
 def _inject_structured_state(body):
     """Prepend a rendered CURRENT CONVERSATION STATE block to the user's
     message when FIFO holds an active pending action or last intent.
@@ -316,6 +349,7 @@ async def escalate_stream(
     ack_text: str,
     reason: str = "others",
     session_id_override: str | None = None,
+    params: dict | None = None,
 ) -> AsyncIterator[str]:
     """Yield an ack, then stream v1's brain response.
 
@@ -335,6 +369,7 @@ async def escalate_stream(
     """
     is_voice = (getattr(body, "platform", None) or "").lower() == "voice"
     effective_body = _inject_structured_state(body)
+    effective_body = _inject_extracted_params(effective_body, params)
     effective_body = _maybe_voice_wrap(effective_body)
     # Class protocol goes outermost so it appears first within the user-turn
     # payload (ahead of voice hints and state blocks). v1's stream_message

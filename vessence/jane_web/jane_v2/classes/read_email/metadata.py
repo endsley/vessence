@@ -1,5 +1,24 @@
 """Read email class — check/read email inbox."""
 
+PARAMS_SCHEMA = {
+    "filter_sender": (
+        "string|null — sender name the user asked about ('did Alice email me'). "
+        "Null when the user wants the inbox overview."
+    ),
+    "unread_only": (
+        "bool — true for 'new/unread/any new emails'. false for 'recent emails'."
+    ),
+    "importance": (
+        "enum — one of: any | important. "
+        "important when the user said 'important', 'urgent', 'real ones'. "
+        "any otherwise."
+    ),
+    "limit": (
+        "int|null — explicit cap ('top 5 emails'). Null = handler default."
+    ),
+}
+
+
 METADATA = {
     "name": "read email",
     "priority": 10,
@@ -24,6 +43,7 @@ METADATA = {
         "  - \"read my text messages\" → 'read messages' (SMS, not email)\n"
         "  - \"what did Bob say in his last email last week\" → 'others' (needs memory / search)"
     ),
+    "params_schema": PARAMS_SCHEMA,
     "few_shot": [],
     "ack": "Checking your email…",
     "escalate_ack": "Let me check your email…",

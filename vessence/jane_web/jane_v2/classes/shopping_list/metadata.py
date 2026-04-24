@@ -29,6 +29,20 @@ def _escalation_context() -> str:
         return f"Shopping list unavailable: {e}"
 
 
+PARAMS_SCHEMA = {
+    "action": (
+        "enum REQUIRED — one of: view | add | remove | clear | check. "
+        "view = read the whole list. add = put items on the list. "
+        "remove = take items off. clear = wipe the entire list. "
+        "check = does the list contain a specific item ('do I need bread')."
+    ),
+    "items": (
+        "string|null — comma-separated raw item names exactly as the user said "
+        "them ('milk, eggs, bread'). Null for view/clear actions."
+    ),
+}
+
+
 METADATA = {
     "name": "shopping list",
     "priority": 20,
@@ -53,6 +67,7 @@ METADATA = {
         "  - \"remind me to buy milk\" → 'timer' or 'others' (reminder, not list add)\n"
         "  - \"where's the closest grocery\" → 'others' (location / maps)"
     ),
+    "params_schema": PARAMS_SCHEMA,
     "few_shot": [],
     "ack": None,
     "escalate_ack": None,

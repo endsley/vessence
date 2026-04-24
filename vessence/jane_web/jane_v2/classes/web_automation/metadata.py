@@ -49,11 +49,33 @@ def _escalation_context() -> str:
     )
 
 
+PARAMS_SCHEMA = {
+    "intent": (
+        "enum REQUIRED — one of: navigate | extract | login | fill_form | "
+        "download | run_workflow. "
+        "navigate = open a URL/site. extract = read info off a page. "
+        "login = user wants to log in to a site. fill_form = enter form fields. "
+        "download = grab a file/PDF. run_workflow = invoke a saved playbook."
+    ),
+    "target_site": (
+        "string|null — the site/URL the user named ('weather.gov', "
+        "'my bank', 'citywater.com/billing'). Null when the user said "
+        "'the page' or 'this website' referring to context."
+    ),
+    "goal": (
+        "string|null — one-sentence summary of what the user wants accomplished "
+        "('grab tomorrow's forecast', 'download this month's bill'). Used by "
+        "Stage 3 to plan the click sequence."
+    ),
+}
+
+
 METADATA = {
     "name": "web_automation",
     "priority": 5,
     "description": _description,
     "escalation_context": _escalation_context,
+    "params_schema": PARAMS_SCHEMA,
     "few_shot": [
         ("Go to weather.gov and tell me tomorrow's forecast",    "web_automation:High"),
         ("Open my bank's website",                                "web_automation:High"),

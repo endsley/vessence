@@ -261,6 +261,7 @@ async def dispatch(
     pending: dict | None = None,
     stage1_conf: str = "",
     min_dist: float = 1.0,
+    params: dict | None = None,
 ) -> dict | None:
     """Call the Stage 2 handler for `class_name` and return its result.
 
@@ -369,9 +370,11 @@ async def dispatch(
         sig = inspect.signature(handler)
         wants_context = "context" in sig.parameters
         wants_pending = "pending" in sig.parameters
+        wants_params = "params" in sig.parameters
     except (TypeError, ValueError):
         wants_context = False
         wants_pending = False
+        wants_params = False
 
     kwargs: dict = {}
     if wants_context:
@@ -382,6 +385,8 @@ async def dispatch(
             handler_pending = dict(handler_pending)
             handler_pending.pop("question", None)
         kwargs["pending"] = handler_pending
+    if wants_params:
+        kwargs["params"] = params
 
     try:
         if inspect.iscoroutinefunction(handler):

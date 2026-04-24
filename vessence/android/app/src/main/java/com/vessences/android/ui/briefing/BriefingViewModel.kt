@@ -6,6 +6,11 @@ import androidx.lifecycle.viewModelScope
 import com.vessences.android.data.api.ApiClient
 import com.vessences.android.data.model.BriefingArticle
 import com.vessences.android.data.model.BriefingTopic
+import com.vessences.android.data.model.MarketplaceAiSummary
+import com.vessences.android.data.model.MarketplaceListing
+import com.vessences.android.data.model.MarketplaceRefreshStatus
+import com.vessences.android.data.model.MarketplaceSearch
+import com.vessences.android.data.model.MarketplaceSearchCard
 import com.vessences.android.voice.AndroidTtsManager
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -27,13 +32,16 @@ import java.util.Date
 import java.util.Locale
 
 data class BriefingUiState(
+    val selectedTab: String = "News",
     val articles: List<BriefingArticle> = emptyList(),
     val topics: List<BriefingTopic> = emptyList(),
     val categories: List<String> = emptyList(),
     val selectedCategory: String = "All",
     val isLoading: Boolean = false,
     val isLoadingArchive: Boolean = false,
+    val isLoadingMarketplace: Boolean = false,
     val error: String? = null,
+    val marketplaceError: String? = null,
     val lastUpdated: String? = null,
     val viewingArchiveDate: String? = null,
     val archiveDates: List<String> = emptyList(),
@@ -45,6 +53,7 @@ data class BriefingUiState(
     val viewingSaved: Boolean = false,
     val savedArticles: List<com.vessences.android.data.model.SavedArticleEntry> = emptyList(),
     val savedFilterCategory: String? = null,
+    val marketplaceSearches: List<MarketplaceSearchCard> = emptyList(),
 )
 
 class BriefingViewModel(application: Application) : AndroidViewModel(application) {
@@ -84,6 +93,7 @@ class BriefingViewModel(application: Application) : AndroidViewModel(application
             loadArchive(_state.value.viewingArchiveDate!!)
             return
         }
+        refreshMarketplace()
         viewModelScope.launch {
             _state.value = _state.value.copy(isLoading = true, error = null)
             try {
@@ -119,6 +129,36 @@ class BriefingViewModel(application: Application) : AndroidViewModel(application
                 _state.value = _state.value.copy(
                     isLoading = false,
                     error = e.message ?: "Failed to load briefing",
+                )
+            }
+        }
+    }
+
+    fun selectTab(tab: String) {
+        _state.value = _state.value.copy(
+            selectedTab = tab,
+            viewingSaved = false,
+            savedFilterCategory = null,
+            viewingArchiveDate = if (tab == "Marketplace") null else _state.value.viewingArchiveDate,
+        )
+        if (tab == "Marketplace" && _state.value.marketplaceSearches.isEmpty() && !_state.value.isLoadingMarketplace) {
+            refreshMarketplace()
+        }
+    }
+
+    fun refreshMarketplace() {
+        viewModelScope.launch {
+            _state.value = _state.value.copy(isLoadingMarketplace = true, marketplaceError = null)
+            try {
+                val searches = fetchMarketplaceSearchCards()
+                _state.value = _state.value.copy(
+                    marketplaceSearches = searches,
+                    isLoadingMarketplace = false,
+                )
+            } catch (e: Exception) {
+                _state.value = _state.value.copy(
+                    isLoadingMarketplace = false,
+                    marketplaceError = e.message ?: "Failed to load marketplace",
                 )
             }
         }
@@ -229,6 +269,12 @@ class BriefingViewModel(application: Application) : AndroidViewModel(application
 
     fun getImageUrl(articleId: String): String {
         return "$baseUrl/api/briefing/image/$articleId"
+    }
+
+    fun getMarketplaceImageUrl(searchName: String, listing: MarketplaceListing): String? {
+        val photoName = listing.thumb ?: listing.photos.firstOrNull() ?: return null
+        val querySlug = listing.querySlug ?: return null
+        return "$baseUrl/marketplace-image/$searchName/$querySlug/${listing.id}/$photoName"
     }
 
     private var mediaPlayer: android.media.MediaPlayer? = null
@@ -419,6 +465,81 @@ class BriefingViewModel(application: Application) : AndroidViewModel(application
             gson.fromJson(categoriesArray, catType)
         } else emptyList()
         Pair(articles, categories)
+    }
+
+    private suspend fun fetchMarketplaceSearchCards(): List<MarketplaceSearchCard> = withContext(Dispatchers.IO) {
+        val searchesRequest = Request.Builder()
+            .url("$baseUrl/api/marketplace/searches")
+            .build()
+        val searchesResponse = client.newCall(searchesRequest).execute()
+        if (!searchesResponse.isSuccessful) {
+            throw Exception("HTTP ${searchesResponse.code}")
+        }
+        val searchesBody = searchesResponse.body?.string() ?: "{}"
+        searchesResponse.close()
+        val searchesParsed = gson.fromJson(searchesBody, com.google.gson.JsonObject::class.java)
+        val searchesArray = searchesParsed.getAsJsonArray("searches")
+            ?: return@withContext emptyList()
+        val searchesType = object : TypeToken<List<MarketplaceSearch>>() {}.type
+        val searches: List<MarketplaceSearch> = gson.fromJson(searchesArray, searchesType)
+
+        searches.map { search ->
+            val detail = runCatching { fetchMarketplaceDetail(search.name) }.getOrDefault(emptyList())
+            val summary = runCatching { fetchMarketplaceSummary(search.name) }.getOrNull()
+            val refreshStatus = runCatching { fetchMarketplaceStatus(search.name) }
+                .getOrDefault(MarketplaceRefreshStatus())
+            MarketplaceSearchCard(
+                search = search,
+                summary = summary,
+                refreshStatus = refreshStatus,
+                listings = detail,
+            )
+        }
+    }
+
+    private fun fetchMarketplaceDetail(searchName: String): List<MarketplaceListing> {
+        val request = Request.Builder()
+            .url("$baseUrl/api/marketplace/search/$searchName")
+            .build()
+        val response = client.newCall(request).execute()
+        if (!response.isSuccessful) {
+            response.close()
+            throw Exception("Marketplace search $searchName returned HTTP ${response.code}")
+        }
+        val body = response.body?.string() ?: "{}"
+        response.close()
+        val parsed = gson.fromJson(body, com.google.gson.JsonObject::class.java)
+        val listingsArray = parsed.getAsJsonArray("listings") ?: return emptyList()
+        val listingsType = object : TypeToken<List<MarketplaceListing>>() {}.type
+        return gson.fromJson(listingsArray, listingsType)
+    }
+
+    private fun fetchMarketplaceSummary(searchName: String): MarketplaceAiSummary? {
+        val request = Request.Builder()
+            .url("$baseUrl/api/marketplace/summary/$searchName")
+            .build()
+        val response = client.newCall(request).execute()
+        if (!response.isSuccessful) {
+            response.close()
+            return null
+        }
+        val body = response.body?.string() ?: "{}"
+        response.close()
+        return gson.fromJson(body, MarketplaceAiSummary::class.java)
+    }
+
+    private fun fetchMarketplaceStatus(searchName: String): MarketplaceRefreshStatus {
+        val request = Request.Builder()
+            .url("$baseUrl/api/marketplace/refresh/$searchName")
+            .build()
+        val response = client.newCall(request).execute()
+        if (!response.isSuccessful) {
+            response.close()
+            return MarketplaceRefreshStatus()
+        }
+        val body = response.body?.string() ?: "{}"
+        response.close()
+        return gson.fromJson(body, MarketplaceRefreshStatus::class.java)
     }
 
     private suspend fun fetchTopics(): List<BriefingTopic> = withContext(Dispatchers.IO) {

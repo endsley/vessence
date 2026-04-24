@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 import asyncio
 from typing import Any, AsyncIterator
@@ -745,10 +746,39 @@ def _assemble_music_text(result: dict) -> str:
     return text
 
 
+_STAGE2_MARKER_RE = re.compile(
+    r"\[\[CLIENT_TOOL:|\[\[AWAITING:|\[MUSIC_PLAY:|\[TOOL_RESULT:"
+)
+
+
+def _wrap_spoken(text: str) -> str:
+    """Wrap the spoken prefix of a Stage 2 reply in <spoken>...</spoken>.
+
+    Invariant: every user-facing reply opens with <spoken>. The Android
+    client voices only what's inside the tag, so markers like
+    [[CLIENT_TOOL:...]] and [MUSIC_PLAY:...] must live OUTSIDE the tag or
+    they'd be treated as speech. This function finds the first such marker
+    and wraps only the prose before it; markers after stay untouched.
+
+    Idempotent — if <spoken> is already present, returns unchanged.
+    """
+    if not text or "<spoken>" in text:
+        return text
+    m = _STAGE2_MARKER_RE.search(text)
+    if m is None:
+        return f"<spoken>{text.strip()}</spoken>"
+    spoken_part = text[:m.start()].strip()
+    rest = text[m.start():].strip()
+    if not spoken_part:
+        return rest
+    return f"<spoken>{spoken_part}</spoken> {rest}"
+
+
 def _stage2_response_parts(result: dict) -> tuple[str, dict[str, Any]]:
     """Normalize a Stage 2 handler result into (user-visible text, extras)."""
-    text = _assemble_music_text(result)
+    text = _wrap_spoken(_assemble_music_text(result))
     # If the handler set a "print" block (too long to speak), append it as text
+    # — AFTER the closing </spoken> so it's displayed but not voiced.
     if result.get("print"):
         text = text.rstrip() + "\n\n" + result["print"]
     extras: dict[str, Any] = {}

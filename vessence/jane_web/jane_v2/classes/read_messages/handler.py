@@ -119,8 +119,8 @@ def _generic_dump(messages: list[dict]) -> str:
             body = (m["body"] or "").strip()
             ts = _fmt_time(m["timestamp_ms"])
             if sender.startswith("Me → "):
-                other = sender[len("Me → "):].strip()
-                parts.append(f"You sent to {other} at {ts}: {body}")
+                recipient = sender[len("Me → "):].strip()
+                parts.append(f"You sent to {recipient} at {ts}: {body}")
             else:
                 parts.append(f"From {sender} at {ts}: {body}")
     else:

@@ -1,5 +1,29 @@
 """Timer class — client-side Android timer (works offline via AlarmManager)."""
 
+PARAMS_SCHEMA = {
+    "action": (
+        "enum REQUIRED — one of: set | cancel | list | count | delete. "
+        "set = create a new timer. cancel = stop ALL active timers. "
+        "list = show currently running timers. count = how many timers. "
+        "delete = remove ONE specific timer (by index/id/label)."
+    ),
+    "duration_text": (
+        "string|null — raw natural-language duration as the user said it "
+        "('5 minutes', 'an hour and a half', '90 seconds'). Null when no "
+        "duration was given (e.g. 'set me a timer'). Handler parses it."
+    ),
+    "label": (
+        "string|null — short timer name ('pasta', 'oven', 'bread'). Null if "
+        "the user didn't name one. Empty string means user explicitly opted out."
+    ),
+    "delete_target": (
+        "string|null — for action=delete only. The phrase identifying which "
+        "timer to remove ('the pasta timer', 'timer 3', 'the third timer'). "
+        "Null for non-delete actions."
+    ),
+}
+
+
 METADATA = {
     "name": "timer",
     "priority": 10,
@@ -30,6 +54,7 @@ METADATA = {
         "  - \"remind me to call mom tomorrow\" → 'others' (day-scale reminder, not short timer)\n"
         "  - \"stop\" (said mid-conversation) → 'end conversation' (sign-off, not cancel-timer)"
     ),
+    "params_schema": PARAMS_SCHEMA,
     "few_shot": [
         ("set a 10 minute timer", "timer:High"),
         ("remind me in an hour", "timer:High"),

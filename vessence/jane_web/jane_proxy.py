@@ -732,6 +732,17 @@ CODE_MAP_KEYWORDS = (
     "apr",
     "cancelled",
     "names",
+    # Auto-evolved from daily conversations
+    "protocol",
+    "block",
+    "summary",
+    "flow",
+    "turn",
+    "source",
+    "includes",
+    "read_calendar",
+    "fetches",
+    "kathia",
 )
 
 

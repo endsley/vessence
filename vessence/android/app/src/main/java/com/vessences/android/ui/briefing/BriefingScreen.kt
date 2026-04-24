@@ -74,6 +74,9 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.vessences.android.data.api.ApiClient
 import com.vessences.android.data.model.BriefingArticle
+import com.vessences.android.data.model.MarketplaceListing
+import com.vessences.android.data.model.MarketplaceSearchCard
+import java.text.NumberFormat
 
 private val SlateBg = Color(0xFF0F172A)
 private val SlateCard = Color(0xFF1E293B)
@@ -100,6 +103,7 @@ fun BriefingScreen(
 ) {
     val state by viewModel.state.collectAsState()
     val filteredArticles = viewModel.getFilteredArticles()
+    val showingMarketplace = state.selectedTab == "Marketplace" && !state.viewingSaved
     var bottomSheetArticle by remember { mutableStateOf<BriefingArticle?>(null) }
     var showHistorySheet by remember { mutableStateOf(false) }
 
@@ -113,19 +117,21 @@ fun BriefingScreen(
             TopBar(
                 onBack = if (state.viewingArchiveDate != null) { { viewModel.clearArchive() } } else onBack,
                 lastUpdated = state.lastUpdated,
-                isLoading = state.isLoading || state.isLoadingArchive,
+                isLoading = state.isLoading || state.isLoadingArchive || state.isLoadingMarketplace,
                 viewingArchive = state.viewingArchiveDate != null,
                 onRefresh = { viewModel.refresh() },
-                onShowHistory = { showHistorySheet = true },
+                onShowHistory = { if (!showingMarketplace) showHistorySheet = true },
+                showHistory = !showingMarketplace,
             )
 
-            // Single "News" chip + "Saved" chip — all categories consolidated
+            // Top-level modes inside Daily Briefing
             TopicChips(
-                topics = listOf("News"),
-                selected = if (state.viewingSaved) "" else "News",
+                topics = listOf("News", "Marketplace"),
+                selected = if (state.viewingSaved) "" else state.selectedTab,
                 onSelect = {
                     if (state.viewingSaved) viewModel.toggleSavedView()
-                    viewModel.selectCategory("All")
+                    viewModel.selectTab(it)
+                    if (it == "News") viewModel.selectCategory("All")
                 },
                 trailingContent = {
                     // Saved chip
@@ -271,6 +277,64 @@ fun BriefingScreen(
                     }
                 }
             }
+            else if (showingMarketplace) {
+                when {
+                    state.marketplaceError != null && state.marketplaceSearches.isEmpty() -> {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text(
+                                    state.marketplaceError ?: "Marketplace unavailable",
+                                    color = SlateMuted,
+                                    fontSize = 14.sp,
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    "Tap refresh to retry",
+                                    color = SlateSubtle,
+                                    fontSize = 12.sp,
+                                )
+                            }
+                        }
+                    }
+                    state.isLoadingMarketplace && state.marketplaceSearches.isEmpty() -> {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            CircularProgressIndicator(color = Violet500)
+                        }
+                    }
+                    state.marketplaceSearches.isEmpty() -> {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text(
+                                    "No marketplace searches yet",
+                                    color = SlateMuted,
+                                    fontSize = 14.sp,
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    "Create a saved Marketplace search first",
+                                    color = SlateSubtle,
+                                    fontSize = 12.sp,
+                                )
+                            }
+                        }
+                    }
+                    else -> {
+                        MarketplaceGrid(
+                            cards = state.marketplaceSearches,
+                            viewModel = viewModel,
+                        )
+                    }
+                }
+            }
             // Error state
             else if (state.error != null && state.articles.isEmpty()) {
                 Box(
@@ -329,64 +393,66 @@ fun BriefingScreen(
 
         // FAB - Read All / Stop Audio
         var showReadMenu by remember { mutableStateOf(false) }
-        Column(
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(16.dp),
-            horizontalAlignment = Alignment.End,
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            // Expanded menu options
-            if (showReadMenu && !state.isSpeaking) {
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = Color(0xFF1E293B),
-                    shadowElevation = 8.dp,
-                ) {
-                    Column(modifier = Modifier.padding(4.dp)) {
-                        Surface(
-                            onClick = { showReadMenu = false; viewModel.readAll("full") },
-                            shape = RoundedCornerShape(8.dp),
-                            color = Color.Transparent,
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+        if (!showingMarketplace) {
+            Column(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(16.dp),
+                horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                // Expanded menu options
+                if (showReadMenu && !state.isSpeaking) {
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = Color(0xFF1E293B),
+                        shadowElevation = 8.dp,
+                    ) {
+                        Column(modifier = Modifier.padding(4.dp)) {
+                            Surface(
+                                onClick = { showReadMenu = false; viewModel.readAll("full") },
+                                shape = RoundedCornerShape(8.dp),
+                                color = Color.Transparent,
                             ) {
-                                Icon(Icons.AutoMirrored.Filled.VolumeUp, "Full", tint = Color.White, modifier = Modifier.size(20.dp))
-                                Text("Read All (Full)", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    Icon(Icons.AutoMirrored.Filled.VolumeUp, "Full", tint = Color.White, modifier = Modifier.size(20.dp))
+                                    Text("Read All (Full)", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                                }
                             }
-                        }
-                        Surface(
-                            onClick = { showReadMenu = false; viewModel.readAll("brief") },
-                            shape = RoundedCornerShape(8.dp),
-                            color = Color.Transparent,
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            Surface(
+                                onClick = { showReadMenu = false; viewModel.readAll("brief") },
+                                shape = RoundedCornerShape(8.dp),
+                                color = Color.Transparent,
                             ) {
-                                Icon(Icons.AutoMirrored.Filled.VolumeUp, "Brief", tint = Color(0xFF94A3B8), modifier = Modifier.size(20.dp))
-                                Text("Read All (Brief)", color = Color(0xFF94A3B8), fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    Icon(Icons.AutoMirrored.Filled.VolumeUp, "Brief", tint = Color(0xFF94A3B8), modifier = Modifier.size(20.dp))
+                                    Text("Read All (Brief)", color = Color(0xFF94A3B8), fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                                }
                             }
                         }
                     }
                 }
-            }
-            FloatingActionButton(
-                onClick = {
-                    if (state.isSpeaking) { viewModel.stopSpeaking(); showReadMenu = false }
-                    else showReadMenu = !showReadMenu
-                },
-                containerColor = if (state.isSpeaking) Color(0xFFDC2626) else Violet500,
-                contentColor = Color.White,
-            ) {
-                if (state.isSpeaking) {
-                    Icon(Icons.Default.Close, contentDescription = "Stop audio")
-                } else {
-                    Icon(Icons.Default.RecordVoiceOver, contentDescription = "Read all")
+                FloatingActionButton(
+                    onClick = {
+                        if (state.isSpeaking) { viewModel.stopSpeaking(); showReadMenu = false }
+                        else showReadMenu = !showReadMenu
+                    },
+                    containerColor = if (state.isSpeaking) Color(0xFFDC2626) else Violet500,
+                    contentColor = Color.White,
+                ) {
+                    if (state.isSpeaking) {
+                        Icon(Icons.Default.Close, contentDescription = "Stop audio")
+                    } else {
+                        Icon(Icons.Default.RecordVoiceOver, contentDescription = "Read all")
+                    }
                 }
             }
         }
@@ -419,6 +485,7 @@ private fun TopBar(
     viewingArchive: Boolean,
     onRefresh: () -> Unit,
     onShowHistory: () -> Unit,
+    showHistory: Boolean,
 ) {
     Row(
         modifier = Modifier
@@ -463,12 +530,16 @@ private fun TopBar(
             Spacer(modifier = Modifier.width(12.dp))
         }
 
-        IconButton(onClick = onShowHistory) {
-            Icon(
-                Icons.Default.History,
-                "History",
-                tint = if (viewingArchive) Violet500 else Color.White,
-            )
+        if (showHistory) {
+            IconButton(onClick = onShowHistory) {
+                Icon(
+                    Icons.Default.History,
+                    "History",
+                    tint = if (viewingArchive) Violet500 else Color.White,
+                )
+            }
+        } else {
+            Spacer(modifier = Modifier.width(48.dp))
         }
 
         IconButton(onClick = onRefresh) {
@@ -581,6 +652,236 @@ private fun TopicChips(
             )
         }
         trailingContent?.invoke()
+    }
+}
+
+@Composable
+private fun MarketplaceGrid(
+    cards: List<MarketplaceSearchCard>,
+    viewModel: BriefingViewModel,
+) {
+    LazyVerticalGrid(
+        columns = GridCells.Fixed(1),
+        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        items(cards, key = { it.search.name }) { card ->
+            MarketplaceSearchPanel(
+                card = card,
+                viewModel = viewModel,
+            )
+        }
+    }
+}
+
+@Composable
+private fun MarketplaceSearchPanel(
+    card: MarketplaceSearchCard,
+    viewModel: BriefingViewModel,
+) {
+    val context = LocalContext.current
+    val listings = card.listings.take(4)
+    val refreshTint = when (card.refreshStatus.state) {
+        "running" -> Color(0xFFF59E0B)
+        "error" -> Color(0xFFEF4444)
+        else -> SlateMuted
+    }
+
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = SlateCard,
+        shadowElevation = 2.dp,
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Top,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = card.search.label.ifBlank { card.search.name },
+                        color = Color.White,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "${card.search.passedCount} matches · ${formatMarketplaceTimestamp(card.search.lastRefreshed)}",
+                        color = SlateMuted,
+                        fontSize = 11.sp,
+                    )
+                }
+                Surface(
+                    shape = RoundedCornerShape(999.dp),
+                    color = refreshTint.copy(alpha = 0.15f),
+                ) {
+                    Text(
+                        text = card.refreshStatus.state.replace('_', ' '),
+                        color = refreshTint,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                    )
+                }
+            }
+
+            if (card.search.queries.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(10.dp))
+                Row(
+                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    card.search.queries.forEach { query ->
+                        Surface(
+                            shape = RoundedCornerShape(999.dp),
+                            color = Violet500.copy(alpha = 0.12f),
+                        ) {
+                            Text(
+                                text = query,
+                                color = Color(0xFFD8B4FE),
+                                fontSize = 11.sp,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                text = card.summary?.summary?.takeIf { !it.isNullOrBlank() }
+                    ?: "No AI brief yet. Pull Marketplace data to generate one.",
+                color = Color(0xFFE2E8F0),
+                fontSize = 13.sp,
+                lineHeight = 19.sp,
+            )
+
+            if (!card.refreshStatus.error.isNullOrBlank()) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = card.refreshStatus.error ?: "",
+                    color = Color(0xFFFCA5A5),
+                    fontSize = 11.sp,
+                )
+            }
+
+            if (listings.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(14.dp))
+                Text(
+                    text = "Top Listings",
+                    color = Color.White,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                listings.forEachIndexed { index, listing ->
+                    MarketplaceListingRow(
+                        searchName = card.search.name,
+                        listing = listing,
+                        imageUrl = viewModel.getMarketplaceImageUrl(card.search.name, listing),
+                        onClick = {
+                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(listing.url)))
+                        },
+                    )
+                    if (index != listings.lastIndex) {
+                        HorizontalDivider(
+                            color = SlateSubtle.copy(alpha = 0.5f),
+                            modifier = Modifier.padding(vertical = 8.dp),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MarketplaceListingRow(
+    searchName: String,
+    listing: MarketplaceListing,
+    imageUrl: String?,
+    onClick: () -> Unit,
+) {
+    val context = LocalContext.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
+            .padding(2.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(width = 92.dp, height = 72.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(SlateSubtle),
+        ) {
+            if (imageUrl != null) {
+                AsyncImage(
+                    model = ImageRequest.Builder(context)
+                        .data(imageUrl)
+                        .crossfade(true)
+                        .build(),
+                    imageLoader = ApiClient.getAuthenticatedImageLoader(context),
+                    contentDescription = "${listing.title} photo",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            } else {
+                Text(
+                    text = searchName.replaceFirstChar { it.uppercase() },
+                    color = SlateMuted,
+                    fontSize = 12.sp,
+                    modifier = Modifier.align(Alignment.Center),
+                )
+            }
+        }
+
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = formatMarketplacePrice(listing.price),
+                color = Color(0xFFFDE68A),
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Bold,
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = listing.title,
+                color = Color.White,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = formatMarketplaceMeta(listing),
+                color = SlateMuted,
+                fontSize = 10.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (!listing.location.isBlank()) {
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = listing.location,
+                    color = SlateSubtle,
+                    fontSize = 10.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+
+        Icon(
+            Icons.Default.OpenInBrowser,
+            contentDescription = "Open listing",
+            tint = SlateMuted,
+            modifier = Modifier.size(16.dp),
+        )
     }
 }
 
@@ -1044,6 +1345,25 @@ private fun formatSourceLine(source: String, published: String): String {
     return if (source.isBlank()) timeAgo else "$source · $timeAgo"
 }
 
+private fun formatMarketplacePrice(price: Int?): String {
+    if (price == null || price <= 0) return "Price unavailable"
+    return NumberFormat.getCurrencyInstance().format(price)
+}
+
+private fun formatMarketplaceMeta(listing: MarketplaceListing): String {
+    val parts = buildList {
+        listing.year?.takeIf { it > 0 }?.let { add(it.toString()) }
+        listing.miles?.takeIf { it > 0 }?.let { add("${NumberFormat.getIntegerInstance().format(it)} mi") }
+        listing.query?.takeIf { it.isNotBlank() }?.let { add(it) }
+    }
+    return parts.joinToString(" · ")
+}
+
+private fun formatMarketplaceTimestamp(raw: String?): String {
+    if (raw.isNullOrBlank()) return "not refreshed yet"
+    return "updated ${formatTimeAgo(raw)}"
+}
+
 private fun formatTimeAgo(published: String): String {
     return try {
         // Try ISO 8601 format
@@ -1077,4 +1397,3 @@ private fun formatTimeAgo(published: String): String {
         published
     }
 }
-

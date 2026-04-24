@@ -200,44 +200,23 @@ private fun AiBubble(message: ChatMessage, aiName: String, aiColor: Color, onNav
                 } else {
                     // Strip action tags from displayed text
                     val cleanText = ACTION_PATTERN.replace(message.text, "").trim()
-                    Row(verticalAlignment = Alignment.Bottom) {
-                        Box(modifier = Modifier.weight(1f, fill = false)) {
-                            RichMessageContent(text = cleanText, color = Color(0xFFE2E8F0))
-                        }
-                        // Copy button inline after last word
-                        if (message.text.isNotEmpty() && !message.isStreaming) {
+                    Column {
+                        RichMessageContent(text = cleanText, color = Color(0xFFE2E8F0))
+                        if (cleanText.isNotEmpty() && !message.isStreaming) {
                             val context = LocalContext.current
-                            Spacer(modifier = Modifier.width(12.dp))
                             Text(
                                 text = "Copy",
                                 color = StatusColor.copy(alpha = 0.6f),
                                 fontSize = 10.sp,
                                 modifier = Modifier
+                                    .align(Alignment.End)
+                                    .padding(top = 6.dp)
                                     .clickable {
                                         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                        clipboard.setPrimaryClip(ClipData.newPlainText("Jane", message.text))
+                                        clipboard.setPrimaryClip(ClipData.newPlainText("Jane", cleanText))
                                         Toast.makeText(context, "Copied", Toast.LENGTH_SHORT).show()
                                     },
                             )
-                            // TTS buttons: short summary + full response (when <spoken> tag was present)
-                            if (onSpeakText != null && message.spokenText != null) {
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = "\uD83D\uDD0A Short",
-                                    color = StatusColor.copy(alpha = 0.6f),
-                                    fontSize = 10.sp,
-                                    modifier = Modifier.clickable { onSpeakText(message.spokenText) },
-                                )
-                                if (message.fullText != null) {
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(
-                                        text = "\uD83D\uDD0A Full",
-                                        color = StatusColor.copy(alpha = 0.6f),
-                                        fontSize = 10.sp,
-                                        modifier = Modifier.clickable { onSpeakText(message.fullText) },
-                                    )
-                                }
-                            }
                         }
                     }
                 }

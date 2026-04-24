@@ -1,5 +1,5 @@
 # Code Map — Web Frontend
-_Auto-generated on 2026-04-22 08:15 UTC by `generate_code_map.py`_
+_Auto-generated on 2026-04-23 08:15 UTC by `generate_code_map.py`_
 
 ## vault_web/templates/jane.html (2609 lines)
   setChatSize() → L453
@@ -96,38 +96,50 @@ _Auto-generated on 2026-04-22 08:15 UTC by `generate_code_map.py`_
   event.type === 'done' → L1513
   event.type === 'error' → L1517
 
-## vault_web/templates/briefing.html (1361 lines)
-  topicColor() → L826
-  async init() → L835
-  async loadArticles() → L866
-  async loadTopics() → L902
-  async addTopic() → L916
-  async deleteTopic() → L940
-  async toggleDismiss() → L956
-  async expandArticle() → L970
-  async triggerFetch() → L987
-  async searchArticles() → L1001
-  playArticleAudio() → L1020
-  _startAudioPlayback() → L1039
-  _browserTTSInPlayer() → L1066
-  toggleAudioPlayback() → L1101
-  closeAudioPlayer() → L1129
-  switchAudioType() → L1136
-  async saveArticleToCategory() → L1148
-  async loadSavedCategories() → L1171
-  async toggleSavedView() → L1184
-  async loadSavedArticles() → L1191
-  playSavedArticleAudio() → L1205
-  async unsaveArticle() → L1214
-  _browserTTS() → L1231
-  readAllSummaries() → L1254
-  _readNext() → L1264
-  stopSpeaking() → L1296
-  timeAgo() → L1304
-  toggle() → L1325
-  async fetchItems() → L1329
-  toggle() → L1344
-  async fetchItems() → L1348
+## vault_web/templates/briefing.html (1972 lines)
+  topicColor() → L1188
+  async init() → L1197
+  async loadArticles() → L1228
+  async loadTopics() → L1264
+  async addTopic() → L1278
+  async deleteTopic() → L1302
+  startEditTopic() → L1318
+  cancelEditTopic() → L1325
+  async saveEditTopic() → L1332
+  async toggleDismiss() → L1362
+  async expandArticle() → L1376
+  async triggerFetch() → L1393
+  async searchArticles() → L1407
+  playArticleAudio() → L1426
+  _startAudioPlayback() → L1445
+  _browserTTSInPlayer() → L1472
+  toggleAudioPlayback() → L1507
+  closeAudioPlayer() → L1535
+  switchAudioType() → L1542
+  async saveArticleToCategory() → L1554
+  async loadSavedCategories() → L1577
+  async toggleSavedView() → L1590
+  async loadSavedArticles() → L1597
+  async loadMarketplaceSearches() → L1612
+  async openMarketplaceSearch() → L1627
+  async loadMarketplaceSummary() → L1648
+  async pullMarketplaceNow() → L1660
+  openMarketplaceEditor() → L1700
+  async saveMarketplaceEditor() → L1727
+  async deleteMarketplaceSearch() → L1775
+  async openMarketplaceListing() → L1792
+  marketplaceImageUrl() → L1808
+  playSavedArticleAudio() → L1816
+  async unsaveArticle() → L1825
+  _browserTTS() → L1842
+  readAllSummaries() → L1865
+  _readNext() → L1875
+  stopSpeaking() → L1907
+  timeAgo() → L1915
+  toggle() → L1936
+  async fetchItems() → L1940
+  toggle() → L1955
+  async fetchItems() → L1959
 
 ## vault_web/templates/tax_accountant.html (735 lines)
   init() → L358

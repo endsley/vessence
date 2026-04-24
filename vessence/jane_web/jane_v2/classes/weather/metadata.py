@@ -71,11 +71,31 @@ def _escalation_context() -> str:
         )
 
 
+PARAMS_SCHEMA = {
+    "topic": (
+        "enum REQUIRED — one of: "
+        "current | forecast | precipitation | wind | air_quality | pollen | overview. "
+        "current = right-now temp/feels-like/sky. forecast = future high/low/condition. "
+        "precipitation = rain/snow/storms. air_quality = AQI/PM2.5. pollen = tree/grass/weed. "
+        "overview = vague 'how's the weather' with no specific facet."
+    ),
+    "day": (
+        "string|null — today | tomorrow | Monday..Sunday | this_week | weekend, "
+        "or a relative phrase like 'in 3 days'. Null if unspecified (means current/today)."
+    ),
+    "location": (
+        "string|null — city/place the user named. Null if unspecified (defaults to Medford, MA). "
+        "Any non-Medford location should be filled in so the handler can escalate."
+    ),
+}
+
+
 METADATA = {
     "name": "weather",
     "priority": 10,
     "description": _description,
     "escalation_context": _escalation_context,
+    "params_schema": PARAMS_SCHEMA,
     "few_shot": [
         ("What's the temperature in Medford right now?", "weather:High"),
         ("Will it rain tomorrow?", "weather:High"),

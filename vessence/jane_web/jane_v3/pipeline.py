@@ -173,17 +173,18 @@ async def _classify_and_maybe_handle(prompt: str, session_id: str) -> dict:
     # ── Stage 1 (v3): Haiku classification ───────────────────────────────
     t1 = time.perf_counter()
     try:
-        cls, conf = await v3_classifier.classify(prompt, session_id=session_id)
+        cls, conf, params = await v3_classifier.classify(prompt, session_id=session_id)
     except Exception as e:
         logger.exception("jane_v3: classifier crashed: %s", e)
-        cls, conf = ("others", "Low")
+        cls, conf, params = ("others", "Low", {})
     stage1_ms = int((time.perf_counter() - t1) * 1000)
     classification = f"{cls}:{conf}"
-    logger.info("jane_v3 pipeline: stage1 %s (%dms)", classification, stage1_ms)
+    logger.info("jane_v3 pipeline: stage1 %s (%dms) params=%s", classification, stage1_ms, params)
 
     state: dict[str, Any] = {
         "cls": cls,
         "conf": conf,
+        "params": params,
         "classification": classification,
         "stage1_ms": stage1_ms,
         "stage2_ms": 0,
@@ -283,6 +284,8 @@ async def _classify_and_maybe_handle(prompt: str, session_id: str) -> dict:
             kwargs["context"] = fifo_ctx
         if "pending" in sig.parameters:
             kwargs["pending"] = pending_data
+        if "params" in sig.parameters:
+            kwargs["params"] = params
     except (TypeError, ValueError):
         pass
 
@@ -540,6 +543,7 @@ async def handle_chat_stream(body, request: Request):
             async for ev in stage3_escalate.escalate_stream(
                 body, request, dynamic_ack, reason=reason,
                 session_id_override=canonical_sid,
+                params=state.get("params") or {},
             ):
                 yield ev
         except Exception as e:

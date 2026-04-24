@@ -27,24 +27,30 @@ logger = logging.getLogger(__name__)
 SKIP_DIST: Final[float] = 0.02
 
 # Fixed reply when we decide to re-request. Kept short so TTS is instant.
-REPEAT_REPLY: Final[str] = "Sorry, could you say that again?"
+REPEAT_REPLY: Final[str] = "Sorry, I didn't understand that, can you say it again or clarify?"
 
-_PROMPT_TEMPLATE = """A user spoke a message to Jane. Speech-to-text occasionally garbles the transcription so badly that the result is not actionable. Your job is to catch ONLY those severe cases — not to judge grammar, style, or opinion.
+_PROMPT_TEMPLATE = """A user spoke a message to Jane. Either speech-to-text garbled the transcription, or the user's question is too vague to act on without guessing. Your job is to catch BOTH — without judging grammar, style, or opinion.
 
-Return UNCLEAR ONLY if at least one of these is true:
+Return UNCLEAR if AT LEAST ONE is true:
+(a) STT noise:
 - The prompt is cut off mid-word or ends with a preposition that clearly has more to come ("what's the weather in", "turn on the", "can you please")
-- Contradictory fragments are stitched together mid-sentence with no coherent intent ("play uh no wait the other thing um actually")
-- The transcription is a short phrase made of disconnected words with no verb or subject ("apple meeting tomorrow blue")
+- Contradictory fragments stitched together mid-sentence with no coherent intent ("play uh no wait the other thing um actually")
+- A short phrase made of disconnected words with no verb or subject ("apple meeting tomorrow blue")
+- Background speech has bleeding into the middle of the transcript
+
+(b) Vague intent:
+- The prompt parses fine but lacks a clear domain or action — no specific thing to do or look up ("how's it going", "what about today", "tell me about her", "anything new")
+- Multiple equally plausible domains and no anchor word to disambiguate
 
 Return CLEAR in all other cases, including:
-- Opinions, complaints, or questions about how something works ("well that is a problem", "I don't understand why there's a short circuit", "no we designed it this way on purpose")
+- Opinions, complaints, or questions about how something works ("well that is a problem", "I don't understand why there's a short circuit")
 - Natural short sentences ("hi", "yes", "what time is it", "read my messages")
-- Slightly awkward grammar or an extra filler word ("um read my messages", "so what time is it")
+- Slightly awkward grammar or an extra filler word ("um read my messages")
 - Informal, rambling, or corrective statements as long as the overall intent is recoverable
 - Technical discussion that happens to include words like "error", "wrong", "why", "problem"
 - Short commands with pronouns that refer to the previous turn ("cancel that", "forget it", "stop that", "do it again", "try the other one")
 
-Bias strongly toward CLEAR. Only return UNCLEAR when a reasonable human would say "I genuinely couldn't tell what you meant."
+Bias toward CLEAR. Only return UNCLEAR when a reasonable human would say "I genuinely couldn't tell what you meant or what you wanted."
 
 User prompt: {prompt}
 

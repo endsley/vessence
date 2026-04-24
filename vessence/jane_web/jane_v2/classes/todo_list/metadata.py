@@ -107,6 +107,28 @@ def _escalation_context() -> str:
     return "\n".join(lines)
 
 
+PARAMS_SCHEMA = {
+    "action": (
+        "enum REQUIRED — one of: read | add | remove. "
+        "read = list/check items. add = put a new item on a list. "
+        "remove = cross off / delete an existing item."
+    ),
+    "category": (
+        "string|null — which sub-list. Recognized aliases: "
+        "urgent (synonyms: immediately, asap, do-now), "
+        "clinic (synonyms: kathia, water lily), "
+        "home (synonyms: house, household), "
+        "students (synonyms: student, school, teaching). "
+        "Null if the user didn't specify a category."
+    ),
+    "item": (
+        "string|null — for action=add: the new task text verbatim. "
+        "For action=remove: the phrase identifying which item to cross off "
+        "(item text or ordinal like 'first item'). Null for action=read."
+    ),
+}
+
+
 METADATA = {
     "name": "todo list",
     "priority": 12,
@@ -143,6 +165,7 @@ METADATA = {
         "  - \"remind me to call x\" → 'timer' or 'others' (reminder, not list add)\n"
         "  - \"what's going on at the clinic today\" → 'others' (ambiguous: could be calendar, not strictly a todo-list query)"
     ),
+    "params_schema": PARAMS_SCHEMA,
     "few_shot": [
         ("What's on my todo list?", "todo list:High"),
         ("What do I need to do today?", "todo list:High"),

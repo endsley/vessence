@@ -88,12 +88,6 @@ NEAR_IDENTICAL_DIST = float(os.environ.get("JANE_V3_NEAR_IDENTICAL_DIST", "0.05"
 # and short-circuited to end_conversation ("Ok.") when it was a topical
 # statement that belonged on Opus.
 STAGE2_MAX_DISTANCE = float(os.environ.get("JANE_V3_STAGE2_MAX_DISTANCE", "0.22"))
-# When v2 votes this many or more out of 5 AND best distance <= this value,
-# trust v2's winner class even if qwen disagrees (qwen sees "schedule" and
-# confuses clinic queries with personal calendar). Override only when qwen
-# picks a valid Stage-2 class — if qwen says "others" we still respect it.
-STAGE2_V2_LOCK_VOTES = int(os.environ.get("JANE_V3_V2_LOCK_VOTES", "4"))
-STAGE2_V2_LOCK_DIST  = float(os.environ.get("JANE_V3_V2_LOCK_DIST", "0.12"))
 # Per-call timeout for the qwen HTTP call. Reads the SINGLE source of
 # truth from jane_web.jane_v2.models so every Ollama caller agrees.
 # JANE_V3_LLM_TIMEOUT_S overrides for this specific call site if needed.
@@ -104,8 +98,10 @@ def _load_timeout() -> float:
     except Exception:
         return float(os.environ.get("JANE_V3_LLM_TIMEOUT_S", "40.0"))
 _LLM_TIMEOUT = _load_timeout()
-# Output budget — the expected response is a ~40-token JSON object.
-_NUM_PREDICT = int(os.environ.get("JANE_V3_NUM_PREDICT", "60"))
+# Output budget — bare {class, confidence} is ~40 tokens, but classes that
+# declare a PARAMS_SCHEMA add a small JSON object on top. 200 fits the
+# largest realistic case without runaway generation.
+_NUM_PREDICT = int(os.environ.get("JANE_V3_NUM_PREDICT", "200"))
 
 _STAGE2_CONFS = {"Very High", "High"}
 
@@ -195,6 +191,29 @@ def _class_definition(class_name: str) -> str:
     except Exception as e:
         logger.warning("v3: class definition lookup failed for %r: %s", class_name, e)
     return ""
+
+
+def _class_param_schema(class_name: str) -> dict:
+    """Return the class's PARAMS_SCHEMA dict, or {} if unset.
+
+    Classes that declare params_schema in metadata get those fields
+    extracted by the same qwen call that classifies the intent. The
+    handler then dispatches on those fields (no Python regex / intent
+    detection in the handler). Classes without a schema behave exactly
+    as before — qwen still emits {class, confidence} only.
+    """
+    try:
+        from jane_web.jane_v2 import classes as class_registry
+        reg = class_registry.get_registry()
+        normalized = class_name.replace("_", " ").strip().lower()
+        for meta in reg.values():
+            n = (meta.get("name") or "").strip().lower()
+            if n == normalized:
+                schema = meta.get("params_schema") or {}
+                return dict(schema) if isinstance(schema, dict) else {}
+    except Exception as e:
+        logger.warning("v3: params_schema lookup failed for %r: %s", class_name, e)
+    return {}
 
 
 # ── FIFO context ─────────────────────────────────────────────────────────────
@@ -304,6 +323,7 @@ def _build_prompt(
     pending_class: str = "",
     pending_def: str = "",
     pending_question: str = "",
+    primary_param_schema: dict | None = None,
 ) -> str:
     """Build the qwen classifier prompt.
 
@@ -332,11 +352,17 @@ def _build_prompt(
     )
     others_block = "[others] neither specific class fits; need reasoning / memory / meta Q."
     unclear_block = (
-        "[unclear] STT garbled the raw text — cut off mid-phrase, or a bag "
-        "of disconnected words with no coherent sentence. Examples: "
-        "\"what's the weather in\", \"turn on the\", \"apple meeting blue\". "
-        "Judge the SURFACE TEXT only; coherent grammatical sentences that "
-        "merely mention unclear / garbled / broken input are NOT unclear."
+        "[unclear] One of: (a) STT garbled — cut off mid-phrase "
+        "(\"what's the weather in\", \"turn on the\"), word-soup with no "
+        "coherent sentence (\"apple meeting blue\"), or background speech "
+        "bleeding into the transcript; OR (b) the prompt parses but is too "
+        "vague to act on without guessing — no clear domain or action "
+        "(\"how's it going\", \"what about today\", \"tell me about her\"). "
+        "Judge the SURFACE TEXT only; coherent sentences that merely mention "
+        "unclear / garbled input are NOT unclear. IMPORTANT: if a vague "
+        "prompt has obvious antecedent in the recent FIFO turns above "
+        "(e.g. user said \"what about her\" right after Jane named a "
+        "patient), classify as that handler class instead — NOT unclear."
     )
 
     if has_pending:
@@ -355,8 +381,12 @@ def _build_prompt(
 
     if not has_pending and winner_best_distance <= NEAR_IDENTICAL_DIST:
         identical_callout = (
-            f"Note: near-identical match to a '{primary_class}' exemplar "
-            f"(d={winner_best_distance:.3f}) — trust it unless FIFO shows a pivot.\n"
+            f"Note: prompt embeds near a '{primary_class}' exemplar "
+            f"(d={winner_best_distance:.3f}). Treat this as supporting "
+            f"evidence, not a verdict — your own read of the SURFACE TEXT "
+            f"and FIFO is what decides. If the prompt looks cut off, vague, "
+            f"or off-topic, prefer 'unclear' or 'others' over the suggested "
+            f"class.\n"
         )
     else:
         identical_callout = ""
@@ -371,13 +401,33 @@ def _build_prompt(
 
     classes_block = "\n".join(b for b in (primary_block, alt_block, others_block, unclear_block) if b)
 
+    # Per-class param extraction: when the primary class declares a
+    # PARAMS_SCHEMA, ask qwen to also emit a `params` object with those
+    # fields filled in from the user prompt + FIFO. Handler then dispatches
+    # on those fields with no Python intent detection.
+    if primary_param_schema:
+        schema_lines = [f"  - {k}: {v}" for k, v in primary_param_schema.items()]
+        params_block = (
+            f"\nIf you classify as {primary_class}, also extract these fields "
+            f"into a `params` object (use null when a field is not mentioned):\n"
+            + "\n".join(schema_lines)
+            + "\n\nReturn ONLY JSON: "
+            f"{{\"class\": \"<name>\", \"confidence\": \"Very High|High|Medium|Low\", "
+            f"\"params\": {{...}}}}\n"
+            f"For any other class, omit `params` (or set it to {{}})."
+        )
+    else:
+        params_block = (
+            "\nReturn ONLY JSON: "
+            "{\"class\": \"<name>\", \"confidence\": \"Very High|High|Medium|Low\"}"
+        )
+
     return f"""{header}
 {identical_callout}Classes:
 {classes_block}
 
 {fifo_section}{jane_callout}User: "{user_prompt.strip()}"
-
-Return ONLY JSON: {{"class": "<name>", "confidence": "Very High|High|Medium|Low"}}
+{params_block}
 Routing: Very High/High → handler. Medium/Low → escalate. "unclear" → ask user to repeat. "others" Low → escalate.
 
 JSON:"""
@@ -429,26 +479,31 @@ async def _call_qwen(prompt_text: str) -> str:
 async def classify(
     user_prompt: str,
     session_id: str | None = None,
-) -> tuple[str, str]:
-    """Return (class_name, confidence_level). Never raises.
+) -> tuple[str, str, dict]:
+    """Return (class_name, confidence_level, params). Never raises.
 
     confidence_level ∈ {"Very High", "High", "Medium", "Low"}.
     The v3 pipeline routes only "Very High" / "High" to Stage 2; anything
     else routes to Stage 3.
+
+    `params` is a dict of fields the chosen class declared in
+    `metadata.PARAMS_SCHEMA`, extracted by qwen alongside the
+    classification. Empty dict for classes without a schema or when
+    parsing failed.
     """
     if not user_prompt or not user_prompt.strip():
-        return ("others", "Low")
+        return ("others", "Low", {})
 
     # 1. Embedding top-5 with distance filter
     candidates = _top_k_candidates(user_prompt)
     if not candidates:
         logger.info("v3: no candidates pass distance threshold → others:Low")
-        return ("others", "Low")
+        return ("others", "Low", {})
 
     # 2. Vote — ranked list with winner + runner-up (if any)
     ranked = _vote(candidates)
     if not ranked:
-        return ("others", "Low")
+        return ("others", "Low", {})
 
     winner = ranked[0]
     runnerup = ranked[1] if len(ranked) > 1 else None
@@ -466,6 +521,11 @@ async def classify(
     runnerup_def = (
         _class_definition(runnerup_handler) if runnerup_handler else ""
     ) or ""
+    # Param schema is per-primary-class. The "primary" is normally the
+    # chroma winner, but if a STAGE2_FOLLOWUP pending swaps the primary
+    # (see _build_prompt's has_pending branch), schema follows the swap.
+    primary_param_schema = _class_param_schema(winner_handler)
+    schema_class = winner_handler  # which class qwen extracted params for
 
     # 3a. Pending STAGE2_FOLLOWUP? If the previous turn's handler emitted
     # a pending_action with a clarifying question, THAT class should be
@@ -478,6 +538,16 @@ async def classify(
     raw_pending_class, pending_question = _pending_action_class(session_id or "")
     pending_class = raw_pending_class.lower().replace("_", " ").strip()
     pending_def = _class_definition(pending_class) if pending_class else ""
+
+    # _build_prompt swaps the "primary" candidate to pending_class when a
+    # STAGE2_FOLLOWUP is open. Mirror that swap here so qwen sees the
+    # schema for whatever class it's being asked to instantiate.
+    has_pending = bool(
+        pending_class and pending_class != (winner_handler or "").lower()
+    )
+    if has_pending:
+        primary_param_schema = _class_param_schema(pending_class)
+        schema_class = pending_class
 
     prompt_text = _build_prompt(
         winner_class=winner_handler,
@@ -493,6 +563,7 @@ async def classify(
         pending_class=pending_class,
         pending_def=pending_def,
         pending_question=pending_question,
+        primary_param_schema=primary_param_schema,
     )
 
     # 4. Send to qwen via Ollama (warm runner, sub-second typical)
@@ -500,9 +571,10 @@ async def classify(
         raw = await _call_qwen(prompt_text)
     except Exception as e:
         logger.warning("v3: qwen call failed (%s) — falling back to Stage 3", e)
-        return ("others", "Low")
+        return ("others", "Low", {})
 
-    # 5. Parse {class, confidence}
+    # 5. Parse {class, confidence, params?}
+    params: dict = {}
     try:
         text = raw.strip().strip("`").strip()
         if text.lower().startswith("json"):
@@ -516,8 +588,12 @@ async def classify(
         conf = str(parsed.get("confidence", "Low")).strip().title()
         if conf not in ("Very High", "High", "Medium", "Low"):
             conf = "Low"
+        # Pull params iff qwen emitted them as a dict.
+        raw_params = parsed.get("params")
+        if isinstance(raw_params, dict):
+            params = raw_params
         if not cls:
-            return ("others", "Low")
+            return ("others", "Low", {})
         # Validate against the runtime handler registry; anything off-list
         # becomes "others".
         allowed = {"others"}
@@ -531,7 +607,7 @@ async def classify(
             pass
         if cls not in allowed:
             logger.warning("v3: qwen returned unknown class %r → others", cls)
-            return ("others", "Low")
+            return ("others", "Low", {})
         # Delete-intent guard: after read_messages / read_email, the user
         # saying "delete it" / "delete that" sometimes chroma-matches
         # send_email exemplars. send_email has no way to satisfy a delete
@@ -543,29 +619,10 @@ async def classify(
                 "v3: delete-intent guard: demoting %r → others for prompt=%r",
                 cls, user_prompt[:80],
             )
-            return ("others", "Low")
+            return ("others", "Low", {})
     except Exception as e:
         logger.warning("v3: parse failed (%s) — raw=%r", e, raw[:160])
-        return ("others", "Low")
-
-    # 5b. V2 supermajority lock — when the embedding model votes ≥4/5 with a
-    # very tight distance AND qwen didn't say "others", trust v2's winner.
-    # Prevents qwen from overriding strong embedding agreement with surface-
-    # word pattern matching (e.g. "schedule" pulling clinic queries into
-    # read_calendar). Still respect qwen saying "others" — that means the
-    # query is genuinely off-topic regardless of embedding similarity.
-    if (
-        cls != "others"
-        and winner["count"] >= STAGE2_V2_LOCK_VOTES
-        and float(winner.get("best_distance", 1.0)) <= STAGE2_V2_LOCK_DIST
-        and cls != winner_handler
-    ):
-        logger.info(
-            "v3: v2 supermajority lock: overriding qwen %r → %r (v2 votes=%d dist=%.3f)",
-            cls, winner_handler, winner["count"], float(winner.get("best_distance", 1.0)),
-        )
-        cls = winner_handler
-        conf = "High"
+        return ("others", "Low", {})
 
     # 6. Stage 2 distance gate — floor confidence when qwen's CHOSEN class
     # has no tight chroma support.
@@ -612,13 +669,24 @@ async def classify(
             "v3: qwen → %s:%s → escalating to Stage 3 (winner=%s runnerup=%s had_fifo=%s)",
             cls, conf, winner_handler, runnerup_handler, bool(fifo_block),
         )
-        return ("others", "Low")
+        return ("others", "Low", {})
+
+    # Param-leak guard: params were extracted against `schema_class` (chroma
+    # winner, or pending-swap target). If qwen overrode to a different class,
+    # those params describe the wrong intent — drop them so the handler for
+    # the actual `cls` doesn't receive a sibling class's loader/slots.
+    if params and cls != (schema_class or "").lower():
+        logger.info(
+            "v3: dropping params (extracted for %r, qwen chose %r) — params=%s",
+            schema_class, cls, params,
+        )
+        params = {}
 
     logger.info(
-        "v3: qwen → %s:%s (winner=%s %d/%d dist=%.3f, runnerup=%s %d, had_fifo=%s)",
-        cls, conf, winner_handler, winner["count"], len(candidates),
+        "v3: qwen → %s:%s params=%s (winner=%s %d/%d dist=%.3f, runnerup=%s %d, had_fifo=%s)",
+        cls, conf, params or "{}", winner_handler, winner["count"], len(candidates),
         winner_best_distance,
         runnerup_handler, (runnerup["count"] if runnerup else 0),
         bool(fifo_block),
     )
-    return (cls, conf)
+    return (cls, conf, params)

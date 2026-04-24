@@ -63,6 +63,22 @@ def _escalation_context() -> str:
     return "\n".join(lines)
 
 
+PARAMS_SCHEMA = {
+    "filter_sender": (
+        "string|null — sender name the user asked about ('what did Kathia text me'). "
+        "Null when the user wants the whole inbox."
+    ),
+    "unread_only": (
+        "bool — true when the user said unread/new/recent ('any new texts', "
+        "'unread messages'). false when they want all recent messages."
+    ),
+    "limit": (
+        "int|null — explicit cap if the user said one ('last 5 messages'). "
+        "Null means use the handler default."
+    ),
+}
+
+
 METADATA = {
     "name": "read messages",
     "priority": 10,
@@ -76,6 +92,7 @@ METADATA = {
         "reply take so long?') — those are self-reference debugging, "
         "not inbox readback."
     ),
+    "params_schema": PARAMS_SCHEMA,
     "few_shot": [
         ("read my messages", "read messages:High"),
         ("any new texts", "read messages:High"),

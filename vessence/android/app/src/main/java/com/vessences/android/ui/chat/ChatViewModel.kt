@@ -108,11 +108,6 @@ class ChatViewModel(
     private val spokenBlockRegex = Regex("<spoken>([\\s\\S]*?)</spoken>", RegexOption.IGNORE_CASE)
     private val spokenOpenRegex = Regex("<spoken>", RegexOption.IGNORE_CASE)
     private val spokenCloseRegex = Regex("</spoken>", RegexOption.IGNORE_CASE)
-    // Chars to accumulate before committing streaming-TTS on a <spoken>-less
-    // reply. If the tag hasn't opened by this many raw chars, assume the
-    // response is plain prose and start speaking normally. 400 chars ≈
-    // 300-500ms of additional latency at typical SSE streaming rates.
-    private val SPOKEN_SNIFF_CHARS = 400
     private val visualBlockRegex = Regex("<visual>([\\s\\S]*?)</visual>", RegexOption.IGNORE_CASE)
     private val assistantTagRegex = Regex("</?(?:spoken|visual|think|thinking|artifact)>", RegexOption.IGNORE_CASE)
     private val trailingPartialAssistantTagRegex = Regex("</?(?:spoken|visual|think|thinking|artifact)[^>]*$", RegexOption.IGNORE_CASE)
@@ -725,25 +720,14 @@ class ChatViewModel(
                                     sentenceTtsActive = true
                                     _state.value = _state.value.copy(isSpeaking = true)
                                 }
-                                // Feed the sanitized accumulated speech text instead of
-                                // per-delta regex cleanup. Tags can split across SSE
-                                // chunks, and per-delta cleanup can leak fragments like
-                                // </spoken> into TTS.
-                                //
-                                // Sniff-threshold gate: when the brain emits a long
-                                // technical reply with a <spoken> TL;DR, the tag often
-                                // lands AFTER hundreds of chars of markdown/paths/code.
-                                // Eagerly feeding the pre-tag content causes TTS to
-                                // voice file paths, backticks, and code identifiers
-                                // before <spoken> ever opens. Wait until either (a)
-                                // <spoken> has opened (assistantTextForSpeech then
-                                // returns only the tag's interior) or (b) SPOKEN_SNIFF
-                                // chars have streamed with no tag in sight — at which
-                                // point it's safe to assume the whole reply is plain
-                                // prose and speak it normally.
+                                // Server contract: every reply opens with <spoken>...</spoken>
+                                // (brain prompt + Stage 2 dispatcher both enforce this). We only
+                                // feed what's inside the tag to the TTS queue — markers, code,
+                                // and display-only detail stay out of the spoken path. If the
+                                // server ever violates the contract, the done-handler safety
+                                // net below logs a warning and voices the stripped fallback.
                                 val spokenOpened = spokenOpenRegex.containsMatchIn(rawAccumulated)
-                                val sniffReady = rawAccumulated.length >= SPOKEN_SNIFF_CHARS
-                                if (spokenOpened || sniffReady) {
+                                if (spokenOpened) {
                                     val speechAccumulated = assistantTextForSpeech(rawAccumulated, trim = false)
                                     if (speechAccumulated.length >= sentenceSpeechFedChars) {
                                         val cleanDelta = speechAccumulated.substring(sentenceSpeechFedChars)
@@ -835,6 +819,9 @@ class ChatViewModel(
                                     "contacts.sms_cancel",
                                     "sync.force_sms",
                                     "device.speak_time",
+                                    "timer.set",
+                                    "timer.cancel",
+                                    "timer.delete",
                                 )
                                 val toolResults = allToolResults.filter { it.tool !in FIRE_AND_FORGET }
                                 if (toolResults.isNotEmpty()) {
@@ -869,6 +856,20 @@ class ChatViewModel(
                                 android.util.Log.w("ChatVM", "Tool result wait timed out — completing normally")
                             }
                             if (sentenceTtsActive && (sentenceQueue != null || androidSentenceQueue != null)) {
+                                // Safety net: server contract says every reply opens with
+                                // <spoken>, so sentenceSpeechFedChars > 0 by done time. If
+                                // it's still 0, the brain or Stage 2 emitter forgot the tag —
+                                // log loudly and fall back to the stripped text so the user
+                                // still hears something. The log surfaces the regression.
+                                if (sentenceSpeechFedChars == 0 && !spokenText.isNullOrBlank()) {
+                                    android.util.Log.w(
+                                        "ttsdbg",
+                                        "spoken_contract_violated — no <spoken> tag in reply; " +
+                                        "falling back to stripped text (len=${spokenText.length})"
+                                    )
+                                    sentenceBuffer.clear()
+                                    sentenceBuffer.append(spokenText)
+                                }
                                 val remaining = sentenceBuffer.toString().trim()
                                 if (remaining.length > 3) {
                                     sentenceQueue?.submitSentence(remaining)

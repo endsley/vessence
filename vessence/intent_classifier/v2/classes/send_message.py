@@ -27,6 +27,7 @@ EXAMPLES = [
     "shoot a text to x",
     "can you text x",
     "can you tell x that y",
+    "text x i'm coming soon",
     # Continuation / confirmation to send (no recipient — short replies)
     "sounds good send it", "yeah send it", "go ahead and send it",
     "send it now", "ok send that", "please send that message",

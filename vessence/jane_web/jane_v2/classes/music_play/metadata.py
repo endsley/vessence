@@ -1,5 +1,25 @@
 """Music play class — classifier metadata."""
 
+PARAMS_SCHEMA = {
+    "kind": (
+        "enum REQUIRED — one of: song | artist | playlist | genre | mood | "
+        "shuffle | resume. "
+        "song for a specific track ('play Bohemian Rhapsody'). "
+        "artist for someone's catalog ('play some Shakira'). "
+        "playlist for a named playlist ('play my chill playlist'). "
+        "genre for a style ('play some lofi'). "
+        "mood for vibe-based ('something relaxing', 'sleep sounds'). "
+        "shuffle for unspecified random music ('put on some music'). "
+        "resume for 'unpause' / 'continue playing'."
+    ),
+    "query": (
+        "string|null — the searchable phrase the handler will resolve against "
+        "the library (song title, artist name, playlist name, genre word, mood "
+        "phrase). Null only for kind=resume."
+    ),
+}
+
+
 METADATA = {
     "name": "music play",
     "priority": 10,
@@ -22,6 +42,7 @@ METADATA = {
         "- DOES NOT handle: questions about music outside the user's library "
         "(Billboard, Spotify, lyrics, release dates). Those go to 'others'."
     ),
+    "params_schema": PARAMS_SCHEMA,
     "few_shot": [
         ("Play Bohemian Rhapsody", "music play:High"),
         ("Play the Scientist", "music play:High"),
