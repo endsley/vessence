@@ -645,6 +645,7 @@ class ConversationManager:
         remaining_part = self.conversation_history[split_index:]
 
         archive_content = " ".join([msg.get('content', '') for msg in part_to_summarize])
+        archive_content = self._strip_injected_metadata(archive_content)
         summary = self._generate_summary(archive_content)
 
         if not summary or summary == "Summary generation failed.":
@@ -657,14 +658,64 @@ class ConversationManager:
         self.conversation_history = [summary_message] + remaining_part
         return summary_message["content"]
 
+    @staticmethod
+    def _strip_injected_metadata(content: str) -> str:
+        """Remove pipeline-injected blocks that confuse the summarizer.
+
+        Stage 3 prepends <class_protocol>, [EXTRACTED PARAMS], [CURRENT
+        CONVERSATION STATE], and voice hints to the user message. These
+        are system metadata — not conversation — and cause the summarizer
+        LLM to respond to them instead of summarizing.
+        """
+        content = re.sub(
+            r'<class_protocol[^>]*>.*?</class_protocol>',
+            '', content, flags=re.DOTALL,
+        )
+        content = re.sub(
+            r'\[EXTRACTED PARAMS\].*?(?=\n\n|\Z)',
+            '', content, flags=re.DOTALL,
+        )
+        content = re.sub(
+            r'\[CURRENT CONVERSATION STATE\].*?(?=\n\n|\Z)',
+            '', content, flags=re.DOTALL,
+        )
+        content = re.sub(
+            r'\(voice request — .*?\)\n*',
+            '', content, flags=re.DOTALL,
+        )
+        content = re.sub(
+            r'\[STANDING BRAIN MODE\].*?(?=\n|\Z)',
+            '', content,
+        )
+        return content.strip()
+
+    _BAD_SUMMARY_PATTERNS = (
+        "I need clarification",
+        "Are you asking me to",
+        "I'm not sure what you",
+        "Could you clarify",
+        "Please clarify",
+        "I don't understand",
+        "Let me know if you",
+    )
+
     def _generate_summary(self, content: str) -> str:
         try:
             from agent_skills.claude_cli_llm import completion
             prompt = (
-                "Summarize key facts and decisions from this conversation excerpt. "
-                "Neutral, 3rd person.\n\n" + content
+                "You are a summarizer. Output ONLY a concise factual summary "
+                "of the conversation below. Do NOT respond to the content, "
+                "do NOT ask questions, do NOT ask for clarification, do NOT "
+                "include system metadata or protocol descriptions. Just "
+                "summarize what the user and assistant discussed: topics, "
+                "decisions, and outcomes. Neutral, 3rd person, 2-4 sentences "
+                "max.\n\n" + content
             )
-            return completion(prompt, max_tokens=300, timeout=60)
+            summary = completion(prompt, max_tokens=300, timeout=60)
+            if any(pat.lower() in summary.lower() for pat in self._BAD_SUMMARY_PATTERNS):
+                logger.warning("Summarizer produced a non-summary response, rejecting: %.100s", summary)
+                return "Summary generation failed."
+            return summary
         except Exception as e:
             logger.warning("Error generating summary: %s", e)
             return "Summary generation failed."
