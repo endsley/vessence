@@ -1,192 +1,300 @@
-# Transcript Quality Review — 2026-04-23
+# Transcript Quality Review — 2026-04-24
 
-Generated: 2026-04-24 01:27:05
+Generated: 2026-04-25 01:38:18
 
-## Issue 1 [MEDIUM]
+## Issue 1 [CRITICAL]
 
-**Turn:** 2026-04-23 01:18:44
-**User said:** I was wondering if you can tell me what's on my to-do list
+**Turn:** 2026-04-24 09:16:05
+**User said:** just that I am testing my text messaging and I love her
 
-**Problem:** Stage 1 misclassified a clear to-do-list request as `others`, so the fast-path to-do handler never ran.
+**Problem:** Send-message turn was routed to Stage 3 and answered as message reading instead of drafting/sending an SMS.
 
-**Root cause:** The classifier labeled the turn `others:Low` and immediately escalated to Stage 3 with no to-do class protocol loaded. Jane still recovered the intent in Stage 3, but only after a slower full-LLM path.
+**Root cause:** The v4 classifier produced the unknown label `send_message`; the pipeline downgraded it to `others`, so the Stage 2 SMS handler never ran. Stage 3 then answered from the wrong conversational context.
 
-**Suggested fix:** Add lexical/rule fallback for `to do`, `to-do`, and `todo list` phrases before `others`, and retrain the Stage 1 examples so list-reading requests map to `todo list` reliably.
+**Suggested fix:** Normalize classifier aliases before validation (`send_message` -> `send message`) and add a regression test for SMS utterances that include body text.
 
 **Log evidence:**
 ```
-[2026-04-23 01:18:44] (audit-177692) user: I was wondering if you can tell me what's on my to-do list
+[2026-04-24 09:16:05] (jane_android) user: just that I am testing my text messaging and I love her
 ```
 ```
-2026-04-23 01:18:43 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (860ms)
+2026-04-24 09:16:04 WARNING [intent_classifier.v4.classifier] v4: qwen returned unknown class 'send_message' → others
 ```
 ```
-2026-04-23 01:18:44 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=1408 sid_override=True class_protocol=n/a
+2026-04-24 09:16:04 INFO [jane_web.jane_v4.pipeline] jane_v4 pipeline: stage1 others:Low (1900ms) params={}
+```
+```
+2026-04-24 09:16:05 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=1568 sid_override=True class_protocol=n/a
 ```
 
 ---
 
 ## Issue 2 [MEDIUM]
 
-**Turn:** 2026-04-23 01:19:10
-**User said:** the home
+**Turn:** 2026-04-24 09:23:20
+**User said:** can you tell me what's on my to-do list
 
-**Problem:** Follow-up routing failed: the user's category answer was not sent directly to the pending to-do flow.
+**Problem:** Fresh to-do-list request inherited stale category state, causing the Stage 2 todo handler to fail and escalate unnecessarily.
 
-**Root cause:** After Jane asked which category to hear, the next turn should have been claimed by `pending_action_resolver`. Instead there is no resolver hit, Stage 1 ran again, classified `the home` as `others:Low`, and Stage 3 had to infer the answer from recent history.
+**Root cause:** A pending todo follow-up was still active (`awaiting=category`), and the next top-level request reached Stage 1 with `category='urgent'`. The todo handler then returned an invalid shape and fell back to Stage 3.
 
-**Suggested fix:** When Stage 2 or Stage 3 asks a constrained follow-up like a to-do category, persist a pending action and bypass Stage 1 entirely on the next user turn.
+**Suggested fix:** Clear todo pending state when a new top-level todo request is detected, and ignore carried category values unless the utterance is only a category reply.
 
 **Log evidence:**
 ```
-[2026-04-23 01:19:10] (audit-177692) user: the home
+[2026-04-24 09:23:20] (jane_android) user: can you tell me what's on my to-do list
 ```
 ```
-2026-04-23 01:19:09 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (788ms)
+2026-04-24 09:23:15 INFO [jane_web.jane_v2.pending_action_resolver] resolver: followup → todo list (awaiting=category)
 ```
 ```
-2026-04-23 01:19:10 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=2001 sid_override=True class_protocol=n/a
+2026-04-24 09:23:17 INFO [jane_web.jane_v4.pipeline] jane_v4 pipeline: stage1 todo list:Very High (1478ms) params={'action': 'read', 'category': 'urgent', 'item': None}
+```
+```
+2026-04-24 09:23:17 INFO [jane_web.jane_v4.pipeline] jane_v4: handler 'todo list' returned invalid shape → Stage 3
 ```
 
 ---
 
-## Issue 3 [MEDIUM]
+## Issue 3 [CRITICAL]
 
-**Turn:** 2026-04-23 01:19:27
-**User said:** how about for the clinic
+**Turn:** 2026-04-24 09:24:46
+**User said:** can you tell me what's on my to-do list
 
-**Problem:** Jane returned an incorrect clinic to-do list count and duplicated one item.
+**Problem:** Clear todo-list request was misclassified as `others`, forcing a 113-second Stage 3 path.
 
-**Root cause:** This follow-up also missed the to-do fast path and went through Stage 3 (`others:Low`, `class_protocol=n/a`). The spoken answer says there are 6 clinic items and repeats `Add texting capability to the laptop`, while the later source-of-truth summary says there are 5 unique clinic items.
+**Root cause:** Stage 1 returned `others:Low` instead of `todo list`, so the deterministic todo handler was skipped and Opus handled the turn with very high latency.
 
-**Suggested fix:** Force all to-do reads, including Stage 3 fallbacks, through the same `todo_list_cache.json` reader/deduper used by Stage 2, and deduplicate items before rendering speech.
+**Suggested fix:** Add lexical fallback rules for `todo list`/`to-do list` before `others`, and retrain the classifier with more direct todo-list examples.
 
 **Log evidence:**
 ```
-[2026-04-23 01:19:27] (audit-177692) user: how about for the clinic
+[2026-04-24 09:24:46] (jane_android) user: can you tell me what's on my to-do list
 ```
 ```
-[2026-04-23 01:19:27] (audit-177692) user: how about for the clinic jane: 6 items for the clinic. Curtain rods at kathia’s clinic; The wooden block for the door at the clinic; Create a clinic Gmail account; Put mirrors up; Add texting capability to the laptop; and finally, Add texting capability to the laptop.
+2026-04-24 09:24:45 INFO [jane_web.jane_v4.pipeline] jane_v4 pipeline: stage1 others:Low (1353ms) params={}
 ```
 ```
-2026-04-23 01:19:26 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (1374ms)
+2026-04-24 09:24:46 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=1526 sid_override=True class_protocol=n/a
 ```
 ```
-[2026-04-23 01:21:17] (audit-177692) **Summary:** Stage 2 and 3 use Google Docs (synced to `todo_list_cache.json` every 30 min) as the single source of truth for todos. Home todos: Put TV from Kathia's room to gym, Clean downstairs, Rebuild the bed. Clinic todos contain 5 unique items
+2026-04-24 09:26:39 INFO [jane_web.jane_v4.pipeline] jane_v4 pipeline: stage3 end-to-end (113539ms)
 ```
 
 ---
 
-## Issue 4 [MEDIUM]
+## Issue 4 [CRITICAL]
 
-**Turn:** 2026-04-23 01:30:56
-**User said:** what's the weather like tomorrow
+**Turn:** 2026-04-24 09:27:45
+**User said:** the Urgent stuff
 
-**Problem:** Stage 1 misclassified a straightforward weather request as `others`, bypassing the weather fast path.
+**Problem:** A simple category follow-up was not resolved by pending_action and instead went through slow Stage 3.
 
-**Root cause:** The server routed the turn to Stage 3 even though the utterance is an explicit forecast query. Jane answered, but only through a slower, unnecessary escalation path.
+**Root cause:** After Jane asked which todo category to read, the next reply should have bypassed classification. Instead Stage 1 labeled it `others:Low`, so follow-up routing failed and the user waited 104 seconds.
 
-**Suggested fix:** Expand Stage 1 weather training/examples for phrasings like `what's the weather like tomorrow` and add a keyword fallback for `weather`, `forecast`, `tomorrow`, and `rain` patterns.
+**Suggested fix:** When `awaiting=category`, route category-only replies directly to the todo handler and skip Stage 1 classification entirely.
 
 **Log evidence:**
 ```
-[2026-04-23 01:30:56] (audit-177692) user: what's the weather like tomorrow
+[2026-04-24 09:27:45] (jane_android) user: the Urgent stuff
 ```
 ```
-2026-04-23 01:30:55 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (764ms)
+2026-04-24 09:27:44 INFO [jane_web.jane_v4.pipeline] jane_v4 pipeline: stage1 others:Low (1292ms) params={}
 ```
 ```
-2026-04-23 01:30:56 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=1320 sid_override=True class_protocol=n/a
+2026-04-24 09:27:44 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=1903 sid_override=True class_protocol=n/a
+```
+```
+2026-04-24 09:29:29 INFO [jane_web.jane_v4.pipeline] jane_v4 pipeline: stage3 end-to-end (104590ms)
 ```
 
 ---
 
 ## Issue 5 [CRITICAL]
 
-**Turn:** 2026-04-23 09:35:01
-**User said:** can you set a timer for 23 minutes
+**Turn:** 2026-04-24 09:31:28
+**User said:** are we still doing
 
-**Problem:** A simple timer request entered a broken multi-turn loop after the timer was already set.
+**Problem:** Jane answered an unrelated question with stale clinic todo items.
 
-**Root cause:** Stage 2 parsed the duration correctly but still asked for a label (`duration=1380000 but no label → ask`). After the follow-up, the handler fired the timer, but the returned `[TOOL_RESULT:...]` was fed back into Stage 1 as if it were a new user turn. Stage 1 classified that tool result as another timer request, Stage 2 parsed `duration_ms=0`, and Jane asked for duration again. The logs also show resolver hits followed by Stage 1 runs, so follow-up routing is not actually bypassing classification.
+**Root cause:** The turn was classified as `others:Low` and escalated with recent-history context right after a clinic todo read, so Stage 3 reused stale clinic context instead of answering the current utterance. Pending follow-up state was not cleared aggressively enough.
 
-**Suggested fix:** Make timer labels optional for `set a timer` requests, consume `[TOOL_RESULT:...]` messages out-of-band so they never enter Stage 1, and when `pending_action_resolver` matches a follow-up, short-circuit directly to the target handler without reclassification.
+**Suggested fix:** Expire/clear todo follow-up state after a completed category read, and strip stale follow-up context from Stage 3 escalation when the new utterance does not match an expected category reply.
 
 **Log evidence:**
 ```
-2026-04-23 09:35:01 INFO [jane_web.jane_v2.classes.timer.handler] timer handler: SET parse → duration_ms=1380000 from prompt='can you set a timer for 23 minutes'
+[2026-04-24 09:31:28] (jane_android) user: are we still doing
 ```
 ```
-2026-04-23 09:35:01 INFO [jane_web.jane_v2.classes.timer.handler] timer handler: duration=1380000 but no label → ask
+[2026-04-24 09:31:28] (jane_android) jane: <spoken>3 items for the clinic. Curtain rods at kathia’s clinic; The wooden block for the door at the clinic; and finally, Put mirrors up.</spoken>
 ```
 ```
-2026-04-23 09:35:10 INFO [jane_web.jane_v2.pending_action_resolver] resolver: followup → timer (awaiting=label)
+2026-04-24 09:31:06 INFO [jane_web.jane_v4.pipeline] jane_v4 pipeline: stage1 todo list:Very High (1315ms) params={'action': 'read', 'category': 'clinic', 'item': None}
 ```
 ```
-2026-04-23 09:35:11 INFO [jane_web.jane_v2.classes.timer.handler] timer handler: fire duration_ms=1380000 label=''
-```
-```
-2026-04-23 09:35:12 INFO [jane_web.jane_v2.classes.timer.handler] timer handler: SET parse → duration_ms=0 from prompt='[TOOL_RESULT:{"tool":"timer.set","call_id":"b35f8793-6aef-4e38-9eb6-b7a6da6d2c97","status":"completed","message":"timer '
-```
-```
-2026-04-23 09:35:12 INFO [jane_web.jane_v2.classes.timer.handler] timer handler: timer intent with no duration → ask
+2026-04-24 09:31:26 INFO [jane_web.jane_v4.pipeline] jane_v4 pipeline: stage1 others:Low (1228ms) params={}
 ```
 
 ---
 
-## Issue 6 [MEDIUM]
+## Issue 6 [CRITICAL]
 
-**Turn:** 2026-04-23 12:28:50
-**User said:** okay what is on my to do list
+**Turn:** 2026-04-24 22:58:32
+**User said:** math is hard
 
-**Problem:** The same to-do-list classification failure recurred in a separate session.
+**Problem:** Fallback to Stage 3 crashed with a server error, so the user got no answer.
 
-**Root cause:** This later request was again labeled `others:Low` and escalated to Stage 3 instead of using the deterministic to-do handler. That shows the Stage 1 bug is systematic, not a one-off.
+**Root cause:** The `others` path used the synchronous Claude call, which invoked `ClaudePersistentManager.get()` without the required `session_id` argument.
 
-**Suggested fix:** Fix Stage 1 intent coverage for `what is on my to do list` style requests and add a regression test that asserts these phrases hit the `todo list` class.
+**Suggested fix:** Fix the sync Stage 3 call signature to always pass `session_id`, and add an integration test for `others` turns on `/api/jane/chat`.
 
 **Log evidence:**
 ```
-[2026-04-23 12:28:50] (jane_android) [private turn — class: clinic schedules info] user: okay what is on my to do list
+[2026-04-24 22:58:32] (e226290043e5) math is hard
 ```
 ```
-2026-04-23 12:28:49 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (760ms)
+2026-04-24 22:58:29 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (662ms) params={}
 ```
 ```
-2026-04-23 12:28:50 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=907 sid_override=True class_protocol=n/a
+2026-04-24 22:58:31 INFO [jane.proxy] [e226290043e5] send_message (sync) brain=Claude history=0 msg_len=12 file_ctx=False
+```
+```
+2026-04-24 22:58:32 ERROR [jane.web] Unhandled error in POST /api/jane/chat after 5063ms: ClaudePersistentManager.get() missing 1 required positional argument: 'session_id'
 ```
 
 ---
 
 ## Issue 7 [CRITICAL]
 
-**Turn:** 2026-04-23 18:39:11
-**User said:** what's on Maya to do list
+**Turn:** 2026-04-24 22:58:36
+**User said:** 234 times 567
 
-**Problem:** A new to-do-list question was hijacked by a stale read-calendar follow-up, and Jane answered the wrong task.
+**Problem:** Basic arithmetic request was misclassified and then crashed in fallback instead of using the math handler.
 
-**Root cause:** The resolver incorrectly claimed the turn as `read calendar (awaiting=event_detail)`, Stage 1 then classified the utterance as `read calendar:Very High`, the read-calendar handler returned an invalid shape, and Stage 3 was invoked with `class_protocol=loaded:read_calendar`. Jane ultimately answered with the generic to-do categories, ignoring the `Maya` qualifier, and the system even emitted a Bing query built from the internal `read_calendar` class protocol text.
+**Root cause:** Stage 1 labeled the utterance `others:Low` rather than `do math`, and the fallback sync Claude path then failed because `session_id` was not passed to `ClaudePersistentManager.get()`.
 
-**Suggested fix:** Tighten `pending_action_resolver` so it only captures semantically compatible replies, clear stale follow-ups on topic changes, validate handler return shapes before fallback, and block any web/tool call that is derived from internal class-protocol text rather than the user utterance.
+**Suggested fix:** Add regression tests for multiplication phrasing like `X times Y`, and fix the sync fallback session handling.
 
 **Log evidence:**
 ```
-[2026-04-23 18:39:11] (jane_android) user: what's on Maya to do list
+[2026-04-24 22:58:36] (3cda7277e332) 234 times 567
 ```
 ```
-2026-04-23 18:39:09 INFO [jane_web.jane_v2.pending_action_resolver] resolver: followup → read calendar (awaiting=event_detail)
+2026-04-24 22:58:34 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (725ms) params={}
 ```
 ```
-2026-04-23 18:39:10 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 read calendar:Very High (817ms)
+2026-04-24 22:58:35 INFO [jane.proxy] [3cda7277e332] send_message (sync) brain=Claude history=0 msg_len=13 file_ctx=False
 ```
 ```
-2026-04-23 18:39:10 INFO [jane_web.jane_v3.pipeline] jane_v3: handler 'read calendar' returned invalid shape → Stage 3
+2026-04-24 22:58:36 ERROR [jane.web] Unhandled error in POST /api/jane/chat after 2599ms: ClaudePersistentManager.get() missing 1 required positional argument: 'session_id'
+```
+
+---
+
+## Issue 8 [CRITICAL]
+
+**Turn:** 2026-04-24 22:59:30
+**User said:** 234 times 567
+
+**Problem:** Repeated arithmetic retry failed the same way: misclassified, then crashed in Stage 3 fallback.
+
+**Root cause:** The classifier again returned `others:Low` for a math utterance, and the same broken sync Claude path raised `missing 1 required positional argument: 'session_id'`.
+
+**Suggested fix:** Fix both the math-intent classification gap and the sync fallback bug; add a retry-path regression test so repeated failures are caught.
+
+**Log evidence:**
+```
+[2026-04-24 22:59:30] (c02eaa7b97e2) 234 times 567
 ```
 ```
-2026-04-23 18:39:10 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=read calendar:Very High voice=False prompt_len=2055 sid_override=True class_protocol=loaded:read_calendar
+2026-04-24 22:59:29 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (719ms) params={}
 ```
 ```
-2026-04-23 18:39:11 INFO [primp] response: https://www.bing.com/search?q=%3Cclass_protocol+name%3D%22read_calendar%22%3E%0AThese+are+runtime+instructions+for+handling+a+read+calendar+request.
+2026-04-24 22:59:30 INFO [jane.proxy] [c02eaa7b97e2] send_message (sync) brain=Claude history=0 msg_len=13 file_ctx=False
+```
+```
+2026-04-24 22:59:30 ERROR [jane.web] Unhandled error in POST /api/jane/chat after 1968ms: ClaudePersistentManager.get() missing 1 required positional argument: 'session_id'
+```
+
+---
+
+## Issue 9 [CRITICAL]
+
+**Turn:** 2026-04-24 23:07:51
+**User said:** what is 789 divided by 3
+
+**Problem:** Division query was misclassified and then crashed before any answer was returned.
+
+**Root cause:** Stage 1 again fell through to `others:Low` instead of `do math`, and the fallback sync Claude request used the broken `ClaudePersistentManager.get()` call without `session_id`.
+
+**Suggested fix:** Broaden Stage 1 math coverage for division phrasing and add end-to-end tests that verify `others` fallback does not crash.
+
+**Log evidence:**
+```
+[2026-04-24 23:07:51] (791516a9eb4d) what is 789 divided by 3
+```
+```
+2026-04-24 23:07:50 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (713ms) params={}
+```
+```
+2026-04-24 23:07:51 INFO [jane.proxy] [791516a9eb4d] send_message (sync) brain=Claude history=0 msg_len=24 file_ctx=False
+```
+```
+2026-04-24 23:07:51 ERROR [jane.web] Unhandled error in POST /api/jane/chat after 2175ms: ClaudePersistentManager.get() missing 1 required positional argument: 'session_id'
+```
+
+---
+
+## Issue 10 [CRITICAL]
+
+**Turn:** 2026-04-24 23:07:54
+**User said:** math is hard
+
+**Problem:** Another `others` turn hit the same Stage 3 crash and returned nothing to the user.
+
+**Root cause:** The synchronous Claude fallback path was still broken and called `ClaudePersistentManager.get()` without a `session_id`.
+
+**Suggested fix:** Repair the sync fallback once and add a smoke test for ordinary `others` chat messages.
+
+**Log evidence:**
+```
+[2026-04-24 23:07:54] (5ca207b5f5c5) math is hard
+```
+```
+2026-04-24 23:07:53 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (1179ms) params={}
+```
+```
+2026-04-24 23:07:54 INFO [jane.proxy] [5ca207b5f5c5] send_message (sync) brain=Claude history=0 msg_len=12 file_ctx=False
+```
+```
+2026-04-24 23:07:54 ERROR [jane.web] Unhandled error in POST /api/jane/chat after 2413ms: ClaudePersistentManager.get() missing 1 required positional argument: 'session_id'
+```
+
+---
+
+## Issue 11 [CRITICAL]
+
+**Turn:** 2026-04-24 23:10:19
+**User said:** calculate 88 minus 19
+
+**Problem:** Subtraction request was not handled by the math fast path and then crashed in fallback.
+
+**Root cause:** Stage 1 returned `others:Low` for a straightforward math utterance, and the fallback sync Claude call again failed because `session_id` was omitted.
+
+**Suggested fix:** Add subtraction phrasing to the math classifier tests and fix the sync Claude fallback API call.
+
+**Log evidence:**
+```
+[2026-04-24 23:10:19] (68a97ad3fc28) calculate 88 minus 19
+```
+```
+2026-04-24 23:10:18 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (656ms) params={}
+```
+```
+2026-04-24 23:10:19 INFO [jane.proxy] [68a97ad3fc28] send_message (sync) brain=Claude history=0 msg_len=21 file_ctx=False
+```
+```
+2026-04-24 23:10:19 ERROR [jane.web] Unhandled error in POST /api/jane/chat after 1732ms: ClaudePersistentManager.get() missing 1 required positional argument: 'session_id'
 ```
 
 ---

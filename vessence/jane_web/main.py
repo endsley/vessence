@@ -886,6 +886,40 @@ async def reset_session_gate(request: Request):
     return JSONResponse({"status": "already_free", "session_id": session_id})
 
 
+@app.post("/api/admin/rotate-brain")
+async def rotate_brain_session(request: Request):
+    """Force-rotate the standing brain's Claude session to clear stale context.
+
+    Discards the current persistent Claude CLI session so the next message
+    starts a fresh one. Useful when context compression has accumulated
+    stale/incorrect summaries (e.g. wrong handler status).
+
+    Body: {"session_id": "jane_android"} or {} to rotate ALL sessions.
+    Localhost only.
+    """
+    client_ip = _client_ip(request)
+    if client_ip not in ("127.0.0.1", "::1", "localhost"):
+        return JSONResponse({"error": "localhost only"}, status_code=403)
+    try:
+        body = await request.json()
+        session_id = body.get("session_id", "").strip()
+    except Exception:
+        session_id = ""
+
+    from llm_brain.v1.persistent_claude import get_claude_persistent_manager
+    manager = get_claude_persistent_manager()
+
+    if session_id:
+        user_id = get_session_user(session_id) or _default_user_id()
+        await manager.end(user_id, session_id)
+        _logger.info("Admin rotated brain session: user=%s session=%s", user_id, session_id[:12])
+        return JSONResponse({"status": "rotated", "session_id": session_id})
+
+    killed = manager.force_shutdown_all()
+    _logger.info("Admin rotated ALL brain sessions: killed=%d", killed)
+    return JSONResponse({"status": "rotated_all", "killed": killed})
+
+
 @app.post("/api/jane/warmup")
 async def warmup_brain(request: Request):
     """Warm up the standing brain CLI process. Called by graceful_restart.sh

@@ -191,11 +191,12 @@ def _synthesize_class_protocol(class_name: str) -> str | None:
         raw_desc = meta.get("description", "")
         desc = raw_desc() if callable(raw_desc) else str(raw_desc or "")
 
+    has_handler = bool(meta.get('handler'))
     lines = [
-        "Shared class contract generated from Stage 2 metadata.",
+        "AUTHORITATIVE class contract (generated live from registry — supersedes any prior summary).",
         f"- Class name: {meta.get('name', class_name)}",
         f"- Package: {class_name}",
-        f"- Stage 2 handler present: {'yes' if meta.get('handler') else 'no'}",
+        f"- Stage 2 handler: {'YES — handler exists and is registered' if has_handler else 'NO — no handler'}",
     ]
     if desc.strip():
         lines.extend(["", "Stage 1/2 description:", desc.strip()])
