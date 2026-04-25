@@ -58,7 +58,7 @@ If the lock is held, **wait** — do not bypass it. The lock auto-releases when 
 ## Essence Post-Build Verification (MANDATORY)
 
 After building or modifying ANY essence, run this checklist before reporting done:
-1. Restart the web server if code changed: `systemctl --user restart jane-web.service`
+1. Restart the web server if code changed: `bash $VESSENCE_HOME/startup_code/graceful_restart.sh` (zero-downtime; see Server Restart Policy)
 2. Verify essence appears in list: `curl -s http://localhost:8081/api/essences | python3 -m json.tool | grep -i <essence_name>`
 3. Verify the essence page/route returns 200 (use a session cookie or check with auth)
 4. Verify API endpoints return valid JSON
@@ -111,34 +111,33 @@ NEVER use `contacts.call` for these phrases.
 Only use `contacts.call` when the user explicitly says **"call"** or **"phone"** (e.g. "call my wife", "phone John").
 If ambiguous, default to SMS — asking "I'll send a text?" is fine.
 
-### Sending Messages (v2 pipeline)
+### Sending Messages
 
-The v2 pipeline handles SEND_MESSAGE intents via a two-path flow controlled by
-`JANE_USE_V2_PIPELINE=1`. When the env var is set, the pipeline decides which path
-to take — Opus only runs on fallback.
+Under v3 (`JANE_USE_V3_PIPELINE=1`, the only active routing), the `jane_v3` pipeline
+classifies the intent and dispatches to the `send_message` handler at
+`jane_web/jane_v2/classes/send_message/handler.py`. Two outcomes:
 
-**Fast path** (Qwen's `COHERENT=yes` + recipient resolves unambiguously):
-- Server sends the SMS immediately and responds `"msg sent"`.
-- No draft, no confirmation.
-- This is safe because Qwen's `COHERENT` flag catches STT garbled/cut-off text.
+**Fast path — handler sends silently** (Qwen's `COHERENT=yes` + recipient resolves
+unambiguously via contact/alias lookup):
+- Handler emits `[[CLIENT_TOOL:contacts.sms_send_direct:{...}]]` immediately and
+  replies `"msg sent"`. No draft, no confirmation. Qwen's `COHERENT` flag is the
+  guard against STT garbled/cut-off text.
 
-**Fallback path** (`COHERENT=no`, recipient ambiguous, or recipient unresolved):
-- Opus handles it. Always use `sms_send_direct` to send:
+**Fallback — confirm-or-revise via Opus** (`COHERENT=no`, recipient ambiguous, or
+recipient unresolved):
+When you (Opus) handle the SMS at Stage 3:
+- Always use `sms_send_direct` to send:
   `[[CLIENT_TOOL:contacts.sms_send_direct:{"phone_number":"<number>","body":"<message>"}]]`
-- DO NOT use `sms_draft` or `sms_send` — those require a draft round-trip that often fails.
-  `sms_send_direct` sends immediately in one step.
+- DO NOT use `sms_draft` or `sms_send` — they require a draft round-trip that often fails.
+  `sms_send_direct` sends in one step.
 - For incoherent body: ask the user what they meant, then send via `sms_send_direct`.
 - For unresolved recipient: use memory to identify who the person is, search contacts
   via `GET /api/contacts/search?q=<name>`, resolve the phone number, then:
   1. Write alias: `POST /api/contacts/alias` with
      `{"alias": "<relational name>", "phone_number": "<resolved>", "display_name": "<real name>"}`
   2. Send via: `[[CLIENT_TOOL:contacts.sms_send_direct:{"phone_number":"<resolved>","body":"<message>"}]]`
-  3. Next request hits the fast path automatically.
+  3. Subsequent requests resolve the alias on the fast path.
 - Rewrite perspective before sending: "tell X I love her" → body should be "I love you".
-
-When `JANE_USE_V2_PIPELINE` is NOT set (old pipeline):
-Follow the original draft → read-back → confirm → send flow for all SMS sends.
-**NEVER send without explicit confirmation in the old pipeline.**
 
 ### Reading Messages
 

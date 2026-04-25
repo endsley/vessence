@@ -52,3 +52,60 @@ def privacy_for(cls: str | None) -> str | None:
     if meta:
         return meta.get("privacy")
     return None
+
+
+# ── Multi-turn continuation helpers ────────────────────────────────────────
+import datetime as _dt
+
+
+def _expires_at(minutes: int = 2) -> str:
+    return (_dt.datetime.utcnow() + _dt.timedelta(minutes=minutes)).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
+
+
+def pending_continuation(
+    handler_class: str,
+    awaiting: str,
+    question: str,
+    data: dict | None = None,
+    minutes: int = 2,
+) -> dict:
+    """Build a STAGE2_FOLLOWUP pending_action for any multi-turn handler.
+
+    Use this from "repeating-read" handlers (todo, weather) and
+    "confirm-or-revise" handlers (sms, email) so the next turn knows
+    which handler should resume and with what shape.
+
+    `awaiting` is a handler-specific tag identifying the response shape
+    expected (e.g. "another_category_or_stop", "send_confirmation",
+    "revised_body"). The handler reads this tag in its resume branch.
+
+    `question` is the literal text Jane just asked. Stored verbatim so
+    the classifier's pivot check can see what was being asked.
+
+    `data` carries any handler-specific state across the turn (e.g.
+    {"draft": {...}, "remaining": [...]}).
+    """
+    return {
+        "type": "STAGE2_FOLLOWUP",
+        "handler_class": handler_class,
+        "status": "awaiting_user",
+        "awaiting": awaiting,
+        "data": {**(data or {}), "awaiting": awaiting},
+        "question": question,
+        "expires_at": _expires_at(minutes),
+    }
+
+
+def end_conversation(text: str = "Ok.", structured: dict | None = None) -> dict:
+    """Return a handler result that ends the conversation cleanly.
+
+    Emits conversation_end=True so the Android client drops STT and
+    returns to wake-word mode (and plays the end-conversation cue).
+    """
+    return {
+        "text": text,
+        "conversation_end": True,
+        "structured": structured or {},
+    }

@@ -1,0 +1,249 @@
+{
+  "class": "TELL_JOKE",
+  "phrases": [
+    "tell Lee a joke",
+    "text Kathia the joke about the chicken",
+    "email Bob a joke for his birthday",
+    "send mom a funny meme",
+    "remind me to tell Lee that joke tomorrow",
+    "add tell a joke at dinner to my todo list",
+    "what is a joke",
+    "why was that joke funny",
+    "explain the pun in this email",
+    "who wrote that joke",
+    "this meeting is a joke",
+    "my inbox is a joke right now",
+    "the weather is a joke today",
+    "don't tell me a joke",
+    "no jokes please",
+    "stop with the jokes",
+    "i don't find that funny",
+    "that was actually funny",
+    "make me a sandwich",
+    "make me some coffee",
+    "make me an appointment",
+    "say hi for me",
+    "say goodnight to Lee",
+    "say my weight out loud",
+    "is this a joke",
+    "are you joking",
+    "you're joking right",
+    "that's hilarious",
+    "what's funny about that",
+    "how do comedians write jokes"
+  ],
+  "results": [
+    {
+      "phrase": "tell Lee a joke",
+      "classification": "SEND_MESSAGE",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "text Kathia the joke about the chicken",
+      "classification": "SEND_MESSAGE",
+      "confidence": 0.6,
+      "margin": 0.2,
+      "false_positive": false
+    },
+    {
+      "phrase": "email Bob a joke for his birthday",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.4,
+      "margin": 0.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "send mom a funny meme",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.4,
+      "margin": 0.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "remind me to tell Lee that joke tomorrow",
+      "classification": "SEND_MESSAGE",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "add tell a joke at dinner to my todo list",
+      "classification": "TODO_LIST",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "what is a joke",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "why was that joke funny",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "explain the pun in this email",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.4,
+      "margin": 0.2,
+      "false_positive": false
+    },
+    {
+      "phrase": "who wrote that joke",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "this meeting is a joke",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.6,
+      "margin": 0.2,
+      "false_positive": false
+    },
+    {
+      "phrase": "my inbox is a joke right now",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.4,
+      "margin": 0.2,
+      "false_positive": false
+    },
+    {
+      "phrase": "the weather is a joke today",
+      "classification": "WEATHER",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "don't tell me a joke",
+      "classification": "END_CONVERSATION",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "no jokes please",
+      "classification": "END_CONVERSATION",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "stop with the jokes",
+      "classification": "END_CONVERSATION",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "i don't find that funny",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.6,
+      "margin": 0.2,
+      "false_positive": false
+    },
+    {
+      "phrase": "that was actually funny",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.6,
+      "margin": 0.2,
+      "false_positive": false
+    },
+    {
+      "phrase": "make me a sandwich",
+      "classification": "SHOPPING_LIST",
+      "confidence": 0.6,
+      "margin": 0.2,
+      "false_positive": false
+    },
+    {
+      "phrase": "make me some coffee",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.4,
+      "margin": 0.2,
+      "false_positive": false
+    },
+    {
+      "phrase": "make me an appointment",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.6,
+      "margin": 0.4,
+      "false_positive": false
+    },
+    {
+      "phrase": "say hi for me",
+      "classification": "GREETING",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "say goodnight to Lee",
+      "classification": "SEND_MESSAGE",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "say my weight out loud",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.2,
+      "margin": 0.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "is this a joke",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "are you joking",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.6,
+      "margin": 0.2,
+      "false_positive": false
+    },
+    {
+      "phrase": "you're joking right",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "that's hilarious",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "what's funny about that",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "how do comedians write jokes",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    }
+  ],
+  "false_positive_count": 0,
+  "false_positives": []
+}

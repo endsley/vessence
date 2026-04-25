@@ -743,6 +743,17 @@ CODE_MAP_KEYWORDS = (
     "read_calendar",
     "fetches",
     "kathia",
+    # Auto-evolved from daily conversations
+    "items",
+    "urgent",
+    "students",
+    "wooden",
+    "mirrors",
+    "curtain",
+    "rods",
+    "door",
+    "min",
+    "todo_list_cache",
 )
 
 

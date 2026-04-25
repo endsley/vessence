@@ -43,6 +43,36 @@ _VALID_TOPICS = {"current", "forecast", "precipitation", "wind",
 _WEEKDAYS = ["monday", "tuesday", "wednesday", "thursday", "friday",
              "saturday", "sunday"]
 
+# Phrases the resume branch maps to a day spec when the user replies after
+# "Want the weather for another day?". Order matters — match longest first.
+_DAY_PHRASE_MAP = [
+    ("day after tomorrow", None),  # special: today + 2
+    ("tomorrow", "tomorrow"),
+    ("today", "today"),
+    ("tonight", "today"),
+    ("this week", "this_week"),
+    ("the week", "this_week"),
+    ("weekend", "weekend"),
+    ("monday", "monday"), ("tuesday", "tuesday"), ("wednesday", "wednesday"),
+    ("thursday", "thursday"), ("friday", "friday"), ("saturday", "saturday"),
+    ("sunday", "sunday"),
+]
+
+
+def _day_from_followup(prompt: str) -> str | None:
+    """Map a follow-up reply ('and tomorrow?', 'monday') to a day spec.
+    Returns None when no day is detected — caller treats as a pivot."""
+    p = (prompt or "").lower()
+    if not p.strip():
+        return None
+    for phrase, mapped in _DAY_PHRASE_MAP:
+        if phrase in p:
+            if phrase == "day after tomorrow":
+                from datetime import date, timedelta
+                return (date.today() + timedelta(days=2)).isoformat()
+            return mapped
+    return None
+
 
 def _normalize_day(day: str | None, forecast: list[dict]) -> dict | None:
     """Return the forecast entry matching `day`, or None if not found.
@@ -192,22 +222,87 @@ async def _phrase(slice_obj: dict, prompt: str) -> str | None:
     return text or None
 
 
-async def handle(prompt: str, params: dict | None = None) -> dict | None:
+def _expires_at(minutes: int = 2) -> str:
+    import datetime as _dt
+    return (_dt.datetime.utcnow() + _dt.timedelta(minutes=minutes)).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
+
+
+def _wrap_with_followup(spoken: str, topic: str, location: str | None) -> dict:
+    """Append 'Want another day?' and a STAGE2_FOLLOWUP pending."""
+    follow = "Want the weather for another day?"
+    text = f"{spoken} {follow}"
+    return {
+        "text": text,
+        "structured": {
+            "intent": "weather",
+            "pending_action": {
+                "type": "STAGE2_FOLLOWUP",
+                "handler_class": "weather",
+                "status": "awaiting_user",
+                "awaiting": "another_day_or_stop",
+                "data": {
+                    "awaiting": "another_day_or_stop",
+                    "topic": topic,
+                    "location": location or "",
+                },
+                "question": follow,
+                "expires_at": _expires_at(),
+            },
+        },
+    }
+
+
+async def _answer_for(prompt: str, topic: str, day, location: str | None) -> dict | None:
+    """Resolve a topic/day pair → spoken text wrapped with follow-up.
+    Returns None on cache miss / phrasing failure."""
+    try:
+        data = json.loads(WEATHER_PATH.read_text())
+    except Exception as e:
+        logger.warning("weather handler: cache unreadable: %s", e)
+        return None
+    slice_obj = _slice_for(topic, day, data)
+    if slice_obj is None:
+        return None
+    text = await _phrase(slice_obj, prompt)
+    if not text:
+        return None
+    logger.info("weather handler: answered (topic=%s day=%s, %d chars)",
+                topic, day, len(text))
+    return _wrap_with_followup(text, topic, location)
+
+
+async def handle(prompt: str, context: str = "", pending: dict | None = None,
+                 params: dict | None = None) -> dict | None:
     p_lower = (prompt or "").lower()
     if any(phrase in p_lower for phrase in _FORCE_ESCALATE_PHRASES):
         logger.info("weather handler: research/online phrase → escalate")
         return None
 
+    # ── Resume branch (repeating-read continuation) ──────────────────────
+    if pending:
+        from agent_skills import end_phrase
+        from agent_skills.private_handler_utils import end_conversation
+        if end_phrase.is_end(prompt):
+            logger.info("weather handler: end-phrase on resume — closing")
+            return end_conversation("Ok.", structured={"intent": "weather"})
+        data = pending.get("data") if isinstance(pending.get("data"), dict) else pending
+        topic = (data or {}).get("topic") or "overview"
+        location = (data or {}).get("location") or ""
+        day_spec = _day_from_followup(prompt)
+        if not day_spec:
+            logger.info("weather handler: no day in follow-up reply → escalate")
+            return {"abandon_pending": True, "force_stage3": True}
+        result = await _answer_for(prompt, topic, day_spec, location)
+        if result is None:
+            return {"abandon_pending": True, "force_stage3": True}
+        return result
+
     params = params or {}
     location = (params.get("location") or "").strip().lower()
     if location and location not in ("medford", "medford ma", "medford, ma"):
         logger.info("weather handler: non-Medford location %r → escalate", location)
-        return None
-
-    try:
-        data = json.loads(WEATHER_PATH.read_text())
-    except Exception as e:
-        logger.warning("weather handler: cache unreadable: %s", e)
         return None
 
     topic = (params.get("topic") or "overview").strip().lower()
@@ -216,15 +311,9 @@ async def handle(prompt: str, params: dict | None = None) -> dict | None:
         topic = "overview"
     day = params.get("day")
 
-    slice_obj = _slice_for(topic, day, data)
-    if slice_obj is None:
+    result = await _answer_for(prompt, topic, day, location)
+    if result is None:
         logger.info("weather handler: no slice for topic=%s day=%s → escalate",
                     topic, day)
         return None
-
-    text = await _phrase(slice_obj, prompt)
-    if not text:
-        return None
-    logger.info("weather handler: answered (topic=%s day=%s, %d chars)",
-                topic, day, len(text))
-    return {"text": text}
+    return result

@@ -66,7 +66,7 @@ def _is_delete_intent(user_prompt: str) -> bool:
 # ── Config ────────────────────────────────────────────────────────────────────
 
 TOP_K = int(os.environ.get("JANE_V3_TOP_K", "5"))
-MAX_DISTANCE = float(os.environ.get("JANE_V3_MAX_DISTANCE", "0.60"))
+MAX_DISTANCE = float(os.environ.get("JANE_V3_MAX_DISTANCE", "0.40"))
 FIFO_TURNS = int(os.environ.get("JANE_V3_FIFO_TURNS", "4"))
 # If the winner's nearest exemplar is within this cosine distance, treat
 # the embedding vote as authoritative and tell qwen to trust it.

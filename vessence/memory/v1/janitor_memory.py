@@ -428,9 +428,8 @@ def run_janitor(max_sessions: int = 2, max_topics: int = 3):
     # cycle regardless of whether consolidation has work to do.
     log_files_purged = purge_old_log_files()
     self_improve_reports_purged = purge_old_self_improve_reports()
-    # cluster_vault_images() disabled — uses Opus for folder proposals,
-    # too expensive to run nightly. Re-enable when cost is acceptable.
-    image_cluster_result = {"images_moved": 0, "folders_created": []}
+    # image_cluster_result = cluster_vault_images() disabled due to cost
+    image_cluster_result = {"images_moved": 0, "folders_created": [], "disabled": True}
 
     total_reduced = 0
     merge_log = []

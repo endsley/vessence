@@ -1,20 +1,22 @@
-"""Read Messages Stage 2 handler.
+"""Read Messages Stage 2 handler — params-aware.
 
-Two paths:
-  - Specific question ("who sent the last message", "what did Romeo say",
-    "how many texts today") → fetch + Qwen answers the specific question
-  - Generic dump ("read my messages", "check my texts") → deterministic
-    summary (verbatim contact messages, collapsed tail for promo/spam)
+Stage 1 (qwen extraction) supplies optional `filter_sender`,
+`unread_only`, and `limit` per the PARAMS_SCHEMA. The handler:
 
-Both paths use the same SQL fetch from synced_messages — only the
-answer step differs.
+  - Refuses architecture / meta-debug phrasing (wrong_class)
+  - Honours `limit` and `filter_sender`
+  - Routes to Qwen for specific questions (sender filter or
+    interrogative phrasing); falls back to a deterministic dump
+    otherwise
+
+The fetch / format / dump helpers are unchanged — only the dispatch
+layer learned to read params.
 """
 
 from __future__ import annotations
 
 import datetime
 import logging
-import os
 import sys
 from pathlib import Path
 
@@ -27,15 +29,12 @@ if str(_VAULT_WEB_DIR) not in sys.path:
 logger = logging.getLogger(__name__)
 
 DEFAULT_LIMIT = 10
+MAX_LIMIT = 50
 
 from jane_web.jane_v2.models import LOCAL_LLM as MODEL, LOCAL_LLM_NUM_CTX, LOCAL_LLM_TIMEOUT, OLLAMA_URL  # noqa: E402
 
-# Architecture/code-question keywords → escalate (not a real read request)
 _ARCH_WORDS = ("architecture", "infrastructure", "pipeline", "handler", "classifier", "stage")
 
-# Meta / self-reference phrases about Jane's OWN previous reply — not an
-# SMS inbox readback. "the last message [you sent / took a while]",
-# "your previous reply", etc.
 _META_PHRASES = (
     "your last message", "your last reply", "your previous message",
     "your previous reply", "the last message you", "the last reply you",
@@ -44,14 +43,22 @@ _META_PHRASES = (
     "why did you", "why was your",
 )
 
-# Words that signal a SPECIFIC question (not just "dump everything")
 _SPECIFIC_WORDS = ("who", "what did", "how many", "when did", "did anyone",
                    "did i get", "any", "is there", "from", "last message",
                    "most recent", "latest", "newest")
 
 
+def _coerce_limit(raw) -> int:
+    try:
+        n = int(raw)
+    except (TypeError, ValueError):
+        return DEFAULT_LIMIT
+    if n <= 0:
+        return DEFAULT_LIMIT
+    return min(n, MAX_LIMIT)
+
+
 def _fetch_messages(limit: int = DEFAULT_LIMIT, contact_only: bool = False) -> list[dict]:
-    """Fetch recent messages from the synced_messages database."""
     try:
         from database import get_db
     except Exception as e:
@@ -73,6 +80,20 @@ def _fetch_messages(limit: int = DEFAULT_LIMIT, contact_only: bool = False) -> l
         return []
 
 
+def _filter_by_sender(messages: list[dict], needle: str) -> list[dict]:
+    needle_low = needle.lower().strip()
+    if not needle_low:
+        return messages
+    out = []
+    for m in messages:
+        sender = (m.get("sender") or "").lower()
+        if sender.startswith("me → "):
+            sender = sender[len("me → "):]
+        if needle_low in sender:
+            out.append(m)
+    return out
+
+
 def _is_personal(msg: dict) -> bool:
     return bool(msg.get("is_contact")) and msg.get("msg_type") != "spam"
 
@@ -82,12 +103,6 @@ def _fmt_time(ts_ms: int) -> str:
 
 
 def _format_for_llm(messages: list[dict]) -> str:
-    """Format messages as a compact list for the LLM to reason over.
-    Direction is made explicit (SENT vs RECEIVED) so the LLM doesn't
-    confuse who's the sender. The DB marks outgoing messages with a
-    "Me → " prefix on the sender field — we strip it and emit a
-    direction tag instead.
-    """
     lines = []
     for i, m in enumerate(messages):
         ts = _fmt_time(m["timestamp_ms"])
@@ -104,7 +119,6 @@ def _format_for_llm(messages: list[dict]) -> str:
 
 
 def _generic_dump(messages: list[dict]) -> str:
-    """Deterministic summary for generic 'read my messages' requests."""
     personal = [m for m in messages if _is_personal(m)]
     other = [m for m in messages if not _is_personal(m)]
 
@@ -142,7 +156,6 @@ def _generic_dump(messages: list[dict]) -> str:
 
 
 async def _llm_answer(prompt: str, messages: list[dict], context: str = "") -> str | None:
-    """Use Qwen to answer a specific question about the messages."""
     formatted = _format_for_llm(messages)
     context_block = ""
     if context and context.strip():
@@ -193,33 +206,40 @@ Your answer:"""
         return None
 
 
-async def handle(prompt: str, context: str = "") -> dict | None:
-    """Read recent texts. Specific questions go to Qwen; generic dumps stay deterministic."""
+async def handle(prompt: str, context: str = "", params: dict | None = None) -> dict | None:
+    """Read recent texts using classifier params when available."""
     p_lower = prompt.lower()
     if any(w in p_lower for w in _ARCH_WORDS):
         return {"wrong_class": True}
-    # Self-reference debug questions ("your last reply took a while")
-    # are NOT inbox readbacks. Decline so Stage 3 / Opus can actually
-    # answer the meta-question.
     if any(p in p_lower for p in _META_PHRASES):
         logger.info("read_messages handler: meta/self-reference phrase → wrong_class")
         return {"wrong_class": True}
 
-    messages = _fetch_messages(limit=DEFAULT_LIMIT)
+    params = params or {}
+    filter_sender = (params.get("filter_sender") or "").strip()
+    limit = _coerce_limit(params.get("limit") or DEFAULT_LIMIT)
+    # unread_only is currently informational — synced_messages has no
+    # is_read column, so "unread" maps to "most recent" already covered
+    # by the limit + DESC ordering.
+
+    fetch_limit = max(limit, 20) if filter_sender else limit
+    messages = _fetch_messages(limit=fetch_limit)
     if not messages:
         return {"text": "You don't have any synced messages yet."}
 
-    # Specific question → use Qwen to answer that exact question
-    is_specific = any(w in p_lower for w in _SPECIFIC_WORDS)
+    if filter_sender:
+        messages = _filter_by_sender(messages, filter_sender)
+        if not messages:
+            return {"text": f"No recent messages from {filter_sender}."}
+
+    is_specific = bool(filter_sender) or any(w in p_lower for w in _SPECIFIC_WORDS)
     if is_specific:
-        answer = await _llm_answer(prompt, messages, context)
+        answer = await _llm_answer(prompt, messages[:limit], context)
         if answer:
             logger.info("read_messages handler: specific Q answered (%d msgs)", len(messages))
             return {"text": answer}
-        # LLM failed → fall back to generic dump rather than escalating
         logger.warning("read_messages handler: LLM answer failed, falling back to dump")
 
-    # Generic dump
-    text = _generic_dump(messages)
+    text = _generic_dump(messages[:limit])
     logger.info("read_messages handler: generic dump (%d msgs)", len(messages))
     return {"text": text}

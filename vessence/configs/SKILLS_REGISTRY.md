@@ -175,6 +175,28 @@ A **WebSequence** is a named, reusable Playwright browser automation script. Eac
     -   Columns: `week_start`, `day_of_week`, `patient_name`, `appt_type`, `visit_number`, `start_time`, `end_time`, `practitioner`, `scraped_at`
     -   On each scrape: DELETEs current week's rows for the practitioner, then inserts fresh
 
+-   **Intent Class:** `intent_classifier/v2/classes/tell_joke.py` — `TELL_JOKE`
+    -   Routes "tell me a joke" / "make me laugh" / "got any jokes" to Stage 2 — no Opus
+    -   Counter-pulls in `send_message` / `send_email` / `delegate_opus` / `end_conversation` absorb proxy-send ("tell Lee a joke"), meta ("what is a joke"), figurative ("this meeting is a joke"), and decline ("no jokes please") variants
+    -   Adversarial sidecar: 0/30 false positives
+
+-   **Stage 2 Handler:** `jane_web/jane_v2/classes/tell_joke/handler.py`
+    -   qwen2.5:7b at temp 0.9, num_predict 100; FIFO context lets "another joke" pivot
+    -   THOUGHT/REPLY tag parser strips a leaked `THOUGHT:` prefix when the model omits the `REPLY:` tag
+    -   Returns `None` on LLM failure → escalates to Stage 3
+
+-   **Intent Class:** `intent_classifier/v2/classes/do_math.py` — `DO_MATH`
+    -   Routes arithmetic prompts (multiplication, division, addition, subtraction, percent, square/root, small mixed expressions) to Stage 2 — no Opus
+    -   Counter-pulls in `delegate_opus` absorb venting ("I'm bad at math"), narrative ("I'm working on a math problem"), and teaching questions ("how do I do long division")
+    -   Adversarial sidecar: 0/30 false positives
+
+-   **Stage 2 Handler:** `jane_web/jane_v2/classes/do_math/handler.py`
+    -   qwen2.5:7b at temp 0.0, num_predict 40 — translates spoken phrase to a single Python expression (or `NONE` to escalate)
+    -   Restricted `ast` walker evaluates only numeric literals + binary/unary ops + safe calls (`sqrt`, `pow`, `abs`, `round`, `floor`, `ceil`); no names, no attribute access, no kwargs
+    -   `_MAX_EXPONENT=1000` caps `**` to block DoS via `9**9999`; `TypeError` is caught and escalates
+    -   `_format_number` falls back to `:.6g` for tiny non-zero values so 1/30000 doesn't render as "0"
+    -   Built because Qwen alone hallucinates multi-digit products (audit 2026-04-24: 234×567 → 132066 vs 132678 actual). Python is now the source of truth for arithmetic.
+
 -   **Skill: Facebook Marketplace Harvester**
     -   **Module:** `agent_skills/marketplace/` (`config.py`, `harvester.py`)
     -   **What it does:** Runs a saved-search bundle against Facebook Marketplace, applies the car-filter pipeline (miles<max, price<max, "clean title" in description, suspicion rule that flags >5-year-old cars with <3k mi/yr), and saves surviving listings + photos to disk. Uses the `facebook_julius` profile (stored cookies → no 2FA prompt).

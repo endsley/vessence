@@ -67,7 +67,9 @@ def resolve_range(range_hint: str | None) -> tuple[datetime, datetime]:
     timezone-aware datetimes in the user's local timezone.
 
     Accepts: today, tomorrow, this_week, next_week, weekend, next,
-    YYYY-MM-DD. Unknown hints fall back to today.
+    monday..sunday (resolves to the upcoming occurrence — today if today
+    matches, else the next 1-6 days), YYYY-MM-DD. Unknown hints fall
+    back to today.
     """
     tz = _local_tz()
     now = datetime.now(tz)
@@ -110,6 +112,13 @@ def resolve_range(range_hint: str | None) -> tuple[datetime, datetime]:
         )
     if hint == "next":
         return now, now + timedelta(days=7)
+    _weekdays = {
+        "monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,
+        "friday": 4, "saturday": 5, "sunday": 6,
+    }
+    if hint in _weekdays:
+        days_ahead = (_weekdays[hint] - today.weekday()) % 7
+        return _day(today + timedelta(days=days_ahead))
     try:
         d = datetime.strptime(hint, "%Y-%m-%d").date()
         return _day(d)

@@ -82,6 +82,22 @@ and to fill in an unspecified recipient from prior context.
 _EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 
 
+def _email_body_coherent(body: str) -> bool:
+    """Lightweight rule-based coherence check for email bodies.
+
+    Reuses the SMS coherence helper so an email body dictated through STT
+    that picked up an Alexa/Siri/Google command is also escalated rather
+    than sent verbatim. Imported lazily to avoid circular import risk.
+    """
+    if not body:
+        return False
+    try:
+        from jane_web.jane_v2.classes.send_message.handler import _is_coherent
+        return _is_coherent(body)
+    except Exception:
+        return True  # fail-open: never block a send because of import error
+
+
 def _parse_extraction(raw: str) -> Optional[dict]:
     """Parse the LLM's TO/SUBJECT/BODY/COHERENT block. Returns None on failure,
     or the wrong-class sentinel if the model rejected the classification."""
@@ -244,14 +260,8 @@ def _check_open_draft(prompt: str) -> Optional[dict]:
     return None
 
 
-async def handle(prompt: str, context: str = "") -> Optional[dict]:
-    """Entry point called by stage2_dispatcher."""
-    # Step 0: pending-draft resolution
-    result = _check_open_draft(prompt)
-    if result is not None:
-        return result
-
-    # Step 1: LLM extract with FIFO context for pronoun resolution
+async def _extract_via_llm(prompt: str, context: str) -> Optional[dict]:
+    """Legacy fallback extractor: ask qwen for {to, subject, body, coherent}."""
     context_block = ""
     if context and context.strip():
         context_block = f"Recent conversation:\n{context.strip()}\n\n"
@@ -276,15 +286,61 @@ async def handle(prompt: str, context: str = "") -> Optional[dict]:
             raw = (r.json().get("response") or "").strip()
     except Exception as exc:
         logger.warning("send_email handler: LLM extract failed: %s", exc)
-        return None  # escalate
-
-    metadata = _parse_extraction(raw)
-    if metadata is _WRONG_CLASS_SENTINEL:
-        logger.info("send_email handler: LLM says WRONG_CLASS — escalating with self-correct")
-        return _WRONG_CLASS_SENTINEL
-    if not metadata:
-        logger.warning("send_email handler: parse failed: %r", raw[:200])
         return None
+    return _parse_extraction(raw)
+
+
+async def handle(prompt: str, context: str = "", params: dict | None = None) -> Optional[dict]:
+    """Entry point called by stage2_dispatcher.
+
+    When `params` is provided (v3 path), the classifier has already extracted
+    {to, subject, body, confirm_signal} — use them directly and skip the
+    Stage 2 LLM extract. When `params` is None, fall back to the legacy LLM
+    extraction (v2 path).
+    """
+    # Step 0: pending-draft resolution (reads session state, not params)
+    result = _check_open_draft(prompt)
+    if result is not None:
+        return result
+
+    # Step 1: Build metadata from params, or fall back to LLM extraction.
+    metadata: Optional[dict] = None
+    if params:
+        to_val = (params.get("to") or "").strip()
+        subject_val = (params.get("subject") or "").strip()
+        body_val = (params.get("body") or "").strip()
+        confirm = (params.get("confirm_signal") or "").strip().lower()
+        # confirm_signal is only meaningful with an open draft; if we got
+        # here, _check_open_draft returned None, so a stray confirm/cancel/
+        # edit signal means we have no draft to act on. Escalate so Opus
+        # can phrase a sensible reply.
+        if confirm in ("send", "cancel", "edit"):
+            logger.info("send_email handler: confirm_signal=%s with no open draft — escalating", confirm)
+            return None
+        if not to_val:
+            logger.info("send_email handler: params has no recipient — escalating")
+            return None
+        if not body_val:
+            logger.info("send_email handler: params has no body — escalating to ask user")
+            return None
+        coherent = _email_body_coherent(body_val)
+        if not coherent:
+            logger.info("send_email handler: params body looks incoherent — escalating")
+            return None
+        metadata = {
+            "to": to_val,
+            "subject": subject_val or "(none)",
+            "body": body_val,
+            "coherent": True,
+        }
+    else:
+        metadata = await _extract_via_llm(prompt, context)
+        if metadata is _WRONG_CLASS_SENTINEL:
+            logger.info("send_email handler: LLM says WRONG_CLASS — escalating with self-correct")
+            return _WRONG_CLASS_SENTINEL
+        if not metadata:
+            logger.warning("send_email handler: extract failed — escalating")
+            return None
 
     logger.info(
         "send_email handler: to=%r subject=%r body=%r coherent=%s",

@@ -1,4 +1,4 @@
-"""Read calendar Stage 2 handler.
+"""Read calendar Stage 2 handler — repeating-read pattern.
 
 Fetches Google Calendar events via agent_skills.calendar_tools, pre-formats
 them into a clean human-readable list (deterministic count + day-of-week +
@@ -9,16 +9,31 @@ long HTML descriptions, and opaque IDs to the local LLM. Qwen only
 needs to convert a numbered list into a spoken sentence — no date math,
 no counting, no HTML parsing.
 
+Routing rule (Stage 2 vs Stage 3):
+  Stage 2 only handles prompts that explicitly name a day or week
+  ("today", "tomorrow", "this week", "next Friday"). Vague queries
+  ("what's coming up", "anything important", "what's on my agenda")
+  escalate to Stage 3 — Opus has the context to apply richer filtering
+  (time-of-day, importance, attendees) than this handler does.
+
+Multi-turn (repeating-read):
+  After answering one day, Jane asks "Would you like to know about
+  another day?" and stores a STAGE2_FOLLOWUP pending. The loop continues
+  for every reply that names a day; it ends when the user says no, says
+  an end-phrase ("nevermind"/"stop"), or pivots to a different topic.
+
 Returns:
-    {"text": "<answer>"}   → success, pipeline returns to user
-    None                    → escalate to Stage 3
+    {"text": "<answer>", "structured": {...}}        → Stage 2 success
+    {"abandon_pending": True, "force_stage3": True}  → pivot mid-flow
+    {"text": "Ok.", "conversation_end": True, ...}   → end-of-flow
+    None                                              → escalate to Stage 3
 """
 
 from __future__ import annotations
 
 import logging
 import re
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 
 import httpx
 
@@ -32,11 +47,14 @@ from jane_web.jane_v2.models import (
 
 logger = logging.getLogger(__name__)
 
+# Stage-2 ONLY accepts prompts that explicitly name a specific day or
+# week range. Anything vaguer ("what's coming up", "anything important",
+# "what's next on my calendar") is intentionally NOT in this list — those
+# escalate to Stage 3 so Opus can interpret intent and apply richer
+# filtering (time-of-day, importance, attendees, etc.).
 _RANGE_PATTERNS: list[tuple[re.Pattern, str]] = [
-    (re.compile(r"\bnext\s+(?:event|thing|appointment|meeting)\b", re.I), "next"),
-    (re.compile(r"\bupcoming\b", re.I), "next"),
-    (re.compile(r"\bwhat'?s\s+(?:coming\s+up|next)\b", re.I), "next"),
     (re.compile(r"\btoday\b", re.I), "today"),
+    (re.compile(r"\btonight\b", re.I), "today"),
     (re.compile(r"\btomorrow\b", re.I), "tomorrow"),
     (re.compile(r"\bthis week\b", re.I), "this week"),
     (re.compile(r"\bnext week\b", re.I), "next week"),
@@ -51,19 +69,12 @@ _RANGE_PATTERNS: list[tuple[re.Pattern, str]] = [
 
 
 def _format_time(dt: datetime) -> str:
-    """Format a datetime into spoken-friendly time like '7pm' or '2:30pm'."""
     if dt.minute == 0:
         return dt.strftime("%-I%p").lower()
     return dt.strftime("%-I:%M%p").lower()
 
 
 def _simplify_events(events: list[dict], today: date) -> str:
-    """Convert raw Google Calendar events into a pre-formatted summary.
-
-    Returns a numbered list with deterministic count, day-of-week, and
-    natural time formatting. Strips description, id, and html_link so
-    Qwen only sees what matters.
-    """
     if not events:
         return "No events."
     lines = [f"Total: {len(events)} event{'s' if len(events) != 1 else ''}\n"]
@@ -138,33 +149,23 @@ _FORCE_ESCALATE_PHRASES = (
     "move my", "reschedule", "change my",
 )
 
-_DETAIL_OFFER_PLURAL = " Want details on any of them?"
-_DETAIL_OFFER_SINGLE = " Want details on it?"
-
-_DETAIL_TEMPLATE = """\
-You are Jane, a personal assistant. Give a short spoken summary of \
-this single calendar event.
-
-Today is {today_weekday}, {today_date}.
-
-CRITICAL — this response will be read aloud. Keep it to 1-2 sentences. \
-Mention the title, day, time, and any useful detail from the description \
-(like a meeting link or location). Skip HTML formatting, IDs, and URLs.
-
-Event:
-- Title: {summary}
-- When: {when}
-- Description: {description}
-
-Your spoken answer:"""
+_FOLLOWUP_QUESTION = "Would you like to know about another day?"
+_DAY_CHOICE_QUESTION = "Which day?"
 
 
-def _resolve_range(prompt: str) -> str:
+def _resolve_range(prompt: str) -> str | None:
+    """Return the matched day/week hint, or None if the prompt is vague.
+
+    None is the signal to escalate: Stage 2 only handles calendar reads
+    where the user explicitly named a specific day or week. Returning
+    "today" by default would silently swallow vaguer queries that Opus
+    is better positioned to answer.
+    """
     p = (prompt or "").lower()
     for pat, hint in _RANGE_PATTERNS:
         if pat.search(p):
             return hint
-    return "today"
+    return None
 
 
 def _expires_at(minutes: int = 2) -> str:
@@ -174,64 +175,32 @@ def _expires_at(minutes: int = 2) -> str:
     )
 
 
-def _pending(awaiting: str, data: dict, question: str = "") -> dict:
+def _pending(awaiting: str, question: str, data: dict | None = None) -> dict:
     return {
         "type": "STAGE2_FOLLOWUP",
         "handler_class": "read calendar",
         "status": "awaiting_user",
         "awaiting": awaiting,
-        "data": {**data, "awaiting": awaiting},
+        "data": {**(data or {}), "awaiting": awaiting},
         "question": question,
         "expires_at": _expires_at(2),
     }
 
 
-_DECLINE_PHRASES = {
-    "no", "nope", "nah", "no thanks", "no thank you", "i'm good",
-    "im good", "that's okay", "thats okay", "all good", "never mind",
-    "nevermind", "not right now", "maybe later",
-}
-
-
-def _is_decline(text: str) -> bool:
-    return text.strip().lower().rstrip(".!") in _DECLINE_PHRASES
-
-
-def _match_event_by_reply(reply: str, events: list[dict]) -> dict | None:
-    """Match a user reply like '2', 'the sump pump one', 'ML reading group'
-    to one of the stored events."""
-    reply_lower = reply.strip().lower()
-    if reply_lower.isdigit():
-        idx = int(reply_lower) - 1
-        if 0 <= idx < len(events):
-            return events[idx]
-        return None
-    for ev in events:
-        title = (ev.get("summary") or "").lower()
-        if title and title in reply_lower:
-            return ev
-        words = [w for w in title.split() if len(w) > 3]
-        if words and any(w in reply_lower for w in words):
-            return ev
-    return None
-
-
-def _format_event_when(ev: dict) -> str:
-    """Format an event's start/end into a human-readable string."""
-    start_raw = str(ev.get("start", ""))
-    end_raw = str(ev.get("end", ""))
-    if "T" in start_raw:
-        dt = datetime.fromisoformat(start_raw)
-        when = f"{dt.strftime('%A %B %-d')}, {_format_time(dt)}"
-        if "T" in end_raw:
-            end_dt = datetime.fromisoformat(end_raw)
-            when += f"–{_format_time(end_dt)}"
-        return when
-    try:
-        d = date.fromisoformat(start_raw)
-        return f"{d.strftime('%A %B %-d')} (all day)"
-    except ValueError:
-        return start_raw
+def _wrap_with_followup(spoken: str, range_hint: str) -> dict:
+    """Append 'Would you like to know about another day?' + STAGE2_FOLLOWUP."""
+    return {
+        "text": f"{spoken} {_FOLLOWUP_QUESTION}",
+        "structured": {
+            "intent": "read calendar",
+            "entities": {"range": range_hint},
+            "pending_action": _pending(
+                "another_day_or_stop",
+                _FOLLOWUP_QUESTION,
+                {"last_range": range_hint},
+            ),
+        },
+    }
 
 
 async def _ask_qwen(prompt_text: str, num_predict: int = 120) -> str | None:
@@ -258,54 +227,11 @@ async def _ask_qwen(prompt_text: str, num_predict: int = 120) -> str | None:
         return None
 
 
-async def _handle_detail_request(prompt: str, pending: dict) -> dict | None:
-    """Resume path: user asked for details on a specific event."""
-    if _is_decline(prompt):
-        return {"text": "Okay, sounds good."}
+async def _answer_for_range(prompt: str, range_hint: str) -> dict | None:
+    """Fetch events for a range, render with Qwen, wrap with follow-up.
 
-    pending_data = pending.get("data") if isinstance(pending.get("data"), dict) else pending
-    events = pending_data.get("events") or []
-    if not events:
-        return None
-
-    ev = _match_event_by_reply(prompt, events)
-    if ev is None:
-        return {"abandon_pending": True, "force_stage3": True}
-
-    today = date.today()
-    desc_raw = ev.get("description") or "None"
-    if len(desc_raw) > 400:
-        desc_raw = desc_raw[:400] + "…"
-    desc_clean = re.sub(r"<[^>]+>", " ", desc_raw).strip()
-
-    detail_prompt = (
-        _DETAIL_TEMPLATE
-        .replace("{today_weekday}", today.strftime("%A"))
-        .replace("{today_date}", today.strftime("%B %d, %Y"))
-        .replace("{summary}", ev.get("summary") or "Untitled")
-        .replace("{when}", _format_event_when(ev))
-        .replace("{description}", desc_clean or "None")
-    )
-
-    text = await _ask_qwen(detail_prompt, num_predict=100)
-    if not text:
-        return None
-
-    logger.info("calendar handler: detail for %r → %d chars", ev.get("summary", ""), len(text))
-    return {"text": text}
-
-
-async def handle(prompt: str, pending: dict | None = None) -> dict | None:
-    if pending:
-        return await _handle_detail_request(prompt, pending)
-
-    p_lower = (prompt or "").lower()
-    if any(phrase in p_lower for phrase in _FORCE_ESCALATE_PHRASES):
-        logger.info("calendar handler: edit/create phrase → escalate early")
-        return None
-
-    range_hint = _resolve_range(prompt)
-
+    Returns a Stage 2 result dict (with pending_action), or None to escalate.
+    """
     try:
         from agent_skills.calendar_tools import list_events_in_range
         events = list_events_in_range(range_hint, max_results=25)
@@ -315,15 +241,13 @@ async def handle(prompt: str, pending: dict | None = None) -> dict | None:
 
     today = date.today()
     events_summary = _simplify_events(events or [], today)
-    today_weekday = today.strftime("%A")
-    today_date = today.strftime("%B %d, %Y")
 
     full_prompt = (
         _ANSWER_TEMPLATE
         .replace("{events_summary}", events_summary)
         .replace("{prompt}", prompt)
-        .replace("{today_weekday}", today_weekday)
-        .replace("{today_date}", today_date)
+        .replace("{today_weekday}", today.strftime("%A"))
+        .replace("{today_date}", today.strftime("%B %d, %Y"))
     )
 
     text = await _ask_qwen(full_prompt, num_predict=120)
@@ -335,28 +259,68 @@ async def handle(prompt: str, pending: dict | None = None) -> dict | None:
         return None
 
     event_count = len(events) if events else 0
-    logger.info("calendar handler: answered in %d chars (range=%s, events=%d, summary_len=%d)",
-                len(text), range_hint, event_count, len(events_summary))
+    logger.info("calendar handler: answered (range=%s, events=%d, %d chars)",
+                range_hint, event_count, len(text))
+    return _wrap_with_followup(text, range_hint)
 
-    if event_count >= 1:
-        offer = _DETAIL_OFFER_SINGLE if event_count == 1 else _DETAIL_OFFER_PLURAL
-        question = "Want details on it?" if event_count == 1 else "Want details on any of them?"
-        slim_events = [
-            {"summary": ev.get("summary", ""), "start": ev.get("start", ""),
-             "end": ev.get("end", ""), "description": ev.get("description", "")}
-            for ev in events
-        ]
-        return {
-            "text": text + offer,
-            "structured": {
-                "intent": "read calendar",
-                "entities": {"event_count": event_count, "range": range_hint},
-                "pending_action": _pending(
-                    "event_detail",
-                    {"events": slim_events},
-                    question=question,
-                ),
-            },
-        }
 
-    return {"text": text}
+async def _handle_resume(prompt: str, pending: dict) -> dict | None:
+    from agent_skills import end_phrase, confirmation
+    from agent_skills.private_handler_utils import end_conversation
+
+    awaiting = (pending.get("data") or {}).get("awaiting") or pending.get("awaiting")
+
+    # End-of-loop signals — same in both states.
+    if end_phrase.is_end(prompt) or confirmation.is_no(prompt):
+        logger.info("calendar handler: end signal on resume (%s) → close", awaiting)
+        return end_conversation("Ok.", structured={"intent": "read calendar"})
+
+    if awaiting == "another_day_or_stop":
+        # Day-name FIRST: "yes, tomorrow" / "tomorrow please" / bare "friday"
+        # all carry an explicit day, and we should fetch it directly instead
+        # of falling into the "Which day?" branch.
+        range_hint = _resolve_range(prompt)
+        if range_hint is not None:
+            return await _answer_for_range(prompt, range_hint)
+        # No day token but a clear "yes" → ask which day.
+        if confirmation.is_yes(prompt):
+            return {
+                "text": _DAY_CHOICE_QUESTION,
+                "structured": {
+                    "intent": "read calendar",
+                    "pending_action": _pending(
+                        "awaiting_day_choice", _DAY_CHOICE_QUESTION,
+                    ),
+                },
+            }
+        logger.info("calendar handler: no day in follow-up reply → escalate")
+        return {"abandon_pending": True, "force_stage3": True}
+
+    if awaiting == "awaiting_day_choice":
+        range_hint = _resolve_range(prompt)
+        if range_hint is None:
+            logger.info("calendar handler: no day in 'which day?' reply → escalate")
+            return {"abandon_pending": True, "force_stage3": True}
+        return await _answer_for_range(prompt, range_hint)
+
+    # Unknown awaiting tag — let Stage 3 sort it out.
+    logger.info("calendar handler: unknown pending awaiting=%r → escalate", awaiting)
+    return {"abandon_pending": True, "force_stage3": True}
+
+
+async def handle(prompt: str, context: str = "", pending: dict | None = None,
+                 params: dict | None = None) -> dict | None:
+    if pending:
+        return await _handle_resume(prompt, pending)
+
+    p_lower = (prompt or "").lower()
+    if any(phrase in p_lower for phrase in _FORCE_ESCALATE_PHRASES):
+        logger.info("calendar handler: edit/create phrase → escalate early")
+        return None
+
+    range_hint = _resolve_range(prompt)
+    if range_hint is None:
+        logger.info("calendar handler: no specific day/week in prompt → Stage 3")
+        return None
+
+    return await _answer_for_range(prompt, range_hint)

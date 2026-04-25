@@ -78,14 +78,14 @@ for historical context.
 <!-- AUTO-GENERATED BELOW — do not edit below this line -->
 
 # Code Map — Core (Python Backend)
-_Auto-generated on 2026-04-23 08:15 UTC by `generate_code_map.py`_
+_Auto-generated on 2026-04-24 08:15 UTC by `generate_code_map.py`_
 
 ## Priority Files
 
-### jane_web/jane_proxy.py (3398 lines)
+### jane_web/jane_proxy.py (3409 lines)
   class ToolMarkerExtractor → L51-338
   class _SkipRouterSignal → L354-358
-  class JaneSessionState → L757-770
+  class JaneSessionState → L768-781
     __init__() → L65-67
     feed() → L70-80
     flush() → L82-100
@@ -99,40 +99,40 @@ _Auto-generated on 2026-04-23 08:15 UTC by `generate_code_map.py`_
   _neutralize_delimiters() → L447-467
   _format_tool_results_for_brain() → L470-510
   _execute_email_tool_serverside() → L513-576
-  _maybe_prepend_code_map() → L749-753
-  run_prefetch_memory() → L785-821
-  get_prefetch_result() → L824-829
-  _get_brain_name() → L832-845
-  _session_log_id() → L848-849
-  _get_timeout_seconds() → L852-853
-  _get_execution_profile() → L856-857
-  _use_gemini_api() → L860-862
-  _use_persistent_gemini() → L864-866
-  _use_persistent_claude() → L869-870
-  _use_persistent_codex() → L873-874
-  _get_web_chat_model() → L877-896
-  _prune_stale_sessions() → L899-917
-  _execute_brain_sync() → L920-986
-  _execute_brain_stream() → L989-1070
-  _get_session() → L1073-1091
-  _resolve_file_context() → L1116-1125
-  _message_for_persistence() → L1128-1132
-  prewarm_session() → L1135-1181
-  _await_prewarm_if_running() → L1184-1201
-  end_session() → L1204-1277
-  _progress_snapshot() → L1280-1294
-  _truncate_log_if_needed() → L1300-1307
-  _log_stage() → L1310-1321
-  _log_start() → L1324-1332
-  _dump_prompt() → L1335-1367
-  _persist_turns_async() → L1370-1484
-  send_message() → L1492-1518
-  _send_message_inner() → L1521-1677
-  _pick_ack() → L1680-1946
-  stream_message() → L1949-3381
-  _log_chat_to_work_log() → L3384-3386
-  get_active_brain() → L3389-3391
-  get_tunnel_url() → L3394-3398
+  _maybe_prepend_code_map() → L760-764
+  run_prefetch_memory() → L796-832
+  get_prefetch_result() → L835-840
+  _get_brain_name() → L843-856
+  _session_log_id() → L859-860
+  _get_timeout_seconds() → L863-864
+  _get_execution_profile() → L867-868
+  _use_gemini_api() → L871-873
+  _use_persistent_gemini() → L875-877
+  _use_persistent_claude() → L880-881
+  _use_persistent_codex() → L884-885
+  _get_web_chat_model() → L888-907
+  _prune_stale_sessions() → L910-928
+  _execute_brain_sync() → L931-997
+  _execute_brain_stream() → L1000-1081
+  _get_session() → L1084-1102
+  _resolve_file_context() → L1127-1136
+  _message_for_persistence() → L1139-1143
+  prewarm_session() → L1146-1192
+  _await_prewarm_if_running() → L1195-1212
+  end_session() → L1215-1288
+  _progress_snapshot() → L1291-1305
+  _truncate_log_if_needed() → L1311-1318
+  _log_stage() → L1321-1332
+  _log_start() → L1335-1343
+  _dump_prompt() → L1346-1378
+  _persist_turns_async() → L1381-1495
+  send_message() → L1503-1529
+  _send_message_inner() → L1532-1688
+  _pick_ack() → L1691-1957
+  stream_message() → L1960-3392
+  _log_chat_to_work_log() → L3395-3397
+  get_active_brain() → L3400-3402
+  get_tunnel_url() → L3405-3409
 
 ### jane_web/main.py (6209 lines)
   class RateLimiter → L104-130
@@ -908,12 +908,12 @@ _Auto-generated on 2026-04-23 08:15 UTC by `generate_code_map.py`_
   _WAKE_WORD_MATCHES = ... → L31
   verify_wake_word() → L34-73
 
-### jane_web/jane_v3/pipeline.py (553 lines)
+### jane_web/jane_v3/pipeline.py (557 lines)
   _persist_turn_to_ledger() → L61-95
-  _classify_and_maybe_handle() → L101-359
-  handle_chat() → L365-462
-  _ndjson() → L468-473
-  handle_chat_stream() → L476-553
+  _classify_and_maybe_handle() → L101-362
+  handle_chat() → L368-465
+  _ndjson() → L471-476
+  handle_chat_stream() → L479-557
 
 ### jane_web/jane_v2/models.py (91 lines)
   LOCAL_LLM = ... → L43
@@ -938,27 +938,27 @@ _Auto-generated on 2026-04-23 08:15 UTC by `generate_code_map.py`_
   _is_edit_intent() → L187-196
   resolve() → L199-366
 
-### jane_web/jane_v2/pipeline.py (1968 lines)
-  _DEFAULT_ESCALATE_ACK = ... → L51
-  _STAGE2_FIFO_TURNS_DEFAULT = ... → L52
-  _STAGE2_FIFO_TURNS_PRIVATE = ... → L53
-  _stage2_fifo_turns() → L59-67
-  _AWAITING_RE = ... → L70
-  _inject_self_improvement_context() → L75-155
-  _copy_body_with_appended_message() → L158-168
-  _copy_body_with_prepended_message() → L171-190
-  _fetch_required_memory_evidence() → L193-209
-  _JANE_CTX_WEB_PATH = ... → L218
-  _JANE_CTX_MAX_CHARS = ... → L222
-  _load_jane_architecture_context() → L225-240
-  _dedup_memory_for_session() → L243-262
-  _apply_evidence_policy() → L265-342
-  class _AwaitingDeltaStripper → L345-416
-    __init__() → L375-377
-    feed() → L379-403
-    flush() → L405-416
-  _extract_awaiting_marker() → L419-437
-  _persist_turn_to_fifo() → L440-503
+### jane_web/jane_v2/pipeline.py (1998 lines)
+  _DEFAULT_ESCALATE_ACK = ... → L52
+  _STAGE2_FIFO_TURNS_DEFAULT = ... → L53
+  _STAGE2_FIFO_TURNS_PRIVATE = ... → L54
+  _stage2_fifo_turns() → L60-68
+  _AWAITING_RE = ... → L71
+  _inject_self_improvement_context() → L76-156
+  _copy_body_with_appended_message() → L159-169
+  _copy_body_with_prepended_message() → L172-191
+  _fetch_required_memory_evidence() → L194-210
+  _JANE_CTX_WEB_PATH = ... → L219
+  _JANE_CTX_MAX_CHARS = ... → L223
+  _load_jane_architecture_context() → L226-241
+  _dedup_memory_for_session() → L244-263
+  _apply_evidence_policy() → L266-343
+  class _AwaitingDeltaStripper → L346-417
+    __init__() → L376-378
+    feed() → L380-404
+    flush() → L406-417
+  _extract_awaiting_marker() → L420-438
+  _persist_turn_to_fifo() → L441-504
 
 ### jane_web/jane_v2/recent_context.py (255 lines)
   _CHARS_PER_TOKEN = ... → L21
@@ -995,35 +995,40 @@ _Auto-generated on 2026-04-23 08:15 UTC by `generate_code_map.py`_
   FORCE_STAGE3_PHRASES = ... → L218
   _FORCE_STAGE3_RE = ... → L252
 
-### jane_web/jane_v2/stage2_dispatcher.py (428 lines)
+### jane_web/jane_v2/stage2_dispatcher.py (433 lines)
   _self_correct_classification() → L30-73
   _CLASS_DESCRIPTIONS = ... → L76
   _continuation_check() → L92-180
   _gate_check() → L183-250
   _NEAR_IDENTICAL_DIST = ... → L253
-  dispatch() → L256-423
-  metadata_for() → L426-428
+  dispatch() → L256-428
+  metadata_for() → L431-433
 
-### jane_web/jane_v2/stage3_escalate.py (449 lines)
+### jane_web/jane_v2/stage3_escalate.py (484 lines)
   _CLASSES_DIR = ... → L34
   _CLASS_NAME_RE = ... → L38
   _VOICE_HINT = ... → L52
   _maybe_voice_wrap() → L60-69
-  _inject_structured_state() → L72-100
-  _reason_to_class() → L103-127
-  _metadata_for_class_pkg() → L130-141
-  _synthesize_class_protocol() → L144-183
-  _load_protocol_extension() → L186-216
-  _load_class_protocol() → L219-226
-  _inject_class_protocol() → L229-255
-  _ndjson() → L258-263
-  _load_v1_stream() → L266-277
-  _load_session_helpers() → L280-310
-  escalate_stream() → L313-449
+  _inject_extracted_params() → L72-102
+  _inject_structured_state() → L105-133
+  _reason_to_class() → L136-160
+  _metadata_for_class_pkg() → L163-174
+  _synthesize_class_protocol() → L177-216
+  _load_protocol_extension() → L219-249
+  _load_class_protocol() → L252-259
+  _inject_class_protocol() → L262-288
+  _ndjson() → L291-296
+  _load_v1_stream() → L299-310
+  _load_session_helpers() → L313-343
+  escalate_stream() → L346-484
 
-### jane_web/jane_v2/unclear_prompt.py (106 lines)
+### jane_web/jane_v2/unclear_prompt.py (112 lines)
   _PROMPT_TEMPLATE = ... → L32
-  is_unclear() → L54-106
+  is_unclear() → L60-112
+
+### jane_web/jane_v2/classes/read_email/metadata.py (50 lines)
+  PARAMS_SCHEMA = ... → L3
+  METADATA = ... → L22
 
 ### jane_web/jane_v2/classes/read_calendar/handler.py (362 lines)
   _format_time() → L53-57
@@ -1045,10 +1050,11 @@ _Auto-generated on 2026-04-23 08:15 UTC by `generate_code_map.py`_
   _handle_detail_request() → L261-295
   handle() → L298-362
 
-### jane_web/jane_v2/classes/web_automation/metadata.py (68 lines)
+### jane_web/jane_v2/classes/web_automation/metadata.py (90 lines)
   _description() → L12-27
   _escalation_context() → L30-49
-  METADATA = ... → L52
+  PARAMS_SCHEMA = ... → L52
+  METADATA = ... → L73
 
 ### jane_web/jane_v2/classes/todo_list/handler.py (752 lines)
   _ADD_PATTERNS = ... → L36
@@ -1072,13 +1078,14 @@ _Auto-generated on 2026-04-23 08:15 UTC by `generate_code_map.py`_
   _friendly_category_name() → L389-407
   _speak_items() → L410-427
 
-### jane_web/jane_v2/classes/todo_list/metadata.py (176 lines)
+### jane_web/jane_v2/classes/todo_list/metadata.py (199 lines)
   _VESSENCE_DATA_HOME = ... → L10
   _TODO_CACHE_PATH = ... → L14
   _fetch_live_todo_text() → L20-40
   _format_cache_data() → L43-59
   _escalation_context() → L62-107
-  METADATA = ... → L110
+  PARAMS_SCHEMA = ... → L110
+  METADATA = ... → L132
 
 ### jane_web/jane_v2/classes/get_time/handler.py (196 lines)
   _FAST_TIME_RE = ... → L43
@@ -1089,18 +1096,23 @@ _Auto-generated on 2026-04-23 08:15 UTC by `generate_code_map.py`_
   _call_local_llm() → L119-151
   handle() → L154-196
 
-### jane_web/jane_v2/classes/weather/handler.py (134 lines)
-  WEATHER_PATH = ... → L22
-  _ANSWER_TEMPLATE = ... → L25
-  _ESCALATE_RE = ... → L70
-  _FORCE_ESCALATE_PHRASES = ... → L75
-  handle() → L84-134
+### jane_web/jane_v2/classes/weather/handler.py (230 lines)
+  WEATHER_PATH = ... → L28
+  _FORCE_ESCALATE_PHRASES = ... → L32
+  _VALID_TOPICS = ... → L40
+  _WEEKDAYS = ... → L43
+  _normalize_day() → L47-81
+  _slice_for() → L84-140
+  _ANSWER_TEMPLATE = ... → L143
+  _phrase() → L168-192
+  handle() → L195-230
 
-### jane_web/jane_v2/classes/weather/metadata.py (87 lines)
+### jane_web/jane_v2/classes/weather/metadata.py (107 lines)
   WEATHER_PATH = ... → L12
   _description() → L15-51
   _escalation_context() → L54-71
-  METADATA = ... → L74
+  PARAMS_SCHEMA = ... → L74
+  METADATA = ... → L93
 
 ### jane_web/jane_v2/classes/send_message/handler.py (348 lines)
   _SKILLS_DIR = ... → L24
@@ -1115,8 +1127,9 @@ _Auto-generated on 2026-04-23 08:15 UTC by `generate_code_map.py`_
   _check_open_draft() → L152-225
   handle() → L228-348
 
-### jane_web/jane_v2/classes/send_message/metadata.py (67 lines)
-  METADATA = ... → L3
+### jane_web/jane_v2/classes/send_message/metadata.py (93 lines)
+  PARAMS_SCHEMA = ... → L3
+  METADATA = ... → L28
 
 ### jane_web/jane_v2/classes/music_play/handler.py (148 lines)
   _normalize() → L30-31
@@ -1125,8 +1138,9 @@ _Auto-generated on 2026-04-23 08:15 UTC by `generate_code_map.py`_
   _ephemeral_from_library() → L99-106
   handle() → L109-148
 
-### jane_web/jane_v2/classes/music_play/metadata.py (60 lines)
-  METADATA = ... → L3
+### jane_web/jane_v2/classes/music_play/metadata.py (81 lines)
+  PARAMS_SCHEMA = ... → L3
+  METADATA = ... → L23
 
 ### jane_web/jane_v2/classes/greeting/handler.py (151 lines)
   _CANNED_REPLIES = ... → L25
@@ -1142,10 +1156,11 @@ _Auto-generated on 2026-04-23 08:15 UTC by `generate_code_map.py`_
   _parse_extraction() → L75-97
   handle() → L100-177
 
-### jane_web/jane_v2/classes/shopping_list/metadata.py (60 lines)
+### jane_web/jane_v2/classes/shopping_list/metadata.py (75 lines)
   _SKILLS_DIR = ... → L7
   _escalation_context() → L14-29
-  METADATA = ... → L32
+  PARAMS_SCHEMA = ... → L32
+  METADATA = ... → L46
 
 ### jane_web/jane_v2/classes/read_messages/handler.py (225 lines)
   _VAULT_WEB_DIR = ... → L23
@@ -1161,10 +1176,11 @@ _Auto-generated on 2026-04-23 08:15 UTC by `generate_code_map.py`_
   _llm_answer() → L144-193
   handle() → L196-225
 
-### jane_web/jane_v2/classes/read_messages/metadata.py (97 lines)
+### jane_web/jane_v2/classes/read_messages/metadata.py (114 lines)
   _VAULT_WEB_DIR = ... → L8
   _escalation_context() → L15-63
-  METADATA = ... → L66
+  PARAMS_SCHEMA = ... → L66
+  METADATA = ... → L82
 
 ### jane_web/jane_v2/classes/send_email/handler.py (343 lines)
   _SKILLS_DIR = ... → L36
@@ -1180,36 +1196,38 @@ _Auto-generated on 2026-04-23 08:15 UTC by `generate_code_map.py`_
   _check_open_draft() → L145-244
   handle() → L247-343
 
-### jane_web/jane_v2/classes/send_email/metadata.py (54 lines)
-  METADATA = ... → L3
+### jane_web/jane_v2/classes/send_email/metadata.py (79 lines)
+  PARAMS_SCHEMA = ... → L3
+  METADATA = ... → L27
 
-### jane_web/jane_v2/classes/clinic_schedules_info/handler.py (1007 lines)
-  DB_PATH = ... → L30
-  _DAYS = ... → L32
-  _FOLLOW_UP_QUESTION = ... → L38
-  _FOLLOW_UP = ... → L39
-  _PATIENT_FOLLOW_UP_QUESTION = ... → L41
-  _LIST_FOLLOW_UP_QUESTION = ... → L46
-  _COUNT_FOLLOW_UP_QUESTION = ... → L51
-  _NEXT_PATIENT_DETAILS_FOLLOW_UP_QUESTION = ... → L53
-  _CONFIRM_RE = ... → L57
-  _DECLINE_RE = ... → L63
-  _READ_SUMMARY_RE = ... → L67
-  _expires_at() → L75-78
-  _PENDING_SELECTION_TTL_SECONDS = ... → L87
-  _selection_cache_put() → L90-102
-  _selection_cache_get() → L105-115
-  _pending_day_followup() → L118-128
-  _pending_count_followup() → L131-144
-  _pending_patient_selection() → L147-164
-  _pending_patient_followup() → L167-191
-  _pending_next_patient_followup() → L194-214
+### jane_web/jane_v2/classes/clinic_schedules_info/handler.py (521 lines)
+  DB_PATH = ... → L48
+  _WEEK_DAYS = ... → L50
+  _LATE_BUFFER_MINUTES = ... → L51
+  _VALID_LOADERS = ... → L53
+  _expires_at() → L59-62
+  _parse_time() → L65-70
+  _fmt_time() → L73-79
+  _db_conn() → L82-85
+  _current_week_start() → L88-98
+  _normalize_day() → L101-113
+  _now_meta() → L116-121
+  _fetch_day_rows() → L126-153
+  _split_active_cancelled() → L156-170
+  _facts_today_overview() → L173-184
+  _facts_day() → L187-199
+  _facts_cancellations() → L202-213
+  _compute_next_patient() → L216-236
+  _facts_next_patient() → L239-251
+  _find_patient_in_week() → L254-263
+  _facts_patient_detail() → L266-316
 
-### jane_web/jane_v2/classes/clinic_schedules_info/metadata.py (76 lines)
+### jane_web/jane_v2/classes/clinic_schedules_info/metadata.py (116 lines)
   DB_PATH = ... → L10
   _description() → L13-36
   _escalation_context() → L39-51
-  METADATA = ... → L54
+  PARAMS_SCHEMA = ... → L61
+  METADATA = ... → L88
 
 ### jane_web/jane_v2/classes/timer/handler.py (485 lines)
   _CANCEL_WORDS = ... → L36
@@ -1233,8 +1251,9 @@ _Auto-generated on 2026-04-23 08:15 UTC by `generate_code_map.py`_
   _ask_label() → L272-283
   _fire_set() → L286-318
 
-### jane_web/jane_v2/classes/timer/metadata.py (55 lines)
-  METADATA = ... → L3
+### jane_web/jane_v2/classes/timer/metadata.py (80 lines)
+  PARAMS_SCHEMA = ... → L3
+  METADATA = ... → L27
 
 ### jane/tool_loader.py (248 lines)
   class ToolHooks → L51-68

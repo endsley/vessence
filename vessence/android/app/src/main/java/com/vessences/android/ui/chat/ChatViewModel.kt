@@ -1393,6 +1393,24 @@ class ChatViewModel(
     var cameFromWakeWord: Boolean = false
 
     private fun endVoiceConversation() {
+        // Audio cue: short two-pip "ack" tone signals to the user that the
+        // voice conversation has ended (STT will stop, app falls back to
+        // wake-word passive mode). TONE_PROP_ACK is a distinct two-beep
+        // pattern, deliberately different from any "start of listening"
+        // cue so the meaning ("done") is unambiguous. 200 ms is enough to
+        // be audible without bleeding into wake-word detection. Best-effort:
+        // any failure (audio focus, no speaker) is swallowed.
+        runCatching {
+            val tone = android.media.ToneGenerator(
+                android.media.AudioManager.STREAM_MUSIC,
+                80,
+            )
+            tone.startTone(android.media.ToneGenerator.TONE_PROP_ACK, 200)
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(
+                { runCatching { tone.release() } },
+                350,
+            )
+        }
         com.vessences.android.voice.WakeWordBridge.sttActive = false
         // Restart wake word service if always-listen is enabled.
         // Dispatch to IO: AlwaysListeningService.start() eventually calls

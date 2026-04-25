@@ -157,12 +157,32 @@ Some intent classes have a **Stage 2 handler** — a deterministic Python functi
 | Class | Handler | Data source | Typical answer |
 |:------|:--------|:------------|:---------------|
 | `clinic_schedules_info` | `jane_web/jane_v2/classes/clinic_schedules_info/handler.py` | `$VESSENCE_DATA_HOME/schedule.db` SQLite | Patient count or names per day of week; "next/current patient" reply now offers to read the patient's Visit Summary via a STAGE2_FOLLOWUP (`awaiting: "next_patient_details_confirm"`) |
+| `tell_joke` | `jane_web/jane_v2/classes/tell_joke/handler.py` | qwen2.5:7b (high-temp) + recent FIFO | Single short clean joke; FIFO context lets "another joke" pivot to a new one. Returns `None` on LLM failure → escalates to Stage 3. |
+| `do_math` | `jane_web/jane_v2/classes/do_math/handler.py` | qwen2.5:7b (parser) + Python `ast` safe-eval | Numeric arithmetic answer. Qwen translates the spoken phrase into a single Python expression; an AST walker evaluates only numeric literals + binary/unary ops + a tiny safe call set (sqrt, pow, abs, round, floor, ceil), with an exponent cap (`_MAX_EXPONENT=1000`) to block DoS via giant powers. Qwen alone hallucinated multi-digit products (audit 2026-04-24: 234×567 → 132066 vs actual 132678); Python now does the arithmetic. Returns `None` on parse failure or non-numeric prompts → escalates to Stage 3. |
 
 **Adding a new Stage 2 handler:**
 1. Create `jane_web/jane_v2/classes/<class_name>/handler.py` with `async def handle(prompt: str) -> dict | None`
 2. Create `jane_web/jane_v2/classes/<class_name>/metadata.py` with `METADATA` dict (name, priority, description, few_shot, ack)
 3. Add a matching intent class in `intent_classifier/v2/classes/<class_name>.py`
 4. Add adversarial test cases in `intent_classifier/v2/classes/<class_name>_adversarial.json`
+
+### Phase 2.6: Multi-turn handler patterns (Stage 2 conversation flows)
+
+A Stage 2 handler can manage a multi-turn flow by emitting a `STAGE2_FOLLOWUP` `pending_action` in its `structured` block. The next user turn re-enters the same handler via the `pending` kwarg (the v3 pipeline introspects the handler signature). Three canonical patterns:
+
+- **Repeating-read** (`todo_list`, `weather`, `read_calendar`): handler answers, then asks "want another?" with `pending_continuation(awaiting="another_X_or_stop", ...)`. On resume: `end_phrase.is_end()` → `end_conversation("Ok.")`; valid follow-up → answer again + ask again; pivot/garbage → `{abandon_pending: True, force_stage3: True}`. `read_calendar` additionally parks on `awaiting_day_choice` when the user replies `yes` without naming a day, then re-enters the loop after the next day-name reply. The handler also enforces a Stage-2-vs-Stage-3 routing rule: only prompts that explicitly name a specific day or week ("today", "tomorrow", "this week", weekday names) stay in Stage 2 — vague queries ("what's coming up", "anything important") return `None` to escalate to Opus.
+- **Confirm-or-revise** (`send_message`, future `send_email`): when LLM extract is uncertain (e.g. qwen `COHERENT=no`), build a draft and ask "Should I send it?" with `pending_continuation(awaiting="send_confirmation", data={"draft":{...}})`. On resume check order is `is_yes` → send + `conversation_end`; `is_no` → ask for revised body (`awaiting="revised_body"`); `end_phrase.is_end` → cancel; else → escalate. **Important:** check `confirmation.is_yes/is_no` BEFORE `end_phrase.is_end` here — bare "no" answers a confirm prompt as "revise", not "abort" (see `agent_skills/confirmation.py` docstring).
+- **One-shot action** (`timer`): handler walks the user through required slots (duration → label) via short pendings, then on the final action returns `{conversation_end: True, ...}` so the voice loop closes cleanly.
+
+Shared helpers:
+- `agent_skills/end_phrase.is_end(text)` — strict "I'm done" matcher (`stop`, `cancel`, `nevermind`, `bye`, etc.)
+- `agent_skills/confirmation.is_yes(text)` / `is_no(text)` — yes/no parser tuned for confirm-or-revise prompts (`is_no` includes `wrong`, `not quite`, `revise`, etc.)
+- `agent_skills/private_handler_utils.pending_continuation(handler_class, awaiting, question, data)` — universal `STAGE2_FOLLOWUP` builder
+- `agent_skills/private_handler_utils.end_conversation(text="Ok.", structured=None)` — sets `conversation_end: True` so v3's stream emits the NDJSON `conversation_end` event; the Android `ChatViewModel.endVoiceConversation()` then plays a short two-pip `TONE_PROP_ACK` audio cue and falls back to wake-word passive mode.
+
+### Phase 2.7: Stage 3 privacy gate (`jane_web/jane_v3/pipeline.py:_stage3_privacy_check`)
+
+Before any escalation to Opus (Stage 3), the v3 entry points run a chroma-based privacy check on the raw prompt. The gate refuses (returns `PRIVACY_REFUSAL_TEXT` with `conversation_end=True`) when EITHER (a) the closest chroma neighbor within distance 0.40 belongs to a `privacy="local_only"` class, OR (b) ≥3 of the top-5 in-range neighbors are private. This is defense-in-depth on top of the per-handler `is_no_stage3` check — it catches prompts that bypass Stage 2 entirely (e.g. classified as `others`).
 
 ### Phase 3: Context Assembly (`context_builder/v1/context_builder.py`)
 - **Gemma classification → intent_level mapping** (`CLASSIFICATION_TO_INTENT`):

@@ -1,13 +1,24 @@
 """Send Message Stage 2 handler.
 
 Extracts recipient + body from the user prompt using a local LLM,
-resolves the recipient against contacts/aliases, then either:
-  - Fast-path: emit CLIENT_TOOL to send immediately ("msg sent")
-  - Escalate: delegate to Stage 3 (Opus) for disambiguation or draft-confirm
+resolves the recipient against contacts/aliases, then branches to:
 
-Two-path flow per CLAUDE.md SMS Protocols:
-  Fast path: COHERENT=yes + recipient resolves → send immediately, no confirmation
-  Fallback:  COHERENT=no, recipient ambiguous, or unresolved → Opus handles it
+  Fast path (qwen COHERENT=yes + recipient + body all present):
+      Emit `sms_send_direct` marker immediately, reply "Done, message sent.",
+      and signal conversation_end=True so the voice loop closes.
+
+  Confirm-or-revise (qwen COHERENT=no with resolved recipient + non-empty body):
+      Build a draft and ask "Message to X: Y. Should I send it?" with a
+      STAGE2_FOLLOWUP pending. Next turn resumes here to interpret yes/no/end.
+          yes  → send + end_conversation
+          no   → ask "please give me the updated message." + pending(revised_body)
+          end  → end_conversation("Ok.")
+          else → abandon_pending + force_stage3 (pivot to Opus)
+
+  Escalate (None):
+      intent_kind=ask, missing recipient, unresolved recipient, missing body.
+      Stage 3 (Opus) handles those — it can ask for body, disambiguate
+      aliases, or phrase the draft+ack for `ask` messages.
 """
 
 from __future__ import annotations
@@ -104,10 +115,12 @@ def _is_coherent(body: str) -> bool:
     if _FILLER_WORDS & set(w.rstrip(".,!?") for w in words):
         return False
 
-    # Check: contains background device commands
+    # Check: contains background device commands. Use word-boundary matching
+    # so contact names like "Alexa" / "Alexander" / "Alexandra" don't trip this.
     body_lower = body.lower()
-    if any(cmd in body_lower for cmd in _DEVICE_COMMANDS):
-        return False
+    for cmd in _DEVICE_COMMANDS:
+        if re.search(r"\b" + re.escape(cmd) + r"\b", body_lower):
+            return False
 
     return True
 
@@ -225,21 +238,8 @@ def _check_open_draft(prompt: str) -> dict | None:
     return None
 
 
-async def handle(prompt: str, context: str = "") -> dict | None:
-    """Extract recipient + body, resolve contact, fast-path or escalate.
-
-    Returns:
-      {"text": "msg sent", "client_tools": [...]}  → fast-path send
-      None                                          → escalate to Stage 3
-    """
-    # Step 0: If there's an open SMS draft, handle confirm/cancel here
-    # instead of re-extracting. This is the Stage 2 safety net — even if
-    # the pre-Stage-1 resolver missed (race, FIFO timing), Stage 2 catches it.
-    draft_result = _check_open_draft(prompt)
-    if draft_result is not None:
-        return draft_result
-
-    # Step 1: Extract metadata via local LLM (with FIFO context for pronoun resolution)
+async def _extract_via_llm(prompt: str, context: str) -> dict | None:
+    """Legacy fallback: ask qwen for {recipient, body, coherent}."""
     context_block = ""
     if context and context.strip():
         context_block = f"Recent conversation:\n{context.strip()}\n\n"
@@ -252,7 +252,6 @@ async def handle(prompt: str, context: str = "") -> dict | None:
         "options": {"temperature": 0.0, "num_predict": 100, "num_ctx": LOCAL_LLM_NUM_CTX},
         "keep_alive": -1,
     }
-
     try:
         async with httpx.AsyncClient(timeout=LOCAL_LLM_TIMEOUT) as client:
             r = await client.post(OLLAMA_URL, json=body)
@@ -265,18 +264,155 @@ async def handle(prompt: str, context: str = "") -> dict | None:
             raw = (r.json().get("response") or "").strip()
     except Exception as e:
         logger.warning("send_message handler: LLM extract failed: %s", e)
-        return None  # escalate
+        return None
+    return _parse_extraction(raw)
 
-    metadata = _parse_extraction(raw)
-    if metadata is _WRONG_CLASS_SENTINEL:
-        logger.info("send_message handler: LLM says WRONG_CLASS — escalating with self-correct")
-        return _WRONG_CLASS_SENTINEL  # dispatcher will self-correct Stage 1
-    if not metadata:
-        logger.warning("send_message handler: parse failed: %r", raw[:200])
-        return None  # escalate
+
+def _build_send_marker(phone: str, body: str) -> str:
+    import json as _json
+    return f"[[CLIENT_TOOL:contacts.sms_send_direct:{_json.dumps({'phone_number': phone, 'body': body})}]]"
+
+
+async def _handle_resume(prompt: str, pending: dict) -> dict | None:
+    """Resume a STAGE2_FOLLOWUP for send_message (confirm-or-revise loop)."""
+    from agent_skills import end_phrase, confirmation
+    from agent_skills.private_handler_utils import (
+        end_conversation, pending_continuation,
+    )
+
+    data = pending.get("data") if isinstance(pending.get("data"), dict) else pending
+    awaiting = (data or {}).get("awaiting") or pending.get("awaiting") or ""
+    draft = (data or {}).get("draft") or {}
+    phone = draft.get("phone") or ""
+    display = draft.get("display") or "them"
+    body = draft.get("body") or ""
+
+    if awaiting == "send_confirmation":
+        # Order matters: check is_yes/is_no BEFORE end_phrase. Bare "no"
+        # answers "Should I send it?" with "no, change it" — treating it
+        # as a cancel here would surprise the user (see confirmation.py
+        # docstring for full rationale). Cancel is reserved for stronger
+        # phrases like "cancel"/"nevermind"/"stop", which are in
+        # end_phrase but not is_no.
+        if confirmation.is_yes(prompt):
+            if not phone or not body:
+                logger.warning("send_message handler: resume yes but draft incomplete → abandon")
+                return {"abandon_pending": True, "force_stage3": True}
+            marker = _build_send_marker(phone, body)
+            logger.info("send_message handler: confirmed → send to %s", display)
+            return {
+                "text": f"Done. {marker}",
+                "conversation_end": True,
+                "structured": {
+                    "intent": "send message",
+                    "entities": {
+                        "recipient": display,
+                        "phone_number": phone,
+                        "message_body": body,
+                    },
+                    "safety": {"side_effectful": True, "requires_confirmation": False},
+                },
+            }
+        if confirmation.is_no(prompt):
+            ask = "Please give me the updated message."
+            return {
+                "text": ask,
+                "structured": {
+                    "intent": "send message",
+                    "pending_action": pending_continuation(
+                        handler_class="send message",
+                        awaiting="revised_body",
+                        question=ask,
+                        data={"draft": {"phone": phone, "display": display}},
+                    ),
+                },
+            }
+        if end_phrase.is_end(prompt):
+            logger.info("send_message handler: resume — end phrase, cancelling draft to %s", display)
+            return end_conversation("Ok.", structured={"intent": "send message"})
+        logger.info("send_message handler: resume — unrecognized confirm reply → escalate")
+        return {"abandon_pending": True, "force_stage3": True}
+
+    if awaiting == "revised_body":
+        # In the revised_body slot, the user is supplying a new message body.
+        # Don't apply is_yes/is_no here — those would clobber valid 1-word
+        # bodies. Only end_phrase aborts.
+        if end_phrase.is_end(prompt):
+            return end_conversation("Ok.", structured={"intent": "send message"})
+        new_body = (prompt or "").strip()
+        if not new_body:
+            return {"abandon_pending": True, "force_stage3": True}
+        ask = f"Message to {display}: {new_body}. Should I send it?"
+        return {
+            "text": ask,
+            "structured": {
+                "intent": "send message",
+                "pending_action": pending_continuation(
+                    handler_class="send message",
+                    awaiting="send_confirmation",
+                    question=ask,
+                    data={"draft": {"phone": phone, "display": display, "body": new_body}},
+                ),
+            },
+        }
+
+    logger.warning("send_message handler: unknown awaiting %r → abandon", awaiting)
+    return {"abandon_pending": True, "force_stage3": True}
+
+
+async def handle(prompt: str, context: str = "", pending: dict | None = None,
+                 params: dict | None = None) -> dict | None:
+    """Extract recipient + body, resolve contact, fast-path or escalate.
+
+    Returns:
+      {"text": "Done, ...", conversation_end=True}  → fast-path send
+      {"text": "Message to X: Y. Should I send it?", pending_action: ...}
+                                                     → confirm-or-revise
+      None                                          → escalate to Stage 3
+    """
+    # Resume path: STAGE2_FOLLOWUP from a previous send_message turn.
+    if pending and (pending.get("handler_class") == "send message"
+                    or (pending.get("data") or {}).get("awaiting") in
+                       {"send_confirmation", "revised_body"}):
+        return await _handle_resume(prompt, pending)
+
+    # Step 0: If there's an open SMS draft, handle confirm/cancel here
+    # instead of re-extracting. This is the Stage 2 safety net — even if
+    # the pre-Stage-1 resolver missed (race, FIFO timing), Stage 2 catches it.
+    draft_result = _check_open_draft(prompt)
+    if draft_result is not None:
+        return draft_result
+
+    # Step 1: Build metadata from params, or fall back to LLM extraction.
+    metadata: dict | None = None
+    if params:
+        recipient = (params.get("recipient") or "").strip()
+        body_text = (params.get("body") or "").strip()
+        intent_kind = (params.get("intent_kind") or "").strip().lower()
+        # `ask` intent always wants a draft+confirm round-trip — escalate so
+        # Opus can phrase the question and read it back.
+        if intent_kind == "ask":
+            logger.info("send_message handler: intent_kind=ask — escalating to Opus draft path")
+            return None
+        if not recipient:
+            logger.info("send_message handler: params has no recipient — escalating")
+            return None
+        metadata = {
+            "recipient": recipient,
+            "body": body_text or "(none)",
+            "coherent": _is_coherent(body_text or "(none)"),
+        }
+    else:
+        metadata = await _extract_via_llm(prompt, context)
+        if metadata is _WRONG_CLASS_SENTINEL:
+            logger.info("send_message handler: LLM says WRONG_CLASS — escalating with self-correct")
+            return _WRONG_CLASS_SENTINEL
+        if not metadata:
+            logger.warning("send_message handler: extract failed — escalating")
+            return None
 
     logger.info(
-        "send_message handler: extracted recipient=%r body=%r coherent=%s",
+        "send_message handler: recipient=%r body=%r coherent=%s",
         metadata["recipient"], metadata["body"][:60], metadata["coherent"],
     )
 
@@ -329,20 +465,49 @@ async def handle(prompt: str, context: str = "") -> dict | None:
         # Never let alias-write fail the send.
         logger.warning("auto-alias attempt failed (non-fatal): %s", _alias_exc)
 
-    # Step 3: Check coherence
-    if not metadata["coherent"]:
-        logger.info("send_message handler: coherence=no for '%s' — escalating", display)
-        return None
-
-    # Step 4: Check if body is missing (user just said "text my wife")
+    # Step 4: If the body is missing (user just said "text my wife"), let
+    # Stage 3 ask for it — there's no draft to confirm yet.
     if metadata["body"] == "(none)" or not metadata["body"].strip():
         logger.info("send_message handler: no body for '%s' — escalating", display)
         return None
 
-    # Step 5: Fast-path send — embed CLIENT_TOOL marker in text
-    # Android parses [[CLIENT_TOOL:<name>:<json>]] markers from response text
-    import json
-    tool_args = json.dumps({"phone_number": phone, "body": metadata["body"]})
-    marker = f"[[CLIENT_TOOL:contacts.sms_send_direct:{tool_args}]]"
+    # Step 3: Coherence check. If qwen flagged the body as garbled / cut off,
+    # don't blast it. Build a draft and ask the user to confirm or revise.
+    if not metadata["coherent"]:
+        from agent_skills.private_handler_utils import pending_continuation
+        ask = f"Message to {display}: {metadata['body']}. Should I send it?"
+        logger.info("send_message handler: coherence=no → confirm-or-revise for '%s'", display)
+        return {
+            "text": ask,
+            "structured": {
+                "intent": "send message",
+                "pending_action": pending_continuation(
+                    handler_class="send message",
+                    awaiting="send_confirmation",
+                    question=ask,
+                    data={"draft": {
+                        "phone": phone,
+                        "display": display,
+                        "body": metadata["body"],
+                    }},
+                ),
+            },
+        }
+
+    # Step 5: Fast-path send — embed CLIENT_TOOL marker in text and end the
+    # conversation so the voice loop returns to wake-word mode.
+    marker = _build_send_marker(phone, metadata["body"])
     logger.info("send_message handler: fast-path → %s (%s)", display, phone)
-    return {"text": f"Done, message sent. {marker}"}
+    return {
+        "text": f"Done, message sent. {marker}",
+        "conversation_end": True,
+        "structured": {
+            "intent": "send message",
+            "entities": {
+                "recipient": display,
+                "phone_number": phone,
+                "message_body": metadata["body"],
+            },
+            "safety": {"side_effectful": True, "requires_confirmation": False},
+        },
+    }

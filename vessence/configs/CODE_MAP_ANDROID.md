@@ -1,5 +1,5 @@
 # Code Map — Android (Kotlin)
-_Auto-generated on 2026-04-23 08:15 UTC by `generate_code_map.py`_
+_Auto-generated on 2026-04-24 08:15 UTC by `generate_code_map.py`_
 
 ## android:.../ArticleReaderV2Activity.kt (339 lines)
   class ArticleReaderV2Activity → L35
@@ -263,11 +263,16 @@ _Auto-generated on 2026-04-23 08:15 UTC by `generate_code_map.py`_
   class NetworkException → L46
   class TransientServerError → L50
 
-## android:.../data/model/BriefingModels.kt (38 lines)
+## android:.../data/model/BriefingModels.kt (84 lines)
   class BriefingArticle → L5
   class BriefingTopic → L21
   class BriefingResponse → L28
   class SavedArticleEntry → L33
+  class MarketplaceSearch → L40
+  class MarketplaceListing → L50
+  class MarketplaceAiSummary → L64
+  class MarketplaceRefreshStatus → L72
+  class MarketplaceSearchCard → L79
 
 ## android:.../data/model/ChatMessage.kt (22 lines)
   class ChatMessage → L3
@@ -584,47 +589,60 @@ _Auto-generated on 2026-04-23 08:15 UTC by `generate_code_map.py`_
     clearError() → L86
     cancelSignIn() → L90
 
-## android:.../ui/briefing/BriefingScreen.kt (1080 lines)
-  @Composable BriefingScreen() → L97
-  @Composable TopBar() → L415
-  @Composable HistorySheet() → L486
-  @Composable TopicChips() → L545
-  @Composable ArticleGrid() → L588
-  @Composable ArticleCard() → L621
-  @Composable ArticleDetailSheet() → L852
-  formatSourceLine() → L1040
-  formatTimeAgo() → L1047
+## android:.../ui/briefing/BriefingScreen.kt (1399 lines)
+  @Composable BriefingScreen() → L100
+  @Composable TopBar() → L481
+  @Composable HistorySheet() → L557
+  @Composable TopicChips() → L616
+  @Composable MarketplaceGrid() → L659
+  @Composable MarketplaceSearchPanel() → L678
+  @Composable MarketplaceListingRow() → L800
+  @Composable ArticleGrid() → L889
+  @Composable ArticleCard() → L922
+  @Composable ArticleDetailSheet() → L1153
+  formatSourceLine() → L1341
+  formatMarketplacePrice() → L1348
+  formatMarketplaceMeta() → L1353
+  formatMarketplaceTimestamp() → L1362
+  formatTimeAgo() → L1367
 
-## android:.../ui/briefing/BriefingViewModel.kt (569 lines)
-  class BriefingUiState → L29
-  class BriefingViewModel → L50
-    refresh() → L82
-    fetchArchiveDates() → L127
-    loadArchive() → L148
-    clearArchive() → L180
-    selectCategory() → L185
-    toggleArticleExpanded() → L189
-    getFilteredArticles() → L196
-    dismissArticle() → L207
-    getImageUrl() → L230
-    speakArticle() → L236
-    suspend playAudioFile() → L260
-    suspend tryPlayServerAudio() → L291
-    stopSpeaking() → L337
-    readAll() → L353
-    loadCachedArticles() → L374
-    saveCachedArticles() → L393
-    suspend fetchArticles() → L404
-    suspend fetchTopics() → L424
-    saveArticle() → L438
-    unsaveArticle() → L465
-    isArticleSaved() → L483
-    toggleSavedView() → L485
-    openSavedCategory() → L491
-    loadSavedArticles() → L495
-    fetchSavedArticleIds() → L523
-    fetchSavedCategories() → L544
-    override onCleared() → L564
+## android:.../ui/briefing/BriefingViewModel.kt (690 lines)
+  class BriefingUiState → L34
+  class BriefingViewModel → L59
+    refresh() → L91
+    selectTab() → L137
+    refreshMarketplace() → L149
+    fetchArchiveDates() → L167
+    loadArchive() → L188
+    clearArchive() → L220
+    selectCategory() → L225
+    toggleArticleExpanded() → L229
+    getFilteredArticles() → L236
+    dismissArticle() → L247
+    getImageUrl() → L270
+    getMarketplaceImageUrl() → L274
+    speakArticle() → L282
+    suspend playAudioFile() → L306
+    suspend tryPlayServerAudio() → L337
+    stopSpeaking() → L383
+    readAll() → L399
+    loadCachedArticles() → L420
+    saveCachedArticles() → L439
+    suspend fetchArticles() → L450
+    suspend fetchMarketplaceSearchCards() → L470
+    fetchMarketplaceDetail() → L500
+    fetchMarketplaceSummary() → L517
+    fetchMarketplaceStatus() → L531
+    suspend fetchTopics() → L545
+    saveArticle() → L559
+    unsaveArticle() → L586
+    isArticleSaved() → L604
+    toggleSavedView() → L606
+    openSavedCategory() → L612
+    loadSavedArticles() → L616
+    fetchSavedArticleIds() → L644
+    fetchSavedCategories() → L665
+    override onCleared() → L685
 
 ## android:.../ui/chat/AttachmentSheet.kt (255 lines)
   @Composable AttachmentSheet() → L46
@@ -645,55 +663,55 @@ _Auto-generated on 2026-04-23 08:15 UTC by `generate_code_map.py`_
   @Composable VoiceStatusBanner() → L470
   @Composable ErrorBanner() → L555
 
-## android:.../ui/chat/ChatViewModel.kt (1657 lines)
+## android:.../ui/chat/ChatViewModel.kt (1658 lines)
   class PendingMessage → L36
   class ChatUiState → L42
   class ChatViewModel → L60
-    removeTrailingPartialAwaitingMarker() → L123
-    stripAssistantTags() → L134
-    assistantTextForDisplay() → L142
-    assistantTextForSpeech() → L151
-    extractedSpokenBlock() → L164
-    acquireStreamWakeLock() → L167
-    releaseStreamWakeLock() → L176
-    consumeMusicPlayRequest() → L184
-    override onReceive() → L219
-    initSession() → L353
-    sendMessage() → L402
-    cancelCurrentResponse() → L429
-    executeSend() → L451
-    FIRE_AND_FORGET → L831
-    isConversationEnding() → L1064
-    onSendComplete() → L1081
-    processNextInQueue() → L1218
-    clearError() → L1228
-    dismissUpdate() → L1232
-    installUpdate() → L1236
-    toggleTts() → L1243
-    stopSpeaking() → L1254
-    speakText() → L1280
-    stopSentenceTtsQueues() → L1284
-    reportStopSpeakingFailure() → L1293
-    speakIfEnabled() → L1307
-    suspend tryServerTts() → L1318
-    autoListenAfterTts() → L1380
-    endVoiceConversation() → L1394
-    isConversationEndPhrase() → L1431
-    showSystemMessage() → L1453
-    clearSession() → L1462
-    setAlwaysListeningEnabled() → L1475
-    syncVoicePreferences() → L1482
-    clearWakeWordTrigger() → L1486
-    triggerWakeWord() → L1491
-    startPushToTalk() → L1496
-    stopPushToTalk() → L1500
-    cancelListening() → L1504
-    stopListeningAndReturnToWakeWord() → L1509
-    clearVoiceError() → L1518
-    updateAiMessage() → L1522
-    switchProvider() → L1550
-    suspend prependPendingToolResults() → L1613
-    override onCleared() → L1639
+    removeTrailingPartialAwaitingMarker() → L118
+    stripAssistantTags() → L129
+    assistantTextForDisplay() → L137
+    assistantTextForSpeech() → L146
+    extractedSpokenBlock() → L159
+    acquireStreamWakeLock() → L162
+    releaseStreamWakeLock() → L171
+    consumeMusicPlayRequest() → L179
+    override onReceive() → L214
+    initSession() → L348
+    sendMessage() → L397
+    cancelCurrentResponse() → L424
+    executeSend() → L446
+    FIRE_AND_FORGET → L815
+    isConversationEnding() → L1065
+    onSendComplete() → L1082
+    processNextInQueue() → L1219
+    clearError() → L1229
+    dismissUpdate() → L1233
+    installUpdate() → L1237
+    toggleTts() → L1244
+    stopSpeaking() → L1255
+    speakText() → L1281
+    stopSentenceTtsQueues() → L1285
+    reportStopSpeakingFailure() → L1294
+    speakIfEnabled() → L1308
+    suspend tryServerTts() → L1319
+    autoListenAfterTts() → L1381
+    endVoiceConversation() → L1395
+    isConversationEndPhrase() → L1432
+    showSystemMessage() → L1454
+    clearSession() → L1463
+    setAlwaysListeningEnabled() → L1476
+    syncVoicePreferences() → L1483
+    clearWakeWordTrigger() → L1487
+    triggerWakeWord() → L1492
+    startPushToTalk() → L1497
+    stopPushToTalk() → L1501
+    cancelListening() → L1505
+    stopListeningAndReturnToWakeWord() → L1510
+    clearVoiceError() → L1519
+    updateAiMessage() → L1523
+    switchProvider() → L1551
+    suspend prependPendingToolResults() → L1614
+    override onCleared() → L1640
 
 ## android:.../ui/chat/ChatViewModelFactory.kt (24 lines)
   class ChatViewModelFactory → L9
@@ -725,12 +743,12 @@ _Auto-generated on 2026-04-23 08:15 UTC by `generate_code_map.py`_
   @Composable MarkdownText() → L19
   parseBasicMarkdown() → L48
 
-## android:.../ui/components/MessageBubble.kt (480 lines)
+## android:.../ui/components/MessageBubble.kt (459 lines)
   @Composable MessageBubble() → L55
   @Composable UserBubble() → L71
   @Composable AiBubble() → L106
-  @Composable AudioPlayCard() → L378
-  @Composable AvatarFallback() → L465
+  @Composable AudioPlayCard() → L357
+  @Composable AvatarFallback() → L444
 
 ## android:.../ui/components/RichMessageContent.kt (287 lines)
   @Composable RichMessageContent() → L35

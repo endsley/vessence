@@ -32,6 +32,19 @@ EXAMPLES = [
     "calling it a night", "calling it a day", "heading to bed",
     "going to sleep now", "off to bed", "time to sleep",
     "i am heading out", "signing off", "logging off",
+    # Declines targeted at a specific topic — these are still
+    # END_CONVERSATION because they're "stop doing X". The TELL_JOKE
+    # cluster otherwise pulls them in by the "joke" word alone.
+    "don't tell me a joke",
+    "no jokes please",
+    "no more jokes please",
+    "please no jokes",
+    "no jokes right now",
+    "stop with the jokes",
+    "stop telling jokes",
+    "no more jokes",
+    "enough jokes",
+    "i don't want a joke",
 ]
 
 CONTEXT = None

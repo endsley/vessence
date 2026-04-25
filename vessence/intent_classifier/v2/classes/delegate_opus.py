@@ -217,6 +217,90 @@ EXAMPLES = [
     "which person should I text",
     "should I text someone",
     "who needs a text",
+    # Meta questions about handler classes — "how does X work" / "what is X" /
+    # "what can you do" should NEVER fire the X handler. The handler classes
+    # have many positive exemplars and pull these toward themselves with high
+    # confidence. Audit 2026-04-23 showed this leakage for shopping/timer/
+    # todo/music/read. One generic "how does X work" per class is enough to
+    # dilute the cluster.
+    "how does the shopping list work",
+    "how does the grocery list work",
+    "what is the shopping list feature",
+    "how does the timer work",
+    "how do timers work",
+    "how does the timer feature work",
+    "what is a todo list",
+    "how does the todo list work",
+    "how does the todo feature work",
+    "how does message reading work",
+    "how does reading my messages work",
+    "what music do I have",
+    "what songs do I have",
+    "how does the music player work",
+    "what can you do",
+    "what are your capabilities",
+    "what can Jane do",
+    "what features do you have",
+    "tell me what you can do",
+    # Cooking-with-ingredient questions — these get pulled toward
+    # SHOPPING_LIST when the ingredient appears in shopping exemplars (e.g.
+    # "what should I cook with eggs" lost to a cluster of egg-bearing
+    # shopping_list exemplars). These are recipe questions, not list-edit
+    # requests.
+    "what should I cook with eggs",
+    "what can I make with eggs",
+    "what should I cook with chicken",
+    "what can I make with the milk",
+    "what dinner can I make tonight",
+    "what should I do with these eggs",
+    # Meta / figurative / rhetorical "joke" + "funny" — NOT a request to
+    # tell a joke. Audit 2026-04-24: the TELL_JOKE chroma cluster pulls
+    # anything containing "joke" or "funny", including questions about
+    # jokes, figurative complaints ("this meeting is a joke"), and
+    # conversational reactions ("that's hilarious"). Counter-pull these
+    # to Stage 3 so Opus can respond conversationally.
+    "what is a joke",
+    "what's a joke",
+    "what does joke mean",
+    "what's the definition of a joke",
+    "why was that joke funny",
+    "explain the pun in this email",
+    "who wrote that joke",
+    "who came up with that joke",
+    "where does that joke come from",
+    "where do jokes come from",
+    "how do comedians write jokes",
+    "how do you write a good joke",
+    "how do comedians come up with material",
+    "what's funny about that",
+    "this meeting is a joke",
+    "my inbox is a joke right now",
+    "is this a joke",
+    "are you joking",
+    "you're joking right",
+    "that's hilarious",
+    "that was actually funny",
+    "i don't find that funny",
+    # Meta / venting / narrative about math — NOT a request to compute a
+    # specific expression. The DO_MATH cluster pulls anything containing
+    # "math" / "division" / "multiplication" by surface word overlap.
+    "how do I do long division",
+    "how do I do long division by hand",
+    "how do you do long division",
+    "teach me long division",
+    "explain how multiplication works",
+    "explain how division works",
+    "how does long division work",
+    "I'm bad at math",
+    "I'm terrible at math",
+    "math is hard",
+    "I hate math",
+    "I'm working on a math problem",
+    "I'm stuck on a math problem",
+    "help me with my math homework",
+    "help me think through this math problem",
+    "can you check my math",
+    "calculate my taxes for me",
     # Past-tense browsing anecdotes — NOT commands to drive a browser now.
     # These get pulled toward WEB_AUTOMATION by surface word overlap but
     # have no actionable intent. Route to DELEGATE_OPUS so Opus can

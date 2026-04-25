@@ -39,4 +39,9 @@ EXAMPLES = [
     "send it",
     "go ahead and send",
     "confirm and send",
+    # Proxy-send "email X a joke/meme/funny thing" — third-party email,
+    # NOT a request for Jane to tell the user a joke.
+    "email Bob a joke for his birthday",
+    "email Lee a funny story",
+    "email mom a meme",
 ]

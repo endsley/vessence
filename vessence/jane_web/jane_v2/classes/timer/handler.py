@@ -180,6 +180,33 @@ _COUNT_PHRASES = (
 )
 
 
+def _parse_delete_phrase(phrase: str) -> dict | None:
+    """Parse a `delete_target` phrase from params into the CLIENT_TOOL arg."""
+    if not phrase:
+        return None
+    p = phrase.lower().strip()
+    ordinals = {"first": 1, "second": 2, "third": 3, "fourth": 4, "fifth": 5,
+                "sixth": 6, "seventh": 7, "eighth": 8, "ninth": 9, "tenth": 10}
+    m = re.search(r"\btimer\s+(?:number\s+|#)?(\d+)\b", p)
+    if m:
+        return {"id": int(m.group(1))}
+    m = re.search(r"\b(?:the\s+)?(\d+)(?:st|nd|rd|th)?\s*timer\b", p)
+    if m:
+        return {"index": int(m.group(1))}
+    for word, n in ordinals.items():
+        if re.search(rf"\b(?:the\s+)?{word}(?:\s+timer)?\b", p):
+            return {"index": n}
+    m = re.search(
+        r"\b(?:the\s+|my\s+)?([a-z][a-z\s]{1,30}?)(?:\s+timer)?$",
+        p,
+    )
+    if m:
+        label = m.group(1).strip()
+        if label and label not in ("a", "an", "that", "this", "my", "the", "timer"):
+            return {"label": label}
+    return None
+
+
 # ── Follow-up helpers ─────────────────────────────────────────────────────
 
 # The "no label" reply vocabulary — user explicitly opts out of labeling.
@@ -312,8 +339,11 @@ def _fire_set(duration_ms: int, label: str, *, from_followup: bool = False) -> d
             "handler_class": "timer",
             "status": "resolved",
         }
+    # Setting a timer is a one-shot action — close the voice loop after the
+    # confirmation so the phone returns to wake-word mode.
     return {
         "text": f"{spoken} {marker}",
+        "conversation_end": True,
         "structured": structured,
     }
 
@@ -327,6 +357,13 @@ def _handle_resume(prompt: str, pending: dict) -> dict | None:
     It contains the accumulated state plus an `awaiting` key marking
     what the user's reply is answering.
     """
+    # End-of-conversation phrase mid-flow: cancel the in-progress setup.
+    from agent_skills import end_phrase
+    from agent_skills.private_handler_utils import end_conversation
+    if end_phrase.is_end(prompt):
+        logger.info("timer handler: end-phrase mid-setup → cancel")
+        return end_conversation("Ok.", structured={"intent": "timer"})
+
     # Cross-class pivot detection is dispatcher-level now (LLM gate against
     # the literal question we stored in pending["question"]). The one thing
     # we still check locally is a same-class "new timer" restart signal —
@@ -381,13 +418,84 @@ def _handle_resume(prompt: str, pending: dict) -> dict | None:
     return {"abandon_pending": True}
 
 
-def handle(prompt: str, pending: dict | None = None) -> dict | None:
+def handle(prompt: str, pending: dict | None = None, params: dict | None = None) -> dict | None:
     # ── Resume path: we're mid-conversation with this user ────────────
     if pending:
         return _handle_resume(prompt, pending)
 
     p_lower = prompt.lower()
 
+    action = None
+    param_duration_text: str | None = None
+    param_label = None  # None = unspecified; "" = explicit opt-out
+    param_delete_target: str | None = None
+    if params:
+        action = (params.get("action") or "").strip().lower() or None
+        param_duration_text = (params.get("duration_text") or None)
+        if "label" in params:
+            param_label = params.get("label")  # keep "" distinct from missing
+        param_delete_target = (params.get("delete_target") or None)
+
+    # ── Params-driven dispatch ────────────────────────────────────────
+    if action == "count":
+        marker = "[[CLIENT_TOOL:timer.list:{}]]"
+        logger.info("timer handler: count query (params)")
+        return {
+            "text": f"Let me check. {marker}",
+            "structured": {"intent": "timer", "entities": {"action": "count"}},
+        }
+
+    if action == "list":
+        marker = "[[CLIENT_TOOL:timer.list:{}]]"
+        logger.info("timer handler: list (params)")
+        return {
+            "text": f"Checking your timers. {marker}",
+            "structured": {"intent": "timer", "entities": {"action": "list"}},
+        }
+
+    if action == "cancel":
+        marker = "[[CLIENT_TOOL:timer.cancel:{}]]"
+        logger.info("timer handler: cancel (params)")
+        return {
+            "text": f"Cancelling your timer. {marker}",
+            "structured": {"intent": "timer", "entities": {"action": "cancel"}},
+        }
+
+    if action == "delete":
+        target = _parse_delete_phrase(param_delete_target or "") or _extract_delete_target(p_lower)
+        if target is None:
+            logger.info("timer handler: delete with no resolvable target — escalating")
+            return None
+        tool_args = json.dumps(target, separators=(',', ':'))
+        marker = f"[[CLIENT_TOOL:timer.delete:{tool_args}]]"
+        descr = (
+            f"timer #{target['id']}" if "id" in target
+            else f"the {target['label']} timer" if "label" in target
+            else f"the #{target['index']} timer"
+        )
+        logger.info("timer handler: delete %s (params)", target)
+        return {
+            "text": f"Deleting {descr}. {marker}",
+            "structured": {"intent": "timer", "entities": {"action": "delete", **target}},
+        }
+
+    if action == "set":
+        duration_ms = 0
+        if param_duration_text:
+            duration_ms = _parse_duration_ms(param_duration_text)
+        if duration_ms <= 0:
+            duration_ms = _parse_duration_ms(prompt)
+        if duration_ms <= 0:
+            logger.info("timer handler: set with no duration — ask")
+            return _ask_duration({})
+        # Label: use param_label if provided (even if ""), else extract.
+        label = param_label if param_label is not None else _extract_label(prompt)
+        if label is None or (label == "" and param_label is None):
+            return _ask_label({"duration_ms": duration_ms})
+        # `label == ""` from params means user opted out → fire without label.
+        return _fire_set(duration_ms, label or "")
+
+    # ── Legacy regex path (no params, e.g. v2 pipeline) ────────────────
     # COUNT / QUERY — "how many timers do I have"
     # timer.list already returns a count-friendly summary on Android.
     if any(p in p_lower for p in _COUNT_PHRASES):

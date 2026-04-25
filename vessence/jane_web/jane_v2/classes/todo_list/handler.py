@@ -145,12 +145,42 @@ def _refresh_cache() -> None:
         logger.warning("todo_list: cache refresh failed: %s", e)
 
 
-async def _handle_edit(prompt: str, edit_type: str, categories: list[dict]) -> dict | None:
-    """Handle an add or remove edit request."""
-    item_text = _extract_item_text(prompt, edit_type)
+async def _handle_edit(
+    prompt: str,
+    edit_type: str,
+    categories: list[dict],
+    item_text: str | None = None,
+    category_name: str | None = None,
+    from_params: bool = False,
+) -> dict | None:
+    """Handle an add or remove edit request.
+
+    When `from_params=True` (params-driven path), trust the provided
+    item_text / category_name verbatim and skip the prompt-regex
+    extraction. Otherwise fall back to extracting from the prompt —
+    preserves the v2 (no-params) code path.
+    """
+    if not from_params and item_text is None:
+        item_text = _extract_item_text(prompt, edit_type)
     if _is_placeholder_item_text(item_text):
         item_text = None
-    cat = _match_category(prompt, categories)
+    cat = None
+    if category_name:
+        cat = next(
+            (c for c in categories if _normalize(c.get("name", "")) == _normalize(category_name)),
+            None,
+        )
+        if cat is None:
+            for alias, canonical in _CATEGORY_ALIASES.items():
+                if _normalize(category_name) == _normalize(alias):
+                    cat = next(
+                        (c for c in categories if _normalize(c.get("name", "")) == _normalize(canonical)),
+                        None,
+                    )
+                    if cat:
+                        break
+    if cat is None:
+        cat = _match_category(prompt, categories)
 
     if edit_type == "add":
         if not item_text and cat:
@@ -487,6 +517,50 @@ def _pending(awaiting: str, data: dict, question: str = "") -> dict:
     }
 
 
+def _read_and_ask_another(cat: dict, categories: list[dict],
+                          already_read: list[str] | None = None) -> dict:
+    """Read items for a category, then ask if the user wants another.
+
+    `already_read` is the running list of canonical category names already
+    spoken in this multi-turn flow. We append `cat['name']` and stash the
+    list in pending data so subsequent turns know not to suggest the same
+    one twice.
+    """
+    spoken = _speak_items(cat)
+    seen = list(already_read or [])
+    if cat.get("name") and cat["name"] not in seen:
+        seen.append(cat["name"])
+    remaining = [
+        c.get("name", "") for c in _visible_categories(categories)
+        if c.get("name") and c["name"] not in seen and c.get("items")
+    ]
+    if not remaining:
+        # Read everything we could; nothing to follow up with.
+        text = f"{spoken} That's everything on your list."
+        return {
+            "text": text,
+            "conversation_end": True,
+            "structured": {
+                "intent": "todo list",
+                "entities": {"category": cat.get("name", "")},
+            },
+        }
+    follow = "Want to hear another category?"
+    text = f"{spoken} {follow}"
+    return {
+        "text": text,
+        "structured": {
+            "intent": "todo list",
+            "entities": {"category": cat.get("name", "")},
+            "pending_action": _pending(
+                "another_category_or_stop",
+                {"already_read": seen},
+                question=follow,
+            ),
+        },
+    }
+
+
 # ── Resume handler (follow-up turn after we asked "which?") ─────────────────
 async def _handle_resume(prompt: str, pending: dict) -> dict | None:
     # Pivot detection is now the dispatcher's job — see
@@ -654,21 +728,30 @@ async def _handle_resume(prompt: str, pending: dict) -> dict | None:
         except Exception as e:
             return {"text": f"Couldn't remove that. Error: {e}", "structured": {"intent": "todo list"}}
 
-    # Default: reading flow — match category
+    # End-of-conversation phrase: user is done with the list.
+    from agent_skills import end_phrase
+    from agent_skills.private_handler_utils import end_conversation
+
+    if end_phrase.is_end(prompt):
+        logger.info("todo_list: end-phrase on resume — closing conversation")
+        return end_conversation("Ok.", structured={"intent": "todo list"})
+
+    # Reading flow — match a category. The repeating-read pattern: after
+    # we read items, we ask "want another?" via pending; the user's reply
+    # comes back here and we either read another category or end.
+    already_read = pending_data.get("already_read") or []
     cat = _match_category(prompt, categories)
     if cat is None:
-        logger.info("todo_list: no strong category match → abandon to Stage 1")
-        return {"abandon_pending": True}
+        logger.info("todo_list: no category match on resume → escalate to Stage 3")
+        return {"abandon_pending": True, "force_stage3": True}
 
-    text = _speak_items(cat)
+    if cat.get("name") in already_read:
+        logger.info("todo_list: user re-asked already-read category %s → escalate",
+                    cat.get("name"))
+        return {"abandon_pending": True, "force_stage3": True}
+
     logger.info("todo_list: resumed → %s", cat.get("name"))
-    return {
-        "text": text,
-        "structured": {
-            "intent": "todo list",
-            "entities": {"category": cat.get("name", "")},
-        },
-    }
+    return _read_and_ask_another(cat, categories, already_read=already_read)
 
 
 # ── Main entry ──────────────────────────────────────────────────────────────
@@ -676,6 +759,7 @@ async def handle(
     prompt: str,
     context: str = "",
     pending: dict | None = None,
+    params: dict | None = None,
 ) -> dict | None:
     if pending:
         return await _handle_resume(prompt, pending)
@@ -700,7 +784,14 @@ async def handle(
             logger.warning("todo_list: shopping_list import failed: %s", e)
         else:
             logger.info("todo_list: shopping-list prompt detected → delegate")
-            return await _shop.handle(prompt, context=context)
+            shop_params = None
+            if params and params.get("action") in {"add", "remove", "view", "clear", "check"}:
+                shop_params = {
+                    "action": "add" if params.get("action") == "add" else
+                              "remove" if params.get("action") == "remove" else "view",
+                    "items": params.get("item"),
+                }
+            return await _shop.handle(prompt, params=shop_params)
 
     cache = _load_cache()
     if cache is None:
@@ -714,11 +805,30 @@ async def handle(
 
     categories = cache.get("categories") or []
 
-    # Edit intent: add or remove items
-    edit_type = _detect_edit_intent(prompt)
-    if edit_type:
-        logger.info("todo_list: edit intent detected → %s", edit_type)
-        return await _handle_edit(prompt, edit_type, categories)
+    # Resolve action / item / category from params first, then fall back
+    # to regex extraction so the v2 (no-params) path keeps working.
+    action = None
+    param_item: str | None = None
+    param_category: str | None = None
+    if params:
+        action = (params.get("action") or "").strip().lower() or None
+        param_item = (params.get("item") or "").strip() or None
+        param_category = (params.get("category") or "").strip() or None
+
+    if action in {"add", "remove"}:
+        logger.info("todo_list: params-driven edit → %s", action)
+        return await _handle_edit(
+            prompt, action, categories,
+            item_text=param_item,
+            category_name=param_category,
+            from_params=True,
+        )
+
+    if action is None:
+        edit_type = _detect_edit_intent(prompt)
+        if edit_type:
+            logger.info("todo_list: edit intent (regex) → %s", edit_type)
+            return await _handle_edit(prompt, edit_type, categories)
 
     if not categories:
         return {
@@ -726,18 +836,32 @@ async def handle(
             "structured": {"intent": "todo list"},
         }
 
+    # Read flow: try params.category first, then prompt match.
+    if param_category:
+        cat = None
+        norm_target = _normalize(param_category)
+        for c in _visible_categories(categories):
+            if _normalize(c.get("name", "")) == norm_target:
+                cat = c
+                break
+        if cat is None:
+            for alias, canonical in _CATEGORY_ALIASES.items():
+                if _normalize(alias) == norm_target:
+                    for c in _visible_categories(categories):
+                        if _normalize(c.get("name", "")) == _normalize(canonical):
+                            cat = c
+                            break
+                    if cat:
+                        break
+        if cat is not None:
+            logger.info("todo_list: params category hit → %s", cat.get("name"))
+            return _read_and_ask_another(cat, categories)
+
     # Shortcut: user already named a specific category in their opener.
     direct = _direct_category_query(prompt, categories)
     if direct is not None:
-        text = _speak_items(direct)
         logger.info("todo_list: direct hit → %s", direct.get("name"))
-        return {
-            "text": text,
-            "structured": {
-                "intent": "todo list",
-                "entities": {"category": direct.get("name", "")},
-            },
-        }
+        return _read_and_ask_another(direct, categories)
 
     # Ask which category.
     text = _speak_category_list(categories)

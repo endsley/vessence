@@ -28,10 +28,33 @@ EXAMPLES = [
     "can you text x",
     "can you tell x that y",
     "text x i'm coming soon",
+    # Direct concrete phrasings — placeholders alone weren't winning votes for
+    # short imperatives like "tell my wife" / "text Lee" (see 2026-04-23 audit:
+    # "text Lee I'm running late" was matching READ_MESSAGES on every top-K
+    # candidate). Anchoring with a few concrete recipients pulls these to
+    # SEND_MESSAGE without overweighting any one name.
+    "tell my wife",
+    "tell my wife I love her",
+    "tell my wife I'll be home soon",
+    "text Lee",
+    "text Lee I'm running late",
+    "tell Lee",
+    "tell Lee thanks",
     # Continuation / confirmation to send (no recipient — short replies)
     "sounds good send it", "yeah send it", "go ahead and send it",
     "send it now", "ok send that", "please send that message",
     "yes send it", "send the message", "go ahead and text them",
+    # Proxy-send "tell/text/send X a joke/meme/funny thing" — these are
+    # SMS to a third party (Lee, Kathia, mom), NOT a request for Jane to
+    # tell the user a joke. The presence of a recipient name is what
+    # pulls these to SEND_MESSAGE despite the joke/meme/funny words.
+    "tell Lee a joke",
+    "text Kathia the joke about the chicken",
+    "send mom a funny meme",
+    "tell Kathia a joke",
+    "text Lee the joke I sent you",
+    "send Lee something funny",
+    "text Bob a meme",
 ]
 
 CONTEXT = """\

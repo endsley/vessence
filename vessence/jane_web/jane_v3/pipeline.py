@@ -58,6 +58,101 @@ from jane_web.session_context import set_current_session_id
 from intent_classifier.v3 import classifier as v3_classifier
 
 
+# ── Stage 3 privacy gate ─────────────────────────────────────────────────────
+# Stage 3 (Opus, in the cloud) must never see prompts that touch local-only
+# classes (clinic schedules, patient records, etc.). If the prompt's chroma
+# neighborhood is dominated by a class flagged `privacy="local_only"`, we
+# refuse here instead of escalating. The gate fires at the v3 entry points
+# only when Stage 3 escalation is about to happen — Stage 2 successes and
+# unclear/end_conversation short-circuits are not gated.
+
+PRIVACY_REFUSAL_TEXT = "I can't help with that — it touches private clinic or patient data."
+_PRIVACY_GATE_DISTANCE = 0.40   # outer relevance bound (matches v3 MAX_DISTANCE)
+_PRIVACY_GATE_TOP_K = 5         # how many neighbors to inspect
+
+
+def _stage3_privacy_check(prompt: str) -> bool:
+    """Return True iff the prompt is close to a private (local_only) class.
+
+    Two-stage rule:
+      1. Embed the prompt and pull the top-5 chroma neighbors.
+      2. Gate (refuse) when EITHER:
+         (a) the single closest neighbor (within `_PRIVACY_GATE_DISTANCE`)
+             belongs to a `privacy="local_only"` class, OR
+         (b) a strict majority (≥ 3 of 5) of in-range neighbors are
+             from `local_only` classes.
+
+    (a) catches direct private-domain prompts ("tell me about patient X"
+    where the top match is `clinic_schedules_info`). (b) catches softer
+    paraphrases that don't dominate but still cluster in the private
+    region.
+
+    Failures (chroma not loaded, embed crash, etc.) return False — the
+    handler-level `is_no_stage3` check at Stage 2 is the strict guarantee;
+    this gate is the additional defense for prompts that miss Stage 2
+    entirely (cls=others, low confidence).
+    """
+    try:
+        from intent_classifier.v2 import classifier as v2c
+        from agent_skills.private_handler_utils import privacy_for
+        v2c._load()
+        if v2c._collection is None or v2c._embed_fn is None:
+            return False
+        n = min(_PRIVACY_GATE_TOP_K, v2c._collection.count())
+        if n <= 0:
+            return False
+        vec = v2c._embed_fn([prompt])[0]
+        results = v2c._collection.query(
+            query_embeddings=[vec],
+            n_results=n,
+            include=["metadatas", "distances"],
+        )
+        metas = results.get("metadatas", [[]])[0]
+        dists = results.get("distances", [[]])[0]
+        in_range: list[tuple[float, str | None, str | None]] = []
+        for meta, dist in zip(metas, dists):
+            if dist is None or dist > _PRIVACY_GATE_DISTANCE:
+                continue
+            cls = (meta or {}).get("class")
+            in_range.append((float(dist), cls, privacy_for(cls)))
+        if not in_range:
+            return False
+        # Rule (a): closest neighbor is private
+        closest_dist, closest_cls, closest_priv = in_range[0]
+        if closest_priv == "local_only":
+            logger.info(
+                "jane_v3 privacy gate: closest neighbor %r is private (dist=%.3f) → refuse",
+                closest_cls, closest_dist,
+            )
+            return True
+        # Rule (b): majority of in-range neighbors are private
+        private_count = sum(1 for _, _, p in in_range if p == "local_only")
+        if private_count >= 3 and private_count > len(in_range) - private_count:
+            logger.info(
+                "jane_v3 privacy gate: %d/%d in-range neighbors private → refuse",
+                private_count, len(in_range),
+            )
+            return True
+    except Exception as e:
+        logger.warning("jane_v3 privacy gate failed (non-fatal): %s", e)
+    return False
+
+
+def _apply_privacy_gate(state: dict, prompt: str) -> dict:
+    """If Stage 3 would fire and the prompt is private, swap in a refusal.
+
+    Mutates and returns the state dict. No-op when Stage 2 already produced
+    a result or the gate clears.
+    """
+    if state.get("force_stage3") and _stage3_privacy_check(prompt):
+        state["result"] = {"text": PRIVACY_REFUSAL_TEXT, "conversation_end": True}
+        state["force_stage3"] = False
+        state["stage2_ack"] = None
+        state["fallback_ack"] = None
+        state["stage2_ms"] = 0
+    return state
+
+
 def _persist_turn_to_ledger(session_id: str, user_prompt: str, jane_response: str,
                             *, stage: str = "stage2", cls: str | None = None) -> None:
     """Write a completed stage2 turn to the SQLite ledger (and ChromaDB).
@@ -382,6 +477,7 @@ async def handle_chat(body, request: Request):
     canonical_sid = _canonical_session_id(body, request) or body.session_id
     set_current_session_id(canonical_sid)
     state = await _classify_and_maybe_handle(prompt, canonical_sid)
+    _apply_privacy_gate(state, prompt)
 
     # ── Stage 2 success: return directly ────────────────────────────────
     if state["result"] is not None and not state["force_stage3"]:
@@ -489,6 +585,7 @@ async def handle_chat_stream(body, request: Request):
         canonical_sid = _canonical_session_id(body, request) or body.session_id
         set_current_session_id(canonical_sid)
         state = await _classify_and_maybe_handle(prompt, canonical_sid)
+        _apply_privacy_gate(state, prompt)
 
         # ── Stage 2 success ──────────────────────────────────────────────
         if state["result"] is not None and not state["force_stage3"]:

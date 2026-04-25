@@ -120,15 +120,25 @@ def run_job(name: str, script: str, args: list[str], timeout_min: int) -> dict:
         with log_path.open("a") as logf:
             logf.write(f"\n\n===== Run {started_at.isoformat()} =====\n")
             logf.flush()
+            _env = {**os.environ,
+                    "VESSENCE_HOME": str(VESSENCE_HOME),
+                    "VESSENCE_DATA_HOME": str(VESSENCE_DATA_HOME),
+                    "PYTHONPATH": str(VESSENCE_HOME)}
+            
+            # Special handling for Memory Janitor: add TensorRT lib path
+            if script == "memory/v1/janitor_memory.py":
+                tensorrt_lib_path = Path(PYTHON).parent.parent / "lib" / "python3.13" / "site-packages" / "tensorrt_libs"
+                if tensorrt_lib_path.is_dir():
+                    current_ld_library_path = _env.get("LD_LIBRARY_PATH", "")
+                    _env["LD_LIBRARY_PATH"] = f"{tensorrt_lib_path}:{current_ld_library_path}".strip(":")
+                    log(f"Injected LD_LIBRARY_PATH for Memory Janitor: {_env['LD_LIBRARY_PATH']}")
+
             r = subprocess.run(
                 cmd,
                 stdout=logf,
                 stderr=subprocess.STDOUT,
                 timeout=timeout_min * 60,
-                env={**os.environ,
-                     "VESSENCE_HOME": str(VESSENCE_HOME),
-                     "VESSENCE_DATA_HOME": str(VESSENCE_DATA_HOME),
-                     "PYTHONPATH": str(VESSENCE_HOME)},
+                env=_env,
             )
         elapsed = time.time() - started
         status = "ok" if r.returncode == 0 else f"exit-{r.returncode}"

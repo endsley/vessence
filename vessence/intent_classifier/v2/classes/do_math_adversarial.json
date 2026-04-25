@@ -1,0 +1,249 @@
+{
+  "class": "DO_MATH",
+  "phrases": [
+    "what time is it",
+    "how many minutes until 5pm",
+    "how long until my meeting",
+    "set a 10 minute timer",
+    "set a timer for 25 minutes",
+    "remind me in 30 minutes",
+    "add milk to my shopping list",
+    "add 5 things to my todo list",
+    "how many emails do I have",
+    "how many unread messages do I have",
+    "how many times has Lee texted me today",
+    "what's the date today",
+    "what year is it",
+    "what's the temperature outside",
+    "what's the weather like",
+    "how do I do long division",
+    "explain how multiplication works",
+    "what is calculus",
+    "who invented zero",
+    "tell me about pi",
+    "I'm bad at math",
+    "math is hard",
+    "I hate doing math in my head",
+    "I'm working on a math problem",
+    "help me with my math homework",
+    "what does 'times' mean in English",
+    "the meeting times are 3 and 5",
+    "divide the work between us",
+    "split the bill",
+    "calculate my taxes for me"
+  ],
+  "results": [
+    {
+      "phrase": "what time is it",
+      "classification": "GET_TIME",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "how many minutes until 5pm",
+      "classification": "TIMER",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "how long until my meeting",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.4,
+      "margin": 0.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "set a 10 minute timer",
+      "classification": "TIMER",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "set a timer for 25 minutes",
+      "classification": "TIMER",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "remind me in 30 minutes",
+      "classification": "TIMER",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "add milk to my shopping list",
+      "classification": "SHOPPING_LIST",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "add 5 things to my todo list",
+      "classification": "TODO_LIST",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "how many emails do I have",
+      "classification": "READ_EMAIL",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "how many unread messages do I have",
+      "classification": "READ_MESSAGES",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "how many times has Lee texted me today",
+      "classification": "READ_MESSAGES",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "what's the date today",
+      "classification": "GET_TIME",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "what year is it",
+      "classification": "GET_TIME",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "what's the temperature outside",
+      "classification": "WEATHER",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "what's the weather like",
+      "classification": "WEATHER",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "how do I do long division",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "explain how multiplication works",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "what is calculus",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.0,
+      "margin": 0.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "who invented zero",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.0,
+      "margin": 0.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "tell me about pi",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.0,
+      "margin": 0.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "I'm bad at math",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "math is hard",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "I hate doing math in my head",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "I'm working on a math problem",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "help me with my math homework",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "what does 'times' mean in English",
+      "classification": "GET_TIME",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "the meeting times are 3 and 5",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.4,
+      "margin": 0.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "divide the work between us",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "split the bill",
+      "classification": "WEB_AUTOMATION",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "calculate my taxes for me",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    }
+  ],
+  "false_positive_count": 0,
+  "false_positives": []
+}
