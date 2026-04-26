@@ -100,6 +100,19 @@ def _strip_system_metadata(text: str) -> str:
         r"\*\*Class Protocol:.*?(?=\n\n|\Z)", "", text, flags=re.DOTALL
     )
     cleaned = re.sub(
+        r"<class_protocol[^>]*>.*?</class_protocol>", "", cleaned, flags=re.DOTALL
+    )
+    cleaned = re.sub(
+        r"\[EXTRACTED PARAMS\].*?(?=\n\n|\Z)", "", cleaned, flags=re.DOTALL
+    )
+    cleaned = re.sub(
+        r"\[CURRENT CONVERSATION STATE\].*?\[END CURRENT CONVERSATION STATE\]",
+        "", cleaned, flags=re.DOTALL,
+    )
+    cleaned = re.sub(
+        r"\(voice request — .*?\)", "", cleaned, flags=re.DOTALL
+    )
+    cleaned = re.sub(
         r"\[STANDING BRAIN MODE\].*?(?=\n\n|\Z)", "", cleaned, flags=re.DOTALL
     )
     cleaned = re.sub(

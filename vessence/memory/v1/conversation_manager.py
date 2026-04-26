@@ -676,7 +676,7 @@ class ConversationManager:
             '', content, flags=re.DOTALL,
         )
         content = re.sub(
-            r'\[CURRENT CONVERSATION STATE\].*?(?=\n\n|\Z)',
+            r'\[CURRENT CONVERSATION STATE\].*?\[END CURRENT CONVERSATION STATE\]\s*',
             '', content, flags=re.DOTALL,
         )
         content = re.sub(

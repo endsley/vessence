@@ -1147,6 +1147,40 @@ def _resolve_file_context(state: JaneSessionState, message: str, file_context: s
     return file_context
 
 
+_STAGE3_CLASS_PROTOCOL_RE = _re.compile(
+    r'<class_protocol[^>]*>.*?</class_protocol>\s*', _re.DOTALL,
+)
+_STAGE3_EXTRACTED_PARAMS_RE = _re.compile(
+    r'\[EXTRACTED PARAMS\].*?(?=\n\n|\Z)', _re.DOTALL,
+)
+_STAGE3_CONV_STATE_RE = _re.compile(
+    r'\[CURRENT CONVERSATION STATE\].*?\[END CURRENT CONVERSATION STATE\]\s*',
+    _re.DOTALL,
+)
+_STAGE3_VOICE_HINT_RE = _re.compile(
+    r'\(voice request — .*?\)\s*', _re.DOTALL,
+)
+
+
+def _strip_stage3_injections(message: str) -> str:
+    """Remove stage3_escalate injection blocks from a user message.
+
+    stage3_escalate prepends class_protocol, EXTRACTED PARAMS, CURRENT
+    CONVERSATION STATE, and voice hints to the user message before passing
+    it to v1's stream_message/send_message. These are brain-only context
+    and must not leak into persistence (conversation history, thematic
+    memory, session summary, FIFO) — doing so causes summarizer LLMs to
+    produce confused output that snowballs across subsequent turns.
+    """
+    if not message:
+        return message
+    text = _STAGE3_CLASS_PROTOCOL_RE.sub('', message)
+    text = _STAGE3_EXTRACTED_PARAMS_RE.sub('', text)
+    text = _STAGE3_CONV_STATE_RE.sub('', text)
+    text = _STAGE3_VOICE_HINT_RE.sub('', text)
+    return text.strip()
+
+
 def _message_for_persistence(message: str, file_context: str | None) -> str:
     base = (message or "").strip()
     if not file_context:
@@ -1554,7 +1588,7 @@ async def _send_message_inner(
     if _tool_results:
         logger.info("[%s] (sync) received %d tool result(s) from client",
                     session_id[:12], len(_tool_results))
-    _user_visible_message = _cleaned_message
+    _user_visible_message = _strip_stage3_injections(_cleaned_message)
     if _tool_results:
         _result_block = _format_tool_results_for_brain(_tool_results)
         if _result_block:
@@ -2029,7 +2063,7 @@ async def stream_message(
                 session_id[:12], _idx, _tr_tool, _tr_status, _tr_msg, _tr_data_str,
             )
     _brain_visible_message = _cleaned_message  # what the brain will see
-    _user_visible_message = _cleaned_message   # what the user will see in the bubble
+    _user_visible_message = _strip_stage3_injections(_cleaned_message)  # what the user actually typed
     if _tool_results:
         _result_block = _format_tool_results_for_brain(_tool_results)
         if _result_block:
