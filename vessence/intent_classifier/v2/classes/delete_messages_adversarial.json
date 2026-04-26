@@ -1,0 +1,264 @@
+{
+  "class": "DELETE_MESSAGES",
+  "phrases": [
+    "delete eggs from my todo list",
+    "remove milk from my shopping list",
+    "clear my todo list",
+    "clear the shopping list",
+    "delete that calendar event",
+    "remove the meeting at 3pm",
+    "delete that contact",
+    "delete John from my contacts",
+    "delete the email from Sarah",
+    "remove that email",
+    "clear my calendar for today",
+    "cancel the text I was drafting",
+    "cancel the message I just dictated",
+    "stop sending me promo notifications",
+    "stop notifying me when texts come in",
+    "dismiss the alarm",
+    "clear the timer",
+    "remove the timer",
+    "delete that song from my playlist",
+    "remove the song from the queue",
+    "did you delete those texts already",
+    "how do I delete texts on android",
+    "what messages got deleted",
+    "should I delete those texts",
+    "I already deleted those messages",
+    "don't delete the texts from mom",
+    "remind me to delete the spam later",
+    "what does dismiss mean",
+    "trash that note",
+    "delete my whole account"
+  ],
+  "results": [
+    {
+      "phrase": "delete eggs from my todo list",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.4,
+      "margin": 0.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "remove milk from my shopping list",
+      "classification": "SHOPPING_LIST",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "clear my todo list",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.4,
+      "margin": 0.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "clear the shopping list",
+      "classification": "SHOPPING_LIST",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "delete that calendar event",
+      "classification": "TIMER",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "remove the meeting at 3pm",
+      "classification": "TIMER",
+      "confidence": 0.6,
+      "margin": 0.2,
+      "false_positive": false
+    },
+    {
+      "phrase": "delete that contact",
+      "classification": "DELETE_MESSAGES",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": true
+    },
+    {
+      "phrase": "delete John from my contacts",
+      "classification": "DELETE_MESSAGES",
+      "confidence": 0.6,
+      "margin": 0.2,
+      "false_positive": true
+    },
+    {
+      "phrase": "delete the email from Sarah",
+      "classification": "SEND_EMAIL",
+      "confidence": 0.6,
+      "margin": 0.2,
+      "false_positive": false
+    },
+    {
+      "phrase": "remove that email",
+      "classification": "SEND_EMAIL",
+      "confidence": 0.6,
+      "margin": 0.2,
+      "false_positive": false
+    },
+    {
+      "phrase": "clear my calendar for today",
+      "classification": "READ_CALENDAR",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "cancel the text I was drafting",
+      "classification": "DELETE_MESSAGES",
+      "confidence": 0.6,
+      "margin": 0.4,
+      "false_positive": true
+    },
+    {
+      "phrase": "cancel the message I just dictated",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.4,
+      "margin": 0.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "stop sending me promo notifications",
+      "classification": "DELETE_MESSAGES",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": true
+    },
+    {
+      "phrase": "stop notifying me when texts come in",
+      "classification": "DELETE_MESSAGES",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": true
+    },
+    {
+      "phrase": "dismiss the alarm",
+      "classification": "TIMER",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "clear the timer",
+      "classification": "TIMER",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "remove the timer",
+      "classification": "TIMER",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "delete that song from my playlist",
+      "classification": "MUSIC_PLAY",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "remove the song from the queue",
+      "classification": "MUSIC_PLAY",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "did you delete those texts already",
+      "classification": "DELETE_MESSAGES",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": true
+    },
+    {
+      "phrase": "how do I delete texts on android",
+      "classification": "DELETE_MESSAGES",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": true
+    },
+    {
+      "phrase": "what messages got deleted",
+      "classification": "READ_MESSAGES",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "should I delete those texts",
+      "classification": "DELETE_MESSAGES",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": true
+    },
+    {
+      "phrase": "I already deleted those messages",
+      "classification": "DELETE_MESSAGES",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": true
+    },
+    {
+      "phrase": "don't delete the texts from mom",
+      "classification": "DELETE_MESSAGES",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": true
+    },
+    {
+      "phrase": "remind me to delete the spam later",
+      "classification": "DELETE_MESSAGES",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": true
+    },
+    {
+      "phrase": "what does dismiss mean",
+      "classification": "DELETE_MESSAGES",
+      "confidence": 0.6,
+      "margin": 0.2,
+      "false_positive": true
+    },
+    {
+      "phrase": "trash that note",
+      "classification": "DELETE_MESSAGES",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": true
+    },
+    {
+      "phrase": "delete my whole account",
+      "classification": "DELETE_MESSAGES",
+      "confidence": 0.6,
+      "margin": 0.4,
+      "false_positive": true
+    }
+  ],
+  "false_positive_count": 14,
+  "false_positives": [
+    "delete that contact",
+    "delete John from my contacts",
+    "cancel the text I was drafting",
+    "stop sending me promo notifications",
+    "stop notifying me when texts come in",
+    "did you delete those texts already",
+    "how do I delete texts on android",
+    "should I delete those texts",
+    "I already deleted those messages",
+    "don't delete the texts from mom",
+    "remind me to delete the spam later",
+    "what does dismiss mean",
+    "trash that note",
+    "delete my whole account"
+  ]
+}

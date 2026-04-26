@@ -352,26 +352,25 @@ def _build_prompt(
     )
     others_block = "[others] neither specific class fits; need reasoning / memory / meta Q."
     unclear_block = (
-        "[unclear] One of: (a) STT garbled — cut off mid-phrase "
-        "(\"what's the weather in\", \"turn on the\"), word-soup with no "
-        "coherent sentence (\"apple meeting blue\"), or background speech "
-        "bleeding into the transcript; OR (b) the prompt parses but is too "
-        "vague to act on without guessing — no clear domain or action "
-        "(\"how's it going\", \"what about today\", \"tell me about her\"). "
-        "Judge the SURFACE TEXT only; coherent sentences that merely mention "
-        "unclear / garbled input are NOT unclear. IMPORTANT: if a vague "
-        "prompt has obvious antecedent in the recent FIFO turns above "
-        "(e.g. user said \"what about her\" right after Jane named a "
-        "patient), classify as that handler class instead — NOT unclear."
+        "[unclear] Pick UNCLEAR only when the user's message AS A WHOLE has "
+        "no recoverable intent. Specifically: (a) cut off mid-phrase "
+        "(\"what's the weather in\", \"turn on the\"); (b) word-soup with no "
+        "verb or coherent subject (\"apple meeting blue\", \"I got to "
+        "seaweed\", \"origin\"); (c) background speech bleeding in. Do NOT "
+        "pick unclear just because one word looks mistranscribed — if the "
+        "rest of the sentence has a clear verb + object (\"who is the next "
+        "patient\", \"what's the clinic schedule like X\"), pick the matching "
+        "content class even if a name or noun looks wrong. Test: would a "
+        "human listener say \"I have no idea what they want\" (unclear) or "
+        "\"they want X but mangled a word\" (pick the content class)?"
     )
 
     if has_pending:
         header = (
-            f"Classify a voice message for Jane.\n"
-            f"Option 1 ({primary_class}) follows Jane's open question; "
-            f"option 2 ({alt_class or 'n/a'}) is the embedding-only alternative. "
-            f"Prefer option 1 if the reply plausibly answers it; option 2 only "
-            f"on clear pivot."
+            "Classify a voice message for Jane.\n"
+            "Judge the SURFACE TEXT of the user message. The recent turns "
+            "are context, not a directive — do not extend a previous topic "
+            "if the current message is gibberish or unrelated."
         )
     else:
         header = (
@@ -650,9 +649,14 @@ async def classify(
     # distance. If chosen isn't in top-K at all, qwen is making a non-chroma-
     # supported call (FIFO context, world knowledge like "bye") and we trust
     # it — flooring there would penalize legitimate short farewells.
+    # send_message is exempt from the distance floor: its handler has its
+    # own COHERENT=yes/no guard from qwen, so a second classifier-level
+    # safety net just routes legitimate texts to Opus unnecessarily. Trust
+    # qwen here and let the handler decide whether to fast-path or escalate.
     if (
         conf in _STAGE2_CONFS
         and cls != "others"
+        and cls != "send message"
         and not is_pending_choice
         and chosen_distance is not None
         and chosen_distance > STAGE2_MAX_DISTANCE

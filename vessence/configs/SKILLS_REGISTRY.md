@@ -208,7 +208,7 @@ A **WebSequence** is a named, reusable Playwright browser automation script. Eac
     -   **CLI:** `python -m agent_skills.marketplace.harvester <search_name>`
     -   **Config:** `$VESSENCE_DATA_HOME/config/marketplace_searches.json`
     -   **Data:** `$VESSENCE_DATA_HOME/data/facebook_marketplace_finds/<search_name>/<query_slug>/<listing_id>/listing.json` + `photo_NN.jpg`
-    -   **Default search `cars`:** queries `Toyota corolla`, `Honda civic`, `Honda fit`; filters `max_price=15000`, `max_miles=60000`, `require_clean_title=True`, `suspicion_filter=True`; Medford MA (`109352265750998`)
+    -   **Default search `cars`:** queries `Toyota corolla`, `Honda civic`, `Honda fit`, `Honda CRV`; filters `min_price=6000`, `max_price=15000`, `max_miles=60000`, `require_clean_title=True`, `suspicion_filter=True`; Medford MA (`109352265750998`)
     -   **Web UI:** Marketplace pill in `/briefing` — card grid of saved searches, drill-in to listings, drill-in to listing detail with photo gallery
     -   **API:** `GET/POST /api/marketplace/searches`, `GET/DELETE /api/marketplace/search/{name}`, `GET /api/marketplace/listing/{name}/{slug}/{id}`, `GET /marketplace-image/{name}/{slug}/{id}/{photo}`
     -   **Trigger:** Intended for cron (not yet configured) — call `harvest("cars")` nightly

@@ -1035,7 +1035,12 @@
           <p class="text-[10px] text-slate-500 mt-1">Each line runs as a separate Facebook Marketplace search.</p>
         </div>
 
-        <div class="grid grid-cols-2 gap-3">
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div>
+            <label class="text-xs font-medium text-slate-400 uppercase tracking-wide">Min price ($)</label>
+            <input type="number" x-model.number="marketplaceEditor.minPrice" min="0" step="500"
+              class="mt-1 w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-sm text-white focus:outline-none focus:border-violet-500"/>
+          </div>
           <div>
             <label class="text-xs font-medium text-slate-400 uppercase tracking-wide">Max price ($)</label>
             <input type="number" x-model.number="marketplaceEditor.maxPrice" min="0" step="500"
@@ -1132,7 +1137,7 @@
         marketplaceEditor: {
           isNew: true, name: '', label: '',
           queriesText: '',
-          maxPrice: 15000, maxMiles: 60000,
+          minPrice: 0, maxPrice: 15000, maxMiles: 60000,
           requireCleanTitle: true, suspicionFilter: true,
           locationId: '109352265750998',
           saving: false, error: null,
@@ -1704,6 +1709,7 @@
               name: search.name,
               label: search.label || search.name,
               queriesText: (search.queries || []).join('\n'),
+              minPrice: search.filters?.min_price ?? 0,
               maxPrice: search.filters?.max_price ?? 15000,
               maxMiles: search.filters?.max_miles ?? 60000,
               requireCleanTitle: search.filters?.require_clean_title ?? true,
@@ -1715,7 +1721,7 @@
             this.marketplaceEditor = {
               isNew: true, name: '', label: '',
               queriesText: '',
-              maxPrice: 15000, maxMiles: 60000,
+              minPrice: 0, maxPrice: 15000, maxMiles: 60000,
               requireCleanTitle: true, suspicionFilter: true,
               locationId: '109352265750998',
               saving: false, error: null,
@@ -1743,6 +1749,7 @@
               label: e.label || e.name,
               queries,
               filters: {
+                min_price: Number(e.minPrice) || 0,
                 max_price: Number(e.maxPrice) || 0,
                 max_miles: Number(e.maxMiles) || 0,
                 require_clean_title: !!e.requireCleanTitle,

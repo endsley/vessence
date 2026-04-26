@@ -19,7 +19,12 @@ logger = logging.getLogger(__name__)
 # messages so Jane can see what happened on the phone — but the JSON
 # blob contains words like "tool", "send", "message" that pollute
 # the classifier's signal. The user's actual question comes after.
-_TOOL_RESULT_RE = re.compile(r"\[TOOL_RESULT:\{[^}]*\}\]\s*", re.DOTALL)
+#
+# Earlier this used a regex `\[TOOL_RESULT:\{[^}]*\}\]` which silently
+# failed on any payload containing a nested object (e.g. `"data":{...}`),
+# leaving the entire JSON blob in the prompt. Use the brace-counting
+# parser in tool_result_parser.py instead.
+from jane_web.jane_v2.tool_result_parser import strip_tool_result_prefix
 # Non-greedy match through nested [[CLIENT_TOOL:...]] up to the [END ...] sentinel.
 _SYS_PREFIX_RE = re.compile(
     r"\[(SMS SEND REQUEST|PHONE TOOL RESULTS)[^\]]*\].*?\[END\s+[^\]]+\]\s*",
@@ -65,7 +70,7 @@ _PLURAL_FIXUPS = {
 def _strip_system_markers(prompt: str) -> str:
     """Strip TOOL_RESULT and SMS SEND REQUEST markers so the classifier
     sees only the user's actual words."""
-    cleaned = _TOOL_RESULT_RE.sub("", prompt)
+    cleaned = strip_tool_result_prefix(prompt)
     cleaned = _SYS_PREFIX_RE.sub("", cleaned)
     cleaned = _SYS_TAIL_RE.sub("", cleaned)  # truncated leftovers
     cleaned = _SUBJECT_CHANGE_RE.sub("", cleaned, count=1)

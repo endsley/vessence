@@ -73,11 +73,23 @@ def _download(url: str, dest: Path) -> bool:
 # ── Playwright scraping ───────────────────────────────────────────────────────
 
 _SCRIPT_SCROLL = """
-(async()=>{let prev=0,same=0;
-for(let i=0;i<50;i++){window.scrollTo(0,document.body.scrollHeight);
-await new Promise(r=>setTimeout(r,900));
-const c=document.querySelectorAll('a[href*="/marketplace/item/"]').length;
-if(c===prev){same++;if(same>=3)break;}else same=0;prev=c;}
+(async()=>{const targetCount=60;
+let prevCount=0,sameCount=0,prevHeight=0,sameHeight=0;
+for(let i=0;i<180;i++){
+window.scrollTo(0,document.body.scrollHeight);
+await new Promise(r=>setTimeout(r,1400));
+window.scrollBy(0,-220);
+await new Promise(r=>setTimeout(r,250));
+window.scrollTo(0,document.body.scrollHeight);
+await new Promise(r=>setTimeout(r,1400));
+const count=document.querySelectorAll('a[href*="/marketplace/item/"]').length;
+const height=document.body.scrollHeight;
+if(count===prevCount){sameCount++;}else sameCount=0;
+if(height===prevHeight){sameHeight++;}else sameHeight=0;
+prevCount=count;prevHeight=height;
+if(count>=targetCount&&sameCount>=3)break;
+if(sameCount>=10&&sameHeight>=6)break;
+}
 return document.querySelectorAll('a[href*="/marketplace/item/"]').length;})()
 """
 
@@ -133,9 +145,18 @@ async def _run_query(page, query: str, filters: dict, location_id: str,
     await page.evaluate(_SCRIPT_SCROLL)
     cards = await page.evaluate(_SCRIPT_EXTRACT_CARDS)
 
-    pre = [c for c in cards
-           if c["miles"] is not None and c["miles"] < filters["max_miles"]
-           and c["price"] is not None and c["price"] < filters["max_price"]]
+    min_price = int(filters.get("min_price") or 0)
+    max_price = int(filters.get("max_price") or 0)
+    max_miles = int(filters.get("max_miles") or 0)
+
+    pre = [
+        c for c in cards
+        if c["miles"] is not None
+        and c["miles"] < max_miles
+        and c["price"] is not None
+        and c["price"] >= min_price
+        and c["price"] < max_price
+    ]
 
     passed: list[dict] = []
     for c in pre:
@@ -224,8 +245,10 @@ async def _harvest_async(search_name: str) -> dict:
 
     per_query: list[dict] = []
     async with async_playwright() as pw:
-        # Headless when no DISPLAY (cron path); visible in desktop sessions.
-        headless = not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+        # Marketplace pulls run headless by default. Opt into a visible
+        # browser only for debugging.
+        headless = os.environ.get("MARKETPLACE_HEADFUL_DEBUG", "").lower() \
+            not in {"1", "true", "yes", "on"}
         browser = await pw.chromium.launch(
             headless=headless,
             args=["--disable-blink-features=AutomationControlled"],

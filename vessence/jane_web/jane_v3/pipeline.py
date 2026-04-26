@@ -55,6 +55,7 @@ from jane_web.jane_v2.pipeline import (
     _stage2_response_parts,
 )
 from jane_web.session_context import set_current_session_id
+from jane_web.jane_v2.tool_result_parser import strip_tool_result_prefix
 from intent_classifier.v3 import classifier as v3_classifier
 
 
@@ -209,6 +210,23 @@ async def _classify_and_maybe_handle(prompt: str, session_id: str) -> dict:
         "force_stage3":    bool,
       }
     """
+    # Strip any [TOOL_RESULT:{json}] prefix Android prepends on follow-up
+    # turns. Without this, the JSON blob (with words like "messages",
+    # "notifications", "completed") dominates the chroma embedding and
+    # routes the user's actual question to whatever class the prior tool
+    # was about. The prior tool call is still visible to Stage 3 via FIFO.
+    #
+    # Always replace prompt with cleaned, even when cleaned is empty
+    # (TOOL_RESULT-only turn with no user words) — pollution is at its
+    # worst there and the downstream classifier handles empty input.
+    _cleaned = strip_tool_result_prefix(prompt)
+    if _cleaned != prompt:
+        logger.info(
+            "jane_v3 pipeline: stripped TOOL_RESULT prefix (%d → %d chars)",
+            len(prompt), len(_cleaned),
+        )
+        prompt = _cleaned
+
     # ── Pre-classifier resolver — STAGE3_FOLLOWUP fast-path ──────────────
     # When Opus's prior turn ended with an `[[AWAITING:<topic>]]` marker, v2
     # persists a pending_action of type `STAGE3_FOLLOWUP` in the FIFO. The

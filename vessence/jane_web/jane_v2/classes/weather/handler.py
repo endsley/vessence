@@ -177,17 +177,20 @@ absolute most). Be casual, like a friend — no preamble, no formal phrasing.
 
 Style rules:
 - Round numbers ("51" not "51.1"). Say "degrees" not "°F".
-- Drop the location and date unless directly asked.
+- Drop the location and ISO date unless directly asked.
 - Skip lists; say it as prose.
+- The data slice is for {day_ref}. When {day_ref} is anything other than \
+"today", the day reference MUST appear in your answer. Never say "today" \
+unless {day_ref} is "today".
 
-Examples of the desired tone:
-- "It's 51 and feels like 41, pretty clear out."
-- "Light drizzle tomorrow."
-- "High of 58 today, overcast."
-- "Air quality's good — AQI is 35."
-- "Around 80 on Wednesday, mostly cloudy."
+Examples of the desired tone (do NOT copy verbatim — adapt to the data):
+- "It's 51 and feels like 41, pretty clear out."           (day_ref = today)
+- "Around 47 with light drizzle tomorrow."                 (day_ref = tomorrow)
+- "High around 73 on Wednesday, partly cloudy."           (day_ref = Wednesday)
+- "Air quality's good — AQI is 35."                        (no day reference)
+- "Looks like rain Saturday, high near 62."                (day_ref = Saturday)
 
-Data slice:
+Data slice (refer to this day as "{day_ref}"):
 {slice}
 
 User question: {prompt}
@@ -195,11 +198,75 @@ User question: {prompt}
 Your 1-sentence spoken answer:"""
 
 
+def _day_reference(slice_obj: dict) -> str:
+    """Human-readable day reference for the prompt template.
+
+    For single-day slices, derive 'today'/'tomorrow'/'<weekday>' from the
+    slice's date. For multi-day slices or facets without a day (overview,
+    air_quality, pollen, current), return a neutral phrase that lets the
+    LLM keep its "no specific day" behavior.
+    """
+    today = date.today()
+    candidates = []
+    if isinstance(slice_obj, dict):
+        if isinstance(slice_obj.get("day"), dict):
+            candidates.append(slice_obj["day"])
+        if isinstance(slice_obj.get("today"), dict):
+            candidates.append(slice_obj["today"])
+        if isinstance(slice_obj.get("days"), list) and len(slice_obj["days"]) == 1:
+            d = slice_obj["days"][0]
+            if isinstance(d, dict):
+                candidates.append(d)
+    for entry in candidates:
+        iso = entry.get("date")
+        weekday = entry.get("weekday")
+        if not iso:
+            continue
+        try:
+            d = date.fromisoformat(iso)
+        except ValueError:
+            continue
+        delta = (d - today).days
+        if delta == 0:
+            return "today"
+        if delta == 1:
+            return "tomorrow"
+        if 2 <= delta <= 6:
+            return weekday or d.strftime("%A")
+        return weekday or iso
+    if isinstance(slice_obj, dict) and isinstance(slice_obj.get("days"), list):
+        return "the next several days"
+    return "today"
+
+
+_NEUTRAL_DAY_REFS = ("today", "the next several days")
+
+
+def _ensure_day_reference(text: str, day_ref: str) -> str:
+    """Safety net: qwen2.5:7b sometimes drops the day from the answer
+    (e.g. "It's around 58 with overcast skies" when the slice is for
+    tomorrow). Without this, the user hears today/tomorrow ambiguously.
+
+    If day_ref is non-trivial and absent from the answer (case-insensitive,
+    word-boundary), prepend it.
+    """
+    if not text or not day_ref or day_ref in _NEUTRAL_DAY_REFS:
+        return text
+    if re.search(rf"\b{re.escape(day_ref)}\b", text, flags=re.IGNORECASE):
+        return text
+    # Lowercase first letter of original so the prepended day reads naturally.
+    rest = text[0].lower() + text[1:] if text and text[0].isupper() else text
+    return f"{day_ref.capitalize()}: {rest}"
+
+
 async def _phrase(slice_obj: dict, prompt: str) -> str | None:
+    day_ref = _day_reference(slice_obj)
     body = {
         "model": MODEL,
         "prompt": _ANSWER_TEMPLATE.format(
-            slice=json.dumps(slice_obj, indent=2), prompt=prompt
+            slice=json.dumps(slice_obj, indent=2),
+            prompt=prompt,
+            day_ref=day_ref,
         ),
         "stream": False,
         "think": False,
@@ -219,7 +286,9 @@ async def _phrase(slice_obj: dict, prompt: str) -> str | None:
     except Exception as e:
         logger.warning("weather handler: ollama call failed: %s", e)
         return None
-    return text or None
+    if not text:
+        return None
+    return _ensure_day_reference(text, day_ref)
 
 
 def _expires_at(minutes: int = 2) -> str:

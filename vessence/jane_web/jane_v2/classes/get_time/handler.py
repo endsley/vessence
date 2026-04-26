@@ -162,7 +162,11 @@ async def handle(prompt: str, context: str = "") -> dict:
     fast = _fast_time_reply(prompt)
     if fast is not None:
         logger.info("get_time: fast path → %r", fast)
-        return {"text": fast, "thought": "fast-path: simple time/date query"}
+        return {
+            "text": fast,
+            "thought": "fast-path: simple time/date query",
+            "conversation_end": True,
+        }
 
     time_info = _format_time_info()
     llm_prompt = _build_prompt(prompt, context or "", time_info)
@@ -193,4 +197,4 @@ async def handle(prompt: str, context: str = "") -> dict:
         "get_time: LLM %dms — thought=%r reply=%r",
         latency_ms, thought[:80], reply[:80],
     )
-    return {"text": reply, "thought": thought}
+    return {"text": reply, "thought": thought, "conversation_end": True}

@@ -1,63 +1,59 @@
 # Most Recent Nightly Self-Improvement
 
-- Run started: 2026-04-24 01:00:01
-- Report generated: 2026-04-24 01:59:05
-- Total runtime: 3544s
+- Run started: 2026-04-25 01:00:01
+- Report generated: 2026-04-25 02:10:20
+- Total runtime: 4218s
 - Jobs: 8 total, 5 ok, 3 timeout, 0 failed
 - Stable latest report path: `/home/chieh/ambient/vessence/configs/self_improvement_latest.md`
-- Archived copy: `/home/chieh/ambient/vessence-data/reports/self_improvement/self_improvement_20260424_010001.md`
+- Archived copy: `/home/chieh/ambient/vessence-data/reports/self_improvement/self_improvement_20260425_010001.md`
 
 ## TL;DR
 
 - 1. ✓ Auto-Commit WIP (pre) (0.0m)
   - Fixes:
-    - 2026-04-24 01:00:01,988 INFO Committed 42 file(s).
+    - 2026-04-25 01:00:01,687 INFO Committed 40 file(s).
 - 2. ✓ Code Auditor (0.0m)
   - Problems:
-    - 2026-04-24 01:00:02,110 [WARNING] Working tree has uncommitted changes — skipping audit.
+    - 2026-04-25 01:00:01,824 [WARNING] Working tree has uncommitted changes — skipping audit.
 - 3. ⏱ Dead Code Auditor (15.0m)
   - Problems:
     - Dead files — review needed: 1.
     - Possibly-dead functions: 13.
     - Duplicate function bodies: 9 groups.
-- 4. ✓ Pipeline Audit (30 prompts) (8.0m)
+- 4. ✓ Pipeline Audit (30 prompts) (19.1m)
   - Problems:
-    - Prompts audited: 20.
-    - Classification failures: 7.
-    - Response failures: 16.
+    - Prompts audited: 29.
+    - Classification failures: 10.
+    - Response failures: 22.
 - 5. ✓ Doc Drift Auditor (0.0m)
   - Problems:
-    - CRON_JOBS.md claims run_marketplace_cron.sh is active but no matching cron entry exists
     - v2_3stage_pipeline.md missing class row: CLINIC_SCHEDULES_INFO
 - 6. ✓ Transcript Quality Review (4.1m)
   - Problems:
-    - Transcript review found 7 issues: 2 critical, 5 medium.
-    - Stage 1 misclassified a clear to-do-list request as `others`, so the fast-path to-do handler never ran.
-    - Follow-up routing failed: the user's category answer was not sent directly to the pending to-do flow.
+    - Transcript review found 11 issues: 10 critical, 1 medium.
+    - Send-message turn was routed to Stage 3 and answered as message reading instead of drafting/sending an SMS.
+    - Fresh to-do-list request inherited stale category state, causing the Stage 2 todo handler to fail and escalate unnecessarily.
   - Fixes:
-    - 2026-04-24 01:27:05,240 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (7 issues)
-    - 2026-04-24 01:27:05,241 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 2 critical, 5 medium iss...
+    - 2026-04-25 01:38:18,480 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (11 issues)
+    - 2026-04-25 01:38:18,481 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 10 critical, 1 medium is...
 - 7. ⏱ Memory Janitor (30.0m)
   - Problems:
-    - e/session/provider_bridge_ort.cc:1952 onnxruntime::Provider& onnxruntime::ProviderLibrary::Get() [ONNXRuntimeError] : 1 : FAIL : Failed to load library /home...
-    - WARNING:memory_janitor:Claude Opus janitor call failed: Expecting value: line 1 column 1 (char 0), trying Gemini fallback...
-    - WARNING:memory_janitor:Claude Opus janitor call failed: Expecting value: line 1 column 1 (char 0), trying Gemini fallback...
-  - Fixes:
-    - INFO:memory_janitor:verify_code_memories: [3/122] 6fdf22fa-f9b — When finishing a task, explicitly say 'done' and state what
-    - INFO:memory_janitor:verify_code_memories: UPDATED 6fdf22fa-f9b — Verified AGENTS.md, CLAUDE.md, GEMINI.md: none require literally saying 'done'.
+    - [0;93m2026-04-25 02:07:30.419164525 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-04-25 06:07:30 WARNING] ModelImporter.cpp:739: Make...
+    - [0;93m2026-04-25 02:07:30.419176092 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-04-25 06:07:30 WARNING] ModelImporter.cpp:739: Make...
+    - [0;93m2026-04-25 02:07:30.653838236 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-04-25 06:07:30 WARNING] ModelImporter.cpp:739: Make...
 - 8. ⏱ Auto-Commit + Push (post) (2.0m)
   - Fixes:
-    - 2026-04-24 01:57:05,500 INFO Committed 5 file(s).
+    - 2026-04-25 02:08:34,482 INFO Committed 7 file(s).
 
 **Top follow-ups:**
 
-- Add lexical/rule fallback for `to do`, `to-do`, and `todo list` phrases before `others`, and retrain the Stage 1 examples so list-reading requests map to `todo list` reliably.
-- When Stage 2 or Stage 3 asks a constrained follow-up like a to-do category, persist a pending action and bypass Stage 1 entirely on the next user turn.
+- Normalize classifier aliases before validation (`send_message` -> `send message`) and add a regression test for SMS utterances that include body text.
+- Clear todo pending state when a new top-level todo request is detected, and ignore carried category values unless the utterance is only a category reply.
 
 ## Executive Summary
 
 - 3 stage(s) need attention because they timed out or exited non-zero.
-- 6 concrete improvement/fix signals were found in logs or reports.
+- 4 concrete improvement/fix signals were found in logs or reports.
 
 ## Stage 1: Auto-Commit WIP (pre)
 
@@ -74,7 +70,7 @@
 
 ### Improvements It Made
 
-- 2026-04-24 01:00:01,988 INFO Committed 42 file(s).
+- 2026-04-25 01:00:01,687 INFO Committed 40 file(s).
 
 ### Evidence Files
 
@@ -91,7 +87,7 @@
 
 ### Problems It Found
 
-- 2026-04-24 01:00:02,110 [WARNING] Working tree has uncommitted changes — skipping audit.
+- 2026-04-25 01:00:01,824 [WARNING] Working tree has uncommitted changes — skipping audit.
 
 ### Improvements It Made
 
@@ -131,7 +127,7 @@
 ## Stage 4: Pipeline Audit (30 prompts)
 
 - Status: `ok`
-- Duration: 477s (8.0 min)
+- Duration: 1148s (19.1 min)
 
 ### What It Did
 
@@ -139,12 +135,12 @@
 
 ### Problems It Found
 
-- Prompts audited: 20.
-- Classification failures: 7.
-- Response failures: 16.
+- Prompts audited: 29.
+- Classification failures: 10.
+- Response failures: 22.
+- **user: I was wondering if you can tell me what's on my to-do list
 - **user: the home
 - **user: how about for the clinic
-- ****Summary:**
 - ****Summary:**
 
 ### Improvements It Made
@@ -167,7 +163,6 @@
 
 ### Problems It Found
 
-- CRON_JOBS.md claims run_marketplace_cron.sh is active but no matching cron entry exists
 - v2_3stage_pipeline.md missing class row: CLINIC_SCHEDULES_INFO
 
 ### Improvements It Made
@@ -182,7 +177,7 @@
 ## Stage 6: Transcript Quality Review
 
 - Status: `ok`
-- Duration: 245s (4.1 min)
+- Duration: 247s (4.1 min)
 
 ### What It Did
 
@@ -190,23 +185,23 @@
 
 ### Problems It Found
 
-- Transcript review found 7 issues: 2 critical, 5 medium.
-- Stage 1 misclassified a clear to-do-list request as `others`, so the fast-path to-do handler never ran.
-- Follow-up routing failed: the user's category answer was not sent directly to the pending to-do flow.
-- Jane returned an incorrect clinic to-do list count and duplicated one item.
-- Stage 1 misclassified a straightforward weather request as `others`, bypassing the weather fast path.
+- Transcript review found 11 issues: 10 critical, 1 medium.
+- Send-message turn was routed to Stage 3 and answered as message reading instead of drafting/sending an SMS.
+- Fresh to-do-list request inherited stale category state, causing the Stage 2 todo handler to fail and escalate unnecessarily.
+- Clear todo-list request was misclassified as `others`, forcing a 113-second Stage 3 path.
+- A simple category follow-up was not resolved by pending_action and instead went through slow Stage 3.
 
 ### Improvements It Made
 
-- 2026-04-24 01:27:05,240 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (7 issues)
-- 2026-04-24 01:27:05,241 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 2 critical, 5 medium issues. The most urgent was: A si
+- 2026-04-25 01:38:18,480 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (11 issues)
+- 2026-04-25 01:38:18,481 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 10 critical, 1 medium issues. The most urgent was: Sen
 
 ### Follow-Up Fixes Recommended
 
-- Add lexical/rule fallback for `to do`, `to-do`, and `todo list` phrases before `others`, and retrain the Stage 1 examples so list-reading requests map to `todo list` reliably.
-- When Stage 2 or Stage 3 asks a constrained follow-up like a to-do category, persist a pending action and bypass Stage 1 entirely on the next user turn.
-- Force all to-do reads, including Stage 3 fallbacks, through the same `todo_list_cache.json` reader/deduper used by Stage 2, and deduplicate items before rendering speech.
-- Expand Stage 1 weather training/examples for phrasings like `what's the weather like tomorrow` and add a keyword fallback for `weather`, `forecast`, `tomorrow`, and `rain` patterns.
+- Normalize classifier aliases before validation (`send_message` -> `send message`) and add a regression test for SMS utterances that include body text.
+- Clear todo pending state when a new top-level todo request is detected, and ignore carried category values unless the utterance is only a category reply.
+- Add lexical fallback rules for `todo list`/`to-do list` before `others`, and retrain the classifier with more direct todo-list examples.
+- When `awaiting=category`, route category-only replies directly to the todo handler and skip Stage 1 classification entirely.
 
 ### Evidence Files
 
@@ -225,16 +220,15 @@
 ### Problems It Found
 
 - Job ended with status `timeout`.
-- e/session/provider_bridge_ort.cc:1952 onnxruntime::Provider& onnxruntime::ProviderLibrary::Get() [ONNXRuntimeError] : 1 : FAIL : Failed to load library /home/chieh/google-adk-env/adk-venv/lib/python3.13/site-packages/onnxruntime/capi/libonnxruntime_providers_tensorrt.so with error: libnvinfer.so.10: cannot open shared object file: No such file or directory
-- WARNING:memory_janitor:Claude Opus janitor call failed: Expecting value: line 1 column 1 (char 0), trying Gemini fallback...
-- WARNING:memory_janitor:Claude Opus janitor call failed: Expecting value: line 1 column 1 (char 0), trying Gemini fallback...
-- WARNING:memory_janitor:Claude Opus janitor call failed: Expecting value: line 1 column 1 (char 0), trying Gemini fallback...
-- [1;31m2026-04-24 01:33:59.324098221 [E:onnxruntime:Default, provider_bridge_ort.cc:2331 TryGetProviderInfo_TensorRT] /onnxruntime_src/onnxruntime/core/session/provider_bridge_ort.cc:1952 onnxruntime::Provider& onnxruntime::ProviderLibrary::Get() [ONNXRuntimeError] : 1 : FAIL : Failed to load library /home/chieh/google-adk-env/adk-venv/lib/python3.13/site-packages/onnxruntime/capi/libonnxruntime_providers_tensorrt.so with error: libnvinfer.so.10: cannot open shared object file: No such file or directory
+- [0;93m2026-04-25 02:07:30.419164525 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-04-25 06:07:30 WARNING] ModelImporter.cpp:739: Make sure input attention_mask has Int64 binding.[m
+- [0;93m2026-04-25 02:07:30.419176092 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-04-25 06:07:30 WARNING] ModelImporter.cpp:739: Make sure input token_type_ids has Int64 binding.[m
+- [0;93m2026-04-25 02:07:30.653838236 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-04-25 06:07:30 WARNING] ModelImporter.cpp:739: Make sure input input_ids has Int64 binding.[m
+- [0;93m2026-04-25 02:07:30.653874525 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-04-25 06:07:30 WARNING] ModelImporter.cpp:739: Make sure input attention_mask has Int64 binding.[m
+- [0;93m2026-04-25 02:07:30.653884465 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-04-25 06:07:30 WARNING] ModelImporter.cpp:739: Make sure input token_type_ids has Int64 binding.[m
 
 ### Improvements It Made
 
-- INFO:memory_janitor:verify_code_memories: [3/122] 6fdf22fa-f9b — When finishing a task, explicitly say 'done' and state what
-- INFO:memory_janitor:verify_code_memories: UPDATED 6fdf22fa-f9b — Verified AGENTS.md, CLAUDE.md, GEMINI.md: none require literally saying 'done'.
+- No concrete improvement was recorded in the available logs/reports.
 
 ### Evidence Files
 
@@ -255,7 +249,7 @@
 
 ### Improvements It Made
 
-- 2026-04-24 01:57:05,500 INFO Committed 5 file(s).
+- 2026-04-25 02:08:34,482 INFO Committed 7 file(s).
 
 ### Evidence Files
 

@@ -754,6 +754,17 @@ CODE_MAP_KEYWORDS = (
     "door",
     "min",
     "todo_list_cache",
+    # Auto-evolved from daily conversations
+    "json",
+    "downstairs",
+    "finally",
+    "categories",
+    "laptop",
+    "gym",
+    "rebuild",
+    "truth",
+    "docs",
+    "bed",
 )
 
 

@@ -500,6 +500,16 @@ def _persist_turn_to_fifo(
             if extras.get("evidence"):
                 record.setdefault("metadata", {})["evidence"] = extras["evidence"]
         add_structured(session_id, record)
+        # When the turn ends the conversation, wipe the FIFO so the next
+        # user prompt starts with a clean slate. Stale FIFO context was
+        # causing qwen to misclassify clinic-schedule questions as
+        # todo_list follow-ups (jane-web log 2026-04-24 23:10:20).
+        if extras and extras.get("conversation_end"):
+            try:
+                from vault_web.recent_turns import clear as _clear_fifo
+                _clear_fifo(session_id)
+            except Exception as e:
+                logger.warning("pipeline: FIFO clear after conversation_end failed: %s", e)
     except Exception as e:
         logger.warning("pipeline: failed to persist turn to FIFO: %s", e)
 

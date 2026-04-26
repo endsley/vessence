@@ -1,5 +1,5 @@
 # Code Map — Android (Kotlin)
-_Auto-generated on 2026-04-24 08:15 UTC by `generate_code_map.py`_
+_Auto-generated on 2026-04-25 08:15 UTC by `generate_code_map.py`_
 
 ## android:.../ArticleReaderV2Activity.kt (339 lines)
   class ArticleReaderV2Activity → L35
@@ -223,16 +223,18 @@ _Auto-generated on 2026-04-24 08:15 UTC by `generate_code_map.py`_
     suspend syncContacts() → L18
     suspend syncMessages() → L21
 
-## android:.../data/api/UpdateChecker.kt (137 lines)
-  class AppVersion → L20
-  interface UpdateApi → L27
-    suspend getLatestVersion() → L29
-  object UpdateManager → L32
-    suspend checkForUpdate() → L35
-    downloadAndInstall() → L65
-    override onReceive() → L85
-    getInstalledVersionCode() → L116
-    getInstalledVersionName() → L130
+## android:.../data/api/UpdateChecker.kt (185 lines)
+  class AppVersion → L23
+  interface UpdateApi → L30
+    suspend getLatestVersion() → L32
+  object UpdateManager → L35
+    suspend checkForUpdate() → L38
+    downloadAndInstall() → L68
+    override onReceive() → L99
+    canRequestPackageInstalls() → L145
+    openUnknownAppSourcesSettings() → L153
+    getInstalledVersionCode() → L164
+    getInstalledVersionName() → L178
 
 ## android:.../data/api/VaultApi.kt (88 lines)
   interface VaultApi → L10
@@ -663,7 +665,7 @@ _Auto-generated on 2026-04-24 08:15 UTC by `generate_code_map.py`_
   @Composable VoiceStatusBanner() → L470
   @Composable ErrorBanner() → L555
 
-## android:.../ui/chat/ChatViewModel.kt (1658 lines)
+## android:.../ui/chat/ChatViewModel.kt (1676 lines)
   class PendingMessage → L36
   class ChatUiState → L42
   class ChatViewModel → L60
@@ -696,22 +698,22 @@ _Auto-generated on 2026-04-24 08:15 UTC by `generate_code_map.py`_
     suspend tryServerTts() → L1319
     autoListenAfterTts() → L1381
     endVoiceConversation() → L1395
-    isConversationEndPhrase() → L1432
-    showSystemMessage() → L1454
-    clearSession() → L1463
-    setAlwaysListeningEnabled() → L1476
-    syncVoicePreferences() → L1483
-    clearWakeWordTrigger() → L1487
-    triggerWakeWord() → L1492
-    startPushToTalk() → L1497
-    stopPushToTalk() → L1501
-    cancelListening() → L1505
-    stopListeningAndReturnToWakeWord() → L1510
-    clearVoiceError() → L1519
-    updateAiMessage() → L1523
-    switchProvider() → L1551
-    suspend prependPendingToolResults() → L1614
-    override onCleared() → L1640
+    isConversationEndPhrase() → L1450
+    showSystemMessage() → L1472
+    clearSession() → L1481
+    setAlwaysListeningEnabled() → L1494
+    syncVoicePreferences() → L1501
+    clearWakeWordTrigger() → L1505
+    triggerWakeWord() → L1510
+    startPushToTalk() → L1515
+    stopPushToTalk() → L1519
+    cancelListening() → L1523
+    stopListeningAndReturnToWakeWord() → L1528
+    clearVoiceError() → L1537
+    updateAiMessage() → L1541
+    switchProvider() → L1569
+    suspend prependPendingToolResults() → L1632
+    override onCleared() → L1658
 
 ## android:.../ui/chat/ChatViewModelFactory.kt (24 lines)
   class ChatViewModelFactory → L9

@@ -6,8 +6,9 @@ filter parameters. Example::
     {
       "cars": {
         "label": "Cars",
-        "queries": ["Toyota corolla", "Honda civic", "Honda fit"],
+        "queries": ["Toyota corolla", "Honda civic", "Honda fit", "Honda CRV"],
         "filters": {
+          "min_price": 6000,
           "max_price": 15000,
           "max_miles": 60000,
           "require_clean_title": true,
@@ -38,6 +39,29 @@ DATA_ROOT = _DATA / "data" / "facebook_marketplace_finds"
 DEFAULT_LOCATION_ID = "109352265750998"
 
 _SAFE_NAME = re.compile(r"^[a-z0-9_-]{1,40}$")
+
+
+def _default_filters() -> dict[str, Any]:
+    return {
+        "min_price": 0,
+        "max_price": 15000,
+        "max_miles": 60000,
+        "require_clean_title": True,
+        "suspicion_filter": True,
+    }
+
+
+def _normalize_filters(filters: dict[str, Any] | None) -> dict[str, Any]:
+    merged = _default_filters()
+    if filters:
+        merged.update(filters)
+    return {
+        "min_price": int(merged.get("min_price") or 0),
+        "max_price": int(merged.get("max_price") or 0),
+        "max_miles": int(merged.get("max_miles") or 0),
+        "require_clean_title": bool(merged.get("require_clean_title", True)),
+        "suspicion_filter": bool(merged.get("suspicion_filter", True)),
+    }
 
 
 def _load() -> dict[str, dict[str, Any]]:
@@ -87,12 +111,7 @@ def save_search(
     body = {
         "label": label or name,
         "queries": queries,
-        "filters": filters or {
-            "max_price": 15000,
-            "max_miles": 60000,
-            "require_clean_title": True,
-            "suspicion_filter": True,
-        },
+        "filters": _normalize_filters(filters),
         "location_id": location_id,
         "created": existing.get("created", dt.date.today().isoformat()),
         "updated": dt.date.today().isoformat(),
