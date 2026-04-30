@@ -169,8 +169,8 @@ try:
     ANDROID_VERSION = _version_data["version_name"]
     _ANDROID_VERSION_CODE = _version_data["version_code"]
 except FileNotFoundError:
-    ANDROID_VERSION = "0.2.84"
-    _ANDROID_VERSION_CODE = 315
+    ANDROID_VERSION = "0.2.86"
+    _ANDROID_VERSION_CODE = 317
 
 # Startup validation: ensure the APK for the advertised version actually exists
 _expected_apk = MARKETING_DOWNLOADS_DIR / f"vessences-android-v{ANDROID_VERSION}.apk"
@@ -1628,6 +1628,7 @@ async def sync_messages(request: Request, session_id: str = Depends(require_auth
         raise HTTPException(status_code=400, detail="Expected a JSON array")
 
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    attempted = 0
     inserted = 0
     with get_db() as conn:
         # Prune messages older than 14 days
@@ -1657,18 +1658,31 @@ async def sync_messages(request: Request, session_id: str = Depends(require_auth
                 msg_type = "unknown"
 
             try:
-                conn.execute(
+                cur = conn.execute(
                     """INSERT OR IGNORE INTO synced_messages
                        (sender, body, timestamp_ms, is_read, is_contact, msg_type, synced_at)
                        VALUES (?, ?, ?, ?, ?, ?, ?)""",
                     (sender, body, timestamp_ms, is_read, is_contact, msg_type, now),
                 )
-                inserted += 1
+                attempted += 1
+                # cursor.rowcount is 1 when the row was newly inserted, 0 when
+                # the UNIQUE(sender, timestamp_ms, body) constraint silently
+                # de-duped (INSERT OR IGNORE no-op).
+                if cur.rowcount > 0:
+                    inserted += 1
             except Exception as e:
                 _logger.warning("messages sync row error: %s", e)
 
-    _logger.info("Messages sync: %d/%d messages inserted", inserted, len(messages))
-    return {"status": "ok", "received": len(messages), "inserted": inserted}
+    _logger.info(
+        "Messages sync: %d new / %d attempted / %d received",
+        inserted, attempted, len(messages),
+    )
+    return {
+        "status": "ok",
+        "received": len(messages),
+        "attempted": attempted,
+        "inserted": inserted,
+    }
 
 
 @app.get("/api/messages/search")

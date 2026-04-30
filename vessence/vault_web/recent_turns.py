@@ -129,6 +129,99 @@ def count(session_id: str) -> int:
         return 0
 
 
+# Default idle window after which the FIFO is treated as a stale
+# conversation and wiped on the next turn. 30 s matches the user's
+# expectation (2026-04-26): if the user pauses longer than this, the
+# next thing they say is almost always a new topic, not a follow-up,
+# so prior FIFO context becomes pollution rather than help.
+IDLE_FLUSH_SECONDS = 30
+
+
+def maybe_idle_flush(session_id: str, idle_seconds: int = IDLE_FLUSH_SECONDS) -> bool:
+    """Wipe the FIFO if the most recent entry is older than `idle_seconds`.
+
+    Called at the start of each new request so a long silence between
+    turns is treated as an implicit conversation_end (the user wandered
+    off, came back with a new topic). This is the auto-equivalent of the
+    explicit FIFO clear at jane_v2/pipeline._persist_turn_to_fifo (which
+    only fires on conversation_end=True from end_conversation handler).
+
+    Skipped (returns False) when an active pending_action is awaiting the
+    user's response — in confirmation flows ("send it?" → 35s pause →
+    "yes") the user's pause is part of the flow, not a topic pivot, and
+    flushing would drop the pending state mid-confirmation.
+
+    Returns True if a flush actually happened.
+    """
+    if not session_id:
+        return False
+    try:
+        # Compute age at the SQLite layer so we don't have to guess at
+        # the on-disk timestamp format. `julianday('now')` is UTC; the
+        # stored `created_at` defaults to CURRENT_TIMESTAMP which is
+        # also UTC, so the subtraction yields the true wall-clock age
+        # in days. Multiply by 86400 to get seconds. This avoids the
+        # strptime fragility that broke when rows used `T`/`Z` ISO
+        # form vs. SQLite's default `YYYY-MM-DD HH:MM:SS`.
+        with get_db() as conn:
+            row = conn.execute(
+                """
+                SELECT
+                    MAX(created_at) AS last_at,
+                    COUNT(*) AS n,
+                    (julianday('now') - julianday(MAX(created_at))) * 86400.0 AS age_s
+                FROM recent_turns
+                WHERE session_id = ?
+                """,
+                (session_id,),
+            ).fetchone()
+            if not row or not row["n"] or not row["last_at"]:
+                return False
+            last_at_str = row["last_at"]
+            age = row["age_s"]
+            if age is None or age <= idle_seconds:
+                return False
+
+        # Late-bound pending-action check so a stale confirmation still
+        # gets cleaned up (long-running pendings expire on their own via
+        # _pending_is_active's expires_at check).
+        try:
+            state = get_active_state(session_id)
+            pending = state.get("pending_action") if state else None
+            if pending and _pending_is_active(pending):
+                logger.info(
+                    "recent_turns.maybe_idle_flush: session=%s age=%.1fs > %ds but pending_action active — skipped",
+                    session_id[:12], age, idle_seconds,
+                )
+                return False
+        except Exception:
+            pass
+
+        # Scope DELETE to rows existing at the time of the staleness
+        # check (created_at <= last_at_str). Without this guard, a turn
+        # written by a concurrent request between the MAX(created_at)
+        # read above and this DELETE would be wiped along with the
+        # stale rows. The structured persist path runs in
+        # asyncio.to_thread (jane_v2/pipeline._persist_turns_async),
+        # which is exactly the kind of overlap that triggers this.
+        with get_db() as conn:
+            conn.execute(
+                "DELETE FROM recent_turns WHERE session_id = ? AND created_at <= ?",
+                (session_id, last_at_str),
+            )
+        logger.info(
+            "recent_turns.maybe_idle_flush: session=%s last_turn_age=%.1fs > %ds — wiped FIFO",
+            session_id[:12], age, idle_seconds,
+        )
+        return True
+    except Exception as e:
+        logger.warning(
+            "recent_turns.maybe_idle_flush failed (session=%s): %s",
+            session_id[:12] if session_id else "?", e,
+        )
+        return False
+
+
 def _format_turn_compact(user_msg: str, assistant_msg: str, max_chars: int = 600) -> str:
     """Collapse a user + assistant turn into a single compact line.
 

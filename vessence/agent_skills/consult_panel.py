@@ -36,7 +36,7 @@ FRONTIER_CLIS = {
 SKIP_CLIS = {"ollama"}
 
 # Timeout for each CLI query (seconds)
-CLI_TIMEOUT = 120
+CLI_TIMEOUT = 600
 
 
 def detect_available_clis(caller: str = "") -> list[dict]:

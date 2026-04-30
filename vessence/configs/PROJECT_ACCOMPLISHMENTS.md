@@ -1,3 +1,17 @@
+### 2026-04-27: v3 pipeline respects resolver cancel/followup
+
+- **Fixed v3 pending-action handling** (`jane_web/jane_v3/pipeline.py`): v3 previously only honored resolver `stage3_followup`. Resolver `cancel` and `followup` for `STAGE2_FOLLOWUP` slots were ignored, so a bare `No` after a clinic follow-up could get reclassified back into the clinic handler and repeat the same information instead of ending the conversation.
+- **New behavior:** resolver `cancel` now short-circuits to `Ok.` with `conversation_end=True` and writes a cancelled pending marker; resolver `followup` now redispatches the owning Stage 2 handler directly with its `pending_data` and FIFO context, bypassing reclassification.
+- **Regression tests:** added `test_code/test_v3_pending_resolution.py` covering both `cancel` and `followup`.
+
+### 2026-04-27: Clinic schedule ordinal/day lookup fix
+
+- **Fixed clinic Stage 2 misread for ordinal patient queries with a weekday** (`jane_web/jane_v2/classes/clinic_schedules_info/{metadata,handler}.py`): the prompt *"Can you tell me about the first patient this Tuesday in the clinic"* was routing to the clinic class but then answering incorrectly with *"There are no patients scheduled for this Tuesday"* even though Tuesday had 8 active patients in `schedule.db`. Two concrete causes were fixed:
+- **Params normalization** in the handler: if the classifier emits `patient_index` or `patient_name`, the handler now normalizes the loader to `patient_detail` before building facts, even if qwen mistakenly labeled it `next_patient` or another generic loader.
+- **Requested-day support for patient detail**: ordinal lookups now respect `params["day"]` instead of always reading `meta["today"]`. Named lookups also search the requested day first before falling back to the whole week.
+- **Schema clarification**: clinic `PARAMS_SCHEMA` now explicitly tells qwen that phrases like *"first patient this Tuesday"* must map to `patient_detail`, not `next_patient`.
+- **Verification**: new regression test `test_code/test_clinic_stage2_param_normalization.py` passes, `_build_facts(...)` now returns Tuesday's first patient (`Kamal Ahmed (matha)` at `8:00am` for week starting `2026-04-27`), and the Stage 2 phraser now replies: *"The first patient this Tuesday in the clinic is Kamal Ahmed, scheduled for 8:00am."*
+
 ### 2026-04-24: TELL_JOKE + DO_MATH Stage 2 handlers (v3 pipeline)
 
 - **TELL_JOKE class** (`intent_classifier/v2/classes/tell_joke.py` + `jane_web/jane_v2/classes/tell_joke/`): explicit "tell me a joke" / "make me laugh" / "got any jokes" requests now route to a Stage 2 handler that asks qwen2.5:7b (temp 0.9, num_predict 100) for a single short clean joke. FIFO context lets "another joke" pivot. THOUGHT/REPLY tag parser hardened so a missing `REPLY:` tag doesn't cause TTS to read out the `THOUGHT:` prefix (Gemini review catch).

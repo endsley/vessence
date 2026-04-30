@@ -251,12 +251,16 @@ def _facts_next_patient(week_start: str) -> dict:
     }
 
 
-def _find_patient_in_week(week_start: str, name: str) -> dict | None:
-    """Search every day this week for a partial name match (case-insensitive)."""
+def _find_patient_in_week(
+    week_start: str, name: str, day: str | None = None
+) -> dict | None:
+    """Search the requested day first, else every day this week, for a name match."""
     needle = name.strip().lower()
     if not needle:
         return None
-    for d in _WEEK_DAYS:
+    target_day = _normalize_day(day)
+    search_days = [target_day] if target_day else list(_WEEK_DAYS)
+    for d in search_days:
         for entry in _fetch_day_rows(week_start, d):
             if needle in (entry["name"] or "").lower():
                 return {**entry, "day": d}
@@ -264,13 +268,17 @@ def _find_patient_in_week(week_start: str, name: str) -> dict | None:
 
 
 def _facts_patient_detail(
-    week_start: str, name: str | None, index: int | None
+    week_start: str,
+    name: str | None,
+    index: int | None,
+    day: str | None = None,
 ) -> dict:
     meta = _now_meta()
     out = {**meta, "loader": "patient_detail"}
+    target_day = _normalize_day(day) or meta["today"]
 
     if name:
-        match = _find_patient_in_week(week_start, name)
+        match = _find_patient_in_week(week_start, name, day=target_day)
         if match:
             out["patient"] = {
                 "name": match["name"],
@@ -287,13 +295,13 @@ def _facts_patient_detail(
         return out
 
     if index is not None:
-        rows = _fetch_day_rows(week_start, meta["today"])
+        rows = _fetch_day_rows(week_start, target_day)
         active, _ = _split_active_cancelled(rows)
         if 1 <= index <= len(active):
             p = active[index - 1]
             out["patient"] = {
                 "name": p["name"],
-                "day": meta["today"],
+                "day": target_day,
                 "time": p["time"],
                 "index": p["index"],
                 "health_concerns": p["health_concerns"],
@@ -303,17 +311,36 @@ def _facts_patient_detail(
         else:
             out["patient"] = None
             out["lookup_index"] = index
-            out["active_today_count"] = len(active)
+            out["active_day_count"] = len(active)
+            out["day"] = target_day
         return out
 
-    # Neither name nor index — return today's roster so the LLM can ask.
-    rows = _fetch_day_rows(week_start, meta["today"])
+    # Neither name nor index — return the requested day's roster so the LLM can ask.
+    rows = _fetch_day_rows(week_start, target_day)
     active, _ = _split_active_cancelled(rows)
     out["patient"] = None
+    out["day"] = target_day
     out["active_today"] = [
         {"index": p["index"], "name": p["name"], "time": p["time"]} for p in active
     ]
     return out
+
+
+def _normalize_params(params: dict | None) -> dict:
+    """Repair common classifier extraction mistakes before loading facts.
+
+    Ordinal or named patient references are more specific than generic
+    schedule loaders, so they must resolve to patient_detail even if qwen
+    emitted next_patient/day/today_overview.
+    """
+    normalized = dict(params or {})
+    loader = normalized.get("loader")
+    if loader not in _VALID_LOADERS:
+        loader = "today_overview"
+    if normalized.get("patient_name") or normalized.get("patient_index") is not None:
+        loader = "patient_detail"
+    normalized["loader"] = loader
+    return normalized
 
 
 def _facts_weekly(week_start: str) -> dict:
@@ -337,9 +364,8 @@ def _facts_weekly(week_start: str) -> dict:
 
 def _build_facts(params: dict) -> dict:
     """Dispatch on params['loader'] to one focused fact builder."""
-    loader = (params or {}).get("loader")
-    if loader not in _VALID_LOADERS:
-        loader = "today_overview"
+    params = _normalize_params(params)
+    loader = params.get("loader")
 
     week_start = _current_week_start()
     if not week_start:
@@ -355,7 +381,10 @@ def _build_facts(params: dict) -> dict:
         return _facts_next_patient(week_start)
     if loader == "patient_detail":
         return _facts_patient_detail(
-            week_start, params.get("patient_name"), params.get("patient_index")
+            week_start,
+            params.get("patient_name"),
+            params.get("patient_index"),
+            params.get("day"),
         )
     if loader == "weekly":
         return _facts_weekly(week_start)

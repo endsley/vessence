@@ -161,7 +161,7 @@ class ConversationManager:
         """
         Adds a message to the in-memory history, logs to SQLite ledger,
         resets the idle timer, and compacts the context window if needed.
-        Short-term thematic memory is updated via update_thematic_memory()
+        Short-term memory is updated via update_short_term_memory()
         called from the persistence worker in jane_proxy.py.
         """
         self.conversation_history.append(message)
@@ -251,8 +251,14 @@ class ConversationManager:
             rows = cursor.fetchall()
             lines = []
             for role, content in rows:
-                if content:
-                    lines.append(f"{role.upper()}: {content}")
+                cleaned = re.sub(
+                    r"\s+",
+                    " ",
+                    self._strip_injected_metadata(content or ""),
+                ).strip()
+                if not cleaned or self._looks_like_bad_thematic_output(cleaned):
+                    continue
+                lines.append(f"{role.upper()}: {cleaned}")
             return "\n\n".join(lines)
         except Exception as e:
             logger.warning("Failed to fetch session transcript: %s", e)
@@ -303,6 +309,8 @@ class ConversationManager:
         try:
             from agent_skills.claude_cli_llm import completion_json
             arcs = completion_json(prompt, tier="agent")
+            stored_count = 0
+            promotion_failed = False
             for arc in arcs:
                 theme = arc.get("theme", "Unnamed Theme")
                 category = arc.get("category", "General")
@@ -311,8 +319,13 @@ class ConversationManager:
                     # Post-classification: catch user-personal arcs the LLM miscategorized
                     category = self._reclassify_if_user_identity(category, content)
                     full_memory = f"Theme: {theme}\nCategory: {category}\n\n{content}"
-                    self._promote_to_long_term(full_memory, category=category)
-            logger.info("Thematic archival complete: %d arcs stored.", len(arcs))
+                    if self._promote_to_long_term(full_memory, category=category):
+                        stored_count += 1
+                    else:
+                        promotion_failed = True
+            if not promotion_failed:
+                self._mark_session_themes_archived()
+            logger.info("Thematic archival complete: %d arcs stored.", stored_count)
         except Exception as e:
             logger.warning("Thematic archival failed: %s", e)
 
@@ -509,7 +522,27 @@ class ConversationManager:
     # future multi-user support.
     _USER_MEMORY_CATEGORIES = frozenset({"Identity Evolution"})
 
-    def _promote_to_long_term(self, content: str, category: str = "General"):
+    def _mark_session_themes_archived(self) -> None:
+        """Stamp the session's short_term_theme entries so janitor backfill
+        does not keep replaying already-archived sessions."""
+        try:
+            themes = self._fetch_session_themes()
+            if not themes:
+                return
+            archived_at = datetime.datetime.utcnow().isoformat()
+            ids = []
+            metadatas = []
+            for theme in themes:
+                ids.append(theme["id"])
+                metadatas.append({
+                    **theme["metadata"],
+                    "archived_at": archived_at,
+                })
+            self.short_term_collection.update(ids=ids, metadatas=metadatas)
+        except Exception as e:
+            logger.warning("Failed to mark session themes archived: %s", e)
+
+    def _promote_to_long_term(self, content: str, category: str = "General") -> bool:
         """
         Writes a single memory entry to the appropriate ChromaDB collection.
         User-identity arcs go to user_memories (shared); everything else goes
@@ -531,19 +564,24 @@ class ConversationManager:
                 query_texts=[content],
                 n_results=2,
                 where={"topic": category},
-                include=["documents", "metadatas"]
+                include=["documents", "metadatas", "distances"]
             )
-            
+
             best_match_id = None
+            distances = existing.get("distances") or []
             if existing and existing['documents'] and existing['documents'][0]:
                 matches = []
                 for i in range(len(existing['documents'][0])):
                     matches.append({
                         "id": existing['ids'][0][i],
                         "doc": existing['documents'][0][i],
-                        "dist": existing['distances'][0][i]
+                        "dist": (
+                            distances[0][i]
+                            if distances and distances[0] and i < len(distances[0])
+                            else 1.0
+                        ),
                     })
-                
+
                 # 2. Ask Sonnet if we should merge
                 prompt = (
                     "You are a Memory Architect. I want to add a new memory arc to the long-term knowledge base.\n\n"
@@ -586,7 +624,7 @@ class ConversationManager:
                         documents=[new_doc],
                         metadatas=[merge_meta]
                     )
-                    return
+                    return True
 
             # 3. If NEW or no matches found, add as a fresh entry
             new_meta = {
@@ -604,8 +642,10 @@ class ConversationManager:
                 metadatas=[new_meta],
                 ids=[str(uuid.uuid4())]
             )
+            return True
         except Exception as e:
             logger.warning("Promotion failed: %s", e)
+            return False
 
 
 
@@ -676,6 +716,10 @@ class ConversationManager:
             '', content, flags=re.DOTALL,
         )
         content = re.sub(
+            r'\[[A-Z][A-Z_ ]*DATA\].*?(?=\n\n|\Z)',
+            '', content, flags=re.DOTALL,
+        )
+        content = re.sub(
             r'\[CURRENT CONVERSATION STATE\].*?\[END CURRENT CONVERSATION STATE\]\s*',
             '', content, flags=re.DOTALL,
         )
@@ -698,6 +742,76 @@ class ConversationManager:
         "I don't understand",
         "Let me know if you",
     )
+    _BAD_THEMATIC_META_PREFIX_PATTERNS = (
+        r"^i need clarification\b",
+        r"^there(?:'|’)s no conversation turn to summarize\b",
+        r"^no action needed\b",
+        r"^i notice there(?:'|’)s a mismatch here\b",
+    )
+    _BAD_THEMATIC_PROTOCOL_PATTERNS = (
+        r"^\*{0,2}\s*class protocol:",
+        r"<class_protocol\b",
+        r"\[extracted params\]",
+        r"\[current conversation state\]",
+        r"\[standing brain mode\]",
+        r"\bclass protocol metadata\b",
+        r"\bdocumentation \(belongs in code/config\)\b",
+        r"\bprovided (?:class )?protocol\b",
+        r"\bclass protocol you provided\b",
+        r"\bnew turn.*class protocol metadata\b",
+    )
+
+    @classmethod
+    def _looks_like_bad_thematic_output(cls, text: str) -> bool:
+        normalized = re.sub(r"\s+", " ", str(text or "")).strip()
+        if not normalized:
+            return False
+        protocol_hit = any(
+            re.search(pattern, normalized, re.IGNORECASE)
+            for pattern in cls._BAD_THEMATIC_PROTOCOL_PATTERNS
+        )
+        if not protocol_hit:
+            return False
+        if re.search(r"^\*{0,2}\s*class protocol:", normalized, re.IGNORECASE):
+            return True
+        return any(
+            re.search(pattern, normalized, re.IGNORECASE)
+            for pattern in cls._BAD_THEMATIC_META_PREFIX_PATTERNS
+        ) or any(
+            marker in normalized.lower()
+            for marker in (
+                "<class_protocol",
+                "[extracted params]",
+                "[current conversation state]",
+                "[standing brain mode]",
+            )
+        )
+
+    @classmethod
+    def _prepare_thematic_turn(cls, user_msg: str, assistant_msg: str) -> str:
+        """Return a cleaned user/Jane turn for thematic memory, or "" to skip.
+
+        The thematic index should store conversation content, not pipeline
+        protocol blocks, injected server-side data, or assistant replies that
+        are themselves clarifying those metadata artifacts.
+        """
+        cleaned_user = re.sub(r"\s+", " ", cls._strip_injected_metadata(user_msg or "")).strip()
+        cleaned_assistant = re.sub(r"\s+", " ", cls._strip_injected_metadata(assistant_msg or "")).strip()
+
+        if cls._looks_like_bad_thematic_output(cleaned_user):
+            cleaned_user = ""
+        if cls._looks_like_bad_thematic_output(cleaned_assistant):
+            cleaned_assistant = ""
+
+        if not cleaned_user and not cleaned_assistant:
+            return ""
+
+        lines = []
+        if cleaned_user:
+            lines.append(f"User: {cleaned_user}")
+        if cleaned_assistant:
+            lines.append(f"Jane: {cleaned_assistant}")
+        return "\n".join(lines).strip()
 
     def _generate_summary(self, content: str) -> str:
         try:
@@ -821,6 +935,94 @@ class ConversationManager:
                     f"duration_ms={elapsed_ms}"
                 )
 
+    def update_short_term_memory(self, user_msg: str, assistant_msg: str) -> None:
+        """Store one structured short-term memory note for this Stage 3 turn.
+
+        Writes a turn-kind-aware structured extraction (facts / decisions /
+        open_loops / artifacts / people / time_refs) flattened into a compact
+        labeled-bullet retrieval note. Skips writes that have no concrete
+        decisions, no open loops, and no artifacts — those are low-value
+        chatter that pollutes retrieval. See ``short_term_extractor`` for
+        the per-kind extraction prompts.
+        """
+        if not self.short_term_collection:
+            return
+
+        # Pre-flight: make sure there's something non-protocol to extract.
+        turn_text = self._prepare_thematic_turn(user_msg, assistant_msg)
+        if not turn_text:
+            _append_writeback_log(
+                f"session={self.session_id} stage=short_term_write skipped=metadata_only"
+            )
+            return
+
+        cleaned_user = re.sub(r"\s+", " ", self._strip_injected_metadata(user_msg or "")).strip()
+        cleaned_assistant = re.sub(r"\s+", " ", self._strip_injected_metadata(assistant_msg or "")).strip()
+        if (
+            not self._should_store_short_term_turn("user", cleaned_user)
+            and not self._should_store_short_term_turn("assistant", cleaned_assistant)
+        ):
+            _append_writeback_log(
+                f"session={self.session_id} stage=short_term_write skipped=low_value"
+            )
+            return
+
+        from memory.v1.short_term_extractor import build_short_term_note
+        try:
+            note, extracted_meta, skip = build_short_term_note(
+                user_msg, assistant_msg,
+                cleaner=self._strip_injected_metadata,
+            )
+        except Exception as exc:
+            logger.warning("short-term extractor crashed: %s", exc)
+            _append_writeback_log(
+                f"session={self.session_id} stage=short_term_write skipped=extractor_crash"
+            )
+            return
+
+        if skip or not note.strip():
+            _append_writeback_log(
+                f"session={self.session_id} stage=short_term_write skipped=no_durable_value "
+                f"kind={extracted_meta.get('turn_kind', '?')}"
+            )
+            return
+
+        if self._looks_like_bad_thematic_output(note):
+            _append_writeback_log(
+                f"session={self.session_id} stage=short_term_write skipped=protocol_chatter"
+            )
+            return
+
+        now_iso = datetime.datetime.utcnow().isoformat()
+        expires_iso = (
+            datetime.datetime.utcnow()
+            + datetime.timedelta(days=SHORT_TERM_TTL_DAYS)
+        ).isoformat()
+        doc_id = str(uuid.uuid4())
+        metadata = {
+            "session_id": self.session_id,
+            "timestamp": now_iso,
+            "expires_at": expires_iso,
+            "memory_type": "short_term",
+            "author": "conversation_manager",
+            "topic": "turn_memory",
+            "role": "turn",
+            "raw_chars": len(turn_text),
+            "summary_chars": len(note),
+            **extracted_meta,
+        }
+        self.short_term_collection.add(
+            ids=[doc_id],
+            documents=[note],
+            metadatas=[metadata],
+        )
+        _append_writeback_log(
+            f"session={self.session_id} stage=short_term_write stored id={doc_id[:12]} "
+            f"kind={metadata.get('turn_kind', '?')} "
+            f"open_loop={int(metadata.get('has_open_loop', False))} "
+            f"chars={len(note)}"
+        )
+
     def _do_thematic_update(self, user_msg: str, assistant_msg: str) -> None:
         """Fetch themes, classify turn, update or create theme.
 
@@ -830,7 +1032,12 @@ class ConversationManager:
         on this shape of task for ~10% of the cost and ~3x the speed.
         """
         themes = self._fetch_session_themes()
-        turn_text = f"User: {user_msg}\nJane: {assistant_msg}"
+        turn_text = self._prepare_thematic_turn(user_msg, assistant_msg)
+        if not turn_text:
+            _append_writeback_log(
+                f"session={self.session_id} stage=thematic_update skipped=metadata_only"
+            )
+            return
         now_iso = datetime.datetime.utcnow().isoformat()
         expires_iso = (
             datetime.datetime.utcnow()
@@ -851,6 +1058,11 @@ class ConversationManager:
             updated_summary = self._update_theme_summary(
                 theme["document"], turn_text
             )
+            if not updated_summary:
+                _append_writeback_log(
+                    f"session={self.session_id} stage=theme_update skipped=bad_summary"
+                )
+                return
             latest_summary = updated_summary
             self.short_term_collection.update(
                 ids=[theme["id"]],
@@ -870,6 +1082,11 @@ class ConversationManager:
         else:
             new_title = classification["title"]
             new_summary = self._update_theme_summary("", turn_text)
+            if not new_summary:
+                _append_writeback_log(
+                    f"session={self.session_id} stage=theme_create skipped=bad_summary"
+                )
+                return
             latest_summary = new_summary
 
             if len(themes) < SHORT_TERM_MAX_THEMES:
@@ -918,19 +1135,18 @@ class ConversationManager:
                     f"new_title={new_title}"
                 )
 
-        # Dual-write: push the same Haiku summary into the per-session
-        # FIFO so v2's ack generator / Stage 2 handlers can fetch recent
-        # context by recency (no ChromaDB similarity search). Zero extra
-        # LLM calls — `latest_summary` is the text we just wrote to Chroma.
-        if latest_summary:
-            try:
-                from vault_web.recent_turns import add as _recent_add
-                _recent_add(self.session_id, latest_summary)
-            except Exception as exc:
-                logger.warning(
-                    "recent_turns FIFO dual-write failed (session=%s): %s",
-                    self.session_id[:12], exc,
-                )
+        # NOTE: the prior dual-write of the Haiku theme summary into the
+        # per-session recent_turns FIFO has been removed (2026-04-26). The
+        # FIFO now only holds structured per-turn records written by
+        # jane_v2/pipeline._persist_turn_to_fifo. Pushing Haiku theme
+        # summaries here created a feedback loop: Haiku produced
+        # protocol-style summaries when summarizing turns whose
+        # user_message had FIFO prose injected by stage3_escalate; those
+        # summaries got written back into FIFO, then re-injected on the
+        # next turn, and so on, causing Opus on phone-1 (turn 6182+) to
+        # see a polluted prompt and emit unfinished `[[AWAITING:...]]`
+        # markers. Theme summaries are still written to ChromaDB above
+        # for similarity-based retrieval; the FIFO no longer mirrors them.
 
     def _fetch_session_themes(self) -> list[dict]:
         """Return all short_term_theme entries for this session, sorted by index."""
@@ -1027,7 +1243,8 @@ class ConversationManager:
         """Ask the Utility (Haiku) model to incorporate the new turn into
         the theme summary.
 
-        Returns the updated summary text (max ~600 chars).
+        Returns the updated summary text (max ~600 chars), or an empty string
+        when the model replied with protocol/meta chatter instead of a memory.
         """
         from agent_skills.claude_cli_llm import completion_utility
 
@@ -1051,7 +1268,11 @@ class ConversationManager:
             )
         try:
             summary = completion_utility(prompt, max_tokens=300, timeout=45)
-            return summary.strip()[:600]
+            summary = summary.strip()
+            if self._looks_like_bad_thematic_output(summary):
+                logger.info("Rejecting thematic summary as metadata/protocol chatter: %.120s", summary)
+                return ""
+            return summary[:600]
         except Exception as exc:
             logger.warning("Theme summary LLM failed: %s", exc)
             combined = (current_summary + "\n" + turn_text).strip()
@@ -1061,13 +1282,16 @@ class ConversationManager:
         """Store raw text in the most recent theme slot when LLM fails."""
         if not self.short_term_collection:
             return
+        raw_text = self._prepare_thematic_turn(user_msg, assistant_msg)
+        if not raw_text:
+            return
         themes = self._fetch_session_themes()
         now_iso = datetime.datetime.utcnow().isoformat()
         expires_iso = (
             datetime.datetime.utcnow()
             + datetime.timedelta(days=SHORT_TERM_TTL_DAYS)
         ).isoformat()
-        raw_text = f"User: {(user_msg or '')[:200]}\nJane: {(assistant_msg or '')[:200]}"
+        raw_text = raw_text[:400]
 
         if themes:
             most_recent = max(

@@ -167,25 +167,56 @@ def render_stage2_context(session_id: str | None, max_turns: int = 3) -> str:
 def render_stage3_context(session_id: str | None, max_turns: int = 10) -> str:
     """Stage 3 (Opus) gets prose FIFO + a clearly-delimited state block.
 
-    Avoids dumping raw JSON. Example output:
+    The whole thing is wrapped between [CURRENT CONVERSATION STATE] and
+    [END CURRENT CONVERSATION STATE] so that
+    ``jane_proxy._strip_stage3_injections`` can strip the entire injection
+    from the persisted user message (its regex matches between those two
+    markers). Without the wrap, the FIFO prose tail leaked into
+    persistence; Haiku then summarized the polluted message and the
+    summary fed back into the next turn's prompt — the feedback loop that
+    broke calendar on phone-1 (turn 6182, 2026-04-26).
+
+    Example output:
 
         [CURRENT CONVERSATION STATE]
         - Last intent: send message.
         - Pending action: awaiting confirmation to send SMS to Kathia.
         - Draft: "I love you".
-        [END CURRENT CONVERSATION STATE]
 
         user: …
         jane: …
+        [END CURRENT CONVERSATION STATE]
     """
     if not session_id:
         return ""
     prose = get_recent_context(session_id, max_turns=max_turns, redact_local_only=True)
     packet = get_stage1_context_packet(session_id)
     if not (packet.get("pending_action") or packet.get("last_intent")):
+        # No state header to render — without the [CURRENT CONVERSATION
+        # STATE] marker, _inject_structured_state would not inject this
+        # anyway. Returning bare prose is harmless because the consumer
+        # gates on the marker.
         return prose
     block = _render_state_block(packet)
-    return (block + "\n\n" + prose).strip() if prose else block
+    if not prose:
+        return block
+    # Move the [END ...] marker past the prose so a single regex match
+    # in jane_proxy._strip_stage3_injections captures both the state
+    # header AND the FIFO prose. Strip the inner END marker, then
+    # re-append it after prose.
+    #
+    # Defuse any literal [CURRENT CONVERSATION STATE] / [END ...]
+    # tokens that may appear inside `prose` (e.g. if a prior turn
+    # somehow persisted these markers). A non-greedy `.*?` regex would
+    # otherwise terminate at the first END inside prose, leaving the
+    # tail unescaped — exactly the leak we just fixed.
+    safe_prose = (
+        prose
+        .replace("[CURRENT CONVERSATION STATE]", "(CURRENT CONVERSATION STATE)")
+        .replace("[END CURRENT CONVERSATION STATE]", "(END CURRENT CONVERSATION STATE)")
+    )
+    inner = block.removesuffix("[END CURRENT CONVERSATION STATE]").rstrip()
+    return f"{inner}\n\n{safe_prose}\n[END CURRENT CONVERSATION STATE]"
 
 
 def _render_state_header(packet: dict) -> str:

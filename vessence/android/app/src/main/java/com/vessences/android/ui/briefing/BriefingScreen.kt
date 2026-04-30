@@ -119,7 +119,7 @@ fun BriefingScreen(
                 lastUpdated = state.lastUpdated,
                 isLoading = state.isLoading || state.isLoadingArchive || state.isLoadingMarketplace,
                 viewingArchive = state.viewingArchiveDate != null,
-                onRefresh = { viewModel.refresh() },
+                onRefresh = { viewModel.refresh(force = true) },
                 onShowHistory = { if (!showingMarketplace) showHistorySheet = true },
                 showHistory = !showingMarketplace,
             )

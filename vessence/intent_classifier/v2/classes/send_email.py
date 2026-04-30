@@ -25,12 +25,30 @@ EXAMPLES = [
     "can you email x",
     "can you send an email to x",
     "let x know via email that y",
-    # Delete / manage — same class because Opus handles the action after
-    # Stage 2's draft-confirm flow.
-    "delete that email",
-    "delete the email from x",
-    "archive the email from x",
-    "move x's email to the trash",
+    # "email X about deleting/removing/cleaning Y" — the topic of the email
+    # mentions deletion but the imperative is SEND, not delete. Without these
+    # exemplars the chroma vote pulls them into DELETE_EMAIL on the "email"
+    # + "delete" trigger overlap.
+    "email x about deleting y",
+    "email x about removing y",
+    "email x a list of y to delete",
+    "send x an email about cleaning up y",
+    "draft an email to x about deleting y",
+    # Meeting / scheduling topics. Without these, "email Bob about
+    # tomorrow's meeting" pulls toward DELEGATE_OPUS ("add a meeting
+    # tomorrow") and TIMER on the bge-small embedding because the
+    # meeting/time tokens dominate.
+    "email x about the meeting",
+    "email x about tomorrow's meeting",
+    "email x about the y meeting",
+    "email x about the meeting at y",
+    "email x about the schedule",
+    "send x an email about the meeting",
+    "draft an email to x about the meeting",
+    "email x about y at y", "email x about scheduling y",
+    # NOTE: delete/archive/trash imperatives live in DELETE_EMAIL — keeping
+    # them here would pull email-deletion intents into the send class and
+    # waste a draft turn before Opus rerouted.
     # Bare confirmations — match send_message's pattern. Mid-flow edit/cancel
     # verbs are NOT listed here: they're handled by the pending_action_resolver
     # when an EMAIL_DRAFT_OPEN is active, and adding them to chroma created

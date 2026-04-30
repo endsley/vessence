@@ -561,10 +561,30 @@ def _execute_email_tool_serverside(tc: dict) -> str:
                 lines.append(f"- From: {e['sender']} — {e['subject']}")
             return "\n".join(lines)
         elif tool == "email.send":
-            # Send requires confirmation — don't auto-execute, just note it
-            return "\n\n[Email send requires user confirmation — not auto-executed]"
+            # Opus is responsible for getting explicit user confirmation BEFORE
+            # emitting the marker — see CLAUDE.md "Email Protocols → Sending".
+            # By the time the marker reaches us, the user has already said yes,
+            # so just send.
+            from agent_skills.email_tools import send_email
+            to = (args.get("to") or "").strip()
+            subject = (args.get("subject") or "").strip()
+            body = (args.get("body") or "").strip()
+            if not to:
+                return "\n\nEmail not sent: no recipient address provided."
+            if not body:
+                return "\n\nEmail not sent: empty body."
+            result = send_email(to=to, subject=subject, body=body)
+            logger.info("Email sent: id=%s to=%s", result.get("message_id", "?"), to)
+            return f"\n\n[Email sent to {to}.]"
         elif tool == "email.delete":
-            return "\n\n[Email delete requires user confirmation — not auto-executed]"
+            # Same contract as email.send — Opus confirms first, then emits.
+            from agent_skills.email_tools import delete_email
+            msg_id = (args.get("message_id") or "").strip()
+            if not msg_id:
+                return "\n\nEmail not deleted: no message_id provided."
+            delete_email(msg_id)
+            logger.info("Email trashed: id=%s", msg_id)
+            return f"\n\n[Email {msg_id} moved to trash.]"
         else:
             logger.warning("Unknown email tool: %s", tool)
             return ""
@@ -765,6 +785,17 @@ CODE_MAP_KEYWORDS = (
     "truth",
     "docs",
     "bed",
+    # Auto-evolved from daily conversations
+    "requests",
+    "removal",
+    "summarization",
+    "extra",
+    "narrative",
+    "api",
+    "events",
+    "phrasings",
+    "standard",
+    "stages",
 )
 
 
@@ -1433,6 +1464,7 @@ def _persist_turns_async(
     *,
     stage: str = "stage3",
     cls: str | None = None,
+    skip_fifo: bool = False,
 ) -> None:
     """Persist a completed turn. The scope of work depends on `stage`:
 
@@ -1490,6 +1522,27 @@ def _persist_turns_async(
             logger.exception("[%s] Short-term writeback failed", session_id[:12])
             _log_stage(session_id, "short_term_writeback_async_error", stage_start, error=type(exc).__name__)
 
+        # FIFO write — runs for ALL stages (stage2 + stage3) so the
+        # recent_turns SQLite FIFO stays current regardless of which
+        # pipeline path handled the turn. Previously only v2/v3 pipeline
+        # paths wrote to the FIFO; the standing brain (stage3_escalate →
+        # jane_proxy) path was missing this, leaving Opus conversations
+        # with zero FIFO entries.
+        # Callers that already wrote to the FIFO (v2/v3 pipeline paths)
+        # pass skip_fifo=True to avoid duplicate entries.
+        if not skip_fifo:
+            try:
+                fifo_start = time.perf_counter()
+                from jane_web.jane_v2.pipeline import _persist_turn_to_fifo
+                _persist_turn_to_fifo(
+                    session_id, user_message, assistant_message,
+                    stage=stage,
+                    intent=cls or "",
+                )
+                _log_stage(session_id, "fifo_write", fifo_start)
+            except Exception as exc:
+                logger.warning("[%s] FIFO write failed (non-fatal): %s", session_id[:12], exc)
+
         if privacy_local_only:
             # Explicit privacy skip — class is marked local_only. Thematic
             # memory (Haiku CLI) and session summary (qwen subprocess) would
@@ -1511,20 +1564,18 @@ def _persist_turns_async(
             logger.info("[%s] Persistence worker finished (stage2 — skipped thematic + summary)", _session_log_id(session_id))
             return
 
-        # Thematic short-term memory update (Haiku-powered, 1-3s typical).
-        # This ALSO dual-writes the Haiku-generated summary into the
-        # recent_turns FIFO (see vault_web.recent_turns) so v2's ack
-        # generator and classifier can fetch recent context cheaply
-        # without a ChromaDB similarity search. No extra LLM calls —
-        # the FIFO reuses the summary Haiku already produced for Chroma.
+        # Atomic short-term memory update (Haiku-powered, 1-3s typical).
+        # The FIFO write happens earlier in this function for immediate
+        # conversational continuity. This section writes the persistent
+        # Chroma short-term note used for cross-session recent recall.
         try:
             stage_start = time.perf_counter()
             if conv_manager:
-                conv_manager.update_thematic_memory(user_message, assistant_message)
-                _log_stage(session_id, "thematic_memory_update_async", stage_start)
+                conv_manager.update_short_term_memory(user_message, assistant_message)
+                _log_stage(session_id, "short_term_memory_update_async", stage_start)
         except Exception as exc:
-            logger.exception("[%s] Thematic memory update failed", session_id[:12])
-            _log_stage(session_id, "thematic_memory_update_async_error", stage_start, error=type(exc).__name__)
+            logger.exception("[%s] Short-term memory update failed", session_id[:12])
+            _log_stage(session_id, "short_term_memory_update_async_error", stage_start, error=type(exc).__name__)
 
         try:
             stage_start = time.perf_counter()

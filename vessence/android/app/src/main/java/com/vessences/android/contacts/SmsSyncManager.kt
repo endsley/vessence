@@ -8,13 +8,19 @@ import android.net.Uri
 import android.provider.ContactsContract
 import android.util.Log
 import androidx.core.content.ContextCompat
+import com.google.gson.Gson
 import com.vessences.android.data.api.ApiClient
 import com.vessences.android.notifications.NotificationSafety
+import com.vessences.android.util.Constants
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.Request
+import okhttp3.RequestBody
 
 /**
  * Syncs SMS messages to the Vessence server so Jane can answer questions
@@ -76,26 +82,49 @@ object SmsSyncManager {
      * Only uploads messages newer than the last synced timestamp.
      */
     suspend fun pushNewMessages(context: Context) {
-        if (!hasPermission(context)) return
+        if (!hasPermission(context)) {
+            postDiag(context, "permission_denied", "READ_SMS not granted")
+            return
+        }
         try {
             val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             val lastTs = prefs.getLong(KEY_LAST_SYNC_TS, 0L)
             if (lastTs == 0L) {
                 // No previous sync — do a backfill instead
+                postDiag(context, "push_skipped", "no lastTs cursor — falling back to backfill")
                 backfillIfNeeded(context)
                 return
             }
-            // Query messages newer than last sync (with 1-second overlap for safety)
-            val messages = querySmsSince(context, lastTs - 1000)
-            if (messages.isEmpty()) {
+            // Query with a 1-second overlap to absorb any clock-skew/batch-timestamp races.
+            // The server's UNIQUE(sender, timestamp_ms, body) constraint dedupes.
+            val rawMessages = querySmsSince(context, lastTs - 1000)
+            // Drop the boundary message(s) the previous sync already saw, so we
+            // only POST when there's a strictly-newer row. Without this filter,
+            // every periodic sync re-uploads the same most-recent message and
+            // INSERT-OR-IGNORE silently no-ops on the server.
+            val newMessages = rawMessages.filter {
+                ((it["timestamp_ms"] as? Long) ?: 0L) > lastTs
+            }
+            postDiag(
+                context,
+                "push_query_result",
+                "lastTs=$lastTs raw=${rawMessages.size} new=${newMessages.size}",
+            )
+            if (newMessages.isEmpty()) {
                 Log.d(TAG, "No new SMS messages since last sync")
                 return
             }
-            uploadMessages(messages)
-            val newest = messages.maxOfOrNull { (it["timestamp_ms"] as? Long) ?: 0L } ?: lastTs
+            uploadMessages(newMessages)
+            val newest = newMessages.maxOfOrNull { (it["timestamp_ms"] as? Long) ?: 0L } ?: lastTs
             prefs.edit().putLong(KEY_LAST_SYNC_TS, newest).apply()
-            Log.i(TAG, "Pushed ${messages.size} new SMS message(s) to server")
+            postDiag(
+                context,
+                "push_uploaded",
+                "uploaded=${newMessages.size} newest_ts=$newest",
+            )
+            Log.i(TAG, "Pushed ${newMessages.size} new SMS message(s) to server")
         } catch (e: Exception) {
+            postDiag(context, "push_error", e.javaClass.simpleName + ": " + (e.message ?: ""))
             Log.e(TAG, "Push sync failed", e)
         }
     }
@@ -260,4 +289,44 @@ object SmsSyncManager {
     private fun hasPermission(context: Context): Boolean =
         ContextCompat.checkSelfPermission(context, Manifest.permission.READ_SMS) ==
             PackageManager.PERMISSION_GRANTED
+
+    // ── Diagnostics ────────────────────────────────────────────────────────────
+    //
+    // Fire-and-forget POST to /api/device-diagnostics. Mirrors the pattern in
+    // ClientToolDispatcher.reportHandlerDiagnostic. Output lands in
+    // vessence-data/logs/android_diagnostics.jsonl under category="sms_sync".
+    // Without this we have zero visibility into why the phone's SMS query
+    // returns or skips rows — which is exactly the bug we're hunting.
+
+    private val diagScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+
+    private fun postDiag(context: Context, event: String, detail: String) {
+        try {
+            val prefs = context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
+            val baseUrl = prefs.getString(Constants.PREF_JANE_URL, null)
+                ?: Constants.DEFAULT_JANE_BASE_URL
+            val payload = mapOf(
+                "category" to "sms_sync",
+                "message" to "sms_sync[$event]",
+                "event" to event,
+                "detail" to detail,
+                "timestamp" to java.time.Instant.now().toString(),
+            )
+            val json = Gson().toJson(payload)
+            diagScope.launch {
+                try {
+                    val body = RequestBody.create(
+                        "application/json".toMediaTypeOrNull(),
+                        json,
+                    )
+                    val req = Request.Builder().url("$baseUrl/api/device-diagnostics").post(body).build()
+                    ApiClient.getOkHttpClient().newCall(req).execute().close()
+                } catch (e: Exception) {
+                    Log.d(TAG, "diag post failed: ${e.message}")
+                }
+            }
+        } catch (e: Exception) {
+            Log.d(TAG, "postDiag setup failed: ${e.message}")
+        }
+    }
 }

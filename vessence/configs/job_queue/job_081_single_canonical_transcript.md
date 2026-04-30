@@ -1,6 +1,6 @@
 # Job #81: Canonicalize the Transcript Source (Discovery + Tooling + Docs)
 
-Status: pending
+Status: incomplete
 Priority: high
 Created: 2026-04-21
 
@@ -67,3 +67,6 @@ The Stage 2 clinic_schedules_info handler literal-substituted the raw user query
 - CLAUDE.md includes a pointer so "read the android transcript" is a one-command answer.
 - `configs/memory_manage_architecture.md` names `VAULT_HOME/conversation_history_ledger.db::turns` as the canonical transcript source.
 - Empty stub DBs are either removed or clearly documented as reserved-not-used.
+
+## Result
+Jane web is not running — skipping

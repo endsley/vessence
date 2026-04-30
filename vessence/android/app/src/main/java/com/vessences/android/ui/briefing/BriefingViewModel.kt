@@ -26,7 +26,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.resume
-import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -67,62 +66,157 @@ class BriefingViewModel(application: Application) : AndroidViewModel(application
     private var readAllJob: Job? = null
 
     private val appContext = application.applicationContext
-    private val articlesCacheFile = File(application.filesDir, "briefing_articles_cache.json")
 
     init {
         // Cleanup old cached audio on startup
         com.vessences.android.util.BriefingAudioCache.cleanupOldFiles(appContext)
-        // Load cached articles immediately so UI has content before network fetch
-        loadCachedArticles()?.let { (articles, categories) ->
-            val effectiveCategory = "All"
-            _state.value = _state.value.copy(
-                articles = articles,
-                categories = categories,
-                selectedCategory = effectiveCategory,
-                lastUpdated = "cached",
-            )
-        }
-        refresh()
-        fetchArchiveDates()
-        fetchSavedArticleIds()
-        fetchSavedCategories()
+        // Hydrate every state field that has a cache: instant first paint with no network.
+        hydrateFromCache()
+        // Decide whether to actually hit the network. refresh(force=false) gates
+        // on WiFi vs cellular and on cache freshness.
+        refresh(force = false)
     }
 
-    fun refresh() {
+    /** Pull every available cache file into _state in one shot. */
+    private fun hydrateFromCache() {
+        com.vessences.android.util.BriefingCache.loadArticlesJson(appContext)?.let { json ->
+            runCatching {
+                val parsed = gson.fromJson(json, com.google.gson.JsonObject::class.java)
+                val cardsArray = parsed.getAsJsonArray("articles")
+                val categoriesArray = parsed.getAsJsonArray("categories")
+                val articles: List<BriefingArticle> = if (cardsArray != null) {
+                    gson.fromJson(cardsArray, object : TypeToken<List<BriefingArticle>>() {}.type)
+                } else emptyList()
+                val categories: List<String> = if (categoriesArray != null) {
+                    gson.fromJson(categoriesArray, object : TypeToken<List<String>>() {}.type)
+                } else emptyList()
+                _state.value = _state.value.copy(
+                    articles = articles,
+                    categories = categories,
+                    selectedCategory = "All",
+                    lastUpdated = "cached",
+                )
+            }
+        }
+        com.vessences.android.util.BriefingCache.loadTopicsJson(appContext)?.let { json ->
+            runCatching {
+                val topics: List<BriefingTopic> = gson.fromJson(
+                    json, object : TypeToken<List<BriefingTopic>>() {}.type,
+                )
+                _state.value = _state.value.copy(topics = topics)
+            }
+        }
+        com.vessences.android.util.BriefingCache.loadMarketplaceJson(appContext)?.let { json ->
+            runCatching {
+                val cards: List<MarketplaceSearchCard> = gson.fromJson(
+                    json, object : TypeToken<List<MarketplaceSearchCard>>() {}.type,
+                )
+                _state.value = _state.value.copy(marketplaceSearches = cards)
+            }
+        }
+        com.vessences.android.util.BriefingCache.loadSavedArticlesJson(appContext)?.let { json ->
+            runCatching {
+                val ids: Set<String> = gson.fromJson(
+                    json, object : TypeToken<Set<String>>() {}.type,
+                )
+                _state.value = _state.value.copy(savedArticleIds = ids)
+            }
+        }
+        com.vessences.android.util.BriefingCache.loadSavedCategoriesJson(appContext)?.let { json ->
+            runCatching {
+                val cats: List<String> = gson.fromJson(
+                    json, object : TypeToken<List<String>>() {}.type,
+                )
+                _state.value = _state.value.copy(savedCategories = cats)
+            }
+        }
+        com.vessences.android.util.BriefingCache.loadArchiveDatesJson(appContext)?.let { json ->
+            runCatching {
+                val dates: List<String> = gson.fromJson(
+                    json, object : TypeToken<List<String>>() {}.type,
+                )
+                _state.value = _state.value.copy(archiveDates = dates)
+            }
+        }
+    }
+
+    /**
+     * Refresh policy:
+     *   force=true              → always fetch (pull-to-refresh, post-action reload)
+     *   online + stale + WiFi   → fetch + prefetch images
+     *   online + stale + cell   → render cache; user must pull-to-refresh to spend data
+     *   online + fresh-today    → render cache, no fetch
+     *   no cache yet + online   → bootstrap fetch regardless of transport
+     *   offline                 → render whatever cache exists; no fetch
+     */
+    fun refresh(force: Boolean = false) {
         if (_state.value.viewingArchiveDate != null) {
             loadArchive(_state.value.viewingArchiveDate!!)
             return
         }
+
+        val online = com.vessences.android.util.BriefingCache.isOnline(appContext)
+        val onWifi = com.vessences.android.util.BriefingCache.isOnWifi(appContext)
+        val fresh = com.vessences.android.util.BriefingCache.isFreshForToday(appContext)
+        val haveAnyCache = _state.value.articles.isNotEmpty()
+
+        val shouldFetch = when {
+            !online -> false
+            force -> true
+            !haveAnyCache -> true   // first-ever launch — bootstrap on whatever transport
+            !fresh && onWifi -> true
+            else -> false
+        }
+
+        if (shouldFetch) {
+            doNetworkRefresh()
+        }
+    }
+
+    private fun doNetworkRefresh() {
         refreshMarketplace()
+        viewModelScope.launch { fetchArchiveDates() }
+        viewModelScope.launch { fetchSavedArticleIds() }
+        viewModelScope.launch { fetchSavedCategories() }
         viewModelScope.launch {
             _state.value = _state.value.copy(isLoading = true, error = null)
             try {
-                // Remember previously cached IDs before fetching
                 val previousIds = _state.value.articles.map { it.id }.toSet()
 
                 val (articles, categories) = fetchArticles()
                 val topics = fetchTopics()
                 val timestamp = SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date())
-                // Fall back to All if Shared has no articles
-                val effectiveCategory = "All"
                 _state.value = _state.value.copy(
                     articles = articles,
                     topics = topics,
                     categories = categories,
-                    selectedCategory = effectiveCategory,
+                    selectedCategory = "All",
                     isLoading = false,
                     lastUpdated = timestamp,
                 )
-                // Save fresh articles to disk cache
-                saveCachedArticles(articles, categories)
-                // WiFi: prefetch audio only for NEW articles (not already cached)
-                val newArticleIds = articles.map { it.id }.filter { it !in previousIds }
-                if (com.vessences.android.util.BriefingAudioCache.isOnWifi(appContext) && newArticleIds.isNotEmpty()) {
+                // Persist articles + topics for the day, then purge yesterday.
+                writeArticlesCache(articles, categories)
+                com.vessences.android.util.BriefingCache.saveTopicsJson(appContext, gson.toJson(topics))
+                com.vessences.android.util.BriefingCache.stamp(appContext)
+                com.vessences.android.util.BriefingCache.purgeOldDays(appContext)
+
+                // WiFi: prefetch audio + images for new articles.
+                if (com.vessences.android.util.BriefingCache.isOnWifi(appContext)) {
+                    val newArticleIds = articles.map { it.id }.filter { it !in previousIds }
+                    if (newArticleIds.isNotEmpty()) {
+                        launch {
+                            com.vessences.android.util.BriefingAudioCache.prefetchAll(
+                                appContext,
+                                newArticleIds,
+                            )
+                        }
+                    }
+                    // Prefetch every article image for today (cache survives across screen opens).
                     launch {
-                        com.vessences.android.util.BriefingAudioCache.prefetchAll(
-                            appContext,
-                            newArticleIds,
-                        )
+                        val items = articles.map { article ->
+                            article.id to "$baseUrl/api/briefing/image/${article.id}"
+                        }
+                        com.vessences.android.util.BriefingCache.prefetchImages(appContext, items)
                     }
                 }
             } catch (e: Exception) {
@@ -131,6 +225,16 @@ class BriefingViewModel(application: Application) : AndroidViewModel(application
                     error = e.message ?: "Failed to load briefing",
                 )
             }
+        }
+    }
+
+    private fun writeArticlesCache(articles: List<BriefingArticle>, categories: List<String>) {
+        runCatching {
+            val obj = com.google.gson.JsonObject().apply {
+                add("articles", gson.toJsonTree(articles))
+                add("categories", gson.toJsonTree(categories))
+            }
+            com.vessences.android.util.BriefingCache.saveArticlesJson(appContext, gson.toJson(obj))
         }
     }
 
@@ -155,6 +259,37 @@ class BriefingViewModel(application: Application) : AndroidViewModel(application
                     marketplaceSearches = searches,
                     isLoadingMarketplace = false,
                 )
+                // Persist marketplace JSON into today's cache directory.
+                runCatching {
+                    com.vessences.android.util.BriefingCache.saveMarketplaceJson(
+                        appContext, gson.toJson(searches),
+                    )
+                }
+                // WiFi: prefetch every visible listing thumbnail.
+                if (com.vessences.android.util.BriefingCache.isOnWifi(appContext)) {
+                    launch {
+                        val refs = mutableListOf<com.vessences.android.util.BriefingCache.MarketplaceImageRef>()
+                        for (card in searches) {
+                            for (listing in card.listings) {
+                                val photoName = listing.thumb ?: listing.photos.firstOrNull() ?: continue
+                                val querySlug = listing.querySlug ?: continue
+                                val url = "$baseUrl/marketplace-image/${card.search.name}/$querySlug/${listing.id}/$photoName"
+                                refs += com.vessences.android.util.BriefingCache.MarketplaceImageRef(
+                                    searchName = card.search.name,
+                                    querySlug = querySlug,
+                                    listingId = listing.id,
+                                    photoName = photoName,
+                                    serverUrl = url,
+                                )
+                            }
+                        }
+                        if (refs.isNotEmpty()) {
+                            com.vessences.android.util.BriefingCache.prefetchMarketplaceImages(
+                                appContext, refs,
+                            )
+                        }
+                    }
+                }
             } catch (e: Exception) {
                 _state.value = _state.value.copy(
                     isLoadingMarketplace = false,
@@ -176,6 +311,11 @@ class BriefingViewModel(application: Application) : AndroidViewModel(application
                     if (datesArray != null) {
                         val dates: List<String> = gson.fromJson(datesArray, object : TypeToken<List<String>>() {}.type)
                         _state.value = _state.value.copy(archiveDates = dates)
+                        runCatching {
+                            com.vessences.android.util.BriefingCache.saveArchiveDatesJson(
+                                appContext, gson.toJson(dates),
+                            )
+                        }
                     }
                 }
                 response.close()
@@ -268,13 +408,21 @@ class BriefingViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun getImageUrl(articleId: String): String {
-        return "$baseUrl/api/briefing/image/$articleId"
+        val serverUrl = "$baseUrl/api/briefing/image/$articleId"
+        // Return file:// URI when the image is in today's cache; Coil handles
+        // both file URIs and http URLs transparently.
+        return com.vessences.android.util.BriefingCache.resolveImageUrl(
+            appContext, articleId, serverUrl,
+        )
     }
 
     fun getMarketplaceImageUrl(searchName: String, listing: MarketplaceListing): String? {
         val photoName = listing.thumb ?: listing.photos.firstOrNull() ?: return null
         val querySlug = listing.querySlug ?: return null
-        return "$baseUrl/marketplace-image/$searchName/$querySlug/${listing.id}/$photoName"
+        val serverUrl = "$baseUrl/marketplace-image/$searchName/$querySlug/${listing.id}/$photoName"
+        return com.vessences.android.util.BriefingCache.resolveMarketplaceImageUrl(
+            appContext, searchName, querySlug, listing.id, photoName, serverUrl,
+        )
     }
 
     private var mediaPlayer: android.media.MediaPlayer? = null
@@ -414,36 +562,6 @@ class BriefingViewModel(application: Application) : AndroidViewModel(application
                 tts.speak(text)
             }
             _state.value = _state.value.copy(readAllActive = false, isSpeaking = false)
-        }
-    }
-
-    private fun loadCachedArticles(): Pair<List<BriefingArticle>, List<String>>? {
-        return try {
-            if (!articlesCacheFile.exists()) return null
-            val json = articlesCacheFile.readText()
-            val parsed = gson.fromJson(json, com.google.gson.JsonObject::class.java)
-            val cardsArray = parsed.getAsJsonArray("articles") ?: return null
-            val articles: List<BriefingArticle> = gson.fromJson(
-                cardsArray, object : TypeToken<List<BriefingArticle>>() {}.type
-            )
-            val categoriesArray = parsed.getAsJsonArray("categories")
-            val categories: List<String> = if (categoriesArray != null) {
-                gson.fromJson(categoriesArray, object : TypeToken<List<String>>() {}.type)
-            } else emptyList()
-            if (articles.isEmpty()) null else Pair(articles, categories)
-        } catch (e: Exception) {
-            null
-        }
-    }
-
-    private fun saveCachedArticles(articles: List<BriefingArticle>, categories: List<String>) {
-        try {
-            val obj = com.google.gson.JsonObject()
-            obj.add("articles", gson.toJsonTree(articles))
-            obj.add("categories", gson.toJsonTree(categories))
-            articlesCacheFile.writeText(gson.toJson(obj))
-        } catch (e: Exception) {
-            // Silently ignore cache write failures
         }
     }
 
@@ -655,6 +773,11 @@ class BriefingViewModel(application: Application) : AndroidViewModel(application
                             it.asJsonObject.get("article_id")?.asString ?: ""
                         }.filter { it.isNotEmpty() }.toSet()
                         _state.value = _state.value.copy(savedArticleIds = ids)
+                        runCatching {
+                            com.vessences.android.util.BriefingCache.saveSavedArticlesJson(
+                                appContext, gson.toJson(ids),
+                            )
+                        }
                     }
                 }
                 response.close()
@@ -675,6 +798,11 @@ class BriefingViewModel(application: Application) : AndroidViewModel(application
                         val serverCats: List<String> = gson.fromJson(catsArray, object : TypeToken<List<String>>() {}.type)
                         val merged = serverCats.distinct()
                         _state.value = _state.value.copy(savedCategories = merged)
+                        runCatching {
+                            com.vessences.android.util.BriefingCache.saveSavedCategoriesJson(
+                                appContext, gson.toJson(merged),
+                            )
+                        }
                     }
                 }
                 response.close()

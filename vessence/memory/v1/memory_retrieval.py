@@ -144,6 +144,25 @@ LOW_SIGNAL_SHARED_PREFIXES = (
     "still here. what do you want to work on next?",
     "noise_check_ok",
 )
+LOW_SIGNAL_SHORT_TERM_META_PREFIX_PATTERNS = (
+    r"^i need clarification\b",
+    r"^there(?:'|’)s no conversation turn to summarize\b",
+    r"^no action needed\b",
+    r"^i notice there(?:'|’)s a mismatch here\b",
+)
+LOW_SIGNAL_SHORT_TERM_PROTOCOL_PATTERNS = (
+    r"^\[context snapshot\b",
+    r"^\*{0,2}\s*class protocol:",
+    r"<class_protocol\b",
+    r"\[extracted params\]",
+    r"\[current conversation state\]",
+    r"\[standing brain mode\]",
+    r"\bclass protocol metadata\b",
+    r"\bdocumentation \(belongs in code/config\)\b",
+    r"\bprovided (?:class )?protocol\b",
+    r"\bclass protocol you provided\b",
+    r"\bnew turn.*class protocol metadata\b",
+)
 
 
 def _utcnow() -> datetime.datetime:
@@ -487,6 +506,36 @@ def _is_low_signal_shared_memory(doc: str, meta: dict | None) -> bool:
     return False
 
 
+def _is_low_signal_short_term_memory(doc: str, meta: dict | None) -> bool:
+    text = re.sub(r"\s+", " ", str(doc or "")).strip()
+    topic = str((meta or {}).get("topic", "")).strip().lower()
+    memory_type = str((meta or {}).get("memory_type", "")).strip().lower()
+    if memory_type == "short_term_theme":
+        return True
+    if topic == "context_snapshot":
+        return True
+    protocol_hit = any(
+        re.search(pattern, text, re.IGNORECASE)
+        for pattern in LOW_SIGNAL_SHORT_TERM_PROTOCOL_PATTERNS
+    )
+    if not protocol_hit:
+        return False
+    if re.search(r"^\*{0,2}\s*class protocol:", text, re.IGNORECASE):
+        return True
+    return any(
+        re.search(pattern, text, re.IGNORECASE)
+        for pattern in LOW_SIGNAL_SHORT_TERM_META_PREFIX_PATTERNS
+    ) or any(
+        marker in text.lower()
+        for marker in (
+            "<class_protocol",
+            "[extracted params]",
+            "[current conversation state]",
+            "[standing brain mode]",
+        )
+    )
+
+
 # In-process short-TTL cache so back-to-back callers (e.g. pipeline.py's
 # `_apply_evidence_policy` followed by jane_proxy's context builder, both
 # running for the same turn) don't re-embed and re-query Chroma for the
@@ -634,7 +683,7 @@ def build_memory_sections(
             elif memory_type in {"forgettable", "short_term"}:
                 if not _within_distance(distance, CHROMA_SHORT_TERM_MAX_DISTANCE):
                     continue
-                if not _is_expired(meta):
+                if not _is_expired(meta) and not _is_low_signal_short_term_memory(doc, meta):
                     legacy_short_term_facts.append(_fmt_memory(doc, meta))
             else:
                 if not _within_distance(distance, CHROMA_USER_MAX_DISTANCE):
@@ -660,6 +709,8 @@ def build_memory_sections(
             for extra_id, extra_doc, extra_meta in zip(extra_ids, extra_docs, extra_metas):
                 if _is_expired(extra_meta):
                     continue
+                if _is_none_content(extra_doc) or _is_low_signal_short_term_memory(extra_doc, extra_meta):
+                    continue
                 legacy_short_term_facts.append(_fmt_memory(extra_doc, extra_meta))
         except Exception:
             pass
@@ -682,6 +733,7 @@ def build_memory_sections(
             _fmt_memory(doc, {**(meta or {}), "distance": distance})
             for doc, meta, distance in zip(st_docs, st_metas, st_distances)
             if not _is_expired(meta or {}) and not _is_too_old(meta or {}) and not _is_none_content(doc)
+            and not _is_low_signal_short_term_memory(doc, meta or {})
             and _within_distance(distance, CHROMA_SHORT_TERM_MAX_DISTANCE)
         ]
         # Recency boost: always include the N most recent short-term entries
@@ -701,7 +753,7 @@ def build_memory_sections(
                     )[:3]  # top 3 most recent (was 8)
                     _existing_texts = {f.split(") ", 1)[-1][:80] for f in short_term_facts}
                     for doc, meta in _recent:
-                        if not _is_expired(meta or {}) and not _is_too_old(meta or {}) and not _is_none_content(doc):
+                        if not _is_expired(meta or {}) and not _is_too_old(meta or {}) and not _is_none_content(doc) and not _is_low_signal_short_term_memory(doc, meta or {}):
                             formatted = _fmt_memory(doc, meta or {})
                             # Dedupe against semantic results
                             if formatted.split(") ", 1)[-1][:80] not in _existing_texts:
@@ -769,6 +821,3 @@ def build_memory_sections(
         sections.append("## Essence Memory\n" + "\n".join(essence_facts))
     _sections_cache_put(cache_key, sections)
     return sections
-
-
-

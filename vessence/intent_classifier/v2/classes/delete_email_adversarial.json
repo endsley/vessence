@@ -1,0 +1,271 @@
+{
+  "class": "DELETE_EMAIL",
+  "phrases": [
+    "delete those spam texts",
+    "delete the text from that 5 digit number",
+    "dismiss the SMS notifications",
+    "trash that text message from kathia",
+    "get rid of the promo text messages",
+    "delete the spam in my notification shade",
+    "how do I delete an email on my phone",
+    "can you teach me how to delete emails",
+    "what's the best way to clear my email inbox",
+    "I already deleted that email yesterday",
+    "I deleted the spam this morning",
+    "did you delete that email I asked about",
+    "don't delete the email from my doctor",
+    "do not trash any of the emails from work",
+    "remind me not to delete the receipt email",
+    "delete my contact for that email address",
+    "delete my gmail account entirely",
+    "deactivate my email account",
+    "unsubscribe from this promotional email",
+    "unsubscribe me from these marketing emails",
+    "block all emails from that sender",
+    "mark that email as spam",
+    "report that email as phishing",
+    "archive that email but don't delete it",
+    "save that email for later",
+    "forward that email to bob then delete it",
+    "send Bob an email about deleting old files",
+    "email Bob a list of files to delete",
+    "search my email for the word delete",
+    "what does the trash folder in gmail do"
+  ],
+  "results": [
+    {
+      "phrase": "delete those spam texts",
+      "classification": "DELETE_MESSAGES",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "delete the text from that 5 digit number",
+      "classification": "DELETE_MESSAGES",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "dismiss the SMS notifications",
+      "classification": "DELETE_MESSAGES",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "trash that text message from kathia",
+      "classification": "DELETE_MESSAGES",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "get rid of the promo text messages",
+      "classification": "DELETE_MESSAGES",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "delete the spam in my notification shade",
+      "classification": "DELETE_MESSAGES",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "how do I delete an email on my phone",
+      "classification": "DELETE_EMAIL",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": true
+    },
+    {
+      "phrase": "can you teach me how to delete emails",
+      "classification": "DELETE_EMAIL",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": true
+    },
+    {
+      "phrase": "what's the best way to clear my email inbox",
+      "classification": "DELETE_EMAIL",
+      "confidence": 0.6,
+      "margin": 0.2,
+      "false_positive": true
+    },
+    {
+      "phrase": "I already deleted that email yesterday",
+      "classification": "DELETE_EMAIL",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": true
+    },
+    {
+      "phrase": "I deleted the spam this morning",
+      "classification": "DELETE_EMAIL",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": true
+    },
+    {
+      "phrase": "did you delete that email I asked about",
+      "classification": "DELETE_EMAIL",
+      "confidence": 0.6,
+      "margin": 0.2,
+      "false_positive": true
+    },
+    {
+      "phrase": "don't delete the email from my doctor",
+      "classification": "DELETE_EMAIL",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": true
+    },
+    {
+      "phrase": "do not trash any of the emails from work",
+      "classification": "DELETE_EMAIL",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": true
+    },
+    {
+      "phrase": "remind me not to delete the receipt email",
+      "classification": "DELETE_EMAIL",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": true
+    },
+    {
+      "phrase": "delete my contact for that email address",
+      "classification": "DELETE_EMAIL",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": true
+    },
+    {
+      "phrase": "delete my gmail account entirely",
+      "classification": "DELETE_EMAIL",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": true
+    },
+    {
+      "phrase": "deactivate my email account",
+      "classification": "DELETE_EMAIL",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": true
+    },
+    {
+      "phrase": "unsubscribe from this promotional email",
+      "classification": "DELETE_EMAIL",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": true
+    },
+    {
+      "phrase": "unsubscribe me from these marketing emails",
+      "classification": "DELETE_EMAIL",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": true
+    },
+    {
+      "phrase": "block all emails from that sender",
+      "classification": "DELETE_EMAIL",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": true
+    },
+    {
+      "phrase": "mark that email as spam",
+      "classification": "DELETE_EMAIL",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": true
+    },
+    {
+      "phrase": "report that email as phishing",
+      "classification": "DELETE_EMAIL",
+      "confidence": 0.6,
+      "margin": 0.2,
+      "false_positive": true
+    },
+    {
+      "phrase": "archive that email but don't delete it",
+      "classification": "DELETE_EMAIL",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": true
+    },
+    {
+      "phrase": "save that email for later",
+      "classification": "DELEGATE_OPUS",
+      "confidence": 0.4,
+      "margin": 0.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "forward that email to bob then delete it",
+      "classification": "DELETE_EMAIL",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": true
+    },
+    {
+      "phrase": "send Bob an email about deleting old files",
+      "classification": "SEND_EMAIL",
+      "confidence": 0.8,
+      "margin": 0.6,
+      "false_positive": false
+    },
+    {
+      "phrase": "email Bob a list of files to delete",
+      "classification": "SEND_EMAIL",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": false
+    },
+    {
+      "phrase": "search my email for the word delete",
+      "classification": "DELETE_EMAIL",
+      "confidence": 0.6,
+      "margin": 0.2,
+      "false_positive": true
+    },
+    {
+      "phrase": "what does the trash folder in gmail do",
+      "classification": "DELETE_EMAIL",
+      "confidence": 1.0,
+      "margin": 1.0,
+      "false_positive": true
+    }
+  ],
+  "false_positive_count": 21,
+  "false_positives": [
+    "how do I delete an email on my phone",
+    "can you teach me how to delete emails",
+    "what's the best way to clear my email inbox",
+    "I already deleted that email yesterday",
+    "I deleted the spam this morning",
+    "did you delete that email I asked about",
+    "don't delete the email from my doctor",
+    "do not trash any of the emails from work",
+    "remind me not to delete the receipt email",
+    "delete my contact for that email address",
+    "delete my gmail account entirely",
+    "deactivate my email account",
+    "unsubscribe from this promotional email",
+    "unsubscribe me from these marketing emails",
+    "block all emails from that sender",
+    "mark that email as spam",
+    "report that email as phishing",
+    "archive that email but don't delete it",
+    "forward that email to bob then delete it",
+    "search my email for the word delete",
+    "what does the trash folder in gmail do"
+  ]
+}

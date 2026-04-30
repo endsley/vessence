@@ -90,29 +90,83 @@ Short-term memory is the **"working notepad"** tier: highest-priority during ret
 
 **Schema (ChromaDB metadata per entry):**
 ```
-memory_type : "short_term"
-author      : "jane" | "system" | "conversation_archivist" | "legacy_amber" | …
-topic       : str  (default "General")
-subtopic    : str  (default "")
-timestamp   : ISO UTC datetime string  ← always present
-expires_at  : ISO UTC datetime string  ← set when Archivist marks as short-term, or at add time
-ttl_days    : int
-session_id  : str  (for conversation turns)
-role        : "user" | "assistant"  (for conversation turns)
-raw_chars   : int  (original message length before summarization)
-summary_chars : int (stored compact summary length)
-summary_style : "concise_turn_memory_v1" | "code_change_turn_memory_v1"
+memory_type    : "short_term"
+author         : "jane" | "system" | "conversation_archivist" | "legacy_amber" | …
+topic          : str  (default "General"; "turn_memory" for Stage 3 writes)
+subtopic       : str  (default "")
+timestamp      : ISO UTC datetime string  ← always present
+expires_at     : ISO UTC datetime string  ← set when Archivist marks as short-term, or at add time
+ttl_days       : int
+session_id     : str  (for conversation turns)
+role           : "user" | "assistant" | "turn"  (for conversation turns)
+raw_chars      : int  (original message length before summarization)
+summary_chars  : int  (stored compact summary length)
+summary_style  : "structured_short_term_v1" (active) | "concise_turn_memory_v1" | "code_change_turn_memory_v1" (legacy)
+
+# Structured-extraction fields (added by Job #86, 2026-04-29)
+turn_kind      : "code" | "debugging" | "calendar" | "messages" | "todo" | "general"
+has_open_loop  : bool   (any pending next action / awaiting confirmation)
+has_decision   : bool   (any concrete decision or state change)
+has_artifact   : bool   (any file path, function/class, ID, URL, tool)
+artifact_paths : str    (top N artifacts joined with " | ")
+person_names   : str    (top N people joined with " | ")
+time_refs      : str    (top N time references joined with " | ")
+n_facts        : int
+n_decisions    : int
+n_open_loops   : int
 ```
 
 **Default TTL:** 14 days. Override per entry with `--days N`.
 
-**Automatic turn summarization:**
-- `ConversationManager` summarizes each new turn before writing it to `short_term_memory`.
-- The stored form should preserve only the shortest facts that maximize later retrieval value: decisions, file paths, current work state, open loops, and solution state.
-- Assistant turns that look like code edits are summarized with a code-aware prompt. The summarizer should capture files changed, the behavioral effect of the edit, important functions/classes, and open risks or next steps, instead of restating raw diff text.
-- Code-aware summaries use `summary_style: "code_change_turn_memory_v1"` and preserve short `-` bullet lines so retrieval keeps the edit structure instead of flattening it back into prose.
-- If summarization fails or times out, the system falls back to a truncated raw-text write rather than losing the memory.
-- Legacy short-term entries written before this design change may still be bloated until the migration helper rewrites them.
+**Stage 3 short-term writer (active design — see `memory/v1/short_term_extractor.py`):**
+
+Each Stage 3 turn is processed through a structured extraction pipeline rather
+than freeform summarization.
+
+1. **Classify the turn** with `classify_turn_kind(text)` — fast regex heuristic,
+   returns one of `code | debugging | calendar | messages | todo | general`.
+2. **Extract structured fields** with a per-kind prompt to the Utility (Haiku)
+   tier. Output is a JSON dict with EXACTLY these keys:
+   - `facts` — concrete factual statements
+   - `decisions` — confirmed state changes / actions taken
+   - `open_loops` — unresolved next actions / awaiting confirmation
+   - `artifacts` — file paths, function names, IDs, URLs, tools
+   - `people` — person/contact names
+   - `time_refs` — explicit dates/times/windows
+3. **Skip-gate**: drop the write entirely if `decisions`, `open_loops`, AND
+   `artifacts` are all empty. Pure facts/people/time_refs without any actionable
+   bit is treated as low-value chatter that pollutes retrieval.
+4. **Flatten** to a labeled-bullet retrieval note (one line per non-empty
+   category, format `Decisions: a; b\nOpen loops: c\n…`). Decisions appear first.
+5. **Persist** with the metadata schema above. `summary_style` is
+   `"structured_short_term_v1"` for all writes from this design forward.
+
+Failure modes are soft: if the LLM call breaks or returns invalid JSON, the
+extractor returns an empty extraction, which trips the skip-gate, and the turn
+is not written. Better to under-write than to write protocol/meta chatter.
+
+Per-turn-kind prompts emphasize different fields:
+- **code** prompts focus on file paths, function/class names, what changed,
+  and open follow-up edits.
+- **debugging** prompts focus on the error symbol, root cause hypothesis, fix
+  applied (if any), and tests still failing.
+- **calendar** prompts focus on attendees, dates/times, and confirmation state.
+- **messages** prompts focus on sender + recipient and pending message ops.
+- **todo** prompts focus on items added/done/pending and the list name.
+- **general** prompts default to strict rejection — only extract durably useful
+  items, return empty lists for greetings / small talk.
+
+**Legacy:** writes from before 2026-04-29 use `summary_style:
+"concise_turn_memory_v1"` or `"code_change_turn_memory_v1"`. Those rows are
+still served by retrieval if present, but the active write path no longer
+produces them. The `short_term_memory` collection was intentionally cleared
+on 2026-04-29 because all 515 prior rows were legacy thematic / context-snapshot
+junk; the new lane is repopulating from a clean slate.
+
+**Pre-extraction hygiene:** injected pipeline metadata and server-side data
+blocks (`<class_protocol>`, `[EXTRACTED PARAMS]`, `[CALENDAR DATA]`, etc.)
+are stripped via `_strip_injected_metadata` before extraction so the LLM
+doesn't see protocol chatter as part of the turn.
 
 **Adding short-term memories explicitly:**
 - CLI: `agent_skills/memory/v1/add_forgettable_memory.py "fact text" [--days N] [--topic T] [--subtopic S] [--author A]`
@@ -163,7 +217,7 @@ Archivist decision guidance:
 
 ### 2.4. Unified Memory Retrieval
 - **Mechanism:** When a prompt is received, the system queries `user_memories`, `short_term_memory`, and Jane's `long_term_knowledge`. It queries `file_index_memories` only for file/vault lookup prompts. Legacy forgettable entries are still swept when present.
-- **Recent-memory strategy:** Retrieval uses both semantic top-N and a broader sweep of still-valid recent entries, guaranteeing that very recent work surfaces even when the query phrasing is weakly matched.
+- **Recent-memory strategy:** Retrieval uses semantic top-N over atomic short-term notes plus a small recency boost from the newest valid rows, guaranteeing that very recent work surfaces even when the query phrasing is weakly matched.
 - **Tiered output:** Results are organized into labeled sections such as `## Permanent Memory`, `## Long-Term Memory`, and `## Short-Term Memory` so the Librarian always knows recency priority.
 - **Jane web conversation summary:** Jane web keeps a Python-owned per-session summary file under `$VESSENCE_DATA_HOME/data/jane_session_summaries/`. Each file stores at most 3 distinct central topics, with `topic`, `state`, and `open_loop`. This is Jane web's continuity layer for stateless turns.
 - **Jane web session bootstrap:** Jane web prewarms a per-session bootstrap memory summary at session establishment, caches it in session state, and reuses it for follow-up turns. Heavy bootstrap retrieval should happen once per live web session, not once per message.
@@ -174,6 +228,7 @@ Archivist decision guidance:
 - **Prompt shaping:** Jane web now uses a tiny base system prompt plus only the dynamic sections needed for that intent. It does not inject the full `user_profile.md`, and it suppresses `current_task_state.json` and conversation summary for simple non-task prompts.
 - **Asynchronous writeback:** Short-term memory persistence and session-summary refresh are dispatched after the web response is sent. Memory writeback must not block the final user-visible response.
 - **Low-value turn handling:** Very short turns use a rule-based short-term summary, and trivial low-value turns can be skipped entirely instead of paying an LLM summarization cost.
+- **Short-term retrieval hygiene:** Retrieval must suppress legacy `context_snapshot` rows, all legacy `short_term_theme` thematic rows, and malformed summaries that contain protocol/meta chatter (`Class Protocol`, clarification about injected metadata, etc.) so poisoned short-term rows do not reach Stage 3 prompts.
 - **File-index lane:** Vault file metadata and descriptions are routed into `file_index_memories`, not mixed into `user_memories`. Query that lane only for file/vault/path prompts.
 - **Retrieval shaping goal:** the conversation summary is intentionally tiny. Large prompt growth should come only from retrieved memory tiers, not from replaying recent chat history. If the Librarian prompt is bloated, inspect `long_term_knowledge`, `user_memories`, `short_term_memory`, and `file_index_memories` contents rather than the session summary file.
 - **Similarity-gated cache (Jane web):** Jane web keeps a tiny in-process cache for the memory-summary layer only. A cached summary is reused only within the same session, only for a short TTL, and only when the new query embedding is highly similar to a cached query embedding. This skips repeated Chroma + Librarian work on near-duplicate follow-ups while allowing topic pivots to miss the cache naturally.

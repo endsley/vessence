@@ -1,5 +1,13 @@
 # Vessence Changelog
 
+## v0.2.86 (2026-04-26)
+- Briefing screen now caches the full daily payload (articles, topics, marketplace, saved items, archive index) and all article + marketplace thumbnail images on-device under a per-day directory.
+- On WiFi the cache is refreshed and images are prefetched; on cellular the cache is reused to save data. Pull-to-refresh always forces a server fetch.
+- Yesterday's cache is purged automatically on the first successful refresh of a new day.
+
+## v0.2.85 (2026-04-26)
+- Version bump.
+
 ## v0.2.84 (2026-04-23)
 - Version bump.
 

@@ -67,7 +67,9 @@ PARAMS_SCHEMA = {
         "Pick cancellations when the user explicitly asks about cancelled / no-show "
         "patients. Pick next_patient for 'who's next' / 'who's my current patient'. "
         "Pick patient_detail when a specific patient is named OR referenced by "
-        "position ('first patient', 'patient 2'). Pick weekly for 'how does the "
+        "position ('first patient', 'patient 2'). If a weekday is also named "
+        "('first patient this Tuesday', 'patient 2 on Thursday'), STILL pick "
+        "patient_detail, not next_patient. Pick weekly for 'how does the "
         "week look' / 'rest of the week'."
     ),
     "day": (

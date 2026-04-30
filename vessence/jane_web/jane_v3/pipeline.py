@@ -185,6 +185,7 @@ def _persist_turn_to_ledger(session_id: str, user_prompt: str, jane_response: st
             user_prompt or "", jane_response,
             stage=stage,
             cls=cls,
+            skip_fifo=True,
         )
     except Exception as e:
         logger.warning("jane_v3: ledger persist failed for %s: %s",
@@ -227,6 +228,18 @@ async def _classify_and_maybe_handle(prompt: str, session_id: str) -> dict:
         )
         prompt = _cleaned
 
+    # ── Idle-timeout FIFO flush ──────────────────────────────────────────
+    # If the user paused longer than IDLE_FLUSH_SECONDS (30s) since the
+    # previous turn, the next utterance is almost always a new topic, not
+    # a follow-up. Wipe FIFO so the resolver / classifier / Stage 3 don't
+    # mix stale prior context into the new turn. Implicit equivalent of
+    # the explicit conversation_end flush in jane_v2/pipeline._persist_turn_to_fifo.
+    try:
+        from vault_web.recent_turns import maybe_idle_flush
+        maybe_idle_flush(session_id)
+    except Exception as _idle_exc:
+        logger.warning("jane_v3: idle flush check failed (non-fatal): %s", _idle_exc)
+
     # ── Pre-classifier resolver — STAGE3_FOLLOWUP fast-path ──────────────
     # When Opus's prior turn ended with an `[[AWAITING:<topic>]]` marker, v2
     # persists a pending_action of type `STAGE3_FOLLOWUP` in the FIFO. The
@@ -240,48 +253,175 @@ async def _classify_and_maybe_handle(prompt: str, session_id: str) -> dict:
     # STAGE3_FOLLOWUP, skip stage 1/2 entirely and force stage 3 so Opus can
     # interpret the reply with full conversation context.
     #
-    # Only handles STAGE3_FOLLOWUP. Other resolver actions (SMS draft
-    # confirm/cancel, STAGE2 followups) still flow through the classifier's
-    # pending_class injection so v3 remains a single-qwen-call pipeline for
-    # the common case.
+    # STAGE3_FOLLOWUP still forces Stage 3. Resolver `cancel` and `followup`
+    # are also honored directly for STAGE2_FOLLOWUP slots so short replies
+    # like "no" or "Tuesday" don't get reclassified from scratch.
     try:
         from jane_web.jane_v2 import pending_action_resolver as _par
         _resolved = _par.resolve(session_id, prompt)
     except Exception as _par_exc:
         logger.warning("jane_v3: resolver failed (non-fatal): %s", _par_exc)
         _resolved = None
-    if _resolved and _resolved.get("action") == "stage3_followup":
+    if _resolved:
+        action = _resolved.get("action")
         pending = _resolved.get("pending") or {}
-        awaiting = pending.get("awaiting") or "previous_question"
-        original_cls = pending.get("original_class") or (pending.get("data") or {}).get("original_class")
-        logger.info(
-            "jane_v3 pipeline: resolver → stage3_followup (awaiting=%s original_class=%s)",
-            awaiting, original_cls or "-",
-        )
-        # Mark the pending slot as resolved so that if Opus finishes WITHOUT
-        # emitting a new AWAITING, the slot clears (mirrors v2's behavior).
         try:
             from jane_web.jane_v2.pipeline import _pending_consumed_marker as _consume
-            consumed_marker = _consume(pending, status="resolved", resolution="answered")
         except Exception:
-            consumed_marker = None
-        state: dict[str, Any] = {
-            "cls": "stage3_followup",
-            "conf": "High",
-            "classification": "stage3_followup:High",
-            "stage1_ms": 0,
-            "stage2_ms": 0,
-            "result": None,
-            "stage2_ack": None,
-            "fallback_ack": None,
-            "force_stage3": True,
-            "stage3_followup_topic": awaiting,
-        }
-        if original_cls:
-            state["stage3_followup_original_class"] = original_cls
-        if consumed_marker:
-            state["resolve_pending_action"] = consumed_marker
-        return state
+            _consume = None
+
+        if action == "stage3_followup":
+            awaiting = pending.get("awaiting") or "previous_question"
+            original_cls = pending.get("original_class") or (pending.get("data") or {}).get("original_class")
+            logger.info(
+                "jane_v3 pipeline: resolver → stage3_followup (awaiting=%s original_class=%s)",
+                awaiting, original_cls or "-",
+            )
+            consumed_marker = (
+                _consume(pending, status="resolved", resolution="answered")
+                if _consume else None
+            )
+            state: dict[str, Any] = {
+                "cls": "stage3_followup",
+                "conf": "High",
+                "classification": "stage3_followup:High",
+                "stage1_ms": 0,
+                "stage2_ms": 0,
+                "result": None,
+                "stage2_ack": None,
+                "fallback_ack": None,
+                "force_stage3": True,
+                "stage3_followup_topic": awaiting,
+            }
+            if original_cls:
+                state["stage3_followup_original_class"] = original_cls
+            if consumed_marker:
+                state["resolve_pending_action"] = consumed_marker
+            return state
+
+        if action == "cancel":
+            logger.info(
+                "jane_v3 pipeline: resolver → cancel (type=%s handler=%s)",
+                pending.get("type") or "-",
+                pending.get("handler_class") or "-",
+            )
+            consumed_marker = (
+                _consume(pending, status="cancelled", resolution="abandoned")
+                if _consume else None
+            )
+            state = {
+                "cls": (pending.get("handler_class") or "others"),
+                "conf": "High",
+                "classification": f"{(pending.get('handler_class') or 'others')}:High",
+                "stage1_ms": 0,
+                "stage2_ms": 0,
+                "result": {"text": "Ok.", "conversation_end": True},
+                "stage2_ack": None,
+                "fallback_ack": None,
+                "force_stage3": False,
+            }
+            if consumed_marker:
+                state["resolve_pending_action"] = consumed_marker
+            return state
+
+        if action == "followup":
+            handler_class = (_resolved.get("handler_class") or "").strip()
+            logger.info(
+                "jane_v3 pipeline: resolver → followup (handler=%s awaiting=%s)",
+                handler_class or "-",
+                pending.get("awaiting") or (pending.get("data") or {}).get("awaiting") or "-",
+            )
+            registry = class_registry.get_registry()
+            meta = registry.get(handler_class)
+            handler = meta.get("handler") if meta else None
+            if not handler:
+                logger.warning(
+                    "jane_v3: resolver followup target %r missing handler → Stage 3",
+                    handler_class,
+                )
+                return {
+                    "cls": handler_class or "others",
+                    "conf": "High",
+                    "classification": f"{handler_class or 'others'}:High",
+                    "stage1_ms": 0,
+                    "stage2_ms": 0,
+                    "result": None,
+                    "stage2_ack": None,
+                    "fallback_ack": _ack_for(handler_class or "others", escalate=True),
+                    "force_stage3": True,
+                }
+
+            pending_data = _resolved.get("pending_data", {})
+            pending_for_dispatch = dict(pending_data) if isinstance(pending_data, dict) else {}
+            if pending.get("question") and "question" not in pending_for_dispatch:
+                pending_for_dispatch["question"] = pending.get("question")
+            try:
+                from jane_web.jane_v2 import recent_context as _recent_context
+                fifo_ctx = _recent_context.render_stage2_context(
+                    session_id,
+                    max_turns=_stage2_fifo_turns(handler_class, default=4),
+                ) or ""
+            except Exception as e:
+                logger.warning("jane_v3: followup recent_context load failed: %s", e)
+                fifo_ctx = ""
+
+            import inspect
+            kwargs: dict[str, Any] = {}
+            try:
+                sig = inspect.signature(handler)
+                if "context" in sig.parameters:
+                    kwargs["context"] = fifo_ctx
+                if "pending" in sig.parameters:
+                    kwargs["pending"] = pending_for_dispatch
+            except (TypeError, ValueError):
+                pass
+
+            t2 = time.perf_counter()
+            try:
+                import asyncio
+                if inspect.iscoroutinefunction(handler):
+                    result = await handler(prompt, **kwargs)
+                else:
+                    result = await asyncio.to_thread(lambda: handler(prompt, **kwargs))
+            except Exception as e:
+                logger.exception("jane_v3: resolver followup handler %r crashed: %s", handler_class, e)
+                result = None
+            stage2_ms = int((time.perf_counter() - t2) * 1000)
+
+            if not isinstance(result, dict) or "text" not in result:
+                logger.warning(
+                    "jane_v3: resolver followup handler %r returned invalid shape → Stage 3",
+                    handler_class,
+                )
+                return {
+                    "cls": handler_class,
+                    "conf": "High",
+                    "classification": f"{handler_class}:High",
+                    "stage1_ms": 0,
+                    "stage2_ms": stage2_ms,
+                    "result": None,
+                    "stage2_ack": None,
+                    "fallback_ack": _ack_for(handler_class, escalate=True),
+                    "force_stage3": True,
+                }
+
+            state = {
+                "cls": handler_class,
+                "conf": "High",
+                "classification": f"{handler_class}:High",
+                "stage1_ms": 0,
+                "stage2_ms": stage2_ms,
+                "result": result,
+                "stage2_ack": _ack_for(handler_class, escalate=False),
+                "fallback_ack": _ack_for(handler_class, escalate=True),
+                "force_stage3": False,
+            }
+            structured = result.get("structured") or {}
+            if not structured.get("pending_action") and _consume:
+                state["resolve_pending_action"] = _consume(
+                    pending, status="resolved", resolution="answered"
+                )
+            return state
 
     # ── Stage 1 (v3): Haiku classification ───────────────────────────────
     t1 = time.perf_counter()
@@ -570,12 +710,9 @@ async def handle_chat(body, request: Request):
     v1_body["stage3_ms"] = stage3_ms
     v1_body["ack"] = dynamic_ack
     cleaned_text = v1_body.get("response") or ""
-    _persist_turn_to_fifo(
-        canonical_sid, prompt, cleaned_text,
-        stage="stage3",
-        intent=state["cls"],
-        confidence=state["conf"],
-    )
+    # FIFO write removed — v1_chat → send_message → _persist_turns_async
+    # now handles the FIFO write for stage3 turns. The prior direct call
+    # here created a double-write since send_message also persists.
     return JSONResponse(v1_body)
 
 

@@ -47,6 +47,34 @@ def _parse_year(s: str | None) -> int | None:
     return int(m.group()) if m else None
 
 
+_MILES_PATTERNS = (
+    re.compile(r"(\d{1,3}(?:,\d{3})+)\s*(?:mi(?:les)?\b|\.)", re.I),
+    re.compile(r"(\d{2,3})\s*[kK]\s*(?:mi(?:les)?\b|\.)", re.I),
+    re.compile(r"\b(\d{4,6})\s*mi(?:les)?\b", re.I),
+    re.compile(r"\bmileage[^\d]{0,15}(\d{1,3}(?:,\d{3})+|\d{4,6})", re.I),
+    re.compile(r"\bdriven\s+(\d{1,3}(?:,\d{3})+|\d{4,6})", re.I),
+)
+
+
+def _parse_miles(text: str | None) -> int | None:
+    if not text:
+        return None
+    for pat in _MILES_PATTERNS:
+        m = pat.search(text)
+        if not m:
+            continue
+        raw = m.group(1).replace(",", "")
+        try:
+            n = int(raw)
+        except ValueError:
+            continue
+        if pat.pattern.startswith("(\\d{2,3})\\s*[kK]"):
+            n *= 1000
+        if 100 <= n <= 600_000:
+            return n
+    return None
+
+
 def _is_suspicious(year: int | None, miles: int) -> tuple[bool, str]:
     if year is None or not miles:
         return False, ""
@@ -149,15 +177,18 @@ async def _run_query(page, query: str, filters: dict, location_id: str,
     max_price = int(filters.get("max_price") or 0)
     max_miles = int(filters.get("max_miles") or 0)
 
+    # Pre-filter on price only — miles are usually NOT exposed on the search
+    # card, so deferring the miles check until after we click into the listing
+    # detail page (where mileage is reliably present in the description) keeps
+    # us from dropping ~95% of cards as "miles=None" before we've even looked.
     pre = [
         c for c in cards
-        if c["miles"] is not None
-        and c["miles"] < max_miles
-        and c["price"] is not None
+        if c["price"] is not None
         and c["price"] >= min_price
         and c["price"] < max_price
     ]
 
+    miles_drops = 0
     passed: list[dict] = []
     for c in pre:
         url = "https://www.facebook.com" + c["href"]
@@ -171,10 +202,25 @@ async def _run_query(page, query: str, filters: dict, location_id: str,
             logger.warning("listing %s failed: %s", listing_id, e)
             continue
         desc = detail["description"] or ""
-        year = _parse_year(c["title"]) or _parse_year(detail.get("title", "")) \
+        detail_title = detail.get("title", "") or ""
+        year = _parse_year(c["title"]) or _parse_year(detail_title) \
             or _parse_year(desc)
+        final_miles = c["miles"]
+        if final_miles is None:
+            final_miles = _parse_miles(desc) or _parse_miles(detail_title)
+        if max_miles:
+            if final_miles is None:
+                miles_drops += 1
+                logger.info("skip %s miles unknown after detail fetch",
+                            listing_id)
+                continue
+            if final_miles >= max_miles:
+                miles_drops += 1
+                logger.info("skip %s miles=%d >= max=%d",
+                            listing_id, final_miles, max_miles)
+                continue
         if filters.get("suspicion_filter", True):
-            sus, reason = _is_suspicious(year, int(c["miles"] or 0))
+            sus, reason = _is_suspicious(year, int(final_miles or 0))
             if sus:
                 logger.info("skip %s suspicious: %s", listing_id, reason)
                 continue
@@ -203,7 +249,7 @@ async def _run_query(page, query: str, filters: dict, location_id: str,
                 saved_photos.append(p.name)
         (ldir / "listing.json").write_text(json.dumps({
             "id": listing_id, "url": url, "query": query,
-            "price": c["price"], "miles": c["miles"], "year": year,
+            "price": c["price"], "miles": final_miles, "year": year,
             "title": c["title"], "location": c["loc"],
             "description": desc.strip(),
             "photo_urls": detail["photos"],
@@ -212,12 +258,13 @@ async def _run_query(page, query: str, filters: dict, location_id: str,
         }, indent=2))
         passed.append({
             "id": listing_id, "url": url, "price": c["price"],
-            "miles": c["miles"], "year": year,
+            "miles": final_miles, "year": year,
             "title": c["title"], "location": c["loc"],
             "photos": saved_photos,
             "thumb": saved_photos[0] if saved_photos else None,
         })
     return {"query": query, "raw": len(cards), "pre_filter": len(pre),
+            "miles_drops": miles_drops,
             "passed_count": len(passed), "listings": passed}
 
 

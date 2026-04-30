@@ -6,9 +6,12 @@ Wait:    30 min for AI to generate summaries.
 Phase 2: extract health_concerns, recommendations, visit_summary from each modal.
 Saves all data to SQLite at VESSENCE_DATA_HOME/schedule.db.
 
-Typical cron: run at 6:30 AM Mon-Fri. Completes ~7:05 AM.
+Installed cron: every 4 hours, every day. Typical run time is ~32 minutes.
+This wrapper uses a non-blocking singleton lock so cron cannot overlap runs
+if a previous scrape is still active.
 """
 import asyncio
+import fcntl
 import json
 import logging
 import os
@@ -29,6 +32,30 @@ from skills.web_sequences.kathia_schedule import KathiaScheduleSequence
 
 DATA_HOME = Path(os.environ.get("VESSENCE_DATA_HOME", "/home/chieh/ambient/vessence-data"))
 TRACKER_PATH = DATA_HOME / "clinic_last_pull.json"
+LOGS_DIR = DATA_HOME / "logs"
+LOCK_PATH = LOGS_DIR / "kathia_schedule.lock"
+
+
+def _acquire_singleton_lock() -> None:
+    """Exit quietly if a previous clinic scrape is still running.
+
+    Cron fires this wrapper every 4 hours. The scrape usually completes well
+    within that window, but if the remote site stalls or Playwright hangs, a
+    second cron tick should not launch a concurrent browser session against the
+    same clinic account or tracker/database outputs.
+    """
+    LOGS_DIR.mkdir(parents=True, exist_ok=True)
+    lock_fd = open(LOCK_PATH, "w")
+    try:
+        fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        logging.getLogger(__name__).info(
+            "Another kathia_schedule run is already active "
+            "(lock held on %s) — exiting quietly.",
+            LOCK_PATH,
+        )
+        sys.exit(0)
+    globals()["_SINGLETON_LOCK_FD"] = lock_fd
 
 
 def _record_pull(status: str, data: dict | None = None, error: str | None = None) -> None:
@@ -87,4 +114,5 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
+    _acquire_singleton_lock()
     asyncio.run(main())

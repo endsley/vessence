@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
+import os
+os.environ.setdefault("ORT_LOGGING_LEVEL", "3")
+os.environ.setdefault("ONNXRUNTIME_EXECUTION_PROVIDERS", '["CPUExecutionProvider"]')
+
 import chromadb
 import uuid
-import os
 import sys
 import json
 import logging
@@ -35,6 +38,8 @@ VAULT_IMAGES_DIR = os.path.join(VAULT_DIR, "images")
 
 
 MEMORY_JANITOR_MODEL = "claude-opus-4-6"  # Memory is too important for a cheap model
+MAX_DEDUP_THEMES_PER_RUN = 150
+MAX_CODE_MEMORIES_PER_RUN = None  # None = verify every code-referencing memory
 
 
 def _llm_json(prompt: str) -> dict:
@@ -215,7 +220,10 @@ def backfill_thematic_archival(max_sessions: int = 2):
         logger.warning(f"Could not run backfill_thematic_archival: {e}")
 
 
-def dedup_cross_session_themes(similarity_threshold: float = 0.10):
+def dedup_cross_session_themes(
+    similarity_threshold: float = 0.10,
+    max_themes_per_run: int = MAX_DEDUP_THEMES_PER_RUN,
+):
     """Remove near-duplicate theme entries across different sessions.
 
     When the same topic is discussed in multiple sessions, their theme
@@ -243,6 +251,16 @@ def dedup_cross_session_themes(similarity_threshold: float = 0.10):
 
         if len(themes) < 2:
             return
+
+        total_themes = len(themes)
+        if total_themes > max_themes_per_run:
+            import random as _random
+            _random.shuffle(themes)
+            themes = themes[:max_themes_per_run]
+            logger.info(
+                "Dedup scanning %d of %d cross-session themes this run.",
+                len(themes), total_themes,
+            )
 
         # For each theme, query its nearest neighbor across ALL sessions
         ids_to_delete = set()
@@ -370,6 +388,14 @@ def run_janitor(max_sessions: int = 2, max_topics: int = 3):
     # Step 0: Backfill any sessions that missed thematic archival (Limited batch)
     backfill_thematic_archival(max_sessions=max_sessions)
 
+    # Step 0.25: Purge expired short-term memories once backfill candidates
+    # have had a chance to archive. This lets TTL cleanup happen even if
+    # later janitor stages time out.
+    expired_purged = purge_expired_short_term()
+    old_forgettable_purged = purge_old_forgettable_memories(
+        max_age_days=FORGETTABLE_MAX_AGE_DAYS
+    )
+
     # Step 0.5: Deduplicate themes across sessions in short-term memory
     dedup_cross_session_themes()
 
@@ -379,10 +405,6 @@ def run_janitor(max_sessions: int = 2, max_topics: int = 3):
     except Exception:
         logger.info("No user_memories collection found.")
         return
-
-    # Step 1: Purge expired short-term memories + enforce 2-week hard cap
-    expired_purged = purge_expired_short_term()
-    old_forgettable_purged = purge_old_forgettable_memories(max_age_days=FORGETTABLE_MAX_AGE_DAYS)
 
     # 2. Fetch all memories with metadata
     all_mems = collection.get(include=["documents", "metadatas"])
@@ -718,6 +740,7 @@ Output EXACTLY one JSON object, no markdown fences:
 def verify_code_memories(
     codex_timeout: int = 120,
     claude_timeout: int = 120,
+    max_memories_per_run: int | None = MAX_CODE_MEMORIES_PER_RUN,
 ) -> dict:
     """Verify code-referencing memories one at a time against the real codebase.
 
@@ -753,6 +776,14 @@ def verify_code_memories(
     # same prefix and later memories never get touched.
     import random as _random
     _random.shuffle(code_mems)
+
+    total_candidates = len(code_mems)
+    if max_memories_per_run is not None and total_candidates > max_memories_per_run:
+        code_mems = code_mems[:max_memories_per_run]
+        logger.info(
+            "verify_code_memories: checking %d of %d code memories this run",
+            len(code_mems), total_candidates,
+        )
 
     logger.info("verify_code_memories: checking %d memories one at a time", len(code_mems))
 
