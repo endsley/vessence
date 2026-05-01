@@ -1,159 +1,168 @@
-# Transcript Quality Review — 2026-04-29
+# Transcript Quality Review — 2026-04-30
 
-Generated: 2026-04-30 01:38:29
+Generated: 2026-05-01 01:10:19
 
-## Issue 1 [MEDIUM]
+## Issue 1 [CRITICAL]
 
-**Turn:** 2026-04-29 09:04:54
-**User said:** currently how does your short-term memory work
+**Turn:** 2026-04-30 01:23:50
+**User said:** <class_protocol name="read_calendar"> These are runtime instructions
 
-**Problem:** Memory/thematic persistence failed on the same turn the user asked about short-term memory.
+**Problem:** Internal class protocol text was recorded as a user turn.
 
-**Root cause:** Stage 3 answered the question, but the post-turn memory pipeline immediately failed because `memory.v1.conversation_manager` depends on a `claude` CLI binary that was not present. That means thematic classification and summary for this turn were not written, so the system was describing memory behavior while part of the memory path was already broken.
+**Root cause:** The transcript contains a synthetic `<class_protocol>` payload instead of a human utterance. Later turns show the same pattern immediately after `stage3_escalate` loads a class protocol, which indicates protocol text is being persisted into conversation history/transcripts instead of staying out-of-band.
 
-**Suggested fix:** Remove the hard dependency on the external `claude` executable for thematic classification/summary. Use the configured provider API directly, or detect the missing binary at startup and fall back cleanly.
+**Suggested fix:** Keep class protocol content in a non-user/system channel only, and exclude synthetic protocol messages from transcript persistence and future conversation history.
 
 **Log evidence:**
 ```
-2026-04-29 09:04:54 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=46 sid_override=True class_protocol=n/a
+[2026-04-30 01:23:50] (audit-177752) <class_protocol name="read_calendar">
 ```
 ```
-2026-04-29 09:06:23 WARNING [memory.v1.conversation_manager] Theme classification LLM failed: CLI not found: claude
+[2026-04-30 01:24:27] (audit-177752) <class_protocol name="delete_email">
 ```
 ```
-2026-04-29 09:06:23 WARNING [memory.v1.conversation_manager] Theme summary LLM failed: CLI not found: claude
+2026-04-30 01:24:26 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=delete email:Very High voice=False prompt_len=18456 sid_override=True class_protocol=loaded:delete_email
 ```
 
 ---
 
-## Issue 2 [MEDIUM]
+## Issue 2 [CRITICAL]
 
-**Turn:** 2026-04-29 09:07:14
-**User said:** <class_protocol name="greeting"> These are runtime instructions for handling a g
+**Turn:** 2026-04-30 01:24:27
+**User said:** <class_protocol name="delete_email"> These are runtime instructions
 
-**Problem:** Internal class-protocol text leaked into the recorded user turn, and the greeting fast path failed.
+**Problem:** Delete-email turn was replaced in the transcript by internal protocol content.
 
-**Root cause:** The Android client only captured a 9-character utterance, but Stage 3 was sent a 1,142-character prompt with `class_protocol=loaded:greeting`, and that wrapper text appears in the transcript as the user message. In the same turn, the greeting handler returned `invalid shape`, forcing an unnecessary Stage 3 escalation.
+**Root cause:** Right before this transcript entry, Stage 3 escalation logged `class_protocol=loaded:delete_email`. The next recorded 'user turn' is that protocol text itself, so the pipeline/transcript layer is capturing the injected protocol prompt instead of the original user utterance.
 
-**Suggested fix:** Keep raw user text separate from Stage 3 prompt scaffolding in persistence/history/TTS, and add schema-contract tests so the greeting handler always returns a valid Stage 2 response.
+**Suggested fix:** Separate protocol injection from user-message persistence. Add a guard in transcript/history writing that drops messages tagged as class protocol or synthetic prompt material.
 
 **Log evidence:**
 ```
-2026-04-29T09:07:12.030Z [voice_flow] voice_flow[stt_result] text_len=9
+2026-04-30 01:24:26 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=delete email:Very High voice=False prompt_len=18456 sid_override=True class_protocol=loaded:delete_email
 ```
 ```
-2026-04-29 09:07:13 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 greeting:Very High (711ms) params={}
-```
-```
-2026-04-29 09:07:13 INFO [jane_web.jane_v3.pipeline] jane_v3: handler 'greeting' returned invalid shape → Stage 3
-```
-```
-2026-04-29 09:07:14 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=greeting:Very High voice=False prompt_len=1142 sid_override=True class_protocol=loaded:greeting
+[2026-04-30 01:24:27] (audit-177752) <class_protocol name="delete_email">
 ```
 
 ---
 
-## Issue 3 [LOW]
+## Issue 3 [MEDIUM]
 
-**Turn:** 2026-04-29 09:16:09
-**User said:** I think the memory that we have has the short-term and we also have a first in 
+**Turn:** 2026-04-30 01:28:11
+**User said:** yes those articles and maybe just two days
 
-**Problem:** The classifier emitted an out-of-schema label (`force stage3`) instead of a registered intent.
+**Problem:** Follow-up routing failed; a dependent reply was reclassified as a fresh turn.
 
-**Root cause:** The Stage 1 classifier returned `force stage3`, which is not a valid class. The pipeline recovered by mapping it to `others:Low`, but this makes classifier telemetry unreliable and shows the classifier output is not properly constrained to the supported enum.
+**Root cause:** The user's reply is semantically a follow-up answer (`yes ... maybe just two days`), but Stage 1 still ran and classified it as `others:Low`. That means the pending-action resolver did not intercept and route the turn directly to the prior handler/brain context.
 
-**Suggested fix:** Constrain classifier decoding to the allowed label set, or add a parser that translates control labels like `force stage3` before scoring/logging them.
+**Suggested fix:** When Stage 2 or Stage 3 asks a clarifying question, persist a pending action with expected slot(s) and bypass Stage 1 on the next turn until that pending action is resolved or expires.
 
 **Log evidence:**
 ```
-2026-04-29 09:16:08 WARNING [intent_classifier.v3.classifier] v3: qwen returned unknown class 'force stage3' → others
+[2026-04-30 01:28:11] (audit-177752) yes those articles and maybe just two days
 ```
 ```
-2026-04-29 09:16:08 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (816ms) params={}
+2026-04-30 01:28:10 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (1113ms) params={}
+```
+```
+2026-04-30 01:28:10 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=42 sid_override=True class_protocol=n/a
 ```
 
 ---
 
 ## Issue 4 [CRITICAL]
 
-**Turn:** 2026-04-29 09:20:53
-**User said:** can you hook that back up
+**Turn:** 2026-04-30 01:28:54
+**User said:** <class_protocol name="greeting"> These are runtime instructions
 
-**Problem:** A technical/product-debugging request was misclassified as `send message`, sending the turn into the SMS flow.
+**Problem:** Greeting turn was polluted with internal protocol text in the transcript.
 
-**Root cause:** Stage 1 labeled the utterance `send message:Very High` and extracted a message body even though there was no recipient and the surrounding conversation was about Jane's memory pipeline. Stage 2 then failed with `handler 'send message' returned invalid shape`, so Stage 3 received the wrong class protocol and the conversation derailed into messaging behavior.
+**Root cause:** The pipeline loaded the greeting class protocol for Stage 3, and the transcript then recorded that protocol payload as the user turn. This is the same protocol-leak/history-corruption pattern seen on other turns.
 
-**Suggested fix:** Tighten `send message` intent gating so it requires an explicit messaging verb plus a plausible contact/recipient, and down-rank it when the utterance refers to system behavior or follows a technical discussion. Also make the handler return a structured clarify/escalate object instead of `invalid shape`.
+**Suggested fix:** Do not write class-protocol prompt material into user-visible or persisted transcript records. Enforce message typing so only real user utterances are stored as user turns.
 
 **Log evidence:**
 ```
-2026-04-29T09:20:51.262Z [voice_flow] voice_flow[stt_result] text_len=30
+2026-04-30 01:28:53 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=greeting:Very High voice=False prompt_len=1142 sid_override=True class_protocol=loaded:greeting
 ```
 ```
-2026-04-29 09:20:52 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 send message:Very High (1283ms) params={'recipient': None, 'body': 'can you hook that back up', 'intent_kind': 'ask', 'confirm_signal': None}
-```
-```
-2026-04-29 09:20:52 INFO [jane_web.jane_v3.pipeline] jane_v3: handler 'send message' returned invalid shape → Stage 3
-```
-```
-2026-04-29 09:20:53 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=send message:Very High voice=False prompt_len=3688 sid_override=True class_protocol=loaded:send_message
+[2026-04-30 01:28:54] (audit-177752) <class_protocol name="greeting">
 ```
 
 ---
 
 ## Issue 5 [MEDIUM]
 
-**Turn:** 2026-04-29 09:21:27
-**User said:** I love you
+**Turn:** 2026-04-30 01:28:54
+**User said:** <class_protocol name="greeting"> These are runtime instructions
 
-**Problem:** Follow-up routing did not stay in a structured clarification flow; the next short reply was reclassified from scratch and hit the same broken `send message` path again.
+**Problem:** The greeting fast-path handler violated the Stage 2 return contract and unnecessarily escalated to Stage 3.
 
-**Root cause:** After the previous send-message turn failed in Stage 2, there is no sign that a pending action captured the missing slots. The next 10-character reply went back through Stage 1, was classified again as `send message`, and Stage 2 again returned `invalid shape`. That indicates the pending-action resolver did not own the clarification loop.
+**Root cause:** Stage 1 classified the turn as `greeting:Very High`, but the handler returned an invalid shape, which forced a Stage 3 fallback. This is an explicit Stage 2 contract failure.
 
-**Suggested fix:** When `send message` is missing recipient/body/confirmation, persist a `pending_action` with required slots and bypass Stage 1 on the next turn. Add cancellation logic when the user redirects back to code/debugging.
+**Suggested fix:** Fix the greeting handler to always return the pipeline's expected response schema and add a unit test that validates handler output shape for every deterministic intent.
 
 **Log evidence:**
 ```
-2026-04-29 09:20:52 INFO [jane_web.jane_v3.pipeline] jane_v3: handler 'send message' returned invalid shape → Stage 3
+2026-04-30 01:28:52 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 greeting:Very High (761ms) params={}
 ```
 ```
-2026-04-29T09:21:24.851Z [voice_flow] voice_flow[stt_result] text_len=10
-```
-```
-2026-04-29 09:21:26 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 send message:Very High (1254ms) params={'recipient': None, 'body': 'I love you', 'intent_kind': 'send', 'confirm_signal': None}
-```
-```
-2026-04-29 09:21:26 INFO [jane_web.jane_v3.pipeline] jane_v3: handler 'send message' returned invalid shape → Stage 3
+2026-04-30 01:28:53 INFO [jane_web.jane_v3.pipeline] jane_v3: handler 'greeting' returned invalid shape → Stage 3
 ```
 
 ---
 
 ## Issue 6 [CRITICAL]
 
-**Turn:** 2026-04-29 09:22:04
-**User said:** no I actually want you to write the code to fix this right now
+**Turn:** 2026-04-30 01:31:02
+**User said:** can you look at the short-term memory to see if this whole thing is actual
 
-**Problem:** The correction turn got trapped behind a long-running Stage 3 call, and a later voice request timed out with an empty reply.
+**Problem:** The turn never completed because Stage 3 ran until the client disconnected and the brain execution was cancelled.
 
-**Root cause:** This turn escalated to Stage 3, but the persistent Claude session kept running for over 210 seconds. When the user spoke again at 09:24, the proxy could not acquire the request gate within 90 seconds and failed the request to avoid desync. The Android client then logged `relaunch_skipped ... reason=empty_reply`, so the user effectively got no response. The pipeline does not cancel or preempt an in-flight Stage 3 turn on barge-in/new input.
+**Root cause:** This request went straight to Stage 3 and stayed there for 243 seconds. The logs show the client disconnecting first, followed by Stage 3 cancellation, so the user-facing failure was caused by an unbounded long-running brain turn with no successful completion.
 
-**Suggested fix:** Add interrupt/cancel support for the standing-brain session when a new user turn arrives, and enforce a server-side timeout that returns a fallback spoken reply instead of leaving the client with `empty_reply`.
+**Suggested fix:** Add a dedicated short-term-memory inspection/debug path instead of sending this to generic Stage 3, and enforce a server-side Stage 3 timeout with a partial/fallback response before client disconnects.
 
 **Log evidence:**
 ```
-2026-04-29 09:22:04 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=62 sid_override=True class_protocol=n/a
+2026-04-30 01:31:02 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (721ms) params={}
 ```
 ```
-2026-04-29 09:24:03 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=52 sid_override=True class_protocol=n/a
+2026-04-30 01:31:02 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=123 sid_override=True class_protocol=n/a
 ```
 ```
-2026-04-29 09:25:33 WARNING [jane.proxy] [jane_android] Session request_gate timed out after 90s (stream) — failing request to prevent desync
+2026-04-30 01:35:05 INFO [jane.proxy] [audit-177752] Client disconnected — waiting for adapter task to finish (brain still working)
 ```
 ```
-2026-04-29T09:25:33.233Z [voice_flow] voice_flow[relaunch_skipped] path=onSendComplete reason=empty_reply
+2026-04-30 01:35:05 WARNING [jane.proxy] [audit-177752] Brain execution cancelled (stream) after 243116ms — likely client disconnect or timeout. Stack:
+```
+
+---
+
+## Issue 7 [CRITICAL]
+
+**Turn:** 2026-04-30 01:40:53
+**User said:** __debug_inspect_update_short_term_memory
+
+**Problem:** The debug turn crashed the server path with a missing `session_id` argument.
+
+**Root cause:** After Stage 1 classified the debug command as `others:Low`, the sync send path invoked Claude persistence incorrectly. The request then failed with `ClaudePersistentManager.get() missing 1 required positional argument: 'session_id'`, which is a direct server-side call-signature bug.
+
+**Suggested fix:** Fix the `ClaudePersistentManager.get()` call site on the sync `/api/jane/chat` path to always pass `session_id`, and add an automated test that exercises this debug command end-to-end.
+
+**Log evidence:**
+```
+[2026-04-30 01:40:53] (89a11d82400d) __debug_inspect_update_short_term_memory
 ```
 ```
-2026-04-29 09:25:35 INFO [jane.standing_brain] Brain [claude-opus-4-6] turn 10 complete in 210752ms (999 chars, 2 raw events)
+2026-04-30 01:40:52 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (751ms) params={}
+```
+```
+2026-04-30 01:40:53 INFO [jane.proxy] [89a11d82400d] send_message (sync) brain=Claude history=0 msg_len=40 file_ctx=False
+```
+```
+2026-04-30 01:40:53 ERROR [jane.web] Unhandled error in POST /api/jane/chat after 1682ms: ClaudePersistentManager.get() missing 1 required positional argument: 'session_id'
 ```
 
 ---

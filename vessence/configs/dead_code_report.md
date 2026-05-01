@@ -1,32 +1,22 @@
-# Dead Code Report — 2026-04-22 01:14
+# Dead Code Report — 2026-05-01 01:06
 
-## Dead files — review needed (1)
+## Dead files — review needed (2)
 
 (Candidates for deletion, but failed an auto-delete safety check —
  usually means the file is too new, too large, or outside agent_skills/test_code.)
 
-- `test_code/test_device_diagnostics_auth.py`
+- `agent_skills/vault_migration.py`
+- `memory/v1/update_identity.py`
 
-## Possibly-dead functions (13)
+## Possibly-dead functions (2)
 
 (No references found via grep. May be false positives if called via
  getattr, dynamic dispatch, or HTTP route registration.)
 
-- `agent_skills/dead_code_auditor.py` :: `is_dynamically_imported()`
-- `test_code/test_vault_unit.py` :: `vault_dir()`
-- `test_code/test_vault_unit.py` :: `authed_client()`
-- `test_code/test_vault_unit.py` :: `totp_secret()`
-- `jane_web/task_offloader.py` :: `heartbeat_loop()`
-- `jane_web/main.py` :: `get_trusted_device_cookie_id()`
-- `jane_web/main.py` :: `check_share_or_auth()`
-- `jane_web/main.py` :: `is_android_webview_request()`
-- `jane_web/main.py` :: `queue_device_command()`
-- `jane_web/main.py` :: `iter_file()`
-- `memory/v1/janitor_memory.py` :: `refresh_dynamic_query_markers()`
-- `memory/v1/janitor_memory.py` :: `verify_code_memories()`
-- `memory/v1/janitor_memory.py` :: `purge_old_self_improve_reports()`
+- `memory/v1/topic_memory.py` :: `fire_and_forget()`
+- `memory/v1/janitor_memory.py` :: `purge_expired_forgettable()`
 
-## Duplicate function bodies (9 groups)
+## Duplicate function bodies (10 groups)
 
 (Identical bodies — candidates for extraction into a shared helper.)
 
@@ -47,6 +37,10 @@
     - `jane_web/jane_v3/pipeline.py`
     - `jane_web/jane_v2/pipeline.py`
     - `jane_web/jane_v2/stage3_escalate.py`
+- group `11aebc14d001`:
+    - `jane_web/jane_v2/classes/read_calendar/handler.py`
+    - `jane_web/jane_v2/classes/weather/handler.py`
+    - `jane_web/jane_v2/classes/timer/handler.py`
 - group `5fb0436bf3f6`:
     - `context_builder/v1/query_live_memory.py`
     - `startup_code/memory_daemon.py`
