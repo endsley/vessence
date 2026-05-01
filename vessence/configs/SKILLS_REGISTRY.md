@@ -35,6 +35,11 @@ This document is a detailed index of Jane's major capabilities. It maps a high-l
         -   `MemoryUpdateTool`
         -   `TerminalTool`
 
+-   **Capability:** Encrypted Secret Store
+    -   **File:** `$VESSENCE_HOME/agent_skills/secret_store.py`
+    -   **Class:** `SecretStore`
+    -   **Purpose:** Centralized encrypted storage for sensitive credentials (API keys, passwords). Replaces plaintext `.env` secrets.
+
 -   **Capability:** Vault Browser Website
     -   **Location:** `$VESSENCE_HOME/jane_web/` (routes + templates) + `$VESSENCE_HOME/vault_web/` (shared library modules: auth, files, oauth, playlists, share, database)
     -   **URL:** Served on `http://127.0.0.1:8081`, public via Cloudflare named tunnel at `jane.vessences.com`

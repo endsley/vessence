@@ -1,5 +1,5 @@
 # Code Map — Android (Kotlin)
-_Auto-generated on 2026-04-26 08:15 UTC by `generate_code_map.py`_
+_Auto-generated on 2026-04-30 08:15 UTC by `generate_code_map.py`_
 
 ## android:.../ArticleReaderV2Activity.kt (339 lines)
   class ArticleReaderV2Activity → L35
@@ -165,17 +165,18 @@ _Auto-generated on 2026-04-26 08:15 UTC by `generate_code_map.py`_
     suspend uploadContacts() → L161
     hasPermission() → L172
 
-## android:.../contacts/SmsSyncManager.kt (263 lines)
-  object SmsSyncManager → L31
-    suspend backfillIfNeeded() → L45
-    suspend pushNewMessages() → L78
-    suspend forceSync() → L108
-    suspend querySmsSince() → L141
-    buildNumberToNameCache() → L188
-    suspend uploadMessages() → L211
-    normalizeNumber() → L225
-    startPeriodicSync() → L241
-    hasPermission() → L260
+## android:.../contacts/SmsSyncManager.kt (332 lines)
+  object SmsSyncManager → L37
+    suspend backfillIfNeeded() → L51
+    suspend pushNewMessages() → L84
+    suspend forceSync() → L137
+    suspend querySmsSince() → L170
+    buildNumberToNameCache() → L217
+    suspend uploadMessages() → L240
+    normalizeNumber() → L254
+    startPeriodicSync() → L270
+    hasPermission() → L289
+    postDiag() → L303
 
 ## android:.../data/api/ApiClient.kt (116 lines)
   object ApiClient → L17
@@ -608,43 +609,44 @@ _Auto-generated on 2026-04-26 08:15 UTC by `generate_code_map.py`_
   formatMarketplaceTimestamp() → L1362
   formatTimeAgo() → L1367
 
-## android:.../ui/briefing/BriefingViewModel.kt (690 lines)
-  class BriefingUiState → L34
-  class BriefingViewModel → L59
-    refresh() → L91
-    selectTab() → L137
-    refreshMarketplace() → L149
-    fetchArchiveDates() → L167
-    loadArchive() → L188
-    clearArchive() → L220
-    selectCategory() → L225
-    toggleArticleExpanded() → L229
-    getFilteredArticles() → L236
-    dismissArticle() → L247
-    getImageUrl() → L270
-    getMarketplaceImageUrl() → L274
-    speakArticle() → L282
-    suspend playAudioFile() → L306
-    suspend tryPlayServerAudio() → L337
-    stopSpeaking() → L383
-    readAll() → L399
-    loadCachedArticles() → L420
-    saveCachedArticles() → L439
-    suspend fetchArticles() → L450
-    suspend fetchMarketplaceSearchCards() → L470
-    fetchMarketplaceDetail() → L500
-    fetchMarketplaceSummary() → L517
-    fetchMarketplaceStatus() → L531
-    suspend fetchTopics() → L545
-    saveArticle() → L559
-    unsaveArticle() → L586
-    isArticleSaved() → L604
-    toggleSavedView() → L606
-    openSavedCategory() → L612
-    loadSavedArticles() → L616
-    fetchSavedArticleIds() → L644
-    fetchSavedCategories() → L665
-    override onCleared() → L685
+## android:.../ui/briefing/BriefingViewModel.kt (818 lines)
+  class BriefingUiState → L33
+  class BriefingViewModel → L58
+    hydrateFromCache() → L81
+    refresh() → L152
+    doNetworkRefresh() → L176
+    writeArticlesCache() → L231
+    selectTab() → L241
+    refreshMarketplace() → L253
+    fetchArchiveDates() → L302
+    loadArchive() → L328
+    clearArchive() → L360
+    selectCategory() → L365
+    toggleArticleExpanded() → L369
+    getFilteredArticles() → L376
+    dismissArticle() → L387
+    getImageUrl() → L410
+    getMarketplaceImageUrl() → L419
+    speakArticle() → L430
+    suspend playAudioFile() → L454
+    suspend tryPlayServerAudio() → L485
+    stopSpeaking() → L531
+    readAll() → L547
+    suspend fetchArticles() → L568
+    suspend fetchMarketplaceSearchCards() → L588
+    fetchMarketplaceDetail() → L618
+    fetchMarketplaceSummary() → L635
+    fetchMarketplaceStatus() → L649
+    suspend fetchTopics() → L663
+    saveArticle() → L677
+    unsaveArticle() → L704
+    isArticleSaved() → L722
+    toggleSavedView() → L724
+    openSavedCategory() → L730
+    loadSavedArticles() → L734
+    fetchSavedArticleIds() → L762
+    fetchSavedCategories() → L788
+    override onCleared() → L813
 
 ## android:.../ui/chat/AttachmentSheet.kt (255 lines)
   @Composable AttachmentSheet() → L46
@@ -927,6 +929,46 @@ _Auto-generated on 2026-04-26 08:15 UTC by `generate_code_map.py`_
     suspend downloadToCache() → L54
     suspend prefetchAll() → L108
     cleanupOldFiles() → L130
+
+## android:.../util/BriefingCache.kt (338 lines)
+  object BriefingCache → L40
+    isOnline() → L46
+    isOnWifi() → L55
+    todayKey() → L66
+    rootDir() → L75
+    todayDir() → L78
+    isFreshForToday() → L85
+    lastRefreshedAt() → L90
+    stamp() → L96
+    purgeOldDays() → L107
+    read() → L121
+    write() → L126
+    loadArticlesJson() → L131
+    saveArticlesJson() → L132
+    loadTopicsJson() → L134
+    saveTopicsJson() → L135
+    loadMarketplaceJson() → L137
+    saveMarketplaceJson() → L138
+    loadSavedArticlesJson() → L140
+    saveSavedArticlesJson() → L141
+    loadSavedCategoriesJson() → L143
+    saveSavedCategoriesJson() → L144
+    loadArchiveDatesJson() → L146
+    saveArchiveDatesJson() → L147
+    imagesDir() → L151
+    cachedImageFile() → L154
+    resolveImageUrl() → L164
+    suspend downloadImage() → L169
+    suspend prefetchImages() → L200
+    marketplaceImagesDir() → L225
+    marketplaceImageKey() → L228
+    cachedMarketplaceImageFile() → L236
+    resolveMarketplaceImageUrl() → L250
+  class MarketplaceImageRef → L267
+    suspend prefetchMarketplaceImages() → L275
+    totalSizeBytes() → L322
+    ageMillis() → L331
+    cacheTtl() → L337
 
 ## android:.../util/ChatPersistence.kt (71 lines)
   class ChatPersistence → L12

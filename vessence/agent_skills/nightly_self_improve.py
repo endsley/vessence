@@ -704,7 +704,7 @@ JOBS = [
         "Memory Janitor",
         "memory/v1/janitor_memory.py",
         [],
-        30,
+        60,
     ),
     # Auto-commit + push AFTER all self-improvement jobs. This captures
     # any fixes, report files, or code changes the jobs produced, and

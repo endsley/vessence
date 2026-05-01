@@ -131,6 +131,8 @@ JANE_SESSIONS_PATH = f"{DATA_DIR}/jane_sessions.json"
 JANE_SESSION_SUMMARY_DIR = f"{DATA_DIR}/jane_session_summaries"
 TASK_SPINE_PATH = f"{DATA_DIR}/task_spine.json"
 INTERRUPT_STACK_PATH = f"{DATA_DIR}/interrupt_stack.json"
+VAULT_ENC_PATH = f"{AGENT_ROOT}/vault.enc"
+CHALLENGE_PATH = f"{CREDENTIALS_DIR}/challenge.json"
 
 # ── Log file paths ────────────────────────────────────────────────────────────
 PROMPT_QUEUE_LOG     = f"{LOGS_DIR}/prompt_queue.log"   # legacy alias

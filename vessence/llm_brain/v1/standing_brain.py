@@ -24,6 +24,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import AsyncGenerator, Optional
 
+from agent_skills.secret_store import SecretStore
+
 logger = logging.getLogger("jane.standing_brain")
 
 # ── Provider error detection ─────────────────────────────────────────────────
@@ -302,6 +304,25 @@ class StandingBrainManager:
             "VESSENCE_HOME",
             os.path.expanduser("~/ambient/vessence"),
         )
+        
+        # Inject secrets from SecretStore into the process environment
+        env = os.environ.copy()
+        store = SecretStore()
+        if store.is_unlocked():
+            # List of keys we want to pass to CLI brains
+            brain_keys = [
+                "GOOGLE_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY",
+                "TAVILY_API_KEY", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"
+            ]
+            injected_count = 0
+            for k in brain_keys:
+                val = store.get(k)
+                if val:
+                    env[k] = val
+                    injected_count += 1
+            if injected_count > 0:
+                logger.info("Injected %d secrets into brain [%s] process environment", injected_count, bp.model)
+
         bp.process = await asyncio.create_subprocess_exec(
             *cmd,
             stdin=asyncio.subprocess.PIPE,
@@ -309,6 +330,7 @@ class StandingBrainManager:
             stderr=asyncio.subprocess.PIPE,
             cwd=_project_dir,
             start_new_session=True,
+            env=env,
         )
         bp.session_id = None
         bp.turn_count = 0
@@ -557,12 +579,20 @@ class StandingBrainManager:
         message: str,
         system_prompt: str = "",
     ) -> AsyncGenerator[tuple[str, str], None]:
-        """Send a message to the standing brain and yield tagged response chunks.
+        """Send a message to the standing brain and yield tagged response chunks."""
+        
+        # Self-healing: if vault is unlocked but brain is missing keys, force restart
+        store = SecretStore()
+        if store.is_unlocked() and self._brain and self._brain.alive:
+            # Check for a critical key that SHOULD be there
+            critical_key = "ANTHROPIC_API_KEY" if _PROVIDER == "claude" else "GOOGLE_API_KEY"
+            # Since we can't easily check the brain's internal env, we check if we were 
+            # unlocked when we started. If not, restart.
+            if getattr(self._brain, "_spawned_locked", True):
+                logger.info("Vault is now unlocked but brain was spawned locked. Restarting brain [%s]...", self._brain.model)
+                await self._kill(self._brain)
+                await self._spawn(self._brain)
 
-        Yields tuples of (event_type, text):
-            ("delta", text)   — final response text
-            ("thought", text) — intermediate thinking / tool-use events
-        """
         configured_provider = _configured_provider()
         if configured_provider != _PROVIDER:
             result = await self.switch_provider(configured_provider)
@@ -955,3 +985,4 @@ def get_standing_brain_manager() -> StandingBrainManager:
     if _manager is None:
         _manager = StandingBrainManager()
     return _manager
+r

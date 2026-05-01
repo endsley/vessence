@@ -82,6 +82,12 @@ def in_hard_skip(rel_path: str) -> bool:
     return any(rel_path.startswith(p) for p in HARD_SKIP_PREFIXES)
 
 
+def is_pytest_discovery_file(rel_path: str) -> bool:
+    """Pytest discovers test_*.py by filename, not imports."""
+    path = Path(rel_path)
+    return path.parts[:1] == ("test_code",) and path.name.startswith("test_")
+
+
 def gather_python_files() -> list[Path]:
     files = []
     for sub in SCAN_DIRS:
@@ -216,6 +222,10 @@ def scan_dead_files(files: list[Path]) -> None:
         rel = str(f.relative_to(VESSENCE_HOME))
         if f.name in HARD_KEEP:
             continue
+        # Pytest test modules are "used" by filesystem discovery even when
+        # nothing imports them directly.
+        if is_pytest_discovery_file(rel):
+            continue
         # Files sitting in a directory that other code loads via
         # importlib.import_module(f"pkg.{name}") look dead to grep but aren't.
         if is_dynamically_imported(f):
@@ -237,19 +247,34 @@ def scan_dead_files(files: list[Path]) -> None:
 def scan_dead_functions(files: list[Path]) -> None:
     log("Scanning for dead functions inside live files")
     for f in files:
+        rel = str(f.relative_to(VESSENCE_HOME))
+        # Pytest fixtures are referenced via parameter injection, and test-only
+        # helpers are low-value dead-code targets anyway. Skip the whole test tree.
+        if rel.startswith("test_code/"):
+            continue
         try:
             tree = ast.parse(f.read_text(), filename=str(f))
         except Exception:
             continue
-        for node in ast.walk(tree):
-            if isinstance(node, ast.FunctionDef):
-                if node.name.startswith("_") or node.name.startswith("test_"):
-                    continue
-                if node.name in ("main", "handle", "metadata"):
-                    continue
-                # Single-pass grep (skip if any reference outside the file)
-                if grep_references(node.name, exclude=f) == 0:
-                    _dead_functions.append((f, node.name))
+        same_file_refs = {
+            node.id
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load)
+        }
+        # Only consider module-level functions. Nested closures are frequently
+        # used as thread targets, generators, callbacks, or FastAPI helpers.
+        for node in tree.body:
+            if not isinstance(node, ast.FunctionDef):
+                continue
+            if node.name.startswith("_") or node.name.startswith("test_"):
+                continue
+            if node.name in ("main", "handle", "metadata"):
+                continue
+            if node.name in same_file_refs:
+                continue
+            # Single-pass grep (skip if any reference outside the file)
+            if grep_references(node.name, exclude=f) == 0:
+                _dead_functions.append((f, node.name))
 
 
 # ── Phase 3: duplicate function bodies across files ─────────────────────────

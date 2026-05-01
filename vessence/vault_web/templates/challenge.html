@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>{{ app_title or 'Vessences' }} — Security Challenge</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body {
+      background:
+        radial-gradient(circle at top right, rgba(167, 139, 250, 0.16), transparent 28%),
+        radial-gradient(circle at bottom left, rgba(245, 158, 11, 0.12), transparent 30%),
+        #0f172a;
+    }
+  </style>
+</head>
+<body class="min-h-screen flex items-center justify-center p-4">
+  <div class="w-full max-w-md mx-auto">
+    <!-- Logo -->
+    <div class="text-center mb-10">
+      <img src="/api/files/serve/images/people/jane/jane1.png"
+        class="w-24 h-24 rounded-full object-cover mx-auto border-2 border-violet-600 mb-3"
+        alt="Jane"
+        onerror="this.style.display='none'"/>
+      <h1 class="text-4xl font-bold text-white">{{ app_title or 'Vessences' }}</h1>
+      <p class="text-slate-400 mt-2 text-base">Security Challenge</p>
+    </div>
+
+    <!-- Card -->
+    <div class="bg-slate-800 rounded-3xl shadow-2xl p-10 border border-slate-700">
+      <div id="challenge-form" class="space-y-6">
+        <div>
+          <h2 class="text-white font-semibold text-lg mb-2">
+            {% if is_init %}Initialize Vault{% else %}Identify Yourself{% endif %}
+          </h2>
+          <p class="text-slate-400 text-sm mb-6">
+            {% if is_init %}Choose a passphrase and a security question to secure your credentials.{% else %}{{ question }}{% endif %}
+          </p>
+        </div>
+
+        <div class="space-y-4">
+          {% if is_init %}
+          <div>
+            <label class="block text-slate-400 text-xs font-semibold mb-1 uppercase tracking-wider">Security Question</label>
+            <input id="question" type="text" placeholder="e.g., What was your first pet's name?"
+              class="w-full bg-slate-700 text-white rounded-xl px-4 py-3 border border-slate-600 focus:border-violet-500 focus:outline-none"/>
+          </div>
+          {% endif %}
+
+          <div>
+            <label class="block text-slate-400 text-xs font-semibold mb-1 uppercase tracking-wider">
+              {% if is_init %}Passphrase{% else %}Answer{% endif %}
+            </label>
+            <input id="answer" type="password" placeholder="••••••••"
+              class="w-full bg-slate-700 text-white rounded-xl px-4 py-3 border border-slate-600 focus:border-violet-500 focus:outline-none"
+              onkeydown="if(event.key==='Enter') submitChallenge()"/>
+          </div>
+
+          <button onclick="submitChallenge()"
+            class="w-full bg-violet-600 hover:bg-violet-500 text-white py-3 rounded-xl font-semibold transition shadow-lg">
+            {% if is_init %}Setup Vault{% else %}Unlock{% endif %}
+          </button>
+
+          <p id="error-msg" class="text-red-400 text-sm text-center hidden"></p>
+        </div>
+      </div>
+    </div>
+
+    <p class="text-center text-slate-600 text-xs mt-6">Project Ambient · Secure Vault v1.0</p>
+  </div>
+
+  <script>
+    async function submitChallenge() {
+      const answer = document.getElementById('answer').value.trim();
+      const questionEl = document.getElementById('question');
+      const question = questionEl ? questionEl.value.trim() : null;
+      
+      const err = document.getElementById('error-msg');
+      err.classList.add('hidden');
+      
+      const payload = { answer };
+      if (question !== null) payload.question = question;
+
+      try {
+        const r = await fetch('/api/auth/challenge', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(payload),
+        });
+        const d = await r.json();
+        if (d.ok) {
+          window.location.href = '/';
+        } else {
+          err.textContent = d.error || 'Incorrect answer.';
+          err.classList.remove('hidden');
+        }
+      } catch (e) {
+        err.textContent = 'Server error. Please try again.';
+        err.classList.remove('hidden');
+      }
+    }
+  </script>
+</body>
+</html>

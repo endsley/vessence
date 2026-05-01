@@ -796,6 +796,17 @@ CODE_MAP_KEYWORDS = (
     "phrasings",
     "standard",
     "stages",
+    # Auto-evolved from daily conversations
+    "spoken",
+    "university",
+    "gmail",
+    "email",
+    "private",
+    "talking",
+    "asks",
+    "texting",
+    "due",
+    "credit",
 )
 
 

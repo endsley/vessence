@@ -96,7 +96,8 @@ from collections import defaultdict
 from time import monotonic
 
 from dotenv import load_dotenv
-from jane.config import ENV_FILE_PATH, VAULT_DIR, TOOLS_DIR, ESSENCES_DIR, VESSENCE_DATA_HOME, ADD_FACT_SCRIPT, ADK_VENV_PYTHON, LOGS_DIR, PROMPT_LIST_PATH, get_chroma_client
+from jane.config import ENV_FILE_PATH, VAULT_DIR, TOOLS_DIR, ESSENCES_DIR, VESSENCE_DATA_HOME, ADD_FACT_SCRIPT, ADK_VENV_PYTHON, LOGS_DIR, PROMPT_LIST_PATH, get_chroma_client, VAULT_ENC_PATH, CHALLENGE_PATH
+from agent_skills.secret_store import SecretStore
 
 
 # ── Rate Limiting ────────────────────────────────────────────────────────────
@@ -441,6 +442,15 @@ _background_tasks: set[asyncio.Task] = set()  # prevent GC of fire-and-forget ta
 
 @app.on_event("startup")
 async def startup():
+    # Initialize and auto-unlock SecretStore
+    store = SecretStore()
+    if store.is_unlocked():
+        # Inject SESSION_SECRET_KEY back into env for middleware if it was migrated
+        s_secret = store.get("SESSION_SECRET_KEY")
+        if s_secret:
+            os.environ["SESSION_SECRET_KEY"] = s_secret
+            _logger.info("SESSION_SECRET_KEY re-injected from SecretStore")
+
     init_db()
     _auto_load_essences()
     # Idempotency dedupe table for Android streaming chat retries (job_076).
@@ -1378,6 +1388,12 @@ def is_android_webview_request(request: Request) -> bool:
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     session_id, trusted_device_id = get_or_bootstrap_session(request)
+    
+    # Check if vault is locked
+    store = SecretStore()
+    if not store.is_unlocked():
+        return RedirectResponse(url="/challenge")
+
     if session_id:
         try:
             from .jane_proxy import get_active_brain
@@ -2065,6 +2081,47 @@ async def login_google(request: Request):
     return await oauth.google.authorize_redirect(
         request, redirect_uri, access_type="offline", prompt="consent",
     )
+
+
+@app.get("/challenge", response_class=HTMLResponse)
+async def challenge_page(request: Request):
+    store = SecretStore()
+    if store.is_unlocked():
+        return RedirectResponse(url="/")
+    
+    question = store.get_challenge_question()
+    is_init = question is None
+    
+    return templates.TemplateResponse(
+        "challenge.html",
+        {
+            "request": request,
+            "question": question or "Set up your security challenge",
+            "is_init": is_init,
+            "app_title": os.getenv("APP_TITLE", "Vessences"),
+            "app_subtitle": os.getenv("APP_SUBTITLE", "Your personal AI companion"),
+        }
+    )
+
+@app.post("/api/auth/challenge")
+async def verify_challenge(request: Request):
+    body = await request.json()
+    answer = body.get("answer", "").strip()
+    
+    store = SecretStore()
+    if not os.path.exists(VAULT_ENC_PATH):
+        # First-time setup
+        question = body.get("question", "").strip()
+        if not answer or not question:
+            return JSONResponse({"ok": False, "error": "Passphrase and question required for setup."})
+        store.initialize(answer, question)
+        return JSONResponse({"ok": True})
+    
+    # Existing vault
+    if store.unlock(answer):
+        return JSONResponse({"ok": True})
+    else:
+        return JSONResponse({"ok": False, "error": "Incorrect answer."})
 
 
 @app.get("/auth/google/callback", name="auth_google_callback")
