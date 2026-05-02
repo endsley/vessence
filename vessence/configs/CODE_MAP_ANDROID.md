@@ -1,5 +1,5 @@
 # Code Map — Android (Kotlin)
-_Auto-generated on 2026-04-30 08:15 UTC by `generate_code_map.py`_
+_Auto-generated on 2026-05-01 08:15 UTC by `generate_code_map.py`_
 
 ## android:.../ArticleReaderV2Activity.kt (339 lines)
   class ArticleReaderV2Activity → L35

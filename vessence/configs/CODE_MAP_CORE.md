@@ -78,7 +78,7 @@ for historical context.
 <!-- AUTO-GENERATED BELOW — do not edit below this line -->
 
 # Code Map — Core (Python Backend)
-_Auto-generated on 2026-04-30 08:15 UTC by `generate_code_map.py`_
+_Auto-generated on 2026-05-01 08:15 UTC by `generate_code_map.py`_
 
 ## Priority Files
 
@@ -134,57 +134,57 @@ _Auto-generated on 2026-04-30 08:15 UTC by `generate_code_map.py`_
   _log_chat_to_work_log() → L3502-3504
   get_active_brain() → L3507-3509
 
-### jane_web/main.py (6257 lines)
-  class RateLimiter → L104-130
-  class CreateManagedUserRequest → L2271-2275
-  class ChatMessage → L3299-3304
-  class SessionControl → L3307-3308
-  class SwitchProviderRequest → L3402-3403
-  GET /health → L823
-  GET /healthz → L829
-  POST /api/admin/reset-gate → L856
-  POST /api/admin/rotate-brain → L890
-  POST /api/jane/warmup → L924
-  GET /sw.js → L949
-  GET /manifest.webmanifest → L954
-  GET / → L1379
-  GET /share → L1405
-  GET /vault → L1410
-  GET /guide → L1433
-  GET /architecture → L1439
-  GET /chat → L1445
-  GET /essences → L1468
-  GET /worklog → L1472
-  GET /api/job-queue → L1476
-  GET /api/job-queue/completed → L1486
-  GET /briefing → L1496
-  POST /api/crash-report → L1501
-  POST /api/contacts/sync → L1514
-  GET /api/contacts/search → L1551
-  GET /api/contacts → L1576
-  POST /api/contacts/alias → L1587
-  POST /api/messages/sync → L1613
-  GET /api/messages/search → L1689
-  GET /api/messages/recent → L1712
-  POST /api/device-diagnostics → L1727
-  GET /api/device-diagnostics → L1761
-  GET /settings/devices → L1780
-  GET /downloads/{filename} → L1786
-  GET /api/tts-server/health → L1886
-  POST /api/tts-server/generate → L1892
-  POST /api/tts-server/stream → L1900
-  POST /api/tts/generate → L1912
-  GET /api/app/settings → L1996
-  PUT /api/app/settings → L2002
-  POST /api/app/installed → L2012
-  GET /api/app/latest-version → L2024
-  GET /auth/google → L2057
-  GET /auth/google/callback → L2071
-  POST /api/auth/google-token → L2115
-  POST /api/auth/verify-share → L2153
-  POST /api/auth/verify-otp → L2163
-  POST /api/auth/logout → L2188
-  GET /api/auth/devices → L2200
+### jane_web/main.py (6314 lines)
+  class RateLimiter → L105-131
+  class CreateManagedUserRequest → L2328-2332
+  class ChatMessage → L3356-3361
+  class SessionControl → L3364-3365
+  class SwitchProviderRequest → L3459-3460
+  GET /health → L833
+  GET /healthz → L839
+  POST /api/admin/reset-gate → L866
+  POST /api/admin/rotate-brain → L900
+  POST /api/jane/warmup → L934
+  GET /sw.js → L959
+  GET /manifest.webmanifest → L964
+  GET / → L1389
+  GET /share → L1421
+  GET /vault → L1426
+  GET /guide → L1449
+  GET /architecture → L1455
+  GET /chat → L1461
+  GET /essences → L1484
+  GET /worklog → L1488
+  GET /api/job-queue → L1492
+  GET /api/job-queue/completed → L1502
+  GET /briefing → L1512
+  POST /api/crash-report → L1517
+  POST /api/contacts/sync → L1530
+  GET /api/contacts/search → L1567
+  GET /api/contacts → L1592
+  POST /api/contacts/alias → L1603
+  POST /api/messages/sync → L1629
+  GET /api/messages/search → L1705
+  GET /api/messages/recent → L1728
+  POST /api/device-diagnostics → L1743
+  GET /api/device-diagnostics → L1777
+  GET /settings/devices → L1796
+  GET /downloads/{filename} → L1802
+  GET /api/tts-server/health → L1902
+  POST /api/tts-server/generate → L1908
+  POST /api/tts-server/stream → L1916
+  POST /api/tts/generate → L1928
+  GET /api/app/settings → L2012
+  PUT /api/app/settings → L2018
+  POST /api/app/installed → L2028
+  GET /api/app/latest-version → L2040
+  GET /auth/google → L2073
+  GET /challenge → L2087
+  POST /api/auth/challenge → L2107
+  GET /auth/google/callback → L2128
+  POST /api/auth/google-token → L2172
+  POST /api/auth/verify-share → L2210
+  POST /api/auth/verify-otp → L2220
 
 ### jane_web/broadcast.py (259 lines)
   SUMMARY_INTERVAL_SECONDS = ... → L16
@@ -249,7 +249,7 @@ _Auto-generated on 2026-04-30 08:15 UTC by `generate_code_map.py`_
   _run_task() → L59-211
   _truncate() → L214-217
 
-### jane/config.py (297 lines)
+### jane/config.py (299 lines)
   _resolve_roots() → L16-39
   get_chroma_client() → L71-97
   TOOLS_DIR = ... → L45
@@ -293,13 +293,13 @@ _Auto-generated on 2026-04-30 08:15 UTC by `generate_code_map.py`_
   JANE_SESSION_SUMMARY_DIR = ... → L131
   TASK_SPINE_PATH = ... → L132
   INTERRUPT_STACK_PATH = ... → L133
-  PROMPT_QUEUE_LOG = ... → L136
-  JOB_QUEUE_LOG = ... → L137
-  JANE_WRAPPER_RAW_LOG = ... → L138
-  AMBIENT_HEARTBEAT_LOG = ... → L139
-  VAULT_TUNNEL_LOG = ... → L140
-  ADK_VENV_PYTHON = ... → L143
-  CLAUDE_BIN = ... → L144
+  VAULT_ENC_PATH = ... → L134
+  CHALLENGE_PATH = ... → L135
+  PROMPT_QUEUE_LOG = ... → L138
+  JOB_QUEUE_LOG = ... → L139
+  JANE_WRAPPER_RAW_LOG = ... → L140
+  AMBIENT_HEARTBEAT_LOG = ... → L141
+  VAULT_TUNNEL_LOG = ... → L142
 
 ### jane/session_summary.py (260 lines)
   MAX_TOPICS = ... → L10
@@ -1427,7 +1427,7 @@ _Auto-generated on 2026-04-30 08:15 UTC by `generate_code_map.py`_
   run_team_review() → L119-142
   main() → L145-181
 
-### agent_skills/dead_code_auditor.py (412 lines)
+### agent_skills/dead_code_auditor.py (437 lines)
   VESSENCE_HOME = ... → L35
   HOME = ... → L36
   REPORT_PATH = ... → L37
@@ -1439,15 +1439,15 @@ _Auto-generated on 2026-04-30 08:15 UTC by `generate_code_map.py`_
   EXTERNAL_SEARCH_ROOTS = ... → L65
   log() → L77-78
   in_hard_skip() → L81-82
-  gather_python_files() → L85-96
-  grep_references() → L99-145
-  _collect_dynamic_import_prefixes() → L155-195
-  is_dynamically_imported() → L198-207
-  scan_dead_files() → L213-231
-  scan_dead_functions() → L237-252
-  normalize_body() → L258-266
-  scan_duplicates() → L269-288
-  can_auto_delete() → L294-316
+  is_pytest_discovery_file() → L85-88
+  gather_python_files() → L91-102
+  grep_references() → L105-151
+  _collect_dynamic_import_prefixes() → L161-201
+  is_dynamically_imported() → L204-213
+  scan_dead_files() → L219-241
+  scan_dead_functions() → L247-277
+  normalize_body() → L283-291
+  scan_duplicates() → L294-313
 
 ### agent_skills/doc_drift_auditor.py (351 lines)
   VESSENCE_HOME = ... → L26
@@ -1743,6 +1743,24 @@ _Auto-generated on 2026-04-30 08:15 UTC by `generate_code_map.py`_
   dim_screen() → L52-62
   main() → L65-90
 
+### agent_skills/secret_store.py (190 lines)
+  VAULT_PATH = ... → L14
+  SIGNATURE_PATH = ... → L16
+  class SecretStore → L18-190
+    __new__() → L25-30
+    _auto_unlock() → L32-43
+    is_unlocked() → L45-46
+    unlock() → L48-79
+    initialize() → L81-113
+    lock() → L115-120
+    get() → L122-125
+    set() → L127-131
+    _save() → L133-146
+    _derive_key() → L148-156
+    _hash_answer() → L158-166
+    get_challenge_question() → L168-173
+    verify_answer() → L175-190
+
 ### agent_skills/self_improve_log.py (143 lines)
   _VESSENCE_DATA_HOME = ... → L35
   VOCAL_LOG_PATH = ... → L39
@@ -1829,6 +1847,11 @@ _Auto-generated on 2026-04-30 08:15 UTC by `generate_code_map.py`_
   list_users() → L214-226
   set_user_personality() → L229-238
   get_personality_content() → L241-248
+
+### agent_skills/vault_migration.py (97 lines)
+  VESSENCE_HOME = ... → L8
+  SECRET_KEYS = ... → L14
+  migrate() → L32-94
 
 ### agent_skills/vault_tunnel_url.py (55 lines)
   LOG_PATHS = ... → L12

@@ -985,4 +985,3 @@ def get_standing_brain_manager() -> StandingBrainManager:
     if _manager is None:
         _manager = StandingBrainManager()
     return _manager
-r
