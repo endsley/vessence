@@ -807,6 +807,8 @@ CODE_MAP_KEYWORDS = (
     "texting",
     "due",
     "credit",
+    # Auto-evolved from daily conversations
+    "timer",
 )
 
 

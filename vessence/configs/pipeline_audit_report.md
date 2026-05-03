@@ -1,8 +1,8 @@
-# Pipeline Audit Report — 2026-05-02 01:05
+# Pipeline Audit Report — 2026-05-03 01:06
 
 - Prompts audited: **12**
-- Elapsed: 42s
-- Classification failures: **4**
+- Elapsed: 52s
+- Classification failures: **5**
 - Response failures: **11**
 - Auto-fixes applied (exemplars added): **0**
 
@@ -17,6 +17,7 @@
 ## Classification failures (top 30)
 | Prompt | Got | Should be |
 |---|---|---|
+| what I want to know is if we can use Jane to order Uber using this mCP | others | others |
 | well I sure my article with the app doesn't | others | others |
 | when I share and article with our app | others | others |
 | I want them to periodically get the lead after some time | timer | others |

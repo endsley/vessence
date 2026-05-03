@@ -1,168 +1,450 @@
-# Transcript Quality Review — 2026-04-30
+# Transcript Quality Review — 2026-05-02
 
-Generated: 2026-05-01 01:10:19
+Generated: 2026-05-03 01:10:58
 
 ## Issue 1 [CRITICAL]
 
-**Turn:** 2026-04-30 01:23:50
-**User said:** <class_protocol name="read_calendar"> These are runtime instructions
+**Turn:** 2026-05-02 01:05:45
+**User said:** can you do a search for the Uber website for mCP to work with potentially my
 
-**Problem:** Internal class protocol text was recorded as a user turn.
+**Problem:** Stage 3 failed and the user received no response
 
-**Root cause:** The transcript contains a synthetic `<class_protocol>` payload instead of a human utterance. Later turns show the same pattern immediately after `stage3_escalate` loads a class protocol, which indicates protocol text is being persisted into conversation history/transcripts instead of staying out-of-band.
+**Root cause:** The turn escalated to Claude, but the proxy logged a stream execution failure and then exited without emitting any final response payload.
 
-**Suggested fix:** Keep class protocol content in a non-user/system channel only, and exclude synthetic protocol messages from transcript persistence and future conversation history.
+**Suggested fix:** Add retry and fallback handling in `jane.proxy` for Stage 3 stream failures, and return a user-visible apology/error response when the stream ends without a final payload.
 
 **Log evidence:**
 ```
-[2026-04-30 01:23:50] (audit-177752) <class_protocol name="read_calendar">
+2026-05-02 01:05:45 INFO [jane.proxy] [audit-177769] stream_message brain=Claude history=0 msg_len=85 file_ctx=False
 ```
 ```
-[2026-04-30 01:24:27] (audit-177752) <class_protocol name="delete_email">
+2026-05-02 01:05:45 ERROR [jane.proxy] [audit-177769] Brain execution failed (stream)
 ```
 ```
-2026-04-30 01:24:26 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=delete email:Very High voice=False prompt_len=18456 sid_override=True class_protocol=loaded:delete_email
+2026-05-02 01:05:45 WARNING [jane.proxy] [audit-177769] Stream finished without final response payload
 ```
 
 ---
 
 ## Issue 2 [CRITICAL]
 
-**Turn:** 2026-04-30 01:24:27
-**User said:** <class_protocol name="delete_email"> These are runtime instructions
+**Turn:** 2026-05-02 01:05:58
+**User said:** what I want to know is if we can use Jane to order Uber using this mCP
 
-**Problem:** Delete-email turn was replaced in the transcript by internal protocol content.
+**Problem:** Stage 3 failed and the user received no response
 
-**Root cause:** Right before this transcript entry, Stage 3 escalation logged `class_protocol=loaded:delete_email`. The next recorded 'user turn' is that protocol text itself, so the pipeline/transcript layer is capturing the injected protocol prompt instead of the original user utterance.
+**Root cause:** The turn escalated to Claude, but the proxy logged a stream execution failure and then exited without emitting any final response payload.
 
-**Suggested fix:** Separate protocol injection from user-message persistence. Add a guard in transcript/history writing that drops messages tagged as class protocol or synthetic prompt material.
+**Suggested fix:** Add retry and fallback handling in `jane.proxy` for Stage 3 stream failures, and return a user-visible apology/error response when the stream ends without a final payload.
 
 **Log evidence:**
 ```
-2026-04-30 01:24:26 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=delete email:Very High voice=False prompt_len=18456 sid_override=True class_protocol=loaded:delete_email
+2026-05-02 01:05:58 INFO [jane.proxy] [audit-177769] stream_message brain=Claude history=0 msg_len=70 file_ctx=False
 ```
 ```
-[2026-04-30 01:24:27] (audit-177752) <class_protocol name="delete_email">
+2026-05-02 01:05:58 ERROR [jane.proxy] [audit-177769] Brain execution failed (stream)
+```
+```
+2026-05-02 01:05:58 WARNING [jane.proxy] [audit-177769] Stream finished without final response payload
 ```
 
 ---
 
 ## Issue 3 [MEDIUM]
 
-**Turn:** 2026-04-30 01:28:11
-**User said:** yes those articles and maybe just two days
+**Turn:** 2026-05-02 01:05:58
+**User said:** what I want to know is if we can use Jane to order Uber using this mCP
 
-**Problem:** Follow-up routing failed; a dependent reply was reclassified as a fresh turn.
+**Problem:** Follow-up flow degraded because Stage 3 was invoked with no conversation history
 
-**Root cause:** The user's reply is semantically a follow-up answer (`yes ... maybe just two days`), but Stage 1 still ran and classified it as `others:Low`. That means the pending-action resolver did not intercept and route the turn directly to the prior handler/brain context.
+**Root cause:** This and subsequent turns in the same session were sent to Claude with `history=0`, so the fragmented follow-up questions had no prior context available to Stage 3.
 
-**Suggested fix:** When Stage 2 or Stage 3 asks a clarifying question, persist a pending action with expected slot(s) and bypass Stage 1 on the next turn until that pending action is resolved or expires.
+**Suggested fix:** Preserve recent conversation history when escalating repeated turns in the same session, and log/alert when a non-initial Stage 3 turn is sent with `history=0`.
 
 **Log evidence:**
 ```
-[2026-04-30 01:28:11] (audit-177752) yes those articles and maybe just two days
+2026-05-02 01:05:58 INFO [jane.proxy] [audit-177769] stream_message brain=Claude history=0 msg_len=70 file_ctx=False
 ```
 ```
-2026-04-30 01:28:10 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (1113ms) params={}
+2026-05-02 01:06:00 INFO [jane.proxy] [audit-177769] stream_message brain=Claude history=0 msg_len=56 file_ctx=False
 ```
 ```
-2026-04-30 01:28:10 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=42 sid_override=True class_protocol=n/a
+2026-05-02 01:06:03 INFO [jane.proxy] [audit-177769] stream_message brain=Claude history=0 msg_len=43 file_ctx=False
 ```
 
 ---
 
 ## Issue 4 [CRITICAL]
 
-**Turn:** 2026-04-30 01:28:54
-**User said:** <class_protocol name="greeting"> These are runtime instructions
+**Turn:** 2026-05-02 01:06:00
+**User said:** so basically Uber has an API just not mCP to order rides
 
-**Problem:** Greeting turn was polluted with internal protocol text in the transcript.
+**Problem:** Stage 3 failed and the user received no response
 
-**Root cause:** The pipeline loaded the greeting class protocol for Stage 3, and the transcript then recorded that protocol payload as the user turn. This is the same protocol-leak/history-corruption pattern seen on other turns.
+**Root cause:** The turn escalated to Claude, but the proxy logged a stream execution failure and then exited without emitting any final response payload.
 
-**Suggested fix:** Do not write class-protocol prompt material into user-visible or persisted transcript records. Enforce message typing so only real user utterances are stored as user turns.
+**Suggested fix:** Add retry and fallback handling in `jane.proxy` for Stage 3 stream failures, and return a user-visible apology/error response when the stream ends without a final payload.
 
 **Log evidence:**
 ```
-2026-04-30 01:28:53 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=greeting:Very High voice=False prompt_len=1142 sid_override=True class_protocol=loaded:greeting
+2026-05-02 01:06:00 INFO [jane.proxy] [audit-177769] stream_message brain=Claude history=0 msg_len=56 file_ctx=False
 ```
 ```
-[2026-04-30 01:28:54] (audit-177752) <class_protocol name="greeting">
+2026-05-02 01:06:00 ERROR [jane.proxy] [audit-177769] Brain execution failed (stream)
+```
+```
+2026-05-02 01:06:00 WARNING [jane.proxy] [audit-177769] Stream finished without final response payload
 ```
 
 ---
 
-## Issue 5 [MEDIUM]
+## Issue 5 [CRITICAL]
 
-**Turn:** 2026-04-30 01:28:54
-**User said:** <class_protocol name="greeting"> These are runtime instructions
+**Turn:** 2026-05-02 01:06:03
+**User said:** well I sure my article with the app doesn't
 
-**Problem:** The greeting fast-path handler violated the Stage 2 return contract and unnecessarily escalated to Stage 3.
+**Problem:** Stage 3 failed and the user received no response
 
-**Root cause:** Stage 1 classified the turn as `greeting:Very High`, but the handler returned an invalid shape, which forced a Stage 3 fallback. This is an explicit Stage 2 contract failure.
+**Root cause:** The turn escalated to Claude, but the proxy logged a stream execution failure and then exited without emitting any final response payload.
 
-**Suggested fix:** Fix the greeting handler to always return the pipeline's expected response schema and add a unit test that validates handler output shape for every deterministic intent.
+**Suggested fix:** Add retry and fallback handling in `jane.proxy` for Stage 3 stream failures, and return a user-visible apology/error response when the stream ends without a final payload.
 
 **Log evidence:**
 ```
-2026-04-30 01:28:52 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 greeting:Very High (761ms) params={}
+2026-05-02 01:06:03 INFO [jane.proxy] [audit-177769] stream_message brain=Claude history=0 msg_len=43 file_ctx=False
 ```
 ```
-2026-04-30 01:28:53 INFO [jane_web.jane_v3.pipeline] jane_v3: handler 'greeting' returned invalid shape → Stage 3
+2026-05-02 01:06:03 ERROR [jane.proxy] [audit-177769] Brain execution failed (stream)
+```
+```
+2026-05-02 01:06:03 WARNING [jane.proxy] [audit-177769] Stream finished without final response payload
 ```
 
 ---
 
 ## Issue 6 [CRITICAL]
 
-**Turn:** 2026-04-30 01:31:02
-**User said:** can you look at the short-term memory to see if this whole thing is actual
+**Turn:** 2026-05-02 01:06:06
+**User said:** when I share and article with our app
 
-**Problem:** The turn never completed because Stage 3 ran until the client disconnected and the brain execution was cancelled.
+**Problem:** Stage 3 failed and the user received no response
 
-**Root cause:** This request went straight to Stage 3 and stayed there for 243 seconds. The logs show the client disconnecting first, followed by Stage 3 cancellation, so the user-facing failure was caused by an unbounded long-running brain turn with no successful completion.
+**Root cause:** The turn escalated to Claude, but the proxy logged a stream execution failure and then exited without emitting any final response payload.
 
-**Suggested fix:** Add a dedicated short-term-memory inspection/debug path instead of sending this to generic Stage 3, and enforce a server-side Stage 3 timeout with a partial/fallback response before client disconnects.
+**Suggested fix:** Add retry and fallback handling in `jane.proxy` for Stage 3 stream failures, and return a user-visible apology/error response when the stream ends without a final payload.
 
 **Log evidence:**
 ```
-2026-04-30 01:31:02 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (721ms) params={}
+2026-05-02 01:06:06 INFO [jane.proxy] [audit-177769] stream_message brain=Claude history=0 msg_len=37 file_ctx=False
 ```
 ```
-2026-04-30 01:31:02 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=123 sid_override=True class_protocol=n/a
+2026-05-02 01:06:06 ERROR [jane.proxy] [audit-177769] Brain execution failed (stream)
 ```
 ```
-2026-04-30 01:35:05 INFO [jane.proxy] [audit-177752] Client disconnected — waiting for adapter task to finish (brain still working)
-```
-```
-2026-04-30 01:35:05 WARNING [jane.proxy] [audit-177752] Brain execution cancelled (stream) after 243116ms — likely client disconnect or timeout. Stack:
+2026-05-02 01:06:06 WARNING [jane.proxy] [audit-177769] Stream finished without final response payload
 ```
 
 ---
 
 ## Issue 7 [CRITICAL]
 
-**Turn:** 2026-04-30 01:40:53
-**User said:** __debug_inspect_update_short_term_memory
+**Turn:** 2026-05-02 01:06:09
+**User said:** I want them to periodically get the lead after some time
 
-**Problem:** The debug turn crashed the server path with a missing `session_id` argument.
+**Problem:** Stage 3 failed and the user received no response
 
-**Root cause:** After Stage 1 classified the debug command as `others:Low`, the sync send path invoked Claude persistence incorrectly. The request then failed with `ClaudePersistentManager.get() missing 1 required positional argument: 'session_id'`, which is a direct server-side call-signature bug.
+**Root cause:** The turn escalated to Claude, but the proxy logged a stream execution failure and then exited without emitting any final response payload.
 
-**Suggested fix:** Fix the `ClaudePersistentManager.get()` call site on the sync `/api/jane/chat` path to always pass `session_id`, and add an automated test that exercises this debug command end-to-end.
+**Suggested fix:** Add retry and fallback handling in `jane.proxy` for Stage 3 stream failures, and return a user-visible apology/error response when the stream ends without a final payload.
 
 **Log evidence:**
 ```
-[2026-04-30 01:40:53] (89a11d82400d) __debug_inspect_update_short_term_memory
+2026-05-02 01:06:08 INFO [jane.proxy] [audit-177769] stream_message brain=Claude history=0 msg_len=56 file_ctx=False
 ```
 ```
-2026-04-30 01:40:52 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (751ms) params={}
+2026-05-02 01:06:09 ERROR [jane.proxy] [audit-177769] Brain execution failed (stream)
 ```
 ```
-2026-04-30 01:40:53 INFO [jane.proxy] [89a11d82400d] send_message (sync) brain=Claude history=0 msg_len=40 file_ctx=False
+2026-05-02 01:06:09 WARNING [jane.proxy] [audit-177769] Stream finished without final response payload
+```
+
+---
+
+## Issue 8 [CRITICAL]
+
+**Turn:** 2026-05-02 01:06:11
+**User said:** yes those articles and maybe just two days
+
+**Problem:** Stage 3 failed and the user received no response
+
+**Root cause:** The turn escalated to Claude, but the proxy logged a stream execution failure and then exited without emitting any final response payload.
+
+**Suggested fix:** Add retry and fallback handling in `jane.proxy` for Stage 3 stream failures, and return a user-visible apology/error response when the stream ends without a final payload.
+
+**Log evidence:**
+```
+2026-05-02 01:06:11 INFO [jane.proxy] [audit-177769] stream_message brain=Claude history=0 msg_len=42 file_ctx=False
 ```
 ```
-2026-04-30 01:40:53 ERROR [jane.web] Unhandled error in POST /api/jane/chat after 1682ms: ClaudePersistentManager.get() missing 1 required positional argument: 'session_id'
+2026-05-02 01:06:11 ERROR [jane.proxy] [audit-177769] Brain execution failed (stream)
+```
+```
+2026-05-02 01:06:11 WARNING [jane.proxy] [audit-177769] Stream finished without final response payload
+```
+
+---
+
+## Issue 9 [CRITICAL]
+
+**Turn:** 2026-05-02 01:06:14
+**User said:** currently how does your short-term memory work
+
+**Problem:** Stage 3 failed and the user received no response
+
+**Root cause:** The turn escalated to Claude, but the proxy logged a stream execution failure and then exited without emitting any final response payload.
+
+**Suggested fix:** Add retry and fallback handling in `jane.proxy` for Stage 3 stream failures, and return a user-visible apology/error response when the stream ends without a final payload.
+
+**Log evidence:**
+```
+2026-05-02 01:06:14 INFO [jane.proxy] [audit-177769] stream_message brain=Claude history=0 msg_len=46 file_ctx=False
+```
+```
+2026-05-02 01:06:14 ERROR [jane.proxy] [audit-177769] Brain execution failed (stream)
+```
+```
+2026-05-02 01:06:14 WARNING [jane.proxy] [audit-177769] Stream finished without final response payload
+```
+
+---
+
+## Issue 10 [MEDIUM]
+
+**Turn:** 2026-05-02 01:06:17
+**User said:** <class_protocol name="greeting"> These are runtime instructions for handling a g
+
+**Problem:** Stage 1 was prompt-injected into the `greeting` class by user-supplied protocol text
+
+**Root cause:** The classifier assigned `greeting:Very High` to a message that literally contained a forged `<class_protocol name="greeting">...` block, and Stage 3 escalation then loaded `class_protocol=loaded:greeting`.
+
+**Suggested fix:** Strip or escape protocol-like markup before classification, and never allow raw user text to influence trusted class protocol loading.
+
+**Log evidence:**
+```
+2026-05-02 01:06:16 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 greeting:Very High (774ms) params={}
+```
+```
+2026-05-02 01:06:17 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=greeting:Very High voice=False prompt_len=1142 sid_override=True class_protocol=loaded:greeting
+```
+
+---
+
+## Issue 11 [MEDIUM]
+
+**Turn:** 2026-05-02 01:06:17
+**User said:** <class_protocol name="greeting"> These are runtime instructions for handling a g
+
+**Problem:** Stage 2 greeting handler returned an invalid shape instead of a valid handler result
+
+**Root cause:** After Stage 1 chose `greeting`, the pipeline explicitly logged that the greeting handler returned an invalid shape and had to fall through to Stage 3.
+
+**Suggested fix:** Schema-validate all handler outputs before returning, and add a unit test that feeds adversarial greeting-like payloads through the greeting handler.
+
+**Log evidence:**
+```
+2026-05-02 01:06:16 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 greeting:Very High (774ms) params={}
+```
+```
+2026-05-02 01:06:16 INFO [jane_web.jane_v3.pipeline] jane_v3: handler 'greeting' returned invalid shape → Stage 3
+```
+
+---
+
+## Issue 12 [CRITICAL]
+
+**Turn:** 2026-05-02 01:06:17
+**User said:** <class_protocol name="greeting"> These are runtime instructions for handling a g
+
+**Problem:** Stage 3 failed and the user received no response
+
+**Root cause:** After the invalid Stage 2 result, the turn escalated to Claude, but the proxy logged a stream execution failure and then exited without a final response payload.
+
+**Suggested fix:** Add retry and fallback handling in `jane.proxy` for Stage 3 stream failures, and return a user-visible apology/error response when the stream ends without a final payload.
+
+**Log evidence:**
+```
+2026-05-02 01:06:17 INFO [jane.proxy] [audit-177769] stream_message brain=Claude history=0 msg_len=1142 file_ctx=False
+```
+```
+2026-05-02 01:06:17 ERROR [jane.proxy] [audit-177769] Brain execution failed (stream)
+```
+```
+2026-05-02 01:06:17 WARNING [jane.proxy] [audit-177769] Stream finished without final response payload
+```
+
+---
+
+## Issue 13 [CRITICAL]
+
+**Turn:** 2026-05-02 01:06:19
+**User said:** it seems to me that you are no longing making any sounds when speech to text 
+
+**Problem:** Stage 3 failed and the user received no response
+
+**Root cause:** The turn escalated to Claude, but the proxy logged a stream execution failure and then exited without emitting any final response payload.
+
+**Suggested fix:** Add retry and fallback handling in `jane.proxy` for Stage 3 stream failures, and return a user-visible apology/error response when the stream ends without a final payload.
+
+**Log evidence:**
+```
+2026-05-02 01:06:19 INFO [jane.proxy] [audit-177769] stream_message brain=Claude history=0 msg_len=94 file_ctx=False
+```
+```
+2026-05-02 01:06:19 ERROR [jane.proxy] [audit-177769] Brain execution failed (stream)
+```
+```
+2026-05-02 01:06:19 WARNING [jane.proxy] [audit-177769] Stream finished without final response payload
+```
+
+---
+
+## Issue 14 [CRITICAL]
+
+**Turn:** 2026-05-02 01:06:22
+**User said:** can you look at the short-term memory to see if this whole thing is actually 
+
+**Problem:** Stage 3 failed and the user received no response
+
+**Root cause:** The turn escalated to Claude, but the proxy logged a stream execution failure and then exited without emitting any final response payload.
+
+**Suggested fix:** Add retry and fallback handling in `jane.proxy` for Stage 3 stream failures, and return a user-visible apology/error response when the stream ends without a final payload.
+
+**Log evidence:**
+```
+2026-05-02 01:06:22 INFO [jane.proxy] [audit-177769] stream_message brain=Claude history=0 msg_len=123 file_ctx=False
+```
+```
+2026-05-02 01:06:22 ERROR [jane.proxy] [audit-177769] Brain execution failed (stream)
+```
+```
+2026-05-02 01:06:22 WARNING [jane.proxy] [audit-177769] Stream finished without final response payload
+```
+
+---
+
+## Issue 15 [CRITICAL]
+
+**Turn:** 2026-05-02 01:06:25
+**User said:** __debug_inspect_update_short_term_memory
+
+**Problem:** Stage 3 failed and the user received no response
+
+**Root cause:** The turn escalated to Claude, but the proxy logged a stream execution failure and then exited without emitting any final response payload.
+
+**Suggested fix:** Add retry and fallback handling in `jane.proxy` for Stage 3 stream failures, and return a user-visible apology/error response when the stream ends without a final payload.
+
+**Log evidence:**
+```
+2026-05-02 01:06:25 INFO [jane.proxy] [audit-177769] stream_message brain=Claude history=0 msg_len=40 file_ctx=False
+```
+```
+2026-05-02 01:06:25 ERROR [jane.proxy] [audit-177769] Brain execution failed (stream)
+```
+```
+2026-05-02 01:06:25 WARNING [jane.proxy] [audit-177769] Stream finished without final response payload
+```
+
+---
+
+## Issue 16 [MEDIUM]
+
+**Turn:** 2026-05-02 21:13:23
+**User said:** <voice timer request; duration_text=5 minutes>
+
+**Problem:** Stage 2 did not actually start the timer until an unnecessary label follow-up completed
+
+**Root cause:** The initial timer request parsed `duration_text='5 minutes'` with `label=None`, but no `fire` happened then. The actual timer start was delayed until the resolver routed a follow-up for `awaiting=label`, at which point the timer fired with an empty label.
+
+**Suggested fix:** Start the timer immediately when duration parsing succeeds, and treat the label as optional metadata instead of blocking timer creation on a follow-up.
+
+**Log evidence:**
+```
+2026-05-02 21:13:24 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 timer:Very High (1234ms) params={'action': 'set', 'duration_text': '5 minutes', 'label': None}
+```
+```
+2026-05-02 21:13:33 INFO [jane_web.jane_v2.pending_action_resolver] resolver: followup → timer (awaiting=label)
+```
+```
+2026-05-02 21:13:33 INFO [jane_web.jane_v2.classes.timer.handler] timer handler: fire duration_ms=300000 label=''
+```
+
+---
+
+## Issue 17 [LOW]
+
+**Turn:** 2026-05-02 21:14:19
+**User said:** <voice timer count query after TOOL_RESULT prefix>
+
+**Problem:** Client/server turn payload was contaminated with an internal `TOOL_RESULT` prefix
+
+**Root cause:** The pipeline had to strip a `TOOL_RESULT` wrapper from the incoming message before classifying it, which means an internal tool payload leaked into the next user turn.
+
+**Suggested fix:** Prevent tool-result envelopes from entering the normal user-message channel, and add a transport-layer guard that rejects or sanitizes `TOOL_RESULT` prefixes before they reach the pipeline.
+
+**Log evidence:**
+```
+2026-05-02 21:14:19 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stripped TOOL_RESULT prefix (177 → 37 chars)
+```
+```
+2026-05-02T21:14:19.871Z [voice_flow] voice_flow[send_message] text_len=37 fromVoice=True
+```
+
+---
+
+## Issue 18 [CRITICAL]
+
+**Turn:** 2026-05-02 21:14:26
+**User said:** <11-char voice utterance after timer count>
+
+**Problem:** Android STT captured a follow-up utterance but never sent it to the server
+
+**Root cause:** The relaunch path produced a final `stt_result` of 11 characters, but there is no matching `send_message` event afterward; the client returned to wakeword mode instead, so the user's turn was dropped locally.
+
+**Suggested fix:** In the relaunch path, require every successful `stt_result` to emit either `send_message` or an explicit discard log with reason, and add a test for relaunch-after-TTS follow-up capture.
+
+**Log evidence:**
+```
+2026-05-02T21:14:22.545Z [voice_flow] voice_flow[relaunch_launched] path=sentence_tts
+```
+```
+2026-05-02T21:14:26.039Z [voice_flow] voice_flow[stt_result] text_len=11
+```
+```
+2026-05-02T21:14:28.446Z [wakeword] Model loaded: hey_jane.onnx
+```
+
+---
+
+## Issue 19 [CRITICAL]
+
+**Turn:** 2026-05-02 21:18:33
+**User said:** <expected timer alarm for the 5-minute timer>
+
+**Problem:** The 5-minute timer appears not to have fired on the Android client
+
+**Root cause:** The server logged `timer handler: fire duration_ms=300000` at 21:13:33, so an alarm should have occurred around 21:18:33. The Android diagnostics show no timer/tool-handler/alarm event at the expected fire time and instead continue with normal wakeword activity.
+
+**Suggested fix:** Add an explicit client acknowledgement when a timer is scheduled and another when it fires, and fail the timer flow if the Android tool handler never confirms local scheduling.
+
+**Log evidence:**
+```
+2026-05-02 21:13:33 INFO [jane_web.jane_v2.classes.timer.handler] timer handler: fire duration_ms=300000 label=''
+```
+```
+2026-05-02T21:18:35.237Z [wakeword] Detected (score=0.9993707)
+```
+```
+2026-05-02T21:19:28.135Z [wakeword] periodic_status
 ```
 
 ---
