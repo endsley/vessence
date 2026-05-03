@@ -1,28 +1,26 @@
 # Most Recent Nightly Self-Improvement
 
-- Run started: 2026-05-01 01:00:01
-- Report generated: 2026-05-01 02:12:20
-- Total runtime: 4338s
+- Run started: 2026-05-02 01:00:01
+- Report generated: 2026-05-02 02:08:29
+- Total runtime: 4107s
 - Jobs: 8 total, 6 ok, 2 timeout, 0 failed
 - Stable latest report path: `/home/chieh/ambient/vessence/configs/self_improvement_latest.md`
-- Archived copy: `/home/chieh/ambient/vessence-data/reports/self_improvement/self_improvement_20260501_010001.md`
+- Archived copy: `/home/chieh/ambient/vessence-data/reports/self_improvement/self_improvement_20260502_010001.md`
 
 ## TL;DR
 
 - 1. ✓ Auto-Commit WIP (pre) (0.0m)
   - Fixes:
-    - 2026-05-01 01:00:02,617 INFO Committed 18 file(s).
+    - 2026-05-02 01:00:01,600 INFO Committed 7 file(s).
 - 2. ✓ Code Auditor (0.0m)
   - Problems:
-    - 2026-05-01 01:00:02,763 [WARNING] Working tree has uncommitted changes — skipping audit.
-- 3. ✓ Dead Code Auditor (6.4m)
+    - 2026-05-02 01:00:01,731 [WARNING] Working tree has uncommitted changes — skipping audit.
+- 3. ✓ Dead Code Auditor (5.7m)
   - Problems:
-    - Dead files — review needed: 2.
-    - Possibly-dead functions: 2.
     - Duplicate function bodies: 10 groups.
   - Fixes:
-    - [dead-code] Done — 0 auto-deleted, 2 flagged, 2 dead funcs, 10 dup groups
-- 4. ✓ Pipeline Audit (30 prompts) (0.9m)
+    - [dead-code] Done — 0 auto-deleted, 0 flagged, 0 dead funcs, 10 dup groups
+- 4. ✓ Pipeline Audit (30 prompts) (0.7m)
   - Problems:
     - Prompts audited: 12.
     - Classification failures: 4.
@@ -30,22 +28,19 @@
 - 5. ✓ Doc Drift Auditor (0.0m)
   - Problems:
     - v2_3stage_pipeline.md missing class row: CLINIC_SCHEDULES_INFO
-- 6. ✓ Transcript Quality Review (2.9m)
+- 6. ✓ Transcript Quality Review (0.0m)
   - Problems:
     - Transcript review found 7 issues: 5 critical, 2 medium.
     - Internal class protocol text was recorded as a user turn.
     - Delete-email turn was replaced in the transcript by internal protocol content.
-  - Fixes:
-    - 2026-05-01 01:10:19,550 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (7 issues)
-    - 2026-05-01 01:10:19,551 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 5 critical, 2 medium iss...
 - 7. ⏱ Memory Janitor (60.0m)
   - Problems:
-    - [0;93m2026-05-01 01:38:10.720599360 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-01 05:38:10 WARNING] ModelImporter.cpp:739: Make...
-    - [0;93m2026-05-01 01:38:10.720647428 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-01 05:38:10 WARNING] ModelImporter.cpp:739: Make...
-    - [0;93m2026-05-01 01:38:10.720672689 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-01 05:38:10 WARNING] ModelImporter.cpp:739: Make...
+    - der.h:92 log] [2026-05-02 05:38:15 WARNING] ModelImporter.cpp:739: Make sure input attention_mask has Int64 binding.[m
+    - [0;93m2026-05-02 01:38:15.567075388 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-02 05:38:15 WARNING] ModelImporter.cpp:739: Make...
+    - [0;93m2026-05-02 01:38:15.760427453 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-02 05:38:15 WARNING] ModelImporter.cpp:739: Make...
 - 8. ⏱ Auto-Commit + Push (post) (2.0m)
   - Fixes:
-    - 2026-05-01 02:10:31,970 INFO Committed 7 file(s).
+    - 2026-05-02 02:06:32,720 INFO Committed 4 file(s).
 
 **Top follow-ups:**
 
@@ -55,7 +50,7 @@
 ## Executive Summary
 
 - 2 stage(s) need attention because they timed out or exited non-zero.
-- 5 concrete improvement/fix signals were found in logs or reports.
+- 3 concrete improvement/fix signals were found in logs or reports.
 
 ## Stage 1: Auto-Commit WIP (pre)
 
@@ -72,7 +67,7 @@
 
 ### Improvements It Made
 
-- 2026-05-01 01:00:02,617 INFO Committed 18 file(s).
+- 2026-05-02 01:00:01,600 INFO Committed 7 file(s).
 
 ### Evidence Files
 
@@ -89,7 +84,7 @@
 
 ### Problems It Found
 
-- 2026-05-01 01:00:02,763 [WARNING] Working tree has uncommitted changes — skipping audit.
+- 2026-05-02 01:00:01,731 [WARNING] Working tree has uncommitted changes — skipping audit.
 
 ### Improvements It Made
 
@@ -104,7 +99,7 @@
 ## Stage 3: Dead Code Auditor
 
 - Status: `ok`
-- Duration: 386s (6.4 min)
+- Duration: 341s (5.7 min)
 
 ### What It Did
 
@@ -112,13 +107,11 @@
 
 ### Problems It Found
 
-- Dead files — review needed: 2.
-- Possibly-dead functions: 2.
 - Duplicate function bodies: 10 groups.
 
 ### Improvements It Made
 
-- [dead-code] Done — 0 auto-deleted, 2 flagged, 2 dead funcs, 10 dup groups
+- [dead-code] Done — 0 auto-deleted, 0 flagged, 0 dead funcs, 10 dup groups
 
 ### Evidence Files
 
@@ -128,7 +121,7 @@
 ## Stage 4: Pipeline Audit (30 prompts)
 
 - Status: `ok`
-- Duration: 53s (0.9 min)
+- Duration: 43s (0.7 min)
 
 ### What It Did
 
@@ -178,7 +171,7 @@
 ## Stage 6: Transcript Quality Review
 
 - Status: `ok`
-- Duration: 176s (2.9 min)
+- Duration: 0s (0.0 min)
 
 ### What It Did
 
@@ -194,8 +187,7 @@
 
 ### Improvements It Made
 
-- 2026-05-01 01:10:19,550 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (7 issues)
-- 2026-05-01 01:10:19,551 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 5 critical, 2 medium issues. The most urgent was: Inte
+- No concrete improvement was recorded in the available logs/reports.
 
 ### Follow-Up Fixes Recommended
 
@@ -221,11 +213,11 @@
 ### Problems It Found
 
 - Job ended with status `timeout`.
-- [0;93m2026-05-01 01:38:10.720599360 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-01 05:38:10 WARNING] ModelImporter.cpp:739: Make sure input input_ids has Int64 binding.[m
-- [0;93m2026-05-01 01:38:10.720647428 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-01 05:38:10 WARNING] ModelImporter.cpp:739: Make sure input attention_mask has Int64 binding.[m
-- [0;93m2026-05-01 01:38:10.720672689 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-01 05:38:10 WARNING] ModelImporter.cpp:739: Make sure input token_type_ids has Int64 binding.[m
-- [0;93m2026-05-01 01:38:10.890726036 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-01 05:38:10 WARNING] ModelImporter.cpp:739: Make sure input input_ids has Int64 binding.[m
-- [0;93m2026-05-01 01:38:10.890765989 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-01 05:38:10 WARNING] ModelImporter.cpp:739: Make sure input attention_mask has Int64 binding.[m
+- der.h:92 log] [2026-05-02 05:38:15 WARNING] ModelImporter.cpp:739: Make sure input attention_mask has Int64 binding.[m
+- [0;93m2026-05-02 01:38:15.567075388 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-02 05:38:15 WARNING] ModelImporter.cpp:739: Make sure input token_type_ids has Int64 binding.[m
+- [0;93m2026-05-02 01:38:15.760427453 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-02 05:38:15 WARNING] ModelImporter.cpp:739: Make sure input input_ids has Int64 binding.[m
+- [0;93m2026-05-02 01:38:15.760462022 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-02 05:38:15 WARNING] ModelImporter.cpp:739: Make sure input attention_mask has Int64 binding.[m
+- [0;93m2026-05-02 01:38:15.760472588 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-02 05:38:15 WARNING] ModelImporter.cpp:739: Make sure input token_type_ids has Int64 binding.[m
 
 ### Improvements It Made
 
@@ -250,7 +242,7 @@
 
 ### Improvements It Made
 
-- 2026-05-01 02:10:31,970 INFO Committed 7 file(s).
+- 2026-05-02 02:06:32,720 INFO Committed 4 file(s).
 
 ### Evidence Files
 

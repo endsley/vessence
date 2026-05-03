@@ -78,7 +78,7 @@ for historical context.
 <!-- AUTO-GENERATED BELOW — do not edit below this line -->
 
 # Code Map — Core (Python Backend)
-_Auto-generated on 2026-05-01 08:15 UTC by `generate_code_map.py`_
+_Auto-generated on 2026-05-02 08:15 UTC by `generate_code_map.py`_
 
 ## Priority Files
 
