@@ -1,61 +1,66 @@
 # Most Recent Nightly Self-Improvement
 
-- Run started: 2026-05-02 01:00:01
-- Report generated: 2026-05-02 02:08:29
-- Total runtime: 4107s
+- Run started: 2026-05-03 01:00:01
+- Report generated: 2026-05-03 02:13:00
+- Total runtime: 4378s
 - Jobs: 8 total, 6 ok, 2 timeout, 0 failed
 - Stable latest report path: `/home/chieh/ambient/vessence/configs/self_improvement_latest.md`
-- Archived copy: `/home/chieh/ambient/vessence-data/reports/self_improvement/self_improvement_20260502_010001.md`
+- Archived copy: `/home/chieh/ambient/vessence-data/reports/self_improvement/self_improvement_20260503_010001.md`
 
 ## TL;DR
 
 - 1. ✓ Auto-Commit WIP (pre) (0.0m)
   - Fixes:
-    - 2026-05-02 01:00:01,600 INFO Committed 7 file(s).
+    - 2026-05-03 01:00:02,575 INFO Committed 6 file(s).
 - 2. ✓ Code Auditor (0.0m)
   - Problems:
-    - 2026-05-02 01:00:01,731 [WARNING] Working tree has uncommitted changes — skipping audit.
-- 3. ✓ Dead Code Auditor (5.7m)
+    - 2026-05-03 01:00:02,680 [WARNING] Working tree has uncommitted changes — skipping audit.
+- 3. ✓ Dead Code Auditor (6.0m)
   - Problems:
+    - Dead files — review needed: 1.
+    - Possibly-dead functions: 2.
     - Duplicate function bodies: 10 groups.
   - Fixes:
-    - [dead-code] Done — 0 auto-deleted, 0 flagged, 0 dead funcs, 10 dup groups
-- 4. ✓ Pipeline Audit (30 prompts) (0.7m)
+    - [dead-code] Done — 0 auto-deleted, 1 flagged, 2 dead funcs, 10 dup groups
+- 4. ✓ Pipeline Audit (30 prompts) (0.9m)
   - Problems:
     - Prompts audited: 12.
-    - Classification failures: 4.
+    - Classification failures: 5.
     - Response failures: 11.
 - 5. ✓ Doc Drift Auditor (0.0m)
   - Problems:
     - v2_3stage_pipeline.md missing class row: CLINIC_SCHEDULES_INFO
-- 6. ✓ Transcript Quality Review (0.0m)
+- 6. ✓ Transcript Quality Review (4.0m)
   - Problems:
-    - Transcript review found 7 issues: 5 critical, 2 medium.
-    - Internal class protocol text was recorded as a user turn.
-    - Delete-email turn was replaced in the transcript by internal protocol content.
+    - Transcript review found 19 issues: 14 critical, 1 low, 4 medium.
+    - Stage 3 failed and the user received no response
+    - Stage 3 failed and the user received no response
+  - Fixes:
+    - 2026-05-03 01:10:58,646 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (19 issues)
+    - 2026-05-03 01:10:58,647 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 14 critical, 4 medium, 1...
 - 7. ⏱ Memory Janitor (60.0m)
   - Problems:
-    - der.h:92 log] [2026-05-02 05:38:15 WARNING] ModelImporter.cpp:739: Make sure input attention_mask has Int64 binding.[m
-    - [0;93m2026-05-02 01:38:15.567075388 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-02 05:38:15 WARNING] ModelImporter.cpp:739: Make...
-    - [0;93m2026-05-02 01:38:15.760427453 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-02 05:38:15 WARNING] ModelImporter.cpp:739: Make...
+    - 05-03 01:46:53.530595477 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-03 05:46:53 WARNING] ModelImporter.cpp:739: Make sure input i...
+    - [0;93m2026-05-03 01:46:53.530650216 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-03 05:46:53 WARNING] ModelImporter.cpp:739: Make...
+    - [0;93m2026-05-03 01:46:53.530666819 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-03 05:46:53 WARNING] ModelImporter.cpp:739: Make...
 - 8. ⏱ Auto-Commit + Push (post) (2.0m)
   - Fixes:
-    - 2026-05-02 02:06:32,720 INFO Committed 4 file(s).
+    - 2026-05-03 02:11:09,271 INFO Committed 6 file(s).
 
 **Top follow-ups:**
 
-- Keep class protocol content in a non-user/system channel only, and exclude synthetic protocol messages from transcript persistence and future conversation history.
-- Separate protocol injection from user-message persistence. Add a guard in transcript/history writing that drops messages tagged as class protocol or synthetic prompt material.
+- Add retry and fallback handling in `jane.proxy` for Stage 3 stream failures, and return a user-visible apology/error response when the stream ends without a final payload.
+- Add retry and fallback handling in `jane.proxy` for Stage 3 stream failures, and return a user-visible apology/error response when the stream ends without a final payload.
 
 ## Executive Summary
 
 - 2 stage(s) need attention because they timed out or exited non-zero.
-- 3 concrete improvement/fix signals were found in logs or reports.
+- 5 concrete improvement/fix signals were found in logs or reports.
 
 ## Stage 1: Auto-Commit WIP (pre)
 
 - Status: `ok`
-- Duration: 0s (0.0 min)
+- Duration: 1s (0.0 min)
 
 ### What It Did
 
@@ -67,7 +72,7 @@
 
 ### Improvements It Made
 
-- 2026-05-02 01:00:01,600 INFO Committed 7 file(s).
+- 2026-05-03 01:00:02,575 INFO Committed 6 file(s).
 
 ### Evidence Files
 
@@ -84,7 +89,7 @@
 
 ### Problems It Found
 
-- 2026-05-02 01:00:01,731 [WARNING] Working tree has uncommitted changes — skipping audit.
+- 2026-05-03 01:00:02,680 [WARNING] Working tree has uncommitted changes — skipping audit.
 
 ### Improvements It Made
 
@@ -99,7 +104,7 @@
 ## Stage 3: Dead Code Auditor
 
 - Status: `ok`
-- Duration: 341s (5.7 min)
+- Duration: 361s (6.0 min)
 
 ### What It Did
 
@@ -107,11 +112,13 @@
 
 ### Problems It Found
 
+- Dead files — review needed: 1.
+- Possibly-dead functions: 2.
 - Duplicate function bodies: 10 groups.
 
 ### Improvements It Made
 
-- [dead-code] Done — 0 auto-deleted, 0 flagged, 0 dead funcs, 10 dup groups
+- [dead-code] Done — 0 auto-deleted, 1 flagged, 2 dead funcs, 10 dup groups
 
 ### Evidence Files
 
@@ -121,7 +128,7 @@
 ## Stage 4: Pipeline Audit (30 prompts)
 
 - Status: `ok`
-- Duration: 43s (0.7 min)
+- Duration: 54s (0.9 min)
 
 ### What It Did
 
@@ -130,7 +137,7 @@
 ### Problems It Found
 
 - Prompts audited: 12.
-- Classification failures: 4.
+- Classification failures: 5.
 - Response failures: 11.
 - **can you do a search for the Uber website for mCP to work with potentially my AI ** (others/stage3):
 - **what I want to know is if we can use Jane to order Uber using this mCP** (others/stage3):
@@ -171,7 +178,7 @@
 ## Stage 6: Transcript Quality Review
 
 - Status: `ok`
-- Duration: 0s (0.0 min)
+- Duration: 240s (4.0 min)
 
 ### What It Did
 
@@ -179,22 +186,23 @@
 
 ### Problems It Found
 
-- Transcript review found 7 issues: 5 critical, 2 medium.
-- Internal class protocol text was recorded as a user turn.
-- Delete-email turn was replaced in the transcript by internal protocol content.
-- Follow-up routing failed; a dependent reply was reclassified as a fresh turn.
-- Greeting turn was polluted with internal protocol text in the transcript.
+- Transcript review found 19 issues: 14 critical, 1 low, 4 medium.
+- Stage 3 failed and the user received no response
+- Stage 3 failed and the user received no response
+- Follow-up flow degraded because Stage 3 was invoked with no conversation history
+- Stage 3 failed and the user received no response
 
 ### Improvements It Made
 
-- No concrete improvement was recorded in the available logs/reports.
+- 2026-05-03 01:10:58,646 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (19 issues)
+- 2026-05-03 01:10:58,647 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 14 critical, 4 medium, 1 minor issues. The most urgent
 
 ### Follow-Up Fixes Recommended
 
-- Keep class protocol content in a non-user/system channel only, and exclude synthetic protocol messages from transcript persistence and future conversation history.
-- Separate protocol injection from user-message persistence. Add a guard in transcript/history writing that drops messages tagged as class protocol or synthetic prompt material.
-- When Stage 2 or Stage 3 asks a clarifying question, persist a pending action with expected slot(s) and bypass Stage 1 on the next turn until that pending action is resolved or expires.
-- Do not write class-protocol prompt material into user-visible or persisted transcript records. Enforce message typing so only real user utterances are stored as user turns.
+- Add retry and fallback handling in `jane.proxy` for Stage 3 stream failures, and return a user-visible apology/error response when the stream ends without a final payload.
+- Add retry and fallback handling in `jane.proxy` for Stage 3 stream failures, and return a user-visible apology/error response when the stream ends without a final payload.
+- Preserve recent conversation history when escalating repeated turns in the same session, and log/alert when a non-initial Stage 3 turn is sent with `history=0`.
+- Add retry and fallback handling in `jane.proxy` for Stage 3 stream failures, and return a user-visible apology/error response when the stream ends without a final payload.
 
 ### Evidence Files
 
@@ -213,11 +221,11 @@
 ### Problems It Found
 
 - Job ended with status `timeout`.
-- der.h:92 log] [2026-05-02 05:38:15 WARNING] ModelImporter.cpp:739: Make sure input attention_mask has Int64 binding.[m
-- [0;93m2026-05-02 01:38:15.567075388 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-02 05:38:15 WARNING] ModelImporter.cpp:739: Make sure input token_type_ids has Int64 binding.[m
-- [0;93m2026-05-02 01:38:15.760427453 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-02 05:38:15 WARNING] ModelImporter.cpp:739: Make sure input input_ids has Int64 binding.[m
-- [0;93m2026-05-02 01:38:15.760462022 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-02 05:38:15 WARNING] ModelImporter.cpp:739: Make sure input attention_mask has Int64 binding.[m
-- [0;93m2026-05-02 01:38:15.760472588 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-02 05:38:15 WARNING] ModelImporter.cpp:739: Make sure input token_type_ids has Int64 binding.[m
+- 05-03 01:46:53.530595477 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-03 05:46:53 WARNING] ModelImporter.cpp:739: Make sure input input_ids has Int64 binding.[m
+- [0;93m2026-05-03 01:46:53.530650216 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-03 05:46:53 WARNING] ModelImporter.cpp:739: Make sure input attention_mask has Int64 binding.[m
+- [0;93m2026-05-03 01:46:53.530666819 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-03 05:46:53 WARNING] ModelImporter.cpp:739: Make sure input token_type_ids has Int64 binding.[m
+- [0;93m2026-05-03 01:46:53.735098259 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-03 05:46:53 WARNING] ModelImporter.cpp:739: Make sure input input_ids has Int64 binding.[m
+- [0;93m2026-05-03 01:46:53.735144809 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-03 05:46:53 WARNING] ModelImporter.cpp:739: Make sure input attention_mask has Int64 binding.[m
 
 ### Improvements It Made
 
@@ -242,7 +250,7 @@
 
 ### Improvements It Made
 
-- 2026-05-02 02:06:32,720 INFO Committed 4 file(s).
+- 2026-05-03 02:11:09,271 INFO Committed 6 file(s).
 
 ### Evidence Files
 
