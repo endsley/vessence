@@ -1,7 +1,7 @@
-# Pipeline Audit Report — 2026-05-03 01:06
+# Pipeline Audit Report — 2026-05-04 01:05
 
 - Prompts audited: **12**
-- Elapsed: 52s
+- Elapsed: 67s
 - Classification failures: **5**
 - Response failures: **11**
 - Auto-fixes applied (exemplars added): **0**
@@ -17,10 +17,10 @@
 ## Classification failures (top 30)
 | Prompt | Got | Should be |
 |---|---|---|
-| what I want to know is if we can use Jane to order Uber using this mCP | others | others |
 | well I sure my article with the app doesn't | others | others |
 | when I share and article with our app | others | others |
 | I want them to periodically get the lead after some time | timer | others |
+| yes those articles and maybe just two days | others | others |
 | __debug_inspect_update_short_term_memory | others | others |
 
 ## Response failures (top 20) — usually need code changes
