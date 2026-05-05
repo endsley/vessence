@@ -1,9 +1,40 @@
 # Job #087 — Set up test.waterlilywellness.com via Cloudflare Tunnel
 
 Priority: 2
-Status: pending
+Status: completed
 Created: 2026-05-03
+Completed: 2026-05-04
 Estimated effort: Small (1-2 hours, mostly waiting for DNS propagation)
+
+## Resolution (2026-05-04)
+
+Done end-to-end. `https://test.waterlilywellness.com` returns HTTP/2 200 from
+Cloudflare's BOS edge, serving the static mirror at `~/code/waterlily/www.waterlilywellness.com/`
+through the tunnel `waterlily-test` (UUID `a520f6da-1fb8-40f5-9077-8f924068ba51`).
+
+Final state:
+- Cloudflare zone `waterlilywellness.com` (id `5bc8dceee4efd416954066a270507468`)
+  active on Juliusctw@gmail.com's account
+- GoDaddy nameservers flipped to `jay.ns.cloudflare.com` / `surina.ns.cloudflare.com`
+- 16 DNS records replicated from GoDaddy (4 Squarespace A, 7 CNAMEs incl Microsoft 365
+  service hosts, 1 MX, 2 TXT for SPF/MS-verification, 2 SRV for Skype-for-Business)
+  — all `proxied: false` so Squarespace and Microsoft 365 traffic flows directly
+- `test.waterlilywellness.com` is the only proxied record, CNAME to
+  `<UUID>.cfargotunnel.com`
+- Local services: `waterlily-test.service` (python3 -m http.server 8088 on
+  ~/code/waterlily/www.waterlilywellness.com/) + `waterlily-tunnel.service`
+  (cloudflared with --token from `~/ambient/vessence-data/.env.waterlily_tunnel`)
+- Tunnel connector token + metadata saved to
+  `~/ambient/vault/private/credentials/cloudflare_waterlily_tunnel.json`
+- New CF API token (with Account:Zone:Edit + Zone:DNS:Edit + Account:Tunnel:Edit)
+  saved to `~/ambient/vault/private/credentials/cloudflare.json`
+- Live `www.waterlilywellness.com` (Squarespace) and `@waterlilywellness.com` email
+  verified still working post-flip.
+
+Note for future ops: the previous-session `waterlily-tunnel.service` and
+`waterlily-test.service` files were already on disk from 2026-05-03 — this session
+reused them rather than creating duplicates. The earlier `.env.waterlily_tunnel`
+file was missing; populated now.
 
 ## Summary
 

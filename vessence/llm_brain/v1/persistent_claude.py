@@ -181,6 +181,7 @@ class ClaudePersistentManager:
 
     async def run_turn(
         self,
+        user_id: str,
         session_id: str,
         prompt_text: str,
         on_delta: Callable[[str], None] | None = None,
@@ -196,7 +197,8 @@ class ClaudePersistentManager:
         Automatically rotates the session if the context window is filling up.
         Returns the full response text.
         """
-        session = await self.get(session_id)
+        composite_key = f"{user_id}:{session_id}"
+        session = await self.get(user_id, session_id)
 
         # Store model for context limit lookups
         if model and not session.model:
@@ -233,7 +235,7 @@ class ClaudePersistentManager:
 
         try:
             response_text, new_claude_session_id, usage = await self._execute_streaming(
-                cmd, on_delta, on_status, timeout_seconds, session_id=session_id
+                cmd, on_delta, on_status, timeout_seconds, session_id=composite_key
             )
         except Exception as exc:
             logger.error("[%s] Turn failed: %s", session_id[:12], exc)
@@ -252,7 +254,7 @@ class ClaudePersistentManager:
                     cmd_fresh.append("--dangerously-skip-permissions")
                 cmd_fresh.extend(["-p", prompt_text])
                 response_text, new_claude_session_id, usage = await self._execute_streaming(
-                    cmd_fresh, on_delta, on_status, timeout_seconds, session_id=session_id
+                    cmd_fresh, on_delta, on_status, timeout_seconds, session_id=composite_key
                 )
             else:
                 raise

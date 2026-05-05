@@ -4024,7 +4024,10 @@ async def jane_init_session(body: SessionControl, request: Request):
             )
 
             profile = _get_execution_profile(brain_name)
+            # Codex's run_turn already takes (user_id, session_id, ...);
+            # Claude's was just updated to match. Pass user_id first for both.
             greeting = await manager.run_turn(
+                user_id,
                 body.session_id or session_id,
                 init_prompt,
                 on_delta=lambda d: None,

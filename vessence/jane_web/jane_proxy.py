@@ -1022,6 +1022,7 @@ async def _execute_brain_sync(user_id: str, session_id: str, brain_name: str, ad
             if _cm:
                 logger.info("[%s] Code map injected (persistent claude sync)", session_id[:12] if 'session_id' in dir() else "?")
         return await manager.run_turn(
+            user_id,
             session_id,
             prompt_text,
             timeout_seconds=profile.timeout_seconds,
@@ -1093,6 +1094,7 @@ async def _execute_brain_stream(user_id: str, session_id: str, brain_name: str, 
                 emit("status", "Loading code map for code-related query...")
                 logger.info("[%s] Code map injected (persistent claude stream)", session_id[:12])
         return await manager.run_turn(
+            user_id,
             session_id,
             prompt_text,
             on_delta=lambda delta: emit("delta", delta),
