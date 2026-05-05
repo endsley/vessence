@@ -809,6 +809,9 @@ CODE_MAP_KEYWORDS = (
     "credit",
     # Auto-evolved from daily conversations
     "timer",
+    # Auto-evolved from daily conversations
+    "term",
+    "working",
 )
 
 
