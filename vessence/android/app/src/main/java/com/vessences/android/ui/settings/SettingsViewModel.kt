@@ -23,6 +23,12 @@ data class SettingsUiState(
     val triggerPhrase: String = "hey jane",
     val triggerTrained: Boolean = false,
     val wakeWordThreshold: Float = com.vessences.android.util.Constants.DEFAULT_WAKE_WORD_THRESHOLD,
+    val dndEnabled: Boolean = false,
+    val dndStartHour: Int = com.vessences.android.util.Constants.DEFAULT_DND_START_HOUR,
+    val dndStartMinute: Int = com.vessences.android.util.Constants.DEFAULT_DND_START_MINUTE,
+    val dndEndHour: Int = com.vessences.android.util.Constants.DEFAULT_DND_END_HOUR,
+    val dndEndMinute: Int = com.vessences.android.util.Constants.DEFAULT_DND_END_MINUTE,
+    val dndPolicyAccessGranted: Boolean = false,
     val isLoading: Boolean = false,
     val error: String? = null,
 )
@@ -38,6 +44,12 @@ class SettingsViewModel(private val context: Context) : ViewModel() {
             triggerPhrase = voiceSettings.getTriggerPhrase(),
             triggerTrained = voiceSettings.isTriggerTrained(),
             wakeWordThreshold = voiceSettings.getWakeWordThreshold(),
+            dndEnabled = com.vessences.android.tools.DndScheduler.isEnabled(context.applicationContext),
+            dndStartHour = com.vessences.android.tools.DndScheduler.getStart(context.applicationContext).first,
+            dndStartMinute = com.vessences.android.tools.DndScheduler.getStart(context.applicationContext).second,
+            dndEndHour = com.vessences.android.tools.DndScheduler.getEnd(context.applicationContext).first,
+            dndEndMinute = com.vessences.android.tools.DndScheduler.getEnd(context.applicationContext).second,
+            dndPolicyAccessGranted = com.vessences.android.tools.DndScheduler.hasPolicyAccess(context.applicationContext),
         )
     )
     val state: StateFlow<SettingsUiState> = _state
@@ -124,5 +136,32 @@ class SettingsViewModel(private val context: Context) : ViewModel() {
         _state.value = _state.value.copy(wakeWordThreshold = threshold)
         // Don't restart service on every slider move — threshold picks up on next service start.
         // User can leave Settings to trigger onResume → service restart.
+    }
+
+    fun setDndEnabled(enabled: Boolean) {
+        val app = context.applicationContext
+        com.vessences.android.tools.DndScheduler.setEnabled(app, enabled)
+        _state.value = _state.value.copy(
+            dndEnabled = enabled,
+            dndPolicyAccessGranted = com.vessences.android.tools.DndScheduler.hasPolicyAccess(app),
+        )
+    }
+
+    fun setDndStart(hour: Int, minute: Int) {
+        com.vessences.android.tools.DndScheduler.setStart(context.applicationContext, hour, minute)
+        _state.value = _state.value.copy(dndStartHour = hour, dndStartMinute = minute)
+    }
+
+    fun setDndEnd(hour: Int, minute: Int) {
+        com.vessences.android.tools.DndScheduler.setEnd(context.applicationContext, hour, minute)
+        _state.value = _state.value.copy(dndEndHour = hour, dndEndMinute = minute)
+    }
+
+    fun refreshDndPolicyAccess() {
+        val granted = com.vessences.android.tools.DndScheduler.hasPolicyAccess(context.applicationContext)
+        _state.value = _state.value.copy(dndPolicyAccessGranted = granted)
+        if (granted && _state.value.dndEnabled) {
+            com.vessences.android.tools.DndScheduler.applyAndSchedule(context.applicationContext)
+        }
     }
 }

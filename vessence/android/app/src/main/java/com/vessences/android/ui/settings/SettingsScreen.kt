@@ -14,12 +14,19 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import android.app.TimePickerDialog
+import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Logout
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -58,6 +65,19 @@ fun SettingsScreen(
     val context = LocalContext.current
     var pendingAlwaysListeningEnable by remember { mutableStateOf(false) }
     var showPermissionDeniedDialog by remember { mutableStateOf(false) }
+
+    // Refresh DND policy access whenever the user returns to this screen (e.g.
+    // after granting it in system settings).
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                viewModel.refreshDndPolicyAccess()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
     val recordAudioLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
@@ -463,6 +483,142 @@ fun SettingsScreen(
             }
         }
 
+        // Quiet Hours (auto Do Not Disturb)
+        item {
+            Text(
+                "Quiet Hours",
+                color = Color.White,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(top = 8.dp),
+            )
+        }
+
+        item {
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = SlateCard,
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            Icons.Default.Bedtime,
+                            contentDescription = null,
+                            tint = Violet500,
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                "Auto Do Not Disturb",
+                                color = Color.White,
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 14.sp,
+                            )
+                            Text(
+                                "Silence calls and texts overnight. Jane can still reach you.",
+                                color = SlateText,
+                                fontSize = 12.sp,
+                            )
+                        }
+                        Switch(
+                            checked = state.dndEnabled,
+                            onCheckedChange = { enabled ->
+                                if (enabled && !state.dndPolicyAccessGranted) {
+                                    val intent = Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)
+                                    try { context.startActivity(intent) } catch (_: Exception) {}
+                                }
+                                viewModel.setDndEnabled(enabled)
+                            },
+                        )
+                    }
+
+                    if (state.dndEnabled && !state.dndPolicyAccessGranted) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            "Grant Vessences access to Do Not Disturb in system settings, then return here.",
+                            color = Color(0xFFFBBF24),
+                            fontSize = 12.sp,
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        TextButton(onClick = {
+                            val intent = Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)
+                            try { context.startActivity(intent) } catch (_: Exception) {}
+                        }) {
+                            Text("Open DND access settings", color = Violet500)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Divider(color = Color(0xFF334155))
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                "Start (silence on)",
+                                color = Color.White,
+                                fontSize = 13.sp,
+                            )
+                            Text(
+                                formatTime(state.dndStartHour, state.dndStartMinute),
+                                color = SlateText,
+                                fontSize = 12.sp,
+                            )
+                        }
+                        TextButton(onClick = {
+                            TimePickerDialog(
+                                context,
+                                { _, h, m -> viewModel.setDndStart(h, m) },
+                                state.dndStartHour,
+                                state.dndStartMinute,
+                                false,
+                            ).show()
+                        }) {
+                            Text("Change", color = Violet500)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                "End (silence off)",
+                                color = Color.White,
+                                fontSize = 13.sp,
+                            )
+                            Text(
+                                formatTime(state.dndEndHour, state.dndEndMinute),
+                                color = SlateText,
+                                fontSize = 12.sp,
+                            )
+                        }
+                        TextButton(onClick = {
+                            TimePickerDialog(
+                                context,
+                                { _, h, m -> viewModel.setDndEnd(h, m) },
+                                state.dndEndHour,
+                                state.dndEndMinute,
+                                false,
+                            ).show()
+                        }) {
+                            Text("Change", color = Violet500)
+                        }
+                    }
+                }
+            }
+        }
+
         // Trusted Devices
         item {
             Text(
@@ -583,4 +739,14 @@ fun SettingsScreen(
             }
         }
     }
+}
+
+private fun formatTime(hour: Int, minute: Int): String {
+    val h12 = when {
+        hour == 0 -> 12
+        hour > 12 -> hour - 12
+        else -> hour
+    }
+    val ampm = if (hour < 12) "AM" else "PM"
+    return "%d:%02d %s".format(h12, minute, ampm)
 }

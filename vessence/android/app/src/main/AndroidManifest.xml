@@ -27,6 +27,8 @@
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Quiet Hours: required to programmatically read/change DND state. -->
+    <uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY" />
 
     <application
         android:allowBackup="true"
@@ -130,6 +132,24 @@
             android:exported="false">
             <intent-filter>
                 <action android:name="com.vessences.android.TIMER_FIRE" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Quiet Hours receiver: flips DND on at the user's start time and
+             off at the end time. The DND_ON / DND_OFF actions arrive via
+             explicit-component PendingIntents, so no <action> filter is needed
+             for them — declaring one would expose the receiver to arbitrary
+             3rd-party broadcasts. BOOT_COMPLETED / MY_PACKAGE_REPLACED re-arm
+             after reboot or upgrade; TIME_SET / TIMEZONE_CHANGED re-arm after
+             clock or timezone shifts so the schedule doesn't drift. -->
+        <receiver
+            android:name=".tools.DndReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
             </intent-filter>
         </receiver>
 

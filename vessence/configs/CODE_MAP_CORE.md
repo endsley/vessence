@@ -78,14 +78,14 @@ for historical context.
 <!-- AUTO-GENERATED BELOW — do not edit below this line -->
 
 # Code Map — Core (Python Backend)
-_Auto-generated on 2026-05-04 08:15 UTC by `generate_code_map.py`_
+_Auto-generated on 2026-05-05 08:15 UTC by `generate_code_map.py`_
 
 ## Priority Files
 
-### jane_web/jane_proxy.py (3518 lines)
+### jane_web/jane_proxy.py (3523 lines)
   class ToolMarkerExtractor → L51-338
   class _SkipRouterSignal → L354-358
-  class JaneSessionState → L823-836
+  class JaneSessionState → L826-839
     __init__() → L65-67
     feed() → L70-80
     flush() → L82-100
@@ -99,42 +99,42 @@ _Auto-generated on 2026-05-04 08:15 UTC by `generate_code_map.py`_
   _neutralize_delimiters() → L447-467
   _format_tool_results_for_brain() → L470-510
   _execute_email_tool_serverside() → L513-596
-  _maybe_prepend_code_map() → L815-819
-  run_prefetch_memory() → L851-887
-  get_prefetch_result() → L890-895
-  _get_brain_name() → L898-911
-  _session_log_id() → L914-915
-  _get_timeout_seconds() → L918-919
-  _get_execution_profile() → L922-923
-  _use_gemini_api() → L926-928
-  _use_persistent_gemini() → L930-932
-  _use_persistent_claude() → L935-936
-  _use_persistent_codex() → L939-940
-  _get_web_chat_model() → L943-962
-  _prune_stale_sessions() → L965-983
-  _execute_brain_sync() → L986-1052
-  _execute_brain_stream() → L1055-1136
-  _get_session() → L1139-1157
-  _resolve_file_context() → L1182-1191
-  _strip_stage3_injections() → L1209-1225
-  _message_for_persistence() → L1228-1232
-  prewarm_session() → L1235-1281
-  _await_prewarm_if_running() → L1284-1301
-  end_session() → L1304-1377
-  _progress_snapshot() → L1380-1394
-  _truncate_log_if_needed() → L1400-1407
-  _log_stage() → L1410-1421
-  _log_start() → L1424-1432
-  _dump_prompt() → L1435-1467
-  _persist_turns_async() → L1470-1604
-  send_message() → L1612-1638
-  _send_message_inner() → L1641-1797
-  _pick_ack() → L1800-2066
-  stream_message() → L2069-3501
-  _log_chat_to_work_log() → L3504-3506
-  get_active_brain() → L3509-3511
+  _maybe_prepend_code_map() → L818-822
+  run_prefetch_memory() → L854-890
+  get_prefetch_result() → L893-898
+  _get_brain_name() → L901-914
+  _session_log_id() → L917-918
+  _get_timeout_seconds() → L921-922
+  _get_execution_profile() → L925-926
+  _use_gemini_api() → L929-931
+  _use_persistent_gemini() → L933-935
+  _use_persistent_claude() → L938-939
+  _use_persistent_codex() → L942-943
+  _get_web_chat_model() → L946-965
+  _prune_stale_sessions() → L968-986
+  _execute_brain_sync() → L989-1056
+  _execute_brain_stream() → L1059-1141
+  _get_session() → L1144-1162
+  _resolve_file_context() → L1187-1196
+  _strip_stage3_injections() → L1214-1230
+  _message_for_persistence() → L1233-1237
+  prewarm_session() → L1240-1286
+  _await_prewarm_if_running() → L1289-1306
+  end_session() → L1309-1382
+  _progress_snapshot() → L1385-1399
+  _truncate_log_if_needed() → L1405-1412
+  _log_stage() → L1415-1426
+  _log_start() → L1429-1437
+  _dump_prompt() → L1440-1472
+  _persist_turns_async() → L1475-1609
+  send_message() → L1617-1643
+  _send_message_inner() → L1646-1802
+  _pick_ack() → L1805-2071
+  stream_message() → L2074-3506
+  _log_chat_to_work_log() → L3509-3511
+  get_active_brain() → L3514-3516
 
-### jane_web/main.py (6314 lines)
+### jane_web/main.py (6317 lines)
   class RateLimiter → L105-131
   class CreateManagedUserRequest → L2328-2332
   class ChatMessage → L3356-3361

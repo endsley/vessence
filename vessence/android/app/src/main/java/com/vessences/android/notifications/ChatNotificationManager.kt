@@ -44,6 +44,9 @@ class ChatNotificationManager(private val context: Context) {
                 description = "Notifications when Jane replies"
                 enableVibration(true)
                 setSound(soundUri, audioAttributes)
+                // Quiet Hours: Jane is allowed to break through DND so the
+                // user still hears important messages during the night window.
+                setBypassDnd(true)
             },
             NotificationChannel(
                 CHANNEL_AMBER,
@@ -53,6 +56,7 @@ class ChatNotificationManager(private val context: Context) {
                 description = "Notifications when Amber replies"
                 enableVibration(true)
                 setSound(soundUri, audioAttributes)
+                setBypassDnd(true)
             },
         )
 

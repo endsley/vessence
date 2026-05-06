@@ -689,7 +689,8 @@ Conversation turns flow through a triage pipeline:
 | Chat ViewModel | `ui/chat/ChatViewModel.kt` | Core chat logic: streaming, TTS, STT (SpeechRecognizer), wake word bridge, message queue |
 | Chat Repository | `data/repository/ChatRepository.kt` | NDJSON streaming via OkHttp `POST /api/jane/chat/stream` |
 | Login | `ui/auth/LoginScreen.kt` + `LoginViewModel.kt` | OTP auth flow |
-| Settings | `ui/settings/SettingsScreen.kt` + `SettingsViewModel.kt` | Theme, always-listening toggle, wake word threshold, trusted devices, shares |
+| Settings | `ui/settings/SettingsScreen.kt` + `SettingsViewModel.kt` | Theme, always-listening toggle, wake word threshold, **Quiet Hours (auto DND)**, trusted devices, shares |
+| DND Scheduler | `tools/DndScheduler.kt` + `tools/DndReceiver.kt` | Daily Quiet Hours: AlarmManager flips `INTERRUPTION_FILTER_PRIORITY` on at user's start time, restores on at end. Allowlisted channels (Jane/Amber chat, timer ringing) `setBypassDnd(true)` so Jane still alerts. Tracks ownership via `dnd_owns_state` to avoid clobbering manual DND. Re-arms on `BOOT_COMPLETED` / `MY_PACKAGE_REPLACED` / `TIME_SET` / `TIMEZONE_CHANGED`. Requires `ACCESS_NOTIFICATION_POLICY`. |
 | Vault | `ui/vault/VaultScreen.kt` + `VaultViewModel.kt` | File browser for server vault |
 | Briefing | `ui/briefing/BriefingScreen.kt` + `BriefingViewModel.kt` | News articles with TTS audio playback |
 | Music | `ui/music/MusicScreen.kt` + `MusicViewModel.kt` | Playlist browser, Media3 playback service |

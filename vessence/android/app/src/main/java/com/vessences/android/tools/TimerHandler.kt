@@ -266,6 +266,8 @@ object TimerHandler : ClientToolHandler {
             setSound(null, null)
             enableVibration(true)
             vibrationPattern = longArrayOf(0, 500, 250, 500)
+            // Timers should still ring during Quiet Hours.
+            setBypassDnd(true)
         }
         nm.createNotificationChannel(channel)
     }

@@ -24,4 +24,18 @@ object Constants {
     // calls when this flag is false so Android can ship the scaffolding
     // without activating any user-visible behavior.
     const val PREF_PHONE_TOOLS_ENABLED = "phone_tools_enabled"
+
+    // Quiet Hours / automatic Do Not Disturb. Vessences notification channels
+    // are flagged bypassDnd=true so Jane can still reach the user during the
+    // quiet window — only OS-level calls/SMS/other-app notifications are
+    // silenced.
+    const val PREF_DND_ENABLED = "dnd_enabled"
+    const val PREF_DND_START_HOUR = "dnd_start_hour"
+    const val PREF_DND_START_MINUTE = "dnd_start_minute"
+    const val PREF_DND_END_HOUR = "dnd_end_hour"
+    const val PREF_DND_END_MINUTE = "dnd_end_minute"
+    const val DEFAULT_DND_START_HOUR = 22  // 10pm
+    const val DEFAULT_DND_START_MINUTE = 0
+    const val DEFAULT_DND_END_HOUR = 8     // 8am
+    const val DEFAULT_DND_END_MINUTE = 0
 }

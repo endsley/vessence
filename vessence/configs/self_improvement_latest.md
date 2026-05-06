@@ -1,54 +1,56 @@
 # Most Recent Nightly Self-Improvement
 
-- Run started: 2026-05-04 01:00:01
-- Report generated: 2026-05-04 02:11:32
-- Total runtime: 4290s
+- Run started: 2026-05-05 01:00:01
+- Report generated: 2026-05-05 02:28:16
+- Total runtime: 5294s
 - Jobs: 8 total, 6 ok, 2 timeout, 0 failed
 - Stable latest report path: `/home/chieh/ambient/vessence/configs/self_improvement_latest.md`
-- Archived copy: `/home/chieh/ambient/vessence-data/reports/self_improvement/self_improvement_20260504_010001.md`
+- Archived copy: `/home/chieh/ambient/vessence-data/reports/self_improvement/self_improvement_20260505_010001.md`
 
 ## TL;DR
 
 - 1. ✓ Auto-Commit WIP (pre) (0.0m)
   - Fixes:
-    - 2026-05-04 01:00:02,289 INFO Committed 7 file(s).
+    - 2026-05-05 01:00:02,477 INFO Committed 10 file(s).
 - 2. ✓ Code Auditor (0.0m)
   - Problems:
-    - 2026-05-04 01:00:02,389 [WARNING] Working tree has uncommitted changes — skipping audit.
+    - 2026-05-05 01:00:02,635 [WARNING] Working tree has uncommitted changes — skipping audit.
 - 3. ✓ Dead Code Auditor (5.8m)
   - Problems:
+    - Dead files — review needed: 1.
+    - Possibly-dead functions: 2.
     - Duplicate function bodies: 10 groups.
   - Fixes:
-    - [dead-code] Done — 0 auto-deleted, 0 flagged, 0 dead funcs, 10 dup groups
-- 4. ✓ Pipeline Audit (30 prompts) (1.1m)
+    - [dead-code] Done — 0 auto-deleted, 1 flagged, 2 dead funcs, 10 dup groups
+- 4. ✓ Pipeline Audit (30 prompts) (16.5m)
   - Problems:
     - Prompts audited: 12.
-    - Classification failures: 5.
-    - Response failures: 11.
+    - Classification failures: 4.
+    - Response failures: 7.
 - 5. ✓ Doc Drift Auditor (0.0m)
   - Problems:
     - v2_3stage_pipeline.md missing class row: CLINIC_SCHEDULES_INFO
-- 6. ✓ Transcript Quality Review (2.6m)
+- 6. ✓ Transcript Quality Review (3.8m)
   - Problems:
-    - Transcript review found 4 issues: 2 critical, 2 medium.
-    - Repeated Stage 3 outage caused silence on the entire 01:06:07-01:06:55 open-ended conversation.
-    - Follow-up turns lost conversation context; each Stage 3 escalation was sent with `history=0`.
+    - Transcript review found 12 issues: 10 critical, 2 medium.
+    - Stage 3 dropped the turn and returned no final response.
+    - A follow-up reply was not routed by the pending-action resolver; it was treated as a fresh `others` request and then dropped.
   - Fixes:
-    - 2026-05-04 01:09:31,627 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (4 issues)
-    - 2026-05-04 01:09:31,628 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 2 critical, 2 medium iss...
+    - 2026-05-05 01:26:15,639 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (12 issues)
+    - 2026-05-05 01:26:15,640 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 10 critical, 2 medium is...
 - 7. ⏱ Memory Janitor (60.0m)
   - Problems:
-    - [0;93m2026-05-04 01:44:09.618786537 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-04 05:44:09 WARNING] ModelImporter.cpp:739: Make...
-    - [0;93m2026-05-04 01:44:09.843305459 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-04 05:44:09 WARNING] ModelImporter.cpp:739: Make...
-    - [0;93m2026-05-04 01:44:09.843338018 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-04 05:44:09 WARNING] ModelImporter.cpp:739: Make...
+    - [0;93m2026-05-05 01:57:08.637713729 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-05 05:57:08 WARNING] ModelImporter.cpp:739: Make...
+    - [0;93m2026-05-05 01:57:08.637753305 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-05 05:57:08 WARNING] ModelImporter.cpp:739: Make...
+    - [0;93m2026-05-05 01:57:08.637777233 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-05 05:57:08 WARNING] ModelImporter.cpp:739: Make...
 - 8. ⏱ Auto-Commit + Push (post) (2.0m)
   - Fixes:
-    - 2026-05-04 02:09:32,107 INFO Committed 5 file(s).
+    - 2026-05-05 02:26:16,311 INFO Committed 9 file(s).
 
 **Top follow-ups:**
 
-- Add a retry and non-stream fallback around Stage 3 calls, and always emit a user-visible failure response when the brain stream dies instead of ending the turn silently.
-- When escalating within the same session, attach prior conversation turns to Stage 3 requests instead of always sending `history=0`; add a regression test for multi-turn same-topic follow-ups.
+- In the Stage 3 proxy/escalation path, catch stream failures and always return a final error payload or retry result instead of allowing the stream to end without a response.
+- Persist pending-action state from Stage 2/Stage 3 follow-up questions and route short affirmative/parameter-only replies directly to the owning handler before classification.
 
 ## Executive Summary
 
@@ -70,7 +72,7 @@
 
 ### Improvements It Made
 
-- 2026-05-04 01:00:02,289 INFO Committed 7 file(s).
+- 2026-05-05 01:00:02,477 INFO Committed 10 file(s).
 
 ### Evidence Files
 
@@ -87,7 +89,7 @@
 
 ### Problems It Found
 
-- 2026-05-04 01:00:02,389 [WARNING] Working tree has uncommitted changes — skipping audit.
+- 2026-05-05 01:00:02,635 [WARNING] Working tree has uncommitted changes — skipping audit.
 
 ### Improvements It Made
 
@@ -102,7 +104,7 @@
 ## Stage 3: Dead Code Auditor
 
 - Status: `ok`
-- Duration: 345s (5.8 min)
+- Duration: 351s (5.8 min)
 
 ### What It Did
 
@@ -110,11 +112,13 @@
 
 ### Problems It Found
 
+- Dead files — review needed: 1.
+- Possibly-dead functions: 2.
 - Duplicate function bodies: 10 groups.
 
 ### Improvements It Made
 
-- [dead-code] Done — 0 auto-deleted, 0 flagged, 0 dead funcs, 10 dup groups
+- [dead-code] Done — 0 auto-deleted, 1 flagged, 2 dead funcs, 10 dup groups
 
 ### Evidence Files
 
@@ -124,7 +128,7 @@
 ## Stage 4: Pipeline Audit (30 prompts)
 
 - Status: `ok`
-- Duration: 68s (1.1 min)
+- Duration: 991s (16.5 min)
 
 ### What It Did
 
@@ -133,12 +137,12 @@
 ### Problems It Found
 
 - Prompts audited: 12.
-- Classification failures: 5.
-- Response failures: 11.
-- **can you do a search for the Uber website for mCP to work with potentially my AI ** (others/stage3):
-- **what I want to know is if we can use Jane to order Uber using this mCP** (others/stage3):
-- **so basically Uber has an API just not mCP to order rides** (others/stage3):
-- **well I sure my article with the app doesn't** (others/stage3):
+- Classification failures: 4.
+- Response failures: 7.
+- **I want them to periodically get the lead after some time** (timer/stage3): Can you clarify what you mean? Who is "them" and what does "getting the lead" look like in this context — are you talking about the Stage 2/3 pipeline
+- **yes those articles and maybe just two days** (others/stage3): I'm picking up from where we left off, but I've lost the earlier context. I know there was an open loop about clarifying "them" and "get the lead" — y
+- **it seems to me that you are no longing making any sounds when speech to text is ** (others/stage3): Based on my research, here's what I found about sounds in the STT flow:
+- **__debug_inspect_update_short_term_memory** (others/stage3): Here's the full picture of the short-term memory update system:
 
 ### Improvements It Made
 
@@ -174,7 +178,7 @@
 ## Stage 6: Transcript Quality Review
 
 - Status: `ok`
-- Duration: 154s (2.6 min)
+- Duration: 230s (3.8 min)
 
 ### What It Did
 
@@ -182,23 +186,23 @@
 
 ### Problems It Found
 
-- Transcript review found 4 issues: 2 critical, 2 medium.
-- Repeated Stage 3 outage caused silence on the entire 01:06:07-01:06:55 open-ended conversation.
-- Follow-up turns lost conversation context; each Stage 3 escalation was sent with `history=0`.
-- Stage 1 was prompt-injected and misclassified non-user control text as `greeting:Very High`.
-- The greeting Stage 2 handler returned an invalid payload shape instead of a valid structured response or clean escalation.
+- Transcript review found 12 issues: 10 critical, 2 medium.
+- Stage 3 dropped the turn and returned no final response.
+- A follow-up reply was not routed by the pending-action resolver; it was treated as a fresh `others` request and then dropped.
+- Stage 3 dropped the turn and returned no final response.
+- Classifier prompt-injection misrouted the turn to `greeting`, the greeting handler returned an invalid shape, and the request then failed in Stage 3.
 
 ### Improvements It Made
 
-- 2026-05-04 01:09:31,627 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (4 issues)
-- 2026-05-04 01:09:31,628 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 2 critical, 2 medium issues. The most urgent was: Repe
+- 2026-05-05 01:26:15,639 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (12 issues)
+- 2026-05-05 01:26:15,640 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 10 critical, 2 medium issues. The most urgent was: Sta
 
 ### Follow-Up Fixes Recommended
 
-- Add a retry and non-stream fallback around Stage 3 calls, and always emit a user-visible failure response when the brain stream dies instead of ending the turn silently.
-- When escalating within the same session, attach prior conversation turns to Stage 3 requests instead of always sending `history=0`; add a regression test for multi-turn same-topic follow-ups.
-- Sanitize or neutralize `class_protocol`/XML-like control markup before classification, and never allow raw user text to trigger protocol loading or class-contract behavior.
-- Enforce schema validation on every handler return value and add tests that malformed or adversarial inputs still produce a valid handler result object.
+- In the Stage 3 proxy/escalation path, catch stream failures and always return a final error payload or retry result instead of allowing the stream to end without a response.
+- Persist pending-action state from Stage 2/Stage 3 follow-up questions and route short affirmative/parameter-only replies directly to the owning handler before classification.
+- Add a guaranteed fallback response on Stage 3 stream failure and trip a temporary health gate after repeated `Brain execution failed (stream)` events.
+- Strip or neutralize user-supplied protocol/XML blocks before classification, ignore literal class-contract text as intent evidence, and enforce handler response schemas with tests so invalid shapes cannot reach production.
 
 ### Evidence Files
 
@@ -217,11 +221,11 @@
 ### Problems It Found
 
 - Job ended with status `timeout`.
-- [0;93m2026-05-04 01:44:09.618786537 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-04 05:44:09 WARNING] ModelImporter.cpp:739: Make sure input input_ids has Int64 binding.[m
-- [0;93m2026-05-04 01:44:09.843305459 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-04 05:44:09 WARNING] ModelImporter.cpp:739: Make sure input attention_mask has Int64 binding.[m
-- [0;93m2026-05-04 01:44:09.843338018 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-04 05:44:09 WARNING] ModelImporter.cpp:739: Make sure input token_type_ids has Int64 binding.[m
-- [0;93m2026-05-04 01:44:10.061563713 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-04 05:44:10 WARNING] ModelImporter.cpp:739: Make sure input input_ids has Int64 binding.[m
-- [0;93m2026-05-04 01:44:10.061610855 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-04 05:44:10 WARNING] ModelImporter.cpp:739: Make sure input attention_mask has Int64 binding.[m
+- [0;93m2026-05-05 01:57:08.637713729 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-05 05:57:08 WARNING] ModelImporter.cpp:739: Make sure input input_ids has Int64 binding.[m
+- [0;93m2026-05-05 01:57:08.637753305 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-05 05:57:08 WARNING] ModelImporter.cpp:739: Make sure input attention_mask has Int64 binding.[m
+- [0;93m2026-05-05 01:57:08.637777233 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-05 05:57:08 WARNING] ModelImporter.cpp:739: Make sure input token_type_ids has Int64 binding.[m
+- [0;93m2026-05-05 01:59:24.507424949 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-05 05:59:24 WARNING] ModelImporter.cpp:739: Make sure input input_ids has Int64 binding.[m
+- [0;93m2026-05-05 01:59:24.507471038 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-05 05:59:24 WARNING] ModelImporter.cpp:739: Make sure input attention_mask has Int64 binding.[m
 
 ### Improvements It Made
 
@@ -246,7 +250,7 @@
 
 ### Improvements It Made
 
-- 2026-05-04 02:09:32,107 INFO Committed 5 file(s).
+- 2026-05-05 02:26:16,311 INFO Committed 9 file(s).
 
 ### Evidence Files
 
