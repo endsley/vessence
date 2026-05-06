@@ -1,291 +1,153 @@
-# Transcript Quality Review — 2026-05-04
+# Transcript Quality Review — 2026-05-05
 
-Generated: 2026-05-05 01:26:15
+Generated: 2026-05-06 01:30:12
 
-## Issue 1 [CRITICAL]
+## Issue 1 [MEDIUM]
 
-**Turn:** 2026-05-04 01:06:38
-**User said:** I want them to periodically get the lead after some time
+**Turn:** 2026-05-05 01:06:44
+**User said:** yes those articles and maybe just two days
 
-**Problem:** Stage 3 dropped the turn and returned no final response.
+**Problem:** Follow-up reply was treated as a brand-new request instead of resolving prior context.
 
-**Root cause:** The request escalated out of Stage 1, but the Claude stream failed in the proxy and the pipeline exited without emitting any fallback payload, so the user received no answer.
+**Root cause:** The utterance is a bare confirmation plus added parameters, but the pipeline reran Stage 1 and launched a fresh Stage 3 turn with `history=0` and `Standing brain turn 1`. No pending-action/resolver handoff is visible, so follow-up state was not preserved in a routable form.
 
-**Suggested fix:** In the Stage 3 proxy/escalation path, catch stream failures and always return a final error payload or retry result instead of allowing the stream to end without a response.
+**Suggested fix:** When Stage 2 or Stage 3 asks a clarifying question, persist a structured `pending_action` with the owning handler/brain and have `pending_action_resolver` consume short replies like `yes ...` before classification.
 
 **Log evidence:**
 ```
-2026-05-04 01:06:37 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (1212ms) params={}
+2026-05-05 01:06:10 INFO [jane.standing_brain] Brain [claude-opus-4-6] result event: result_len=205, accumulated=0, lines_read=11
 ```
 ```
-2026-05-04 01:06:38 ERROR [jane.proxy] [audit-177787] Brain execution failed (stream)
+2026-05-05 01:06:43 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (1188ms) params={}
 ```
 ```
-2026-05-04 01:06:38 WARNING [jane.proxy] [audit-177787] Stream finished without final response payload
+2026-05-05 01:06:44 INFO [jane.proxy] [audit-177795] stream_message brain=Claude history=0 msg_len=42 file_ctx=False
+```
+```
+2026-05-05 01:06:44 INFO [jane.proxy] [audit-177795] Standing brain turn 1 — injected recent history only
 ```
 
 ---
 
 ## Issue 2 [CRITICAL]
 
-**Turn:** 2026-05-04 01:06:40
-**User said:** yes those articles and maybe just two days
+**Turn:** 2026-05-05 01:08:18
+**User said:** <class_protocol name="greeting"> These are runtime instructions for handling
 
-**Problem:** A follow-up reply was not routed by the pending-action resolver; it was treated as a fresh `others` request and then dropped.
+**Problem:** User-supplied control text hijacked routing: Stage 1 treated the payload as a real `greeting` intent, and the greeting handler then failed.
 
-**Root cause:** This utterance is an elliptical answer to a prior question, but it still went through Stage 1 and was classified `others:Low` instead of bypassing classification. After that miss, Stage 3 also failed and produced no final response.
+**Root cause:** Stage 1 classified the literal `<class_protocol name="greeting">...` payload as `greeting:Very High`. Stage 2 then returned an invalid shape and Stage 3 was invoked with `class_protocol=loaded:greeting`, showing that untrusted prompt-like text influenced both routing and downstream behavior.
 
-**Suggested fix:** Persist pending-action state from Stage 2/Stage 3 follow-up questions and route short affirmative/parameter-only replies directly to the owning handler before classification.
+**Suggested fix:** Sanitize or strongly down-rank XML/control-token patterns before intent classification, and never load a handler protocol from user-supplied text. Add a schema-safe fallback when a handler receives malformed input.
 
 **Log evidence:**
 ```
-2026-05-04 01:06:40 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (1140ms) params={}
+2026-05-05 01:08:16 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 greeting:Very High (687ms) params={}
 ```
 ```
-2026-05-04 01:06:40 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=42 sid_override=True class_protocol=n/a
+2026-05-05 01:08:17 INFO [jane_web.jane_v3.pipeline] jane_v3: handler 'greeting' returned invalid shape → Stage 3
 ```
 ```
-2026-05-04 01:06:40 WARNING [jane.proxy] [audit-177787] Stream finished without final response payload
+2026-05-05 01:08:17 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=greeting:Very High voice=False prompt_len=1142 sid_override=True class_protocol=loaded:greeting
 ```
 
 ---
 
 ## Issue 3 [CRITICAL]
 
-**Turn:** 2026-05-04 01:06:43
-**User said:** currently how does your short-term memory work
+**Turn:** 2026-05-05 01:08:41
+**User said:** it seems to me that you are no longing making any sounds when speech to te
 
-**Problem:** Stage 3 dropped the turn and returned no final response.
+**Problem:** A live voice-troubleshooting turn incurred unusable Stage 3 latency.
 
-**Root cause:** Stage 1 escalated the request appropriately, but the Claude stream failed and the proxy closed the stream without a final payload.
+**Root cause:** The standing Claude session is unstable: session teardown failures are logged, and every escalated turn restarts the brain as a fresh `turn 1` because it was spawned locked. This turn took 145765ms in Stage 3 and 147085ms end-to-end, which is incompatible with conversational voice UX.
 
-**Suggested fix:** Add a guaranteed fallback response on Stage 3 stream failure and trip a temporary health gate after repeated `Brain execution failed (stream)` events.
+**Suggested fix:** Keep the standing brain warm and unlocked across turns. If teardown fails, recreate the session asynchronously before the next user request instead of cold-restarting during the request path.
 
 **Log evidence:**
 ```
-2026-05-04 01:06:42 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (786ms) params={}
+2026-05-05 01:05:54 ERROR [jane.proxy] [ac6ede791cb0] Failed to end persistent Claude session
 ```
 ```
-2026-05-04 01:06:43 ERROR [jane.proxy] [audit-177787] Brain execution failed (stream)
+2026-05-05 01:08:41 INFO [jane.standing_brain] Vault is now unlocked but brain was spawned locked. Restarting brain [claude-opus-4-6]...
 ```
 ```
-2026-05-04 01:06:43 WARNING [jane.proxy] [audit-177787] Stream finished without final response payload
+2026-05-05 01:11:08 INFO [jane.standing_brain] Brain [claude-opus-4-6] turn 1 complete in 145765ms (617 chars, 3 raw events)
+```
+```
+2026-05-05 01:11:08 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage3 end-to-end (147085ms)
 ```
 
 ---
 
-## Issue 4 [CRITICAL]
+## Issue 4 [MEDIUM]
 
-**Turn:** 2026-05-04 01:06:46
-**User said:** <class_protocol name="greeting"> These are runtime instructions for handling
+**Turn:** 2026-05-05 01:15:40
+**User said:** I'm currently are you able to see that the website Jane version is not work
 
-**Problem:** Classifier prompt-injection misrouted the turn to `greeting`, the greeting handler returned an invalid shape, and the request then failed in Stage 3.
+**Problem:** Stage 1 emitted an unregistered label (`restart server`) for a website-debugging request and had to fall back to `others`.
 
-**Root cause:** Stage 1 labeled the injected protocol text as `greeting:Very High`; the pipeline explicitly logged that the `greeting` handler returned an invalid shape and escalated. Stage 3 then failed and produced no final response.
+**Root cause:** The classifier produced a class name that is not in the active intent registry, so the pipeline downgraded it to `others:Low` and sent the turn to Stage 3. This indicates drift between classifier outputs and the registered label set.
 
-**Suggested fix:** Strip or neutralize user-supplied protocol/XML blocks before classification, ignore literal class-contract text as intent evidence, and enforce handler response schemas with tests so invalid shapes cannot reach production.
+**Suggested fix:** Constrain classifier decoding to the registered intent enum, or post-validate and re-prompt the classifier when it returns an unknown label instead of silently mapping arbitrary labels to `others`.
 
 **Log evidence:**
 ```
-2026-05-04 01:06:45 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 greeting:Very High (727ms) params={}
+2026-05-05 01:15:39 WARNING [intent_classifier.v3.classifier] v3: qwen returned unknown class 'restart server' → others
 ```
 ```
-2026-05-04 01:06:45 INFO [jane_web.jane_v3.pipeline] jane_v3: handler 'greeting' returned invalid shape → Stage 3
+2026-05-05 01:15:39 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (707ms) params={}
 ```
 ```
-2026-05-04 01:06:46 WARNING [jane.proxy] [audit-177787] Stream finished without final response payload
+2026-05-05 01:15:39 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=78 sid_override=True class_protocol=n/a
 ```
 
 ---
 
-## Issue 5 [CRITICAL]
+## Issue 5 [MEDIUM]
 
-**Turn:** 2026-05-04 01:06:49
-**User said:** it seems to me that you are no longing making any sounds when speech to text 
-
-**Problem:** Stage 3 dropped the diagnostic turn and returned no final response.
-
-**Root cause:** The request escalated from Stage 1, but the proxy logged a Stage 3 stream failure and then ended without a final payload.
-
-**Suggested fix:** Return a deterministic outage/apology response when the brain stream fails, instead of leaving the client with no assistant reply.
-
-**Log evidence:**
-```
-2026-05-04 01:06:48 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (718ms) params={}
-```
-```
-2026-05-04 01:06:49 ERROR [jane.proxy] [audit-177787] Brain execution failed (stream)
-```
-```
-2026-05-04 01:06:49 WARNING [jane.proxy] [audit-177787] Stream finished without final response payload
-```
-
----
-
-## Issue 6 [CRITICAL]
-
-**Turn:** 2026-05-04 01:06:52
-**User said:** can you look at the short-term memory to see if this whole thing is actually 
-
-**Problem:** Stage 3 dropped the turn and returned no final response.
-
-**Root cause:** After Stage 1 classified the request as `others:Low`, the proxy's Claude stream failed and no final response payload was emitted.
-
-**Suggested fix:** Add a fallback response path for Stage 3 failures and alert on repeated stream failures within the same session.
-
-**Log evidence:**
-```
-2026-05-04 01:06:51 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (861ms) params={}
-```
-```
-2026-05-04 01:06:52 ERROR [jane.proxy] [audit-177787] Brain execution failed (stream)
-```
-```
-2026-05-04 01:06:52 WARNING [jane.proxy] [audit-177787] Stream finished without final response payload
-```
-
----
-
-## Issue 7 [CRITICAL]
-
-**Turn:** 2026-05-04 01:06:54
-**User said:** __debug_inspect_update_short_term_memory
-
-**Problem:** Stage 3 dropped the turn and returned no final response.
-
-**Root cause:** The proxy again logged `Brain execution failed (stream)` and then closed without a final payload, so even the debug-style command produced no answer.
-
-**Suggested fix:** Implement a hard error response for failed Stage 3 streams and consider a dedicated deterministic handler for internal debug commands.
-
-**Log evidence:**
-```
-2026-05-04 01:06:53 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (711ms) params={}
-```
-```
-2026-05-04 01:06:54 ERROR [jane.proxy] [audit-177787] Brain execution failed (stream)
-```
-```
-2026-05-04 01:06:54 WARNING [jane.proxy] [audit-177787] Stream finished without final response payload
-```
-
----
-
-## Issue 8 [CRITICAL]
-
-**Turn:** 2026-05-04 10:03:39
-**User said:** hey Jane, can you take a look at the ~/code/waterlily project for me
-
-**Problem:** The request escalated to Stage 3, but the brain was unavailable and the user received no response.
-
-**Root cause:** The web layer logged `Init session failed` shortly before the turn. The request then went to Stage 3, where the Claude stream failed and the proxy finished without a final payload.
-
-**Suggested fix:** Gate Stage 3 escalation on successful session initialization and return a deterministic 'brain unavailable' response or auto-restart before accepting the turn.
-
-**Log evidence:**
-```
-2026-05-04 10:03:12 ERROR [jane.web] Init session failed
-```
-```
-2026-05-04 10:03:39 ERROR [jane.proxy] [b7bcba8dcdd3] Brain execution failed (stream)
-```
-```
-2026-05-04 10:03:39 WARNING [jane.proxy] [b7bcba8dcdd3] Stream finished without final response payload
-```
-
----
-
-## Issue 9 [CRITICAL]
-
-**Turn:** 2026-05-04 10:15:11
-**User said:** I'm currently are you able to see that the website Jane version is not working
-
-**Problem:** Stage 1 emitted an unsupported class (`restart server`), fell back to `others`, and the turn still failed in Stage 3 with no reply.
-
-**Root cause:** The classifier log shows Qwen producing an unknown label, which the pipeline coerced to `others:Low`. At the same time the web layer had `Init session failed`, and the subsequent Stage 3 stream died without a final payload.
-
-**Suggested fix:** Constrain classifier outputs to the registered class set with server-side validation/re-prompting, and short-circuit to a user-visible outage message when session init or Stage 3 startup has failed.
-
-**Log evidence:**
-```
-2026-05-04 10:15:09 ERROR [jane.web] Init session failed
-```
-```
-2026-05-04 10:15:10 WARNING [intent_classifier.v3.classifier] v3: qwen returned unknown class 'restart server' → others
-```
-```
-2026-05-04 10:15:11 WARNING [jane.proxy] [jane_android] Stream finished without final response payload
-```
-
----
-
-## Issue 10 [CRITICAL]
-
-**Turn:** 2026-05-04 10:22:20
+**Turn:** 2026-05-05 01:18:45
 **User said:** is stage 3 brain back up by now
 
-**Problem:** A Stage-3-status question was classified through unsupported `force stage3`, then routed into a Stage 3 backend that was still down.
+**Problem:** Stage 1 again emitted an internal/unregistered label (`force stage3`) for a simple status question.
 
-**Root cause:** The classifier again emitted an unknown label and fell back to `others`. The request hit Stage 3 and failed at 10:22:20, while the standing brain was only started at 10:22:25, so the status check itself raced the recovery.
+**Root cause:** The classifier is leaking meta-routing concepts into its output. The invalid `force stage3` label appears on this turn and recurs again at 01:21:49, then both are coerced to `others:Low`.
 
-**Suggested fix:** Add a deterministic Stage 2 health/status handler for 'is Stage 3 up' queries and block Stage 3 escalation until the standing brain is confirmed ready.
+**Suggested fix:** Remove meta labels from the classifier prompt/examples, clamp outputs to the public registry, and add regression tests for `is stage 3 working/back up` phrasings.
 
 **Log evidence:**
 ```
-2026-05-04 10:22:18 WARNING [intent_classifier.v3.classifier] v3: qwen returned unknown class 'force stage3' → others
+2026-05-05 01:18:44 WARNING [intent_classifier.v3.classifier] v3: qwen returned unknown class 'force stage3' → others
 ```
 ```
-2026-05-04 10:22:20 WARNING [jane.proxy] [jane_android] Stream finished without final response payload
+2026-05-05 01:18:44 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (766ms) params={}
 ```
 ```
-2026-05-04 10:22:25 INFO [jane.standing_brain] Standing brain started: provider=claude model=claude-opus-4-6 pid=924260
+2026-05-05 01:21:49 WARNING [intent_classifier.v3.classifier] v3: qwen returned unknown class 'force stage3' → others
 ```
 
 ---
 
-## Issue 11 [MEDIUM]
+## Issue 6 [MEDIUM]
 
-**Turn:** 2026-05-04 15:59:07
-**User said:** is the stage 3 brain working now
-
-**Problem:** The turn eventually succeeded, but the first post-unlock Stage 3 request incurred a 33-second recovery delay.
-
-**Root cause:** The standing brain had been spawned while the vault was locked. The system only noticed and restarted it after this user turn arrived, so the request blocked on recovery before completion.
-
-**Suggested fix:** When vault lock state changes, eagerly respawn or rehydrate the standing brain in the background so the next user turn does not pay the restart penalty.
-
-**Log evidence:**
-```
-2026-05-04 15:59:07 INFO [jane.standing_brain] Vault is now unlocked but brain was spawned locked. Restarting brain [claude-opus-4-6]...
-```
-```
-2026-05-04 15:59:40 INFO [jane.standing_brain] Brain [claude-opus-4-6] turn 1 complete in 32066ms (210 chars, 2 raw events)
-```
-```
-2026-05-04 15:59:40 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage3 end-to-end (33483ms)
-```
-
----
-
-## Issue 12 [MEDIUM]
-
-**Turn:** 2026-05-04 23:12:25
+**Turn:** 2026-05-05 01:22:08
 **User said:** can you mute my computer for me
 
-**Problem:** A simple action request incurred another avoidable Stage 3 cold-start because the standing brain was still in the wrong lock state.
+**Problem:** A device-control request had no deterministic execution path; it was treated as generic text and only sent to Stage 3.
 
-**Root cause:** The same locked/unlocked mismatch reappeared later that day. The request entered Stage 3, triggered another standing-brain restart, and took 11.5 seconds end-to-end instead of using a warm brain.
+**Root cause:** The turn was classified as `others:Low` and immediately escalated. In the supplied diagnostics there is no corresponding `tool_handler` or `voice_flow` execution event for a mute action, so the logs show text generation only, not an actual client-side command execution path.
 
-**Suggested fix:** Persist the corrected brain state after unlock or continuously reconcile vault state so later turns do not repeatedly restart the standing brain.
+**Suggested fix:** Add a `device_control` intent/handler for actions like mute, and require Stage 3 to emit an explicit tool marker that the client executes and logs.
 
 **Log evidence:**
 ```
-2026-05-04 23:12:25 INFO [jane.proxy] [jane_android] Standing brain turn 1 — injected recent history only
+2026-05-05 01:22:07 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (771ms) params={}
 ```
 ```
-2026-05-04 23:12:25 INFO [jane.standing_brain] Vault is now unlocked but brain was spawned locked. Restarting brain [claude-opus-4-6]...
+2026-05-05 01:22:08 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=31 sid_override=True class_protocol=n/a
 ```
 ```
-2026-05-04 23:12:37 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage3 end-to-end (11532ms)
+2026-05-05 01:22:23 INFO [jane.standing_brain] Brain [claude-opus-4-6] result event: result_len=30, accumulated=0, lines_read=15
 ```
 
 ---
