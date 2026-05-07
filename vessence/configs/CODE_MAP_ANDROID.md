@@ -1,5 +1,5 @@
 # Code Map — Android (Kotlin)
-_Auto-generated on 2026-05-05 08:15 UTC by `generate_code_map.py`_
+_Auto-generated on 2026-05-06 08:15 UTC by `generate_code_map.py`_
 
 ## android:.../ArticleReaderV2Activity.kt (339 lines)
   class ArticleReaderV2Activity → L35
@@ -408,10 +408,10 @@ _Auto-generated on 2026-05-05 08:15 UTC by `generate_code_map.py`_
     getWakeWordThreshold() → L38
     setWakeWordThreshold() → L41
 
-## android:.../notifications/ChatNotificationManager.kt (115 lines)
+## android:.../notifications/ChatNotificationManager.kt (119 lines)
   class ChatNotificationManager → L19
     ensureChannels() → L27
-    showReplyNotification() → L62
+    showReplyNotification() → L66
 
 ## android:.../notifications/IncomingMessageAnnouncer.kt (214 lines)
   object IncomingMessageAnnouncer → L51
@@ -523,6 +523,30 @@ _Auto-generated on 2026-05-05 08:15 UTC by `generate_code_map.py`_
   object DeviceSpeakTimeHandler → L19
     suspend handle() → L25
 
+## android:.../tools/DndScheduler.kt (260 lines)
+  object DndScheduler → L29
+    ACTION_DND_ON → L32
+    ACTION_DND_OFF → L33
+    isEnabled() → L49
+    setEnabled() → L52
+    getStart() → L57
+    getEnd() → L63
+    setStart() → L69
+    setEnd() → L77
+    applyAndSchedule() → L89
+    cancelAll() → L121
+    isInQuietWindow() → L136
+    trySetFilter() → L153
+    scheduleNext() → L161
+    scheduleExact() → L171
+    pendingIntent() → L191
+    nextOccurrenceMillis() → L201
+    hasPolicyAccess() → L214
+    ensureBypassDnd() → L225
+    prefs() → L238
+  class DndReceiver → L247
+    override onReceive() → L248
+
 ## android:.../tools/JsonExtensions.kt (63 lines)
   JsonElement() → L25
   JsonElement() → L41
@@ -558,7 +582,7 @@ _Auto-generated on 2026-05-05 08:15 UTC by `generate_code_map.py`_
   object SyncForceSmsHandler → L23
     suspend handle() → L29
 
-## android:.../tools/TimerHandler.kt (339 lines)
+## android:.../tools/TimerHandler.kt (341 lines)
   object TimerHandler → L31
     ALIASES → L34
     CHANNEL_ID → L40
@@ -575,11 +599,11 @@ _Auto-generated on 2026-05-05 08:15 UTC by `generate_code_map.py`_
     pruneExpired() → L234
     removeFromBook() → L247
     ensureChannel() → L258
-  class TimerFireReceiver → L279
-    override onReceive() → L280
-    override onStart() → L299
-    override onDone() → L300
-    override onError() → L304
+  class TimerFireReceiver → L281
+    override onReceive() → L282
+    override onStart() → L301
+    override onDone() → L302
+    override onError() → L306
 
 ## android:.../ui/auth/LoginScreen.kt (183 lines)
   @Composable LoginScreen() → L36
@@ -823,20 +847,25 @@ _Auto-generated on 2026-05-05 08:15 UTC by `generate_code_map.py`_
     buildCookieHeaders() → L344
     override onCleared() → L358
 
-## android:.../ui/settings/SettingsScreen.kt (586 lines)
-  @Composable SettingsScreen() → L48
+## android:.../ui/settings/SettingsScreen.kt (752 lines)
+  @Composable SettingsScreen() → L55
+  formatTime() → L744
 
-## android:.../ui/settings/SettingsViewModel.kt (128 lines)
+## android:.../ui/settings/SettingsViewModel.kt (167 lines)
   class SettingsUiState → L17
-  class SettingsViewModel → L30
-    loadAll() → L49
-    revokeDevice() → L69
-    revokeShare() → L75
-    setAlwaysListeningEnabled() → L81
-    requestBatteryOptimizationExemption() → L93
-    setAutoListenAfterTts() → L107
-    sendDiagnosticPing() → L112
-    setWakeWordThreshold() → L122
+  class SettingsViewModel → L36
+    loadAll() → L61
+    revokeDevice() → L81
+    revokeShare() → L87
+    setAlwaysListeningEnabled() → L93
+    requestBatteryOptimizationExemption() → L105
+    setAutoListenAfterTts() → L119
+    sendDiagnosticPing() → L124
+    setWakeWordThreshold() → L134
+    setDndEnabled() → L141
+    setDndStart() → L150
+    setDndEnd() → L155
+    refreshDndPolicyAccess() → L160
 
 ## android:.../ui/settings/SettingsViewModelFactory.kt (22 lines)
   class SettingsViewModelFactory → L8
@@ -992,7 +1021,7 @@ _Auto-generated on 2026-05-05 08:15 UTC by `generate_code_map.py`_
     isIncomingMessageAnnounceEnabled() → L55
     setIncomingMessageAnnounceEnabled() → L58
 
-## android:.../util/Constants.kt (27 lines)
+## android:.../util/Constants.kt (41 lines)
   object Constants → L3
     DEFAULT_VAULT_BASE_URL → L4
     DEFAULT_JANE_BASE_URL → L5
@@ -1013,6 +1042,15 @@ _Auto-generated on 2026-05-05 08:15 UTC by `generate_code_map.py`_
     PREF_CONNECTION_MODE → L20
     PREF_KEEP_SCREEN_ON → L21
     PREF_PHONE_TOOLS_ENABLED → L26
+    PREF_DND_ENABLED → L32
+    PREF_DND_START_HOUR → L33
+    PREF_DND_START_MINUTE → L34
+    PREF_DND_END_HOUR → L35
+    PREF_DND_END_MINUTE → L36
+    DEFAULT_DND_START_HOUR → L37
+    DEFAULT_DND_START_MINUTE → L38
+    DEFAULT_DND_END_HOUR → L39
+    DEFAULT_DND_END_MINUTE → L40
 
 ## android:.../util/CookieStore.kt (44 lines)
   class CookieStore → L9

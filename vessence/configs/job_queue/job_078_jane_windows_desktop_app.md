@@ -1,7 +1,7 @@
 # Job #078 — Jane Windows Desktop App
 
 Priority: 3
-Status: pending
+Status: incomplete
 Created: 2026-04-20
 Estimated effort: Large (multi-week)
 
@@ -675,3 +675,6 @@ Additional review after the multi-user conversation-bleed discussion:
 6. **MVP order changed.** Authentication and canonical conversation-key
    verification now happen before tray/hotkey polish, because otherwise a
    polished app could still leak conversation state.
+
+## Result
+Jane web is not running — skipping

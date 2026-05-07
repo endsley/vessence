@@ -1,28 +1,26 @@
 # Most Recent Nightly Self-Improvement
 
-- Run started: 2026-05-05 01:00:01
-- Report generated: 2026-05-05 02:28:16
-- Total runtime: 5294s
-- Jobs: 8 total, 6 ok, 2 timeout, 0 failed
+- Run started: 2026-05-06 01:00:01
+- Report generated: 2026-05-06 02:32:14
+- Total runtime: 5531s
+- Jobs: 8 total, 5 ok, 3 timeout, 0 failed
 - Stable latest report path: `/home/chieh/ambient/vessence/configs/self_improvement_latest.md`
-- Archived copy: `/home/chieh/ambient/vessence-data/reports/self_improvement/self_improvement_20260505_010001.md`
+- Archived copy: `/home/chieh/ambient/vessence-data/reports/self_improvement/self_improvement_20260506_010001.md`
 
 ## TL;DR
 
 - 1. ✓ Auto-Commit WIP (pre) (0.0m)
   - Fixes:
-    - 2026-05-05 01:00:02,477 INFO Committed 10 file(s).
+    - 2026-05-06 01:00:02,231 INFO Committed 14 file(s).
 - 2. ✓ Code Auditor (0.0m)
   - Problems:
-    - 2026-05-05 01:00:02,635 [WARNING] Working tree has uncommitted changes — skipping audit.
-- 3. ✓ Dead Code Auditor (5.8m)
+    - 2026-05-06 01:00:02,453 [WARNING] Working tree has uncommitted changes — skipping audit.
+- 3. ✓ Dead Code Auditor (5.9m)
   - Problems:
-    - Dead files — review needed: 1.
-    - Possibly-dead functions: 2.
     - Duplicate function bodies: 10 groups.
   - Fixes:
-    - [dead-code] Done — 0 auto-deleted, 1 flagged, 2 dead funcs, 10 dup groups
-- 4. ✓ Pipeline Audit (30 prompts) (16.5m)
+    - [dead-code] Done — 0 auto-deleted, 0 flagged, 0 dead funcs, 10 dup groups
+- 4. ⏱ Pipeline Audit (30 prompts) (20.0m)
   - Problems:
     - Prompts audited: 12.
     - Classification failures: 4.
@@ -30,31 +28,31 @@
 - 5. ✓ Doc Drift Auditor (0.0m)
   - Problems:
     - v2_3stage_pipeline.md missing class row: CLINIC_SCHEDULES_INFO
-- 6. ✓ Transcript Quality Review (3.8m)
+- 6. ✓ Transcript Quality Review (4.2m)
   - Problems:
-    - Transcript review found 12 issues: 10 critical, 2 medium.
-    - Stage 3 dropped the turn and returned no final response.
-    - A follow-up reply was not routed by the pending-action resolver; it was treated as a fresh `others` request and then dropped.
+    - Transcript review found 6 issues: 2 critical, 4 medium.
+    - Follow-up reply was treated as a brand-new request instead of resolving prior context.
+    - User-supplied control text hijacked routing: Stage 1 treated the payload as a real `greeting` intent, and the greeting handler then failed.
   - Fixes:
-    - 2026-05-05 01:26:15,639 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (12 issues)
-    - 2026-05-05 01:26:15,640 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 10 critical, 2 medium is...
+    - 2026-05-06 01:30:12,904 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (6 issues)
+    - 2026-05-06 01:30:12,905 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 2 critical, 4 medium iss...
 - 7. ⏱ Memory Janitor (60.0m)
   - Problems:
-    - [0;93m2026-05-05 01:57:08.637713729 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-05 05:57:08 WARNING] ModelImporter.cpp:739: Make...
-    - [0;93m2026-05-05 01:57:08.637753305 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-05 05:57:08 WARNING] ModelImporter.cpp:739: Make...
-    - [0;93m2026-05-05 01:57:08.637777233 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-05 05:57:08 WARNING] ModelImporter.cpp:739: Make...
+    - rrt_execution_provider.h:92 log] [2026-05-06 06:04:53 WARNING] ModelImporter.cpp:739: Make sure input input_ids has Int64 binding.[m
+    - [0;93m2026-05-06 02:04:53.180816808 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-06 06:04:53 WARNING] ModelImporter.cpp:739: Make...
+    - [0;93m2026-05-06 02:04:53.180856330 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-06 06:04:53 WARNING] ModelImporter.cpp:739: Make...
 - 8. ⏱ Auto-Commit + Push (post) (2.0m)
   - Fixes:
-    - 2026-05-05 02:26:16,311 INFO Committed 9 file(s).
+    - 2026-05-06 02:30:16,766 INFO Committed 4 file(s).
 
 **Top follow-ups:**
 
-- In the Stage 3 proxy/escalation path, catch stream failures and always return a final error payload or retry result instead of allowing the stream to end without a response.
-- Persist pending-action state from Stage 2/Stage 3 follow-up questions and route short affirmative/parameter-only replies directly to the owning handler before classification.
+- When Stage 2 or Stage 3 asks a clarifying question, persist a structured `pending_action` with the owning handler/brain and have `pending_action_resolver` consume short replies like `yes ...` before classification.
+- Sanitize or strongly down-rank XML/control-token patterns before intent classification, and never load a handler protocol from user-supplied text. Add a schema-safe fallback when a handler receives malformed input.
 
 ## Executive Summary
 
-- 2 stage(s) need attention because they timed out or exited non-zero.
+- 3 stage(s) need attention because they timed out or exited non-zero.
 - 5 concrete improvement/fix signals were found in logs or reports.
 
 ## Stage 1: Auto-Commit WIP (pre)
@@ -72,7 +70,7 @@
 
 ### Improvements It Made
 
-- 2026-05-05 01:00:02,477 INFO Committed 10 file(s).
+- 2026-05-06 01:00:02,231 INFO Committed 14 file(s).
 
 ### Evidence Files
 
@@ -89,7 +87,7 @@
 
 ### Problems It Found
 
-- 2026-05-05 01:00:02,635 [WARNING] Working tree has uncommitted changes — skipping audit.
+- 2026-05-06 01:00:02,453 [WARNING] Working tree has uncommitted changes — skipping audit.
 
 ### Improvements It Made
 
@@ -104,7 +102,7 @@
 ## Stage 3: Dead Code Auditor
 
 - Status: `ok`
-- Duration: 351s (5.8 min)
+- Duration: 355s (5.9 min)
 
 ### What It Did
 
@@ -112,13 +110,11 @@
 
 ### Problems It Found
 
-- Dead files — review needed: 1.
-- Possibly-dead functions: 2.
 - Duplicate function bodies: 10 groups.
 
 ### Improvements It Made
 
-- [dead-code] Done — 0 auto-deleted, 1 flagged, 2 dead funcs, 10 dup groups
+- [dead-code] Done — 0 auto-deleted, 0 flagged, 0 dead funcs, 10 dup groups
 
 ### Evidence Files
 
@@ -127,8 +123,8 @@
 
 ## Stage 4: Pipeline Audit (30 prompts)
 
-- Status: `ok`
-- Duration: 991s (16.5 min)
+- Status: `timeout`
+- Duration: 1200s (20.0 min)
 
 ### What It Did
 
@@ -136,6 +132,7 @@
 
 ### Problems It Found
 
+- Job ended with status `timeout`.
 - Prompts audited: 12.
 - Classification failures: 4.
 - Response failures: 7.
@@ -178,7 +175,7 @@
 ## Stage 6: Transcript Quality Review
 
 - Status: `ok`
-- Duration: 230s (3.8 min)
+- Duration: 254s (4.2 min)
 
 ### What It Did
 
@@ -186,23 +183,23 @@
 
 ### Problems It Found
 
-- Transcript review found 12 issues: 10 critical, 2 medium.
-- Stage 3 dropped the turn and returned no final response.
-- A follow-up reply was not routed by the pending-action resolver; it was treated as a fresh `others` request and then dropped.
-- Stage 3 dropped the turn and returned no final response.
-- Classifier prompt-injection misrouted the turn to `greeting`, the greeting handler returned an invalid shape, and the request then failed in Stage 3.
+- Transcript review found 6 issues: 2 critical, 4 medium.
+- Follow-up reply was treated as a brand-new request instead of resolving prior context.
+- User-supplied control text hijacked routing: Stage 1 treated the payload as a real `greeting` intent, and the greeting handler then failed.
+- A live voice-troubleshooting turn incurred unusable Stage 3 latency.
+- Stage 1 emitted an unregistered label (`restart server`) for a website-debugging request and had to fall back to `others`.
 
 ### Improvements It Made
 
-- 2026-05-05 01:26:15,639 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (12 issues)
-- 2026-05-05 01:26:15,640 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 10 critical, 2 medium issues. The most urgent was: Sta
+- 2026-05-06 01:30:12,904 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (6 issues)
+- 2026-05-06 01:30:12,905 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 2 critical, 4 medium issues. The most urgent was: User
 
 ### Follow-Up Fixes Recommended
 
-- In the Stage 3 proxy/escalation path, catch stream failures and always return a final error payload or retry result instead of allowing the stream to end without a response.
-- Persist pending-action state from Stage 2/Stage 3 follow-up questions and route short affirmative/parameter-only replies directly to the owning handler before classification.
-- Add a guaranteed fallback response on Stage 3 stream failure and trip a temporary health gate after repeated `Brain execution failed (stream)` events.
-- Strip or neutralize user-supplied protocol/XML blocks before classification, ignore literal class-contract text as intent evidence, and enforce handler response schemas with tests so invalid shapes cannot reach production.
+- When Stage 2 or Stage 3 asks a clarifying question, persist a structured `pending_action` with the owning handler/brain and have `pending_action_resolver` consume short replies like `yes ...` before classification.
+- Sanitize or strongly down-rank XML/control-token patterns before intent classification, and never load a handler protocol from user-supplied text. Add a schema-safe fallback when a handler receives malformed input.
+- Keep the standing brain warm and unlocked across turns. If teardown fails, recreate the session asynchronously before the next user request instead of cold-restarting during the request path.
+- Constrain classifier decoding to the registered intent enum, or post-validate and re-prompt the classifier when it returns an unknown label instead of silently mapping arbitrary labels to `others`.
 
 ### Evidence Files
 
@@ -221,11 +218,11 @@
 ### Problems It Found
 
 - Job ended with status `timeout`.
-- [0;93m2026-05-05 01:57:08.637713729 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-05 05:57:08 WARNING] ModelImporter.cpp:739: Make sure input input_ids has Int64 binding.[m
-- [0;93m2026-05-05 01:57:08.637753305 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-05 05:57:08 WARNING] ModelImporter.cpp:739: Make sure input attention_mask has Int64 binding.[m
-- [0;93m2026-05-05 01:57:08.637777233 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-05 05:57:08 WARNING] ModelImporter.cpp:739: Make sure input token_type_ids has Int64 binding.[m
-- [0;93m2026-05-05 01:59:24.507424949 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-05 05:59:24 WARNING] ModelImporter.cpp:739: Make sure input input_ids has Int64 binding.[m
-- [0;93m2026-05-05 01:59:24.507471038 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-05 05:59:24 WARNING] ModelImporter.cpp:739: Make sure input attention_mask has Int64 binding.[m
+- rrt_execution_provider.h:92 log] [2026-05-06 06:04:53 WARNING] ModelImporter.cpp:739: Make sure input input_ids has Int64 binding.[m
+- [0;93m2026-05-06 02:04:53.180816808 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-06 06:04:53 WARNING] ModelImporter.cpp:739: Make sure input attention_mask has Int64 binding.[m
+- [0;93m2026-05-06 02:04:53.180856330 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-06 06:04:53 WARNING] ModelImporter.cpp:739: Make sure input token_type_ids has Int64 binding.[m
+- [0;93m2026-05-06 02:04:53.393960905 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-06 06:04:53 WARNING] ModelImporter.cpp:739: Make sure input input_ids has Int64 binding.[m
+- [0;93m2026-05-06 02:04:53.393998411 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-06 06:04:53 WARNING] ModelImporter.cpp:739: Make sure input attention_mask has Int64 binding.[m
 
 ### Improvements It Made
 
@@ -250,7 +247,7 @@
 
 ### Improvements It Made
 
-- 2026-05-05 02:26:16,311 INFO Committed 9 file(s).
+- 2026-05-06 02:30:16,766 INFO Committed 4 file(s).
 
 ### Evidence Files
 
