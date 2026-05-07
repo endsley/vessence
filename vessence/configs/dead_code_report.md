@@ -1,4 +1,19 @@
-# Dead Code Report — 2026-05-06 01:05
+# Dead Code Report — 2026-05-07 01:06
+
+## Dead files — review needed (1)
+
+(Candidates for deletion, but failed an auto-delete safety check —
+ usually means the file is too new, too large, or outside agent_skills/test_code.)
+
+- `memory/v1/update_identity.py`
+
+## Possibly-dead functions (2)
+
+(No references found via grep. May be false positives if called via
+ getattr, dynamic dispatch, or HTTP route registration.)
+
+- `memory/v1/topic_memory.py` :: `fire_and_forget()`
+- `memory/v1/janitor_memory.py` :: `purge_expired_forgettable()`
 
 ## Duplicate function bodies (10 groups)
 

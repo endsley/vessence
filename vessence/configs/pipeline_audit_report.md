@@ -1,16 +1,16 @@
-# Pipeline Audit Report — 2026-05-05 01:05
+# Pipeline Audit Report — 2026-05-07 01:06
 
-- Prompts audited: **12**
-- Elapsed: 990s
-- Classification failures: **4**
-- Response failures: **7**
+- Prompts audited: **13**
+- Elapsed: 843s
+- Classification failures: **8**
+- Response failures: **8**
 - Auto-fixes applied (exemplars added): **0**
 
 ## Stage breakdown
-- stage3: 12
+- stage3: 13
 
 ## Classification breakdown
-- others: 8
+- others: 9
 - timer: 1
 - greeting: 1
 - todo list: 1
@@ -21,27 +21,30 @@
 |---|---|---|
 | I want them to periodically get the lead after some time | timer | others |
 | yes those articles and maybe just two days | others | others |
+| it seems to me that you are no longing making any sounds when speech to text is  | others | others |
+| __debug_inspect_update_short_term_memory | others | others |
 | hey Jane, can you take a look at the ~/code/waterlily project for me | todo list | others |
+| I'm currently are you able to see that the website Jane version is not working | others | others |
 | can you mute my computer for me | music play | music play |
+| ping | others | others |
 
 ## Response failures (top 20) — usually need code changes
-- **I want them to periodically get the lead after some time** (timer/stage3): Can you clarify what you mean? Who is "them" and what does "getting the lead" look like in this context — are you talking about the Stage 2/3 pipeline
-- **yes those articles and maybe just two days** (others/stage3): I'm picking up from where we left off, but I've lost the earlier context. I know there was an open loop about clarifying "them" and "get the lead" — y
-- **it seems to me that you are no longing making any sounds when speech to text is ** (others/stage3): Based on my research, here's what I found about sounds in the STT flow:
+- **I want them to periodically get the lead after some time** (timer/stage3): Hey Chieh — I'm not sure what "them" and "the lead" refer to here. Can you give me a bit more context? Are you talking about a pipeline stage, a servi
+- **yes those articles and maybe just two days** (others/stage3): I don't have context for what "those articles" refers to — this might be carrying over from a conversation I don't have access to. Can you fill me in 
+- **currently how does your short-term memory work** (others/stage3): Here's how short-term memory works right now:
 
-**Android:** The wake word detection plays a beep via `ToneGenerator` in `Voi
-- **__debug_inspect_update_short_term_memory** (others/stage3): Here's the full picture of the short-term memory update system:
+**Write path** — after every conversation turn (Stage 3), `ConversationManager.update_short_term_memory
+- **how about** (greeting/stage3): Hey Chieh, what's up? What are you thinking about?
+- **it seems to me that you are no longing making any sounds when speech to text is ** (others/stage3): Based on the code, here's what's happening with STT sounds:
 
-## Short-Term Memory Architecture
+**On Android**, there are two sound feedback points:
+1. **Wake word detection** — plays a
+- **__debug_inspect_update_short_term_memory** (others/stage3): Here's the full short-term memory update architecture:
 
-### Write Path
-1. **Trigger**: `jane_proxy.py:1589
-- **hey Jane, can you take a look at the ~/code/waterlily project for me** (todo list/stage3): Got it. Here's the overview:
+## Write Path
 
-**Waterlily** is a local-first redevelopment of Kathia's Waterlily Wellness site. It's a hybrid setup:
+**Trigger:** `jane_proxy.py:1592` calls `conv_manager.update_short_term_memory(
+- **hey Jane, can you take a look at the ~/code/waterlily project for me** (todo list/stage3): Here's the overview of `~/code/waterlily`:
 
-1. **Static mirr
-- **I'm currently are you able to see that the website Jane version is not working** (others/stage3): The server is up, the frontend loads, and the chat API works. Can you tell me more about what you're seeing? Specifically:
-
-1. **What happens when you
-- **is stage 3 brain back up by now** (others/stage3): The web service is up and running (active since yesterday, serving HTML fine), but the Stage 3 brain (Claude subprocess) appears to be busy — the chat
+**Waterlily** is a local-first static mirror of Kathia's Squarespace wellness site (waterlilywellness.com)
+- **is the stage 3 brain working now** (others/stage3): The web server is up, but the `/api/jane/live` health check timed out again. The brain process (PID 114335) is alive at 19.7% CPU — spawned at 01:19 t
