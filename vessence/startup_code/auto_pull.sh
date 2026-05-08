@@ -33,7 +33,7 @@ if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     exit 1
 fi
 
-if [ -n "$(git status --porcelain)" ]; then
+if [ -n "$(git status --porcelain -uno)" ]; then
     log "SKIP: working tree has local changes — not pulling"
     exit 0
 fi
