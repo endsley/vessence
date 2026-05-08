@@ -51,13 +51,17 @@ if [ -z "$REMOTE" ]; then
     exit 1
 fi
 
-if [ "$LOCAL" = "$REMOTE" ]; then
-    log "up-to-date ($LOCAL)"
+# Check if remote is ahead of local
+NEW_COMMITS=$(git rev-list --count "$LOCAL..$REMOTE")
+
+if [ "$NEW_COMMITS" -eq 0 ]; then
+    log "up-to-date (local is at or ahead of $REMOTE)"
     exit 0
 fi
 
+# We have new commits to pull.
 CHANGED=$(git diff --name-only "$LOCAL" "$REMOTE")
-log "pulling $(echo "$CHANGED" | wc -l) changed file(s) — $LOCAL → $REMOTE"
+log "pulling $NEW_COMMITS new commit(s), $(echo "$CHANGED" | wc -l) changed file(s) — $LOCAL → $REMOTE"
 
 if ! git pull --ff-only --quiet 2>>"$LOG_FILE"; then
     log "ERROR: git pull --ff-only failed (non-fast-forward?) — leaving alone"
