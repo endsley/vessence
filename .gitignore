@@ -4,6 +4,25 @@ vault/
 essences/
 skills/
 venv/
+vector_db/
+vessence/vector_db/
+vessence/seed_db/
+vessence/logs/
+marketing_site/downloads/*.apk
+marketing_site/downloads/*.zip
+marketing_site/downloads/*.exe
+
+# Auto-generated reports and maps
+vessence/configs/CODE_MAP_*.md
+vessence/configs/dead_code_report.md
+vessence/configs/doc_drift_report.md
+vessence/configs/pipeline_audit_report.md
+vessence/configs/transcript_review_report.md
+vessence/configs/self_improvement_latest.md
+vessence/configs/self_improve_log.md
+vessence/configs/transcript_review_report.md
+vessence/configs/auto_audit_log.md
+vessence/configs/audit_failures.md
 
 # User-specific agent config symlinks (linked from vessence/{CLAUDE,GEMINI,AGENTS}.md)
 /CLAUDE.md
