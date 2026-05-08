@@ -14,10 +14,10 @@
 
 set -u
 
-AMBIENT_BASE="${AMBIENT_BASE:-$HOME/ambient}"
-VENV_PY="$AMBIENT_BASE/venv/bin/python"
-VENV_PIP="$AMBIENT_BASE/venv/bin/pip"
-LOG_DIR="$AMBIENT_BASE/vessence-data/logs"
+AMBIENT_BASE="/home/chieh/ambient"
+VENV_PY="/home/chieh/google-adk-env/adk-venv/bin/python"
+VENV_PIP="/home/chieh/google-adk-env/adk-venv/bin/pip"
+LOG_DIR="/home/chieh/ambient/vessence-data/logs"
 LOG_FILE="$LOG_DIR/auto_pull.log"
 
 mkdir -p "$LOG_DIR"

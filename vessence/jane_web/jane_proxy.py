@@ -843,7 +843,25 @@ _sessions: dict[str, JaneSessionState] = {}
 _MAX_SESSIONS = 50  # hard cap on in-memory sessions to prevent unbounded growth
 REQUEST_TIMING_LOG = Path(LOGS_DIR) / "jane_request_timing.log"
 PROMPT_DUMP_LOG = Path(LOGS_DIR) / "jane_prompt_dump.jsonl"
-SESSION_IDLE_TTL_SECONDS = max(int(os.environ.get("JANE_SESSION_IDLE_TTL_SECONDS", "21600")), 60)
+SESSION_IDLE_TTL_SECONDS = max(int(os.environ.get("JANE_SESSION_IDLE_TTL_SECONDS", "1800")), 60)
+_CC_ACTIVITY_PATH = Path(os.environ.get("VESSENCE_DATA_HOME", os.path.expanduser("~/ambient/vessence-data"))) / "claude_code_activity.json"
+
+
+def _read_global_idle_ts() -> float:
+    """Last time Chieh typed at a Claude Code prompt. 0 if unknown.
+
+    Reads claude_code_activity.json (NOT idle_state.json — that one is also
+    written by jane_web on every API call, which would defer archival forever
+    while Jane is in active use).
+    """
+    try:
+        with open(_CC_ACTIVITY_PATH) as f:
+            ts = float(json.load(f).get("last_active_ts", 0))
+        # Clamp future timestamps (clock skew / corrupt write) to "now" so a
+        # bad write can't block archival forever.
+        return min(ts, time.time())
+    except Exception:
+        return 0.0
 
 # ── Prefetch cache ─────────────────────────────────────────────────────────────
 _prefetch_cache: dict[str, dict] = {}  # {session_id: {"result": str, "timestamp": float}}
@@ -967,6 +985,12 @@ def _get_web_chat_model(brain_name: str) -> str:
 
 def _prune_stale_sessions(now: float | None = None) -> None:
     now_ts = time.time() if now is None else now
+    # Global-idle gate: only archive when Chieh is also idle in Claude Code.
+    # idle_state.json is updated by ~/.claude/hooks/idle_state_hook.sh on every
+    # CC prompt, so an active CC session keeps Jane archival deferred.
+    global_last = _read_global_idle_ts()
+    if global_last and now_ts - global_last <= SESSION_IDLE_TTL_SECONDS:
+        return
     expired_keys = [
         composite_key
         for composite_key, state in list(_sessions.items())
@@ -1146,11 +1170,23 @@ def _get_session(user_id: str, session_id: str) -> JaneSessionState:
     composite_key = f"{user_id}:{session_id}"
     state = _sessions.get(composite_key)
     if state is None:
-        # Evict oldest session if at capacity
+        # Evict oldest session if at capacity. Route through end_session() so
+        # the conv manager closes cleanly (final archival, DB handles, timers).
+        # Raw pop() would silently drop the session and skip archival —
+        # especially likely now that the global-idle gate keeps sessions
+        # in the table longer.
         if len(_sessions) >= _MAX_SESSIONS:
             oldest_key = min(_sessions, key=lambda k: _sessions[k].last_accessed_at)
             logger.info("[%s] Evicting oldest session to stay under %d cap", oldest_key[:12], _MAX_SESSIONS)
-            _sessions.pop(oldest_key, None)
+            evict_user, _, evict_sid = oldest_key.partition(":")
+            if evict_sid:
+                try:
+                    end_session(evict_user, evict_sid)
+                except Exception as exc:
+                    logger.warning("[%s] end_session during eviction failed: %s — falling back to raw pop", oldest_key[:12], exc)
+                    _sessions.pop(oldest_key, None)
+            else:
+                _sessions.pop(oldest_key, None)
 
         state = JaneSessionState(conv_manager=ConversationManager(session_id, user_id=user_id))
         _sessions[composite_key] = state

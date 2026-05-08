@@ -40,6 +40,44 @@ VAULT_IMAGES_DIR = os.path.join(VAULT_DIR, "images")
 MEMORY_JANITOR_MODEL = "claude-opus-4-6"  # Memory is too important for a cheap model
 MAX_DEDUP_THEMES_PER_RUN = 150
 MAX_CODE_MEMORIES_PER_RUN = None  # None = verify every code-referencing memory
+CODE_MEMORY_REVERIFY_DAYS = 14
+MAX_LONG_TERM_NORMALIZE_PER_RUN = 25
+LONG_TERM_REVIEW_THRESHOLD = 500
+LONG_TERM_REWRITE_THRESHOLD = 800
+LONG_TERM_SPLIT_THRESHOLD = 1500
+MAX_REWRITTEN_CHARS = 500
+MAX_SPLIT_ITEMS = 6
+JANITOR_DELETE_QUARANTINE = os.path.join(LOGS_DIR, "janitor_deleted_memories.jsonl")
+
+# "Theme" topics — long-term entries whose whole point is to accumulate detail
+# under one anchor over time. The normalizer must NOT split or compact these,
+# because that would shatter the per-project (and per-identity) anchor we
+# want retrieval to find. Atomic topics (Decision, Commitment, Failure Lesson,
+# External Relationship) and everything else remain eligible for normalization.
+THEME_TOPICS = frozenset({
+    "Identity Evolution",
+    "Project: vessence",
+    "Project: classes.chiehwu.com",
+    "Project: waterlily",
+    "Architectural Milestones",
+    "Collaborative Habits",
+    "Aesthetic Preferences",
+})
+
+KNOWN_JUNK_TOPICS = {"prompt_queue", "job_queue", "test"}
+KNOWN_JUNK_PREFIXES = (
+    "Prompt queue item ",
+    "Job #",
+    "Prompt List Item ",
+)
+KNOWN_JUNK_PHRASES = (
+    "delete me",
+    "completed autonomously on",
+)
+
+
+def _utcnow_iso() -> str:
+    return datetime.datetime.utcnow().isoformat()
 
 
 def _llm_json(prompt: str) -> dict:
@@ -88,6 +126,365 @@ def _llm_json(prompt: str) -> dict:
             logger.warning(f"Gemini janitor call failed: {e}")
 
     raise ValueError("Claude CLI failed and no GOOGLE_API_KEY available as fallback")
+
+
+def _llm_text(prompt: str, max_chars: int | None = None) -> str:
+    """Call Claude Opus via CLI for compact text output."""
+    system_msg = (
+        "Return plain text only. You are a careful memory curator. "
+        "Preserve only durable facts, decisions, root causes, fixes, lessons, "
+        "or reusable references. Remove transcript chatter and boilerplate."
+    )
+
+    try:
+        from agent_skills.claude_cli_llm import completion
+        text = completion(
+            f"{system_msg}\n\n{prompt}",
+            model=MEMORY_JANITOR_MODEL,
+            max_tokens=2048,
+            timeout=180,
+        ).strip()
+        if text.startswith("```"):
+            lines = [l for l in text.split("\n") if not l.startswith("```")]
+            text = "\n".join(lines).strip()
+        return text[:max_chars].strip() if max_chars else text
+    except Exception as e:
+        logger.warning("Claude Opus janitor text call failed: %s", e)
+    return ""
+
+
+def _append_quarantine_entries(entries: list[dict]) -> int:
+    """Append deleted-memory backups to an append-only quarantine log."""
+    if not entries:
+        return 0
+    try:
+        os.makedirs(LOGS_DIR, exist_ok=True)
+        with open(JANITOR_DELETE_QUARANTINE, "a") as f:
+            for entry in entries:
+                f.write(json.dumps(entry) + "\n")
+        return len(entries)
+    except Exception as e:
+        logger.warning("Could not append janitor quarantine log: %s", e)
+        return 0
+
+
+def _classify_known_junk(collection_name: str, doc: str, meta: dict | None) -> str | None:
+    """Return a deletion reason for known junk patterns, else None."""
+    meta = meta or {}
+    text = (doc or "").strip()
+    low = text.lower()
+    topic = str(meta.get("topic") or "")
+
+    if collection_name == CHROMA_COLLECTION_USER_MEMORIES:
+        if topic in KNOWN_JUNK_TOPICS:
+            return f"Known junk topic `{topic}`"
+        if any(text.startswith(prefix) for prefix in KNOWN_JUNK_PREFIXES):
+            return "Known queue/prompt transcript artifact"
+        if any(phrase in low for phrase in KNOWN_JUNK_PHRASES):
+            return "Known test or queue execution artifact"
+        if topic == "system" and (
+            low.startswith("refactor test")
+            or low.startswith("shim cli test")
+            or low.startswith("e2e test")
+        ):
+            return "System test artifact"
+        if "the ai assistant's name is amber" in low:
+            return "Outdated Amber identity memory"
+        return None
+
+    if collection_name == CHROMA_COLLECTION_LONG_TERM:
+        if not meta.get("topic"):
+            return "Untyped archived transcript fragment with no topic metadata"
+        if low.startswith("theme: article-sharing workflow") and "deferred follow-up feature request" in low:
+            return "Deferred feature-request snapshot"
+        return None
+
+    return None
+
+
+def _delete_rows_with_quarantine(collection, collection_name: str, rows: list[dict], reason: str) -> int:
+    """Back up rows to quarantine, then delete them from Chroma."""
+    if not rows:
+        return 0
+    now = _utcnow_iso()
+    ids = [r["id"] for r in rows]
+    quarantine_entries = [
+        {
+            "deleted_at": now,
+            "collection": collection_name,
+            "reason": reason,
+            "id": r["id"],
+            "doc": r["doc"],
+            "meta": r["meta"],
+        }
+        for r in rows
+    ]
+    _append_quarantine_entries(quarantine_entries)
+    collection.delete(ids=ids)
+    logger.info("Deleted %d rows from %s: %s", len(ids), collection_name, reason)
+    return len(ids)
+
+
+def _collect_collection_rows(collection) -> list[dict]:
+    data = collection.get(include=["documents", "metadatas"])
+    return [
+        {"id": row_id, "doc": doc or "", "meta": meta or {}}
+        for row_id, doc, meta in zip(
+            data.get("ids", []),
+            data.get("documents", []),
+            data.get("metadatas", []),
+        )
+    ]
+
+
+def _normalize_long_term_memory_rows(collection, rows: list[dict]) -> dict:
+    """Rewrite or split oversized long_term_knowledge entries into compact facts."""
+    candidates = [
+        row for row in rows
+        if row["meta"].get("topic")
+        and row["meta"].get("topic") not in THEME_TOPICS  # themes must accumulate, not split
+        and not _classify_known_junk(CHROMA_COLLECTION_LONG_TERM, row["doc"], row["meta"])
+        and len(row["doc"].strip()) > LONG_TERM_REVIEW_THRESHOLD
+        and row["meta"].get("normalized_style") != "long_term_normalized_v2"
+    ][:MAX_LONG_TERM_NORMALIZE_PER_RUN]
+
+    result = {
+        "reviewed": 0,
+        "rewritten": 0,
+        "split": 0,
+        "deleted_originals": 0,
+        "unchanged": 0,
+    }
+
+    for row in candidates:
+        try:
+            doc = row["doc"].strip()
+            if not doc:
+                continue
+            result["reviewed"] += 1
+
+            if len(doc) > LONG_TERM_SPLIT_THRESHOLD:
+                prompt = (
+                    "Split this long-term memory into 2-6 atomic durable memories.\n"
+                    "Return ONLY valid JSON: {\"memories\": [\"...\", \"...\"]}\n"
+                    "Each item must be short, standalone, and preserve only durable facts, "
+                    "decisions, root causes, fixes, lessons, or reusable references.\n\n"
+                    f"Topic: {row['meta'].get('topic')}\n"
+                    f"Memory:\n{doc}"
+                )
+                plan = _llm_json(prompt)
+                memories = [
+                    str(item).strip()[:MAX_REWRITTEN_CHARS]
+                    for item in (plan.get("memories") or [])
+                    if str(item).strip()
+                ][:MAX_SPLIT_ITEMS]
+                if len(memories) >= 2:
+                    new_ids = [str(uuid.uuid4()) for _ in memories]
+                    new_metas = []
+                    for idx, mem_text in enumerate(memories, start=1):
+                        new_metas.append({
+                            **row["meta"],
+                            "raw_chars": len(doc),
+                            "summary_chars": len(mem_text),
+                            "normalized_style": "long_term_normalized_v2",
+                            "normalized_from": row["id"],
+                            "normalized_part": idx,
+                            "normalized_parts_total": len(memories),
+                            "timestamp": _utcnow_iso(),
+                        })
+                    collection.add(ids=new_ids, documents=memories, metadatas=new_metas)
+                    result["split"] += 1
+                    result["deleted_originals"] += _delete_rows_with_quarantine(
+                        collection,
+                        CHROMA_COLLECTION_LONG_TERM,
+                        [row],
+                        "Normalized oversized long-term memory into atomic records",
+                    )
+                    continue
+
+            if len(doc) > LONG_TERM_REWRITE_THRESHOLD:
+                rewritten = _llm_text(
+                    (
+                        "Rewrite this long-term memory into one compact durable memory.\n"
+                        f"- Keep under {MAX_REWRITTEN_CHARS} characters\n"
+                        "- Keep only reusable facts, decisions, fixes, root causes, lessons, or references\n"
+                        "- Remove transcript chatter, filler, or temporary status\n\n"
+                        f"Topic: {row['meta'].get('topic')}\n"
+                        f"Memory:\n{doc}"
+                    ),
+                    max_chars=MAX_REWRITTEN_CHARS,
+                )
+                if rewritten:
+                    collection.update(
+                        ids=[row["id"]],
+                        documents=[rewritten],
+                        metadatas=[{
+                            **row["meta"],
+                            "raw_chars": len(doc),
+                            "summary_chars": len(rewritten),
+                            "normalized_style": "long_term_normalized_v2",
+                            "timestamp": _utcnow_iso(),
+                        }],
+                    )
+                    result["rewritten"] += 1
+                    continue
+
+            result["unchanged"] += 1
+        except Exception as e:
+            logger.warning("Long-term normalization failed for %s: %s", row["id"][:12], e)
+            result["unchanged"] += 1
+
+    return result
+
+
+def _consolidate_collection(
+    collection,
+    collection_name: str,
+    rows: list[dict],
+    max_topics: int,
+) -> dict:
+    """Merge truly redundant memories topic-by-topic inside one collection."""
+    topic_groups: dict[str, list[dict]] = {}
+    permanent_count = 0
+
+    for row in rows:
+        meta = row["meta"]
+        doc = row["doc"]
+        if _classify_known_junk(collection_name, doc, meta):
+            continue
+
+        if collection_name == CHROMA_COLLECTION_USER_MEMORIES:
+            mem_type = meta.get("memory_type", "")
+            skip = (
+                mem_type == "permanent" or
+                mem_type in ("forgettable", "short_term", "short_term_theme") or
+                "Saved file '" in doc or
+                "Location: " in doc or
+                meta.get("file_path") is not None
+            )
+            if skip:
+                if mem_type == "permanent":
+                    permanent_count += 1
+                continue
+
+        topic = meta.get("topic", "General")
+        topic_groups.setdefault(topic, []).append(row)
+
+    consolidate_candidates = [t for t, mems in topic_groups.items() if len(mems) >= 3]
+    if consolidate_candidates:
+        logger.info(
+            "Consolidating %d topics (out of %d needing work) in %s...",
+            min(len(consolidate_candidates), max_topics),
+            len(consolidate_candidates),
+            collection_name,
+        )
+    else:
+        logger.info("No topics need consolidation in %s.", collection_name)
+
+    total_reduced = 0
+    merge_log = []
+    target_topics = consolidate_candidates[:max_topics]
+    for topic in target_topics:
+        memories = topic_groups[topic]
+        logger.info("Analyzing topic '%s' with %d facts in %s...", topic, len(memories), collection_name)
+        prompt = f"""
+You are a careful Memory Curator for a personal AI system. Below is a list of facts for the topic: '{topic}'.
+
+YOUR RULES:
+1. ONLY merge facts that are truly redundant — they describe the EXACT SAME knowledge, just worded differently.
+2. If two facts share a topic but describe DIFFERENT things, they are NOT redundant. Leave them alone.
+3. When merging, preserve ALL specific details from both facts. Do not lose any information.
+4. If a subtopic exists, keep the most specific one.
+5. When in doubt, do NOT merge.
+6. Facts that are the ONLY one about their specific subject must NEVER appear in a merge.
+
+Return your response as a JSON object. The "merges" array should ONLY contain groups of truly redundant facts.
+If no facts are redundant, return {{"merges": []}}.
+
+{{
+  "merges": [
+    {{
+      "original_ids": ["id1", "id2"],
+      "new_fact": "Comprehensive merged fact preserving all details",
+      "new_subtopic": "Most specific subtopic or empty string"
+    }}
+  ]
+}}
+
+FACTS FOR TOPIC '{topic}':
+{json.dumps([{"id": m["id"], "text": m["doc"], "subtopic": m["meta"].get("subtopic", "General")} for m in memories], indent=2)}
+"""
+        try:
+            plan = _llm_json(prompt)
+            row_map = {m["id"]: m for m in memories}
+            for merge in plan.get("merges", []):
+                old_ids = [oid for oid in merge.get("original_ids", []) if oid in row_map]
+                if len(old_ids) < 2:
+                    continue
+                new_text = str(merge.get("new_fact") or "").strip()
+                if not new_text:
+                    continue
+                new_sub = str(merge.get("new_subtopic") or "").strip()
+                old_rows = [row_map[oid] for oid in old_ids]
+                _delete_rows_with_quarantine(
+                    collection,
+                    collection_name,
+                    old_rows,
+                    f"Consolidated redundant memories in topic `{topic}`",
+                )
+                base_meta = {
+                    "author": "janitor",
+                    "status": "compressed",
+                    "topic": topic,
+                    "timestamp": _utcnow_iso(),
+                }
+                if collection_name == CHROMA_COLLECTION_USER_MEMORIES:
+                    base_meta["memory_type"] = "long_term"
+                    base_meta["user_id"] = old_rows[0]["meta"].get("user_id", os.environ.get("USER_NAME", "user"))
+                    if new_sub:
+                        base_meta["subtopic"] = new_sub
+                else:
+                    base_meta["source"] = "janitor"
+                new_id = str(uuid.uuid4())
+                collection.add(documents=[new_text], ids=[new_id], metadatas=[base_meta])
+                total_reduced += (len(old_ids) - 1)
+                merge_log.append({
+                    "collection": collection_name,
+                    "topic": topic,
+                    "subtopic": new_sub,
+                    "originals": [row["doc"] for row in old_rows],
+                    "merged_into": new_text,
+                    "ids_removed": old_ids,
+                    "new_id": new_id,
+                })
+        except Exception as e:
+            logger.error("Failed to process topic '%s' in %s: %s", topic, collection_name, e)
+
+    return {
+        "topic_groups": topic_groups,
+        "permanent_count": permanent_count,
+        "vectors_reduced": total_reduced,
+        "merge_log": merge_log,
+    }
+
+
+def _purge_known_junk(collection, collection_name: str, rows: list[dict]) -> dict:
+    junk_rows = []
+    reasons: dict[str, list[dict]] = {}
+    for row in rows:
+        reason = _classify_known_junk(collection_name, row["doc"], row["meta"])
+        if not reason:
+            continue
+        junk_rows.append(row)
+        reasons.setdefault(reason, []).append(row)
+
+    deleted = 0
+    deleted_by_reason = {}
+    for reason, grouped_rows in reasons.items():
+        count = _delete_rows_with_quarantine(collection, collection_name, grouped_rows, reason)
+        deleted += count
+        deleted_by_reason[reason] = count
+    return {"deleted": deleted, "by_reason": deleted_by_reason}
 
 
 def _is_expired(expires_at) -> bool:
@@ -172,50 +569,63 @@ def purge_old_forgettable_memories(max_age_days: int = 14) -> int:
 
 def backfill_thematic_archival(max_sessions: int = 2):
     """
-    Finds sessions in short-term memory that were never archived to long-term
-    and runs the thematic archivist on them. Limits to max_sessions per run.
+    Finds sessions whose transcript exists in the SQLite ledger but which have
+    never been archived to long-term, and runs the thematic archivist on them.
+    Picks the OLDEST untranscribed session first ("worth remembering" sweep
+    policy: drain the backlog one session per janitor run while Chieh is idle).
 
-    Checks both old-format entries (no expires_at) and new thematic entries
-    (memory_type=short_term_theme) that haven't been archived yet.
+    Source of truth: `sessions` table in the conversation history ledger.
+    A session counts as "needs archival" if it has turns but no row in
+    `sessions` (or its row has archived_at IS NULL). `_thematic_archival`
+    is idempotent and stamps the row on completion (including the
+    transcript-too-short case), so this loop converges.
     """
-    if not os.path.exists(SHORT_TERM_DB_PATH):
+    try:
+        import sqlite3
+        from jane.config import LEDGER_DB_PATH
+        from memory.v1.conversation_manager import ConversationManager
+    except Exception as e:
+        logger.warning(f"backfill: imports failed: {e}")
+        return
+    if not os.path.exists(LEDGER_DB_PATH):
+        logger.info("backfill: no ledger db at %s; skipping.", LEDGER_DB_PATH)
         return
     try:
-        from memory.v1.conversation_manager import ConversationManager
-        st_client = get_chroma_client(path=SHORT_TERM_DB_PATH)
-        st_collection = st_client.get_collection(name="short_term_memory")
+        conn = sqlite3.connect(LEDGER_DB_PATH)
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT t.session_id, MIN(t.timestamp) AS first_turn
+                FROM turns t
+                LEFT JOIN sessions s ON s.session_id = t.session_id
+                WHERE s.session_id IS NULL OR s.archived_at IS NULL
+                GROUP BY t.session_id
+                ORDER BY first_turn ASC
+                LIMIT ?
+            """, (max_sessions,))
+            rows = cur.fetchall()
+        finally:
+            conn.close()
 
-        all_st = st_collection.get(include=["metadatas"])
-        untriaged_sessions = set()
-        for meta in all_st.get("metadatas", []):
-            if not meta:
-                continue
-            sid = meta.get("session_id")
-            if not sid:
-                continue
-            # Old format: no expires_at means never triaged
-            if not meta.get("expires_at"):
-                untriaged_sessions.add(sid)
-                continue
-            # New thematic format: check if session has themes but was never
-            # long-term archived (no "archived_at" marker)
-            if meta.get("memory_type") == "short_term_theme" and not meta.get("archived_at"):
-                untriaged_sessions.add(sid)
-
-        if not untriaged_sessions:
+        if not rows:
             logger.info("No untriaged sessions found for backfill.")
             return
 
-        target_sessions = list(untriaged_sessions)[:max_sessions]
-        logger.info(f"Backfilling thematic archival for {len(target_sessions)} sessions (out of {len(untriaged_sessions)} pending)...")
-        for sid in target_sessions:
+        logger.info(
+            "Backfilling thematic archival for %d session(s) (oldest first): %s",
+            len(rows), [sid[:12] for sid, _ in rows],
+        )
+        for sid, _first_turn in rows:
             try:
                 cm = ConversationManager(session_id=sid)
                 cm._run_archival()
                 cm.close()
             except Exception as e:
-                logger.warning(f"Failed to backfill session {sid}: {e}")
+                logger.warning(f"Failed to backfill session {sid[:12]}: {e}")
 
+    except sqlite3.OperationalError as e:
+        # `sessions` table may not exist yet on first run after the migration.
+        logger.warning(f"backfill: ledger schema missing — first run? {e}")
     except Exception as e:
         logger.warning(f"Could not run backfill_thematic_archival: {e}")
 
@@ -399,53 +809,6 @@ def run_janitor(max_sessions: int = 2, max_topics: int = 3):
     # Step 0.5: Deduplicate themes across sessions in short-term memory
     dedup_cross_session_themes()
 
-    client = get_chroma_client(path=DB_PATH)
-    try:
-        collection = client.get_collection(name="user_memories")
-    except Exception:
-        logger.info("No user_memories collection found.")
-        return
-
-    # 2. Fetch all memories with metadata
-    all_mems = collection.get(include=["documents", "metadatas"])
-    
-    if not all_mems['documents']:
-        return
-
-    # 3. Group by Topic (Exclude Permanent)
-    topic_groups = {} # topic -> list of {id, text, subtopic}
-    permanent_count = 0
-
-    for i, (doc, meta, id) in enumerate(zip(all_mems['documents'], all_mems['metadatas'], all_mems['ids'])):
-        # Skip entries that should not be consolidated:
-        # - permanent memories (explicitly protected)
-        # - forgettable/short_term (managed by TTL, not consolidation)
-        # - file-anchored entries (vault file metadata)
-        mem_type = meta.get("memory_type", "")
-        skip = (
-            mem_type == "permanent" or
-            mem_type in ("forgettable", "short_term", "short_term_theme") or
-            "Saved file '" in doc or
-            "Location: " in doc or
-            meta.get("file_path") is not None
-        )
-
-        if skip:
-            if mem_type == "permanent":
-                permanent_count += 1
-            continue
-        
-        topic = meta.get("topic", "General")
-        subtopic = meta.get("subtopic", "General")
-        
-        if topic not in topic_groups:
-            topic_groups[topic] = []
-        
-        topic_groups[topic].append({"id": id, "text": doc, "subtopic": subtopic})
-
-    # Filter to topics that actually need merging
-    consolidate_candidates = [t for t, mems in topic_groups.items() if len(mems) >= 3]
-
     # Purge old logs and set up image cluster placeholder — these run every
     # cycle regardless of whether consolidation has work to do.
     log_files_purged = purge_old_log_files()
@@ -453,88 +816,75 @@ def run_janitor(max_sessions: int = 2, max_topics: int = 3):
     # image_cluster_result = cluster_vault_images() disabled due to cost
     image_cluster_result = {"images_moved": 0, "folders_created": [], "disabled": True}
 
+    user_client = get_chroma_client(path=DB_PATH)
+    try:
+        user_collection = user_client.get_collection(name=CHROMA_COLLECTION_USER_MEMORIES)
+    except Exception:
+        logger.info("No user_memories collection found.")
+        user_collection = None
+
+    long_term_client = get_chroma_client(path=VECTOR_DB_LONG_TERM)
+    try:
+        long_term_collection = long_term_client.get_collection(name=CHROMA_COLLECTION_LONG_TERM)
+    except Exception:
+        logger.info("No long_term_knowledge collection found.")
+        long_term_collection = None
+
     total_reduced = 0
     merge_log = []
+    user_topics = {}
+    long_term_topics = {}
+    permanent_count = 0
+    known_junk_deleted = {
+        CHROMA_COLLECTION_USER_MEMORIES: {"deleted": 0, "by_reason": {}},
+        CHROMA_COLLECTION_LONG_TERM: {"deleted": 0, "by_reason": {}},
+    }
+    normalization_result = {
+        "reviewed": 0,
+        "rewritten": 0,
+        "split": 0,
+        "deleted_originals": 0,
+        "unchanged": 0,
+    }
 
-    if not consolidate_candidates:
-        logger.info(f"No topics need consolidation. (Skipped {permanent_count} permanent memories)")
-        target_topics = []
-    else:
-        # 4. Limit consolidation to a few topics per run to save tokens/time
-        target_topics = consolidate_candidates[:max_topics]
-        logger.info(f"Consolidating {len(target_topics)} topics (out of {len(consolidate_candidates)} needing work)...")
+    if user_collection is not None:
+        user_rows = _collect_collection_rows(user_collection)
+        known_junk_deleted[CHROMA_COLLECTION_USER_MEMORIES] = _purge_known_junk(
+            user_collection,
+            CHROMA_COLLECTION_USER_MEMORIES,
+            user_rows,
+        )
+        user_rows = _collect_collection_rows(user_collection)
+        user_result = _consolidate_collection(
+            user_collection,
+            CHROMA_COLLECTION_USER_MEMORIES,
+            user_rows,
+            max_topics=max_topics,
+        )
+        user_topics = user_result["topic_groups"]
+        permanent_count = user_result["permanent_count"]
+        total_reduced += user_result["vectors_reduced"]
+        merge_log.extend(user_result["merge_log"])
 
-    for topic in target_topics:
-        memories = topic_groups[topic]
-        logger.info(f"Analyzing topic '{topic}' with {len(memories)} facts...")
-        # ... (rest of logic) ...
-
-        prompt = f"""
-You are a careful Memory Curator for a personal AI system. Below is a list of facts for the topic: '{topic}'.
-
-YOUR RULES:
-1. ONLY merge facts that are truly redundant — they describe the EXACT SAME knowledge, just worded differently.
-2. If two facts share a topic but describe DIFFERENT things, they are NOT redundant. Leave them alone.
-3. When merging, preserve ALL specific details from both facts. Do not lose any information.
-4. Preserve the 'subtopic' field. If merged facts have different subtopics, keep the most specific one.
-5. When in doubt, do NOT merge. It is far better to keep a slight duplicate than to lose a unique fact.
-6. Facts that are the ONLY one about their specific subject must NEVER appear in a merge.
-
-Return your response as a JSON object. The "merges" array should ONLY contain groups of truly redundant facts.
-If no facts are redundant, return {{"merges": []}}.
-
-{{
-  "merges": [
-    {{
-      "original_ids": ["id1", "id2"],
-      "new_fact": "Comprehensive merged fact preserving all details",
-      "new_subtopic": "Most specific subtopic"
-    }}
-  ]
-}}
-
-FACTS FOR TOPIC '{topic}':
-{json.dumps(memories, indent=2)}
-"""
-
-        try:
-            plan = _llm_json(prompt)
-            
-            for merge in plan.get("merges", []):
-                old_ids = merge["original_ids"]
-                new_text = merge["new_fact"]
-                new_sub = merge.get("new_subtopic", "General")
-
-                # Capture original texts before deletion
-                original_texts = []
-                for oid in old_ids:
-                    for m in memories:
-                        if m["id"] == oid:
-                            original_texts.append(m["text"])
-                            break
-
-                # Delete old
-                collection.delete(ids=old_ids)
-                # Add new
-                new_id = str(uuid.uuid4())
-                collection.add(
-                    documents=[new_text],
-                    ids=[new_id],
-                    metadatas=[{"author": "janitor", "status": "compressed", "topic": topic, "subtopic": new_sub}]
-                )
-                total_reduced += (len(old_ids) - 1)
-
-                # Log the merge details
-                merge_log.append({
-                    "topic": topic,
-                    "subtopic": new_sub,
-                    "originals": original_texts,
-                    "merged_into": new_text,
-                    "ids_removed": old_ids,
-                    "new_id": new_id,
-                })
-        except Exception as e:
-            logger.error(f"Failed to process topic '{topic}': {e}")
+    if long_term_collection is not None:
+        long_term_rows = _collect_collection_rows(long_term_collection)
+        known_junk_deleted[CHROMA_COLLECTION_LONG_TERM] = _purge_known_junk(
+            long_term_collection,
+            CHROMA_COLLECTION_LONG_TERM,
+            long_term_rows,
+        )
+        long_term_rows = _collect_collection_rows(long_term_collection)
+        normalization_result = _normalize_long_term_memory_rows(long_term_collection, long_term_rows)
+        long_term_rows = _collect_collection_rows(long_term_collection)
+        long_term_result = _consolidate_collection(
+            long_term_collection,
+            CHROMA_COLLECTION_LONG_TERM,
+            long_term_rows,
+            max_topics=max_topics,
+        )
+        long_term_topics = long_term_result["topic_groups"]
+        total_reduced += long_term_result["vectors_reduced"]
+        merge_log.extend(long_term_result["merge_log"])
 
     # 4. Save report
     run_timestamp = datetime.datetime.now().isoformat()
@@ -546,8 +896,15 @@ FACTS FOR TOPIC '{topic}':
         "forgettable_expired_by_ttl": expired_purged,
         "forgettable_expired_by_age": old_forgettable_purged,
         "permanent_memories_protected": permanent_count,
-        "topics_processed": list(topic_groups.keys()),
+        "topics_processed": {
+            CHROMA_COLLECTION_USER_MEMORIES: list(user_topics.keys()),
+            CHROMA_COLLECTION_LONG_TERM: list(long_term_topics.keys()),
+        },
+        "known_junk_deleted": known_junk_deleted,
+        "long_term_normalization": normalization_result,
+        "delete_quarantine_log": JANITOR_DELETE_QUARANTINE,
         "log_files_purged": log_files_purged,
+        "self_improve_reports_purged": self_improve_reports_purged,
         "image_clustering": image_cluster_result,
         "merge_details": merge_log,
     }
@@ -561,7 +918,9 @@ FACTS FOR TOPIC '{topic}':
         "vectors_reduced": total_reduced,
         "merges_performed": len(merge_log),
         "forgettable_purged": expired_purged + old_forgettable_purged,
-        "topics_with_merges": list({m["topic"] for m in merge_log}),
+        "topics_with_merges": list({f"{m['collection']}::{m['topic']}" for m in merge_log}),
+        "known_junk_deleted": known_junk_deleted,
+        "long_term_normalization": normalization_result,
         "merges": merge_log,
     }
     try:
@@ -584,7 +943,14 @@ FACTS FOR TOPIC '{topic}':
     # Final step: refresh dynamic query markers from all collections
     refresh_dynamic_query_markers()
 
-    logger.info(f"Janitor finished. Reduced {total_reduced} facts ({len(merge_log)} merges) across {len(topic_groups)} topics.")
+    logger.info(
+        "Janitor finished. Reduced %d facts (%d merges), deleted %d known junk rows, normalized %d long-term rows.",
+        total_reduced,
+        len(merge_log),
+        known_junk_deleted[CHROMA_COLLECTION_USER_MEMORIES]["deleted"]
+        + known_junk_deleted[CHROMA_COLLECTION_LONG_TERM]["deleted"],
+        normalization_result["rewritten"] + normalization_result["split"],
+    )
 
 # ── Memory vs Code Verification ─────────────────────────────────────────────
 #
@@ -612,6 +978,59 @@ _VESSENCE_HOME = str(Path(__file__).resolve().parents[2])
 def _is_code_memory(doc: str) -> bool:
     """Return True if a memory references Vessence internals."""
     return bool(doc and _CODE_INDICATOR_RE.search(doc))
+
+
+def _parse_stored_utc(value: str | None) -> datetime.datetime | None:
+    """Parse legacy naive UTC strings and modern ISO timestamps."""
+    if not value or not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone(datetime.UTC).replace(tzinfo=None)
+    return parsed
+
+
+def _memory_needs_reverification(
+    meta: dict | None,
+    now_utc: datetime.datetime | None = None,
+) -> bool:
+    """Skip code memories that were already checked recently."""
+    verified_at = (meta or {}).get("code_verified_at")
+    verified_dt = _parse_stored_utc(verified_at)
+    if verified_dt is None:
+        return True
+    if now_utc is None:
+        now_utc = datetime.datetime.utcnow()
+    return (now_utc - verified_dt) >= datetime.timedelta(days=CODE_MEMORY_REVERIFY_DAYS)
+
+
+def _stamp_code_verification(
+    col,
+    mem: dict,
+    *,
+    status: str,
+    explanation: str = "",
+    corrected_text: str | None = None,
+) -> dict:
+    """Persist verification metadata so nightly runs can skip fresh checks."""
+    meta = dict(mem.get("metadata") or {})
+    meta["code_verified_at"] = _utcnow_iso()
+    meta["code_verification_status"] = status
+    if explanation:
+        meta["code_verification_note"] = explanation[:240]
+    else:
+        meta.pop("code_verification_note", None)
+    try:
+        update_kwargs = {"ids": [mem["id"]], "metadatas": [meta]}
+        if corrected_text is not None:
+            update_kwargs["documents"] = [corrected_text]
+        col.update(**update_kwargs)
+        return {"ok": True, "reason": ""}
+    except Exception as e:
+        return {"ok": False, "reason": f"stamp_failed: {e}"}
 
 
 def _verify_one_memory(mem: dict, codex_timeout: int = 120) -> dict:
@@ -717,15 +1136,31 @@ Output EXACTLY one JSON object, no markdown fences:
     mem_id = mem["id"]
 
     if act == "update" and corrected:
-        try:
-            col.update(ids=[mem_id], documents=[corrected])
+        stamp = _stamp_code_verification(
+            col,
+            mem,
+            status="updated",
+            explanation=reason,
+            corrected_text=corrected,
+        )
+        if stamp["ok"]:
             logger.info("verify_code_memories: UPDATED %s — %s", mem_id[:12], reason[:80])
             return {"action": "updated", "reason": reason}
-        except Exception as e:
-            return {"action": "error", "reason": f"update_failed: {e}"}
+        return {"action": "error", "reason": stamp["reason"]}
 
     elif act == "delete":
         try:
+            _append_quarantine_entries([{
+                "deleted_at": _utcnow_iso(),
+                "collection": CHROMA_COLLECTION_USER_MEMORIES,
+                "reason": f"verify_code_memories: {reason}",
+                "id": mem_id,
+                "doc": mem.get("text", ""),
+                "meta": {
+                    "topic": mem.get("topic", ""),
+                    "subtopic": mem.get("subtopic", ""),
+                },
+            }])
             col.delete(ids=[mem_id])
             logger.info("verify_code_memories: DELETED %s — %s", mem_id[:12], reason[:80])
             return {"action": "deleted", "reason": reason}
@@ -733,8 +1168,16 @@ Output EXACTLY one JSON object, no markdown fences:
             return {"action": "error", "reason": f"delete_failed: {e}"}
 
     else:
-        logger.info("verify_code_memories: KEPT %s — %s", mem_id[:12], reason[:80])
-        return {"action": "kept", "reason": reason}
+        stamp = _stamp_code_verification(
+            col,
+            mem,
+            status="kept",
+            explanation=reason,
+        )
+        if stamp["ok"]:
+            logger.info("verify_code_memories: KEPT %s — %s", mem_id[:12], reason[:80])
+            return {"action": "kept", "reason": reason}
+        return {"action": "error", "reason": stamp["reason"]}
 
 
 def verify_code_memories(
@@ -766,10 +1209,39 @@ def verify_code_memories(
                 "id": doc_id,
                 "text": doc[:500],
                 "topic": (meta or {}).get("topic", ""),
+                "metadata": dict(meta or {}),
             })
     if not code_mems:
         logger.info("verify_code_memories: no code-referencing memories found")
-        return {"checked": 0, "stale": 0, "fixed": 0}
+        return {"checked": 0, "stale": 0, "fixed": 0, "skipped_recent": 0}
+
+    now_utc = datetime.datetime.utcnow()
+    skipped_recent = 0
+    eligible_mems = []
+    for mem in code_mems:
+        if _memory_needs_reverification(mem.get("metadata"), now_utc=now_utc):
+            eligible_mems.append(mem)
+        else:
+            skipped_recent += 1
+
+    if skipped_recent:
+        logger.info(
+            "verify_code_memories: skipped %d recently verified memories (%d-day window)",
+            skipped_recent,
+            CODE_MEMORY_REVERIFY_DAYS,
+        )
+    code_mems = eligible_mems
+    if not code_mems:
+        logger.info("verify_code_memories: all code memories were recently verified")
+        return {
+            "checked": 0,
+            "stale": 0,
+            "fixed": 0,
+            "deleted": 0,
+            "errors": 0,
+            "skipped_recent": skipped_recent,
+            "details": [],
+        }
 
     # Shuffle so the orchestrator's per-stage time budget cuts a different
     # slice every night. Without this, truncated runs keep re-verifying the
@@ -809,6 +1281,16 @@ def verify_code_memories(
             continue
 
         if verdict == "ACCURATE":
+            stamp = _stamp_code_verification(
+                col,
+                mem,
+                status="accurate",
+                explanation=finding.get("explanation", ""),
+            )
+            if not stamp["ok"]:
+                errors += 1
+                details.append({"id": mem["id"], "action": "error", "reason": stamp["reason"]})
+                continue
             details.append({"id": mem["id"], "action": "accurate", "reason": finding.get("explanation", "")})
             continue
 
@@ -852,6 +1334,7 @@ def verify_code_memories(
                 job="Memory Verification",
                 summary=(
                     f"Verified {checked} code-related memories one at a time. "
+                    f"Skipped {skipped_recent} recently verified entries. "
                     f"All checked out — no stale entries."
                 ),
                 severity="info",
@@ -865,6 +1348,7 @@ def verify_code_memories(
         "fixed": fixed,
         "deleted": deleted,
         "errors": errors,
+        "skipped_recent": skipped_recent,
         "details": details,
     }
 
@@ -873,7 +1357,8 @@ def verify_code_memories(
         ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
         lines = [f"# Memory Verification Report — {ts}\n"]
         lines.append(f"Checked: {checked} | Stale: {stale_count} "
-                      f"| Fixed: {fixed} | Deleted: {deleted} | Errors: {errors}\n")
+                      f"| Fixed: {fixed} | Deleted: {deleted} | Errors: {errors} "
+                      f"| Skipped recent: {skipped_recent}\n")
         for d in details:
             if d["action"] != "accurate":
                 lines.append(f"- **{d['action'].upper()}** `{d['id'][:12]}` — {d['reason']}")

@@ -266,66 +266,120 @@ class ConversationManager:
 
     def _thematic_archival(self):
         """
-        Synthesizes the entire session into high-value thematic arcs using the Agent tier.
-        Stores them in long-term knowledge with 'Sweet 16' category metadata.
+        Synthesizes the session into long-term memories using the
+        "worth remembering" rubric. Emits two kinds:
+          - themes:       recurring/evolving anchors that merge over time
+                          (Identity, Project: vessence/classes.chiehwu.com/waterlily,
+                          Architecture, Collaborative Habits)
+          - atomic facts: orphan one-offs that don't fit a theme yet
+                          (Decision, Commitment, Failure Lesson, External Relationship)
+        Both go through `_promote_to_long_term`, which decides MERGE vs NEW
+        against existing entries in the same topic.
+
+        Idempotent: skips if the SQLite `sessions` row already has archived_at.
+        Marks even too-short transcripts as archived so the janitor backfill
+        does not re-scan them.
         """
+        if self._is_session_archived():
+            return
         transcript = self._fetch_session_transcript()
         if not transcript or len(transcript) < 200:
+            self._mark_session_archived(arc_count=0, transcript_too_short=True)
             return
 
         prompt = (
-            "You are The Thematic Archivist. Analyze the following session transcript. "
-            "Identify the 'Arcs of Lasting Value'—the meaningful developments that should be remembered "
-            "long-term. Ignore greetings, noise, and transient state.\n\n"
-            "Categories to search for (The Sweet 16):\n"
-            "1. Identity Evolution (ANYTHING about the user as a person: name, profession, "
-            "employer, office location, family members, pets, hobbies, personal interests, "
-            "health, lifestyle, personal preferences, life events, relationships, "
-            "businesses they own, personal history. If in doubt whether something is about "
-            "the user vs. the system, and it describes WHO the user IS, use this category.)\n"
-            "2. Architectural Milestones (System design changes, new components)\n"
-            "3. Project State (Ground truth of active projects)\n"
-            "4. Debugging Wisdom (Root causes, fix patterns, why things failed)\n"
-            "5. Collaborative Habits (Communication style, preferred workflows)\n"
-            "6. Resource Mapping (Key files, URLs, entities, people)\n"
-            "7. Tech Stack Fingerprint (Specific library versions, environment quirks)\n"
-            "8. Risk & Mitigation (Safety rules, dangerous command handling)\n"
-            "9. User Eureka Moments (Shifts in logic, breakthroughs)\n"
-            "10. Future Speculations (Discussed but unimplemented ideas)\n"
-            "11. Aesthetic Preferences (UI/UX tastes, font sizes, colors)\n"
-            "12. Cross-Agent Coordination (Division of labor between Jane and Amber)\n"
-            "13. File Anchors (Direct paths to important code or data)\n"
-            "14. Don't Search List (Known noise paths or irrelevant directories)\n"
-            "15. Symbolic Shorthand (Frequent constants, Lexicon items)\n"
-            "16. Proven Command Snippets (Bash commands that worked perfectly)\n\n"
-            "Output each Arc as a JSON object within a list. Each object must have:\n"
-            "- 'theme': A concise title\n"
-            "- 'category': One of the 16 categories above\n"
-            "- 'content': A clear, comprehensive summary including context and outcomes.\n\n"
-            "Format: [ { \"theme\": \"...\", \"category\": \"...\", \"content\": \"...\" }, ... ]\n\n"
+            "You are The Thematic Archivist for Chieh's personal AI partner (Jane). "
+            "Analyze the session transcript and extract memories that are WORTH REMEMBERING.\n\n"
+
+            "WORTH REMEMBERING — save it if any of these apply:\n"
+            "1. Facts about Chieh that aren't in code or git: preferences, life context, "
+            "family, work, teaching style, what he finds satisfying or annoying.\n"
+            "2. Decisions and the *why* behind them — rationale doesn't survive in commit "
+            "messages reliably.\n"
+            "3. Commitments and open threads — what's promised, blocked, mid-flight.\n"
+            "4. Architectural shape and rationale — boundaries between components, why "
+            "something is split this way (NOT impl details — those are in code).\n"
+            "5. Failures and the lesson — what we tried that didn't work and why.\n"
+            "6. External relationships — people, services, accounts, deadlines.\n"
+            "7. Identity/values shifts — anything about how we work together as partners.\n\n"
+
+            "DROP IT — do not save:\n"
+            "- Status updates and config values that already live in code or CLAUDE.md.\n"
+            "- Tool output, command results, file paths used once.\n"
+            "- Intermediate debugging that succeeded — the fix is in the diff.\n"
+            "- Anything re-derivable from `git log`, the repo, or config files.\n"
+            "- Routine task completions.\n\n"
+
+            "TWO HEURISTICS:\n"
+            "- 'Would a new agent picking up cold make the wrong call without this?' → save.\n"
+            "- 'If we deleted this in 6 months and re-encountered the situation, would we "
+            "re-learn it painlessly?' → painful → save.\n\n"
+
+            "OUTPUT SHAPE — each memory is either a THEME or an ATOMIC fact:\n"
+            "- THEME (recurring, evolves over time): use these topics:\n"
+            "    * Identity Evolution           — facts about Chieh as a person\n"
+            "    * Project: vessence            — Jane/Vessence implementation, decisions, state\n"
+            "    * Project: classes.chiehwu.com — teaching app, Cloud SQL, FastAPI rewrite\n"
+            "    * Project: waterlily           — waterlily project state and decisions\n"
+            "    * Architectural Milestones     — cross-project system design\n"
+            "    * Collaborative Habits         — how Chieh and Jane work together\n"
+            "    * Aesthetic Preferences        — UI/UX taste\n"
+            "- ATOMIC (one-off, doesn't fit a theme): use these topics:\n"
+            "    * Decision\n"
+            "    * Commitment\n"
+            "    * Failure Lesson\n"
+            "    * External Relationship\n\n"
+
+            "If a fact clearly belongs to vessence/classes.chiehwu.com/waterlily, ALWAYS "
+            "emit it as a THEME with the matching 'Project: <name>' topic — implementation "
+            "details accumulate under the project anchor.\n\n"
+
+            "Output a single JSON list. Each object must have:\n"
+            "- 'kind':    'theme' | 'atomic'\n"
+            "- 'topic':   one of the topics above\n"
+            "- 'title':   concise phrase\n"
+            "- 'content': comprehensive summary including context and outcome\n"
+            "- 'why_kept': one sentence — which rubric criterion this hits\n\n"
+            "If nothing in the transcript is worth remembering, return [].\n\n"
             f"Transcript:\n{transcript}"
         )
 
         try:
             from agent_skills.claude_cli_llm import completion_json
-            arcs = completion_json(prompt, tier="agent")
+            memories = completion_json(prompt, tier="agent")
             stored_count = 0
             promotion_failed = False
-            for arc in arcs:
-                theme = arc.get("theme", "Unnamed Theme")
-                category = arc.get("category", "General")
-                content = arc.get("content", "")
-                if content:
-                    # Post-classification: catch user-personal arcs the LLM miscategorized
-                    category = self._reclassify_if_user_identity(category, content)
-                    full_memory = f"Theme: {theme}\nCategory: {category}\n\n{content}"
-                    if self._promote_to_long_term(full_memory, category=category):
-                        stored_count += 1
-                    else:
-                        promotion_failed = True
+            for mem in memories:
+                kind = (mem.get("kind") or "").lower()
+                topic = mem.get("topic", "General")
+                title = mem.get("title", "Unnamed")
+                content = mem.get("content", "")
+                why_kept = mem.get("why_kept", "")
+                if not content:
+                    continue
+                # Post-classification: catch user-personal arcs miscategorized away from Identity
+                topic = self._reclassify_if_user_identity(topic, content)
+                full_memory = (
+                    f"Title: {title}\n"
+                    f"Topic: {topic}\n"
+                    f"Kind: {kind or 'theme'}\n"
+                    f"Why kept: {why_kept}\n\n"
+                    f"{content}"
+                )
+                if self._promote_to_long_term(full_memory, category=topic):
+                    stored_count += 1
+                else:
+                    promotion_failed = True
             if not promotion_failed:
+                # Legacy path: stamp short_term_theme rows (if any) for the
+                # janitor backfill that scans by archived_at.
                 self._mark_session_themes_archived()
-            logger.info("Thematic archival complete: %d arcs stored.", stored_count)
+                # New path: session-level marker so future runs short-circuit.
+                self._mark_session_archived(arc_count=stored_count)
+            logger.info(
+                "Thematic archival complete: %d memories stored (themes+atomic).",
+                stored_count,
+            )
         except Exception as e:
             logger.warning("Thematic archival failed: %s", e)
 
@@ -859,7 +913,51 @@ class ConversationManager:
             cursor.execute("ALTER TABLE turns ADD COLUMN cls TEXT")
         except sqlite3.OperationalError:
             pass
+        # Session-level archival ledger. One row per session that has been
+        # processed by _thematic_archival, so re-runs (and the janitor
+        # backfill) can skip already-transcribed sessions. archived_at NULL
+        # means "session is known to exist but archival has not completed."
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS sessions (
+                session_id TEXT PRIMARY KEY,
+                archived_at TEXT,
+                arc_count INTEGER DEFAULT 0,
+                transcript_too_short INTEGER DEFAULT 0
+            )
+        """)
         self.db_conn.commit()
+
+    def _is_session_archived(self) -> bool:
+        try:
+            with self._db_lock:
+                cur = self.db_conn.cursor()
+                cur.execute(
+                    "SELECT archived_at FROM sessions WHERE session_id = ?",
+                    (self.session_id,),
+                )
+                row = cur.fetchone()
+            return bool(row and row[0])
+        except Exception:
+            return False
+
+    def _mark_session_archived(self, arc_count: int, transcript_too_short: bool = False) -> None:
+        try:
+            with self._db_lock:
+                cur = self.db_conn.cursor()
+                cur.execute(
+                    "INSERT OR REPLACE INTO sessions "
+                    "(session_id, archived_at, arc_count, transcript_too_short) "
+                    "VALUES (?, ?, ?, ?)",
+                    (
+                        self.session_id,
+                        datetime.datetime.utcnow().isoformat(),
+                        int(arc_count),
+                        1 if transcript_too_short else 0,
+                    ),
+                )
+                self.db_conn.commit()
+        except Exception as e:
+            logger.warning("Failed to mark session archived: %s", e)
 
     def _log_to_ledger(self, message: dict, latency_ms: float, cls: str | None = None):
         if not self.db_conn:
@@ -969,7 +1067,7 @@ class ConversationManager:
 
         from memory.v1.short_term_extractor import build_short_term_note
         try:
-            note, extracted_meta, skip = build_short_term_note(
+            note, search_text, extracted_meta, skip = build_short_term_note(
                 user_msg, assistant_msg,
                 cleaner=self._strip_injected_metadata,
             )
@@ -1011,11 +1109,24 @@ class ConversationManager:
             "summary_chars": len(note),
             **extracted_meta,
         }
-        self.short_term_collection.add(
-            ids=[doc_id],
-            documents=[note],
-            metadatas=[metadata],
-        )
+        # Embed the label-stripped form for sharper retrieval; the labeled
+        # ``note`` stays as the displayed document. See
+        # ``short_term_extractor.flatten_to_search_text``.
+        embeddings = None
+        try:
+            from memory.v1.embedding_helpers import embed_one
+            embeddings = [embed_one(search_text)]
+        except Exception as exc:
+            logger.debug("custom embedding failed (%s); using default on labeled note", exc)
+        if embeddings is not None:
+            self.short_term_collection.add(
+                ids=[doc_id], documents=[note], embeddings=embeddings,
+                metadatas=[metadata],
+            )
+        else:
+            self.short_term_collection.add(
+                ids=[doc_id], documents=[note], metadatas=[metadata],
+            )
         _append_writeback_log(
             f"session={self.session_id} stage=short_term_write stored id={doc_id[:12]} "
             f"kind={metadata.get('turn_kind', '?')} "

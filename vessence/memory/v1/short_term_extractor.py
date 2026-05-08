@@ -321,6 +321,25 @@ def flatten_to_note(extracted: dict[str, list[str]]) -> str:
     return "\n".join(parts).strip()
 
 
+def flatten_to_search_text(extracted: dict[str, list[str]]) -> str:
+    """Label-stripped form of the note used as the embedding input.
+
+    The labeled note (``flatten_to_note``) is what we display and store in
+    ``documents``; this is what we hand to the embedding model so the
+    vectors capture content semantics instead of label boilerplate
+    (``Decisions: ``, ``Open loops: ``). Items are joined with newlines
+    so the model sees them as separate bullets, not one long sentence.
+    """
+    parts: list[str] = []
+    for key, _label in _LABEL_ORDER:
+        items = extracted.get(key) or []
+        for it in items:
+            s = str(it).strip()
+            if s:
+                parts.append(s)
+    return "\n".join(parts).strip()
+
+
 def flatten_to_metadata(kind: str, extracted: dict[str, list[str]]) -> dict[str, Any]:
     """Metadata dict for Chroma. Lists are joined into delimited strings since
     Chroma metadata values must be primitives.
@@ -352,21 +371,29 @@ def build_short_term_note(
     *,
     cleaner=None,
     llm_call=None,
-) -> tuple[str, dict[str, Any], bool]:
+) -> tuple[str, str, dict[str, Any], bool]:
     """Build the structured short-term note from one Stage 3 turn.
 
-    ``cleaner`` is ``ConversationManager._strip_injected_metadata`` (injected so
-    tests don't have to import the whole class). Defaults to identity.
+    ``cleaner`` is ``ConversationManager._strip_injected_metadata`` (injected
+    so tests don't have to import the whole class). Defaults to identity.
 
-    Returns ``(note_text, metadata, should_skip)``. The caller writes to
-    Chroma only if ``should_skip is False``.
+    Returns ``(note_text, search_text, metadata, should_skip)``:
+      * ``note_text``    — labeled-bullet form for display / Chroma ``documents``
+      * ``search_text``  — label-stripped form for the embedding input (sharper
+        retrieval; labels were polluting the vector with boilerplate)
+      * ``metadata``     — Chroma metadata dict
+      * ``should_skip``  — caller writes to Chroma only if False
+
+    Backward-compat note: this changed from a 3-tuple to a 4-tuple on
+    2026-05-07. Old callers that unpack 3 values will break — update them
+    to take ``search_text`` as the second element, or use indexing.
     """
     cleaner = cleaner or (lambda s: s)
     user_clean = re.sub(r"\s+", " ", cleaner(user_msg or "")).strip()
     asst_clean = re.sub(r"\s+", " ", cleaner(assistant_msg or "")).strip()
 
     if not user_clean and not asst_clean:
-        return "", {"turn_kind": "general"}, True
+        return "", "", {"turn_kind": "general"}, True
 
     # The classifier sees the whole turn so signals from both sides count
     # (e.g. user said "fix the bug" + assistant produced a code edit → "code").
@@ -375,12 +402,13 @@ def build_short_term_note(
 
     extracted = extract_structured(kind, full, llm_call=llm_call)
     if should_skip(extracted):
-        return "", {"turn_kind": kind, "skipped": True}, True
+        return "", "", {"turn_kind": kind, "skipped": True}, True
 
     note = flatten_to_note(extracted)
     if not note.strip():
-        return "", {"turn_kind": kind, "skipped": True}, True
+        return "", "", {"turn_kind": kind, "skipped": True}, True
 
+    search_text = flatten_to_search_text(extracted) or note
     meta = flatten_to_metadata(kind, extracted)
     meta["summary_style"] = "structured_short_term_v1"
-    return note, meta, False
+    return note, search_text, meta, False
