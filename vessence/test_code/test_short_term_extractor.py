@@ -215,7 +215,7 @@ def test_extract_structured_passes_through_clean_dict():
 # ---------------------------------------------------------------------------
 
 def test_build_skips_when_both_messages_empty():
-    note, meta, skip = build_short_term_note("", "", llm_call=_mock_llm({k: [] for k in EXTRACT_KEYS}))
+    note, _search, meta, skip = build_short_term_note("", "", llm_call=_mock_llm({k: [] for k in EXTRACT_KEYS}))
     assert skip is True
     assert note == ""
 
@@ -232,7 +232,7 @@ def test_build_code_edit_preserves_files_and_symbols():
         "people": [],
         "time_refs": [],
     }
-    note, meta, skip = build_short_term_note(
+    note, _search, meta, skip = build_short_term_note(
         "fix the off-by-one in attempts.py",
         "Done — bumped upper bound in app/services/attempts.py:_select_pool. Need to smoke test still.",
         llm_call=_mock_llm(payload),
@@ -255,7 +255,7 @@ def test_build_calendar_preserves_names_and_dates():
         "people": ["Dr. Smith"],
         "time_refs": ["April 30 2026 at 2pm"],
     }
-    note, meta, skip = build_short_term_note(
+    note, _search, meta, skip = build_short_term_note(
         "When is my doctor appointment?",
         "[CALENDAR DATA] Dr. Smith on Apr 30 2026 at 2pm. Dentist needs confirmation for second visit.",
         llm_call=_mock_llm(payload),
@@ -277,7 +277,7 @@ def test_build_messaging_preserves_recipient_and_action():
         "people": ["Mom"],
         "time_refs": [],
     }
-    note, meta, skip = build_short_term_note(
+    note, _search, meta, skip = build_short_term_note(
         "Tell mom I'll be late",
         "msg sent",
         llm_call=_mock_llm(payload),
@@ -297,7 +297,7 @@ def test_build_todo_preserves_items():
         "people": [],
         "time_refs": [],
     }
-    note, meta, skip = build_short_term_note(
+    note, _search, meta, skip = build_short_term_note(
         "Add milk and eggs to my grocery list",
         "Added — list now has: milk, eggs, bread.",
         llm_call=_mock_llm(payload),
@@ -313,7 +313,7 @@ def test_build_skips_low_value_chatter():
     should be dropped before reaching Chroma.
     """
     payload = {k: [] for k in EXTRACT_KEYS}
-    note, meta, skip = build_short_term_note(
+    note, _search, meta, skip = build_short_term_note(
         "Hi Jane!",
         "Hello! How can I help?",
         llm_call=_mock_llm(payload),
@@ -331,7 +331,7 @@ def test_build_skips_when_only_facts_present():
     payload = _empty_extracted()
     payload["facts"] = ["the user mentioned they are tired"]
     payload["people"] = ["the user"]
-    note, meta, skip = build_short_term_note(
+    note, _search, meta, skip = build_short_term_note(
         "I'm tired",
         "Sorry to hear that — get some rest.",
         llm_call=_mock_llm(payload),
@@ -349,7 +349,7 @@ def test_build_uses_strip_metadata_cleaner():
 
     payload = _empty_extracted()
     payload["decisions"] = ["did the thing"]
-    note, meta, skip = build_short_term_note(
+    note, _search, meta, skip = build_short_term_note(
         "user msg [META]",
         "asst msg [META]",
         cleaner=fake_cleaner,
