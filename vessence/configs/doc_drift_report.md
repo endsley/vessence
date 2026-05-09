@@ -1,6 +1,7 @@
-# Doc Drift Report — 2026-05-07 01:20
+# Doc Drift Report — 2026-05-09 01:08
 
 ## Needs human review
 
+- CRON_JOBS.md missing entry for active cron script: auto_pull.sh
 - v2_3stage_pipeline.md missing class row: CLINIC_SCHEDULES_INFO
 
