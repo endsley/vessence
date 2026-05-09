@@ -119,47 +119,6 @@ After building or modifying ANY essence, run this checklist before reporting don
 5. If Android was changed, verify the build compiles.
 *Essence display order: Jane is #1, Work Log is last. Others are alphabetical.*
 
-### Text Message (SMS) Protocols
-
-**Sending:** When user says "tell X something" / "text X" / "message X" — this ALWAYS means SMS.
-- If message included: draft it with `[[CLIENT_TOOL:contacts.sms_draft:{"query":"X","body":"msg","draft_id":"id"}]]`, read it back verbally, ask "Ready to send?"
-- If no message: ask "What would you like me to say?"
-- On "yes": send with `[[CLIENT_TOOL:contacts.sms_send:{"draft_id":"id"}]]`
-- On "no": ask for new message, update draft with `[[CLIENT_TOOL:contacts.sms_draft_update:{"draft_id":"id","body":"new msg"}]]`, read back again
-- On "cancel": `[[CLIENT_TOOL:contacts.sms_cancel:{"draft_id":"id"}]]`
-- **NEVER send without explicit confirmation.**
-
-**Reading:** When user asks "read my messages" / "any new texts?" / "how many unread?":
-- Fetch with `[[CLIENT_TOOL:messages.fetch_unread:{"limit":10}]]`
-- Wait for tool result with message data
-- Count messages, classify as important vs spam/unimportant
-- Report: "You have N unread. X are important, Y are spam. The important ones are from..."
-- Read important ones if asked
-- **Do NOT just say "I've asked your phone." YOU read and analyze them.**
-
-### Email Protocols
-
-**Reading:** When user asks "check my email" / "any new emails?" / "read my email":
-- Fetch with `[[CLIENT_TOOL:email.read_inbox:{"limit":10}]]`
-- Wait for tool result with email data
-- Count emails, classify as important vs spam/unimportant
-- Report: "You have N unread. X are important, Y are spam. The important ones are from..."
-- Read important ones if asked. Full body: `[[CLIENT_TOOL:email.read:{"message_id":"id"}]]`
-- Search by person: `[[CLIENT_TOOL:email.search:{"query":"from:bob@gmail.com","limit":5}]]`
-- **Do NOT just say "I've checked your email." YOU read and analyze them.**
-
-**Sending:** When user says "email X about Y" / "send an email to X":
-- Draft the email, read it back: "Here's your email to X — Subject: Y. Body: '...'. Ready to send?"
-- If no content given: ask "What would you like to say?"
-- On "yes": `[[CLIENT_TOOL:email.send:{"to":"addr","subject":"subj","body":"msg"}]]`
-- On "no": ask for changes, read back again
-- **NEVER send without explicit confirmation.**
-
-**Deleting:** When user says "delete that email" / "trash the spam":
-- Confirm what will be deleted first
-- On confirmation: `[[CLIENT_TOOL:email.delete:{"message_id":"id"}]]`
-- Same confirmation flow as SMS.
-
 ### Environment
 - ADK Python venv: `python`
 - ChromaDB at: `$VESSENCE_DATA_HOME/vector_db` (collection: `user_memories`)
@@ -171,7 +130,6 @@ After building or modifying ANY essence, run this checklist before reporting don
 ## Mandatory Update Rules
 After implementing any change:
 - Jane capabilities → `configs/Jane_architecture.md`
-- Amber capabilities → `configs/Amber_architecture.md`
 - Memory system → `configs/memory_manage_architecture.md`
 - Skills added/removed → `configs/SKILLS_REGISTRY.md`
 - Goals/TODOs change → `configs/TODO_PROJECTS.md`
