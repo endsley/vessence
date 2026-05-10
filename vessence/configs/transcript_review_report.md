@@ -1,174 +1,138 @@
-# Transcript Quality Review — 2026-05-06
+# Transcript Quality Review — 2026-05-09
 
-Generated: 2026-05-07 01:24:17
+Generated: 2026-05-10 01:34:59
 
-## Issue 1 [MEDIUM]
+## Issue 1 [CRITICAL]
 
-**Turn:** 2026-05-06 01:06:43
+**Turn:** 2026-05-09 01:07:08
 **User said:** yes those articles and maybe just two days
 
-**Problem:** Follow-up routing failed; a clarification reply was treated as a new `others` request instead of going through the pending_action_resolver.
+**Problem:** Pending follow-up was not resolved; a contextual reply fragment went through normal classification
 
-**Root cause:** The turn immediately after a Stage 3 exchange still ran normal Stage 1 classification and Stage 3 escalation. The trace shows no resolver hit, and the Stage 3 call started with `history=0`, so the system did not preserve an explicit pending follow-up path for a reply that depended on the previous turn.
+**Root cause:** The pre-classifier pending_action_resolver did not intercept a reply that plainly depends on the previous turn. Stage 1 still ran and downgraded the fragment to `others`, which means no pending action was active or the bypass path failed.
 
-**Suggested fix:** Persist pending follow-up state from Stage 3 clarifying questions and check it before Stage 1. Add resolver heuristics for terse confirmations plus parameter-only replies such as durations.
+**Suggested fix:** Persist pending_action whenever Stage 2 or Stage 3 asks a follow-up question, run the resolver before classification on every turn, and add tests for short contextual answers like `yes ... two days`.
 
 **Log evidence:**
 ```
-2026-05-06 01:06:42 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (1169ms) params={}
+2026-05-09 01:07:07 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (1105ms) params={}
 ```
 ```
-2026-05-06 01:06:43 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=42 sid_override=True class_protocol=n/a
-```
-```
-2026-05-06 01:06:43 INFO [jane.proxy] [audit-177804] stream_message brain=Claude history=0 msg_len=42 file_ctx=False
+2026-05-09 01:07:08 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=42 sid_override=True class_protocol=n/a
 ```
 
 ---
 
-## Issue 2 [MEDIUM]
+## Issue 2 [CRITICAL]
 
-**Turn:** 2026-05-06 01:06:57
-**User said:** currently how does your short-term memory work
+**Turn:** 2026-05-09 01:07:20
+**User said:** <class_protocol name="greeting"> These are runtime instructions for handling a
 
-**Problem:** Stage 3 latency was excessive for a plain informational question.
+**Problem:** User-supplied protocol text was treated as a real `greeting` intent, and the greeting fast-path then failed schema validation
 
-**Root cause:** This turn was escalated to Stage 3 and immediately forced a standing-brain restart because the vault was unlocked after the brain had been spawned locked. The same restart pattern repeats across Stage 3 turns, and this request took over 72 seconds end-to-end.
+**Root cause:** Stage 1 classified the pasted `<class_protocol ...>` block as `greeting` with Very High confidence instead of treating it as arbitrary user text. After that misroute, the greeting handler returned an invalid shape, forcing Stage 3 to run with the greeting class protocol loaded.
 
-**Suggested fix:** When the vault unlocks, respawn or rebind the standing brain once and reuse the healthy unlocked session. Do not restart the Stage 3 process on each request.
+**Suggested fix:** Sanitize or neutralize control-looking markup before classification, classify from semantic intent rather than literal label mentions, and add contract tests that fail any handler response not matching the expected schema.
 
 **Log evidence:**
 ```
-2026-05-06 01:06:57 INFO [jane.standing_brain] Vault is now unlocked but brain was spawned locked. Restarting brain [claude-opus-4-6]...
+2026-05-09 01:07:18 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 greeting:Very High (786ms) params={}
 ```
 ```
-2026-05-06 01:08:10 INFO [jane.standing_brain] Brain [claude-opus-4-6] turn 1 complete in 71303ms (1602 chars, 7 raw events)
+2026-05-09 01:07:19 INFO [jane_web.jane_v3.pipeline] jane_v3: handler 'greeting' returned invalid shape → Stage 3
 ```
 ```
-2026-05-06 01:08:10 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage3 end-to-end (72653ms)
+2026-05-09 01:07:19 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=greeting:Very High voice=False prompt_len=1142 sid_override=True class_protocol=loaded:greeting
 ```
 
 ---
 
-## Issue 3 [CRITICAL]
+## Issue 3 [MEDIUM]
 
-**Turn:** 2026-05-06 01:08:13
-**User said:** <class_protocol name="greeting"> These are runtime instructions for handling
+**Turn:** 2026-05-09 01:07:31
+**User said:** can you look at the short-term memory to see if this whole thing is actually bei
 
-**Problem:** User-supplied protocol text hijacked Stage 1 into `greeting`, and the greeting handler then returned an invalid shape and fell through to Stage 3.
+**Problem:** Short-term-memory introspection was degraded because the extractor was failing on every turn
 
-**Root cause:** The classifier labeled the injected payload as `greeting:Very High`. Stage 2 then logged that the `greeting` handler returned an invalid shape, and the system escalated to Stage 3 with `class_protocol=loaded:greeting` and a 1142-character prompt. This is both a prompt-injection weakness and a handler contract failure.
+**Root cause:** The short-term memory extractor repeatedly failed with a quota error, so the system could not reliably update or inspect short-term memory during the same conversation in which the user was asking about it.
 
-**Suggested fix:** Strip or neutralize user-supplied pseudo-protocol/XML blocks before classification, never trust user text as a class protocol source, and add strict schema validation plus tests for every handler response shape.
+**Suggested fix:** Take the remote LLM extractor out of the hot path or add a local fallback, add a circuit breaker after repeated failures, and expose a degraded-memory status to Stage 3 so it does not imply live memory inspection succeeded.
 
 **Log evidence:**
 ```
-2026-05-06 01:08:11 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 greeting:Very High (704ms) params={}
+2026-05-09 01:07:31 WARNING [memory.v1.short_term_extractor] short_term_extractor: LLM call failed: CLI failed (exit 1): You've hit your limit · resets May 31, 8pm (America/New_York)
 ```
 ```
-2026-05-06 01:08:12 INFO [jane_web.jane_v3.pipeline] jane_v3: handler 'greeting' returned invalid shape → Stage 3
-```
-```
-2026-05-06 01:08:12 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=greeting:Very High voice=False prompt_len=1142 sid_override=True class_protocol=loaded:greeting
+2026-05-09 01:07:37 WARNING [memory.v1.short_term_extractor] short_term_extractor: LLM call failed: CLI failed (exit 1): You've hit your limit · resets May 31, 8pm (America/New_York)
 ```
 
 ---
 
 ## Issue 4 [MEDIUM]
 
-**Turn:** 2026-05-06 01:13:00
-**User said:** can you look at the short-term memory to see if this whole thing is actually b
+**Turn:** 2026-05-09 01:07:43
+**User said:** hey Jane, can you take a look at the ~/code/waterlily project for me
 
-**Problem:** The short-term-memory inspection path failed during the turn, so the assistant could not reliably verify live short-term memory behavior.
+**Problem:** A codebase-inspection request reached Stage 3 without any file context even though the user gave an explicit path
 
-**Root cause:** The request was escalated to Stage 3, but the supporting short-term-memory extractor timed out after 45 seconds during the same turn. The conversation still ran for over 205 seconds end-to-end, so any answer claiming direct inspection of live short-term memory would not have been fully backed by the intended evidence path.
+**Root cause:** The proxy forwarded the request with `file_ctx=False`, so Stage 3 was not given project files for `~/code/waterlily`. The file-context detector did not recognize or expand the tilde path.
 
-**Suggested fix:** Make debug memory inspection deterministic, or fail fast and explicitly report that memory inspection is unavailable when the extractor times out instead of continuing as though inspection succeeded.
+**Suggested fix:** Expand `~` before path parsing, detect filesystem paths in utterances, and auto-attach repo or file context before escalating code-inspection requests to Stage 3.
 
 **Log evidence:**
 ```
-2026-05-06 01:12:59 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=123 sid_override=True class_protocol=n/a
+2026-05-09 01:07:42 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (2102ms) params={}
 ```
 ```
-2026-05-06 01:13:42 WARNING [memory.v1.short_term_extractor] short_term_extractor: LLM call failed: CLI timed out after 45s
-```
-```
-2026-05-06 01:16:25 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage3 end-to-end (205910ms)
+2026-05-09 01:07:43 INFO [jane.proxy] [audit-177830] stream_message brain=Claude history=0 msg_len=68 file_ctx=False
 ```
 
 ---
 
 ## Issue 5 [MEDIUM]
 
-**Turn:** 2026-05-06 01:18:32
+**Turn:** 2026-05-09 01:07:48
 **User said:** I'm currently are you able to see that the website Jane version is not working
 
-**Problem:** Stage 1 produced an unregistered class label (`restart server`) and fell back to `others`, losing the routing signal for a site-debugging request.
+**Problem:** Stage 1 emitted unsupported internal labels (`restart server`, `force stage3`) and silently downcast them to `others`
 
-**Root cause:** The classifier backend returned `restart server`, which is not a valid class in the registry. The pipeline downgraded it to `others:Low` and sent the request to Stage 3, which took over 203 seconds.
+**Root cause:** The classifier was not constrained to the registered intent enum, so it hallucinated out-of-schema labels that look like internal control intents. The pipeline then coerced them to `others`, losing routing fidelity and confidence.
 
-**Suggested fix:** Constrain classifier output to the registered enum or JSON schema, and add a normalization layer that maps operational paraphrases to valid intents before fallback to `others`.
+**Suggested fix:** Use structured decoding against the allowed class list, retry or hard-fail invalid labels instead of silently coercing them, and remove any internal control labels from the classifier prompt or few-shot examples.
 
 **Log evidence:**
 ```
-2026-05-06 01:18:32 WARNING [intent_classifier.v3.classifier] v3: qwen returned unknown class 'restart server' → others
+2026-05-09 01:07:47 WARNING [intent_classifier.v3.classifier] v3: qwen returned unknown class 'restart server' → others
 ```
 ```
-2026-05-06 01:18:32 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (693ms) params={}
+2026-05-09 01:07:53 WARNING [intent_classifier.v3.classifier] v3: qwen returned unknown class 'force stage3' → others
 ```
 ```
-2026-05-06 01:21:56 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage3 end-to-end (203730ms)
+2026-05-09 01:07:58 WARNING [intent_classifier.v3.classifier] v3: qwen returned unknown class 'force stage3' → others
 ```
 
 ---
 
 ## Issue 6 [MEDIUM]
 
-**Turn:** 2026-05-06 01:21:59
+**Turn:** 2026-05-09 01:07:54
 **User said:** is stage 3 brain back up by now
 
-**Problem:** A Stage 3 health-check question was classified as the internal label `force stage3` and routed through Stage 3 itself; the same failure repeated on the next turn.
+**Problem:** The 'persistent' Stage 3 brain was being restarted on each turn, adding latency and undermining continuity
 
-**Root cause:** The classifier leaked an internal or unregistered control label (`force stage3`) at 01:21:58 and again at 01:22:55. Both turns fell back to `others` and escalated to Stage 3 instead of using a deterministic server-health path, which would fail badly if Stage 3 were actually unavailable.
+**Root cause:** For Stage 3 turns, the server detected that the standing brain had been spawned locked, restarted it, and then injected only recent history. That defeats true session persistence and adds about 3 seconds end-to-end per turn.
 
-**Suggested fix:** Remove internal control labels from the classifier vocabulary and add a dedicated health/status intent that answers from server process state rather than the Stage 3 model.
-
-**Log evidence:**
-```
-2026-05-06 01:21:58 WARNING [intent_classifier.v3.classifier] v3: qwen returned unknown class 'force stage3' → others
-```
-```
-2026-05-06 01:21:58 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=31 sid_override=True class_protocol=n/a
-```
-```
-2026-05-06 01:22:55 WARNING [intent_classifier.v3.classifier] v3: qwen returned unknown class 'force stage3' → others
-```
-
----
-
-## Issue 7 [CRITICAL]
-
-**Turn:** 2026-05-06 01:25:46
-**User said:** can you mute my computer for me
-
-**Problem:** The mute request never executed; it was routed to Stage 3 instead of a device-control fast path, then cancelled on client disconnect before any action could run.
-
-**Root cause:** Stage 1 classified the request as `others:Low`, so no deterministic Stage 2 device-audio handler ran. The request escalated to Stage 3, but the client disconnected after 12 seconds and the brain execution was cancelled, so there is no evidence of any tool/action reaching the Android client.
-
-**Suggested fix:** Add a `mute/unmute volume` intent with a deterministic client tool path. If Stage 3 fallback is ever used, return an immediate action marker or acknowledgement and avoid cancelling the action on transient disconnects.
+**Suggested fix:** Reinitialize or unlock the standing brain once when vault state changes, preserve the same persistent session across turns, and only fall back to recent-history injection when the session is genuinely lost.
 
 **Log evidence:**
 ```
-2026-05-06 01:25:45 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (936ms) params={}
+2026-05-09 01:07:54 INFO [jane.proxy] [audit-177830] Standing brain turn 1 — injected recent history only
 ```
 ```
-2026-05-06 01:25:46 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=31 sid_override=True class_protocol=n/a
+2026-05-09 01:07:54 INFO [jane.standing_brain] Vault is now unlocked but brain was spawned locked. Restarting brain [claude-opus-4-6]...
 ```
 ```
-2026-05-06 01:25:58 INFO [jane.proxy] [audit-177804] Client disconnected — waiting for adapter task to finish (brain still working)
-```
-```
-2026-05-06 01:25:58 WARNING [jane.proxy] [audit-177804] Brain execution cancelled (stream) after 12007ms — likely client disconnect or timeout. Stack:
+2026-05-09 01:07:56 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage3 end-to-end (2975ms)
 ```
 
 ---
