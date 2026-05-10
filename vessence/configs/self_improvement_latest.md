@@ -1,59 +1,60 @@
 # Most Recent Nightly Self-Improvement
 
-- Run started: 2026-05-06 01:00:01
-- Report generated: 2026-05-06 02:32:14
-- Total runtime: 5531s
-- Jobs: 8 total, 5 ok, 3 timeout, 0 failed
+- Run started: 2026-05-09 01:00:01
+- Report generated: 2026-05-09 02:10:19
+- Total runtime: 4214s
+- Jobs: 8 total, 5 ok, 2 timeout, 1 failed
 - Stable latest report path: `/home/chieh/ambient/vessence/configs/self_improvement_latest.md`
-- Archived copy: `/home/chieh/ambient/vessence-data/reports/self_improvement/self_improvement_20260506_010001.md`
+- Archived copy: `/home/chieh/ambient/vessence-data/reports/self_improvement/self_improvement_20260509_010001.md`
 
 ## TL;DR
 
 - 1. ✓ Auto-Commit WIP (pre) (0.0m)
   - Fixes:
-    - 2026-05-06 01:00:02,231 INFO Committed 14 file(s).
-- 2. ✓ Code Auditor (0.0m)
+    - 2026-05-09 01:00:01,886 INFO Committed 4 file(s).
+- 2. ✗ Code Auditor (0.1m)
   - Problems:
-    - 2026-05-06 01:00:02,453 [WARNING] Working tree has uncommitted changes — skipping audit.
-- 3. ✓ Dead Code Auditor (5.9m)
+    - 2026-05-09 01:00:04,925 [WARNING] Test generation failed
+- 3. ✓ Dead Code Auditor (6.5m)
   - Problems:
+    - Possibly-dead functions: 1.
     - Duplicate function bodies: 10 groups.
   - Fixes:
-    - [dead-code] Done — 0 auto-deleted, 0 flagged, 0 dead funcs, 10 dup groups
-- 4. ⏱ Pipeline Audit (30 prompts) (20.0m)
+    - [dead-code] Done — 0 auto-deleted, 0 flagged, 1 dead funcs, 10 dup groups
+- 4. ✓ Pipeline Audit (30 prompts) (1.6m)
   - Problems:
-    - Prompts audited: 12.
-    - Classification failures: 4.
-    - Response failures: 7.
+    - Prompts audited: 13.
+    - Classification failures: 8.
+    - Response failures: 13.
 - 5. ✓ Doc Drift Auditor (0.0m)
   - Problems:
+    - CRON_JOBS.md missing entry for active cron script: auto_pull.sh
     - v2_3stage_pipeline.md missing class row: CLINIC_SCHEDULES_INFO
-- 6. ✓ Transcript Quality Review (4.2m)
+- 6. ✓ Transcript Quality Review (0.0m)
   - Problems:
-    - Transcript review found 6 issues: 2 critical, 4 medium.
-    - Follow-up reply was treated as a brand-new request instead of resolving prior context.
-    - User-supplied control text hijacked routing: Stage 1 treated the payload as a real `greeting` intent, and the greeting handler then failed.
-  - Fixes:
-    - 2026-05-06 01:30:12,904 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (6 issues)
-    - 2026-05-06 01:30:12,905 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 2 critical, 4 medium iss...
+    - Transcript review found 7 issues: 2 critical, 5 medium.
+    - Follow-up routing failed; a clarification reply was treated as a new `others` request instead of going through the pending_action_resolver.
+    - Stage 3 latency was excessive for a plain informational question.
 - 7. ⏱ Memory Janitor (60.0m)
   - Problems:
-    - rrt_execution_provider.h:92 log] [2026-05-06 06:04:53 WARNING] ModelImporter.cpp:739: Make sure input input_ids has Int64 binding.[m
-    - [0;93m2026-05-06 02:04:53.180816808 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-06 06:04:53 WARNING] ModelImporter.cpp:739: Make...
-    - [0;93m2026-05-06 02:04:53.180856330 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-06 06:04:53 WARNING] ModelImporter.cpp:739: Make...
+    - WARNING:memory_janitor:Claude Opus janitor call failed: CLI failed (exit 1): You've hit your limit · resets May 31, 8pm (America/New_York), trying Gemini fal...
+    - WARNING:memory_janitor:Claude Opus janitor call failed: CLI failed (exit 1): You've hit your limit · resets May 31, 8pm (America/New_York), trying Gemini fal...
+    - WARNING:memory_janitor:Claude Opus janitor call failed: CLI failed (exit 1): You've hit your limit · resets May 31, 8pm (America/New_York), trying Gemini fal...
+  - Fixes:
+    - INFO:memory_janitor:verify_code_memories: [5/140] bc266060-889 — chieh_class_v2 NOT done / known limitations after 2026-05-08
 - 8. ⏱ Auto-Commit + Push (post) (2.0m)
   - Fixes:
-    - 2026-05-06 02:30:16,766 INFO Committed 4 file(s).
+    - 2026-05-09 02:08:16,131 INFO Committed 4 file(s).
 
 **Top follow-ups:**
 
-- When Stage 2 or Stage 3 asks a clarifying question, persist a structured `pending_action` with the owning handler/brain and have `pending_action_resolver` consume short replies like `yes ...` before classification.
-- Sanitize or strongly down-rank XML/control-token patterns before intent classification, and never load a handler protocol from user-supplied text. Add a schema-safe fallback when a handler receives malformed input.
+- Persist pending follow-up state from Stage 3 clarifying questions and check it before Stage 1. Add resolver heuristics for terse confirmations plus parameter-only replies such as durations.
+- When the vault unlocks, respawn or rebind the standing brain once and reuse the healthy unlocked session. Do not restart the Stage 3 process on each request.
 
 ## Executive Summary
 
 - 3 stage(s) need attention because they timed out or exited non-zero.
-- 5 concrete improvement/fix signals were found in logs or reports.
+- 4 concrete improvement/fix signals were found in logs or reports.
 
 ## Stage 1: Auto-Commit WIP (pre)
 
@@ -70,7 +71,7 @@
 
 ### Improvements It Made
 
-- 2026-05-06 01:00:02,231 INFO Committed 14 file(s).
+- 2026-05-09 01:00:01,886 INFO Committed 4 file(s).
 
 ### Evidence Files
 
@@ -78,8 +79,8 @@
 
 ## Stage 2: Code Auditor
 
-- Status: `ok`
-- Duration: 0s (0.0 min)
+- Status: `exit-1`
+- Duration: 3s (0.1 min)
 
 ### What It Did
 
@@ -87,7 +88,8 @@
 
 ### Problems It Found
 
-- 2026-05-06 01:00:02,453 [WARNING] Working tree has uncommitted changes — skipping audit.
+- Job ended with status `exit-1`.
+- 2026-05-09 01:00:04,925 [WARNING] Test generation failed
 
 ### Improvements It Made
 
@@ -102,7 +104,7 @@
 ## Stage 3: Dead Code Auditor
 
 - Status: `ok`
-- Duration: 355s (5.9 min)
+- Duration: 392s (6.5 min)
 
 ### What It Did
 
@@ -110,11 +112,12 @@
 
 ### Problems It Found
 
+- Possibly-dead functions: 1.
 - Duplicate function bodies: 10 groups.
 
 ### Improvements It Made
 
-- [dead-code] Done — 0 auto-deleted, 0 flagged, 0 dead funcs, 10 dup groups
+- [dead-code] Done — 0 auto-deleted, 0 flagged, 1 dead funcs, 10 dup groups
 
 ### Evidence Files
 
@@ -123,8 +126,8 @@
 
 ## Stage 4: Pipeline Audit (30 prompts)
 
-- Status: `timeout`
-- Duration: 1200s (20.0 min)
+- Status: `ok`
+- Duration: 97s (1.6 min)
 
 ### What It Did
 
@@ -132,14 +135,13 @@
 
 ### Problems It Found
 
-- Job ended with status `timeout`.
-- Prompts audited: 12.
-- Classification failures: 4.
-- Response failures: 7.
-- **I want them to periodically get the lead after some time** (timer/stage3): Can you clarify what you mean? Who is "them" and what does "getting the lead" look like in this context — are you talking about the Stage 2/3 pipeline
-- **yes those articles and maybe just two days** (others/stage3): I'm picking up from where we left off, but I've lost the earlier context. I know there was an open loop about clarifying "them" and "get the lead" — y
-- **it seems to me that you are no longing making any sounds when speech to text is ** (others/stage3): Based on my research, here's what I found about sounds in the STT flow:
-- **__debug_inspect_update_short_term_memory** (others/stage3): Here's the full picture of the short-term memory update system:
+- Prompts audited: 13.
+- Classification failures: 8.
+- Response failures: 13.
+- **I want them to periodically get the lead after some time** (timer/stage3): You've hit your limit · resets May 31, 8pm (America/New_York)
+- **yes those articles and maybe just two days** (others/stage3): You've hit your limit · resets May 31, 8pm (America/New_York)
+- **currently how does your short-term memory work** (others/stage3): You've hit your limit · resets May 31, 8pm (America/New_York)
+- **how about** (greeting/stage3): You've hit your limit · resets May 31, 8pm (America/New_York)
 
 ### Improvements It Made
 
@@ -161,6 +163,7 @@
 
 ### Problems It Found
 
+- CRON_JOBS.md missing entry for active cron script: auto_pull.sh
 - v2_3stage_pipeline.md missing class row: CLINIC_SCHEDULES_INFO
 
 ### Improvements It Made
@@ -175,7 +178,7 @@
 ## Stage 6: Transcript Quality Review
 
 - Status: `ok`
-- Duration: 254s (4.2 min)
+- Duration: 0s (0.0 min)
 
 ### What It Did
 
@@ -183,23 +186,22 @@
 
 ### Problems It Found
 
-- Transcript review found 6 issues: 2 critical, 4 medium.
-- Follow-up reply was treated as a brand-new request instead of resolving prior context.
-- User-supplied control text hijacked routing: Stage 1 treated the payload as a real `greeting` intent, and the greeting handler then failed.
-- A live voice-troubleshooting turn incurred unusable Stage 3 latency.
-- Stage 1 emitted an unregistered label (`restart server`) for a website-debugging request and had to fall back to `others`.
+- Transcript review found 7 issues: 2 critical, 5 medium.
+- Follow-up routing failed; a clarification reply was treated as a new `others` request instead of going through the pending_action_resolver.
+- Stage 3 latency was excessive for a plain informational question.
+- User-supplied protocol text hijacked Stage 1 into `greeting`, and the greeting handler then returned an invalid shape and fell through to Stage 3.
+- The short-term-memory inspection path failed during the turn, so the assistant could not reliably verify live short-term memory behavior.
 
 ### Improvements It Made
 
-- 2026-05-06 01:30:12,904 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (6 issues)
-- 2026-05-06 01:30:12,905 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 2 critical, 4 medium issues. The most urgent was: User
+- No concrete improvement was recorded in the available logs/reports.
 
 ### Follow-Up Fixes Recommended
 
-- When Stage 2 or Stage 3 asks a clarifying question, persist a structured `pending_action` with the owning handler/brain and have `pending_action_resolver` consume short replies like `yes ...` before classification.
-- Sanitize or strongly down-rank XML/control-token patterns before intent classification, and never load a handler protocol from user-supplied text. Add a schema-safe fallback when a handler receives malformed input.
-- Keep the standing brain warm and unlocked across turns. If teardown fails, recreate the session asynchronously before the next user request instead of cold-restarting during the request path.
-- Constrain classifier decoding to the registered intent enum, or post-validate and re-prompt the classifier when it returns an unknown label instead of silently mapping arbitrary labels to `others`.
+- Persist pending follow-up state from Stage 3 clarifying questions and check it before Stage 1. Add resolver heuristics for terse confirmations plus parameter-only replies such as durations.
+- When the vault unlocks, respawn or rebind the standing brain once and reuse the healthy unlocked session. Do not restart the Stage 3 process on each request.
+- Strip or neutralize user-supplied pseudo-protocol/XML blocks before classification, never trust user text as a class protocol source, and add strict schema validation plus tests for every handler response shape.
+- Make debug memory inspection deterministic, or fail fast and explicitly report that memory inspection is unavailable when the extractor times out instead of continuing as though inspection succeeded.
 
 ### Evidence Files
 
@@ -218,15 +220,15 @@
 ### Problems It Found
 
 - Job ended with status `timeout`.
-- rrt_execution_provider.h:92 log] [2026-05-06 06:04:53 WARNING] ModelImporter.cpp:739: Make sure input input_ids has Int64 binding.[m
-- [0;93m2026-05-06 02:04:53.180816808 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-06 06:04:53 WARNING] ModelImporter.cpp:739: Make sure input attention_mask has Int64 binding.[m
-- [0;93m2026-05-06 02:04:53.180856330 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-06 06:04:53 WARNING] ModelImporter.cpp:739: Make sure input token_type_ids has Int64 binding.[m
-- [0;93m2026-05-06 02:04:53.393960905 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-06 06:04:53 WARNING] ModelImporter.cpp:739: Make sure input input_ids has Int64 binding.[m
-- [0;93m2026-05-06 02:04:53.393998411 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-06 06:04:53 WARNING] ModelImporter.cpp:739: Make sure input attention_mask has Int64 binding.[m
+- WARNING:memory_janitor:Claude Opus janitor call failed: CLI failed (exit 1): You've hit your limit · resets May 31, 8pm (America/New_York), trying Gemini fallback...
+- WARNING:memory_janitor:Claude Opus janitor call failed: CLI failed (exit 1): You've hit your limit · resets May 31, 8pm (America/New_York), trying Gemini fallback...
+- WARNING:memory_janitor:Claude Opus janitor call failed: CLI failed (exit 1): You've hit your limit · resets May 31, 8pm (America/New_York), trying Gemini fallback...
+- WARNING:memory_janitor:Claude Opus janitor call failed: CLI failed (exit 1): You've hit your limit · resets May 31, 8pm (America/New_York), trying Gemini fallback...
+- WARNING:memory_janitor:Claude Opus janitor call failed: CLI failed (exit 1): You've hit your limit · resets May 31, 8pm (America/New_York), trying Gemini fallback...
 
 ### Improvements It Made
 
-- No concrete improvement was recorded in the available logs/reports.
+- INFO:memory_janitor:verify_code_memories: [5/140] bc266060-889 — chieh_class_v2 NOT done / known limitations after 2026-05-08
 
 ### Evidence Files
 
@@ -247,7 +249,7 @@
 
 ### Improvements It Made
 
-- 2026-05-06 02:30:16,766 INFO Committed 4 file(s).
+- 2026-05-09 02:08:16,131 INFO Committed 4 file(s).
 
 ### Evidence Files
 

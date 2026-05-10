@@ -67,3 +67,51 @@ def test_low_signal_short_term_memory_filters_protocol_chatter():
         "I need clarification from the clinic about whether the appointment moved to Thursday.",
         {"memory_type": "short_term"},
     )
+
+
+def test_resolve_archival_topic_uses_existing_theme_id():
+    manager = ConversationManager.__new__(ConversationManager)
+    registry = [
+        {
+            "theme_id": "project_vessence",
+            "title": "Project: vessence",
+            "description": "Vessence work",
+        }
+    ]
+
+    topic = manager._resolve_archival_topic(
+        {
+            "kind": "theme",
+            "existing_theme_id": "project_vessence",
+            "new_theme_title": "",
+            "atomic_topic": "",
+        },
+        registry,
+    )
+
+    assert topic == "Project: vessence"
+
+
+def test_resolve_archival_topic_registers_new_theme_title():
+    manager = ConversationManager.__new__(ConversationManager)
+    manager._register_new_theme = lambda title, description="": {
+        "theme_id": "theme_123",
+        "title": title,
+        "description": description,
+        "built_in": 0,
+    }
+    registry = []
+
+    topic = manager._resolve_archival_topic(
+        {
+            "kind": "theme",
+            "existing_theme_id": "",
+            "new_theme_title": "Claude CLI Memory Flow",
+            "atomic_topic": "",
+        },
+        registry,
+    )
+
+    assert topic == "Claude CLI Memory Flow"
+    assert registry[0]["theme_id"] == "theme_123"
+    assert registry[0]["title"] == "Claude CLI Memory Flow"

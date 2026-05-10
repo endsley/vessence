@@ -196,6 +196,16 @@ Archivist decision guidance:
 - **Short-Term** is for recent execution state and temporary progress that matters now but is unlikely to matter after the current work window.
 - **Discard** is for noise, filler, and redundant repetition.
 
+### 2.2a. Dynamic Theme Registry
+- **Registry store:** SQLite table `theme_registry` in the same ledger DB as `turns` and `sessions`.
+- **Purpose:** holds the canonical set of long-term recurring themes used by the thematic archivist.
+- **Seeded defaults:** the historical fixed themes (`Identity Evolution`, `Project: vessence`, `Project: classes.chiehwu.com`, `Project: waterlily`, `Architectural Milestones`, `Collaborative Habits`, `Aesthetic Preferences`) are inserted automatically on first boot.
+- **Dynamic growth:** when the archivist sees a recurring memory that does not fit an existing theme, it creates a new registry row with a generated `theme_id` and a human-readable title.
+- **Archivist contract:** for `kind="theme"` memories, the archivist must choose exactly one of:
+  - `existing_theme_id` — extend/update a registered theme
+  - `new_theme_title` — create a new recurring theme
+- **Reuse of merge logic:** after theme selection resolves to a canonical theme title, promotion still uses the normal merge-vs-new decision inside that selected theme's long-term lane.
+
 ### 2.2. Active Conversation Compaction (Context Window Management)
 - **Mechanism:** `ConversationManager` monitors the token count of the live in-memory context window.
 - **Trigger:** When 65% of the model's token limit is reached (`CONTEXT_COMPACTION_RATIO` in `jane/config.py`), the oldest portion of `conversation_history` is replaced with a Qwen-generated summary.
@@ -211,8 +221,9 @@ Archivist decision guidance:
 - **Process:**
   1. Retrieve all entries currently in the Short-Term DB.
   2. For each entry, Qwen ("The Archivist") decides Keep or Discard using the criteria in `project_specs/context_window_management.md`.
-  3. Kept entries are written to the Long-Term DB with source/session metadata.
-  4. Entries classified as `Keep` or `Discard` are deleted from Short-Term; `Short-Term` entries remain with a stamped `expires_at`.
+  3. For thematic memories, the archivist resolves `existing_theme_id` or `new_theme_title` through `theme_registry` to pick the canonical theme title.
+  4. Kept entries are written to the Long-Term DB with source/session metadata.
+  5. Entries classified as `Keep` or `Discard` are deleted from Short-Term; `Short-Term` entries remain with a stamped `expires_at`.
 - **Session-end Cleanup:** `close()` runs one final archival pass and releases DB handles. The current architecture uses shared persistent short-term storage rather than deleting a per-session ChromaDB directory.
 
 ### 2.4. Unified Memory Retrieval

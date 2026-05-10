@@ -94,6 +94,57 @@ class ConversationManager:
     It does NOT drive the archival schedule.
     """
 
+    _DEFAULT_LONG_TERM_THEMES = (
+        {
+            "theme_id": "identity_evolution",
+            "title": "Identity Evolution",
+            "description": "Facts about Chieh as a person, life context, preferences, and identity shifts.",
+            "built_in": 1,
+        },
+        {
+            "theme_id": "project_vessence",
+            "title": "Project: vessence",
+            "description": "Jane/Vessence implementation, project decisions, system state, and product direction.",
+            "built_in": 1,
+        },
+        {
+            "theme_id": "project_classes_chiehwu_com",
+            "title": "Project: classes.chiehwu.com",
+            "description": "Teaching app implementation, Cloud SQL work, and FastAPI rewrite decisions.",
+            "built_in": 1,
+        },
+        {
+            "theme_id": "project_waterlily",
+            "title": "Project: waterlily",
+            "description": "Waterlily project state, implementation choices, and project-specific learnings.",
+            "built_in": 1,
+        },
+        {
+            "theme_id": "architectural_milestones",
+            "title": "Architectural Milestones",
+            "description": "Cross-project system design boundaries, architecture rationale, and major structural changes.",
+            "built_in": 1,
+        },
+        {
+            "theme_id": "collaborative_habits",
+            "title": "Collaborative Habits",
+            "description": "How Chieh and Jane work together, coordination patterns, and operating expectations.",
+            "built_in": 1,
+        },
+        {
+            "theme_id": "aesthetic_preferences",
+            "title": "Aesthetic Preferences",
+            "description": "UI, UX, and style tastes that recur across design or product decisions.",
+            "built_in": 1,
+        },
+    )
+    _ATOMIC_MEMORY_TOPICS = (
+        "Decision",
+        "Commitment",
+        "Failure Lesson",
+        "External Relationship",
+    )
+
     def __init__(self, session_id: str, max_tokens: int = 8192,
                  idle_timeout: int = IDLE_TIMEOUT_SECONDS,
                  user_id: str | None = None):
@@ -116,6 +167,7 @@ class ConversationManager:
         try:
             self.db_conn = sqlite3.connect(LEDGER_DB_PATH, check_same_thread=False)
             self._init_db()
+            self._ensure_theme_registry_seeded()
         except Exception as e:
             logger.warning("Failed to initialize SQLite ledger: %s", e)
             self.db_conn = None
@@ -315,31 +367,28 @@ class ConversationManager:
             "- 'If we deleted this in 6 months and re-encountered the situation, would we "
             "re-learn it painlessly?' → painful → save.\n\n"
 
-            "OUTPUT SHAPE — each memory is either a THEME or an ATOMIC fact:\n"
-            "- THEME (recurring, evolves over time): use these topics:\n"
-            "    * Identity Evolution           — facts about Chieh as a person\n"
-            "    * Project: vessence            — Jane/Vessence implementation, decisions, state\n"
-            "    * Project: classes.chiehwu.com — teaching app, Cloud SQL, FastAPI rewrite\n"
-            "    * Project: waterlily           — waterlily project state and decisions\n"
-            "    * Architectural Milestones     — cross-project system design\n"
-            "    * Collaborative Habits         — how Chieh and Jane work together\n"
-            "    * Aesthetic Preferences        — UI/UX taste\n"
-            "- ATOMIC (one-off, doesn't fit a theme): use these topics:\n"
-            "    * Decision\n"
-            "    * Commitment\n"
-            "    * Failure Lesson\n"
-            "    * External Relationship\n\n"
-
-            "If a fact clearly belongs to vessence/classes.chiehwu.com/waterlily, ALWAYS "
-            "emit it as a THEME with the matching 'Project: <name>' topic — implementation "
-            "details accumulate under the project anchor.\n\n"
-
+            "OUTPUT SHAPE — each memory is either a THEME or an ATOMIC fact.\n"
+            "For THEME memories, first decide whether it belongs to an existing registered theme "
+            "or needs a new theme.\n\n"
+            f"Existing registered themes:\n{self._format_theme_registry_for_prompt()}\n\n"
+            "THEME rules:\n"
+            "- Use 'existing_theme_id' when this memory extends or updates one of the registered themes.\n"
+            "- Use 'new_theme_title' only when the memory clearly introduces a recurring long-lived area "
+            "that does not fit any registered theme.\n"
+            "- Exactly one of 'existing_theme_id' or 'new_theme_title' must be populated for kind='theme'.\n"
+            "- If a fact clearly belongs to vessence/classes.chiehwu.com/waterlily, prefer the matching "
+            "'Project: <name>' theme unless it truly introduces a new recurring area.\n\n"
+            "ATOMIC rules:\n"
+            "- Use one of these atomic topics: Decision, Commitment, Failure Lesson, External Relationship.\n"
+            f"- Valid atomic topics: {', '.join(self._ATOMIC_MEMORY_TOPICS)}\n\n"
             "Output a single JSON list. Each object must have:\n"
             "- 'kind':    'theme' | 'atomic'\n"
-            "- 'topic':   one of the topics above\n"
             "- 'title':   concise phrase\n"
             "- 'content': comprehensive summary including context and outcome\n"
-            "- 'why_kept': one sentence — which rubric criterion this hits\n\n"
+            "- 'why_kept': one sentence — which rubric criterion this hits\n"
+            "- 'existing_theme_id': registered theme id or ''\n"
+            "- 'new_theme_title': new recurring theme title or ''\n"
+            "- 'atomic_topic': one of the atomic topics above or ''\n\n"
             "If nothing in the transcript is worth remembering, return [].\n\n"
             f"Transcript:\n{transcript}"
         )
@@ -349,13 +398,17 @@ class ConversationManager:
             memories = completion_json(prompt, tier="agent")
             stored_count = 0
             promotion_failed = False
+            registry = self._fetch_theme_registry()
             for mem in memories:
                 kind = (mem.get("kind") or "").lower()
-                topic = mem.get("topic", "General")
                 title = mem.get("title", "Unnamed")
                 content = mem.get("content", "")
                 why_kept = mem.get("why_kept", "")
                 if not content:
+                    continue
+                topic = self._resolve_archival_topic(mem, registry)
+                if not topic:
+                    logger.warning("Skipping archival memory with unresolved theme/topic: %s", title)
                     continue
                 # Post-classification: catch user-personal arcs miscategorized away from Identity
                 topic = self._reclassify_if_user_identity(topic, content)
@@ -575,6 +628,172 @@ class ConversationManager:
     # (Jane, Amber, etc.) can access them — and they carry a user_id for
     # future multi-user support.
     _USER_MEMORY_CATEGORIES = frozenset({"Identity Evolution"})
+
+    @staticmethod
+    def _normalize_theme_title(title: str) -> str:
+        clean = re.sub(r"\s+", " ", str(title or "").strip())
+        clean = clean.strip(" -_:;,.")
+        return clean[:80]
+
+    def _format_theme_registry_for_prompt(self) -> str:
+        themes = self._fetch_theme_registry()
+        if not themes:
+            return "- (none)"
+        return "\n".join(
+            f"- {theme['theme_id']}: {theme['title']} — {theme.get('description') or 'No description.'}"
+            for theme in themes
+        )
+
+    def _fetch_theme_registry(self) -> list[dict]:
+        if not self.db_conn:
+            return [dict(theme) for theme in self._DEFAULT_LONG_TERM_THEMES]
+        try:
+            with self._db_lock:
+                cur = self.db_conn.cursor()
+                cur.execute(
+                    """
+                    SELECT theme_id, title, description, built_in, created_at, updated_at
+                    FROM theme_registry
+                    ORDER BY built_in DESC, title COLLATE NOCASE ASC
+                    """
+                )
+                rows = cur.fetchall()
+            return [
+                {
+                    "theme_id": row[0],
+                    "title": row[1],
+                    "description": row[2] or "",
+                    "built_in": int(row[3] or 0),
+                    "created_at": row[4] or "",
+                    "updated_at": row[5] or "",
+                }
+                for row in rows
+            ]
+        except Exception as e:
+            logger.warning("Failed to fetch theme registry: %s", e)
+            return [dict(theme) for theme in self._DEFAULT_LONG_TERM_THEMES]
+
+    def _ensure_theme_registry_seeded(self) -> None:
+        if not self.db_conn:
+            return
+        try:
+            now_iso = datetime.datetime.utcnow().isoformat()
+            with self._db_lock:
+                cur = self.db_conn.cursor()
+                cur.execute("SELECT COUNT(*) FROM theme_registry")
+                existing_count = int((cur.fetchone() or [0])[0] or 0)
+                if existing_count == 0:
+                    cur.executemany(
+                        """
+                        INSERT INTO theme_registry
+                        (theme_id, title, description, built_in, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                        """,
+                        [
+                            (
+                                theme["theme_id"],
+                                theme["title"],
+                                theme["description"],
+                                int(theme.get("built_in", 0)),
+                                now_iso,
+                                now_iso,
+                            )
+                            for theme in self._DEFAULT_LONG_TERM_THEMES
+                        ],
+                    )
+                    self.db_conn.commit()
+        except Exception as e:
+            logger.warning("Failed to seed theme registry: %s", e)
+
+    def _register_new_theme(self, title: str, description: str = "") -> dict | None:
+        title = self._normalize_theme_title(title)
+        if not title:
+            return None
+        if not self.db_conn:
+            return {
+                "theme_id": f"theme_{uuid.uuid4().hex[:12]}",
+                "title": title,
+                "description": description.strip(),
+                "built_in": 0,
+            }
+        try:
+            now_iso = datetime.datetime.utcnow().isoformat()
+            with self._db_lock:
+                cur = self.db_conn.cursor()
+                cur.execute(
+                    """
+                    SELECT theme_id, title, description, built_in, created_at, updated_at
+                    FROM theme_registry
+                    WHERE title = ? COLLATE NOCASE
+                    """,
+                    (title,),
+                )
+                row = cur.fetchone()
+                if row:
+                    cur.execute(
+                        "UPDATE theme_registry SET updated_at = ? WHERE theme_id = ?",
+                        (now_iso, row[0]),
+                    )
+                    self.db_conn.commit()
+                    return {
+                        "theme_id": row[0],
+                        "title": row[1],
+                        "description": row[2] or "",
+                        "built_in": int(row[3] or 0),
+                        "created_at": row[4] or "",
+                        "updated_at": now_iso,
+                    }
+                theme_id = f"theme_{uuid.uuid4().hex[:12]}"
+                cur.execute(
+                    """
+                    INSERT INTO theme_registry
+                    (theme_id, title, description, built_in, created_at, updated_at)
+                    VALUES (?, ?, ?, 0, ?, ?)
+                    """,
+                    (theme_id, title, description.strip(), now_iso, now_iso),
+                )
+                self.db_conn.commit()
+            return {
+                "theme_id": theme_id,
+                "title": title,
+                "description": description.strip(),
+                "built_in": 0,
+                "created_at": now_iso,
+                "updated_at": now_iso,
+            }
+        except Exception as e:
+            logger.warning("Failed to register new theme '%s': %s", title, e)
+            return None
+
+    def _resolve_archival_topic(self, mem: dict, registry: list[dict]) -> str:
+        kind = (mem.get("kind") or "").strip().lower()
+        if kind == "atomic":
+            atomic_topic = self._normalize_theme_title(mem.get("atomic_topic") or "")
+            if atomic_topic in self._ATOMIC_MEMORY_TOPICS:
+                return atomic_topic
+            legacy_topic = self._normalize_theme_title(mem.get("topic") or "")
+            if legacy_topic in self._ATOMIC_MEMORY_TOPICS:
+                return legacy_topic
+            return "Decision"
+
+        registry_by_id = {theme["theme_id"]: theme for theme in registry}
+        existing_theme_id = (mem.get("existing_theme_id") or "").strip()
+        if existing_theme_id:
+            theme = registry_by_id.get(existing_theme_id)
+            if theme:
+                return theme["title"]
+            logger.warning("Archivist selected unknown theme id '%s'", existing_theme_id)
+
+        new_theme_title = self._normalize_theme_title(mem.get("new_theme_title") or "")
+        legacy_topic = self._normalize_theme_title(mem.get("topic") or "")
+        chosen_title = new_theme_title or legacy_topic
+        if not chosen_title:
+            return ""
+        registered = self._register_new_theme(chosen_title)
+        if registered:
+            registry.append(registered)
+            return registered["title"]
+        return chosen_title
 
     def _mark_session_themes_archived(self) -> None:
         """Stamp the session's short_term_theme entries so janitor backfill
@@ -924,6 +1143,20 @@ class ConversationManager:
                 arc_count INTEGER DEFAULT 0,
                 transcript_too_short INTEGER DEFAULT 0
             )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS theme_registry (
+                theme_id TEXT PRIMARY KEY,
+                title TEXT NOT NULL COLLATE NOCASE,
+                description TEXT DEFAULT '',
+                built_in INTEGER DEFAULT 0,
+                created_at TEXT,
+                updated_at TEXT
+            )
+        """)
+        cursor.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_theme_registry_title
+            ON theme_registry(title COLLATE NOCASE)
         """)
         self.db_conn.commit()
 
