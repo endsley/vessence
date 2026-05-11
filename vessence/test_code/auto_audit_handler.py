@@ -1,533 +1,1136 @@
-"""Comprehensive tests for jane_web.jane_v2.classes.greeting.handler"""
+"""Comprehensive audit tests for jane_web.jane_v2.classes.send_message.handler.
+
+Covers behavioral correctness, edge cases, integration mocks, and structural
+invariants for the Stage 2 send_message handler.
+"""
 
 from __future__ import annotations
 
-import random
+import asyncio
+import json
+import re
+import sys
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import httpx
 import pytest
 
-from jane_web.jane_v2.classes.greeting.handler import (
-    _CANNED_PATTERNS,
-    _CANNED_REPLIES,
-    _canned_reply,
-    _PROMPT_TEMPLATE,
+# ── Ensure the module is importable ──────────────────────────────────────────
+
+_VESSENCE = Path(__file__).resolve().parents[1]
+for p in [str(_VESSENCE), str(_VESSENCE / "agent_skills"), str(_VESSENCE / "vault_web")]:
+    if p not in sys.path:
+        sys.path.insert(0, p)
+
+from jane_web.jane_v2.classes.send_message.handler import (
+    _is_coherent,
+    _parse_extraction,
+    _check_open_draft,
+    _extract_via_llm,
+    _handle_resume,
+    _build_send_marker,
     handle,
+    _DANGLING_ENDINGS,
+    _FILLER_WORDS,
+    _DEVICE_COMMANDS,
+    _WRONG_CLASS_SENTINEL,
+    _EXTRACT_PROMPT,
 )
 
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
-@pytest.fixture(autouse=True)
-def _seed_random():
-    random.seed(42)
+# ═══════════════════════════════════════════════════════════════════════════════
+# 1. BEHAVIORAL TESTS — _is_coherent
+# ═══════════════════════════════════════════════════════════════════════════════
 
 
-def _make_ollama_client(response_text: str, status_code: int = 200):
-    """Build a fake async httpx client that returns a controlled Ollama response."""
-    resp = MagicMock()
-    resp.status_code = status_code
-    resp.json.return_value = {"response": response_text}
-    resp.raise_for_status = MagicMock()
-    if status_code >= 400:
-        resp.raise_for_status.side_effect = httpx.HTTPStatusError(
-            "error", request=MagicMock(), response=resp,
-        )
+class TestIsCoherent:
+    """Verify the rule-based coherence checker per docstring spec."""
 
-    client = AsyncMock()
-    client.post = AsyncMock(return_value=resp)
-    client.__aenter__ = AsyncMock(return_value=client)
-    client.__aexit__ = AsyncMock(return_value=False)
-    return client
+    def test_normal_message_is_coherent(self):
+        assert _is_coherent("I love you") is True
 
+    def test_greeting_is_coherent(self):
+        assert _is_coherent("Hey, what's up?") is True
 
-@pytest.fixture
-def mock_ollama():
-    """Patch httpx.AsyncClient to return a controlled Ollama response."""
-    with patch("jane_web.jane_v2.classes.greeting.handler.httpx.AsyncClient") as mock_cls:
-        mock_cls._factory = _make_ollama_client
-        mock_cls.side_effect = lambda **kw: _make_ollama_client("Hey! What's on your mind?")
-        yield mock_cls
+    def test_single_word_body_coherent(self):
+        assert _is_coherent("Hello") is True
 
+    def test_empty_string_is_coherent(self):
+        assert _is_coherent("") is True
 
-# ---------------------------------------------------------------------------
-# 1. STRUCTURAL INVARIANTS
-# ---------------------------------------------------------------------------
+    def test_none_body_is_coherent(self):
+        assert _is_coherent("(none)") is True
 
-class TestStructuralInvariants:
-    """Catch mapping/lookup inconsistencies between _CANNED_PATTERNS and _CANNED_REPLIES."""
+    def test_none_value_is_coherent(self):
+        assert _is_coherent(None) is True
 
-    def test_every_pattern_bucket_exists_in_replies(self):
-        """Every bucket name referenced in _CANNED_PATTERNS must exist in _CANNED_REPLIES."""
-        for pattern, bucket in _CANNED_PATTERNS:
-            assert bucket in _CANNED_REPLIES, (
-                f"Pattern {pattern.pattern!r} references bucket {bucket!r} "
-                f"which is missing from _CANNED_REPLIES"
-            )
+    def test_dangling_the(self):
+        assert _is_coherent("I went to the") is False
 
-    def test_every_reply_bucket_is_reachable(self):
-        """Every bucket in _CANNED_REPLIES must be referenced by at least one pattern."""
-        referenced_buckets = {bucket for _, bucket in _CANNED_PATTERNS}
-        for bucket in _CANNED_REPLIES:
-            assert bucket in referenced_buckets, (
-                f"Bucket {bucket!r} in _CANNED_REPLIES is dead — "
-                f"no pattern in _CANNED_PATTERNS routes to it"
-            )
+    def test_dangling_and(self):
+        assert _is_coherent("Pick up milk and") is False
 
-    def test_no_empty_reply_lists(self):
-        """Every bucket must have at least one reply."""
-        for bucket, replies in _CANNED_REPLIES.items():
-            assert len(replies) > 0, f"Bucket {bucket!r} has an empty reply list"
+    def test_dangling_with_punctuation(self):
+        assert _is_coherent("I was thinking about the.") is False
 
-    def test_all_replies_are_nonempty_strings(self):
-        """Every canned reply must be a non-empty string."""
-        for bucket, replies in _CANNED_REPLIES.items():
-            for i, reply in enumerate(replies):
-                assert isinstance(reply, str) and reply.strip(), (
-                    f"Bucket {bucket!r}[{i}] is empty or not a string: {reply!r}"
-                )
+    def test_dangling_because(self):
+        assert _is_coherent("I can't come because") is False
 
-    def test_all_patterns_are_compiled_regex(self):
-        """Every pattern must be a compiled regex."""
-        import re
-        for pattern, bucket in _CANNED_PATTERNS:
-            assert isinstance(pattern, re.Pattern), (
-                f"Pattern for bucket {bucket!r} is not compiled: {type(pattern)}"
-            )
+    def test_filler_uh(self):
+        assert _is_coherent("Tell him uh I'll be late") is False
 
-    def test_prompt_template_has_required_placeholders(self):
-        """The LLM prompt template must contain {prompt} and {context_block}."""
-        assert "{prompt}" in _PROMPT_TEMPLATE
-        assert "{context_block}" in _PROMPT_TEMPLATE
+    def test_filler_um(self):
+        assert _is_coherent("Um can you pick up dinner") is False
 
-    def test_prompt_template_contains_wrong_class_instruction(self):
-        """The template must instruct the LLM to output WRONG_CLASS for non-greetings."""
-        assert "WRONG_CLASS" in _PROMPT_TEMPLATE
+    def test_filler_hmm(self):
+        assert _is_coherent("I was hmm thinking about dinner") is False
 
-    @pytest.mark.asyncio
-    async def test_handler_return_shape_canned(self):
-        """Canned replies must return dict with 'text' key."""
-        result = await handle("hey")
-        assert result is not None
-        assert "text" in result
-        assert isinstance(result["text"], str)
+    def test_filler_with_punctuation(self):
+        assert _is_coherent("Well, um, I'll be there") is False
 
+    def test_device_command_alexa(self):
+        assert _is_coherent("I'll be home soon alexa set timer") is False
 
-# ---------------------------------------------------------------------------
-# 2. BEHAVIORAL TESTS — canned reply path
-# ---------------------------------------------------------------------------
+    def test_device_command_hey_siri(self):
+        assert _is_coherent("Tell her hey siri call mom") is False
 
-class TestCannedReplies:
-    """Verify that known greeting patterns return canned replies without hitting the LLM."""
+    def test_device_command_ok_google(self):
+        assert _is_coherent("I'm coming ok google navigate home") is False
 
-    @pytest.mark.parametrize("greeting", [
-        "hi", "hey", "hello", "yo", "howdy", "heya", "hiya",
-        "hi!", "hey!", "hello!", "Hi", "HEY", "HELLO",
-        "hiii", "heyyy",
-    ])
-    def test_bare_hellos(self, greeting):
-        reply = _canned_reply(greeting)
-        assert reply is not None
-        assert reply in _CANNED_REPLIES["hello"]
+    def test_device_command_hey_google(self):
+        assert _is_coherent("Almost there hey google play music") is False
 
-    @pytest.mark.parametrize("greeting", [
-        "how's it going", "how are you", "how you doing",
-        "what's up", "whats up", "sup", "you good", "you there",
-        "how's it going?", "how are you?",
-        "How Are You", "HOW'S IT GOING",
-        "how's things", "how's everything", "how you holding up",
-    ])
-    def test_check_in(self, greeting):
-        reply = _canned_reply(greeting)
-        assert reply is not None
-        assert reply in _CANNED_REPLIES["check_in"]
+    def test_alexa_as_contact_name_standalone(self):
+        """Bare 'alexa' triggers the device-command check because it matches
+        the word-boundary pattern. This is a known trade-off."""
+        assert _is_coherent("alexa") is False
 
-    @pytest.mark.parametrize("greeting", [
-        "good morning", "Good Morning", "good morning!",
-    ])
-    def test_morning(self, greeting):
-        reply = _canned_reply(greeting)
-        assert reply is not None
-        assert reply in _CANNED_REPLIES["morning"]
+    def test_name_containing_alexa_substring(self):
+        """'Alexander' should NOT trip 'alexa' because word boundaries differ."""
+        assert _is_coherent("Hey Alexander, see you tonight") is True
 
-    @pytest.mark.parametrize("greeting", [
-        "good afternoon", "Good Afternoon",
-    ])
-    def test_afternoon(self, greeting):
-        reply = _canned_reply(greeting)
-        assert reply is not None
-        assert reply in _CANNED_REPLIES["afternoon"]
-
-    @pytest.mark.parametrize("greeting", [
-        "good evening", "Good Evening",
-    ])
-    def test_evening(self, greeting):
-        reply = _canned_reply(greeting)
-        assert reply is not None
-        assert reply in _CANNED_REPLIES["evening"]
-
-    @pytest.mark.parametrize("greeting", [
-        "thanks", "thank you", "thx", "ty",
-        "appreciate it", "appreciate you",
-        "Thanks!", "THANK YOU",
-    ])
-    def test_thanks(self, greeting):
-        reply = _canned_reply(greeting)
-        assert reply is not None
-        assert reply in _CANNED_REPLIES["thanks"]
-
-
-# ---------------------------------------------------------------------------
-# 3. EDGE CASES
-# ---------------------------------------------------------------------------
-
-class TestEdgeCases:
-
-    def test_empty_string(self):
-        assert _canned_reply("") is None
-
-    def test_none_input(self):
-        assert _canned_reply(None) is None
+    def test_alexandra_not_tripped(self):
+        assert _is_coherent("Tell Alexandra I said hi") is True
 
     def test_whitespace_only(self):
-        assert _canned_reply("   ") is None
-
-    def test_very_long_input(self):
-        long_input = "hey " * 5000
-        assert _canned_reply(long_input) is None
-
-    def test_greeting_with_followup_question(self):
-        """A greeting followed by a question should NOT match canned patterns."""
-        assert _canned_reply("hey can you help me with something") is None
-
-    def test_greeting_embedded_in_sentence(self):
-        assert _canned_reply("I just wanted to say hello to everyone") is None
-
-    def test_partial_match_not_greeting(self):
-        assert _canned_reply("how's it going to end") is None
-
-    def test_good_morning_with_name(self):
-        """'good morning Jane' should still match because the pattern uses \\b not $."""
-        reply = _canned_reply("good morning Jane")
-        assert reply is not None
-        assert reply in _CANNED_REPLIES["morning"]
-
-    def test_numeric_input(self):
-        assert _canned_reply("12345") is None
-
-    def test_special_characters(self):
-        assert _canned_reply("@#$%^&*()") is None
-
-    def test_trailing_punctuation_stripped(self):
-        """Trailing punctuation should be stripped before matching."""
-        reply = _canned_reply("hey!")
-        assert reply is not None
-        assert reply in _CANNED_REPLIES["hello"]
-
-    @pytest.mark.asyncio
-    async def test_handle_empty_string(self, mock_ollama):
-        result = await handle("")
-        assert result is None or isinstance(result, dict)
-
-    @pytest.mark.asyncio
-    async def test_handle_whitespace_only(self, mock_ollama):
-        result = await handle("   ")
-        assert result is None or isinstance(result, dict)
+        assert _is_coherent("   ") is False
 
 
-# ---------------------------------------------------------------------------
-# 4. BEHAVIORAL TESTS — LLM path
-# ---------------------------------------------------------------------------
+# ═══════════════════════════════════════════════════════════════════════════════
+# 2. BEHAVIORAL TESTS — _parse_extraction
+# ═══════════════════════════════════════════════════════════════════════════════
 
-class TestLLMPath:
 
-    @pytest.mark.asyncio
-    async def test_non_canned_greeting_hits_llm(self, mock_ollama):
-        """A greeting that doesn't match canned patterns should call Ollama."""
-        client = mock_ollama._factory("What's good! Nice to hear from you.")
-        mock_ollama.side_effect = lambda **kw: client
+class TestParseExtraction:
+    """Verify structured output parsing from the LLM response."""
 
-        result = await handle("what's crackin")
+    def test_valid_three_line_output(self):
+        raw = "RECIPIENT: wife\nBODY: I love you\nCOHERENT: yes"
+        result = _parse_extraction(raw)
+        assert result["recipient"] == "wife"
+        assert result["body"] == "I love you"
+        assert result["coherent"] is True
+
+    def test_coherent_no(self):
+        raw = "RECIPIENT: mom\nBODY: I'll be\nCOHERENT: no"
+        result = _parse_extraction(raw)
+        assert result["coherent"] is False
+
+    def test_wrong_class(self):
+        raw = "WRONG_CLASS"
+        assert _parse_extraction(raw) is _WRONG_CLASS_SENTINEL
+
+    def test_wrong_class_case_insensitive(self):
+        raw = "wrong_class"
+        assert _parse_extraction(raw) is _WRONG_CLASS_SENTINEL
+
+    def test_wrong_class_embedded_in_text(self):
+        raw = "This is not a send intent. WRONG_CLASS detected."
+        assert _parse_extraction(raw) is _WRONG_CLASS_SENTINEL
+
+    def test_missing_recipient_returns_none(self):
+        raw = "BODY: hello\nCOHERENT: yes"
+        assert _parse_extraction(raw) is None
+
+    def test_missing_body_defaults_to_none(self):
+        raw = "RECIPIENT: dad\nCOHERENT: yes"
+        result = _parse_extraction(raw)
+        assert result["body"] == "(none)"
+
+    def test_missing_coherent_defaults_to_true(self):
+        raw = "RECIPIENT: john\nBODY: Hey there"
+        result = _parse_extraction(raw)
+        assert result["coherent"] is True
+
+    def test_case_insensitive_labels(self):
+        raw = "recipient: Sarah\nbody: Thanks\ncoherent: YES"
+        result = _parse_extraction(raw)
+        assert result["recipient"] == "Sarah"
+        assert result["body"] == "Thanks"
+
+    def test_extra_whitespace_and_blank_lines(self):
+        raw = "\n  RECIPIENT:   john  \n\n  BODY:   Hey buddy  \n  COHERENT:   yes  \n"
+        result = _parse_extraction(raw)
+        assert result["recipient"] == "john"
+        assert result["body"] == "Hey buddy"
+
+    def test_empty_string(self):
+        assert _parse_extraction("") is None
+
+    def test_garbage_input(self):
+        assert _parse_extraction("asdfghjkl 12345 !!!") is None
+
+    def test_coherent_no_plus_rule_incoherent_body(self):
+        """Both LLM and rules say incoherent."""
+        raw = "RECIPIENT: wife\nBODY: I was going to the\nCOHERENT: no"
+        result = _parse_extraction(raw)
+        assert result["coherent"] is False
+
+    def test_coherent_yes_but_rule_catches_filler(self):
+        """LLM says yes but rules override with filler detection."""
+        raw = "RECIPIENT: wife\nBODY: I uh love you\nCOHERENT: yes"
+        result = _parse_extraction(raw)
+        assert result["coherent"] is False
+
+    def test_coherent_yes_but_rule_catches_dangling(self):
+        """LLM says yes but rules override with dangling ending."""
+        raw = "RECIPIENT: mom\nBODY: I went to the\nCOHERENT: yes"
+        result = _parse_extraction(raw)
+        assert result["coherent"] is False
+
+    def test_body_with_special_characters(self):
+        raw = "RECIPIENT: john\nBODY: Hey! How's it going? :)\nCOHERENT: yes"
+        result = _parse_extraction(raw)
+        assert result["body"] == "Hey! How's it going? :)"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 3. BEHAVIORAL TESTS — _build_send_marker
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestBuildSendMarker:
+    def test_marker_format(self):
+        marker = _build_send_marker("+15551234567", "Hello there")
+        assert marker.startswith("[[CLIENT_TOOL:contacts.sms_send_direct:")
+        assert marker.endswith("]]")
+        payload = json.loads(marker[len("[[CLIENT_TOOL:contacts.sms_send_direct:"):-2])
+        assert payload["phone_number"] == "+15551234567"
+        assert payload["body"] == "Hello there"
+
+    def test_marker_escapes_special_chars(self):
+        marker = _build_send_marker("+1555", 'He said "hi" & bye')
+        payload = json.loads(marker[len("[[CLIENT_TOOL:contacts.sms_send_direct:"):-2])
+        assert payload["body"] == 'He said "hi" & bye'
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 4. BEHAVIORAL TESTS — _check_open_draft
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestCheckOpenDraft:
+    """Verify the Stage 2 safety-net for open SMS drafts."""
+
+    def _mock_deps(self, pending_action=None, session_id="sess-123"):
+        mock_get_active_state = MagicMock(return_value={
+            "pending_action": pending_action,
+        })
+        mock_get_session = MagicMock(return_value=session_id)
+        mock_is_confirm = MagicMock(side_effect=lambda p: p.lower().strip() in {"yes", "yeah", "yep", "send it"})
+        mock_is_cancel = MagicMock(side_effect=lambda p: p.lower().strip() in {"cancel", "nevermind", "no"})
+        mock_is_edit = MagicMock(side_effect=lambda p: p.lower().strip().startswith(("change ", "add ", "make it ")))
+        mock_normalize = MagicMock(side_effect=lambda p: p.lower().strip().rstrip(".,!?"))
+        cancel_strong = {"cancel", "cancel that", "cancel it", "never mind", "nevermind",
+                         "forget it", "drop it", "abort", "scratch that", "stop"}
+        return {
+            "vault_web.recent_turns": MagicMock(get_active_state=mock_get_active_state),
+            "jane_web.jane_v2.pending_action_resolver": MagicMock(
+                _is_confirm=mock_is_confirm,
+                _is_cancel=mock_is_cancel,
+                _is_edit_intent=mock_is_edit,
+                _STAGE3_CANCEL_STRONG=cancel_strong,
+                _normalize=mock_normalize,
+            ),
+            "jane_web.session_context": MagicMock(get_current_session_id=mock_get_session),
+        }
+
+    def test_no_pending_action_returns_none(self):
+        mocks = self._mock_deps(pending_action=None)
+        with patch.dict(sys.modules, mocks):
+            assert _check_open_draft("yes") is None
+
+    def test_wrong_pending_type_returns_none(self):
+        mocks = self._mock_deps(pending_action={"type": "SOMETHING_ELSE"})
+        with patch.dict(sys.modules, mocks):
+            assert _check_open_draft("yes") is None
+
+    def test_confirm_sends(self):
+        pending = {
+            "type": "SEND_MESSAGE_DRAFT_OPEN",
+            "data": {"draft_id": "draft-abc-123", "query": "wife", "body": "I love you"},
+        }
+        mocks = self._mock_deps(pending_action=pending)
+        with patch.dict(sys.modules, mocks):
+            result = _check_open_draft("yes")
         assert result is not None
-        assert "text" in result
-        assert result["text"] == "What's good! Nice to hear from you."
-        client.post.assert_called_once()
+        assert "Sending to wife" in result["text"]
+        assert "sms_send" in result["text"]
+        assert result["structured"]["pending_action"]["resolution"] == "sent"
+        assert result["structured"]["safety"]["side_effectful"] is True
 
-    @pytest.mark.asyncio
-    async def test_wrong_class_escalates(self, mock_ollama):
-        """LLM returning WRONG_CLASS should escalate (return wrong_class dict)."""
-        client = mock_ollama._factory("WRONG_CLASS")
-        mock_ollama.side_effect = lambda **kw: client
-
-        result = await handle("deploy the app to production")
+    def test_strong_cancel(self):
+        pending = {
+            "type": "SEND_MESSAGE_DRAFT_OPEN",
+            "data": {"draft_id": "draft-abc-123", "query": "mom", "body": "Hi"},
+        }
+        mocks = self._mock_deps(pending_action=pending)
+        with patch.dict(sys.modules, mocks):
+            result = _check_open_draft("cancel")
         assert result is not None
-        assert result.get("wrong_class") is True
-        assert "text" not in result
+        assert "cancelled" in result["text"].lower()
+        assert result["structured"]["pending_action"]["resolution"] == "cancelled"
 
-    @pytest.mark.asyncio
-    async def test_wrong_class_case_insensitive(self, mock_ollama):
-        """WRONG_CLASS detection should be case-insensitive."""
-        client = mock_ollama._factory("wrong_class")
-        mock_ollama.side_effect = lambda **kw: client
-
-        result = await handle("what time is my meeting")
-        assert result is not None
-        assert result.get("wrong_class") is True
-
-    @pytest.mark.asyncio
-    async def test_wrong_class_embedded_in_text(self, mock_ollama):
-        """WRONG_CLASS anywhere in the response should trigger escalation."""
-        client = mock_ollama._factory("I think this is WRONG_CLASS actually.")
-        mock_ollama.side_effect = lambda **kw: client
-
-        result = await handle("schedule a meeting")
-        assert result is not None
-        assert result.get("wrong_class") is True
-
-    @pytest.mark.asyncio
-    async def test_llm_empty_response_returns_none(self, mock_ollama):
-        """Empty LLM response should return None (escalate)."""
-        client = mock_ollama._factory("")
-        mock_ollama.side_effect = lambda **kw: client
-
-        result = await handle("greetings earthling")
+    def test_edit_intent_escalates(self):
+        pending = {
+            "type": "SEND_MESSAGE_DRAFT_OPEN",
+            "data": {"draft_id": "draft-abc-123", "query": "dad", "body": "Hi"},
+        }
+        mocks = self._mock_deps(pending_action=pending)
+        with patch.dict(sys.modules, mocks):
+            result = _check_open_draft("change it to say hello")
         assert result is None
 
-    @pytest.mark.asyncio
-    async def test_llm_whitespace_response_returns_none(self, mock_ollama):
-        """Whitespace-only LLM response should return None (escalate)."""
-        client = mock_ollama._factory("   \n  ")
-        mock_ollama.side_effect = lambda **kw: client
+    def test_no_session_returns_none(self):
+        mocks = self._mock_deps(pending_action=None, session_id=None)
+        with patch.dict(sys.modules, mocks):
+            assert _check_open_draft("yes") is None
 
-        result = await handle("greetings earthling")
+    def test_import_failure_returns_none(self):
+        with patch.dict(sys.modules, {"vault_web.recent_turns": None}):
+            result = _check_open_draft("yes")
         assert result is None
 
-    @pytest.mark.asyncio
-    async def test_jane_prefix_stripped(self, mock_ollama):
-        """LLM output starting with 'Jane:' should have the prefix stripped."""
-        client = mock_ollama._factory("Jane: Hey there, good to see you!")
-        mock_ollama.side_effect = lambda **kw: client
 
-        result = await handle("long time no see")
+# ═══════════════════════════════════════════════════════════════════════════════
+# 5. BEHAVIORAL TESTS — _extract_via_llm
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestExtractViaLlm:
+    """Verify LLM extraction with mocked HTTP calls."""
+
+    @pytest.fixture
+    def mock_httpx(self):
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "response": "RECIPIENT: wife\nBODY: I love you\nCOHERENT: yes"
+        }
+        mock_response.raise_for_status = MagicMock()
+
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=mock_response)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("jane_web.jane_v2.classes.send_message.handler.httpx.AsyncClient",
+                    return_value=mock_client) as mock_cls:
+            yield mock_cls, mock_client, mock_response
+
+    def test_successful_extraction(self, mock_httpx):
+        _, mock_client, _ = mock_httpx
+        result = asyncio.get_event_loop().run_until_complete(
+            _extract_via_llm("text my wife I love her", "")
+        )
         assert result is not None
-        assert result["text"] == "Hey there, good to see you!"
-        assert not result["text"].startswith("Jane:")
+        assert result["recipient"] == "wife"
+        assert result["body"] == "I love you"
+        assert result["coherent"] is True
+        mock_client.post.assert_awaited_once()
 
-    @pytest.mark.asyncio
-    async def test_jane_prefix_case_insensitive(self, mock_ollama):
-        """'jane:' prefix stripping should be case-insensitive."""
-        client = mock_ollama._factory("jane: What's going on?")
-        mock_ollama.side_effect = lambda **kw: client
+    def test_llm_returns_wrong_class(self, mock_httpx):
+        _, _, mock_response = mock_httpx
+        mock_response.json.return_value = {"response": "WRONG_CLASS"}
+        result = asyncio.get_event_loop().run_until_complete(
+            _extract_via_llm("what's the weather?", "")
+        )
+        assert result is _WRONG_CLASS_SENTINEL
 
-        result = await handle("yo yo yo")
+    def test_llm_failure_returns_none(self):
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(side_effect=Exception("connection refused"))
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("jane_web.jane_v2.classes.send_message.handler.httpx.AsyncClient",
+                    return_value=mock_client):
+            result = asyncio.get_event_loop().run_until_complete(
+                _extract_via_llm("text wife hello", "")
+            )
+        assert result is None
+
+    def test_context_block_included_when_present(self, mock_httpx):
+        _, mock_client, _ = mock_httpx
+        asyncio.get_event_loop().run_until_complete(
+            _extract_via_llm("tell her I'm coming", "Jane: Who?\nUser: My wife")
+        )
+        call_args = mock_client.post.call_args
+        prompt_sent = call_args[1]["json"]["prompt"] if "json" in call_args[1] else call_args[0][1]["prompt"]
+        assert "Recent conversation:" in prompt_sent
+
+    def test_empty_context_no_block(self, mock_httpx):
+        _, mock_client, _ = mock_httpx
+        asyncio.get_event_loop().run_until_complete(
+            _extract_via_llm("text john hello", "")
+        )
+        call_args = mock_client.post.call_args
+        body = call_args[1].get("json") or call_args[0][1]
+        assert "Recent conversation:" not in body["prompt"]
+
+    def test_llm_returns_empty_response(self, mock_httpx):
+        _, _, mock_response = mock_httpx
+        mock_response.json.return_value = {"response": ""}
+        result = asyncio.get_event_loop().run_until_complete(
+            _extract_via_llm("text wife", "")
+        )
+        assert result is None
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 6. BEHAVIORAL TESTS — _handle_resume
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestHandleResume:
+    """Verify the confirm-or-revise state machine."""
+
+    @pytest.fixture(autouse=True)
+    def mock_agent_skills(self):
+        mock_end_phrase = MagicMock()
+        mock_end_phrase.is_end = MagicMock(side_effect=lambda p: p.lower().strip() in {
+            "stop", "cancel", "nevermind", "forget it", "bye", "goodbye", "end"
+        })
+        mock_confirmation = MagicMock()
+        mock_confirmation.is_yes = MagicMock(side_effect=lambda p: p.lower().strip() in {
+            "yes", "yeah", "yep", "sure", "send it", "do it"
+        })
+        mock_confirmation.is_no = MagicMock(side_effect=lambda p: p.lower().strip() in {
+            "no", "nope", "nah"
+        })
+
+        mock_utils = MagicMock()
+        mock_utils.end_conversation = MagicMock(
+            side_effect=lambda text, structured=None: {
+                "text": text,
+                "conversation_end": True,
+                **({"structured": structured} if structured else {}),
+            }
+        )
+        mock_utils.pending_continuation = MagicMock(
+            side_effect=lambda **kwargs: {
+                "type": "STAGE2_FOLLOWUP",
+                "handler_class": kwargs.get("handler_class"),
+                "data": {
+                    "awaiting": kwargs.get("awaiting"),
+                    "question": kwargs.get("question"),
+                    "draft": (kwargs.get("data") or {}).get("draft"),
+                },
+            }
+        )
+
+        with patch.dict(sys.modules, {
+            "agent_skills": MagicMock(end_phrase=mock_end_phrase, confirmation=mock_confirmation),
+            "agent_skills.end_phrase": mock_end_phrase,
+            "agent_skills.confirmation": mock_confirmation,
+            "agent_skills.private_handler_utils": mock_utils,
+        }):
+            yield
+
+    def _make_pending(self, awaiting, phone="+15551234567", display="wife", body="I love you"):
+        return {
+            "handler_class": "send message",
+            "data": {
+                "awaiting": awaiting,
+                "draft": {"phone": phone, "display": display, "body": body},
+            },
+        }
+
+    def test_confirm_yes_sends(self):
+        pending = self._make_pending("send_confirmation")
+        result = asyncio.get_event_loop().run_until_complete(
+            _handle_resume("yes", pending)
+        )
+        assert result["conversation_end"] is True
+        assert "Done" in result["text"]
+        assert "sms_send_direct" in result["text"]
+        assert result["structured"]["safety"]["side_effectful"] is True
+
+    def test_confirm_yes_but_missing_phone_abandons(self):
+        pending = self._make_pending("send_confirmation", phone="")
+        result = asyncio.get_event_loop().run_until_complete(
+            _handle_resume("yes", pending)
+        )
+        assert result.get("abandon_pending") is True
+        assert result.get("force_stage3") is True
+
+    def test_confirm_yes_but_missing_body_abandons(self):
+        pending = self._make_pending("send_confirmation", body="")
+        result = asyncio.get_event_loop().run_until_complete(
+            _handle_resume("yes", pending)
+        )
+        assert result.get("abandon_pending") is True
+
+    def test_confirm_no_asks_for_revision(self):
+        pending = self._make_pending("send_confirmation")
+        result = asyncio.get_event_loop().run_until_complete(
+            _handle_resume("no", pending)
+        )
+        assert "updated message" in result["text"].lower()
+        pa = result["structured"]["pending_action"]
+        assert pa["data"]["awaiting"] == "revised_body"
+
+    def test_confirm_end_phrase_cancels(self):
+        pending = self._make_pending("send_confirmation")
+        result = asyncio.get_event_loop().run_until_complete(
+            _handle_resume("cancel", pending)
+        )
+        assert result["conversation_end"] is True
+        assert result["text"] == "Ok."
+
+    def test_confirm_unrecognized_escalates(self):
+        pending = self._make_pending("send_confirmation")
+        result = asyncio.get_event_loop().run_until_complete(
+            _handle_resume("what's the weather like?", pending)
+        )
+        assert result.get("abandon_pending") is True
+        assert result.get("force_stage3") is True
+
+    def test_revised_body_end_phrase(self):
+        pending = self._make_pending("revised_body")
+        result = asyncio.get_event_loop().run_until_complete(
+            _handle_resume("nevermind", pending)
+        )
+        assert result["conversation_end"] is True
+
+    def test_revised_body_empty_abandons(self):
+        pending = self._make_pending("revised_body")
+        result = asyncio.get_event_loop().run_until_complete(
+            _handle_resume("", pending)
+        )
+        assert result.get("abandon_pending") is True
+
+    def test_revised_body_new_message_loops_back(self):
+        pending = self._make_pending("revised_body")
+        result = asyncio.get_event_loop().run_until_complete(
+            _handle_resume("I miss you so much", pending)
+        )
+        assert "Should I send it?" in result["text"]
+        assert "I miss you so much" in result["text"]
+        pa = result["structured"]["pending_action"]
+        assert pa["data"]["awaiting"] == "send_confirmation"
+        assert pa["data"]["draft"]["body"] == "I miss you so much"
+
+    def test_unknown_awaiting_abandons(self):
+        pending = {
+            "handler_class": "send message",
+            "data": {"awaiting": "something_unexpected", "draft": {}},
+        }
+        result = asyncio.get_event_loop().run_until_complete(
+            _handle_resume("hello", pending)
+        )
+        assert result.get("abandon_pending") is True
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 7. BEHAVIORAL TESTS — handle (main entry point)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestHandle:
+    """Verify the main handle() orchestration logic."""
+
+    @pytest.fixture(autouse=True)
+    def mock_all_deps(self):
+        mock_resolve = MagicMock(return_value={
+            "phone_number": "+15551234567",
+            "display_name": "Kathia",
+            "source": "alias",
+        })
+        mock_add_alias = MagicMock(return_value=True)
+        mock_normalize_name = MagicMock(side_effect=lambda n: n.lower().strip())
+
+        mock_sms = MagicMock(
+            resolve_recipient=mock_resolve,
+            add_alias=mock_add_alias,
+            _normalize_name=mock_normalize_name,
+        )
+        self._mock_resolve = mock_resolve
+        self._mock_sms = mock_sms
+
+        mock_utils = MagicMock()
+        mock_utils.pending_continuation = MagicMock(
+            side_effect=lambda **kwargs: {
+                "type": "STAGE2_FOLLOWUP",
+                "handler_class": kwargs.get("handler_class"),
+                "data": {
+                    "awaiting": kwargs.get("awaiting"),
+                    "question": kwargs.get("question"),
+                    "draft": (kwargs.get("data") or {}).get("draft"),
+                },
+            }
+        )
+
+        with patch.dict(sys.modules, {
+            "agent_skills.sms_helpers": mock_sms,
+            "agent_skills.private_handler_utils": mock_utils,
+        }):
+            with patch(
+                "jane_web.jane_v2.classes.send_message.handler._check_open_draft",
+                return_value=None,
+            ):
+                with patch(
+                    "jane_web.jane_v2.classes.send_message.handler._extract_via_llm",
+                    new_callable=AsyncMock,
+                ) as mock_llm:
+                    self._mock_llm = mock_llm
+                    yield
+
+    def test_params_fast_path_coherent(self):
+        params = {"recipient": "wife", "body": "I love you", "intent_kind": "send"}
+        result = asyncio.get_event_loop().run_until_complete(
+            handle("text wife I love her", params=params)
+        )
         assert result is not None
-        assert result["text"] == "What's going on?"
+        assert result.get("conversation_end") is True
+        assert "sms_send_direct" in result["text"]
+        assert result["structured"]["entities"]["recipient"] == "Kathia"
 
-    @pytest.mark.asyncio
-    async def test_context_included_in_prompt(self, mock_ollama):
-        """When context is provided, it should appear in the LLM prompt."""
-        client = mock_ollama._factory("Welcome back!")
-        mock_ollama.side_effect = lambda **kw: client
+    def test_params_intent_ask_escalates(self):
+        params = {"recipient": "wife", "body": "are you ok?", "intent_kind": "ask"}
+        result = asyncio.get_event_loop().run_until_complete(
+            handle("ask wife if she's ok", params=params)
+        )
+        assert result is None
 
-        await handle("hey again", context="User: I was working on the deploy\nJane: Sure, let me check.")
+    def test_params_no_recipient_escalates(self):
+        params = {"recipient": "", "body": "hello", "intent_kind": "send"}
+        result = asyncio.get_event_loop().run_until_complete(
+            handle("text someone hello", params=params)
+        )
+        assert result is None
 
-        call_args = client.post.call_args
-        body = call_args[1]["json"] if "json" in call_args[1] else call_args[0][1]
-        prompt_text = body["prompt"]
-        assert "Recent conversation:" in prompt_text
-        assert "working on the deploy" in prompt_text
+    def test_params_no_body_escalates(self):
+        params = {"recipient": "wife", "body": "", "intent_kind": "send"}
+        result = asyncio.get_event_loop().run_until_complete(
+            handle("text wife", params=params)
+        )
+        assert result is None
 
-    @pytest.mark.asyncio
-    async def test_empty_context_not_included(self, mock_ollama):
-        """Empty or whitespace context should not add a context block."""
-        client = mock_ollama._factory("Hey!")
-        mock_ollama.side_effect = lambda **kw: client
+    def test_params_incoherent_body_triggers_confirm(self):
+        params = {"recipient": "wife", "body": "I was going to the", "intent_kind": "send"}
+        result = asyncio.get_event_loop().run_until_complete(
+            handle("text wife I was going to the", params=params)
+        )
+        assert result is not None
+        assert "Should I send it?" in result["text"]
+        assert result.get("conversation_end") is not True
 
-        await handle("hey there friend", context="   ")
+    def test_llm_extraction_path(self):
+        self._mock_llm.return_value = {
+            "recipient": "mom",
+            "body": "I'm on my way",
+            "coherent": True,
+        }
+        self._mock_resolve.return_value = {
+            "phone_number": "+15559876543",
+            "display_name": "Mom",
+            "source": "alias",
+        }
+        result = asyncio.get_event_loop().run_until_complete(
+            handle("let mom know I'm on my way")
+        )
+        assert result is not None
+        assert result["conversation_end"] is True
+        assert "sms_send_direct" in result["text"]
 
-        call_args = client.post.call_args
-        body = call_args[1]["json"] if "json" in call_args[1] else call_args[0][1]
-        prompt_text = body["prompt"]
-        assert "Recent conversation:" not in prompt_text
+    def test_llm_wrong_class(self):
+        self._mock_llm.return_value = _WRONG_CLASS_SENTINEL
+        result = asyncio.get_event_loop().run_until_complete(
+            handle("what's the weather like?")
+        )
+        assert result is _WRONG_CLASS_SENTINEL
+
+    def test_llm_extraction_fails(self):
+        self._mock_llm.return_value = None
+        result = asyncio.get_event_loop().run_until_complete(
+            handle("text someone something")
+        )
+        assert result is None
+
+    def test_unresolved_recipient_escalates(self):
+        self._mock_resolve.return_value = None
+        params = {"recipient": "unknown_person", "body": "hello", "intent_kind": "send"}
+        result = asyncio.get_event_loop().run_until_complete(
+            handle("text unknown_person hello", params=params)
+        )
+        assert result is None
+
+    def test_resume_path_dispatches(self):
+        with patch(
+            "jane_web.jane_v2.classes.send_message.handler._handle_resume",
+            new_callable=AsyncMock,
+            return_value={"text": "resumed", "conversation_end": True},
+        ) as mock_resume:
+            pending = {"handler_class": "send message", "data": {"awaiting": "send_confirmation"}}
+            result = asyncio.get_event_loop().run_until_complete(
+                handle("yes", pending=pending)
+            )
+            mock_resume.assert_awaited_once()
+            assert result["text"] == "resumed"
 
 
-# ---------------------------------------------------------------------------
-# 5. INTEGRATION POINTS — error handling & side effects
-# ---------------------------------------------------------------------------
+# ═══════════════════════════════════════════════════════════════════════════════
+# 8. EDGE CASES
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestEdgeCases:
+    """Boundary conditions and degenerate inputs."""
+
+    def test_is_coherent_very_long_body(self):
+        body = "word " * 5000 + "done"
+        assert _is_coherent(body) is True
+
+    def test_is_coherent_very_long_body_dangling(self):
+        body = "word " * 5000 + "the"
+        assert _is_coherent(body) is False
+
+    def test_parse_extraction_very_long_body(self):
+        long_body = "a " * 10000
+        raw = f"RECIPIENT: john\nBODY: {long_body.strip()}\nCOHERENT: yes"
+        result = _parse_extraction(raw)
+        assert result is not None
+        assert result["recipient"] == "john"
+
+    def test_parse_extraction_recipient_with_special_chars(self):
+        raw = "RECIPIENT: María José\nBODY: Hola\nCOHERENT: yes"
+        result = _parse_extraction(raw)
+        assert result["recipient"] == "María José"
+
+    def test_parse_extraction_body_with_newline_embedded(self):
+        """Only the first BODY: line is captured; subsequent lines are ignored."""
+        raw = "RECIPIENT: john\nBODY: Line one\nExtra line\nCOHERENT: yes"
+        result = _parse_extraction(raw)
+        assert result["body"] == "Line one"
+
+    def test_is_coherent_single_dangling_word(self):
+        assert _is_coherent("the") is False
+
+    def test_is_coherent_single_filler_word(self):
+        assert _is_coherent("um") is False
+
+    def test_is_coherent_punctuation_only(self):
+        assert _is_coherent("...") is True
+
+    def test_build_send_marker_empty_body(self):
+        marker = _build_send_marker("+1555", "")
+        payload = json.loads(marker.split("sms_send_direct:")[1].rstrip("]"))
+        assert payload["body"] == ""
+
+    def test_build_send_marker_unicode_body(self):
+        marker = _build_send_marker("+1555", "I love you 💕")
+        payload = json.loads(marker.split("sms_send_direct:")[1].rstrip("]"))
+        assert payload["body"] == "I love you 💕"
+
+    def test_parse_extraction_multiple_recipient_lines(self):
+        """Last RECIPIENT line wins (parser overwrites on each match)."""
+        raw = "RECIPIENT: alice\nRECIPIENT: bob\nBODY: Hi\nCOHERENT: yes"
+        result = _parse_extraction(raw)
+        assert result["recipient"] == "bob"
+
+    def test_handle_empty_prompt(self):
+        with patch(
+            "jane_web.jane_v2.classes.send_message.handler._check_open_draft",
+            return_value=None,
+        ):
+            with patch(
+                "jane_web.jane_v2.classes.send_message.handler._extract_via_llm",
+                new_callable=AsyncMock,
+                return_value=None,
+            ):
+                result = asyncio.get_event_loop().run_until_complete(
+                    handle("", context="")
+                )
+                assert result is None
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 9. STRUCTURAL INVARIANTS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestStructuralInvariants:
+    """High-leverage checks on lookup tables, destructive-op guards, and
+    handler dispatch shape."""
+
+    # ── Lookup table invariants ──────────────────────────────────────────
+
+    def test_dangling_endings_all_lowercase(self):
+        for word in _DANGLING_ENDINGS:
+            assert word == word.lower(), f"_DANGLING_ENDINGS entry '{word}' is not lowercase"
+
+    def test_filler_words_all_lowercase(self):
+        for word in _FILLER_WORDS:
+            assert word == word.lower(), f"_FILLER_WORDS entry '{word}' is not lowercase"
+
+    def test_device_commands_all_lowercase(self):
+        for cmd in _DEVICE_COMMANDS:
+            assert cmd == cmd.lower(), f"_DEVICE_COMMANDS entry '{cmd}' is not lowercase"
+
+    def test_dangling_endings_no_punctuation(self):
+        for word in _DANGLING_ENDINGS:
+            assert word == word.strip(".,!?"), f"_DANGLING_ENDINGS entry '{word}' has trailing punctuation"
+
+    def test_filler_words_no_overlap_with_dangling(self):
+        overlap = _FILLER_WORDS & _DANGLING_ENDINGS
+        assert not overlap, f"Unexpected overlap between filler and dangling: {overlap}"
+
+    def test_every_dangling_word_is_reachable(self):
+        for word in _DANGLING_ENDINGS:
+            body = f"I was going to see {word}"
+            assert _is_coherent(body) is False, (
+                f"_DANGLING_ENDINGS entry '{word}' does not trigger incoherence"
+            )
+
+    def test_every_filler_word_is_reachable(self):
+        for word in _FILLER_WORDS:
+            body = f"I {word} think so"
+            assert _is_coherent(body) is False, (
+                f"_FILLER_WORDS entry '{word}' does not trigger incoherence"
+            )
+
+    def test_every_device_command_is_reachable(self):
+        for cmd in _DEVICE_COMMANDS:
+            body = f"I'm coming home {cmd} set a timer"
+            assert _is_coherent(body) is False, (
+                f"_DEVICE_COMMANDS entry '{cmd}' does not trigger incoherence"
+            )
+
+    # ── Destructive operation guards ─────────────────────────────────────
+
+    def test_fast_path_requires_coherent_true(self):
+        """sms_send_direct (fast path) must never fire when coherent=False."""
+        with patch(
+            "jane_web.jane_v2.classes.send_message.handler._check_open_draft",
+            return_value=None,
+        ):
+            with patch.dict(sys.modules, {
+                "agent_skills.sms_helpers": MagicMock(
+                    resolve_recipient=MagicMock(return_value={
+                        "phone_number": "+15551234567",
+                        "display_name": "Kathia",
+                        "source": "alias",
+                    }),
+                    add_alias=MagicMock(),
+                    _normalize_name=MagicMock(side_effect=lambda n: n.lower()),
+                ),
+                "agent_skills.private_handler_utils": MagicMock(
+                    pending_continuation=MagicMock(
+                        side_effect=lambda **kw: {"type": "STAGE2_FOLLOWUP", "data": kw}
+                    ),
+                ),
+            }):
+                params = {"recipient": "wife", "body": "I was going to the", "intent_kind": "send"}
+                result = asyncio.get_event_loop().run_until_complete(
+                    handle("text wife I was going to the", params=params)
+                )
+                assert result is not None
+                assert "sms_send_direct" not in result.get("text", ""), (
+                    "CRITICAL: sms_send_direct fired on incoherent body"
+                )
+                assert result.get("conversation_end") is not True, (
+                    "CRITICAL: conversation ended without confirmation on incoherent body"
+                )
+
+    def test_fast_path_requires_resolved_recipient(self):
+        """sms_send_direct must not fire when recipient is unresolved."""
+        with patch(
+            "jane_web.jane_v2.classes.send_message.handler._check_open_draft",
+            return_value=None,
+        ):
+            with patch.dict(sys.modules, {
+                "agent_skills.sms_helpers": MagicMock(
+                    resolve_recipient=MagicMock(return_value=None),
+                    add_alias=MagicMock(),
+                    _normalize_name=MagicMock(),
+                ),
+            }):
+                params = {"recipient": "some_stranger", "body": "hello", "intent_kind": "send"}
+                result = asyncio.get_event_loop().run_until_complete(
+                    handle("text some_stranger hello", params=params)
+                )
+                assert result is None, (
+                    "CRITICAL: handler did not escalate for unresolved recipient"
+                )
+
+    def test_fast_path_requires_non_empty_body(self):
+        """sms_send_direct must not fire when body is missing."""
+        with patch(
+            "jane_web.jane_v2.classes.send_message.handler._check_open_draft",
+            return_value=None,
+        ):
+            with patch.dict(sys.modules, {
+                "agent_skills.sms_helpers": MagicMock(
+                    resolve_recipient=MagicMock(return_value={
+                        "phone_number": "+1555",
+                        "display_name": "Wife",
+                        "source": "alias",
+                    }),
+                    add_alias=MagicMock(),
+                    _normalize_name=MagicMock(),
+                ),
+            }):
+                params = {"recipient": "wife", "body": "", "intent_kind": "send"}
+                result = asyncio.get_event_loop().run_until_complete(
+                    handle("text wife", params=params)
+                )
+                assert result is None, (
+                    "CRITICAL: handler did not escalate for missing body"
+                )
+
+    def test_confirm_yes_with_incomplete_draft_does_not_send(self):
+        """If resume('yes') has an empty phone or body, it must NOT send."""
+        mock_end_phrase = MagicMock()
+        mock_end_phrase.is_end = MagicMock(return_value=False)
+        mock_confirmation = MagicMock()
+        mock_confirmation.is_yes = MagicMock(return_value=True)
+        mock_confirmation.is_no = MagicMock(return_value=False)
+
+        with patch.dict(sys.modules, {
+            "agent_skills": MagicMock(end_phrase=mock_end_phrase, confirmation=mock_confirmation),
+            "agent_skills.end_phrase": mock_end_phrase,
+            "agent_skills.confirmation": mock_confirmation,
+            "agent_skills.private_handler_utils": MagicMock(
+                end_conversation=MagicMock(),
+                pending_continuation=MagicMock(),
+            ),
+        }):
+            pending = {
+                "handler_class": "send message",
+                "data": {
+                    "awaiting": "send_confirmation",
+                    "draft": {"phone": "", "display": "wife", "body": ""},
+                },
+            }
+            result = asyncio.get_event_loop().run_until_complete(
+                _handle_resume("yes", pending)
+            )
+            assert result.get("abandon_pending") is True, (
+                "CRITICAL: handler attempted to send with incomplete draft"
+            )
+            assert "sms_send_direct" not in result.get("text", "")
+
+    # ── Handler return shape invariants ──────────────────────────────────
+
+    def test_fast_path_return_has_required_keys(self):
+        with patch(
+            "jane_web.jane_v2.classes.send_message.handler._check_open_draft",
+            return_value=None,
+        ):
+            with patch.dict(sys.modules, {
+                "agent_skills.sms_helpers": MagicMock(
+                    resolve_recipient=MagicMock(return_value={
+                        "phone_number": "+15551234567",
+                        "display_name": "Kathia",
+                        "source": "alias",
+                    }),
+                    add_alias=MagicMock(),
+                    _normalize_name=MagicMock(side_effect=lambda n: n.lower()),
+                ),
+            }):
+                params = {"recipient": "wife", "body": "I love you", "intent_kind": "send"}
+                result = asyncio.get_event_loop().run_until_complete(
+                    handle("text wife I love her", params=params)
+                )
+                assert "text" in result, "Fast-path result missing 'text' key"
+                assert "conversation_end" in result, "Fast-path result missing 'conversation_end'"
+                assert "structured" in result, "Fast-path result missing 'structured'"
+                assert "entities" in result["structured"]
+                assert "safety" in result["structured"]
+
+    def test_confirm_path_return_has_pending_action(self):
+        with patch(
+            "jane_web.jane_v2.classes.send_message.handler._check_open_draft",
+            return_value=None,
+        ):
+            with patch.dict(sys.modules, {
+                "agent_skills.sms_helpers": MagicMock(
+                    resolve_recipient=MagicMock(return_value={
+                        "phone_number": "+15551234567",
+                        "display_name": "Kathia",
+                        "source": "alias",
+                    }),
+                    add_alias=MagicMock(),
+                    _normalize_name=MagicMock(side_effect=lambda n: n.lower()),
+                ),
+                "agent_skills.private_handler_utils": MagicMock(
+                    pending_continuation=MagicMock(
+                        side_effect=lambda **kw: {"type": "STAGE2_FOLLOWUP", "data": kw}
+                    ),
+                ),
+            }):
+                params = {"recipient": "wife", "body": "I um love you", "intent_kind": "send"}
+                result = asyncio.get_event_loop().run_until_complete(
+                    handle("text wife I um love her", params=params)
+                )
+                assert "text" in result
+                assert "structured" in result
+                assert "pending_action" in result["structured"]
+
+    def test_wrong_class_sentinel_is_dict_with_key(self):
+        assert isinstance(_WRONG_CLASS_SENTINEL, dict)
+        assert _WRONG_CLASS_SENTINEL.get("wrong_class") is True
+        assert len(_WRONG_CLASS_SENTINEL) == 1
+
+    # ── Coherence as gate for destructive action ─────────────────────────
+
+    def test_coherent_true_is_only_fast_path_gate(self):
+        """Rule-based coherence must override LLM COHERENT=yes when filler detected."""
+        assert _is_coherent("Tell uh him I said hello") is False
+        raw = "RECIPIENT: john\nBODY: Tell uh him I said hello\nCOHERENT: yes"
+        parsed = _parse_extraction(raw)
+        assert parsed["coherent"] is False
+
+    def test_coherent_true_overrides_llm_coherent_no(self):
+        """If LLM says COHERENT=no, coherent must be False regardless of rules."""
+        raw = "RECIPIENT: john\nBODY: Hello there friend\nCOHERENT: no"
+        parsed = _parse_extraction(raw)
+        assert parsed["coherent"] is False
+
+    # ── Extract prompt template invariants ───────────────────────────────
+
+    def test_extract_prompt_has_placeholders(self):
+        assert "{prompt}" in _EXTRACT_PROMPT
+        assert "{context_block}" in _EXTRACT_PROMPT
+
+    def test_extract_prompt_mentions_wrong_class(self):
+        assert "WRONG_CLASS" in _EXTRACT_PROMPT
+
+    def test_extract_prompt_mentions_perspective_rewrite(self):
+        assert "I love you" in _EXTRACT_PROMPT
+
+    def test_extract_prompt_mentions_none_body(self):
+        assert "(none)" in _EXTRACT_PROMPT
+
+    # ── Dangling-word check edge: punctuation stripping ──────────────────
+
+    def test_dangling_word_with_exclamation(self):
+        assert _is_coherent("I went to the!") is False
+
+    def test_dangling_word_with_question_mark(self):
+        assert _is_coherent("I was thinking about the?") is False
+
+    def test_non_dangling_word_with_punctuation(self):
+        assert _is_coherent("I'm going home!") is True
+
+    # ── Filler detection edge: trailing punctuation ──────────────────────
+
+    def test_filler_with_comma(self):
+        assert _is_coherent("Well, um, ok") is False
+
+    def test_filler_at_end_of_sentence(self):
+        assert _is_coherent("I think so hmm.") is False
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 10. INTEGRATION POINT TESTS
+# ═══════════════════════════════════════════════════════════════════════════════
+
 
 class TestIntegrationPoints:
+    """Test boundaries where handler interacts with external systems."""
 
-    @pytest.mark.asyncio
-    async def test_llm_http_error_returns_none(self, mock_ollama):
-        """HTTP errors from Ollama should return None (escalate to Stage 3)."""
-        client = mock_ollama._factory("", status_code=500)
-        mock_ollama.side_effect = lambda **kw: client
-
-        result = await handle("howdy partner")
-        assert result is None
-
-    @pytest.mark.asyncio
-    async def test_llm_timeout_returns_none(self, mock_ollama):
-        """Timeout from Ollama should return None (escalate)."""
-        client = AsyncMock()
-        client.post = AsyncMock(side_effect=httpx.TimeoutException("timeout"))
-        client.__aenter__ = AsyncMock(return_value=client)
-        client.__aexit__ = AsyncMock(return_value=False)
-        mock_ollama.side_effect = lambda **kw: client
-
-        result = await handle("hey what's happening")
-        assert result is None
-
-    @pytest.mark.asyncio
-    async def test_llm_connection_error_returns_none(self, mock_ollama):
-        """Connection errors should return None (escalate)."""
-        client = AsyncMock()
-        client.post = AsyncMock(side_effect=httpx.ConnectError("refused"))
-        client.__aenter__ = AsyncMock(return_value=client)
-        client.__aexit__ = AsyncMock(return_value=False)
-        mock_ollama.side_effect = lambda **kw: client
-
-        result = await handle("what's the good word")
-        assert result is None
-
-    @pytest.mark.asyncio
-    async def test_record_ollama_activity_called(self, mock_ollama):
-        """Successful LLM calls should invoke record_ollama_activity."""
-        client = mock_ollama._factory("Hey!")
-        mock_ollama.side_effect = lambda **kw: client
-
-        with patch("jane_web.jane_v2.models.record_ollama_activity") as mock_record:
-            result = await handle("what's good")
-            assert result is not None
-            mock_record.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_record_ollama_failure_does_not_break_handler(self, mock_ollama):
-        """If record_ollama_activity raises, the handler should still return normally."""
-        client = mock_ollama._factory("All good!")
-        mock_ollama.side_effect = lambda **kw: client
-
+    def test_resolve_recipient_called_with_extracted_name(self):
+        mock_resolve = MagicMock(return_value=None)
         with patch(
-            "jane_web.jane_v2.models.record_ollama_activity",
-            side_effect=RuntimeError("tracking broken"),
+            "jane_web.jane_v2.classes.send_message.handler._check_open_draft",
+            return_value=None,
         ):
-            result = await handle("what's crackin")
-            assert result is not None
-            assert result["text"] == "All good!"
+            with patch.dict(sys.modules, {
+                "agent_skills.sms_helpers": MagicMock(
+                    resolve_recipient=mock_resolve,
+                    add_alias=MagicMock(),
+                    _normalize_name=MagicMock(),
+                ),
+            }):
+                params = {"recipient": "Mom", "body": "Hi there", "intent_kind": "send"}
+                asyncio.get_event_loop().run_until_complete(
+                    handle("text mom hi there", params=params)
+                )
+                mock_resolve.assert_called_once_with("Mom")
 
-    @pytest.mark.asyncio
-    async def test_canned_reply_skips_llm_entirely(self, mock_ollama):
-        """Canned replies should never hit the LLM."""
-        result = await handle("hey")
-        assert result is not None
-        assert "text" in result
-        # The mock's post should NOT have been called
-        # (mock_ollama returns a factory, but handle() won't even reach httpx)
-        # We verify by checking the result matches a canned reply
-        assert result["text"] in _CANNED_REPLIES["hello"]
+    def test_auto_alias_only_for_contacts_source(self):
+        mock_resolve = MagicMock(return_value={
+            "phone_number": "+15551234567",
+            "display_name": "Kathia",
+            "source": "alias",
+        })
+        mock_add_alias = MagicMock()
+        with patch(
+            "jane_web.jane_v2.classes.send_message.handler._check_open_draft",
+            return_value=None,
+        ):
+            with patch.dict(sys.modules, {
+                "agent_skills.sms_helpers": MagicMock(
+                    resolve_recipient=mock_resolve,
+                    add_alias=mock_add_alias,
+                    _normalize_name=MagicMock(side_effect=lambda n: n.lower()),
+                ),
+            }):
+                params = {"recipient": "wife", "body": "I love you", "intent_kind": "send"}
+                asyncio.get_event_loop().run_until_complete(
+                    handle("text wife I love her", params=params)
+                )
+                mock_add_alias.assert_not_called()
 
-    @pytest.mark.asyncio
-    async def test_ollama_request_body_shape(self, mock_ollama):
-        """Verify the shape of the request body sent to Ollama."""
-        client = mock_ollama._factory("Hey!")
-        mock_ollama.side_effect = lambda **kw: client
+    def test_ollama_request_body_shape(self):
+        mock_client = AsyncMock()
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "response": "RECIPIENT: john\nBODY: Hey\nCOHERENT: yes"
+        }
+        mock_response.raise_for_status = MagicMock()
+        mock_client.post = AsyncMock(return_value=mock_response)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
 
-        await handle("what's happening my friend")
+        with patch("jane_web.jane_v2.classes.send_message.handler.httpx.AsyncClient",
+                    return_value=mock_client):
+            asyncio.get_event_loop().run_until_complete(
+                _extract_via_llm("text john hey", "")
+            )
 
-        call_args = client.post.call_args
-        body = call_args[1]["json"] if "json" in call_args[1] else call_args[0][1]
-
-        assert "model" in body
-        assert "prompt" in body
+        call_kwargs = mock_client.post.call_args
+        body = call_kwargs[1].get("json") or call_kwargs.kwargs.get("json")
         assert body["stream"] is False
-        assert "options" in body
-        assert "temperature" in body["options"]
-        assert "num_predict" in body["options"]
+        assert body["options"]["temperature"] == 0.0
         assert "num_ctx" in body["options"]
-        assert body["options"]["num_predict"] == 60
+        assert "keep_alive" in body
 
-    @pytest.mark.asyncio
-    async def test_ollama_url_used(self, mock_ollama):
-        """Verify the handler posts to the configured OLLAMA_URL."""
-        from jane_web.jane_v2.models import OLLAMA_URL
-
-        client = mock_ollama._factory("Hey!")
-        mock_ollama.side_effect = lambda **kw: client
-
-        await handle("what's happening")
-
-        call_args = client.post.call_args
-        url = call_args[0][0] if call_args[0] else call_args[1].get("url")
-        assert url == OLLAMA_URL
-
-
-# ---------------------------------------------------------------------------
-# 6. PATTERN COVERAGE — ensure every bucket is reachable via at least one input
-# ---------------------------------------------------------------------------
-
-class TestPatternCoverage:
-    """Verify that every _CANNED_REPLIES bucket can be reached by real user input."""
-
-    _BUCKET_EXAMPLES = {
-        "check_in": "how's it going",
-        "hello": "hey",
-        "morning": "good morning",
-        "afternoon": "good afternoon",
-        "evening": "good evening",
-        "thanks": "thanks",
-    }
-
-    @pytest.mark.parametrize("bucket,example", list(_BUCKET_EXAMPLES.items()))
-    def test_bucket_reachable(self, bucket, example):
-        reply = _canned_reply(example)
-        assert reply is not None, f"Bucket {bucket!r} not reachable via {example!r}"
-        assert reply in _CANNED_REPLIES[bucket]
+    def test_sms_helpers_import_failure_escalates(self):
+        with patch(
+            "jane_web.jane_v2.classes.send_message.handler._check_open_draft",
+            return_value=None,
+        ):
+            with patch.dict(sys.modules, {
+                "agent_skills.sms_helpers": None,
+            }):
+                params = {"recipient": "wife", "body": "hello", "intent_kind": "send"}
+                result = asyncio.get_event_loop().run_until_complete(
+                    handle("text wife hello", params=params)
+                )
+                assert result is None
 
 
-# ---------------------------------------------------------------------------
-# 7. RETURN SHAPE CONSISTENCY
-# ---------------------------------------------------------------------------
-
-class TestReturnShapes:
-    """Every code path must return either None, {"text": str}, or {"wrong_class": True}."""
-
-    @pytest.mark.asyncio
-    async def test_canned_return_shape(self):
-        result = await handle("hey")
-        assert isinstance(result, dict)
-        assert "text" in result
-        assert isinstance(result["text"], str)
-        assert len(result["text"]) > 0
-
-    @pytest.mark.asyncio
-    async def test_llm_success_return_shape(self, mock_ollama):
-        client = mock_ollama._factory("Yo! What's up?")
-        mock_ollama.side_effect = lambda **kw: client
-
-        result = await handle("greetings friend")
-        assert isinstance(result, dict)
-        assert "text" in result
-        assert isinstance(result["text"], str)
-
-    @pytest.mark.asyncio
-    async def test_wrong_class_return_shape(self, mock_ollama):
-        client = mock_ollama._factory("WRONG_CLASS")
-        mock_ollama.side_effect = lambda **kw: client
-
-        result = await handle("run the deploy script")
-        assert isinstance(result, dict)
-        assert result == {"wrong_class": True}
-
-    @pytest.mark.asyncio
-    async def test_failure_return_shape(self, mock_ollama):
-        client = AsyncMock()
-        client.post = AsyncMock(side_effect=Exception("boom"))
-        client.__aenter__ = AsyncMock(return_value=client)
-        client.__aexit__ = AsyncMock(return_value=False)
-        mock_ollama.side_effect = lambda **kw: client
-
-        result = await handle("ahoy there")
-        assert result is None
+if __name__ == "__main__":
+    pytest.main([__file__, "-v", "--tb=short"])
