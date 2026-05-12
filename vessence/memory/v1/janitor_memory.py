@@ -39,7 +39,7 @@ VAULT_IMAGES_DIR = os.path.join(VAULT_DIR, "images")
 
 MEMORY_JANITOR_MODEL = "claude-opus-4-6"  # Memory is too important for a cheap model
 MAX_DEDUP_THEMES_PER_RUN = 150
-MAX_CODE_MEMORIES_PER_RUN = None  # None = verify every code-referencing memory
+MAX_CODE_MEMORIES_PER_RUN = 20  # Limit per night to avoid orchestrator timeout
 CODE_MEMORY_REVERIFY_DAYS = 14
 MAX_LONG_TERM_NORMALIZE_PER_RUN = 25
 LONG_TERM_REVIEW_THRESHOLD = 500
@@ -1243,17 +1243,19 @@ def verify_code_memories(
             "details": [],
         }
 
-    # Shuffle so the orchestrator's per-stage time budget cuts a different
-    # slice every night. Without this, truncated runs keep re-verifying the
-    # same prefix and later memories never get touched.
-    import random as _random
-    _random.shuffle(code_mems)
+    # Sort by verification date (oldest first). Memories never verified 
+    # (None) come before those with a timestamp.
+    def _sort_key(m):
+        val = (m.get("metadata") or {}).get("code_verified_at")
+        return val if val is not None else ""
+
+    code_mems.sort(key=_sort_key)
 
     total_candidates = len(code_mems)
     if max_memories_per_run is not None and total_candidates > max_memories_per_run:
         code_mems = code_mems[:max_memories_per_run]
         logger.info(
-            "verify_code_memories: checking %d of %d code memories this run",
+            "verify_code_memories: checking %d of %d code memories (oldest first)",
             len(code_mems), total_candidates,
         )
 
