@@ -1,11 +1,14 @@
-# Memory Verification Report — 2026-04-27 07:08
+# Memory Verification Report — 2026-05-12 02:21
 
-Checked: 10 | Stale: 7 | Fixed: 7 | Deleted: 0 | Errors: 2
+Checked: 20 | Stale: 10 | Fixed: 1 | Deleted: 0 | Errors: 17 | Skipped recent: 18
 
-- **UPDATED** `b7681cc2-e5c` — Verified against configs/project_specs/vessence.md and configs/VESCAB.md — vision is current and accurate but stored memory is truncated mid-sentence. Codex's correction matches the canonical spec verbatim.
-- **UPDATED** `8233574a-5be` — Verified against repo: system_load.py exists; job_queue_runner.py:399 and prompt_queue_runner.py:614 call wait_until_safe(); recommended_parallelism() only referenced inside system_load.py (lines 253/306/343); consult_panel.py:186 uses ThreadPoolExecutor with no load check. Codex's PARTIAL verdict is accurate — the original memory's 'always check / never saturate / applies every time' framing overstates current enforcement.
-- **UPDATED** `707720f5-659` — Verified: /home/chieh/ambient/config.py does not exist, /home/chieh/ambient/vessence/config.py does not exist, but /home/chieh/ambient/vessence/jane/config.py exists and its header explicitly declares it the 'Single source of truth for Vessence path and runtime configuration.' Codex's correction matches the actual code.
-- **UPDATED** `a0f185dc-c42` — Verified against jane_web/verify_first_policy.py (narrow regex triggers), context_builder/v1/context_builder.py (memory disabled for tool_mode/data_mode/greeting/simple, anaphora skip), jane_web/main.py (instant commands explicitly 'no LLM, no ChromaDB'), get_time/timer handlers (direct answers and follow-up questions). The universal 'always check 3 sources before ANY question' mandate is not actually enforced; the narrower description matches the code.
-- **UPDATED** `0b79f9cc-9a4` — Verified Codex's claims against the code. FileRepository.kt confirms cache-based access, not Dropbox-style real-time sync. BriefingViewModel.kt explicitly handles offline by rendering cache. user_manager.py confirms per-user paths only for managed users, with legacy/admin on shared path.
-- **UPDATED** `8c7cda38-d7f` — Confirmed Codex correct: v3 pipeline active, qwen2.5:7b not Gemma, Python _is_coherent() heuristics combined with LLM flag, fast-path reply is 'Done, message sent.' not 'msg sent', gemma_stage2.py is legacy. Resolution order and escalation flow remain intact. Updated memory captures current architecture.
-- **UPDATED** `ce8a496f-2d6` — Verified by reading the file: it has 9 sections (not 8), and section 7 is named 'Daily Patterns & Context' (not 'Daily Patterns'). Codex's correction is accurate.
+- **UPDATED** `9e243ef8-c9f` — Verified against the actual code: Codex's PARTIAL verdict is correct. list_available_essences() scans both _get_tools_dir() and _get_essences_dir(); runtime.load_essence() in _auto_load_essences is wrapped in a swallowing try/except; EssenceRuntime is initialized with TOOLS_DIR (legacy alias for SKILLS_DIR per jane/config.py:45); and the HTTP load/unload endpoints at lines 4158-4203 only call essence_loader functions and CapabilityRegistry, never EssenceRuntime.
+- **ERROR** `901db7e5-f64` — parse_fail: You've hit your limit · resets 6am (America/New_York)
+- **ERROR** `b7681cc2-e5c` — parse_fail: You've hit your limit · resets 6am (America/New_York)
+- **ERROR** `37c3c677-9fe` — parse_fail: You've hit your limit · resets 6am (America/New_York)
+- **ERROR** `707720f5-659` — parse_fail: You've hit your limit · resets 6am (America/New_York)
+- **ERROR** `07699ebf-cd6` — parse_fail: You've hit your limit · resets 6am (America/New_York)
+- **ERROR** `032cc1f6-19b` — parse_fail: You've hit your limit · resets 6am (America/New_York)
+- **ERROR** `78a2c726-e5d` — parse_fail: You've hit your limit · resets 6am (America/New_York)
+- **ERROR** `be4829ec-937` — parse_fail: You've hit your limit · resets 6am (America/New_York)
+- **ERROR** `c1874433-4b9` — parse_fail: You've hit your limit · resets 6am (America/New_York)

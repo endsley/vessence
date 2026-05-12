@@ -185,10 +185,16 @@ class MainActivity : ComponentActivity() {
                 override fun onReadyForSpeech(params: android.os.Bundle?) {
                     readyAtMs = SystemClock.elapsedRealtime()
                     DiagnosticReporter.voiceFlow("stt_ready", timingDetails())
-                    // Notify UI that we're actively listening.
-                    // Google's SpeechRecognizer plays its own mic-open chime,
-                    // so we no longer emit a ToneGenerator beep here — that
-                    // caused a double-beep on every STT turn.
+                    // Short beep so the user knows STT is listening.
+                    // AlwaysListeningService (wake word) only vibrates, so
+                    // this is the sole audio cue on every STT path.
+                    runCatching {
+                        val tone = android.media.ToneGenerator(
+                            android.media.AudioManager.STREAM_NOTIFICATION, 70)
+                        tone.startTone(android.media.ToneGenerator.TONE_PROP_BEEP, 100)
+                        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(
+                            { runCatching { tone.release() } }, 250)
+                    }
                     SttResultBus.onListening?.invoke(true)
                 }
                 override fun onBeginningOfSpeech() {

@@ -156,6 +156,23 @@ def main() -> int:
     try:
         client = get_chroma_client(path=VECTOR_DB_SHORT_TERM)
         col = client.get_or_create_collection(name=CHROMA_COLLECTION_SHORT_TERM)
+
+        # Dedup: skip if an identical note was written in the last 60 seconds.
+        recent = col.get(
+            where={"author": "claude_code_stop_hook"},
+            include=["documents", "metadatas"],
+        )
+        if recent["documents"]:
+            now_ts = datetime.datetime.utcnow()
+            for doc, m in zip(recent["documents"], recent["metadatas"]):
+                if doc == note:
+                    try:
+                        written = datetime.datetime.fromisoformat(m.get("timestamp", ""))
+                        if (now_ts - written).total_seconds() < 60:
+                            return 0
+                    except (ValueError, TypeError):
+                        pass
+
         now = datetime.datetime.utcnow()
         meta = {
             "session_id": data.get("session_id", "claude_code"),
