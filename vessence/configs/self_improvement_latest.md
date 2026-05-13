@@ -1,26 +1,27 @@
 # Most Recent Nightly Self-Improvement
 
-- Run started: 2026-05-11 01:00:01
-- Report generated: 2026-05-11 02:41:51
-- Total runtime: 6109s
-- Jobs: 8 total, 5 ok, 3 timeout, 0 failed
+- Run started: 2026-05-12 01:00:01
+- Report generated: 2026-05-12 02:27:49
+- Total runtime: 5260s
+- Jobs: 8 total, 6 ok, 2 timeout, 0 failed
 - Stable latest report path: `/home/chieh/ambient/vessence/configs/self_improvement_latest.md`
-- Archived copy: `/home/chieh/ambient/vessence-data/reports/self_improvement/self_improvement_20260511_010001.md`
+- Archived copy: `/home/chieh/ambient/vessence-data/reports/self_improvement/self_improvement_20260512_010001.md`
 
 ## TL;DR
 
 - 1. ✓ Auto-Commit WIP (pre) (0.0m)
   - Fixes:
-    - 2026-05-11 01:00:02,023 INFO Committed 4 file(s).
-- 2. ✓ Code Auditor (9.8m)
+    - 2026-05-12 01:00:02,090 INFO Committed 3 file(s).
+- 2. ✓ Code Auditor (4.6m)
   - Problems: none detected
   - Fixes: none applied
-- 3. ✓ Dead Code Auditor (7.1m)
+- 3. ✓ Dead Code Auditor (6.5m)
   - Problems:
-    - Possibly-dead functions: 1.
+    - Dead files — review needed: 1.
+    - Possibly-dead functions: 2.
     - Duplicate function bodies: 10 groups.
   - Fixes:
-    - [dead-code] Done — 0 auto-deleted, 0 flagged, 1 dead funcs, 10 dup groups
+    - [dead-code] Done — 0 auto-deleted, 1 flagged, 2 dead funcs, 10 dup groups
 - 4. ⏱ Pipeline Audit (30 prompts) (20.0m)
   - Problems:
     - Prompts audited: 13.
@@ -30,34 +31,27 @@
   - Problems:
     - CRON_JOBS.md missing entry for active cron script: auto_pull.sh
     - v2_3stage_pipeline.md missing class row: CLINIC_SCHEDULES_INFO
-- 6. ✓ Transcript Quality Review (2.9m)
-  - Problems:
-    - Transcript review found 7 issues: 2 critical, 5 medium.
-    - Follow-up answer was routed through Stage 1 instead of the pending_action_resolver
-    - Straightforward question incurred extreme Stage 3 latency
+- 6. ✓ Transcript Quality Review (5.0m)
   - Fixes:
-    - 2026-05-11 01:39:50,314 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (7 issues)
-    - 2026-05-11 01:39:50,316 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 2 critical, 5 medium iss...
-- 7. ⏱ Memory Janitor (60.0m)
+    - 2026-05-12 01:36:10,446 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (0 issues)
+    - 2026-05-12 01:36:10,447 INFO self_improve_log: recorded [info] Transcript Review — I reviewed yesterday's conversations and nothing looked off — all turns ha...
+- 7. ✓ Memory Janitor (49.5m)
   - Problems:
-    - WARNING:memory_janitor:Claude Opus janitor call failed: CLI timed out after 180s, trying Gemini fallback...
+    - WARNING:memory.v1.conversation_manager:Thematic archival failed: [Errno 7] Argument list too long: 'claude'
     - WARNING:memory_janitor:Claude Opus janitor call failed: Expecting value: line 1 column 1 (char 0), trying Gemini fallback...
     - WARNING:memory_janitor:Claude Opus janitor call failed: Expecting value: line 1 column 1 (char 0), trying Gemini fallback...
   - Fixes:
-    - INFO:memory.v1.conversation_manager:Session 'session_1773577613' closed and cleaned up.
+    - INFO:memory.v1.conversation_manager:Session 'session_1773577035' closed and cleaned up.
+    - INFO:memory.v1.conversation_manager:Session 'session_1773598338' closed and cleaned up.
+    - INFO:agent_skills.self_improve_log:self_improve_log: recorded [medium] Memory Verification — Found 10 stale memories out of 20 checked. Stale memories make J...
 - 8. ⏱ Auto-Commit + Push (post) (2.0m)
   - Fixes:
-    - 2026-05-11 02:39:51,400 INFO Committed 4 file(s).
-
-**Top follow-ups:**
-
-- Gate Stage 1 behind an explicit pending-action lookup keyed by session id, and add resolver hit/miss logs so follow-up routing failures are visible.
-- Keep the standing brain usable after vault unlock instead of restarting per turn, and move `short_term_extractor` off the synchronous request path behind a hard latency budget.
+    - 2026-05-12 02:25:41,857 INFO Committed 7 file(s).
 
 ## Executive Summary
 
-- 3 stage(s) need attention because they timed out or exited non-zero.
-- 6 concrete improvement/fix signals were found in logs or reports.
+- 2 stage(s) need attention because they timed out or exited non-zero.
+- 8 concrete improvement/fix signals were found in logs or reports.
 
 ## Stage 1: Auto-Commit WIP (pre)
 
@@ -74,7 +68,7 @@
 
 ### Improvements It Made
 
-- 2026-05-11 01:00:02,023 INFO Committed 4 file(s).
+- 2026-05-12 01:00:02,090 INFO Committed 3 file(s).
 
 ### Evidence Files
 
@@ -83,7 +77,7 @@
 ## Stage 2: Code Auditor
 
 - Status: `ok`
-- Duration: 585s (9.8 min)
+- Duration: 275s (4.6 min)
 
 ### What It Did
 
@@ -106,7 +100,7 @@
 ## Stage 3: Dead Code Auditor
 
 - Status: `ok`
-- Duration: 426s (7.1 min)
+- Duration: 392s (6.5 min)
 
 ### What It Did
 
@@ -114,12 +108,13 @@
 
 ### Problems It Found
 
-- Possibly-dead functions: 1.
+- Dead files — review needed: 1.
+- Possibly-dead functions: 2.
 - Duplicate function bodies: 10 groups.
 
 ### Improvements It Made
 
-- [dead-code] Done — 0 auto-deleted, 0 flagged, 1 dead funcs, 10 dup groups
+- [dead-code] Done — 0 auto-deleted, 1 flagged, 2 dead funcs, 10 dup groups
 
 ### Evidence Files
 
@@ -181,7 +176,7 @@
 ## Stage 6: Transcript Quality Review
 
 - Status: `ok`
-- Duration: 175s (2.9 min)
+- Duration: 300s (5.0 min)
 
 ### What It Did
 
@@ -189,23 +184,12 @@
 
 ### Problems It Found
 
-- Transcript review found 7 issues: 2 critical, 5 medium.
-- Follow-up answer was routed through Stage 1 instead of the pending_action_resolver
-- Straightforward question incurred extreme Stage 3 latency
-- Stage 1 was vulnerable to prompt-like control text and misclassified the message as `greeting`
-- The Stage 2 greeting handler returned an invalid payload shape and could not complete the fast path
+- No problems were detected in the available logs/reports.
 
 ### Improvements It Made
 
-- 2026-05-11 01:39:50,314 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (7 issues)
-- 2026-05-11 01:39:50,316 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 2 critical, 5 medium issues. The most urgent was: Stag
-
-### Follow-Up Fixes Recommended
-
-- Gate Stage 1 behind an explicit pending-action lookup keyed by session id, and add resolver hit/miss logs so follow-up routing failures are visible.
-- Keep the standing brain usable after vault unlock instead of restarting per turn, and move `short_term_extractor` off the synchronous request path behind a hard latency budget.
-- Sanitize classifier input by stripping or heavily down-weighting XML/control blocks such as `<class_protocol ...>`, and add adversarial tests requiring these inputs to fall back to `others` or a dedicated debug/safety class.
-- Validate handler outputs against a typed schema at registration time and add a unit test for the greeting handler's return shape so invalid payloads cannot reach production.
+- 2026-05-12 01:36:10,446 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (0 issues)
+- 2026-05-12 01:36:10,447 INFO self_improve_log: recorded [info] Transcript Review — I reviewed yesterday's conversations and nothing looked off — all turns handled cleanly.
 
 ### Evidence Files
 
@@ -214,8 +198,8 @@
 
 ## Stage 7: Memory Janitor
 
-- Status: `timeout`
-- Duration: 3600s (60.0 min)
+- Status: `ok`
+- Duration: 2970s (49.5 min)
 
 ### What It Did
 
@@ -223,16 +207,17 @@
 
 ### Problems It Found
 
-- Job ended with status `timeout`.
-- WARNING:memory_janitor:Claude Opus janitor call failed: CLI timed out after 180s, trying Gemini fallback...
+- WARNING:memory.v1.conversation_manager:Thematic archival failed: [Errno 7] Argument list too long: 'claude'
 - WARNING:memory_janitor:Claude Opus janitor call failed: Expecting value: line 1 column 1 (char 0), trying Gemini fallback...
 - WARNING:memory_janitor:Claude Opus janitor call failed: Expecting value: line 1 column 1 (char 0), trying Gemini fallback...
 - WARNING:memory_janitor:Claude Opus janitor call failed: Expecting value: line 1 column 1 (char 0), trying Gemini fallback...
-- WARNING:memory_janitor:Claude Opus janitor call failed: CLI timed out after 180s, trying Gemini fallback...
+- WARNING:memory_janitor:Claude Opus janitor call failed: Expecting value: line 1 column 1 (char 0), trying Gemini fallback...
 
 ### Improvements It Made
 
-- INFO:memory.v1.conversation_manager:Session 'session_1773577613' closed and cleaned up.
+- INFO:memory.v1.conversation_manager:Session 'session_1773577035' closed and cleaned up.
+- INFO:memory.v1.conversation_manager:Session 'session_1773598338' closed and cleaned up.
+- INFO:agent_skills.self_improve_log:self_improve_log: recorded [medium] Memory Verification — Found 10 stale memories out of 20 checked. Stale memories make Jane give wrong answers about her own
 
 ### Evidence Files
 
@@ -253,7 +238,7 @@
 
 ### Improvements It Made
 
-- 2026-05-11 02:39:51,400 INFO Committed 4 file(s).
+- 2026-05-12 02:25:41,857 INFO Committed 7 file(s).
 
 ### Evidence Files
 

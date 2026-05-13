@@ -1033,7 +1033,7 @@ def _stamp_code_verification(
         return {"ok": False, "reason": f"stamp_failed: {e}"}
 
 
-def _verify_one_memory(mem: dict, codex_timeout: int = 120) -> dict:
+def _verify_one_memory(mem: dict, codex_timeout: int = 7200) -> dict:
     """Verify a single memory against the codebase via Codex.
 
     Returns {"verdict": "ACCURATE|STALE|PARTIAL", "explanation": ...,
@@ -1083,7 +1083,7 @@ Output EXACTLY one JSON object, no markdown fences:
 
 
 def _apply_fix_via_claude(mem: dict, codex_finding: dict, col,
-                          claude_timeout: int = 120) -> dict:
+                          claude_timeout: int = 7200) -> dict:
     """Send one Codex finding to Claude for validation, apply fix if confirmed.
 
     Returns {"action": "updated|deleted|kept|error", "reason": ...}.
@@ -1181,8 +1181,8 @@ Output EXACTLY one JSON object, no markdown fences:
 
 
 def verify_code_memories(
-    codex_timeout: int = 120,
-    claude_timeout: int = 120,
+    codex_timeout: int = 7200,
+    claude_timeout: int = 7200,
     max_memories_per_run: int | None = MAX_CODE_MEMORIES_PER_RUN,
 ) -> dict:
     """Verify code-referencing memories one at a time against the real codebase.
