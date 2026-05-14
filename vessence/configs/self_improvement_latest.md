@@ -1,52 +1,60 @@
 # Most Recent Nightly Self-Improvement
 
-- Run started: 2026-05-12 01:00:01
-- Report generated: 2026-05-12 02:27:49
-- Total runtime: 5260s
-- Jobs: 8 total, 6 ok, 2 timeout, 0 failed
+- Run started: 2026-05-13 01:00:01
+- Report generated: 2026-05-13 01:52:38
+- Total runtime: 3157s
+- Jobs: 8 total, 6 ok, 1 timeout, 1 failed
 - Stable latest report path: `/home/chieh/ambient/vessence/configs/self_improvement_latest.md`
-- Archived copy: `/home/chieh/ambient/vessence-data/reports/self_improvement/self_improvement_20260512_010001.md`
+- Archived copy: `/home/chieh/ambient/vessence-data/reports/self_improvement/self_improvement_20260513_010001.md`
 
 ## TL;DR
 
 - 1. ✓ Auto-Commit WIP (pre) (0.0m)
   - Fixes:
-    - 2026-05-12 01:00:02,090 INFO Committed 3 file(s).
-- 2. ✓ Code Auditor (4.6m)
-  - Problems: none detected
-  - Fixes: none applied
-- 3. ✓ Dead Code Auditor (6.5m)
+    - 2026-05-13 01:00:01,999 INFO Committed 4 file(s).
+- 2. ✗ Code Auditor (0.1m)
   - Problems:
-    - Dead files — review needed: 1.
-    - Possibly-dead functions: 2.
+    - 2026-05-13 01:00:05,537 [ERROR] Auditor crashed: Command '['git', 'commit', '-m', 'auto-audit: add tests for jane_web/jane_v2/classes/shopping_list/handler.p...
+- 3. ✓ Dead Code Auditor (5.9m)
+  - Problems:
+    - Possibly-dead functions: 1.
     - Duplicate function bodies: 10 groups.
   - Fixes:
-    - [dead-code] Done — 0 auto-deleted, 1 flagged, 2 dead funcs, 10 dup groups
-- 4. ⏱ Pipeline Audit (30 prompts) (20.0m)
+    - [dead-code] Done — 0 auto-deleted, 0 flagged, 1 dead funcs, 10 dup groups
+- 4. ✓ Pipeline Audit (30 prompts) (1.7m)
   - Problems:
-    - Prompts audited: 13.
-    - Classification failures: 8.
-    - Response failures: 13.
+    - Prompts audited: 12.
+    - Classification failures: 7.
+    - Response failures: 12.
 - 5. ✓ Doc Drift Auditor (0.0m)
   - Problems:
     - CRON_JOBS.md missing entry for active cron script: auto_pull.sh
     - v2_3stage_pipeline.md missing class row: CLINIC_SCHEDULES_INFO
-- 6. ✓ Transcript Quality Review (5.0m)
+- 6. ✓ Transcript Quality Review (3.6m)
+  - Problems:
+    - Transcript review found 5 issues: 3 critical, 2 medium.
+    - Follow-up answer was not routed through the pending_action_resolver and got reclassified from scratch
+    - Raw `<class_protocol>` text was misclassified as a real greeting, and the greeting handler's WRONG_CLASS path degraded into an invalid-shape Stage 3 escalation
   - Fixes:
-    - 2026-05-12 01:36:10,446 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (0 issues)
-    - 2026-05-12 01:36:10,447 INFO self_improve_log: recorded [info] Transcript Review — I reviewed yesterday's conversations and nothing looked off — all turns ha...
-- 7. ✓ Memory Janitor (49.5m)
+    - 2026-05-13 01:11:17,920 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (5 issues)
+    - 2026-05-13 01:11:17,921 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 3 critical, 2 medium iss...
+- 7. ✓ Memory Janitor (39.3m)
   - Problems:
     - WARNING:memory.v1.conversation_manager:Thematic archival failed: [Errno 7] Argument list too long: 'claude'
-    - WARNING:memory_janitor:Claude Opus janitor call failed: Expecting value: line 1 column 1 (char 0), trying Gemini fallback...
-    - WARNING:memory_janitor:Claude Opus janitor call failed: Expecting value: line 1 column 1 (char 0), trying Gemini fallback...
+    - WARNING:memory_janitor:Claude Opus janitor call failed: CLI failed (exit 1): You've hit your limit · resets 10pm (America/New_York), trying Gemini fallback...
+    - WARNING:memory_janitor:Claude Opus janitor call failed: CLI failed (exit 1): You've hit your limit · resets 10pm (America/New_York), trying Gemini fallback...
   - Fixes:
     - INFO:memory.v1.conversation_manager:Session 'session_1773577035' closed and cleaned up.
-    - INFO:memory.v1.conversation_manager:Session 'session_1773598338' closed and cleaned up.
-    - INFO:agent_skills.self_improve_log:self_improve_log: recorded [medium] Memory Verification — Found 10 stale memories out of 20 checked. Stale memories make J...
+    - INFO:memory.v1.conversation_manager:Session 'session_1773599090' closed and cleaned up.
+    - INFO:agent_skills.self_improve_log:self_improve_log: recorded [info] Memory Verification — Verified 20 code-related memories one at a time. Skipped 21 recent...
 - 8. ⏱ Auto-Commit + Push (post) (2.0m)
   - Fixes:
-    - 2026-05-12 02:25:41,857 INFO Committed 7 file(s).
+    - 2026-05-13 01:50:39,025 INFO Committed 6 file(s).
+
+**Top follow-ups:**
+
+- In `jane_web/jane_v3/pipeline.py`, resolve active pending actions before `maybe_idle_flush()`, or exempt unresolved `pending_action` state from the 30s idle flush. Add an explicit log when an idle flush discards a pending follow-up.
+- Sanitize `<class_protocol>...</class_protocol>` and other Stage 3 injection blocks before v3 classification, reusing the v2 stripping logic. In `jane_web/jane_v3/pipeline.py`, check `result.get("wrong_class")` before the `'text'` shape gate, or change `jane_web/jane_v2/classes/greeting/handler.py` to return `None` on WRONG_CLASS.
 
 ## Executive Summary
 
@@ -68,7 +76,7 @@
 
 ### Improvements It Made
 
-- 2026-05-12 01:00:02,090 INFO Committed 3 file(s).
+- 2026-05-13 01:00:01,999 INFO Committed 4 file(s).
 
 ### Evidence Files
 
@@ -76,8 +84,8 @@
 
 ## Stage 2: Code Auditor
 
-- Status: `ok`
-- Duration: 275s (4.6 min)
+- Status: `exit-2`
+- Duration: 3s (0.1 min)
 
 ### What It Did
 
@@ -85,7 +93,8 @@
 
 ### Problems It Found
 
-- No problems were detected in the available logs/reports.
+- Job ended with status `exit-2`.
+- 2026-05-13 01:00:05,537 [ERROR] Auditor crashed: Command '['git', 'commit', '-m', 'auto-audit: add tests for jane_web/jane_v2/classes/shopping_list/handler.py', '--no-verify']' returned non-zero exit status 1.
 
 ### Improvements It Made
 
@@ -100,7 +109,7 @@
 ## Stage 3: Dead Code Auditor
 
 - Status: `ok`
-- Duration: 392s (6.5 min)
+- Duration: 355s (5.9 min)
 
 ### What It Did
 
@@ -108,13 +117,12 @@
 
 ### Problems It Found
 
-- Dead files — review needed: 1.
-- Possibly-dead functions: 2.
+- Possibly-dead functions: 1.
 - Duplicate function bodies: 10 groups.
 
 ### Improvements It Made
 
-- [dead-code] Done — 0 auto-deleted, 1 flagged, 2 dead funcs, 10 dup groups
+- [dead-code] Done — 0 auto-deleted, 0 flagged, 1 dead funcs, 10 dup groups
 
 ### Evidence Files
 
@@ -123,8 +131,8 @@
 
 ## Stage 4: Pipeline Audit (30 prompts)
 
-- Status: `timeout`
-- Duration: 1200s (20.0 min)
+- Status: `ok`
+- Duration: 102s (1.7 min)
 
 ### What It Did
 
@@ -132,14 +140,13 @@
 
 ### Problems It Found
 
-- Job ended with status `timeout`.
-- Prompts audited: 13.
-- Classification failures: 8.
-- Response failures: 13.
-- **I want them to periodically get the lead after some time** (timer/stage3): You've hit your limit · resets May 31, 8pm (America/New_York)
-- **yes those articles and maybe just two days** (others/stage3): You've hit your limit · resets May 31, 8pm (America/New_York)
-- **currently how does your short-term memory work** (others/stage3): You've hit your limit · resets May 31, 8pm (America/New_York)
-- **how about** (greeting/stage3): You've hit your limit · resets May 31, 8pm (America/New_York)
+- Prompts audited: 12.
+- Classification failures: 7.
+- Response failures: 12.
+- **yes those articles and maybe just two days** (others/stage3): You've hit your limit · resets 10pm (America/New_York)
+- **currently how does your short-term memory work** (others/stage3): You've hit your limit · resets 10pm (America/New_York)
+- **how about** (greeting/stage3): You've hit your limit · resets 10pm (America/New_York)
+- **it seems to me that you are no longing making any sounds when speech to text is ** (others/stage3): You've hit your limit · resets 10pm (America/New_York)
 
 ### Improvements It Made
 
@@ -176,7 +183,7 @@
 ## Stage 6: Transcript Quality Review
 
 - Status: `ok`
-- Duration: 300s (5.0 min)
+- Duration: 214s (3.6 min)
 
 ### What It Did
 
@@ -184,12 +191,23 @@
 
 ### Problems It Found
 
-- No problems were detected in the available logs/reports.
+- Transcript review found 5 issues: 3 critical, 2 medium.
+- Follow-up answer was not routed through the pending_action_resolver and got reclassified from scratch
+- Raw `<class_protocol>` text was misclassified as a real greeting, and the greeting handler's WRONG_CLASS path degraded into an invalid-shape Stage 3 escalation
+- A voice/STT bug report took 5.6 minutes to answer, and the client-side behavior could not be verified from the available Android diagnostics
+- The user asked to inspect short-term memory while the short-term extractor was repeatedly failing
 
 ### Improvements It Made
 
-- 2026-05-12 01:36:10,446 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (0 issues)
-- 2026-05-12 01:36:10,447 INFO self_improve_log: recorded [info] Transcript Review — I reviewed yesterday's conversations and nothing looked off — all turns handled cleanly.
+- 2026-05-13 01:11:17,920 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (5 issues)
+- 2026-05-13 01:11:17,921 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 3 critical, 2 medium issues. The most urgent was: Raw
+
+### Follow-Up Fixes Recommended
+
+- In `jane_web/jane_v3/pipeline.py`, resolve active pending actions before `maybe_idle_flush()`, or exempt unresolved `pending_action` state from the 30s idle flush. Add an explicit log when an idle flush discards a pending follow-up.
+- Sanitize `<class_protocol>...</class_protocol>` and other Stage 3 injection blocks before v3 classification, reusing the v2 stripping logic. In `jane_web/jane_v3/pipeline.py`, check `result.get("wrong_class")` before the `'text'` shape gate, or change `jane_web/jane_v2/classes/greeting/handler.py` to return `None` on WRONG_CLASS.
+- Add a hard latency budget and smaller-model fallback for meta/diagnostic turns in Stage 3, stop restarting the standing brain on every vault-unlock mismatch, and emit Android `voice_flow` telemetry for TTS end, STT relaunch, beep playback, and relaunch-skipped reasons with the session id.
+- Make `memory.v1.short_term_extractor` fail fast to a heuristic fallback instead of waiting 45s, queue extraction fully out-of-band, and surface an explicit `short_term_memory_write_failed` flag to Stage 3 so memory-inspection answers can report degraded state honestly.
 
 ### Evidence Files
 
@@ -199,7 +217,7 @@
 ## Stage 7: Memory Janitor
 
 - Status: `ok`
-- Duration: 2970s (49.5 min)
+- Duration: 2360s (39.3 min)
 
 ### What It Did
 
@@ -208,16 +226,16 @@
 ### Problems It Found
 
 - WARNING:memory.v1.conversation_manager:Thematic archival failed: [Errno 7] Argument list too long: 'claude'
-- WARNING:memory_janitor:Claude Opus janitor call failed: Expecting value: line 1 column 1 (char 0), trying Gemini fallback...
-- WARNING:memory_janitor:Claude Opus janitor call failed: Expecting value: line 1 column 1 (char 0), trying Gemini fallback...
-- WARNING:memory_janitor:Claude Opus janitor call failed: Expecting value: line 1 column 1 (char 0), trying Gemini fallback...
-- WARNING:memory_janitor:Claude Opus janitor call failed: Expecting value: line 1 column 1 (char 0), trying Gemini fallback...
+- WARNING:memory_janitor:Claude Opus janitor call failed: CLI failed (exit 1): You've hit your limit · resets 10pm (America/New_York), trying Gemini fallback...
+- WARNING:memory_janitor:Claude Opus janitor call failed: CLI failed (exit 1): You've hit your limit · resets 10pm (America/New_York), trying Gemini fallback...
+- WARNING:memory_janitor:Claude Opus janitor call failed: CLI failed (exit 1): You've hit your limit · resets 10pm (America/New_York), trying Gemini fallback...
+- WARNING:memory_janitor:Claude Opus janitor call failed: CLI failed (exit 1): You've hit your limit · resets 10pm (America/New_York), trying Gemini fallback...
 
 ### Improvements It Made
 
 - INFO:memory.v1.conversation_manager:Session 'session_1773577035' closed and cleaned up.
-- INFO:memory.v1.conversation_manager:Session 'session_1773598338' closed and cleaned up.
-- INFO:agent_skills.self_improve_log:self_improve_log: recorded [medium] Memory Verification — Found 10 stale memories out of 20 checked. Stale memories make Jane give wrong answers about her own
+- INFO:memory.v1.conversation_manager:Session 'session_1773599090' closed and cleaned up.
+- INFO:agent_skills.self_improve_log:self_improve_log: recorded [info] Memory Verification — Verified 20 code-related memories one at a time. Skipped 21 recently verified entries. All checked o
 
 ### Evidence Files
 
@@ -238,7 +256,7 @@
 
 ### Improvements It Made
 
-- 2026-05-12 02:25:41,857 INFO Committed 7 file(s).
+- 2026-05-13 01:50:39,025 INFO Committed 6 file(s).
 
 ### Evidence Files
 
