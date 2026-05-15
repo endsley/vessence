@@ -1109,3 +1109,15 @@ A tool/essence is NOT complete without a valid MCP. The essence builder intervie
 1. **Qwen Delegation Check:** Code analysis, search summarization, or log triage → delegate to Qwen sub-agent.
 2. **Micromanagement Audit:** Did I perform low-level edits that should have been autonomous? My role is strategic intent.
 3. **Documentation Update Check:** If architecture, capabilities, or processes changed → update relevant config docs.
+
+### 19.1 Google Cloud Billing Receipt Downloader
+
+- **File:** `agent_skills/google_cloud_receipts.py`
+- **Purpose:** lets Codex/Jane capture a reusable Google Cloud Billing browser profile and then download the last `n` recent payment receipts from Billing Transactions pages.
+- **Commands:**
+  - `python agent_skills/google_cloud_receipts.py capture-profile`
+  - `python agent_skills/google_cloud_receipts.py download --count <n> [--billing-account ACCOUNT_ID]`
+  - `python agent_skills/google_cloud_receipts.py download --start-date YYYY-MM-DD --end-date YYYY-MM-DD`
+  - `python agent_skills/google_cloud_receipts.py list-accounts`
+- **Filename convention:** `google_<month>_<day>_<year>_<amount>.pdf` when both values are available from the receipt row/page
+- **Reused plumbing:** `agent_skills/web_automation/browser_session.py` and `agent_skills/web_automation/profiles.py`

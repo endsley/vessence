@@ -233,3 +233,14 @@ A **WebSequence** is a named, reusable Playwright browser automation script. Eac
     -   **Safety:** refuses to run against non-localhost base-urls (DB is hardcoded local); cleanup `DELETE` is restricted to attempts owned by the audit student AND started within the last 24h; `try/finally` cleans up an in-progress attempt if the loop crashes mid-run.
     -   **Verdict semantics:** `incorrect` from the grader → high-severity `grader_canonical_mismatch`; `stale` / `locked` / `unknown` → high-severity `verdict_*` (audit data unreliable for that question).
     -   **Discovered during the May 9 2026 Codex-via-Playwright run** (system Chrome + CDP + DB peek). This skill replaces that whole dance with plain `httpx` + `dev-login` + the same DB peek for snapshot solutions.
+
+-   **Skill: Google Cloud Billing Receipt Downloader**
+    -   **File:** `agent_skills/google_cloud_receipts.py`
+    -   **What it does:** Captures a one-time Playwright browser profile for `console.cloud.google.com`, enumerates open billing accounts via `gcloud billing accounts list`, scans Billing Transactions pages for receipt controls, and downloads the last `n` recent payment receipts.
+    -   **CLI:**
+        -   `python agent_skills/google_cloud_receipts.py capture-profile`
+        -   `python agent_skills/google_cloud_receipts.py download --count 5 [--billing-account ACCOUNT_ID] [--out-dir DIR]`
+        -   `python agent_skills/google_cloud_receipts.py download --start-date 2026-03-01 --end-date 2026-05-14`
+        -   `python agent_skills/google_cloud_receipts.py list-accounts`
+    -   **Filename convention:** `google_<month>_<day>_<year>_<amount>.pdf` when the page exposes both a receipt date and amount
+    -   **Storage:** browser auth state in `$VESSENCE_DATA_HOME/data/browser_profiles/google_cloud_billing/`; downloads in `~/Downloads/google_cloud_receipts_<timestamp>/`
