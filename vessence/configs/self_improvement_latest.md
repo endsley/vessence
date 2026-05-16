@@ -1,27 +1,26 @@
 # Most Recent Nightly Self-Improvement
 
-- Run started: 2026-05-14 01:00:01
-- Report generated: 2026-05-14 01:40:33
-- Total runtime: 2431s
+- Run started: 2026-05-15 01:00:01
+- Report generated: 2026-05-15 02:35:44
+- Total runtime: 5742s
 - Jobs: 8 total, 6 ok, 2 timeout, 0 failed
 - Stable latest report path: `/home/chieh/ambient/vessence/configs/self_improvement_latest.md`
-- Archived copy: `/home/chieh/ambient/vessence-data/reports/self_improvement/self_improvement_20260514_010001.md`
+- Archived copy: `/home/chieh/ambient/vessence-data/reports/self_improvement/self_improvement_20260515_010001.md`
 
 ## TL;DR
 
 - 1. ✓ Auto-Commit WIP (pre) (0.0m)
   - Fixes:
-    - 2026-05-14 01:00:03,237 INFO Committed 2 file(s).
-- 2. ✓ Code Auditor (4.7m)
+    - 2026-05-15 01:00:02,821 INFO Committed 6 file(s).
+- 2. ✓ Code Auditor (7.5m)
   - Problems: none detected
   - Fixes: none applied
-- 3. ✓ Dead Code Auditor (6.2m)
+- 3. ✓ Dead Code Auditor (7.1m)
   - Problems:
-    - Dead files — review needed: 1.
-    - Possibly-dead functions: 2.
+    - Possibly-dead functions: 1.
     - Duplicate function bodies: 10 groups.
   - Fixes:
-    - [dead-code] Done — 0 auto-deleted, 1 flagged, 2 dead funcs, 10 dup groups
+    - [dead-code] Done — 0 auto-deleted, 0 flagged, 1 dead funcs, 10 dup groups
 - 4. ⏱ Pipeline Audit (30 prompts) (20.0m)
   - Problems:
     - Prompts audited: 12.
@@ -31,30 +30,36 @@
   - Problems:
     - CRON_JOBS.md missing entry for active cron script: auto_pull.sh
     - v2_3stage_pipeline.md missing class row: CLINIC_SCHEDULES_INFO
-- 6. ✓ Transcript Quality Review (3.6m)
+- 6. ✓ Transcript Quality Review (3.0m)
   - Problems:
-    - Transcript review found 8 issues: 2 critical, 3 low, 3 medium.
-    - Follow-up routing failed; a clear pending-action reply was sent through normal classification instead of the pending_action_resolver.
-    - Stage 3 incurred an inline standing-brain restart before answering, adding avoidable latency.
+    - Transcript review found 8 issues: 3 critical, 5 medium.
+    - Follow-up reply was not resolved by the pending-action path and was treated as a fresh `others` turn
+    - Stage 1 misclassified user-supplied protocol text as `greeting` with Very High confidence
   - Fixes:
-    - 2026-05-14 01:34:31,039 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (8 issues)
-    - 2026-05-14 01:34:31,040 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 2 critical, 3 medium, 3...
-- 7. ✓ Memory Janitor (4.0m)
+    - 2026-05-15 01:37:38,483 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (8 issues)
+    - 2026-05-15 01:37:38,484 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 3 critical, 5 medium iss...
+- 7. ✓ Memory Janitor (56.1m)
   - Problems:
-    - WARNING:system_load:System still busy after 5 min — giving up.
+    - WARNING:memory.v1.conversation_manager:Thematic archival failed: [Errno 7] Argument list too long: 'claude'
+    - WARNING:memory_janitor:Claude Opus janitor call failed: CLI timed out after 180s, trying Gemini fallback...
+    - WARNING:memory_janitor:Claude Opus janitor call failed: Expecting value: line 1 column 1 (char 0), trying Gemini fallback...
+  - Fixes:
+    - INFO:memory.v1.conversation_manager:Session 'session_1773577035' closed and cleaned up.
+    - INFO:memory.v1.conversation_manager:Session 'session_1773599591' closed and cleaned up.
+    - INFO:agent_skills.self_improve_log:self_improve_log: recorded [info] Memory Verification — Verified 20 code-related memories one at a time. Skipped 24 recent...
 - 8. ⏱ Auto-Commit + Push (post) (2.0m)
   - Fixes:
-    - 2026-05-14 01:38:33,964 INFO Committed 4 file(s).
+    - 2026-05-15 02:33:44,872 INFO Committed 5 file(s).
 
 **Top follow-ups:**
 
-- Persist pending actions with explicit TTL/state and add a logged resolver decision before Stage 1. If a turn is short and referential (`yes`, `those`, duration refinement), route it to the pending handler instead of classifying it.
-- When vault unlock state changes, immediately recreate or invalidate the standing brain out of band. Do not restart the Stage 3 process inline on live user turns.
+- Run pending-action resolution before Stage 1 on every turn, persist pending-action metadata until consumed, and add explicit resolver hit/miss logs.
+- Sanitize or strip control-like markup before classification, add adversarial tests for protocol-looking payloads, and require semantic validation before loading any class protocol.
 
 ## Executive Summary
 
 - 2 stage(s) need attention because they timed out or exited non-zero.
-- 5 concrete improvement/fix signals were found in logs or reports.
+- 8 concrete improvement/fix signals were found in logs or reports.
 
 ## Stage 1: Auto-Commit WIP (pre)
 
@@ -71,7 +76,7 @@
 
 ### Improvements It Made
 
-- 2026-05-14 01:00:03,237 INFO Committed 2 file(s).
+- 2026-05-15 01:00:02,821 INFO Committed 6 file(s).
 
 ### Evidence Files
 
@@ -80,7 +85,7 @@
 ## Stage 2: Code Auditor
 
 - Status: `ok`
-- Duration: 281s (4.7 min)
+- Duration: 450s (7.5 min)
 
 ### What It Did
 
@@ -103,7 +108,7 @@
 ## Stage 3: Dead Code Auditor
 
 - Status: `ok`
-- Duration: 369s (6.2 min)
+- Duration: 427s (7.1 min)
 
 ### What It Did
 
@@ -111,13 +116,12 @@
 
 ### Problems It Found
 
-- Dead files — review needed: 1.
-- Possibly-dead functions: 2.
+- Possibly-dead functions: 1.
 - Duplicate function bodies: 10 groups.
 
 ### Improvements It Made
 
-- [dead-code] Done — 0 auto-deleted, 1 flagged, 2 dead funcs, 10 dup groups
+- [dead-code] Done — 0 auto-deleted, 0 flagged, 1 dead funcs, 10 dup groups
 
 ### Evidence Files
 
@@ -179,7 +183,7 @@
 ## Stage 6: Transcript Quality Review
 
 - Status: `ok`
-- Duration: 216s (3.6 min)
+- Duration: 177s (3.0 min)
 
 ### What It Did
 
@@ -187,23 +191,23 @@
 
 ### Problems It Found
 
-- Transcript review found 8 issues: 2 critical, 3 low, 3 medium.
-- Follow-up routing failed; a clear pending-action reply was sent through normal classification instead of the pending_action_resolver.
-- Stage 3 incurred an inline standing-brain restart before answering, adding avoidable latency.
-- Stage 1 was prompt-injected into the `greeting` class, and the injected class protocol was forwarded into Stage 3.
-- The deterministic `greeting` handler returned an invalid payload and forced unnecessary Stage 3 fallback.
+- Transcript review found 8 issues: 3 critical, 5 medium.
+- Follow-up reply was not resolved by the pending-action path and was treated as a fresh `others` turn
+- Stage 1 misclassified user-supplied protocol text as `greeting` with Very High confidence
+- The greeting fast-path handler failed its contract and returned an invalid shape
+- Stage 3 took over 5 minutes to answer a runtime problem report
 
 ### Improvements It Made
 
-- 2026-05-14 01:34:31,039 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (8 issues)
-- 2026-05-14 01:34:31,040 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 2 critical, 3 medium, 3 minor issues. The most urgent
+- 2026-05-15 01:37:38,483 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (8 issues)
+- 2026-05-15 01:37:38,484 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 3 critical, 5 medium issues. The most urgent was: Stag
 
 ### Follow-Up Fixes Recommended
 
-- Persist pending actions with explicit TTL/state and add a logged resolver decision before Stage 1. If a turn is short and referential (`yes`, `those`, duration refinement), route it to the pending handler instead of classifying it.
-- When vault unlock state changes, immediately recreate or invalidate the standing brain out of band. Do not restart the Stage 3 process inline on live user turns.
-- Sanitize or heavily downweight protocol/XML/control-looking text before classification, and never load a class protocol from a label derived from raw user text without a second validation layer.
-- Add schema validation and unit tests for every handler return object, and fail with a typed handler error rather than silently bouncing malformed handler output into Stage 3.
+- Run pending-action resolution before Stage 1 on every turn, persist pending-action metadata until consumed, and add explicit resolver hit/miss logs.
+- Sanitize or strip control-like markup before classification, add adversarial tests for protocol-looking payloads, and require semantic validation before loading any class protocol.
+- Make the greeting handler schema-safe for malformed inputs and fall back to a canned greeting response instead of emitting an invalid handler result.
+- Stop respawning the standing brain on routine unlocked turns, move short-term extraction off the critical path, and enforce a hard Stage 3 response SLA with graceful fallback.
 
 ### Evidence Files
 
@@ -213,7 +217,7 @@
 ## Stage 7: Memory Janitor
 
 - Status: `ok`
-- Duration: 242s (4.0 min)
+- Duration: 3366s (56.1 min)
 
 ### What It Did
 
@@ -221,11 +225,17 @@
 
 ### Problems It Found
 
-- WARNING:system_load:System still busy after 5 min — giving up.
+- WARNING:memory.v1.conversation_manager:Thematic archival failed: [Errno 7] Argument list too long: 'claude'
+- WARNING:memory_janitor:Claude Opus janitor call failed: CLI timed out after 180s, trying Gemini fallback...
+- WARNING:memory_janitor:Claude Opus janitor call failed: Expecting value: line 1 column 1 (char 0), trying Gemini fallback...
+- WARNING:memory_janitor:Claude Opus janitor call failed: Expecting value: line 1 column 1 (char 0), trying Gemini fallback...
+- WARNING:memory_janitor:Claude Opus janitor call failed: CLI timed out after 180s, trying Gemini fallback...
 
 ### Improvements It Made
 
-- No concrete improvement was recorded in the available logs/reports.
+- INFO:memory.v1.conversation_manager:Session 'session_1773577035' closed and cleaned up.
+- INFO:memory.v1.conversation_manager:Session 'session_1773599591' closed and cleaned up.
+- INFO:agent_skills.self_improve_log:self_improve_log: recorded [info] Memory Verification — Verified 20 code-related memories one at a time. Skipped 24 recently verified entries. All checked o
 
 ### Evidence Files
 
@@ -246,7 +256,7 @@
 
 ### Improvements It Made
 
-- 2026-05-14 01:38:33,964 INFO Committed 4 file(s).
+- 2026-05-15 02:33:44,872 INFO Committed 5 file(s).
 
 ### Evidence Files
 
