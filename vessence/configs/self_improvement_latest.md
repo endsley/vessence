@@ -1,26 +1,27 @@
 # Most Recent Nightly Self-Improvement
 
-- Run started: 2026-05-15 01:00:01
-- Report generated: 2026-05-15 02:35:44
-- Total runtime: 5742s
+- Run started: 2026-05-16 01:00:01
+- Report generated: 2026-05-16 01:37:16
+- Total runtime: 2234s
 - Jobs: 8 total, 6 ok, 2 timeout, 0 failed
 - Stable latest report path: `/home/chieh/ambient/vessence/configs/self_improvement_latest.md`
-- Archived copy: `/home/chieh/ambient/vessence-data/reports/self_improvement/self_improvement_20260515_010001.md`
+- Archived copy: `/home/chieh/ambient/vessence-data/reports/self_improvement/self_improvement_20260516_010001.md`
 
 ## TL;DR
 
 - 1. ✓ Auto-Commit WIP (pre) (0.0m)
   - Fixes:
-    - 2026-05-15 01:00:02,821 INFO Committed 6 file(s).
-- 2. ✓ Code Auditor (7.5m)
+    - 2026-05-16 01:00:02,065 INFO Committed 3 file(s).
+- 2. ✓ Code Auditor (3.5m)
   - Problems: none detected
   - Fixes: none applied
-- 3. ✓ Dead Code Auditor (7.1m)
+- 3. ✓ Dead Code Auditor (6.5m)
   - Problems:
-    - Possibly-dead functions: 1.
+    - Dead files — review needed: 1.
+    - Possibly-dead functions: 2.
     - Duplicate function bodies: 10 groups.
   - Fixes:
-    - [dead-code] Done — 0 auto-deleted, 0 flagged, 1 dead funcs, 10 dup groups
+    - [dead-code] Done — 0 auto-deleted, 1 flagged, 2 dead funcs, 10 dup groups
 - 4. ⏱ Pipeline Audit (30 prompts) (20.0m)
   - Problems:
     - Prompts audited: 12.
@@ -30,41 +31,35 @@
   - Problems:
     - CRON_JOBS.md missing entry for active cron script: auto_pull.sh
     - v2_3stage_pipeline.md missing class row: CLINIC_SCHEDULES_INFO
-- 6. ✓ Transcript Quality Review (3.0m)
+- 6. ✓ Transcript Quality Review (1.1m)
   - Problems:
     - Transcript review found 8 issues: 3 critical, 5 medium.
-    - Follow-up reply was not resolved by the pending-action path and was treated as a fresh `others` turn
-    - Stage 1 misclassified user-supplied protocol text as `greeting` with Very High confidence
+    - Follow-up reply was not routed through pending_action_resolver and instead went through Stage 1/Stage 3
+    - Stage 3 response path was extremely slow for a normal explanatory question
   - Fixes:
-    - 2026-05-15 01:37:38,483 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (8 issues)
-    - 2026-05-15 01:37:38,484 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 3 critical, 5 medium iss...
-- 7. ✓ Memory Janitor (56.1m)
+    - 2026-05-16 01:31:14,134 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (8 issues)
+    - 2026-05-16 01:31:14,135 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 3 critical, 5 medium iss...
+- 7. ✓ Memory Janitor (4.0m)
   - Problems:
-    - WARNING:memory.v1.conversation_manager:Thematic archival failed: [Errno 7] Argument list too long: 'claude'
-    - WARNING:memory_janitor:Claude Opus janitor call failed: CLI timed out after 180s, trying Gemini fallback...
-    - WARNING:memory_janitor:Claude Opus janitor call failed: Expecting value: line 1 column 1 (char 0), trying Gemini fallback...
-  - Fixes:
-    - INFO:memory.v1.conversation_manager:Session 'session_1773577035' closed and cleaned up.
-    - INFO:memory.v1.conversation_manager:Session 'session_1773599591' closed and cleaned up.
-    - INFO:agent_skills.self_improve_log:self_improve_log: recorded [info] Memory Verification — Verified 20 code-related memories one at a time. Skipped 24 recent...
+    - WARNING:system_load:System still busy after 5 min — giving up.
 - 8. ⏱ Auto-Commit + Push (post) (2.0m)
   - Fixes:
-    - 2026-05-15 02:33:44,872 INFO Committed 5 file(s).
+    - 2026-05-16 01:35:16,502 INFO Committed 4 file(s).
 
 **Top follow-ups:**
 
-- Run pending-action resolution before Stage 1 on every turn, persist pending-action metadata until consumed, and add explicit resolver hit/miss logs.
-- Sanitize or strip control-like markup before classification, add adversarial tests for protocol-looking payloads, and require semantic validation before loading any class protocol.
+- Persist pending_action state across turns and add explicit resolver logging for both hit and miss cases. Before Stage 1, check pending_action for the session and route short confirmation/edit replies directly to the owning handler.
+- Avoid per-turn brain restarts after vault unlock by respawning once and reusing the unlocked process. Move short_term_extractor work fully out of the response critical path or hard-cap it with a shorter nonblocking timeout.
 
 ## Executive Summary
 
 - 2 stage(s) need attention because they timed out or exited non-zero.
-- 8 concrete improvement/fix signals were found in logs or reports.
+- 5 concrete improvement/fix signals were found in logs or reports.
 
 ## Stage 1: Auto-Commit WIP (pre)
 
 - Status: `ok`
-- Duration: 1s (0.0 min)
+- Duration: 0s (0.0 min)
 
 ### What It Did
 
@@ -76,7 +71,7 @@
 
 ### Improvements It Made
 
-- 2026-05-15 01:00:02,821 INFO Committed 6 file(s).
+- 2026-05-16 01:00:02,065 INFO Committed 3 file(s).
 
 ### Evidence Files
 
@@ -85,7 +80,7 @@
 ## Stage 2: Code Auditor
 
 - Status: `ok`
-- Duration: 450s (7.5 min)
+- Duration: 207s (3.5 min)
 
 ### What It Did
 
@@ -108,7 +103,7 @@
 ## Stage 3: Dead Code Auditor
 
 - Status: `ok`
-- Duration: 427s (7.1 min)
+- Duration: 393s (6.5 min)
 
 ### What It Did
 
@@ -116,12 +111,13 @@
 
 ### Problems It Found
 
-- Possibly-dead functions: 1.
+- Dead files — review needed: 1.
+- Possibly-dead functions: 2.
 - Duplicate function bodies: 10 groups.
 
 ### Improvements It Made
 
-- [dead-code] Done — 0 auto-deleted, 0 flagged, 1 dead funcs, 10 dup groups
+- [dead-code] Done — 0 auto-deleted, 1 flagged, 2 dead funcs, 10 dup groups
 
 ### Evidence Files
 
@@ -160,7 +156,7 @@
 ## Stage 5: Doc Drift Auditor
 
 - Status: `ok`
-- Duration: 0s (0.0 min)
+- Duration: 1s (0.0 min)
 
 ### What It Did
 
@@ -183,7 +179,7 @@
 ## Stage 6: Transcript Quality Review
 
 - Status: `ok`
-- Duration: 177s (3.0 min)
+- Duration: 69s (1.1 min)
 
 ### What It Did
 
@@ -192,22 +188,22 @@
 ### Problems It Found
 
 - Transcript review found 8 issues: 3 critical, 5 medium.
-- Follow-up reply was not resolved by the pending-action path and was treated as a fresh `others` turn
-- Stage 1 misclassified user-supplied protocol text as `greeting` with Very High confidence
-- The greeting fast-path handler failed its contract and returned an invalid shape
-- Stage 3 took over 5 minutes to answer a runtime problem report
+- Follow-up reply was not routed through pending_action_resolver and instead went through Stage 1/Stage 3
+- Stage 3 response path was extremely slow for a normal explanatory question
+- Prompt-injection-like class_protocol text was classified as greeting with Very High confidence
+- Greeting handler returned an invalid response shape
 
 ### Improvements It Made
 
-- 2026-05-15 01:37:38,483 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (8 issues)
-- 2026-05-15 01:37:38,484 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 3 critical, 5 medium issues. The most urgent was: Stag
+- 2026-05-16 01:31:14,134 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (8 issues)
+- 2026-05-16 01:31:14,135 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 3 critical, 5 medium issues. The most urgent was: Foll
 
 ### Follow-Up Fixes Recommended
 
-- Run pending-action resolution before Stage 1 on every turn, persist pending-action metadata until consumed, and add explicit resolver hit/miss logs.
-- Sanitize or strip control-like markup before classification, add adversarial tests for protocol-looking payloads, and require semantic validation before loading any class protocol.
-- Make the greeting handler schema-safe for malformed inputs and fall back to a canned greeting response instead of emitting an invalid handler result.
-- Stop respawning the standing brain on routine unlocked turns, move short-term extraction off the critical path, and enforce a hard Stage 3 response SLA with graceful fallback.
+- Persist pending_action state across turns and add explicit resolver logging for both hit and miss cases. Before Stage 1, check pending_action for the session and route short confirmation/edit replies directly to the owning handler.
+- Avoid per-turn brain restarts after vault unlock by respawning once and reusing the unlocked process. Move short_term_extractor work fully out of the response critical path or hard-cap it with a shorter nonblocking timeout.
+- Sanitize user text before classification by stripping or escaping internal protocol tags. Add classifier tests for user-supplied '<class_protocol>' payloads and reject handler routing based on embedded protocol markup.
+- Fix the greeting handler to always return the registered Stage 2 response schema. Add schema validation tests for every deterministic handler and fail closed with a clear internal error instead of silently escalating malformed handler output.
 
 ### Evidence Files
 
@@ -217,7 +213,7 @@
 ## Stage 7: Memory Janitor
 
 - Status: `ok`
-- Duration: 3366s (56.1 min)
+- Duration: 242s (4.0 min)
 
 ### What It Did
 
@@ -225,17 +221,11 @@
 
 ### Problems It Found
 
-- WARNING:memory.v1.conversation_manager:Thematic archival failed: [Errno 7] Argument list too long: 'claude'
-- WARNING:memory_janitor:Claude Opus janitor call failed: CLI timed out after 180s, trying Gemini fallback...
-- WARNING:memory_janitor:Claude Opus janitor call failed: Expecting value: line 1 column 1 (char 0), trying Gemini fallback...
-- WARNING:memory_janitor:Claude Opus janitor call failed: Expecting value: line 1 column 1 (char 0), trying Gemini fallback...
-- WARNING:memory_janitor:Claude Opus janitor call failed: CLI timed out after 180s, trying Gemini fallback...
+- WARNING:system_load:System still busy after 5 min — giving up.
 
 ### Improvements It Made
 
-- INFO:memory.v1.conversation_manager:Session 'session_1773577035' closed and cleaned up.
-- INFO:memory.v1.conversation_manager:Session 'session_1773599591' closed and cleaned up.
-- INFO:agent_skills.self_improve_log:self_improve_log: recorded [info] Memory Verification — Verified 20 code-related memories one at a time. Skipped 24 recently verified entries. All checked o
+- No concrete improvement was recorded in the available logs/reports.
 
 ### Evidence Files
 
@@ -256,7 +246,7 @@
 
 ### Improvements It Made
 
-- 2026-05-15 02:33:44,872 INFO Committed 5 file(s).
+- 2026-05-16 01:35:16,502 INFO Committed 4 file(s).
 
 ### Evidence Files
 
