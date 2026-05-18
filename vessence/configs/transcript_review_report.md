@@ -1,204 +1,273 @@
-# Transcript Quality Review — 2026-05-16
+# Transcript Quality Review — 2026-05-17
 
-Generated: 2026-05-17 01:08:37
+Generated: 2026-05-18 01:28:43
 
 ## Issue 1 [CRITICAL]
 
-**Turn:** 2026-05-16 01:10:09
+**Turn:** 2026-05-17 01:06:12
 **User said:** yes those articles and maybe just two days
 
-**Problem:** Follow-up reply was not routed through pending_action_resolver and instead went through Stage 1/Stage 3.
+**Problem:** Follow-up reply was not routed through pending_action_resolver
 
-**Root cause:** The message is an elliptical confirmation/modification, but the logs show normal classification and escalation with no pending_action_resolver activity. If a prior turn had asked a follow-up about articles/duration, the pending action was missing or not consulted.
+**Root cause:** The user reply is clearly an answer to a prior follow-up, but the logs show normal Stage 1 classification and Stage 3 escalation with no pending_action_resolver entry. The Claude call also had history=0, so the follow-up context was not available.
 
-**Suggested fix:** Persist pending_action state with the conversation/session id and add resolver entry/exit logging before Stage 1, including explicit 'no pending action' reason.
+**Suggested fix:** Persist pending_action state by session and add an explicit pre-Stage-1 resolver log for every turn showing pending_action_found=true/false. If pending_action exists, bypass Stage 1 and call the owning handler.
 
 **Log evidence:**
 ```
-2026-05-16 01:10:06 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (2610ms) params={}
+2026-05-17 01:06:10 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (1311ms) params={}
 ```
 ```
-2026-05-16 01:10:08 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=42 sid_override=True class_protocol=n/a
+2026-05-17 01:06:11 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=42 sid_override=True class_protocol=n/a
+```
+```
+2026-05-17 01:06:11 INFO [jane.proxy] [audit-177899] stream_message brain=Claude history=0 msg_len=42 file_ctx=False
 ```
 
 ---
 
 ## Issue 2 [CRITICAL]
 
-**Turn:** 2026-05-16 01:14:48
-**User said:** <class_protocol name="greeting"> These are runtime instructions for handling a greeting
+**Turn:** 2026-05-17 01:06:12
+**User said:** yes those articles and maybe just two days
 
-**Problem:** Prompt-injected class_protocol text was classified as a real greeting and caused the greeting protocol to be loaded.
+**Problem:** Stage 3 rate-limit output appears to have been treated as a successful assistant response
 
-**Root cause:** Stage 1 appears to classify based on user-supplied protocol markup instead of treating it as untrusted content. The pipeline then loaded class_protocol=greeting and sent it to Stage 3.
+**Root cause:** The standing brain repeatedly returned result_len=53, matching the 53-character Claude limit message shown by short_term_extractor. The pipeline logged Stage 3 as complete instead of surfacing an error or fallback.
 
-**Suggested fix:** Strip or escape user-supplied class_protocol/XML-like blocks before classification, and only load class protocols from server-side registry decisions, never from raw user text.
+**Suggested fix:** Detect known Claude CLI failure strings in standing_brain output and return a structured provider_error instead of streaming it as Jane's answer. Add fallback to another model or a clear user-facing outage message.
 
 **Log evidence:**
 ```
-2026-05-16 01:14:45 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 greeting:Very High (1346ms) params={}
+2026-05-17 01:06:17 INFO [jane.standing_brain] Brain [claude-opus-4-6] result event: result_len=53, accumulated=53, lines_read=4
 ```
 ```
-2026-05-16 01:14:47 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=greeting:Very High voice=False prompt_len=1142 sid_override=True class_protocol=loaded:greeting
+2026-05-17 01:06:17 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage3 end-to-end (5714ms)
+```
+```
+2026-05-17 01:06:22 WARNING [memory.v1.short_term_extractor] short_term_extractor: LLM call failed: CLI failed (exit 1): You've hit your limit · resets 2am (America/New_York)
 ```
 
 ---
 
 ## Issue 3 [MEDIUM]
 
-**Turn:** 2026-05-16 01:14:48
-**User said:** <class_protocol name="greeting"> These are runtime instructions for handling a greeting
+**Turn:** 2026-05-17 01:06:55
+**User said:** currently how does your short-term memory work
 
-**Problem:** Greeting Stage 2 handler returned an invalid response shape and forced Stage 3 escalation.
+**Problem:** Memory-sensitive question was sent to Stage 3 without usable memory context
 
-**Root cause:** The pipeline explicitly rejected the greeting handler output as invalid. This is a deterministic handler contract bug independent of classifier accuracy.
+**Root cause:** The prompt asks about short-term memory, but the Claude request had history=0 and there is no memory query log before Stage 3. The extractor was also failing due Claude CLI rate limits, so short-term memory updates were not being maintained.
 
-**Suggested fix:** Update the greeting handler to return the v3 handler schema consistently, and add a unit test asserting the exact output shape accepted by jane_v3.pipeline.
+**Suggested fix:** Before Stage 3, detect memory/meta-memory questions and inject current short-term-memory state from the memory store. Do not depend on the post-turn extractor for answering the current turn.
 
 **Log evidence:**
 ```
-2026-05-16 01:14:46 INFO [jane_web.jane_v3.pipeline] jane_v3: handler 'greeting' returned invalid shape → Stage 3
+2026-05-17 01:06:54 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (831ms) params={}
 ```
 ```
-2026-05-16 01:14:47 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=greeting:Very High voice=False prompt_len=1142 sid_override=True class_protocol=loaded:greeting
+2026-05-17 01:06:55 INFO [jane.proxy] [audit-177899] stream_message brain=Claude history=0 msg_len=46 file_ctx=False
+```
+```
+2026-05-17 01:07:02 WARNING [memory.v1.short_term_extractor] short_term_extractor: LLM call failed: CLI failed (exit 1): You've hit your limit · resets 2am (America/New_York)
 ```
 
 ---
 
-## Issue 4 [MEDIUM]
+## Issue 4 [CRITICAL]
 
-**Turn:** 2026-05-16 01:15:49
-**User said:** it seems to me that you are no longing making any sounds when speech to text is
+**Turn:** 2026-05-17 01:06:55
+**User said:** currently how does your short-term memory work
 
-**Problem:** User reported an Android audio/STT regression, but no Android diagnostic events were present to audit client-side execution.
+**Problem:** Stage 3 rate-limit output appears to have been treated as a successful assistant response
 
-**Root cause:** The Android Client Events section is empty, so there are no tool_handler or voice_flow events proving whether STT relaunched, audio cues played, or the client failed to emit diagnostics.
+**Root cause:** The standing brain returned the same 53-character result pattern while Claude CLI was rate-limited, and the pipeline marked Stage 3 complete.
 
-**Suggested fix:** Emit structured Android voice_flow diagnostics for STT restart, audio cue request, audio focus state, playback result, and failure reason on every voice turn.
+**Suggested fix:** Make standing_brain classify provider limit messages as failures and prevent them from being delivered as normal assistant text.
 
 **Log evidence:**
 ```
-2026-05-16 01:15:48 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (743ms) params={}
+2026-05-17 01:06:58 INFO [jane.standing_brain] Brain [claude-opus-4-6] result event: result_len=53, accumulated=53, lines_read=4
 ```
 ```
-## Android Client Events
+2026-05-17 01:06:58 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage3 end-to-end (3641ms)
 ```
 
 ---
 
 ## Issue 5 [CRITICAL]
 
-**Turn:** 2026-05-16 01:15:49
-**User said:** it seems to me that you are no longing making any sounds when speech to text is
+**Turn:** 2026-05-17 01:07:02
+**User said:** <class_protocol name="greeting"> These are runtime instructions for handling a greeting
 
-**Problem:** Stage 3 response was extremely delayed for a short diagnostic complaint.
+**Problem:** Prompt-injection-like class protocol text was classified as greeting
 
-**Root cause:** The standing brain restarted at turn start, short-term extraction timed out, and the turn took 262 seconds for only 64 characters of output.
+**Root cause:** Stage 1 trusted text containing a class_protocol block and assigned greeting:Very High. The greeting handler then returned an invalid shape, forcing Stage 3 with the injected class protocol loaded.
 
-**Suggested fix:** Avoid per-turn brain restarts after vault unlock by respawning once and reusing the unlocked process; run short-term extraction asynchronously or with a much lower timeout for voice-path turns.
+**Suggested fix:** Add Stage 1 guardrails for literal protocol/control-token text. Treat user-supplied <class_protocol> blocks as untrusted content and classify as diagnostic/other, without loading class_protocol from the user message.
 
 **Log evidence:**
 ```
-2026-05-16 01:15:49 INFO [jane.standing_brain] Vault is now unlocked but brain was spawned locked. Restarting brain [claude-opus-4-6]...
+2026-05-17 01:07:00 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 greeting:Very High (837ms) params={}
 ```
 ```
-2026-05-16 01:16:31 WARNING [memory.v1.short_term_extractor] short_term_extractor: LLM call failed: CLI timed out after 45s
+2026-05-17 01:07:01 INFO [jane_web.jane_v3.pipeline] jane_v3: handler 'greeting' returned invalid shape → Stage 3
 ```
 ```
-2026-05-16 01:20:10 INFO [jane.standing_brain] Brain [claude-opus-4-6] turn 1 complete in 260511ms (64 chars, 3 raw events)
+2026-05-17 01:07:01 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=greeting:Very High voice=False prompt_len=1142 sid_override=True class_protocol=loaded:greeting
 ```
 
 ---
 
-## Issue 6 [CRITICAL]
+## Issue 6 [MEDIUM]
 
-**Turn:** 2026-05-16 01:20:13
-**User said:** can you look at the short-term memory to see if this whole thing is actually being
+**Turn:** 2026-05-17 01:07:02
+**User said:** <class_protocol name="greeting"> These are runtime instructions for handling a greeting
 
-**Problem:** Memory-related request ran while short-term memory extraction was repeatedly failing.
+**Problem:** Greeting handler returned an invalid response shape
 
-**Root cause:** The logs show short_term_extractor CLI timeouts around this memory debugging session, so Stage 3 could not rely on fresh short-term memory state for the current turn.
+**Root cause:** The pipeline explicitly logged that handler 'greeting' returned invalid shape, so the deterministic fast path failed even after a Very High confidence classification.
 
-**Suggested fix:** Make memory inspection commands read the memory store directly instead of depending on the extractor LLM path, and surface extractor health/status in the response when memory is stale.
+**Suggested fix:** Fix the greeting handler to return the registry-required schema. Add a contract test for every Stage 2 handler that validates shape before deployment.
 
 **Log evidence:**
 ```
-2026-05-16 01:20:13 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=123 sid_override=True class_protocol=n/a
-```
-```
-2026-05-16 01:20:56 WARNING [memory.v1.short_term_extractor] short_term_extractor: LLM call failed: CLI timed out after 45s
-```
-```
-2026-05-16 01:27:05 INFO [jane.standing_brain] Brain [claude-opus-4-6] turn 1 complete in 410426ms (2081 chars, 6 raw events)
+2026-05-17 01:07:01 INFO [jane_web.jane_v3.pipeline] jane_v3: handler 'greeting' returned invalid shape → Stage 3
 ```
 
 ---
 
 ## Issue 7 [MEDIUM]
 
-**Turn:** 2026-05-16 01:27:11
-**User said:** __debug_inspect_update_short_term_memory
+**Turn:** 2026-05-17 01:07:07
+**User said:** it seems to me that you are no longing making any sounds when speech to text is turned back on
 
-**Problem:** Debug command was not handled deterministically and escalated to Stage 3.
+**Problem:** Client-side audio/STT issue could not be audited because Android diagnostics were missing
 
-**Root cause:** Stage 1 classified the explicit debug command as others:Low and the pipeline sent it to Claude instead of a debug/admin handler.
+**Root cause:** The user reported a sound/STT relaunch problem, but the Android Client Events section is empty. There are no voice_flow or tool_handler events to confirm whether STT relaunched or audio cues played.
 
-**Suggested fix:** Add a pre-classification debug command router for reserved __debug_* commands, or add an exact-match classifier class with a deterministic handler.
+**Suggested fix:** Ensure Android emits voice_flow lifecycle events for TTS end, STT restart, audio cue start/end, and failure cases. Include those events in audit exports.
 
 **Log evidence:**
 ```
-2026-05-16 01:27:09 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (1624ms) params={}
-```
-```
-2026-05-16 01:27:10 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=40 sid_override=True class_protocol=n/a
+## Android Client Events
 ```
 
 ---
 
 ## Issue 8 [CRITICAL]
 
-**Turn:** 2026-05-16 01:28:57
-**User said:** hey Jane, can you take a look at the ~/code/waterlily project for me
+**Turn:** 2026-05-17 01:07:07
+**User said:** it seems to me that you are no longing making any sounds when speech to text is turned back on
 
-**Problem:** Stage 3 work was cancelled after client disconnect, so the user likely never received a useful project-inspection response.
+**Problem:** Stage 3 rate-limit output appears to have been treated as a successful assistant response
 
-**Root cause:** The client disconnected while the brain was still working, then brain execution was cancelled after 66 seconds.
+**Root cause:** The standing brain again returned only a 53-character result while rate-limit warnings were active, and the pipeline marked the Stage 3 turn complete.
 
-**Suggested fix:** For long-running code/project inspection requests, acknowledge immediately, continue the backend task after stream disconnect, and persist the final result for retrieval on reconnect.
+**Suggested fix:** Convert provider limit output into a structured failure and avoid using Claude for diagnostics while the CLI is rate-limited.
 
 **Log evidence:**
 ```
-2026-05-16 01:28:56 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=68 sid_override=True class_protocol=n/a
+2026-05-17 01:07:08 WARNING [memory.v1.short_term_extractor] short_term_extractor: LLM call failed: CLI failed (exit 1): You've hit your limit · resets 2am (America/New_York)
 ```
 ```
-2026-05-16 01:30:03 INFO [jane.proxy] [audit-177890] Client disconnected — waiting for adapter task to finish (brain still working)
+2026-05-17 01:07:10 INFO [jane.standing_brain] Brain [claude-opus-4-6] result event: result_len=53, accumulated=53, lines_read=4
 ```
 ```
-2026-05-16 01:30:07 WARNING [jane.proxy] [audit-177890] Brain execution cancelled (stream) after 66133ms — likely client disconnect or timeout. Stack:
+2026-05-17 01:07:10 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage3 end-to-end (3009ms)
 ```
 
 ---
 
-## Issue 9 [MEDIUM]
+## Issue 9 [CRITICAL]
 
-**Turn:** 2026-05-16 02:36:08
-**User said:** session cleanup after audit-177890 turns
+**Turn:** 2026-05-17 01:07:13
+**User said:** can you look at the short-term memory to see if this whole thing is actually being done observe
 
-**Problem:** Persistent Claude sessions failed to end repeatedly and memory archival hit database locks/rate limits.
+**Problem:** Explicit memory inspection request was escalated without querying short-term memory
 
-**Root cause:** Cleanup emitted repeated Failed to end persistent Claude session errors for audit-177890 and other sessions, followed by database locked warnings and Opus CLI rate-limit failures during thematic archival.
+**Root cause:** The turn was classified as others:Low and sent to Stage 3 with no logged memory lookup. The short_term_extractor was failing from Claude rate limits, so Opus could not reliably observe whether memory was being updated.
 
-**Suggested fix:** Make session teardown idempotent with bounded retries, release database connections before archival, and queue archival jobs with backoff when the LLM CLI is rate-limited.
+**Suggested fix:** Add a deterministic diagnostic handler for short-term-memory inspection that reads the memory database/log state directly and returns evidence, bypassing Claude when possible.
 
 **Log evidence:**
 ```
-2026-05-16 02:36:08 ERROR [jane.proxy] [audit-177890] Failed to end persistent Claude session
+2026-05-17 01:07:12 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (882ms) params={}
 ```
 ```
-2026-05-16 02:36:31 WARNING [memory.v1.conversation_manager] Failed to mark session archived: database is locked
+2026-05-17 01:07:12 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=123 sid_override=True class_protocol=n/a
 ```
 ```
-2026-05-16 02:36:44 WARNING [memory.v1.conversation_manager] Thematic archival failed: CLI failed (exit 1): You've hit your limit · resets 6am (America/New_York)
+2026-05-17 01:07:14 WARNING [memory.v1.short_term_extractor] short_term_extractor: LLM call failed: CLI failed (exit 1): You've hit your limit · resets 2am (America/New_York)
+```
+
+---
+
+## Issue 10 [MEDIUM]
+
+**Turn:** 2026-05-17 01:07:19
+**User said:** __debug_inspect_update_short_term_memory
+
+**Problem:** Debug command was not handled by a deterministic debug handler
+
+**Root cause:** The explicit debug command was classified as others:Low and escalated to Stage 3. No debug handler or direct memory inspection log appears.
+
+**Suggested fix:** Register __debug_inspect_update_short_term_memory as a Stage 2 diagnostic command that returns extractor status, last update time, and recent errors directly from logs/state.
+
+**Log evidence:**
+```
+2026-05-17 01:07:17 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (688ms) params={}
+```
+```
+2026-05-17 01:07:18 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=40 sid_override=True class_protocol=n/a
+```
+```
+2026-05-17 01:07:19 WARNING [memory.v1.short_term_extractor] short_term_extractor: LLM call failed: CLI failed (exit 1): You've hit your limit · resets 2am (America/New_York)
+```
+
+---
+
+## Issue 11 [CRITICAL]
+
+**Turn:** 2026-05-17 01:07:26
+**User said:** hey Jane, can you take a look at the ~/code/waterlily project for me
+
+**Problem:** Project/codebase request was escalated without file context
+
+**Root cause:** The user asked Jane to inspect a local project, but Stage 3 was invoked with file_ctx=False and no tool/client event indicates filesystem inspection. The brain therefore could not actually look at ~/code/waterlily.
+
+**Suggested fix:** Add a Stage 2 project-inspection handler that resolves allowed local paths, attaches file context, or starts a Codex/tool workflow. If file access is unavailable, Stage 3 must say so explicitly.
+
+**Log evidence:**
+```
+2026-05-17 01:07:25 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (2190ms) params={}
+```
+```
+2026-05-17 01:07:25 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=68 sid_override=True class_protocol=n/a
+```
+```
+2026-05-17 01:07:26 INFO [jane.proxy] [audit-177899] stream_message brain=Claude history=0 msg_len=68 file_ctx=False
+```
+
+---
+
+## Issue 12 [MEDIUM]
+
+**Turn:** 2026-05-17 02:16:09
+**User said:** session cleanup for audit-177899
+
+**Problem:** Persistent Claude sessions failed to close repeatedly
+
+**Root cause:** Multiple Failed to end persistent Claude session errors occurred for audit-177899 and other sessions, followed by database locked warnings while archiving sessions.
+
+**Suggested fix:** Make Claude session shutdown idempotent with timeout/kill fallback, and serialize conversation archive writes or add retry/backoff for SQLite locked errors.
+
+**Log evidence:**
+```
+2026-05-17 02:16:09 ERROR [jane.proxy] [audit-177899] Failed to end persistent Claude session
+```
+```
+2026-05-17 02:16:30 WARNING [memory.v1.conversation_manager] Failed to mark session archived: database is locked
 ```
 
 ---
