@@ -1,65 +1,60 @@
 # Most Recent Nightly Self-Improvement
 
-- Run started: 2026-05-17 01:00:01
-- Report generated: 2026-05-17 01:48:08
-- Total runtime: 2886s
-- Jobs: 8 total, 6 ok, 1 timeout, 1 failed
+- Run started: 2026-05-18 01:00:01
+- Report generated: 2026-05-18 01:34:46
+- Total runtime: 2084s
+- Jobs: 8 total, 7 ok, 1 timeout, 0 failed
 - Stable latest report path: `/home/chieh/ambient/vessence/configs/self_improvement_latest.md`
-- Archived copy: `/home/chieh/ambient/vessence-data/reports/self_improvement/self_improvement_20260517_010001.md`
+- Archived copy: `/home/chieh/ambient/vessence-data/reports/self_improvement/self_improvement_20260518_010001.md`
 
 ## TL;DR
 
 - 1. ✓ Auto-Commit WIP (pre) (0.0m)
   - Fixes:
-    - 2026-05-17 01:00:01,528 INFO Committed 2 file(s).
-- 2. ✗ Code Auditor (0.1m)
+    - 2026-05-18 01:00:01,880 INFO Committed 2 file(s).
+- 2. ✓ Code Auditor (4.9m)
+  - Problems: none detected
+  - Fixes: none applied
+- 3. ✓ Dead Code Auditor (6.5m)
   - Problems:
-    - 2026-05-17 01:00:04,959 [WARNING] Test generation failed
-- 3. ✓ Dead Code Auditor (6.0m)
-  - Problems:
-    - Possibly-dead functions: 1.
+    - Dead files — review needed: 1.
+    - Possibly-dead functions: 2.
     - Duplicate function bodies: 10 groups.
   - Fixes:
-    - [dead-code] Done — 0 auto-deleted, 0 flagged, 1 dead funcs, 10 dup groups
-- 4. ✓ Pipeline Audit (30 prompts) (1.4m)
+    - [dead-code] Done — 0 auto-deleted, 1 flagged, 2 dead funcs, 10 dup groups
+- 4. ✓ Pipeline Audit (30 prompts) (15.8m)
   - Problems:
     - Prompts audited: 7.
-    - Classification failures: 4.
-    - Response failures: 7.
+    - Classification failures: 3.
+    - Response failures: 5.
 - 5. ✓ Doc Drift Auditor (0.0m)
   - Problems:
     - CRON_JOBS.md missing entry for active cron script: auto_pull.sh
     - v2_3stage_pipeline.md missing class row: CLINIC_SCHEDULES_INFO
-- 6. ✓ Transcript Quality Review (1.1m)
+- 6. ✓ Transcript Quality Review (1.4m)
   - Problems:
-    - Transcript review found 9 issues: 5 critical, 4 medium.
-    - Follow-up reply was not routed through pending_action_resolver and instead went through Stage 1/Stage 3.
-    - Prompt-injected class_protocol text was classified as a real greeting and caused the greeting protocol to be loaded.
+    - Transcript review found 12 issues: 7 critical, 5 medium.
+    - Follow-up reply was not routed through pending_action_resolver
+    - Stage 3 rate-limit output appears to have been treated as a successful assistant response
   - Fixes:
-    - 2026-05-17 01:08:37,653 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (9 issues)
-    - 2026-05-17 01:08:37,654 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 5 critical, 4 medium iss...
-- 7. ✓ Memory Janitor (37.5m)
+    - 2026-05-18 01:28:43,738 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (12 issues)
+    - 2026-05-18 01:28:43,739 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 7 critical, 5 medium iss...
+- 7. ✓ Memory Janitor (4.0m)
   - Problems:
-    - WARNING:memory.v1.conversation_manager:Thematic archival failed: [Errno 7] Argument list too long: 'claude'
-    - WARNING:memory_janitor:Claude Opus janitor call failed: CLI failed (exit 1): You've hit your limit · resets 2am (America/New_York), trying Gemini fallback...
-    - WARNING:memory_janitor:Claude Opus janitor call failed: CLI failed (exit 1): You've hit your limit · resets 2am (America/New_York), trying Gemini fallback...
-  - Fixes:
-    - INFO:memory.v1.conversation_manager:Session 'session_1773577035' closed and cleaned up.
-    - INFO:memory.v1.conversation_manager:Session 'session_1773607728' closed and cleaned up.
-    - INFO:agent_skills.self_improve_log:self_improve_log: recorded [info] Memory Verification — Verified 20 code-related memories one at a time. Skipped 24 recent...
+    - WARNING:system_load:System still busy after 5 min — giving up.
 - 8. ⏱ Auto-Commit + Push (post) (2.0m)
   - Fixes:
-    - 2026-05-17 01:46:08,419 INFO Committed 6 file(s).
+    - 2026-05-18 01:32:46,682 INFO Committed 5 file(s).
 
 **Top follow-ups:**
 
-- Persist pending_action state with the conversation/session id and add resolver entry/exit logging before Stage 1, including explicit 'no pending action' reason.
-- Strip or escape user-supplied class_protocol/XML-like blocks before classification, and only load class protocols from server-side registry decisions, never from raw user text.
+- Persist pending_action state by session and add an explicit pre-Stage-1 resolver log for every turn showing pending_action_found=true/false. If pending_action exists, bypass Stage 1 and call the owning handler.
+- Detect known Claude CLI failure strings in standing_brain output and return a structured provider_error instead of streaming it as Jane's answer. Add fallback to another model or a clear user-facing outage message.
 
 ## Executive Summary
 
-- 2 stage(s) need attention because they timed out or exited non-zero.
-- 8 concrete improvement/fix signals were found in logs or reports.
+- 1 stage(s) need attention because they timed out or exited non-zero.
+- 5 concrete improvement/fix signals were found in logs or reports.
 
 ## Stage 1: Auto-Commit WIP (pre)
 
@@ -76,7 +71,7 @@
 
 ### Improvements It Made
 
-- 2026-05-17 01:00:01,528 INFO Committed 2 file(s).
+- 2026-05-18 01:00:01,880 INFO Committed 2 file(s).
 
 ### Evidence Files
 
@@ -84,8 +79,8 @@
 
 ## Stage 2: Code Auditor
 
-- Status: `exit-1`
-- Duration: 3s (0.1 min)
+- Status: `ok`
+- Duration: 294s (4.9 min)
 
 ### What It Did
 
@@ -93,8 +88,7 @@
 
 ### Problems It Found
 
-- Job ended with status `exit-1`.
-- 2026-05-17 01:00:04,959 [WARNING] Test generation failed
+- No problems were detected in the available logs/reports.
 
 ### Improvements It Made
 
@@ -109,7 +103,7 @@
 ## Stage 3: Dead Code Auditor
 
 - Status: `ok`
-- Duration: 363s (6.0 min)
+- Duration: 393s (6.5 min)
 
 ### What It Did
 
@@ -117,12 +111,13 @@
 
 ### Problems It Found
 
-- Possibly-dead functions: 1.
+- Dead files — review needed: 1.
+- Possibly-dead functions: 2.
 - Duplicate function bodies: 10 groups.
 
 ### Improvements It Made
 
-- [dead-code] Done — 0 auto-deleted, 0 flagged, 1 dead funcs, 10 dup groups
+- [dead-code] Done — 0 auto-deleted, 1 flagged, 2 dead funcs, 10 dup groups
 
 ### Evidence Files
 
@@ -132,7 +127,7 @@
 ## Stage 4: Pipeline Audit (30 prompts)
 
 - Status: `ok`
-- Duration: 83s (1.4 min)
+- Duration: 945s (15.8 min)
 
 ### What It Did
 
@@ -141,12 +136,12 @@
 ### Problems It Found
 
 - Prompts audited: 7.
-- Classification failures: 4.
-- Response failures: 7.
-- **yes those articles and maybe just two days** (others/stage3): You've hit your limit · resets 2am (America/New_York)
-- **currently how does your short-term memory work** (others/stage3): You've hit your limit · resets 2am (America/New_York)
-- **how about** (greeting/stage3): You've hit your limit · resets 2am (America/New_York)
-- **it seems to me that you are no longing making any sounds when speech to text is ** (others/stage3): You've hit your limit · resets 2am (America/New_York)
+- Classification failures: 3.
+- Response failures: 5.
+- **yes those articles and maybe just two days** (others/stage3): I don't have context from what came before — looks like this is continuing a prior conversation that I can't see. What articles are you referring to,
+- **currently how does your short-term memory work** (others/stage3): Here's how short-term memory works right now:
+- **it seems to me that you are no longing making any sounds when speech to text is ** (others/stage3): Based on the code, there are two different situations depending on whether you're talking about **Android** or **web**:
+- **can you look at the short-term memory to see if this whole thing is actually bei** (others/stage3): Here's the full diagnosis:
 
 ### Improvements It Made
 
@@ -183,7 +178,7 @@
 ## Stage 6: Transcript Quality Review
 
 - Status: `ok`
-- Duration: 65s (1.1 min)
+- Duration: 87s (1.4 min)
 
 ### What It Did
 
@@ -191,23 +186,23 @@
 
 ### Problems It Found
 
-- Transcript review found 9 issues: 5 critical, 4 medium.
-- Follow-up reply was not routed through pending_action_resolver and instead went through Stage 1/Stage 3.
-- Prompt-injected class_protocol text was classified as a real greeting and caused the greeting protocol to be loaded.
-- Greeting Stage 2 handler returned an invalid response shape and forced Stage 3 escalation.
-- User reported an Android audio/STT regression, but no Android diagnostic events were present to audit client-side execution.
+- Transcript review found 12 issues: 7 critical, 5 medium.
+- Follow-up reply was not routed through pending_action_resolver
+- Stage 3 rate-limit output appears to have been treated as a successful assistant response
+- Memory-sensitive question was sent to Stage 3 without usable memory context
+- Stage 3 rate-limit output appears to have been treated as a successful assistant response
 
 ### Improvements It Made
 
-- 2026-05-17 01:08:37,653 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (9 issues)
-- 2026-05-17 01:08:37,654 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 5 critical, 4 medium issues. The most urgent was: Foll
+- 2026-05-18 01:28:43,738 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (12 issues)
+- 2026-05-18 01:28:43,739 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 7 critical, 5 medium issues. The most urgent was: Foll
 
 ### Follow-Up Fixes Recommended
 
-- Persist pending_action state with the conversation/session id and add resolver entry/exit logging before Stage 1, including explicit 'no pending action' reason.
-- Strip or escape user-supplied class_protocol/XML-like blocks before classification, and only load class protocols from server-side registry decisions, never from raw user text.
-- Update the greeting handler to return the v3 handler schema consistently, and add a unit test asserting the exact output shape accepted by jane_v3.pipeline.
-- Emit structured Android voice_flow diagnostics for STT restart, audio cue request, audio focus state, playback result, and failure reason on every voice turn.
+- Persist pending_action state by session and add an explicit pre-Stage-1 resolver log for every turn showing pending_action_found=true/false. If pending_action exists, bypass Stage 1 and call the owning handler.
+- Detect known Claude CLI failure strings in standing_brain output and return a structured provider_error instead of streaming it as Jane's answer. Add fallback to another model or a clear user-facing outage message.
+- Before Stage 3, detect memory/meta-memory questions and inject current short-term-memory state from the memory store. Do not depend on the post-turn extractor for answering the current turn.
+- Make standing_brain classify provider limit messages as failures and prevent them from being delivered as normal assistant text.
 
 ### Evidence Files
 
@@ -217,7 +212,7 @@
 ## Stage 7: Memory Janitor
 
 - Status: `ok`
-- Duration: 2250s (37.5 min)
+- Duration: 242s (4.0 min)
 
 ### What It Did
 
@@ -225,17 +220,11 @@
 
 ### Problems It Found
 
-- WARNING:memory.v1.conversation_manager:Thematic archival failed: [Errno 7] Argument list too long: 'claude'
-- WARNING:memory_janitor:Claude Opus janitor call failed: CLI failed (exit 1): You've hit your limit · resets 2am (America/New_York), trying Gemini fallback...
-- WARNING:memory_janitor:Claude Opus janitor call failed: CLI failed (exit 1): You've hit your limit · resets 2am (America/New_York), trying Gemini fallback...
-- WARNING:memory_janitor:Claude Opus janitor call failed: CLI failed (exit 1): You've hit your limit · resets 2am (America/New_York), trying Gemini fallback...
-- WARNING:memory_janitor:Claude Opus janitor call failed: CLI failed (exit 1): You've hit your limit · resets 2am (America/New_York), trying Gemini fallback...
+- WARNING:system_load:System still busy after 5 min — giving up.
 
 ### Improvements It Made
 
-- INFO:memory.v1.conversation_manager:Session 'session_1773577035' closed and cleaned up.
-- INFO:memory.v1.conversation_manager:Session 'session_1773607728' closed and cleaned up.
-- INFO:agent_skills.self_improve_log:self_improve_log: recorded [info] Memory Verification — Verified 20 code-related memories one at a time. Skipped 24 recently verified entries. All checked o
+- No concrete improvement was recorded in the available logs/reports.
 
 ### Evidence Files
 
@@ -256,7 +245,7 @@
 
 ### Improvements It Made
 
-- 2026-05-17 01:46:08,419 INFO Committed 6 file(s).
+- 2026-05-18 01:32:46,682 INFO Committed 5 file(s).
 
 ### Evidence Files
 
