@@ -1,55 +1,54 @@
 # Most Recent Nightly Self-Improvement
 
-- Run started: 2026-05-18 01:00:01
-- Report generated: 2026-05-18 01:34:46
-- Total runtime: 2084s
+- Run started: 2026-05-19 01:00:01
+- Report generated: 2026-05-19 01:41:25
+- Total runtime: 2484s
 - Jobs: 8 total, 7 ok, 1 timeout, 0 failed
 - Stable latest report path: `/home/chieh/ambient/vessence/configs/self_improvement_latest.md`
-- Archived copy: `/home/chieh/ambient/vessence-data/reports/self_improvement/self_improvement_20260518_010001.md`
+- Archived copy: `/home/chieh/ambient/vessence-data/reports/self_improvement/self_improvement_20260519_010001.md`
 
 ## TL;DR
 
 - 1. ✓ Auto-Commit WIP (pre) (0.0m)
   - Fixes:
-    - 2026-05-18 01:00:01,880 INFO Committed 2 file(s).
-- 2. ✓ Code Auditor (4.9m)
+    - 2026-05-19 01:00:02,007 INFO Committed 2 file(s).
+- 2. ✓ Code Auditor (6.8m)
   - Problems: none detected
   - Fixes: none applied
-- 3. ✓ Dead Code Auditor (6.5m)
+- 3. ✓ Dead Code Auditor (7.4m)
   - Problems:
-    - Dead files — review needed: 1.
-    - Possibly-dead functions: 2.
+    - Possibly-dead functions: 1.
     - Duplicate function bodies: 10 groups.
   - Fixes:
-    - [dead-code] Done — 0 auto-deleted, 1 flagged, 2 dead funcs, 10 dup groups
-- 4. ✓ Pipeline Audit (30 prompts) (15.8m)
+    - [dead-code] Done — 0 auto-deleted, 0 flagged, 1 dead funcs, 10 dup groups
+- 4. ✓ Pipeline Audit (30 prompts) (20.0m)
   - Problems:
     - Prompts audited: 7.
-    - Classification failures: 3.
-    - Response failures: 5.
+    - Classification failures: 1.
+    - Response failures: 3.
 - 5. ✓ Doc Drift Auditor (0.0m)
   - Problems:
     - CRON_JOBS.md missing entry for active cron script: auto_pull.sh
     - v2_3stage_pipeline.md missing class row: CLINIC_SCHEDULES_INFO
-- 6. ✓ Transcript Quality Review (1.4m)
+- 6. ✓ Transcript Quality Review (1.1m)
   - Problems:
-    - Transcript review found 12 issues: 7 critical, 5 medium.
-    - Follow-up reply was not routed through pending_action_resolver
-    - Stage 3 rate-limit output appears to have been treated as a successful assistant response
+    - Transcript review found 8 issues: 4 critical, 4 medium.
+    - Follow-up reply was not routed through pending_action_resolver and lost prior-turn context.
+    - Stage 3 response path was extremely slow for a simple explanatory question.
   - Fixes:
-    - 2026-05-18 01:28:43,738 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (12 issues)
-    - 2026-05-18 01:28:43,739 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 7 critical, 5 medium iss...
+    - 2026-05-19 01:35:22,096 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (8 issues)
+    - 2026-05-19 01:35:22,097 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 4 critical, 4 medium iss...
 - 7. ✓ Memory Janitor (4.0m)
   - Problems:
     - WARNING:system_load:System still busy after 5 min — giving up.
 - 8. ⏱ Auto-Commit + Push (post) (2.0m)
   - Fixes:
-    - 2026-05-18 01:32:46,682 INFO Committed 5 file(s).
+    - 2026-05-19 01:39:25,944 INFO Committed 5 file(s).
 
 **Top follow-ups:**
 
-- Persist pending_action state by session and add an explicit pre-Stage-1 resolver log for every turn showing pending_action_found=true/false. If pending_action exists, bypass Stage 1 and call the owning handler.
-- Detect known Claude CLI failure strings in standing_brain output and return a structured provider_error instead of streaming it as Jane's answer. Add fallback to another model or a clear user-facing outage message.
+- Persist pending_action by session_id before assistant follow-up is emitted, and have pending_action_resolver log both hits and misses before Stage 1. Add a regression test where 'yes ... two days' bypasses classification.
+- Respawn the standing brain once when vault state changes and reuse it across turns; move short_term_extractor off the synchronous critical path or enforce a shorter nonblocking timeout.
 
 ## Executive Summary
 
@@ -71,7 +70,7 @@
 
 ### Improvements It Made
 
-- 2026-05-18 01:00:01,880 INFO Committed 2 file(s).
+- 2026-05-19 01:00:02,007 INFO Committed 2 file(s).
 
 ### Evidence Files
 
@@ -80,7 +79,7 @@
 ## Stage 2: Code Auditor
 
 - Status: `ok`
-- Duration: 294s (4.9 min)
+- Duration: 408s (6.8 min)
 
 ### What It Did
 
@@ -103,7 +102,7 @@
 ## Stage 3: Dead Code Auditor
 
 - Status: `ok`
-- Duration: 393s (6.5 min)
+- Duration: 442s (7.4 min)
 
 ### What It Did
 
@@ -111,13 +110,12 @@
 
 ### Problems It Found
 
-- Dead files — review needed: 1.
-- Possibly-dead functions: 2.
+- Possibly-dead functions: 1.
 - Duplicate function bodies: 10 groups.
 
 ### Improvements It Made
 
-- [dead-code] Done — 0 auto-deleted, 1 flagged, 2 dead funcs, 10 dup groups
+- [dead-code] Done — 0 auto-deleted, 0 flagged, 1 dead funcs, 10 dup groups
 
 ### Evidence Files
 
@@ -127,7 +125,7 @@
 ## Stage 4: Pipeline Audit (30 prompts)
 
 - Status: `ok`
-- Duration: 945s (15.8 min)
+- Duration: 1199s (20.0 min)
 
 ### What It Did
 
@@ -136,12 +134,11 @@
 ### Problems It Found
 
 - Prompts audited: 7.
-- Classification failures: 3.
-- Response failures: 5.
-- **yes those articles and maybe just two days** (others/stage3): I don't have context from what came before — looks like this is continuing a prior conversation that I can't see. What articles are you referring to,
+- Classification failures: 1.
+- Response failures: 3.
+- **yes those articles and maybe just two days** (others/stage3): I don't have context from the previous conversation — what articles are you referring to, and what's the two-day timeframe for? Give me a quick recap
 - **currently how does your short-term memory work** (others/stage3): Here's how short-term memory works right now:
-- **it seems to me that you are no longing making any sounds when speech to text is ** (others/stage3): Based on the code, there are two different situations depending on whether you're talking about **Android** or **web**:
-- **can you look at the short-term memory to see if this whole thing is actually bei** (others/stage3): Here's the full diagnosis:
+- **hey Jane, can you take a look at the ~/code/waterlily project for me** (todo list/stage3): Here's what I see:
 
 ### Improvements It Made
 
@@ -178,7 +175,7 @@
 ## Stage 6: Transcript Quality Review
 
 - Status: `ok`
-- Duration: 87s (1.4 min)
+- Duration: 69s (1.1 min)
 
 ### What It Did
 
@@ -186,23 +183,23 @@
 
 ### Problems It Found
 
-- Transcript review found 12 issues: 7 critical, 5 medium.
-- Follow-up reply was not routed through pending_action_resolver
-- Stage 3 rate-limit output appears to have been treated as a successful assistant response
-- Memory-sensitive question was sent to Stage 3 without usable memory context
-- Stage 3 rate-limit output appears to have been treated as a successful assistant response
+- Transcript review found 8 issues: 4 critical, 4 medium.
+- Follow-up reply was not routed through pending_action_resolver and lost prior-turn context.
+- Stage 3 response path was extremely slow for a simple explanatory question.
+- Prompt-injection-like user text caused Stage 1 to misclassify the turn as greeting and load the greeting class protocol.
+- Diagnostics request took over three minutes and had no Android diagnostic evidence available.
 
 ### Improvements It Made
 
-- 2026-05-18 01:28:43,738 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (12 issues)
-- 2026-05-18 01:28:43,739 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 7 critical, 5 medium issues. The most urgent was: Foll
+- 2026-05-19 01:35:22,096 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (8 issues)
+- 2026-05-19 01:35:22,097 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 4 critical, 4 medium issues. The most urgent was: Foll
 
 ### Follow-Up Fixes Recommended
 
-- Persist pending_action state by session and add an explicit pre-Stage-1 resolver log for every turn showing pending_action_found=true/false. If pending_action exists, bypass Stage 1 and call the owning handler.
-- Detect known Claude CLI failure strings in standing_brain output and return a structured provider_error instead of streaming it as Jane's answer. Add fallback to another model or a clear user-facing outage message.
-- Before Stage 3, detect memory/meta-memory questions and inject current short-term-memory state from the memory store. Do not depend on the post-turn extractor for answering the current turn.
-- Make standing_brain classify provider limit messages as failures and prevent them from being delivered as normal assistant text.
+- Persist pending_action by session_id before assistant follow-up is emitted, and have pending_action_resolver log both hits and misses before Stage 1. Add a regression test where 'yes ... two days' bypasses classification.
+- Respawn the standing brain once when vault state changes and reuse it across turns; move short_term_extractor off the synchronous critical path or enforce a shorter nonblocking timeout.
+- Treat class_protocol blocks in user input as inert text before classification, add injection examples to the classifier eval set, and validate handler return schemas in unit tests.
+- Attach recent Android diagnostic events to Stage 3 context for voice/audio bug reports, or add a deterministic diagnostics handler that queries voice_flow and tool_handler logs directly.
 
 ### Evidence Files
 
@@ -212,7 +209,7 @@
 ## Stage 7: Memory Janitor
 
 - Status: `ok`
-- Duration: 242s (4.0 min)
+- Duration: 243s (4.0 min)
 
 ### What It Did
 
@@ -245,7 +242,7 @@
 
 ### Improvements It Made
 
-- 2026-05-18 01:32:46,682 INFO Committed 5 file(s).
+- 2026-05-19 01:39:25,944 INFO Committed 5 file(s).
 
 ### Evidence Files
 

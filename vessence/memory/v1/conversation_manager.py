@@ -58,6 +58,10 @@ COMPACTION_THRESHOLD_PERCENT = CONTEXT_COMPACTION_RATIO
 ARCHIVIST_MODEL = ARCHIVIST_MODEL_LITELLM
 WRITEBACK_TIMING_LOG = Path(LOGS_DIR) / "jane_writeback_timing.log"
 
+# Single-flight guard for window-based archival — stops the many concurrent
+# per-request sessions from running overlapping archival sweeps.
+_WINDOW_ARCHIVAL_LOCK = threading.Lock()
+
 # Initialize the tokenizer
 try:
     encoding = tiktoken.get_encoding(TOKEN_ENCODING_MODEL)
@@ -165,7 +169,12 @@ class ConversationManager:
         # 1. Initialize SQLite Ledger
         os.makedirs(VAULT_PATH, exist_ok=True)
         try:
-            self.db_conn = sqlite3.connect(LEDGER_DB_PATH, check_same_thread=False)
+            self.db_conn = sqlite3.connect(LEDGER_DB_PATH, check_same_thread=False, timeout=30.0)
+            # WAL + busy_timeout: many short-lived per-request sessions open
+            # this ledger concurrently. Without these, archival hit
+            # "database is locked" and silently lost memories.
+            self.db_conn.execute("PRAGMA journal_mode=WAL")
+            self.db_conn.execute("PRAGMA busy_timeout=30000")
             self._init_db()
             self._ensure_theme_registry_seeded()
         except Exception as e:
@@ -339,6 +348,44 @@ class ConversationManager:
             self._mark_session_archived(arc_count=0, transcript_too_short=True)
             return
 
+        try:
+            stored_count = self._archive_transcript(transcript)
+            # Legacy bookkeeping: stamp short_term_theme rows + the session
+            # row so the old per-session path stays idempotent.
+            self._mark_session_themes_archived()
+            self._mark_session_archived(arc_count=stored_count)
+            logger.info("Thematic archival complete: %d memories stored.", stored_count)
+        except Exception as e:
+            logger.warning("Thematic archival failed: %s", e)
+
+    # -------------------------------------------------------------------------
+    # Window-based archival (short-term → long-term)
+    #
+    # The runtime mints a fresh session_id per request, so a real conversation
+    # is shattered across hundreds of 2-turn "sessions" — none long enough for
+    # per-session archival to ever fire. Window archival ignores session
+    # boundaries: it walks the ledger `turns` table, groups turns into
+    # idle-delimited windows, and archives each window once it has closed.
+    # -------------------------------------------------------------------------
+
+    WINDOW_IDLE_GAP_MINUTES = 30
+    WINDOW_MIN_CHARS = 200
+    # Force-split a window at this many turns even without an idle gap, so a
+    # long uninterrupted session can't build one transcript too large for the
+    # archivist LLM's context.
+    WINDOW_MAX_TURNS = 80
+    # After this many failed archival attempts, a window is skipped (watermark
+    # advanced past it) so one un-archivable window can't jam the pipeline.
+    WINDOW_MAX_FAILS = 3
+
+    def _archive_transcript(self, transcript: str) -> int:
+        """Run the Thematic Archivist over *transcript* and promote the
+        resulting memories to long-term. Returns the count stored.
+
+        Raises on archivist-call failure or partial promotion failure, so the
+        window-archival watermark only advances past transcripts that fully
+        succeeded (a rate-limited or errored window is retried later).
+        """
         prompt = (
             "You are The Thematic Archivist for Chieh's personal AI partner (Jane). "
             "Analyze the session transcript and extract memories that are WORTH REMEMBERING.\n\n"
@@ -390,51 +437,272 @@ class ConversationManager:
             "- 'new_theme_title': new recurring theme title or ''\n"
             "- 'atomic_topic': one of the atomic topics above or ''\n\n"
             "If nothing in the transcript is worth remembering, return [].\n\n"
-            f"Transcript:\n{transcript}"
+            f"Transcript (truncated if needed):\n{transcript[-20000:]}"
         )
 
-        try:
-            from agent_skills.claude_cli_llm import completion_json
-            memories = completion_json(prompt, tier="agent")
-            stored_count = 0
-            promotion_failed = False
-            registry = self._fetch_theme_registry()
-            for mem in memories:
-                kind = (mem.get("kind") or "").lower()
-                title = mem.get("title", "Unnamed")
-                content = mem.get("content", "")
-                why_kept = mem.get("why_kept", "")
-                if not content:
-                    continue
-                topic = self._resolve_archival_topic(mem, registry)
-                if not topic:
-                    logger.warning("Skipping archival memory with unresolved theme/topic: %s", title)
-                    continue
-                # Post-classification: catch user-personal arcs miscategorized away from Identity
-                topic = self._reclassify_if_user_identity(topic, content)
-                full_memory = (
-                    f"Title: {title}\n"
-                    f"Topic: {topic}\n"
-                    f"Kind: {kind or 'theme'}\n"
-                    f"Why kept: {why_kept}\n\n"
-                    f"{content}"
-                )
-                if self._promote_to_long_term(full_memory, category=topic):
-                    stored_count += 1
-                else:
-                    promotion_failed = True
-            if not promotion_failed:
-                # Legacy path: stamp short_term_theme rows (if any) for the
-                # janitor backfill that scans by archived_at.
-                self._mark_session_themes_archived()
-                # New path: session-level marker so future runs short-circuit.
-                self._mark_session_archived(arc_count=stored_count)
-            logger.info(
-                "Thematic archival complete: %d memories stored (themes+atomic).",
-                stored_count,
+        from agent_skills.claude_cli_llm import completion_json
+        memories = completion_json(prompt, tier="agent")
+        stored_count = 0
+        promotion_failed = False
+        registry = self._fetch_theme_registry()
+        for mem in memories:
+            kind = (mem.get("kind") or "").lower()
+            title = mem.get("title", "Unnamed")
+            content = mem.get("content", "")
+            why_kept = mem.get("why_kept", "")
+            if not content:
+                continue
+            topic = self._resolve_archival_topic(mem, registry)
+            if not topic:
+                logger.warning("Skipping archival memory with unresolved theme/topic: %s", title)
+                continue
+            # Post-classification: catch user-personal arcs miscategorized away from Identity
+            topic = self._reclassify_if_user_identity(topic, content)
+            full_memory = (
+                f"Title: {title}\n"
+                f"Topic: {topic}\n"
+                f"Kind: {kind or 'theme'}\n"
+                f"Why kept: {why_kept}\n\n"
+                f"{content}"
             )
+            if self._promote_to_long_term(full_memory, category=topic):
+                stored_count += 1
+            else:
+                promotion_failed = True
+        if promotion_failed:
+            raise RuntimeError(
+                f"archival partially failed: {stored_count} stored before a "
+                "promotion error — window will be retried"
+            )
+        return stored_count
+
+    def _parse_ledger_ts(self, raw) -> datetime.datetime | None:
+        """Parse a ledger timestamp (SQLite CURRENT_TIMESTAMP or ISO) to UTC."""
+        if not raw:
+            return None
+        try:
+            return datetime.datetime.fromisoformat(
+                str(raw).replace("T", " ").split("+")[0].split(".")[0].strip()
+            )
+        except Exception:
+            return None
+
+    def _build_window_transcript(self, window: list) -> str:
+        """Render a window of (id, role, content, ts) turns into a transcript."""
+        lines = []
+        for _tid, role, content, _ts in window:
+            cleaned = re.sub(
+                r"\s+", " ", self._strip_injected_metadata(content or "")
+            ).strip()
+            if not cleaned or self._looks_like_bad_thematic_output(cleaned):
+                continue
+            lines.append(f"{(role or '').upper()}: {cleaned}")
+        return "\n\n".join(lines)
+
+    def _get_archival_state(self, key: str) -> str | None:
+        if not self.db_conn:
+            return None
+        try:
+            with self._db_lock:
+                cur = self.db_conn.cursor()
+                cur.execute("SELECT value FROM archival_state WHERE key = ?", (key,))
+                row = cur.fetchone()
+            return row[0] if row and row[0] is not None else None
+        except Exception:
+            return None
+
+    def _set_archival_state(self, key: str, value) -> None:
+        if not self.db_conn:
+            return
+        try:
+            with self._db_lock:
+                cur = self.db_conn.cursor()
+                cur.execute(
+                    "INSERT OR REPLACE INTO archival_state (key, value) VALUES (?, ?)",
+                    (key, str(value)),
+                )
+                self.db_conn.commit()
         except Exception as e:
-            logger.warning("Thematic archival failed: %s", e)
+            logger.warning("Failed to write archival_state %s: %s", key, e)
+
+    def _seed_watermark_from_long_term(self) -> int:
+        """First-run watermark: start where long-term archival last left off,
+        so window archival replays only the un-archived backlog rather than
+        re-processing months of already-promoted history."""
+        latest_iso = None
+        try:
+            got = self.long_term_collection.get(include=["metadatas"])
+            stamps = []
+            for m in (got.get("metadatas") or []):
+                if not m:
+                    continue
+                for k in ("archived_at", "timestamp", "created_at", "updated_at"):
+                    if m.get(k):
+                        stamps.append(str(m[k]))
+                        break
+            if stamps:
+                latest_iso = max(stamps)
+        except Exception as e:
+            logger.warning("Watermark seed: could not read long-term timestamps: %s", e)
+        try:
+            with self._db_lock:
+                cur = self.db_conn.cursor()
+                if latest_iso:
+                    norm = latest_iso.replace("T", " ").split("+")[0].split(".")[0].strip()[:19]
+                    cur.execute(
+                        "SELECT MAX(id) FROM turns "
+                        "WHERE replace(substr(timestamp,1,19),'T',' ') <= ?",
+                        (norm,),
+                    )
+                else:
+                    cur.execute("SELECT MAX(id) FROM turns")
+                row = cur.fetchone()
+            seed = int(row[0]) if row and row[0] else 0
+            logger.info(
+                "Window archival watermark seeded to turn id %d (long-term cutoff %s).",
+                seed, latest_iso or "none",
+            )
+            return seed
+        except Exception as e:
+            logger.warning("Watermark seed failed: %s", e)
+            return 0
+
+    def _get_archival_watermark(self) -> int:
+        raw = self._get_archival_state("last_archived_turn_id")
+        if raw:
+            try:
+                return int(raw)
+            except (TypeError, ValueError):
+                pass
+        seed = self._seed_watermark_from_long_term()
+        self._set_archival_state("last_archived_turn_id", seed)
+        return seed
+
+    def run_window_archival(
+        self,
+        *,
+        idle_gap_minutes: int = WINDOW_IDLE_GAP_MINUTES,
+        min_chars: int = WINDOW_MIN_CHARS,
+        max_windows: int = 20,
+        force: bool = False,
+        min_interval_minutes: int = 10,
+    ) -> dict:
+        """Promote conversation turns to long-term memory, grouped into
+        idle-delimited windows across ALL session_ids.
+
+        Each run reads turns with id > the watermark, splits them wherever the
+        gap between consecutive turns exceeds *idle_gap_minutes*, and archives
+        every window that has CLOSED (its last turn older than the gap). The
+        still-open trailing window is left for a later run. The watermark
+        advances only past windows that archived (or were skipped as too
+        short) — a failed/rate-limited window stops the run and is retried.
+
+        Safe to call frequently: throttled to once per *min_interval_minutes*
+        (unless *force*), and single-flighted across threads.
+        """
+        if not self.db_conn:
+            return {"status": "no-db"}
+        if not _WINDOW_ARCHIVAL_LOCK.acquire(blocking=False):
+            return {"status": "already-running"}
+        try:
+            if not force:
+                last = self._get_archival_state("last_window_archival")
+                if last:
+                    ts = self._parse_ledger_ts(last)
+                    if ts and (datetime.datetime.utcnow() - ts).total_seconds() < min_interval_minutes * 60:
+                        return {"status": "throttled"}
+            watermark = self._get_archival_watermark()
+            with self._db_lock:
+                cur = self.db_conn.cursor()
+                cur.execute(
+                    "SELECT id, role, content, timestamp FROM turns "
+                    "WHERE id > ? AND session_id NOT LIKE 'audit-%' "
+                    "ORDER BY id ASC",
+                    (watermark,),
+                )
+                rows = cur.fetchall()
+            now_iso = datetime.datetime.utcnow().isoformat()
+            if not rows:
+                self._set_archival_state("last_window_archival", now_iso)
+                return {"status": "nothing-new", "watermark": watermark}
+
+            gap = datetime.timedelta(minutes=idle_gap_minutes)
+            windows: list[list] = []
+            current: list = []
+            prev_ts = None
+            for tid, role, content, ts_raw in rows:
+                ts = self._parse_ledger_ts(ts_raw)
+                gap_break = (
+                    prev_ts is not None and ts is not None and (ts - prev_ts) > gap
+                )
+                size_break = len(current) >= self.WINDOW_MAX_TURNS
+                if current and (gap_break or size_break):
+                    windows.append(current)
+                    current = []
+                current.append((tid, role, content, ts))
+                if ts is not None:
+                    prev_ts = ts
+            if current:
+                windows.append(current)
+
+            cutoff = datetime.datetime.utcnow() - gap
+            archived = skipped = 0
+            new_watermark = watermark
+            for window in windows:
+                last_ts = window[-1][3]
+                last_id = window[-1][0]
+                # Leave the still-open trailing window for a later run.
+                if last_ts is None or last_ts > cutoff:
+                    break
+                if archived + skipped >= max_windows:
+                    break
+                transcript = self._build_window_transcript(window)
+                if len(transcript) < min_chars:
+                    skipped += 1
+                    new_watermark = last_id
+                    continue
+                try:
+                    self._archive_transcript(transcript)
+                except Exception as e:
+                    # Poison-pill guard: count failures per window. A window
+                    # that fails WINDOW_MAX_FAILS times (e.g. deterministically
+                    # un-archivable) is skipped so it can't jam the pipeline.
+                    fail_key = f"window_fail:{last_id}"
+                    fails = int(self._get_archival_state(fail_key) or 0) + 1
+                    self._set_archival_state(fail_key, fails)
+                    if fails >= self.WINDOW_MAX_FAILS:
+                        logger.error(
+                            "Window archival: window ending %s failed %d× — "
+                            "skipping permanently. (%s)",
+                            last_ts, fails, e,
+                        )
+                        skipped += 1
+                        new_watermark = last_id
+                        continue
+                    logger.warning(
+                        "Window archival: window ending %s failed "
+                        "(attempt %d/%d: %s) — stopping, will retry.",
+                        last_ts, fails, self.WINDOW_MAX_FAILS, e,
+                    )
+                    break
+                archived += 1
+                new_watermark = last_id
+
+            if new_watermark != watermark:
+                self._set_archival_state("last_archived_turn_id", new_watermark)
+            self._set_archival_state("last_window_archival", now_iso)
+            logger.info(
+                "Window archival: %d archived, %d skipped (too short). Watermark %d → %d.",
+                archived, skipped, watermark, new_watermark,
+            )
+            return {
+                "status": "ok",
+                "archived": archived,
+                "skipped": skipped,
+                "watermark": new_watermark,
+            }
+        finally:
+            _WINDOW_ARCHIVAL_LOCK.release()
 
     # -------------------------------------------------------------------------
     # Idle timer
@@ -471,6 +739,16 @@ class ConversationManager:
             self._run_archival(idle_seconds=idle_seconds)
         else:
             logger.info("Idle detected — no new short-term memories to archive.")
+
+        # Window-based long-term archival: promote closed conversation windows
+        # across all sessions. Throttled + single-flighted, so it is safe to
+        # fire on every idle even from short-lived per-request sessions.
+        try:
+            result = self.run_window_archival()
+            if result.get("archived") or result.get("skipped"):
+                logger.info("Idle window archival: %s", result)
+        except Exception as e:
+            logger.warning("Window archival from idle failed: %s", e)
 
     # -------------------------------------------------------------------------
     # Archival: short-term → long-term
@@ -1157,6 +1435,15 @@ class ConversationManager:
         cursor.execute("""
             CREATE UNIQUE INDEX IF NOT EXISTS idx_theme_registry_title
             ON theme_registry(title COLLATE NOCASE)
+        """)
+        # Window-archival state: key/value store. Holds the archival
+        # watermark ('last_archived_turn_id') and throttle timestamp
+        # ('last_window_archival'). See run_window_archival().
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS archival_state (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            )
         """)
         self.db_conn.commit()
 

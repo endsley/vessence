@@ -181,6 +181,33 @@ doesn't see protocol chatter as part of the turn.
 
 ### 2.2. Archival Flow (Short-Term → Long-Term)
 
+**Window-based archival (current mechanism).** The runtime mints a fresh
+`session_id` per request, so a real conversation is shattered across hundreds
+of 2-turn "sessions" — none long enough for the old per-session archivist to
+ever fire (every session was flagged `transcript_too_short`, `arc_count` was 0
+across the board, and `long_term_knowledge` stopped growing). `run_window_archival()`
+(in `conversation_manager.py`) ignores session boundaries:
+
+1. Reads ledger `turns` with `id > watermark`, excluding `session_id LIKE 'audit-%'`.
+2. Splits them into windows wherever the gap between consecutive turns exceeds
+   `WINDOW_IDLE_GAP_MINUTES` (30 min).
+3. Archives every **closed** window (last turn older than the gap) whose
+   transcript clears `WINDOW_MIN_CHARS` (200); the still-open trailing window
+   is left for a later run.
+4. Advances the watermark only past windows that archived (or were skipped as
+   too short). A rate-limited/errored window stops the run and is retried —
+   the watermark never skips un-archived content.
+
+State lives in the `archival_state` table (`last_archived_turn_id` watermark,
+`last_window_archival` throttle stamp). First-run watermark is seeded from the
+newest `long_term_knowledge` timestamp so only the un-archived backlog replays.
+Triggered from `_on_idle` (throttled to once per 10 min, single-flighted via a
+module lock) and as a nightly backstop by the janitor's `backfill_thematic_archival`.
+`_archive_transcript()` runs the Thematic Archivist over one window's transcript.
+
+The legacy per-session `_thematic_archival()` / `sessions` table remain for
+compatibility but are no longer the promotion path.
+
 The `ConversationManager` Archivist triages entries from the current session in `short_term_memory`:
 - **Keep** → promoted to `long_term_knowledge`, deleted from `short_term_memory`
 - **Short-Term** → `expires_at` stamped in-place (stays in `short_term_memory` until TTL)
@@ -305,6 +332,12 @@ The ledger provides Jane with a deterministic way to investigate unexpected fail
 ## 4. Nightly Maintenance: The Memory Janitor
 
 To prevent the Long-Term Memory DB from becoming bloated with redundant or outdated information, a nightly maintenance script, "The Memory Janitor" (`agent_skills/memory/v1/janitor_memory.py`), runs to clean and consolidate the database. This process relies on an LLM to perform intelligent clustering and synthesis, rather than using vector distance metrics.
+
+### 4.0. Load Gate
+
+`run_janitor()` opens with a load gate. **During the night window (`_is_nighttime()`, 11 PM–6 AM) the gate is bypassed entirely** — the janitor runs unconditionally. The gate exists only to keep the web/Android UI responsive while Chieh is awake; at night nobody is waiting on it, and the janitor is the last job in the nightly orchestrator, so deferring meant it silently never ran. In the daytime window the gate still applies: `wait_until_safe(max_wait_minutes=5)`, skip the cycle if still busy.
+
+Note: `system_load.get_system_load()` samples CPU with `psutil.cpu_percent(interval=1)` (a fresh blocking 1s sample). `interval=0` was wrong — it reported CPU averaged since psutil import, which inside the janitor process reflected the janitor's own chromadb/onnxruntime import spike (a false ~100%), tripping the gate.
 
 ### 4.1. Detailed Algorithm
 

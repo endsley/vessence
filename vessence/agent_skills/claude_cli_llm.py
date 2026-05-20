@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from jane.config import PROVIDER_CLI, CHEAP_MODEL, SMART_MODEL, _PROVIDER
+from jane.config import PROVIDER_CLI, CHEAP_MODEL, SMART_MODEL, _PROVIDER, PROVIDER_MODELS
 
 # Tiered Model Mapping (as of 2026-03-27)
 # Orchestrator: Primary Reasoning (Opus/Sonnet)
@@ -22,9 +22,9 @@ from jane.config import PROVIDER_CLI, CHEAP_MODEL, SMART_MODEL, _PROVIDER
 # Utility: Background Worker (Haiku/Flash)
 
 
-def _build_command(prompt: str, model: str, max_tokens: int) -> list[str]:
+def _build_command(prompt: str, model: str, max_tokens: int, cli: str | None = None) -> list[str]:
     """Build the CLI command for the active provider."""
-    cli = os.environ.get("PROVIDER_CLI", PROVIDER_CLI)
+    cli = cli or os.environ.get("PROVIDER_CLI", PROVIDER_CLI)
 
     if "claude" in cli or cli == "claude":
         return [cli, "-p", prompt, "--output-format", "text",
@@ -32,12 +32,14 @@ def _build_command(prompt: str, model: str, max_tokens: int) -> list[str]:
 
     elif "codex" in cli or cli == "codex":
         # OpenAI Codex CLI
-        return [cli, "exec", "--dangerously-bypass-approvals-and-sandbox",
-                "-m", model, prompt]
+        cmd = [cli, "exec", "--dangerously-bypass-approvals-and-sandbox"]
+        # In fallback mode, omitting -m is safer as the hardcoded gpt-4o might not be supported.
+        return cmd + [prompt]
 
     elif "gemini" in cli or cli == "gemini":
         # Gemini CLI
-        return [cli, "-p", prompt]
+        # Use --prompt for non-interactive
+        return [cli, "--prompt", prompt]
 
     else:
         # Fallback: treat as claude-compatible
@@ -46,7 +48,8 @@ def _build_command(prompt: str, model: str, max_tokens: int) -> list[str]:
 
 
 def completion(prompt: str, *, model: str | None = None,
-               max_tokens: int = 1024, timeout: int = 60) -> str:
+               max_tokens: int = 1024, timeout: int = 60,
+               cli: str | None = None) -> str:
     """Send a single prompt to the active CLI and return the text response.
 
     Args:
@@ -54,12 +57,18 @@ def completion(prompt: str, *, model: str | None = None,
         model: Model to use. Defaults to CHEAP_MODEL (for background tasks).
         max_tokens: Max output tokens.
         timeout: Subprocess timeout in seconds.
+        cli: Optional CLI binary override.
 
     Returns:
         The assistant's response text, stripped.
     """
+    # Safety truncation to avoid "Argument list too long" errors
+    # 32,000 characters is a safe limit for most CLI arguments.
+    if len(prompt) > 32000:
+        prompt = prompt[:1000] + "\n... [TRUNCATED] ...\n" + prompt[-31000:]
+        
     model = model or CHEAP_MODEL
-    cmd = _build_command(prompt, model, max_tokens)
+    cmd = _build_command(prompt, model, max_tokens, cli=cli)
 
     try:
         result = subprocess.run(
@@ -72,25 +81,85 @@ def completion(prompt: str, *, model: str | None = None,
         raise RuntimeError(f"CLI timed out after {timeout}s")
 
     if result.returncode != 0:
-        err = (result.stderr or result.stdout or "Unknown error").strip()[:300]
-        raise RuntimeError(f"CLI failed (exit {result.returncode}): {err}")
+        err = (result.stderr or result.stdout or "Unknown error").strip()[:500]
+        raise RuntimeError(f"CLI ({cmd[0]}) failed (exit {result.returncode}): {err}")
 
     return result.stdout.strip()
 
 
-def completion_orchestrator(prompt: str, *, max_tokens: int = 4096, timeout: int = 180) -> str:
+def completion_with_fallback(prompt: str, *, tier: str = "utility", 
+                             max_tokens: int = 1024, timeout: int = 60) -> str:
+    """Try primary provider, then fall back to others if limit is hit."""
+    import logging
+    logger = logging.getLogger(__name__)
+
+    # 1. Try Primary
+    try:
+        if tier == "orchestrator":
+            return completion_orchestrator(prompt, max_tokens=max_tokens, timeout=timeout, use_fallback=False)
+        elif tier == "agent":
+            return completion_agent(prompt, max_tokens=max_tokens, timeout=timeout, use_fallback=False)
+        else:
+            return completion_utility(prompt, max_tokens=max_tokens, timeout=timeout, use_fallback=False)
+    except RuntimeError as e:
+        err_msg = str(e)
+        # If it's a hard error like "CLI not found" AND not a limit error, raise it.
+        # But if it's a limit, quota, timeout, or general failure, try fallback.
+        is_limit = "limit" in err_msg.lower() or "quota" in err_msg.lower()
+        is_timeout = "timed out" in err_msg.lower()
+        
+        if not (is_limit or is_timeout or "failed" in err_msg.lower()):
+            raise e
+        
+        logger.warning(f"Primary LLM failed: {err_msg[:100]}... Attempting fallback.")
+
+    # 2. Try Fallbacks (Codex then Gemini)
+    fallback_sequence = ["openai", "gemini", "claude"]
+    # Filter out current provider
+    fallbacks = [p for p in fallback_sequence if p != _PROVIDER]
+    
+    last_err = None
+    for provider in fallbacks:
+        config = PROVIDER_MODELS.get(provider)
+        if not config:
+            continue
+            
+        cli = config["cli"]
+        # Map tier to provider-specific model (though _build_command may ignore it for codex)
+        if tier == "orchestrator" or tier == "agent":
+            model = config["smart"]
+        else:
+            model = config["cheap"]
+            
+        try:
+            logger.info(f"Fallback: trying {provider} ({cli})...")
+            return completion(prompt, model=model, cli=cli, max_tokens=max_tokens, timeout=timeout)
+        except Exception as fe:
+            logger.warning(f"Fallback to {provider} failed: {str(fe)[:100]}...")
+            last_err = fe
+            
+    raise last_err or RuntimeError("Primary LLM and all fallbacks failed.")
+
+
+def completion_orchestrator(prompt: str, *, max_tokens: int = 4096, timeout: int = 180, use_fallback: bool = True) -> str:
     """Uses the highest-tier model (Opus/Sonnet) for complex reasoning/code."""
+    if use_fallback:
+        return completion_with_fallback(prompt, tier="orchestrator", max_tokens=max_tokens, timeout=timeout)
     # current JANE_BRAIN setting usually points to the orchestrator
     return completion(prompt, model=os.environ.get("BRAIN_HEAVY_CLAUDE", "claude-3-6-opus-20260320"), max_tokens=max_tokens, timeout=timeout)
 
 
-def completion_agent(prompt: str, *, max_tokens: int = 4096, timeout: int = 120) -> str:
+def completion_agent(prompt: str, *, max_tokens: int = 4096, timeout: int = 120, use_fallback: bool = True) -> str:
     """Uses the Agent-tier model (Sonnet) for specialized research and archival."""
+    if use_fallback:
+        return completion_with_fallback(prompt, tier="agent", max_tokens=max_tokens, timeout=timeout)
     return completion(prompt, model=SMART_MODEL, max_tokens=max_tokens, timeout=timeout)
 
 
-def completion_utility(prompt: str, *, max_tokens: int = 1024, timeout: int = 60) -> str:
+def completion_utility(prompt: str, *, max_tokens: int = 1024, timeout: int = 60, use_fallback: bool = True) -> str:
     """Uses the Utility-tier model (Haiku) for triage and simple tasks."""
+    if use_fallback:
+        return completion_with_fallback(prompt, tier="utility", max_tokens=max_tokens, timeout=timeout)
     return completion(prompt, model=CHEAP_MODEL, max_tokens=max_tokens, timeout=timeout)
 
 

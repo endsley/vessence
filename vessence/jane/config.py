@@ -13,6 +13,37 @@ import os
 from pathlib import Path
 
 
+def _load_runtime_env_defaults() -> None:
+    """Load mutable runtime settings from vessence-data/.env as defaults.
+
+    Services can still override any key through systemd or the shell. This
+    gives cron and one-off scripts the same Jane provider/model settings
+    without duplicating JANE_BRAIN in every launcher.
+    """
+    home = str(Path.home())
+    ambient_base = os.environ.get("AMBIENT_BASE", os.path.join(home, "ambient"))
+    data_root = (
+        os.environ.get("VESSENCE_DATA_HOME")
+        or os.environ.get("AMBIENT_HOME")
+        or os.path.join(ambient_base, "vessence-data")
+    )
+    env_path = Path(data_root) / ".env"
+    if not env_path.exists():
+        return
+    try:
+        for raw_line in env_path.read_text(encoding="utf-8", errors="replace").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            os.environ.setdefault(key.strip(), value.strip())
+    except Exception:
+        pass
+
+
+_load_runtime_env_defaults()
+
+
 def _resolve_roots() -> tuple[str, str, str, str]:
     home = str(Path.home())
     ambient_base = os.environ.get("AMBIENT_BASE", os.path.join(home, "ambient"))
@@ -244,8 +275,20 @@ PROVIDER_MODELS = {
 
 _models = PROVIDER_MODELS.get(_PROVIDER, PROVIDER_MODELS["claude"])
 
+_PROVIDER_MODEL_ENV = {
+    "claude": "JANE_MODEL_CLAUDE",
+    "openai": "JANE_MODEL_OPENAI",
+    "codex": "JANE_MODEL_OPENAI",
+    "gemini": "JANE_MODEL_GEMINI",
+}
+
+
+def _provider_model_override() -> str:
+    env_var = _PROVIDER_MODEL_ENV.get(_PROVIDER, "")
+    return os.environ.get(env_var, "").strip() if env_var else ""
+
 # Smart model — used for Jane, Amber, user-facing work
-SMART_MODEL = os.getenv("SMART_MODEL", _models["smart"])
+SMART_MODEL = os.getenv("SMART_MODEL") or _provider_model_override() or _models["smart"]
 
 # Cheap model — used for archivist, janitor, librarian, summarization
 CHEAP_MODEL = os.getenv("CHEAP_MODEL", _models["cheap"])
@@ -253,9 +296,10 @@ CHEAP_MODEL = os.getenv("CHEAP_MODEL", _models["cheap"])
 # CLI binary for the active provider
 PROVIDER_CLI = os.getenv("PROVIDER_CLI", _models["cli"])
 
-# Web/Android chat model — defaults to SMART_MODEL but can be overridden to a
-# faster/cheaper model (e.g. Sonnet instead of Opus) without changing CLI Jane.
-WEB_CHAT_MODEL = os.environ.get("JANE_BRAIN_WEB_MODEL", SMART_MODEL)
+# Web/Android chat model. Prefer the provider-specific Jane model setting
+# (`JANE_MODEL_OPENAI`, `JANE_MODEL_CLAUDE`, etc.) so there is one main-brain
+# model knob. `JANE_BRAIN_WEB_MODEL` remains only as a legacy fallback.
+WEB_CHAT_MODEL = _provider_model_override() or os.environ.get("JANE_BRAIN_WEB_MODEL", SMART_MODEL)
 
 # Legacy aliases (backward compat)
 OLLAMA_BASE_URL       = os.getenv("LOCAL_LLM_BASE_URL", "http://localhost:11434")

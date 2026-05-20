@@ -569,19 +569,17 @@ def purge_old_forgettable_memories(max_age_days: int = 14) -> int:
 
 def backfill_thematic_archival(max_sessions: int = 2):
     """
-    Finds sessions whose transcript exists in the SQLite ledger but which have
-    never been archived to long-term, and runs the thematic archivist on them.
-    Picks the OLDEST untranscribed session first ("worth remembering" sweep
-    policy: drain the backlog one session per janitor run while Chieh is idle).
+    Nightly backstop for long-term archival. Archival is window-based: turns
+    are grouped into idle-delimited windows across ALL session_ids and each
+    closed window is promoted (per-session archival broke once the runtime
+    began minting a fresh session_id per request — most "sessions" hold only
+    2 turns, far below any archival threshold).
 
-    Source of truth: `sessions` table in the conversation history ledger.
-    A session counts as "needs archival" if it has turns but no row in
-    `sessions` (or its row has archived_at IS NULL). `_thematic_archival`
-    is idempotent and stamps the row on completion (including the
-    transcript-too-short case), so this loop converges.
+    `max_sessions` is kept for signature/cron compatibility and reused as the
+    per-run window cap (min 20). `run_window_archival` is watermark-tracked
+    and idempotent, so this drains the backlog progressively across runs.
     """
     try:
-        import sqlite3
         from jane.config import LEDGER_DB_PATH
         from memory.v1.conversation_manager import ConversationManager
     except Exception as e:
@@ -591,43 +589,16 @@ def backfill_thematic_archival(max_sessions: int = 2):
         logger.info("backfill: no ledger db at %s; skipping.", LEDGER_DB_PATH)
         return
     try:
-        conn = sqlite3.connect(LEDGER_DB_PATH)
+        cm = ConversationManager(session_id="janitor-window-archival")
         try:
-            cur = conn.cursor()
-            cur.execute("""
-                SELECT t.session_id, MIN(t.timestamp) AS first_turn
-                FROM turns t
-                LEFT JOIN sessions s ON s.session_id = t.session_id
-                WHERE s.session_id IS NULL OR s.archived_at IS NULL
-                GROUP BY t.session_id
-                ORDER BY first_turn ASC
-                LIMIT ?
-            """, (max_sessions,))
-            rows = cur.fetchall()
+            result = cm.run_window_archival(
+                force=True, max_windows=max(20, int(max_sessions or 0))
+            )
+            logger.info("backfill: window archival result: %s", result)
         finally:
-            conn.close()
-
-        if not rows:
-            logger.info("No untriaged sessions found for backfill.")
-            return
-
-        logger.info(
-            "Backfilling thematic archival for %d session(s) (oldest first): %s",
-            len(rows), [sid[:12] for sid, _ in rows],
-        )
-        for sid, _first_turn in rows:
-            try:
-                cm = ConversationManager(session_id=sid)
-                cm._run_archival()
-                cm.close()
-            except Exception as e:
-                logger.warning(f"Failed to backfill session {sid[:12]}: {e}")
-
-    except sqlite3.OperationalError as e:
-        # `sessions` table may not exist yet on first run after the migration.
-        logger.warning(f"backfill: ledger schema missing — first run? {e}")
+            cm.close()
     except Exception as e:
-        logger.warning(f"Could not run backfill_thematic_archival: {e}")
+        logger.warning(f"Could not run window-archival backfill: {e}")
 
 
 def dedup_cross_session_themes(
@@ -785,11 +756,16 @@ def refresh_dynamic_query_markers() -> dict:
 
 
 def run_janitor(max_sessions: int = 2, max_topics: int = 3):
-    # Load gate: wait until CPU/memory is acceptable
+    # Load gate: wait until CPU/memory is acceptable.
+    # Bypassed entirely during the night window — the gate exists to keep
+    # the web/Android UI responsive while Chieh is awake. At night nobody
+    # is waiting on the UI, and deferring just means the janitor (the last
+    # nightly job) never runs at all.
     try:
-        from agent_skills.system_load import wait_until_safe
-        # Shorten wait time for frequent runs
-        if not wait_until_safe(max_wait_minutes=5):
+        from agent_skills.system_load import wait_until_safe, _is_nighttime
+        if _is_nighttime():
+            logger.info("Nighttime — bypassing load gate, running janitor.")
+        elif not wait_until_safe(max_wait_minutes=5):
             logger.info("System busy — skipping janitor this cycle.")
             return
     except Exception:

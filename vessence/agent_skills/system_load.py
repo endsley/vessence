@@ -95,7 +95,11 @@ def get_system_load() -> dict:
 
     if psutil is not None:
         try:
-            result["cpu_percent"] = psutil.cpu_percent(interval=0)
+            # interval=1 takes a fresh blocking 1s sample. interval=0 reports
+            # CPU averaged "since psutil was imported", which inside a process
+            # that just did heavy imports (chromadb/onnxruntime) reflects that
+            # process's own startup spike — not the real system load.
+            result["cpu_percent"] = psutil.cpu_percent(interval=1)
             mem = psutil.virtual_memory()
             result["memory_percent"] = mem.percent
             result["memory_available_gb"] = round(mem.available / (1024 ** 3), 2)
