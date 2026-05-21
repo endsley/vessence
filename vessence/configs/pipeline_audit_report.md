@@ -1,7 +1,7 @@
-# Pipeline Audit Report — 2026-05-20 01:10
+# Pipeline Audit Report — 2026-05-21 01:12
 
 - Prompts audited: **7**
-- Elapsed: 34s
+- Elapsed: 31s
 - Classification failures: **2**
 - Response failures: **7**
 - Auto-fixes applied (exemplars added): **0**
