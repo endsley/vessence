@@ -58,9 +58,24 @@ python \
     $VESSENCE_HOME/agent_skills/memory/v1/add_fact.py "fact here" --topic <topic> [--subtopic <subtopic>]
 ```
 
-Codex does not have Claude Code's automatic `UserPromptSubmit` memory hook.
-For memory-sensitive prompts, explicitly query ChromaDB before answering. Use
-the Codex MCP tool `query_jane_memory` when available, or run:
+Codex does not have Claude Code's native `UserPromptSubmit` hook. Vessence's
+persistent Codex adapter injects the nearest 2 ChromaDB memories automatically
+when their Chroma distance is <= 0.50 and they pass the lexical relevance
+guard; the result may contain fewer than 2 memories. In raw Codex CLI sessions,
+perform the same preflight at the start of every user prompt. Use the Codex MCP tool
+`query_nearest_jane_memories(query, limit=2, max_distance=0.50)` when available,
+or run:
+```bash
+VESSENCE_HOME=/home/chieh/ambient/vessence \
+VESSENCE_DATA_HOME=/home/chieh/ambient/vessence-data \
+VAULT_HOME=/home/chieh/ambient/vault \
+PYTHONPATH=/home/chieh/ambient/vessence \
+/home/chieh/google-adk-env/adk-venv/bin/python \
+    /home/chieh/ambient/vessence/startup_code/codex_auto_memory.py "query here"
+```
+
+For broader memory-sensitive prompts, explicitly query ChromaDB before
+answering. Use the Codex MCP tool `query_jane_memory` when available, or run:
 ```bash
 VESSENCE_HOME=/home/chieh/ambient/vessence \
 VESSENCE_DATA_HOME=/home/chieh/ambient/vessence-data \

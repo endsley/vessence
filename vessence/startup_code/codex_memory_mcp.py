@@ -107,6 +107,33 @@ def query_jane_memory(query: str, max_chars: int = 12000) -> str:
 
 
 @mcp.tool()
+def query_nearest_jane_memories(query: str, limit: int = 2, max_distance: float = 0.50) -> str:
+    """Return the nearest Jane ChromaDB memories below a distance threshold.
+
+    This is the Codex preflight lookup: call it at the start of a turn when
+    running raw Codex CLI sessions that do not have a real prompt hook.
+    """
+    q = (query or "").strip()
+    if not q:
+        return "No query provided."
+    try:
+        with _silence_process_output():
+            from memory.v1.memory_retrieval import query_nearest_memory_lines
+
+            hits = query_nearest_memory_lines(
+                q,
+                limit=max(1, min(int(limit), 10)),
+                max_distance=float(max_distance),
+                assistant_name="Jane",
+            )
+    except Exception as exc:
+        return f"Nearest memory query failed: {type(exc).__name__}: {exc}"
+    if not hits:
+        return "No relevant context found."
+    return _strip_onnx_noise("\n".join(f"- {hit}" for hit in hits))
+
+
+@mcp.tool()
 def jane_memory_paths() -> str:
     """Return the configured Jane memory roots for this Codex session."""
     return (

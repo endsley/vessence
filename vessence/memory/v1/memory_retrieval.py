@@ -2,6 +2,7 @@
 import datetime
 import os
 import re
+import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -10,6 +11,11 @@ from pathlib import Path
 
 class silence_stderr_fd:
     def __enter__(self):
+        self.py_stdout = sys.stdout
+        self.py_stderr = sys.stderr
+        self.null_file = open(os.devnull, "w")
+        sys.stdout = self.null_file
+        sys.stderr = self.null_file
         self.stdout_fd = os.dup(1)
         self.stderr_fd = os.dup(2)
         self.null_fd = os.open(os.devnull, os.O_WRONLY)
@@ -22,6 +28,10 @@ class silence_stderr_fd:
         os.close(self.null_fd)
         os.close(self.stdout_fd)
         os.close(self.stderr_fd)
+        sys.stdout = self.py_stdout
+        sys.stderr = self.py_stderr
+        # Do not close null_file here: some ML loaders keep a reference to the
+        # Python stream and flush asynchronously during teardown.
 
 
 os.environ.setdefault("ORT_LOGGING_LEVEL", "3")
@@ -313,6 +323,19 @@ def _is_too_old(meta: dict, max_days: int = 3) -> bool:
         return False
 
 
+def _age_days(meta: dict) -> float | None:
+    ts_str = (meta or {}).get("timestamp", (meta or {}).get("created_at", ""))
+    if not ts_str:
+        return None
+    try:
+        ts = datetime.datetime.fromisoformat(str(ts_str).replace("Z", "+00:00"))
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=datetime.timezone.utc)
+        return (datetime.datetime.now(datetime.timezone.utc) - ts).total_seconds() / 86400
+    except Exception:
+        return None
+
+
 def _is_none_content(doc: str) -> bool:
     """Return True if the document content is a None/empty sentinel."""
     stripped = (doc or "").strip()
@@ -600,7 +623,8 @@ def build_memory_sections(
     use_essence = bool(essence_chromadb_path and os.path.exists(essence_chromadb_path))
 
     # Pre-compute embedding ONCE — pass to all queries to avoid re-embedding
-    query_emb = _embed_query_text(query)
+    with silence_stderr_fd():
+        query_emb = _embed_query_text(query)
 
     # --- Submit all applicable queries in parallel ---
     futures: dict[str, "Future"] = {}
@@ -821,3 +845,154 @@ def build_memory_sections(
         sections.append("## Essence Memory\n" + "\n".join(essence_facts))
     _sections_cache_put(cache_key, sections)
     return sections
+
+
+def query_nearest_memory_lines(
+    query: str,
+    limit: int = 2,
+    max_distance: float = 0.50,
+    min_lexical_overlap: float = 0.34,
+    assistant_name: str = "Jane",
+    essence_chromadb_path: str | None = None,
+    user_memory_path: str | None = None,
+) -> list[str]:
+    """Return the nearest formatted memory lines below a distance threshold.
+
+    This is intentionally narrower than build_memory_sections(): it is for
+    per-turn Codex preloading, where a small high-confidence prelude is better
+    than broad memory recall.
+    """
+    normalized = _normalize_query(query)
+    if not normalized or limit <= 0:
+        return []
+
+    intent = _classify_query_intent(query)
+    use_user_memory = bool(user_memory_path and os.path.exists(user_memory_path))
+    use_shared = not use_user_memory
+    use_jane_long_term = (
+        not use_user_memory
+        and assistant_name.strip().lower() != "amber"
+        and intent in {"project_work", "general"}
+    )
+    use_short_term = not use_user_memory
+    use_file_index = intent == "file_lookup" and not use_user_memory
+    use_essence = bool(essence_chromadb_path and os.path.exists(essence_chromadb_path))
+
+    query_emb = _embed_query_text(query)
+    query_terms = {
+        term
+        for term in re.findall(r"[a-z0-9_./-]+", normalized)
+        if len(term) >= 4 and term not in {"what", "when", "about", "with", "from", "that", "this", "were", "have"}
+    }
+    candidates: list[tuple[int, float, str, str, str]] = []
+
+    def _lexical_overlap(doc: str) -> float:
+        if not query_terms:
+            return 0.0
+        text = str(doc or "").lower()
+        hits = sum(1 for term in query_terms if term in text)
+        return hits / len(query_terms)
+
+    def _add_candidate(source: str, doc: str, meta: dict | None, distance: float | None) -> None:
+        if distance is None:
+            return
+        try:
+            dist = float(distance)
+        except (TypeError, ValueError):
+            return
+        meta = dict(meta or {})
+        if _is_expired(meta) or _is_none_content(doc):
+            return
+        age = _age_days(meta)
+        overlap = _lexical_overlap(doc)
+        promoted_recent_short_term = (
+            source == "short_term"
+            and age is not None
+            and age <= 14
+            and overlap >= 0.35
+        )
+        if dist > max_distance and not promoted_recent_short_term:
+            return
+        if not promoted_recent_short_term and query_terms and overlap < min_lexical_overlap:
+            return
+        memory_type = str(meta.get("memory_type", "long_term"))
+        if source == "user_memories":
+            if _is_file_index_record(doc, meta) or _is_low_signal_shared_memory(doc, meta):
+                return
+            if memory_type in {"forgettable", "short_term"}:
+                if _is_low_signal_short_term_memory(doc, meta):
+                    return
+            elif meta.get("topic") == "prompt_queue":
+                return
+        if source == "short_term":
+            if (not promoted_recent_short_term and _is_too_old(meta)) or _is_low_signal_short_term_memory(doc, meta):
+                return
+        meta["distance"] = dist
+        priority = 0 if promoted_recent_short_term else 1
+        candidates.append((priority, dist, source, _extract_content_key(doc), _fmt_memory(doc, meta)))
+
+    query_specs: list[tuple[str, str, str, int]] = []
+    if use_user_memory or use_shared:
+        query_specs.append((
+            "user_memories",
+            user_memory_path if use_user_memory else VECTOR_DB_USER_MEMORIES,
+            CHROMA_COLLECTION_USER_MEMORIES,
+            max(CHROMA_SEARCH_LIMIT, limit * 4),
+        ))
+    if use_jane_long_term:
+        query_specs.append((
+            "jane_long_term",
+            VECTOR_DB_LONG_TERM,
+            CHROMA_COLLECTION_LONG_TERM,
+            max(CHROMA_LONG_TERM_LIMIT, limit * 4),
+        ))
+    if use_short_term:
+        query_specs.append((
+            "short_term",
+            VECTOR_DB_SHORT_TERM,
+            CHROMA_COLLECTION_SHORT_TERM,
+            max(CHROMA_SHORT_TERM_LIMIT, limit * 4),
+        ))
+    if use_file_index:
+        query_specs.append((
+            "file_index",
+            VECTOR_DB_FILE_INDEX,
+            CHROMA_COLLECTION_FILE_INDEX,
+            max(8, limit * 4),
+        ))
+    if use_essence:
+        query_specs.append((
+            "essence",
+            essence_chromadb_path or "",
+            "essence_knowledge",
+            max(CHROMA_SEARCH_LIMIT, limit * 4),
+        ))
+
+    # Run sequentially. The underlying Chroma/SentenceTransformer stack writes
+    # to process-wide stdout/stderr during lazy loads; parallel lookups can race
+    # the fd redirection and leak noise into Codex prompt preflight output.
+    for source, path, collection, search_limit in query_specs:
+        try:
+            docs, metas, distances = _query_collection(
+                path,
+                collection,
+                query,
+                search_limit,
+                query_emb,
+            )
+        except Exception:
+            continue
+        for doc, meta, distance in zip(docs, metas, distances):
+            _add_candidate(source, doc, meta, distance)
+
+    candidates.sort(key=lambda item: (item[0], item[1]))
+    seen: set[str] = set()
+    selected: list[str] = []
+    for _priority, _dist, source, key, formatted in candidates:
+        if key in seen:
+            continue
+        seen.add(key)
+        selected.append(f"{source}: {formatted}")
+        if len(selected) >= limit:
+            break
+    return selected

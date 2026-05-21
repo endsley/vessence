@@ -508,16 +508,26 @@ MCP server:
 
 - **Server name:** `jane-memory`
 - **File:** `startup_code/codex_memory_mcp.py`
-- **Tools:** `query_jane_memory(query, max_chars=12000)`, `jane_memory_paths()`
+- **Tools:** `query_jane_memory(query, max_chars=12000)`,
+  `query_nearest_jane_memories(query, limit=2, max_distance=0.50)`,
+  `jane_memory_paths()`
 - **Retrieval backend:** `memory.v1.memory_retrieval.build_memory_sections()`
   against `$VESSENCE_DATA_HOME/vector_db`
 
-This is not a true automatic prompt hook: Codex must call the MCP tool before
-answering memory-sensitive prompts. The Codex runtime rules in `AGENTS.md`
-therefore require explicit ChromaDB lookup for prompts involving "remember",
-"recently", prior decisions, project history, preferences, personal/family
-context, or architecture/debugging rationale. Current runtime behavior still
-requires code/log verification after memory recall.
+For Jane web / Vessence persistent Codex sessions, `persistent_codex.py`
+prepends a compact `[Jane Auto Memory]` block before `codex exec`: nearest 2
+ChromaDB memories, distance <= `CODEX_AUTO_MEMORY_MAX_DISTANCE` (default 0.50),
+with a lexical relevance guard and recent short-term promotion. It may inject
+fewer than 2 memories when the second hit is broad/noisy. This gives the web
+Codex path a real automatic memory prelude.
+
+Raw standalone Codex CLI sessions still do not have a native prompt hook, so
+`AGENTS.md` requires the same preflight through
+`query_nearest_jane_memories(query, limit=2, max_distance=0.50)` or
+`startup_code/codex_auto_memory.py`. Broader memory-sensitive prompts should
+still call `query_jane_memory` when the nearest-2 prelude is insufficient.
+Current runtime behavior still requires code/log verification after memory
+recall.
 
 ---
 
