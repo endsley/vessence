@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import AsyncGenerator, Optional
 
 from agent_skills.secret_store import SecretStore
+from jane.config import PROVIDER_MODELS, normalize_frontier_provider
 
 logger = logging.getLogger("jane.standing_brain")
 
@@ -90,13 +91,12 @@ def _available_providers(current: str) -> list[str]:
 
 # ── Configuration ────────────────────────────────────────────────────────────
 
-_PROVIDER = os.environ.get("JANE_BRAIN", "claude").lower()
+_PROVIDER = normalize_frontier_provider(os.environ.get("JANE_BRAIN", "claude"))
 
 # Single model per provider — read from env with sensible defaults.
 _DEFAULT_MODELS = {
-    "claude": "claude-opus-4-6",
-    "gemini": "gemini-2.5-pro",
-    "openai": "gpt-5.4",
+    provider: cfg["smart"]
+    for provider, cfg in PROVIDER_MODELS.items()
 }
 
 _ENV_VAR_FOR_MODEL = {
@@ -118,11 +118,11 @@ def _configured_provider() -> str:
                 continue
             key, value = line.split("=", 1)
             if key.strip() == "JANE_BRAIN":
-                provider = value.strip().lower()
+                provider = normalize_frontier_provider(value.strip())
                 if provider in ALL_PROVIDERS:
                     return provider
 
-    provider = os.environ.get("JANE_BRAIN", _PROVIDER).lower()
+    provider = normalize_frontier_provider(os.environ.get("JANE_BRAIN", _PROVIDER))
     return provider if provider in ALL_PROVIDERS else _PROVIDER
 
 
@@ -134,12 +134,12 @@ def _get_model() -> str:
     return (
         os.environ.get(env_var)
         or os.environ.get(legacy_var)
-        or _DEFAULT_MODELS.get(_PROVIDER, "claude-opus-4-6")
+        or _DEFAULT_MODELS.get(_PROVIDER, _DEFAULT_MODELS["claude"])
     )
 
 
 # How long to wait for a response before considering the brain stuck.
-# Claude Opus can think/use tools for extended periods — give it plenty of time.
+# Frontier brains can think/use tools for extended periods — give them time.
 RESPONSE_TIMEOUT_SECS = 900  # 15 minutes total
 # Chunk read interval: wait this long per read attempt before retrying.
 # Keeps the async loop responsive while allowing long brain computation.

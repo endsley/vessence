@@ -11,7 +11,7 @@ Two-stage self-improvement job:
     6. Codex traces logs to explain the root cause of each issue
     7. Writes a structured report to configs/transcript_review_report.md
 
-  Stage B (Claude, manual only with --apply-fixes):
+  Stage B (configured frontier provider, manual only with --apply-fixes):
     1. Reads Codex's report
     2. Validates each issue against the actual codebase
     3. For valid issues: implements a fix + writes a test
@@ -49,7 +49,6 @@ VESSENCE_DATA_HOME = Path(os.environ.get(
 LOG_DIR = VESSENCE_DATA_HOME / "logs"
 REPORT_PATH = VESSENCE_HOME / "configs" / "transcript_review_report.md"
 CODEX_BIN = "codex"
-CLAUDE_BIN = os.environ.get("CLAUDE_BIN", "/home/chieh/.local/bin/claude")
 PYTHON = "/home/chieh/google-adk-env/adk-venv/bin/python"
 
 logging.basicConfig(
@@ -193,7 +192,7 @@ The pipeline works like this:
     (timer, greeting, send message, weather, etc.) with a confidence score.
   Stage 2 (handler): a deterministic handler for that category processes the
     request directly (fast path). If it can't handle it, it escalates.
-  Stage 3 (Opus/Claude): full LLM brain handles complex/ambiguous requests.
+  Stage 3 (configured frontier brain): full LLM brain handles complex/ambiguous requests.
 
 There is also a pending_action_resolver that runs BEFORE Stage 1: if the
 previous turn left a follow-up question pending (Stage 2 or Stage 3), the
@@ -403,7 +402,7 @@ def write_codex_report(issues: list[dict], date_str: str) -> None:
     log.info("Report written to %s (%d issues)", REPORT_PATH, len(issues))
 
 
-# ─── Stage B: Claude validation + fix ────────────────────────────────────────
+# ─── Stage B: Frontier validation + fix ──────────────────────────────────────
 
 
 CLAUDE_FIX_PROMPT_TEMPLATE = """\
@@ -478,14 +477,14 @@ Report contents:
 
 
 def run_claude_fixes(timeout: int = 600) -> bool:
-    """Invoke Claude CLI to validate and fix issues from the report."""
+    """Invoke the configured frontier provider to validate and fix report issues."""
     if not REPORT_PATH.exists():
         log.warning("No report to process at %s", REPORT_PATH)
         return False
 
     report_content = REPORT_PATH.read_text(encoding="utf-8")
     if "No issues found" in report_content:
-        log.info("No issues in report — skipping Claude fixes")
+        log.info("No issues in report — skipping frontier fixes")
         return True
 
     prompt = CLAUDE_FIX_PROMPT_TEMPLATE.format(
@@ -493,30 +492,23 @@ def run_claude_fixes(timeout: int = 600) -> bool:
         report_content=report_content,
     )
 
-    log.info("Invoking Claude to validate and fix %s...", REPORT_PATH.name)
+    log.info("Invoking configured frontier provider to validate and fix %s...", REPORT_PATH.name)
     try:
-        result = subprocess.run(
-            [CLAUDE_BIN, "-p", "-", "--output-format", "text"],
-            input=prompt,
-            capture_output=True,
-            text=True,
+        from agent_skills.claude_cli_llm import completion_orchestrator
+        output = completion_orchestrator(
+            prompt,
+            max_tokens=4096,
             timeout=timeout,
             cwd=str(VESSENCE_HOME),
         )
-    except subprocess.TimeoutExpired:
-        log.error("Claude timed out after %ds", timeout)
-        return False
-    except FileNotFoundError:
-        log.error("Claude binary not found at %s", CLAUDE_BIN)
+    except Exception as exc:
+        log.error("Frontier provider failed: %s", exc)
         return False
 
-    output = result.stdout.strip()
+    output = output.strip()
     if output:
-        log.info("Claude output (%d chars): %s", len(output), output[:500])
-    if result.returncode != 0:
-        log.warning("Claude exited with code %d: %s",
-                    result.returncode, result.stderr[:500] if result.stderr else "")
-    return result.returncode == 0
+        log.info("Frontier provider output (%d chars): %s", len(output), output[:500])
+    return True
 
 
 # ─── Main ────────────────────────────────────────────────────────────────────
@@ -532,12 +524,12 @@ def main() -> int:
     parser.add_argument(
         "--apply-fixes",
         action="store_true",
-        help="After writing the report, run Claude to validate issues and apply code fixes.",
+        help="After writing the report, run the configured frontier provider to validate issues and apply code fixes.",
     )
     parser.add_argument(
         "--skip-fixes",
         action="store_true",
-        help="Run Codex review only, skip Claude fixes. This is the default.",
+        help="Run Codex review only, skip frontier-provider fixes. This is the default.",
     )
     parser.add_argument(
         "--codex-timeout",
@@ -549,7 +541,7 @@ def main() -> int:
         "--claude-timeout",
         type=int,
         default=600,
-        help="Claude CLI timeout in seconds.",
+        help="Frontier provider timeout in seconds.",
     )
     args = parser.parse_args()
 
@@ -579,7 +571,7 @@ def main() -> int:
     if args.skip_fixes or not args.apply_fixes or not issues:
         return 0
 
-    # Stage B: Claude validation + fixes (manual --apply-fixes only)
+    # Stage B: frontier-provider validation + fixes (manual --apply-fixes only)
     ok = run_claude_fixes(timeout=args.claude_timeout)
     return 0 if ok else 1
 

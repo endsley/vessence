@@ -1,8 +1,8 @@
 """nightly_code_auditor.py — autonomous code audit + fix loop.
 
 Runs nightly during the sleep window (1-7 AM). Picks one module from the
-whitelist (rotating), generates stress tests for it via Claude Opus,
-runs them, diagnoses failures, and commits fixes.
+whitelist (rotating), generates stress tests with the configured frontier
+provider, runs them, diagnoses failures, and commits fixes.
 
 Safety rails:
   - Always works on a git branch (auto-audit/YYYY-MM-DD), never master
@@ -38,7 +38,6 @@ AUDIT_LOG_PATH = VESSENCE_HOME / "configs" / "auto_audit_log.md"
 FAILURE_LOG_PATH = VESSENCE_HOME / "configs" / "audit_failures.md"
 TEST_DIR = VESSENCE_HOME / "test_code"
 
-CLAUDE_BIN = os.environ.get("CLAUDE_BIN", "/home/chieh/.local/bin/claude")
 TIME_BUDGET_SEC = int(os.environ.get("AUDIT_TIME_BUDGET_SEC", "1800"))  # 30 min
 MAX_FIX_ATTEMPTS = 3
 
@@ -168,24 +167,25 @@ def commit_changes(message: str) -> None:
     git("commit", "-m", message, "--no-verify")
 
 
-# ── Claude subprocess helper ─────────────────────────────────────────────────
+# ── Frontier subprocess helper ───────────────────────────────────────────────
 
 
 def run_claude(prompt: str, timeout: int = 600) -> str:
-    """Invoke Claude CLI with a prompt, return stdout."""
+    """Invoke the configured frontier provider with a prompt, return stdout.
+
+    Kept under the legacy name because the audit phases call it directly.
+    The provider now follows JANE_BRAIN (opus/claude, codex/openai, gemini).
+    """
     try:
-        r = subprocess.run(
-            [CLAUDE_BIN, "-p", prompt, "--output-format", "text",
-             "--model", "claude-opus-4-6"],
-            capture_output=True, text=True, timeout=timeout,
-            env={**os.environ, "PYTHONPATH": str(VESSENCE_HOME)},
+        from agent_skills.claude_cli_llm import completion_orchestrator
+        return completion_orchestrator(
+            prompt,
+            max_tokens=4096,
+            timeout=timeout,
+            cwd=str(VESSENCE_HOME),
         )
-        return r.stdout
-    except subprocess.TimeoutExpired:
-        logger.warning("Claude call timed out after %ds", timeout)
-        return ""
     except Exception as e:
-        logger.warning("Claude call failed: %s", e)
+        logger.warning("Frontier LLM call failed: %s", e)
         return ""
 
 
@@ -193,7 +193,7 @@ def run_claude(prompt: str, timeout: int = 600) -> str:
 
 
 def phase1_generate_tests(module: dict, target_test_path: Path) -> bool:
-    """Have Claude write a pytest file with edge cases for this module."""
+    """Have the configured frontier provider write pytest edge cases."""
     module_path = VESSENCE_HOME / module["path"]
     if not module_path.exists():
         logger.warning("Target module missing: %s", module_path)
@@ -277,7 +277,7 @@ def phase2_run_tests(test_path: Path) -> tuple[bool, str]:
 
 
 def phase3_attempt_fix(module: dict, test_output: str, attempt: int) -> bool:
-    """Have Claude diagnose the failure and patch the module. Return True if it edited."""
+    """Have the configured frontier provider diagnose and patch the module."""
     module_path = VESSENCE_HOME / module["path"]
     code = module_path.read_text()
 

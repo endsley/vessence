@@ -3,7 +3,7 @@
 topic_memory.py — Topic-based short-term memory system.
 
 Called asynchronously after each turn (fire-and-forget, separate process).
-Uses Haiku to classify topic + update/create summary in ChromaDB.
+Uses the configured utility LLM to classify topic + update/create summary in ChromaDB.
 
 Usage:
     # From Python (fire-and-forget):
@@ -92,15 +92,12 @@ def _find_nearest_topics(collection, query_text: str, n_results: int = 5) -> lis
     return topics
 
 
-def _call_claude(user_msg: str, assistant_msg: str, existing_topics: list[dict]) -> dict:
+def _call_utility_llm(user_msg: str, assistant_msg: str, existing_topics: list[dict]) -> dict:
     """
-    Use claude CLI (--print) to classify topic + produce updated summary.
-    Inherits OAuth from the user's Claude Code session — no API key needed.
+    Use the configured utility LLM to classify topic + produce updated summary.
 
     Returns: {"action": "update"|"create"|"skip", "topic_id": "...", "topic_title": "...", "summary": "..."}
     """
-    import subprocess
-
     topic_list = ""
     if existing_topics:
         for t in existing_topics:
@@ -130,16 +127,8 @@ Rules:
 Respond with ONLY valid JSON (no markdown, no explanation):
 {{"action": "update"|"create"|"skip", "topic_id": "existing_id_or_null", "topic_title": "short title", "summary": "the summary text"}}"""
 
-    claude_bin = os.environ.get("CLAUDE_BIN", os.path.expanduser("~/.local/bin/claude"))
-    result = subprocess.run(
-        [claude_bin, "--print", "--model", "haiku", prompt],
-        capture_output=True, text=True, timeout=30,
-    )
-
-    if result.returncode != 0:
-        raise RuntimeError(f"claude --print failed: {result.stderr[:200]}")
-
-    text = result.stdout.strip()
+    from agent_skills.claude_cli_llm import completion_utility
+    text = completion_utility(prompt, max_tokens=1024, timeout=30).strip()
     # Strip markdown code fences if present
     if text.startswith("```"):
         text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
@@ -198,9 +187,9 @@ def process_turn(user_msg: str, assistant_msg: str, source: str = "unknown"):
     nearest_topics = _find_nearest_topics(collection, query, n_results=3)
 
     try:
-        result = _call_claude(user_msg, assistant_msg, nearest_topics)
+        result = _call_utility_llm(user_msg, assistant_msg, nearest_topics)
     except Exception as e:
-        logger.error(f"Haiku call failed: {e}")
+        logger.error(f"Utility LLM call failed: {e}")
         return
 
     action = result.get("action", "skip")

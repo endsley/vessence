@@ -254,22 +254,44 @@ QUEUE_PAUSE_BETWEEN_SECS = 5      # pause between consecutive prompt runs
 
 # ── LLM Provider Strategy ────────────────────────────────────────────────────
 #
-# JANE_BRAIN determines the primary provider. Each provider has a "smart" model
-# (for Jane, Amber, user-facing tasks) and a "cheap" model (for background tasks
-# like archivist, janitor, librarian). Users only need their subscription — no
-# separate API keys required for the CLI-based providers.
+# JANE_BRAIN is the single frontier-provider knob. User-facing aliases are
+# accepted so Chieh can set it to "opus", "codex", or "gemini" without caring
+# about the internal provider names used by older code.
 #
 # Provider    | Smart (Jane/Amber)        | Cheap (background)        | CLI
 # ------------|---------------------------|---------------------------|----------
-# claude      | claude-sonnet-4-6         | claude-haiku-4-5-20251001 | claude
-# openai      | gpt-4o                   | gpt-4o-mini               | codex
+# claude/opus | claude-opus-4-6           | claude-haiku-4-5-20251001 | claude
+# openai/codex| gpt-5.4                  | gpt-5.4-mini              | codex
 # gemini      | gemini-2.5-pro           | gemini-2.5-flash          | gemini
 #
-_PROVIDER = os.getenv("JANE_BRAIN", "claude").lower()
+_PROVIDER_ALIASES = {
+    "anthropic": "claude",
+    "claude": "claude",
+    "opus": "claude",
+    "openai": "openai",
+    "codex": "openai",
+    "gpt": "openai",
+    "google": "gemini",
+    "gemini": "gemini",
+}
+
+
+def normalize_frontier_provider(value: str | None) -> str:
+    """Normalize user-facing frontier provider aliases.
+
+    Canonical internal names remain ``claude``, ``openai``, and ``gemini`` for
+    compatibility with older settings/UI code. ``openai`` means "use the Codex
+    CLI" in this codebase.
+    """
+    raw = (value or "claude").strip().lower()
+    return _PROVIDER_ALIASES.get(raw, raw)
+
+
+_PROVIDER = normalize_frontier_provider(os.getenv("JANE_BRAIN", "claude"))
 
 PROVIDER_MODELS = {
-    "claude":  {"smart": "claude-sonnet-4-6",   "cheap": "claude-haiku-4-5-20251001",  "cli": "claude"},
-    "openai":  {"smart": "gpt-4o",              "cheap": "gpt-4o-mini",                "cli": "codex"},
+    "claude":  {"smart": "claude-opus-4-6",     "cheap": "claude-haiku-4-5-20251001",  "cli": "claude"},
+    "openai":  {"smart": "gpt-5.4",             "cheap": "gpt-5.4-mini",               "cli": "codex"},
     "gemini":  {"smart": "gemini-2.5-pro",      "cheap": "gemini-2.5-flash",           "cli": "gemini"},
 }
 
@@ -301,6 +323,14 @@ PROVIDER_CLI = os.getenv("PROVIDER_CLI", _models["cli"])
 # model knob. `JANE_BRAIN_WEB_MODEL` remains only as a legacy fallback.
 WEB_CHAT_MODEL = _provider_model_override() or os.environ.get("JANE_BRAIN_WEB_MODEL", SMART_MODEL)
 
+# Frontier-tier tasks that previously hardcoded Claude Opus should use these
+# values. Switching JANE_BRAIN between opus/claude, codex/openai, and gemini
+# changes the provider for janitor verification, archival validation, code
+# audits, and other non-local high-judgment work.
+FRONTIER_PROVIDER = _PROVIDER
+FRONTIER_MODEL = SMART_MODEL
+FRONTIER_CLI = PROVIDER_CLI
+
 # Legacy aliases (backward compat)
 OLLAMA_BASE_URL       = os.getenv("LOCAL_LLM_BASE_URL", "http://localhost:11434")
 # LOCAL_LLM_MODEL is kept only as a backward-compatible import alias.
@@ -327,9 +357,9 @@ ARCHIVIST_SMART_MODEL = os.getenv("ARCHIVIST_SMART_MODEL", CHEAP_MODEL)
 ARCHIVIST_SMART_MODEL_LITELLM = f"ollama/{ARCHIVIST_SMART_MODEL}" if "/" not in ARCHIVIST_SMART_MODEL else ARCHIVIST_SMART_MODEL
 ARCHIVIST_SMART_AFTER_HOUR = int(os.getenv("ARCHIVIST_SMART_AFTER_HOUR", "12"))
 ARCHIVIST_SMART_IDLE_SECS = int(os.getenv("ARCHIVIST_SMART_IDLE_SECS", "3600"))
-JANITOR_LLM_MODEL       = CHEAP_MODEL
+JANITOR_LLM_MODEL       = FRONTIER_MODEL
 FALLBACK_GEMINI_MODEL   = "gemini-2.5-flash"
-FALLBACK_OPENAI_MODEL   = "gpt-4o"
+FALLBACK_OPENAI_MODEL   = "gpt-5.4-mini"
 
 # ── TTS (edge-tts) ───────────────────────────────────────────────────────────
 TTS_ENABLED      = os.getenv("TTS_ENABLED", "1") == "1"

@@ -16,7 +16,7 @@ from memory.v1.conversation_manager import ConversationManager
 from memory.v1.memory_retrieval import invalidate_memory_summary_cache
 from llm_brain.v1.brain_adapters import BrainAdapterError, ExecutionProfile, build_execution_profile, get_brain_adapter, resolve_timeout_seconds
 from context_builder.v1.context_builder import build_jane_context_async
-from jane.config import ENV_FILE_PATH, LOGS_DIR
+from jane.config import ENV_FILE_PATH, LOGS_DIR, PROVIDER_MODELS, normalize_frontier_provider
 from llm_brain.v1.persistent_gemini import get_gemini_persistent_manager
 from jane.session_summary import format_session_summary, load_session_summary, update_session_summary_async
 from jane_web.broadcast import StreamBroadcaster
@@ -925,11 +925,11 @@ def _get_brain_name() -> str:
                 continue
             key, value = line.split("=", 1)
             if key.strip() == "JANE_BRAIN":
-                provider = value.strip().lower()
+                provider = normalize_frontier_provider(value.strip())
                 if provider in {"claude", "gemini", "openai"}:
                     os.environ["JANE_BRAIN"] = provider
                     return provider
-    return os.environ.get("JANE_BRAIN", "gemini").lower()
+    return normalize_frontier_provider(os.environ.get("JANE_BRAIN", "gemini"))
 
 
 def _session_log_id(session_id: str | None) -> str:
@@ -968,19 +968,13 @@ def _get_web_chat_model(brain_name: str) -> str:
         "openai": "JANE_MODEL_OPENAI",
         "codex": "JANE_MODEL_OPENAI",
     }
-    defaults = {
-        "claude": "claude-opus-4-6",
-        "gemini": "gemini-2.5-pro",
-        "openai": "gpt-5.4",
-        "codex": "gpt-5.4",
-    }
-    normalized = (brain_name or "").lower()
+    normalized = normalize_frontier_provider(brain_name)
     env_var = env_vars.get(normalized)
     if env_var:
         configured = os.environ.get(env_var, "").strip()
         if configured:
             return configured
-    return defaults.get(normalized, defaults["claude"])
+    return PROVIDER_MODELS.get(normalized, PROVIDER_MODELS["claude"])["smart"]
 
 
 def _prune_stale_sessions(now: float | None = None) -> None:

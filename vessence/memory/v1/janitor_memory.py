@@ -24,7 +24,7 @@ from jane.config import (
     FORGETTABLE_MAX_AGE_DAYS, JANITOR_REPORT, LOGS_DIR,
     JANITOR_LLM_MODEL, OPENAI_API_URL,
     FALLBACK_GEMINI_MODEL, FALLBACK_OPENAI_MODEL, VAULT_DIR,
-    DYNAMIC_QUERY_MARKERS_PATH,
+    DYNAMIC_QUERY_MARKERS_PATH, FRONTIER_PROVIDER,
 )
 
 load_dotenv(ENV_FILE_PATH)
@@ -37,7 +37,7 @@ JANITOR_LOG = JANITOR_REPORT
 VAULT_IMAGES_DIR = os.path.join(VAULT_DIR, "images")
 
 
-MEMORY_JANITOR_MODEL = "claude-opus-4-6"  # Memory is too important for a cheap model
+MEMORY_JANITOR_MODEL = JANITOR_LLM_MODEL  # Uses configured frontier provider/model.
 MAX_DEDUP_THEMES_PER_RUN = 150
 MAX_CODE_MEMORIES_PER_RUN = 20  # Limit per night to avoid orchestrator timeout
 CODE_MEMORY_REVERIFY_DAYS = 14
@@ -81,22 +81,21 @@ def _utcnow_iso() -> str:
 
 
 def _llm_json(prompt: str) -> dict:
-    """Call Claude Opus via CLI for JSON output. Memory consolidation uses
-    Opus 4.6 to avoid corruption from cheaper models."""
+    """Call the configured frontier provider via CLI for JSON output."""
     system_msg = (
         "Return only valid JSON. You are a memory curator. "
         "Only merge facts that are truly redundant — describing the exact same knowledge. "
         "Non-redundant facts MUST be preserved as-is. When in doubt, do NOT merge."
     )
 
-    # --- Claude CLI with Opus (primary — uses Pro/Max subscription) ---
+    # --- Primary frontier CLI (JANE_BRAIN: opus/claude, codex/openai, gemini) ---
     try:
-        from agent_skills.claude_cli_llm import completion
-        text = completion(
+        from agent_skills.claude_cli_llm import completion_orchestrator
+        text = completion_orchestrator(
             f"{system_msg}\n\n{prompt}",
-            model=MEMORY_JANITOR_MODEL,
             max_tokens=4096,
             timeout=180,
+            cwd=_VESSENCE_HOME,
         )
         # Strip markdown code fences if present
         if text.startswith("```"):
@@ -105,7 +104,12 @@ def _llm_json(prompt: str) -> dict:
             text = "\n".join(lines)
         return json.loads(text)
     except Exception as e:
-        logger.warning(f"Claude Opus janitor call failed: {e}, trying Gemini fallback...")
+        logger.warning(
+            "Configured frontier janitor call failed provider=%s model=%s: %s; trying Gemini fallback...",
+            FRONTIER_PROVIDER,
+            MEMORY_JANITOR_MODEL,
+            e,
+        )
 
     # --- Gemini (fallback) ---
     google_key = os.getenv("GOOGLE_API_KEY")
@@ -125,11 +129,11 @@ def _llm_json(prompt: str) -> dict:
         except Exception as e:
             logger.warning(f"Gemini janitor call failed: {e}")
 
-    raise ValueError("Claude CLI failed and no GOOGLE_API_KEY available as fallback")
+    raise ValueError("Configured frontier CLI failed and no GOOGLE_API_KEY available as fallback")
 
 
 def _llm_text(prompt: str, max_chars: int | None = None) -> str:
-    """Call Claude Opus via CLI for compact text output."""
+    """Call the configured frontier provider via CLI for compact text output."""
     system_msg = (
         "Return plain text only. You are a careful memory curator. "
         "Preserve only durable facts, decisions, root causes, fixes, lessons, "
@@ -137,19 +141,24 @@ def _llm_text(prompt: str, max_chars: int | None = None) -> str:
     )
 
     try:
-        from agent_skills.claude_cli_llm import completion
-        text = completion(
+        from agent_skills.claude_cli_llm import completion_orchestrator
+        text = completion_orchestrator(
             f"{system_msg}\n\n{prompt}",
-            model=MEMORY_JANITOR_MODEL,
             max_tokens=2048,
             timeout=180,
+            cwd=_VESSENCE_HOME,
         ).strip()
         if text.startswith("```"):
             lines = [l for l in text.split("\n") if not l.startswith("```")]
             text = "\n".join(lines).strip()
         return text[:max_chars].strip() if max_chars else text
     except Exception as e:
-        logger.warning("Claude Opus janitor text call failed: %s", e)
+        logger.warning(
+            "Configured frontier janitor text call failed provider=%s model=%s: %s",
+            FRONTIER_PROVIDER,
+            MEMORY_JANITOR_MODEL,
+            e,
+        )
     return ""
 
 
@@ -906,7 +915,7 @@ def run_janitor(max_sessions: int = 2, max_topics: int = 3):
         logger.warning(f"Could not write consolidation history: {e}")
 
     # Verify code-referencing memories against the real codebase.
-    # Codex audits → Claude validates + fixes stale entries.
+    # Codex audits → configured frontier provider validates + fixes stale entries.
     try:
         verify_result = verify_code_memories()
         logger.info("Memory verification: %d checked, %d stale, %d fixed",
@@ -933,8 +942,9 @@ def run_janitor(max_sessions: int = 2, max_topics: int = 3):
 # Memories about Vessence's own code (file paths, model names, cron schedules,
 # architecture claims) drift fast because we change the code daily. This step
 # loops through code-referencing memories ONE AT A TIME, sending each to Codex
-# individually to keep token cost low per call. Stale findings go to Claude
-# for validation before editing ChromaDB.
+# individually to keep token cost low per call. Stale findings go to the
+# configured frontier provider (JANE_BRAIN: opus/codex/gemini) for validation
+# before editing ChromaDB.
 
 import re as _re
 import subprocess as _sp
@@ -947,7 +957,6 @@ _CODE_INDICATOR_RE = _re.compile(
 )
 
 _CODEX_BIN = "codex"
-_CLAUDE_BIN = os.environ.get("CLAUDE_BIN", "claude")
 _VESSENCE_HOME = str(Path(__file__).resolve().parents[2])
 
 
@@ -1058,13 +1067,13 @@ Output EXACTLY one JSON object, no markdown fences:
         return {"verdict": "ERROR", "explanation": f"json_decode: {raw[:200]}"}
 
 
-def _apply_fix_via_claude(mem: dict, codex_finding: dict, col,
-                          claude_timeout: int = 7200) -> dict:
-    """Send one Codex finding to Claude for validation, apply fix if confirmed.
+def _apply_fix_via_frontier(mem: dict, codex_finding: dict, col,
+                            frontier_timeout: int = 7200) -> dict:
+    """Send one Codex finding to the frontier provider and apply confirmed fixes.
 
     Returns {"action": "updated|deleted|kept|error", "reason": ...}.
     """
-    claude_prompt = f"""\
+    frontier_prompt = f"""\
 Codex flagged this ChromaDB memory as stale or partially wrong.
 
 MEMORY (id={mem['id'][:12]}, topic={mem['topic']}):
@@ -1085,18 +1094,17 @@ Output EXACTLY one JSON object, no markdown fences:
   "reason": "brief explanation"}}
 """
     try:
-        result = _sp.run(
-            [_CLAUDE_BIN, "-p", "-", "--output-format", "text"],
-            input=claude_prompt,
-            capture_output=True, text=True,
-            timeout=claude_timeout,
+        from agent_skills.claude_cli_llm import completion_orchestrator
+        raw = completion_orchestrator(
+            frontier_prompt,
+            max_tokens=4096,
+            timeout=frontier_timeout,
             cwd=_VESSENCE_HOME,
-        )
-        raw = result.stdout.strip()
-    except _sp.TimeoutExpired:
-        return {"action": "error", "reason": "claude_timeout"}
-    except FileNotFoundError:
-        return {"action": "error", "reason": "claude_not_found"}
+        ).strip()
+    except TimeoutError:
+        return {"action": "error", "reason": "frontier_timeout"}
+    except Exception as e:
+        return {"action": "error", "reason": f"frontier_failed: {e}"}
 
     json_match = _re.search(r'\{[\s\S]*\}', raw)
     if not json_match:
@@ -1158,15 +1166,15 @@ Output EXACTLY one JSON object, no markdown fences:
 
 def verify_code_memories(
     codex_timeout: int = 7200,
-    claude_timeout: int = 7200,
+    frontier_timeout: int = 7200,
     max_memories_per_run: int | None = MAX_CODE_MEMORIES_PER_RUN,
 ) -> dict:
     """Verify code-referencing memories one at a time against the real codebase.
 
     Loops through ALL code-referencing memories in user_memories, verifying
     each individually via Codex. Only memories flagged STALE or PARTIAL get
-    sent to Claude for validation and correction. This keeps per-call token
-    cost low while achieving full coverage in a single nightly run.
+    sent to the configured frontier provider for validation and correction.
+    This keeps per-call token cost low while achieving full coverage.
     """
     chroma_client = get_chroma_client(path=DB_PATH)
     try:
@@ -1273,10 +1281,15 @@ def verify_code_memories(
             continue
 
         stale_count += 1
-        logger.info("verify_code_memories: [%d/%d] Codex says %s — sending to Claude",
-                     i + 1, len(code_mems), verdict)
+        logger.info(
+            "verify_code_memories: [%d/%d] Codex says %s — sending to frontier provider %s",
+            i + 1,
+            len(code_mems),
+            verdict,
+            FRONTIER_PROVIDER,
+        )
 
-        result = _apply_fix_via_claude(mem, finding, col, claude_timeout=claude_timeout)
+        result = _apply_fix_via_frontier(mem, finding, col, frontier_timeout=frontier_timeout)
         act = result.get("action", "error")
         if act == "updated":
             fixed += 1

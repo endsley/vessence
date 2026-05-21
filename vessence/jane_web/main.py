@@ -96,7 +96,7 @@ from collections import defaultdict
 from time import monotonic
 
 from dotenv import load_dotenv
-from jane.config import ENV_FILE_PATH, VAULT_DIR, TOOLS_DIR, ESSENCES_DIR, VESSENCE_DATA_HOME, ADD_FACT_SCRIPT, ADK_VENV_PYTHON, LOGS_DIR, PROMPT_LIST_PATH, get_chroma_client, VAULT_ENC_PATH, CHALLENGE_PATH
+from jane.config import ENV_FILE_PATH, VAULT_DIR, TOOLS_DIR, ESSENCES_DIR, VESSENCE_DATA_HOME, ADD_FACT_SCRIPT, ADK_VENV_PYTHON, LOGS_DIR, PROMPT_LIST_PATH, PROVIDER_MODELS, get_chroma_client, normalize_frontier_provider, VAULT_ENC_PATH, CHALLENGE_PATH
 from agent_skills.secret_store import SecretStore
 
 
@@ -831,7 +831,7 @@ def _get_essence_runtime():
 
 @app.get("/health")
 async def health():
-    brain = os.getenv("JANE_BRAIN", "gemini")
+    brain = normalize_frontier_provider(os.getenv("JANE_BRAIN", "gemini"))
     return {"status": "ok", "service": "jane", "brain": brain}
 
 
@@ -843,7 +843,7 @@ async def healthz():
     retrying a TransientServerError is worth the round-trip. Replies fast
     (no LLM calls) so it's safe to poll during rolling restarts.
     """
-    brain = os.getenv("JANE_BRAIN", "gemini")
+    brain = normalize_frontier_provider(os.getenv("JANE_BRAIN", "gemini"))
     warm = "unknown"
     model = ""
     try:
@@ -2451,9 +2451,8 @@ _AVAILABLE_MODELS = {
 }
 
 _DEFAULT_MODEL = {
-    "claude": "claude-opus-4-6",
-    "gemini": "gemini-2.5-pro",
-    "openai": "gpt-5.4",
+    provider: cfg["smart"]
+    for provider, cfg in PROVIDER_MODELS.items()
 }
 
 _ENV_VAR_FOR_MODEL = {
@@ -2466,7 +2465,7 @@ _ENV_VAR_FOR_MODEL = {
 @app.get("/api/settings/models")
 async def get_model_settings(_=Depends(require_auth)):
     """Return current model config, available options, and 3-tier architecture."""
-    provider = os.environ.get("JANE_BRAIN", "claude").lower()
+    provider = normalize_frontier_provider(os.environ.get("JANE_BRAIN", "claude"))
     default = _DEFAULT_MODEL.get(provider, _DEFAULT_MODEL["claude"])
     env_var = _ENV_VAR_FOR_MODEL.get(provider, _ENV_VAR_FOR_MODEL["claude"])
     legacy_var = f"BRAIN_HEAVY_{provider.upper()}"
@@ -2500,7 +2499,7 @@ async def get_model_settings(_=Depends(require_auth)):
 async def save_model_settings(request: Request, _=Depends(require_auth)):
     """Save model selection to .env and restart the standing brain."""
     body = await request.json()
-    provider = os.environ.get("JANE_BRAIN", "claude").lower()
+    provider = normalize_frontier_provider(os.environ.get("JANE_BRAIN", "claude"))
     env_var = _ENV_VAR_FOR_MODEL.get(provider, _ENV_VAR_FOR_MODEL["claude"])
 
     model = body.get("model")
@@ -5574,7 +5573,7 @@ def _attempt_claude_token_refresh() -> bool:
 
 
 def _cli_login_candidates(provider: str) -> list[list[str]]:
-    provider = (provider or "").lower()
+    provider = normalize_frontier_provider(provider)
     if provider == "claude":
         # Claude: self-managed OAuth (bypass CLI, handled in /api/cli-login)
         return [["claude", "auth", "login"]]
@@ -5600,7 +5599,7 @@ def _mask_email(value: str) -> str:
 
 
 def _provider_auth_status_details(provider: str) -> dict:
-    provider = (provider or "").lower()
+    provider = normalize_frontier_provider(provider)
     now = time.time()
     if provider in _auth_status_cache:
         ts, details = _auth_status_cache[provider]
@@ -6020,7 +6019,7 @@ async def cli_login(request: Request):
     global _cli_login_process, _cli_login_authenticated, _cli_login_provider
     global _cli_login_local_port, _cli_login_oauth_state
     body = await request.json()
-    provider = body.get("provider", os.environ.get("JANE_BRAIN", "gemini"))
+    provider = normalize_frontier_provider(body.get("provider", os.environ.get("JANE_BRAIN", "gemini")))
 
     # Kill any previous login process
     _terminate_cli_login_process()
@@ -6117,7 +6116,7 @@ async def cli_login_code(request: Request):
     global _cli_login_authenticated, _cli_login_local_port
     body = await request.json()
     code = (body.get("code") or "").strip()
-    provider = (body.get("provider") or _cli_login_provider or os.environ.get("JANE_BRAIN", "gemini")).lower()
+    provider = normalize_frontier_provider(body.get("provider") or _cli_login_provider or os.environ.get("JANE_BRAIN", "gemini"))
 
     if not code:
         return JSONResponse({"ok": False, "error": "Authentication code is required."}, status_code=400)
@@ -6300,7 +6299,7 @@ async def cli_login_code(request: Request):
 async def cli_login_status(request: Request):
     """Check if the CLI login completed."""
     global _cli_login_process, _cli_login_authenticated
-    provider = (_cli_login_provider or os.environ.get("JANE_BRAIN", "gemini")).lower()
+    provider = normalize_frontier_provider(_cli_login_provider or os.environ.get("JANE_BRAIN", "gemini"))
     if _cli_login_authenticated:
         response_data = {"authenticated": True, "debug": _cli_login_debug_snapshot(provider)}
     elif _provider_auth_status(provider):

@@ -121,7 +121,7 @@ def build_context():
 Generated: {now} | Auto-updated nightly by startup_code/regenerate_jane_context.py
 
 === SYSTEM IDENTITY ===
-- Jane (Jane#3353): Claude Code (claude-opus-4-6). Sole agent — reasoning, code, systems, research. Direct executor, not a delegator.
+- Jane (Jane#3353): configured frontier brain from JANE_BRAIN (opus/codex/gemini). Sole agent — reasoning, code, systems, research. Direct executor, not a delegator.
 - Tools: Capabilities Jane can invoke (vault/file access, music playback, daily briefing, etc.)
 - Essences: Memories + modes of operation Jane can load to become a specialist (e.g., tax accountant)
 - User profile: see $VESSENCE_DATA_HOME/user_profile.md

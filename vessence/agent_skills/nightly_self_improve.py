@@ -698,8 +698,8 @@ JOBS = [
     ),
     # Memory Janitor runs LAST — purges expired short-term memories,
     # deduplicates long-term entries, archives conversation themes,
-    # and cleans stale log files. Uses Claude Opus for dedup merging
-    # so it's expensive; once per night is sufficient.
+    # and cleans stale log files. Uses the configured frontier provider for
+    # dedup merging, so it's expensive; once per night is sufficient.
     (
         "Memory Janitor",
         "memory/v1/janitor_memory.py",
