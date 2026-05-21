@@ -52,6 +52,7 @@ wake_word/samples/*.wav
 # Distribution / installer binaries (NEVER commit)
 dist/
 marketing_site/downloads/*.apk
+marketing_site/downloads/*.exe
 marketing_site/downloads/*.zip
 marketing_site/downloads/*.tar.gz
 marketing_site/downloads/vessence-mac-staging/
@@ -104,4 +105,3 @@ vessence-data/
 *.sqlite3
 credentials/
 gmail_token.json
-
