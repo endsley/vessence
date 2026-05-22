@@ -186,14 +186,25 @@ class MainActivity : ComponentActivity() {
                     readyAtMs = SystemClock.elapsedRealtime()
                     DiagnosticReporter.voiceFlow("stt_ready", timingDetails())
                     // Short beep so the user knows STT is listening.
-                    // AlwaysListeningService (wake word) only vibrates, so
-                    // this is the sole audio cue on every STT path.
+                    // Use STREAM_MUSIC so the cue follows the same audible path
+                    // as Jane's TTS instead of disappearing when notification
+                    // volume or silent mode suppresses notification sounds.
                     runCatching {
                         val tone = android.media.ToneGenerator(
-                            android.media.AudioManager.STREAM_NOTIFICATION, 70)
+                            android.media.AudioManager.STREAM_MUSIC, 80)
                         tone.startTone(android.media.ToneGenerator.TONE_PROP_BEEP, 100)
                         android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(
                             { runCatching { tone.release() } }, 250)
+                    }.onFailure {
+                        DiagnosticReporter.voiceFlow(
+                            "stt_ready_tone_failed",
+                            timingDetails(
+                                mapOf(
+                                    "exception_class" to it.javaClass.name,
+                                    "message" to (it.message ?: ""),
+                                )
+                            )
+                        )
                     }
                     SttResultBus.onListening?.invoke(true)
                 }

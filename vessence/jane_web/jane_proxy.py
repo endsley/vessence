@@ -812,6 +812,9 @@ CODE_MAP_KEYWORDS = (
     # Auto-evolved from daily conversations
     "term",
     "working",
+    # Auto-evolved from daily conversations
+    "model",
+    "language",
 )
 
 
