@@ -37,6 +37,8 @@ data class BriefingUiState(
     val categories: List<String> = emptyList(),
     val selectedCategory: String = "All",
     val isLoading: Boolean = false,
+    val isLoadingMore: Boolean = false,
+    val hasMoreArticles: Boolean = false,
     val isLoadingArchive: Boolean = false,
     val isLoadingMarketplace: Boolean = false,
     val error: String? = null,
@@ -183,7 +185,9 @@ class BriefingViewModel(application: Application) : AndroidViewModel(application
             try {
                 val previousIds = _state.value.articles.map { it.id }.toSet()
 
-                val (articles, categories) = fetchArticles()
+                val page = fetchArticles()
+                val articles = page.articles
+                val categories = page.categories
                 val topics = fetchTopics()
                 val timestamp = SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date())
                 _state.value = _state.value.copy(
@@ -191,6 +195,7 @@ class BriefingViewModel(application: Application) : AndroidViewModel(application
                     topics = topics,
                     categories = categories,
                     selectedCategory = "All",
+                    hasMoreArticles = page.hasMore,
                     isLoading = false,
                     lastUpdated = timestamp,
                 )
@@ -565,16 +570,24 @@ class BriefingViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    private suspend fun fetchArticles(): Pair<List<BriefingArticle>, List<String>> = withContext(Dispatchers.IO) {
-        val request = Request.Builder()
-            .url("$baseUrl/api/briefing/articles")
-            .build()
+    data class ArticlesPage(
+        val articles: List<BriefingArticle>,
+        val categories: List<String>,
+        val hasMore: Boolean,
+    )
+
+    private suspend fun fetchArticles(
+        limit: Int = PAGE_SIZE,
+        offset: Int = 0,
+    ): ArticlesPage = withContext(Dispatchers.IO) {
+        val url = "$baseUrl/api/briefing/articles?limit=$limit&offset=$offset"
+        val request = Request.Builder().url(url).build()
         val response = client.newCall(request).execute()
         if (!response.isSuccessful) throw Exception("HTTP ${response.code}")
         val body = response.body?.string() ?: "{}"
-        // API returns {"status": "ok", "cards": [...], "card_count": N, "categories": [...]}
         val parsed = gson.fromJson(body, com.google.gson.JsonObject::class.java)
-        val cardsArray = parsed.getAsJsonArray("cards") ?: return@withContext Pair(emptyList(), emptyList())
+        val cardsArray = parsed.getAsJsonArray("cards")
+            ?: return@withContext ArticlesPage(emptyList(), emptyList(), false)
         val articlesType = object : TypeToken<List<BriefingArticle>>() {}.type
         val articles: List<BriefingArticle> = gson.fromJson(cardsArray, articlesType)
         val categoriesArray = parsed.getAsJsonArray("categories")
@@ -582,7 +595,33 @@ class BriefingViewModel(application: Application) : AndroidViewModel(application
             val catType = object : TypeToken<List<String>>() {}.type
             gson.fromJson(categoriesArray, catType)
         } else emptyList()
-        Pair(articles, categories)
+        val hasMore = parsed.get("has_more")?.takeIf { !it.isJsonNull }?.asBoolean ?: false
+        ArticlesPage(articles, categories, hasMore)
+    }
+
+    fun loadMoreArticles() {
+        val s = _state.value
+        if (s.isLoadingMore || !s.hasMoreArticles || s.viewingArchiveDate != null) return
+        viewModelScope.launch {
+            _state.value = _state.value.copy(isLoadingMore = true)
+            try {
+                val page = fetchArticles(limit = PAGE_SIZE, offset = _state.value.articles.size)
+                val existingIds = _state.value.articles.map { it.id }.toSet()
+                val merged = _state.value.articles + page.articles.filter { it.id !in existingIds }
+                _state.value = _state.value.copy(
+                    articles = merged,
+                    hasMoreArticles = page.hasMore,
+                    isLoadingMore = false,
+                )
+            } catch (e: Exception) {
+                android.util.Log.w("BriefingViewModel", "loadMoreArticles failed", e)
+                _state.value = _state.value.copy(isLoadingMore = false)
+            }
+        }
+    }
+
+    companion object {
+        private const val PAGE_SIZE = 50
     }
 
     private suspend fun fetchMarketplaceSearchCards(): List<MarketplaceSearchCard> = withContext(Dispatchers.IO) {

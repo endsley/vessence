@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -52,11 +53,16 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -106,6 +112,21 @@ fun BriefingScreen(
     val showingMarketplace = state.selectedTab == "Marketplace" && !state.viewingSaved
     var bottomSheetArticle by remember { mutableStateOf<BriefingArticle?>(null) }
     var showHistorySheet by remember { mutableStateOf(false) }
+
+    // When a category filter yields zero loaded matches but more pages exist on the server,
+    // eagerly fetch more so the user isn't stuck on a misleading "No articles found".
+    LaunchedEffect(state.selectedCategory, filteredArticles.size, state.hasMoreArticles, state.isLoadingMore) {
+        if (
+            state.selectedCategory != "All" &&
+            filteredArticles.isEmpty() &&
+            state.hasMoreArticles &&
+            !state.isLoadingMore &&
+            !state.viewingSaved &&
+            state.viewingArchiveDate == null
+        ) {
+            viewModel.loadMoreArticles()
+        }
+    }
 
     Box(
         modifier = Modifier
@@ -894,7 +915,24 @@ private fun ArticleGrid(
     onSpeakFull: (BriefingArticle) -> Unit,
     onDismiss: (BriefingArticle) -> Unit,
 ) {
+    val gridState = rememberLazyGridState()
+    val state by viewModel.state.collectAsState()
+
+    LaunchedEffect(gridState, articles.size, state.hasMoreArticles) {
+        snapshotFlow {
+            val last = gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+            last >= articles.size - 6
+        }
+            .distinctUntilChanged()
+            .collectLatest { nearEnd ->
+                if (nearEnd && state.hasMoreArticles && !state.isLoadingMore) {
+                    viewModel.loadMoreArticles()
+                }
+            }
+    }
+
     LazyVerticalGrid(
+        state = gridState,
         columns = GridCells.Fixed(2),
         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),

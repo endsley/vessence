@@ -517,6 +517,60 @@ def _classify_query_intent(query: str) -> str:
     return "general"
 
 
+def _ds3000_lecture_subtopics(query: str) -> list[str]:
+    """Return exact DS3000 lecture-anchor subtopics mentioned in a query."""
+    q = (query or "").lower()
+    if "ds3000" not in q and "lecture" not in q:
+        return []
+
+    subtopics: list[str] = []
+
+    def add(value: str) -> None:
+        if value and value not in subtopics:
+            subtopics.append(value)
+
+    for match in re.finditer(r"\b(?:ds\s*3000|ds3000)?\s*lecture\s*0*(\d{1,2})(a?)\b", q):
+        number = int(match.group(1))
+        suffix = match.group(2) or ""
+        if 1 <= number <= 99:
+            add(f"lecture_{number}{suffix}")
+
+    if re.search(r"\bappendix\b", q):
+        add("appendix")
+
+    if (
+        "ds3000" in q
+        and "lecture" in q
+        and any(marker in q for marker in ("series", "index", "all lectures", "entire lecture"))
+    ):
+        add("series_index")
+
+    return subtopics
+
+
+def _get_ds3000_lecture_anchors(subtopics: list[str]) -> list[tuple[str, dict]]:
+    if not subtopics or not os.path.exists(VECTOR_DB_USER_MEMORIES):
+        return []
+    try:
+        with silence_stderr_fd():
+            client = get_chroma_client(path=VECTOR_DB_USER_MEMORIES)
+            collection = client.get_collection(name=CHROMA_COLLECTION_USER_MEMORIES)
+            results = collection.get(
+                where={"topic": "ds3000_lecture_notes"},
+                include=["documents", "metadatas"],
+            )
+    except Exception:
+        return []
+
+    wanted = set(subtopics)
+    anchors: list[tuple[str, dict]] = []
+    for doc, meta in zip(results.get("documents", []), results.get("metadatas", [])):
+        meta = meta or {}
+        if meta.get("subtopic") in wanted and not _is_expired(meta) and not _is_none_content(doc):
+            anchors.append((doc, meta))
+    return anchors
+
+
 def _is_low_signal_shared_memory(doc: str, meta: dict | None) -> bool:
     text = str(doc or "").strip().lower()
     if not text:
@@ -688,6 +742,11 @@ def build_memory_sections(
     long_term_facts: list[str] = []
     legacy_short_term_facts: list[str] = []
 
+    exact_ds3000_anchors = []
+    if use_shared:
+        exact_ds3000_anchors = _get_ds3000_lecture_anchors(_ds3000_lecture_subtopics(query))
+        long_term_facts.extend(_fmt_memory(doc, meta) for doc, meta in exact_ds3000_anchors)
+
     if use_user_memory or use_shared:
         docs, metas, distances = _safe_get("user_memories")
         for doc, meta, distance in zip(docs, metas, distances):
@@ -715,6 +774,10 @@ def build_memory_sections(
                 # Skip prompt_queue entries from auto-injection — they're noise for
                 # most queries; retrieve them explicitly when needed via search.
                 if meta.get("topic") == "prompt_queue":
+                    continue
+                if meta.get("topic") == "ds3000_lecture_notes" and any(
+                    doc == anchor_doc for anchor_doc, _anchor_meta in exact_ds3000_anchors
+                ):
                     continue
                 long_term_facts.append(_fmt_memory(doc, meta))
 
@@ -885,6 +948,9 @@ def query_nearest_memory_lines(
         if len(term) >= 4 and term not in {"what", "when", "about", "with", "from", "that", "this", "were", "have"}
     }
     candidates: list[tuple[int, float, str, str, str]] = []
+
+    for doc, meta in _get_ds3000_lecture_anchors(_ds3000_lecture_subtopics(query)):
+        candidates.append((0, 0.0, "user_memories", _extract_content_key(doc), _fmt_memory(doc, meta)))
 
     def _lexical_overlap(doc: str) -> float:
         if not query_terms:

@@ -234,12 +234,18 @@ class CodexPersistentManager:
         pending_agent_message: str | None = None
         last_activity = time.time()
         codex_error: str | None = None
+        read_buf = ""  # partial-line buffer for chunk-based reading
+        done = False
 
         try:
-            while True:
+            # Chunk-based reader: Codex stream-json can emit lines larger than
+            # asyncio.StreamReader's 64KB default (e.g. agent messages with long text or
+            # tool results containing entire file contents). readline() raises
+            # LimitOverrunError on those — read raw chunks and split manually.
+            while not done:
                 try:
-                    raw = await asyncio.wait_for(
-                        proc.stdout.readline(),
+                    chunk = await asyncio.wait_for(
+                        proc.stdout.read(8192),
                         timeout=min(60.0, timeout_seconds - (time.time() - last_activity)),
                     )
                 except asyncio.TimeoutError:
@@ -249,114 +255,120 @@ class CodexPersistentManager:
                         raise RuntimeError(f"Codex CLI timed out after {int(timeout_seconds)}s")
                     continue
 
-                if not raw:
-                    break
+                if not chunk:
+                    tail = read_buf.strip()
+                    read_buf = ""
+                    lines_to_process = [tail] if tail else []
+                    done = True
+                else:
+                    last_activity = time.time()
+                    read_buf += chunk.decode("utf-8", errors="ignore")
+                    parts = read_buf.split("\n")
+                    read_buf = parts[-1]
+                    lines_to_process = [p.strip() for p in parts[:-1] if p.strip()]
 
-                last_activity = time.time()
-                line = raw.decode("utf-8", errors="ignore").strip()
-                if not line:
-                    continue
-
-                try:
-                    event = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-
-                event_type = event.get("type", "")
-
-                if event_type == "thread.started":
-                    thread_id = event.get("thread_id") or thread_id
-                    continue
-
-                if event_type == "error":
-                    message = (event.get("message") or "").strip()
-                    if message:
-                        codex_error = self._normalize_error_message(message)
-                    continue
-
-                if event_type == "turn.started":
-                    if on_status:
-                        on_status("Jane is thinking...")
-                    continue
-
-                if event_type == "item.started":
-                    item = event.get("item") or {}
-                    item_type = item.get("type", "")
-                    if item_type == "command_execution":
-                        self._flush_pending_thought(pending_agent_message, on_thought, on_status)
-                        pending_agent_message = None
-                        command = item.get("command", "")
-                        label = f"Running command: {self._format_command(command)}"
-                        if on_tool_use:
-                            on_tool_use(label)
-                        elif on_status:
-                            on_status(label)
-                    continue
-
-                if event_type == "item.completed":
-                    item = event.get("item") or {}
-                    item_type = item.get("type", "")
-
-                    if item_type == "agent_message":
-                        text = (item.get("text") or "").strip()
-                        if text:
-                            if pending_agent_message and pending_agent_message != text:
-                                self._flush_pending_thought(pending_agent_message, on_thought, on_status)
-                            pending_agent_message = text
+                for line in lines_to_process:
+                    try:
+                        event = json.loads(line)
+                    except json.JSONDecodeError:
                         continue
 
-                    if item_type == "command_execution":
-                        self._flush_pending_thought(pending_agent_message, on_thought, on_status)
-                        pending_agent_message = None
-                        command = item.get("command", "")
-                        exit_code = item.get("exit_code")
-                        output = (item.get("aggregated_output") or "").strip()
-                        detail = self._format_tool_result(command, exit_code, output)
-                        if on_tool_result:
-                            on_tool_result(detail)
-                        elif on_status:
-                            on_status(detail)
+                    event_type = event.get("type", "")
+
+                    if event_type == "thread.started":
+                        thread_id = event.get("thread_id") or thread_id
                         continue
 
-                    if item_type in {"reasoning", "thinking", "analysis"}:
-                        text = self._extract_item_text(item)
-                        if text:
-                            if on_thought:
-                                on_thought(text)
-                            elif on_status:
-                                on_status(text[:300])
-                        continue
-
-                if event_type == "item.failed":
-                    item = event.get("item") or {}
-                    item_type = item.get("type", "")
-                    if item_type == "command_execution":
-                        self._flush_pending_thought(pending_agent_message, on_thought, on_status)
-                        pending_agent_message = None
-                        command = item.get("command", "")
-                        message = self._extract_item_text(item) or "Command failed."
-                        detail = f"{self._format_command(command)} failed\n↳ {message[:300]}"
-                        if on_tool_result:
-                            on_tool_result(detail)
-                        elif on_status:
-                            on_status(detail)
-                    continue
-
-                if event_type == "turn.completed":
-                    if pending_agent_message:
-                        final_response = pending_agent_message
-                        if on_delta:
-                            on_delta(final_response)
-                        pending_agent_message = None
-                    break
-
-                if event_type == "turn.failed":
-                    error = event.get("error") or {}
-                    if isinstance(error, dict):
-                        message = (error.get("message") or "").strip()
+                    if event_type == "error":
+                        message = (event.get("message") or "").strip()
                         if message:
                             codex_error = self._normalize_error_message(message)
-                    continue
+                        continue
+
+                    if event_type == "turn.started":
+                        if on_status:
+                            on_status("Jane is thinking...")
+                        continue
+
+                    if event_type == "item.started":
+                        item = event.get("item") or {}
+                        item_type = item.get("type", "")
+                        if item_type == "command_execution":
+                            self._flush_pending_thought(pending_agent_message, on_thought, on_status)
+                            pending_agent_message = None
+                            command = item.get("command", "")
+                            label = f"Running command: {self._format_command(command)}"
+                            if on_tool_use:
+                                on_tool_use(label)
+                            elif on_status:
+                                on_status(label)
+                        continue
+
+                    if event_type == "item.completed":
+                        item = event.get("item") or {}
+                        item_type = item.get("type", "")
+
+                        if item_type == "agent_message":
+                            text = (item.get("text") or "").strip()
+                            if text:
+                                if pending_agent_message and pending_agent_message != text:
+                                    self._flush_pending_thought(pending_agent_message, on_thought, on_status)
+                                pending_agent_message = text
+                            continue
+
+                        if item_type == "command_execution":
+                            self._flush_pending_thought(pending_agent_message, on_thought, on_status)
+                            pending_agent_message = None
+                            command = item.get("command", "")
+                            exit_code = item.get("exit_code")
+                            output = (item.get("aggregated_output") or "").strip()
+                            detail = self._format_tool_result(command, exit_code, output)
+                            if on_tool_result:
+                                on_tool_result(detail)
+                            elif on_status:
+                                on_status(detail)
+                            continue
+
+                        if item_type in {"reasoning", "thinking", "analysis"}:
+                            text = self._extract_item_text(item)
+                            if text:
+                                if on_thought:
+                                    on_thought(text)
+                                elif on_status:
+                                    on_status(text[:300])
+                            continue
+
+                    if event_type == "item.failed":
+                        item = event.get("item") or {}
+                        item_type = item.get("type", "")
+                        if item_type == "command_execution":
+                            self._flush_pending_thought(pending_agent_message, on_thought, on_status)
+                            pending_agent_message = None
+                            command = item.get("command", "")
+                            message = self._extract_item_text(item) or "Command failed."
+                            detail = f"{self._format_command(command)} failed\n↳ {message[:300]}"
+                            if on_tool_result:
+                                on_tool_result(detail)
+                            elif on_status:
+                                on_status(detail)
+                        continue
+
+                    if event_type == "turn.completed":
+                        if pending_agent_message:
+                            final_response = pending_agent_message
+                            if on_delta:
+                                on_delta(final_response)
+                            pending_agent_message = None
+                        done = True
+                        break
+
+                    if event_type == "turn.failed":
+                        error = event.get("error") or {}
+                        if isinstance(error, dict):
+                            message = (error.get("message") or "").strip()
+                            if message:
+                                codex_error = self._normalize_error_message(message)
+                        continue
 
             await proc.wait()
 

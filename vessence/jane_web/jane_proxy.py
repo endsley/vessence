@@ -1065,6 +1065,7 @@ async def _execute_brain_sync(user_id: str, session_id: str, brain_name: str, ad
             if _cm:
                 logger.info("[%s] Code map injected (persistent codex sync)", session_id[:12])
         return await manager.run_turn(
+            user_id,
             session_id,
             prompt_text,
             timeout_seconds=profile.timeout_seconds,
@@ -1140,6 +1141,7 @@ async def _execute_brain_stream(user_id: str, session_id: str, brain_name: str, 
                 emit("status", "Loading code map for code-related query...")
                 logger.info("[%s] Code map injected (persistent codex stream)", session_id[:12])
         return await manager.run_turn(
+            user_id,
             session_id,
             prompt_text,
             on_delta=lambda delta: emit("delta", delta),
@@ -1372,11 +1374,11 @@ def end_session(user_id: str, session_id: str) -> None:
             manager = get_codex_persistent_manager()
             try:
                 loop = asyncio.get_running_loop()
-                loop.create_task(manager.end(session_id))
+                loop.create_task(manager.end(user_id, session_id))
             except RuntimeError:
                 def _end_codex_session():
                     try:
-                        asyncio.run(asyncio.wait_for(manager.end(session_id), timeout=10))
+                        asyncio.run(asyncio.wait_for(manager.end(user_id, session_id), timeout=10))
                     except asyncio.TimeoutError:
                         logger.warning("[%s] Persistent Codex shutdown timed out", _session_log_id(session_id))
                     except Exception as exc:
@@ -1392,13 +1394,13 @@ def end_session(user_id: str, session_id: str) -> None:
             manager = get_claude_persistent_manager()
             try:
                 loop = asyncio.get_running_loop()
-                loop.create_task(manager.end(session_id))
+                loop.create_task(manager.end(user_id, session_id))
             except RuntimeError:
                 # No running event loop — create one in a background thread to avoid
                 # conflicts with event loops in other threads
                 def _end_session():
                     try:
-                        asyncio.run(asyncio.wait_for(manager.end(session_id), timeout=10))
+                        asyncio.run(asyncio.wait_for(manager.end(user_id, session_id), timeout=10))
                     except asyncio.TimeoutError:
                         logger.warning("[%s] Persistent Claude shutdown timed out, proceeding with force kill", _session_log_id(session_id))
                     except Exception as exc:

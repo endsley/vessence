@@ -522,7 +522,7 @@ class ChatViewModel(
                 // Per-turn idempotency key (job_076). Same UUID reused across
                 // any repo-level retries so the server dedupes correctly.
                 val turnId = java.util.UUID.randomUUID().toString()
-                val flow = repo.streamChat(backend, outgoingText, sessionId, resolvedFileContext, ttsEnabled = fromVoice, turnId = turnId)
+                val flow = repo.streamChat(backend, outgoingText, sessionId, resolvedFileContext, ttsEnabled = true, turnId = turnId)
                 var accumulated = ""
                 var statusLog = mutableListOf<String>()
                 // Incremental ACK parser state

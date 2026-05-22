@@ -170,8 +170,8 @@ try:
     ANDROID_VERSION = _version_data["version_name"]
     _ANDROID_VERSION_CODE = _version_data["version_code"]
 except FileNotFoundError:
-    ANDROID_VERSION = "0.2.87"
-    _ANDROID_VERSION_CODE = 318
+    ANDROID_VERSION = "0.2.89"
+    _ANDROID_VERSION_CODE = 320
 
 # Startup validation: ensure the APK for the advertised version actually exists
 _expected_apk = MARKETING_DOWNLOADS_DIR / f"vessences-android-v{ANDROID_VERSION}.apk"
@@ -4291,15 +4291,24 @@ def _briefing_tools():
 
 
 @app.get("/api/briefing/articles")
-async def get_briefing_articles(topic: Optional[str] = None, view: Optional[str] = None, _=Depends(require_auth)):
-    """Get latest briefing articles. Optional filters: topic name, or view='saved'."""
+async def get_briefing_articles(
+    topic: Optional[str] = None,
+    view: Optional[str] = None,
+    limit: Optional[int] = None,
+    offset: int = 0,
+    _=Depends(require_auth),
+):
+    """Get latest briefing articles.
+
+    Filters: topic name, or view='saved'.
+    Pagination: when `limit` is provided, returns that slice starting at `offset`.
+    `full_summary` is omitted from the list view (call /api/briefing/article/{id} for the full text).
+    """
     bt = _briefing_tools()
     result = bt.get_briefing_cards()
     if result.get("status") != "ok":
         return result
     cards = result["cards"]
-    # Populate per-card 'categories' from tags (Android app filters on this field)
-    # Also add image_url from the serving endpoint when image_path is present
     for c in cards:
         if not c.get("categories"):
             c["categories"] = c.get("tags", []) or ([c["topic"]] if c.get("topic") else [])
@@ -4309,12 +4318,39 @@ async def get_briefing_articles(topic: Optional[str] = None, view: Optional[str]
         cards = [c for c in cards if c.get("state") == "saved"]
     elif topic:
         cards = [c for c in cards if c.get("topic", "").lower() == topic.lower()]
-    # Build top-level categories list for tab navigation
     cat_set: set[str] = set()
     for c in cards:
         cat_set.update(c.get("categories", []))
     categories = sorted(cat_set)
-    return {"status": "ok", "cards": cards, "card_count": len(cards), "categories": categories}
+
+    total = len(cards)
+    if limit is not None:
+        try:
+            limit_i = max(0, int(limit))
+            offset_i = max(0, int(offset))
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="limit/offset must be integers")
+        page = cards[offset_i:offset_i + limit_i]
+        has_more = offset_i + limit_i < total
+    else:
+        page = cards
+        has_more = False
+        limit_i = total
+        offset_i = 0
+
+    for c in page:
+        c.pop("full_summary", None)
+
+    return {
+        "status": "ok",
+        "cards": page,
+        "card_count": len(page),
+        "total": total,
+        "offset": offset_i,
+        "limit": limit_i,
+        "has_more": has_more,
+        "categories": categories,
+    }
 
 
 @app.get("/api/briefing/article/{article_id}")
@@ -4967,6 +5003,15 @@ async def trigger_briefing_fetch(_=Depends(require_auth)):
     result = bt.fetch_and_summarize_all()
     if result.get("status") == "error":
         raise HTTPException(status_code=400, detail=result.get("message", "Fetch failed"))
+    # Apply the same variety/cap trim that the nightly cron uses so manual
+    # fetches can't reintroduce list bloat.
+    try:
+        if _BRIEFING_FUNCTIONS_DIR not in sys.path:
+            sys.path.insert(0, _BRIEFING_FUNCTIONS_DIR)
+        from run_briefing import _trim_to_cap, MAX_TOTAL_ARTICLES
+        result["trim"] = _trim_to_cap(MAX_TOTAL_ARTICLES)
+    except Exception as exc:
+        _logger.warning("Manual briefing trim skipped: %s", exc)
     return result
 
 

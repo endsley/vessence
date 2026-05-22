@@ -108,6 +108,12 @@ This document logs all scheduled tasks (cron jobs) for the system. It must be up
 - **Tracker:** `$VESSENCE_DATA_HOME/clinic_last_pull.json` (last attempt/success timestamp, row count, AI-trigger count, days window)
 - **Description:** Two-phase Playwright scrape of Kathia Kirschner's weekly schedule on waterlilywellness.acubliss.app. Phase 1: clicks each appointment and triggers AI summary generation ("Give it a try") for any patient that hasn't had one yet. Waits 30 minutes for AI to finish generating. Phase 2: clicks each appointment again and extracts visit_reason, health_concerns, recommendations, visit_summary from the modal. Saves all data to `$VESSENCE_DATA_HOME/schedule.db` (appointments table). The 30-min wait is skipped if all summaries are already generated. On each run, the wrapper writes `clinic_last_pull.json` atomically — success overwrites, failure preserves the prior `last_success_at`. The wrapper also takes a non-blocking singleton lock at `$VESSENCE_DATA_HOME/logs/kathia_schedule.lock` so overlapping cron invocations exit quietly instead of launching concurrent scrapes.
 
+## 23. Daily Briefing Article Pruner
+- **Schedule:** `45 3 * * *` (Runs daily at 3:45 AM)
+- **Script Path:** `/home/chieh/ambient/skills/daily_briefing/functions/prune_articles.py`
+- **Log:** `$VESSENCE_DATA_HOME/logs/System_log/briefing_prune.log`
+- **Description:** Deletes daily-briefing article JSON, image, and audio files older than 14 days. Articles with `state == "saved"` are kept indefinitely. Prevents the briefing listing API from ballooning (was reaching ~900 articles / 3.5 MB list payloads, which made the Android app's first paint of the Daily Briefing essence very slow).
+
 ---
 
 ## Removed Jobs (historical reference)
