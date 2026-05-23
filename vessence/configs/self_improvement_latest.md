@@ -1,68 +1,70 @@
 # Most Recent Nightly Self-Improvement
 
-- Run started: 2026-05-21 01:00:01
-- Report generated: 2026-05-21 02:12:51
-- Total runtime: 4368s
-- Jobs: 8 total, 6 ok, 1 timeout, 1 failed
+- Run started: 2026-05-22 01:00:01
+- Report generated: 2026-05-22 02:38:48
+- Total runtime: 5926s
+- Jobs: 8 total, 8 ok, 0 timeout, 0 failed
 - Stable latest report path: `/home/chieh/ambient/vessence/configs/self_improvement_latest.md`
-- Archived copy: `/home/chieh/ambient/vessence-data/reports/self_improvement/self_improvement_20260521_010001.md`
+- Archived copy: `/home/chieh/ambient/vessence-data/reports/self_improvement/self_improvement_20260522_010001.md`
 
 ## TL;DR
 
 - 1. ✓ Auto-Commit WIP (pre) (0.0m)
   - Fixes:
-    - 2026-05-21 01:00:02,808 INFO Committed 15 file(s).
-- 2. ✗ Code Auditor (6.2m)
+    - 2026-05-22 01:00:03,879 INFO Committed 12 file(s).
+- 2. ✓ Code Auditor (5.0m)
+  - Problems: none detected
+  - Fixes: none applied
+- 3. ✓ Dead Code Auditor (6.7m)
   - Problems:
-    - 2026-05-21 01:06:12,942 [WARNING] All fix attempts exhausted, reverting
-- 3. ✓ Dead Code Auditor (6.6m)
-  - Problems:
-    - Possibly-dead functions: 1.
+    - Dead files — review needed: 1.
+    - Possibly-dead functions: 2.
     - Duplicate function bodies: 10 groups.
   - Fixes:
-    - [dead-code] Done — 0 auto-deleted, 0 flagged, 1 dead funcs, 10 dup groups
-- 4. ✓ Pipeline Audit (30 prompts) (0.5m)
+    - [dead-code] Done — 0 auto-deleted, 1 flagged, 2 dead funcs, 10 dup groups
+- 4. ✓ Pipeline Audit (30 prompts) (11.8m)
   - Problems:
-    - Prompts audited: 7.
-    - Classification failures: 2.
+    - Prompts audited: 11.
+    - Classification failures: 3.
     - Response failures: 7.
 - 5. ✓ Doc Drift Auditor (0.0m)
   - Problems:
     - CRON_JOBS.md missing entry for active cron script: auto_pull.sh
     - v2_3stage_pipeline.md missing class row: CLINIC_SCHEDULES_INFO
-- 6. ✓ Transcript Quality Review (1.1m)
+- 6. ✓ Transcript Quality Review (2.2m)
   - Problems:
-    - Transcript review found 8 issues: 7 critical, 1 medium.
-    - Follow-up reply was not routed through pending_action_resolver and then produced no response.
-    - Complex memory question escalated correctly but Stage 3 failed with no response.
+    - Transcript review found 12 issues: 9 critical, 3 medium.
+    - Follow-up reply was not routed by the pending_action_resolver and then produced no final response.
+    - Stage 3 failed for a normal informational request and returned no answer.
   - Fixes:
-    - 2026-05-21 01:14:24,140 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (8 issues)
-    - 2026-05-21 01:14:24,141 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 7 critical, 1 medium iss...
-- 7. ✓ Memory Janitor (56.4m)
+    - 2026-05-22 01:25:52,385 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (12 issues)
+    - 2026-05-22 01:25:52,386 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 9 critical, 3 medium iss...
+- 7. ✓ Memory Janitor (72.8m)
   - Problems:
-    - [0;93m2026-05-21 01:53:00.649194051 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-21 05:53:00 WARNING] ModelImporter.cpp:739: Make...
-    - [0;93m2026-05-21 01:53:00.649211020 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-21 05:53:00 WARNING] ModelImporter.cpp:739: Make...
-    - [0;93m2026-05-21 01:53:00.854742318 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-21 05:53:00 WARNING] ModelImporter.cpp:739: Make...
+    - [0;93m2026-05-22 02:21:09.971899464 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-22 06:21:09 WARNING] ModelImporter.cpp:739: Make...
+    - [0;93m2026-05-22 02:21:09.971956198 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-22 06:21:09 WARNING] ModelImporter.cpp:739: Make...
+    - [0;93m2026-05-22 02:21:09.971970477 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-22 06:21:09 WARNING] ModelImporter.cpp:739: Make...
   - Fixes:
-    - INFO:agent_skills.self_improve_log:self_improve_log: recorded [medium] Memory Verification — Found 17 stale memories out of 20 checked. Stale memories make J...
-- 8. ⏱ Auto-Commit + Push (post) (2.0m)
+    - INFO:agent_skills.self_improve_log:self_improve_log: recorded [medium] Memory Verification — Found 19 stale memories out of 20 checked. Stale memories make J...
+- 8. ✓ Auto-Commit + Push (post) (0.1m)
   - Fixes:
-    - 2026-05-21 02:10:52,096 INFO Committed 6 file(s).
+    - 2026-05-22 02:38:44,329 INFO Committed 8 file(s).
+    - 2026-05-22 02:38:48,461 INFO Pushed successfully.
 
 **Top follow-ups:**
 
-- Persist pending_action state across the prior turn and add resolver entry/exit logging before Stage 1. If resolver state is absent for short affirmative/parameter replies, route to a clarification fallback instead of generic Stage 3. Also make stage3_escalate return a user-visible fallback when brain streaming errors.
-- Fix the OpenAI brain streaming failure path and add exception detail to jane.proxy logs. stage3_escalate should emit a fallback response instead of ending the stream empty.
+- Persist pending_action state by session before the next user turn and add a resolver miss diagnostic when a pending action is absent or expired; also make Stage 3 return a user-visible fallback on stream failure.
+- Fix the OpenAI streaming backend exception path and include exception type/stack in jane.proxy logs; return a deterministic apology/error response when Stage 3 fails.
 
 ## Executive Summary
 
-- 2 stage(s) need attention because they timed out or exited non-zero.
-- 6 concrete improvement/fix signals were found in logs or reports.
+- All stages exited cleanly.
+- 7 concrete improvement/fix signals were found in logs or reports.
 
 ## Stage 1: Auto-Commit WIP (pre)
 
 - Status: `ok`
-- Duration: 0s (0.0 min)
+- Duration: 2s (0.0 min)
 
 ### What It Did
 
@@ -74,7 +76,7 @@
 
 ### Improvements It Made
 
-- 2026-05-21 01:00:02,808 INFO Committed 15 file(s).
+- 2026-05-22 01:00:03,879 INFO Committed 12 file(s).
 
 ### Evidence Files
 
@@ -82,8 +84,8 @@
 
 ## Stage 2: Code Auditor
 
-- Status: `exit-1`
-- Duration: 370s (6.2 min)
+- Status: `ok`
+- Duration: 300s (5.0 min)
 
 ### What It Did
 
@@ -91,8 +93,7 @@
 
 ### Problems It Found
 
-- Job ended with status `exit-1`.
-- 2026-05-21 01:06:12,942 [WARNING] All fix attempts exhausted, reverting
+- No problems were detected in the available logs/reports.
 
 ### Improvements It Made
 
@@ -107,7 +108,7 @@
 ## Stage 3: Dead Code Auditor
 
 - Status: `ok`
-- Duration: 394s (6.6 min)
+- Duration: 403s (6.7 min)
 
 ### What It Did
 
@@ -115,12 +116,13 @@
 
 ### Problems It Found
 
-- Possibly-dead functions: 1.
+- Dead files — review needed: 1.
+- Possibly-dead functions: 2.
 - Duplicate function bodies: 10 groups.
 
 ### Improvements It Made
 
-- [dead-code] Done — 0 auto-deleted, 0 flagged, 1 dead funcs, 10 dup groups
+- [dead-code] Done — 0 auto-deleted, 1 flagged, 2 dead funcs, 10 dup groups
 
 ### Evidence Files
 
@@ -130,7 +132,7 @@
 ## Stage 4: Pipeline Audit (30 prompts)
 
 - Status: `ok`
-- Duration: 32s (0.5 min)
+- Duration: 708s (11.8 min)
 
 ### What It Did
 
@@ -138,13 +140,13 @@
 
 ### Problems It Found
 
-- Prompts audited: 7.
-- Classification failures: 2.
+- Prompts audited: 11.
+- Classification failures: 3.
 - Response failures: 7.
-- **yes those articles and maybe just two days** (others/stage3):
-- **currently how does your short-term memory work** (others/stage3):
-- **how about** (greeting/stage3):
-- **it seems to me that you are no longing making any sounds when speech to text is ** (others/stage3):
+- **yes those articles and maybe just two days** (others/stage3): [ACK]Chieh, I’m missing the specific article context, so this should be quick once you point me at it.[/ACK]
+- **currently how does your short-term memory work** (others/stage3): [ACK]Chieh, quick explanation of my current memory model.[/ACK]
+- **how about** (greeting/stage3): Chieh, what are you proposing? Give me the option or wording you want me to evaluate. [[AWAITING:what_option
+- **it seems to me that you are no longing making any sounds when speech to text is ** (others/stage3): Chieh, I found the issue and patched it.
 
 ### Improvements It Made
 
@@ -181,7 +183,7 @@
 ## Stage 6: Transcript Quality Review
 
 - Status: `ok`
-- Duration: 63s (1.1 min)
+- Duration: 135s (2.2 min)
 
 ### What It Did
 
@@ -189,23 +191,23 @@
 
 ### Problems It Found
 
-- Transcript review found 8 issues: 7 critical, 1 medium.
-- Follow-up reply was not routed through pending_action_resolver and then produced no response.
-- Complex memory question escalated correctly but Stage 3 failed with no response.
-- Prompt-injection-looking text was misclassified as greeting and loaded the greeting class protocol.
-- Audio/STT diagnostic request escalated correctly but Stage 3 failed with no response.
+- Transcript review found 12 issues: 9 critical, 3 medium.
+- Follow-up reply was not routed by the pending_action_resolver and then produced no final response.
+- Stage 3 failed for a normal informational request and returned no answer.
+- User-supplied class_protocol markup was treated as a real greeting signal, and the greeting handler returned an invalid shape.
+- Stage 3 failed for a bug report about Android speech relaunch audio.
 
 ### Improvements It Made
 
-- 2026-05-21 01:14:24,140 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (8 issues)
-- 2026-05-21 01:14:24,141 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 7 critical, 1 medium issues. The most urgent was: Foll
+- 2026-05-22 01:25:52,385 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (12 issues)
+- 2026-05-22 01:25:52,386 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 9 critical, 3 medium issues. The most urgent was: Foll
 
 ### Follow-Up Fixes Recommended
 
-- Persist pending_action state across the prior turn and add resolver entry/exit logging before Stage 1. If resolver state is absent for short affirmative/parameter replies, route to a clarification fallback instead of generic Stage 3. Also make stage3_escalate return a user-visible fallback when brain streaming errors.
-- Fix the OpenAI brain streaming failure path and add exception detail to jane.proxy logs. stage3_escalate should emit a fallback response instead of ending the stream empty.
-- Add a pre-classification sanitizer/rule that treats literal '<class_protocol' and similar runtime-instruction tags in user text as untrusted content and blocks class protocol loading. Fix greeting handler to always return the expected response schema.
-- Repair Stage 3 streaming and include Android voice_flow/tool_handler diagnostics in the audit log bundle for voice-client issues. Add a deterministic diagnostics handler for STT/audio complaints if this is a common support intent.
+- Persist pending_action state by session before the next user turn and add a resolver miss diagnostic when a pending action is absent or expired; also make Stage 3 return a user-visible fallback on stream failure.
+- Fix the OpenAI streaming backend exception path and include exception type/stack in jane.proxy logs; return a deterministic apology/error response when Stage 3 fails.
+- Escape or strip reserved runtime-control tags from user text before classification, reject user-originated class_protocol envelopes, and make the greeting handler always return the normalized Stage2 response schema.
+- Repair Stage 3 streaming failure handling and add a fallback response path so diagnostic requests do not disappear when the brain backend errors.
 
 ### Evidence Files
 
@@ -215,7 +217,7 @@
 ## Stage 7: Memory Janitor
 
 - Status: `ok`
-- Duration: 3386s (56.4 min)
+- Duration: 4367s (72.8 min)
 
 ### What It Did
 
@@ -223,15 +225,15 @@
 
 ### Problems It Found
 
-- [0;93m2026-05-21 01:53:00.649194051 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-21 05:53:00 WARNING] ModelImporter.cpp:739: Make sure input attention_mask has Int64 binding.[m
-- [0;93m2026-05-21 01:53:00.649211020 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-21 05:53:00 WARNING] ModelImporter.cpp:739: Make sure input token_type_ids has Int64 binding.[m
-- [0;93m2026-05-21 01:53:00.854742318 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-21 05:53:00 WARNING] ModelImporter.cpp:739: Make sure input input_ids has Int64 binding.[m
-- [0;93m2026-05-21 01:53:00.854800631 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-21 05:53:00 WARNING] ModelImporter.cpp:739: Make sure input attention_mask has Int64 binding.[m
-- [0;93m2026-05-21 01:53:00.854813047 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-21 05:53:00 WARNING] ModelImporter.cpp:739: Make sure input token_type_ids has Int64 binding.[m
+- [0;93m2026-05-22 02:21:09.971899464 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-22 06:21:09 WARNING] ModelImporter.cpp:739: Make sure input input_ids has Int64 binding.[m
+- [0;93m2026-05-22 02:21:09.971956198 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-22 06:21:09 WARNING] ModelImporter.cpp:739: Make sure input attention_mask has Int64 binding.[m
+- [0;93m2026-05-22 02:21:09.971970477 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-22 06:21:09 WARNING] ModelImporter.cpp:739: Make sure input token_type_ids has Int64 binding.[m
+- [0;93m2026-05-22 02:21:10.160273017 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-22 06:21:10 WARNING] ModelImporter.cpp:739: Make sure input input_ids has Int64 binding.[m
+- [0;93m2026-05-22 02:21:10.160314567 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-22 06:21:10 WARNING] ModelImporter.cpp:739: Make sure input attention_mask has Int64 binding.[m
 
 ### Improvements It Made
 
-- INFO:agent_skills.self_improve_log:self_improve_log: recorded [medium] Memory Verification — Found 17 stale memories out of 20 checked. Stale memories make Jane give wrong answers about her own
+- INFO:agent_skills.self_improve_log:self_improve_log: recorded [medium] Memory Verification — Found 19 stale memories out of 20 checked. Stale memories make Jane give wrong answers about her own
 
 ### Evidence Files
 
@@ -239,8 +241,8 @@
 
 ## Stage 8: Auto-Commit + Push (post)
 
-- Status: `timeout`
-- Duration: 120s (2.0 min)
+- Status: `ok`
+- Duration: 8s (0.1 min)
 
 ### What It Did
 
@@ -248,11 +250,12 @@
 
 ### Problems It Found
 
-- Job ended with status `timeout`.
+- No problems were detected in the available logs/reports.
 
 ### Improvements It Made
 
-- 2026-05-21 02:10:52,096 INFO Committed 6 file(s).
+- 2026-05-22 02:38:44,329 INFO Committed 8 file(s).
+- 2026-05-22 02:38:48,461 INFO Pushed successfully.
 
 ### Evidence Files
 
