@@ -1,111 +1,129 @@
-# Transcript Quality Review — 2026-05-22
+# Transcript Quality Review — 2026-05-23
 
-Generated: 2026-05-23 01:24:37
+Generated: 2026-05-24 01:23:42
 
 ## Issue 1 [CRITICAL]
 
-**Turn:** 2026-05-22 01:18:22
+**Turn:** 2026-05-23 01:15:43
 **User said:** hey Jane, can you take a look at the ~/code/waterlily project for me
 
-**Problem:** User request took ~2m32s to resolve, making the interaction unusable for real-time use.
+**Problem:** Local project inspection was escalated to Stage 3 without file/project context.
 
-**Root cause:** Stage 1 and escalation happened quickly, but Stage 3 did not complete for 152,337ms. Logs show no stage2 handler path or client-side recovery during this delay, indicating the slowdown is in Stage 3 execution rather than intent routing.
+**Root cause:** Stage 1 routed the request as others and Stage 3 was invoked with file_ctx=False, so the frontier brain had no attached context for ~/code/waterlily. The request then occupied Stage 3 for 227.7s.
 
-**Suggested fix:** Add per-stage timing instrumentation inside Stage 3 (LLM call vs tool call vs postprocessing), enforce a hard timeout with graceful partial-response fallback, and retry/failover policy for stalled frontier-brain responses.
+**Suggested fix:** Add local-path/code-project intent detection before escalation: expand ~/ paths, verify the project path, and attach file context or route to the Codex/code-agent backend with that cwd. If the path is inaccessible, fail fast with a clarifying question.
 
 **Log evidence:**
 ```
-2026-05-22 01:18:21 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (2166ms) params={}
+2026-05-23 01:15:41 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (4047ms) params={}
 ```
 ```
-2026-05-22 01:18:22 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=68 sid_override=True class_protocol=n/a
+2026-05-23 01:15:42 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=68 sid_override=True class_protocol=n/a
 ```
 ```
-2026-05-22 01:20:22 INFO [jane.proxy] [audit-177942] Jane stream pipeline task finished
+2026-05-23 01:15:42 INFO [jane.proxy] [audit-177951] stream_message brain=OpenAI history=0 msg_len=68 file_ctx=False
 ```
 ```
-2026-05-22 01:20:22 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage3 end-to-end (152337ms)
+2026-05-23 01:19:30 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage3 end-to-end (227698ms)
 ```
 
 ---
 
-## Issue 2 [CRITICAL]
+## Issue 2 [MEDIUM]
 
-**Turn:** 2026-05-22 01:20:39
-**User said:** can you tell me if currently you are using cold decks or Claude cold as the base stage 3 brain
+**Turn:** 2026-05-23 01:19:43
+**User said:** currently is your background large language model using Claude codex or call I mean
 
-**Problem:** Turn took ~88s before completion despite no explicit tool invocation in the logs.
+**Problem:** Runtime model/status question missed the fast path and went to Stage 3.
 
-**Root cause:** Another long Stage 3 path with no Stage 2 fallback. Classifier escalated with low-confidence "others" and class protocol was unavailable, so the deterministic path was not used and the response depended on the slow Stage 3 route.
+**Root cause:** Stage 1 returned others:Low with no params; there is no deterministic self-status/model-status handler, so Stage 2 did nothing and Stage 3 handled a question that should be answerable from live config.
 
-**Suggested fix:** Introduce a deterministic "system_identity/model_query" handler for this common class of questions or cache static answers, and set a shorter Stage 3 SLA budget for simple factual prompts.
+**Suggested fix:** Add a self_status or model_status classifier category and Stage 2 handler that reads the configured Stage 3 brain/model from the live proxy/config and returns it directly.
 
 **Log evidence:**
 ```
-2026-05-22 01:20:38 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (936ms) params={}
+2026-05-23 01:19:42 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (1105ms) params={}
 ```
 ```
-2026-05-22 01:20:39 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=94 sid_override=True class_protocol=n/a
+2026-05-23 01:19:42 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=105 sid_override=True class_protocol=n/a
 ```
 ```
-2026-05-22 01:20:39 INFO [jane.proxy] [audit-177942] stream_message brain=OpenAI history=0 msg_len=94 file_ctx=False
+2026-05-23 01:19:43 INFO [jane.proxy] [audit-177951] stream_message brain=OpenAI history=0 msg_len=105 file_ctx=False
 ```
 ```
-2026-05-22 01:22:07 INFO [jane.proxy] [audit-177942] Jane stream pipeline task finished
-```
-```
-2026-05-22 01:22:07 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage3 end-to-end (88061ms)
+2026-05-23 01:19:58 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage3 end-to-end (15643ms)
 ```
 
 ---
 
 ## Issue 3 [MEDIUM]
 
-**Turn:** 2026-05-22 01:22:20
-**User said:** currently which large language model is being used as Jane Webb
+**Turn:** 2026-05-23 01:20:01
+**User said:** can you tell me if currently you are using cold decks or Claude cold as the base
 
-**Problem:** Classifier emitted an unsupported class (`force stage3`) and fell back to `others`, reducing routing fidelity.
+**Problem:** Follow-up model question was sent to Stage 3 with no conversation history and took about 2 minutes.
 
-**Root cause:** Stage 1 logging shows the intent model returned a non-enumerated label (`qwen returned unknown class 'force stage3'`), and the pipeline normalized it to `others` with `class_protocol=n/a`, which can mask explicit routing intent and contributes to unnecessary Stage 3 ambiguity.
+**Root cause:** The same session id was used, but jane.proxy logged history=0. The ASR-corrupted terms needed prior context from the previous turn, and the missing model-status fast path forced a 119.5s Stage 3 call.
 
-**Suggested fix:** Version and harden the Stage 1 class schema: add canonical mappings/aliases for `force stage3` (and similar control-intent tokens), and fail closed with explicit telemetry when unseen labels are returned instead of silently coercing to `others`.
+**Suggested fix:** Persist and load session history when sid_override=True, and handle model/status questions in Stage 2 with ASR aliases such as codex/cold decks.
 
 **Log evidence:**
 ```
-2026-05-22 01:22:19 WARNING [intent_classifier.v3.classifier] v3: qwen returned unknown class 'force stage3' → others
+2026-05-23 01:20:00 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (1062ms) params={}
 ```
 ```
-2026-05-22 01:22:19 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (685ms) params={}
+2026-05-23 01:20:01 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=94 sid_override=True class_protocol=n/a
 ```
 ```
-2026-05-22 01:22:20 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=63 sid_override=True class_protocol=n/a
+2026-05-23 01:20:01 INFO [jane.proxy] [audit-177951] stream_message brain=OpenAI history=0 msg_len=94 file_ctx=False
+```
+```
+2026-05-23 01:22:00 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage3 end-to-end (119496ms)
 ```
 
 ---
 
-## Issue 4 [CRITICAL]
+## Issue 4 [LOW]
 
-**Turn:** 2026-05-22 01:22:20
+**Turn:** 2026-05-23 01:22:16
 **User said:** currently which large language model is being used as Jane Webb
 
-**Problem:** High end-to-end latency again (~74.6s) on an intent-only query.
+**Problem:** Stage 1 produced an out-of-schema class before falling back to others.
 
-**Root cause:** After Stage 1 fallback and Stage 3 escalation, completion came 74,638ms later. No Stage 2 fast-path or resolver bypass was used for this turn.
+**Root cause:** The classifier returned 'force stage3', which the pipeline did not recognize and converted to others. Routing still reached Stage 3, but the classifier prompt/schema is not constrained to the valid taxonomy.
 
-**Suggested fix:** As above for Stage 3 SLA: split Stage 3 latency budgets by query type and route static/meta-model questions to a cheap deterministic response path.
+**Suggested fix:** Constrain classifier output to the allowed enum and add parser tests for unknown labels. If force_stage3 is intentional, add it as an explicit alias.
 
 **Log evidence:**
 ```
-2026-05-22 01:22:20 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=63 sid_override=True class_protocol=n/a
+2026-05-23 01:22:15 WARNING [intent_classifier.v3.classifier] v3: qwen returned unknown class 'force stage3' → others
 ```
 ```
-2026-05-22 01:22:20 INFO [jane.proxy] [audit-177942] stream_message brain=OpenAI history=0 msg_len=63 file_ctx=False
+2026-05-23 01:22:15 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (1208ms) params={}
+```
+
+---
+
+## Issue 5 [MEDIUM]
+
+**Turn:** 2026-05-23 01:22:16
+**User said:** currently which large language model is being used as Jane Webb
+
+**Problem:** Simple model-status question took almost 2 minutes because it was handled by Stage 3.
+
+**Root cause:** After the unknown-class fallback, Stage 3 was invoked with history=0 and file_ctx=False and completed after 118.8s; no Stage 2 runtime model handler answered from config.
+
+**Suggested fix:** Use a deterministic model-status handler for this intent and return the active backend/model name from the live configuration instead of escalating to the frontier brain.
+
+**Log evidence:**
+```
+2026-05-23 01:22:16 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=63 sid_override=True class_protocol=n/a
 ```
 ```
-2026-05-22 01:23:34 INFO [jane.proxy] [audit-177942] Jane stream pipeline task finished
+2026-05-23 01:22:16 INFO [jane.proxy] [audit-177951] stream_message brain=OpenAI history=0 msg_len=63 file_ctx=False
 ```
 ```
-2026-05-22 01:23:34 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage3 end-to-end (74638ms)
+2026-05-23 01:24:15 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage3 end-to-end (118773ms)
 ```
 
 ---
