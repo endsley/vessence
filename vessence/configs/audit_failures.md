@@ -39,3 +39,26 @@ test_code/auto_audit_classifier.py::test_very_long_input_skips_load_embedding_an
 test_code/auto_audit
 ```
 
+## 2026-05-25 01:00 — jane_web/jane_v2/classes/greeting/handler.py
+Tests failing after 3 fix attempts. Reverted.
+
+Last test output:
+```
+============================= test session starts ==============================
+platform linux -- Python 3.13.7, pytest-9.0.2, pluggy-1.6.0 -- /home/chieh/google-adk-env/adk-venv/bin/python
+cachedir: .pytest_cache
+rootdir: /home/chieh/ambient/vessence
+plugins: asyncio-1.3.0, anyio-4.12.1, typeguard-4.5.1
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 54 items
+
+test_code/auto_audit_handler.py::TestDocumentedBehavior::test_spec_documents_greeting_stage2_contract PASSED [  1%]
+test_code/auto_audit_handler.py::TestDocumentedBehavior::test_module_docstring_documents_simple_greeting_and_escalation_contract PASSED [  3%]
+test_code/auto_audit_handler.py::TestDocumentedBehavior::test_basic_canned_greeting_returns_text_and_skips_ollama PASSED [  5%]
+test_code/auto_audit_handler.py::TestDocumentedBehavior::test_common_greetings_use_documented_fast_path[how's it going?-check_in] PASSED [  7%]
+test_code/auto_audit_handler.py::TestDocumentedBehavior::test_common_greetings_use_documented_fast_path[How are you-check_in] PASSED [  9%]
+test_code/auto_audit_handler.py::TestDocumentedBehavior::test_common_greetings_use_documented_fast_path[what's up-check_in] PASSED [ 11%]
+test_code/auto_audit_handler.py::TestDocumentedBehavior::test_common_greetings_use_documented_fast_path[HELLO!!!-hello] PASSED [ 12%]
+test_code/auto_audit_handler.py::TestDocumentedBehavior::test_common_greetings_use_documented
+```
+
