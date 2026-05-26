@@ -62,3 +62,31 @@ test_code/auto_audit_handler.py::TestDocumentedBehavior::test_common_greetings_u
 test_code/auto_audit_handler.py::TestDocumentedBehavior::test_common_greetings_use_documented
 ```
 
+## 2026-05-26 01:00 — jane_web/jane_v2/classes/send_message/handler.py
+Tests failing after 3 fix attempts. Reverted.
+
+Last test output:
+```
+============================= test session starts ==============================
+platform linux -- Python 3.13.7, pytest-9.0.2, pluggy-1.6.0 -- /home/chieh/google-adk-env/adk-venv/bin/python
+cachedir: .pytest_cache
+rootdir: /home/chieh/ambient/vessence
+plugins: asyncio-1.3.0, anyio-4.12.1, typeguard-4.5.1
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 26 items
+
+test_code/auto_audit_handler.py::test_is_coherent[Hello there-True] PASSED [  3%]
+test_code/auto_audit_handler.py::test_is_coherent[text my wife-True] PASSED [  7%]
+test_code/auto_audit_handler.py::test_is_coherent[(none)-True] PASSED    [ 11%]
+test_code/auto_audit_handler.py::test_is_coherent[-True] PASSED          [ 15%]
+test_code/auto_audit_handler.py::test_is_coherent[I am at the-False] PASSED [ 19%]
+test_code/auto_audit_handler.py::test_is_coherent[I want a-False] PASSED [ 23%]
+test_code/auto_audit_handler.py::test_is_coherent[um hello-False] PASSED [ 26%]
+test_code/auto_audit_handler.py::test_is_coherent[hello uh world-False] PASSED [ 30%]
+test_code/auto_audit_handler.py::test_is_coherent[hey siri send a text-False] PASSED [ 34%]
+test_code/auto_audit_handler.py::test_is_coherent[alexa what time is it-False] PASSED [ 38%]
+test_code/auto_audit_handler.py::test_is_coherent[Alexander is my friend-True] PASSED [ 42%]
+test_code/auto_audit_handler.py::test_is_coherent[I love the way you are-False] PASSED [ 46%]
+test_code/
+```
+

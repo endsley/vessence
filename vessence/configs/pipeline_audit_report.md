@@ -1,7 +1,7 @@
-# Pipeline Audit Report — 2026-05-25 01:14
+# Pipeline Audit Report — 2026-05-26 01:22
 
 - Prompts audited: **5**
-- Elapsed: 405s
+- Elapsed: 438s
 - Classification failures: **1**
 - Response failures: **1**
 - Auto-fixes applied (exemplars added): **0**
@@ -19,6 +19,8 @@
 | hey Jane, can you take a look at the ~/code/waterlily project for me | todo list | others |
 
 ## Response failures (top 20) — usually need code changes
-- **hey Jane, can you take a look at the ~/code/waterlily project for me** (todo list/stage3): Chieh, I did a read-only pass over `~/code/waterlily`.
+- **can you tell me if currently you are using cold decks or Claude cold as the base** (others/stage3): Chieh, current base Stage 3 brain is **Codex/OpenAI**, not Claude Code.
 
-It’s a hybrid Squarespace mirror plus FastAPI backend. Current dirty state is substantial: `ba
+Evidence:
+- `/home/chieh/ambient/vessence-data/.env` has `JANE_BRAIN=codex`
+-
