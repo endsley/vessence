@@ -1,3 +1,9 @@
+### 2026-05-26: Standalone Codex Chroma Memory Bootstrap
+
+- **Codex memory installer:** added `startup_code/install_codex_memory.py`, an idempotent setup script that writes the Codex `UserPromptSubmit` hook, persistent Jane memory instructions, and `jane-memory` MCP registration into `~/.codex/config.toml`.
+- **First-run setup wiring:** `startup_code/first_run_setup.py` now runs the installer automatically when Codex CLI is available, so new Codex boots retrieve Jane's Chroma memories without manual config.
+- **Docs:** updated Codex/Jane memory instructions in `AGENTS.md`, `README.md`, `configs/Jane_architecture.md`, and `configs/SKILLS_REGISTRY.md`.
+
 ### 2026-04-27: v3 pipeline respects resolver cancel/followup
 
 - **Fixed v3 pending-action handling** (`jane_web/jane_v3/pipeline.py`): v3 previously only honored resolver `stage3_followup`. Resolver `cancel` and `followup` for `STAGE2_FOLLOWUP` slots were ignored, so a bare `No` after a clinic follow-up could get reclassified back into the clinic handler and repeat the same information instead of ending the conversation.

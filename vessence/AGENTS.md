@@ -87,11 +87,13 @@ python \
     $VESSENCE_HOME/agent_skills/add_fact.py "fact here" --topic <topic> [--subtopic <subtopic>]
 ```
 
-Codex does not have Claude Code's native `UserPromptSubmit` hook. Vessence's
-persistent Codex adapter injects the nearest 2 ChromaDB memories automatically
-when their Chroma distance is <= 0.50 and they pass the lexical relevance
-guard; the result may contain fewer than 2 memories. In raw Codex CLI sessions,
-perform the same preflight at the start of every user prompt. Use the Codex MCP tool
+Vessence's persistent Codex adapter and standalone Codex CLI setup inject the
+nearest 2 ChromaDB memories automatically when their Chroma distance is <= 0.50
+and they pass the lexical relevance guard; the result may contain fewer than 2
+memories. `startup_code/install_codex_memory.py` installs the standalone Codex
+`UserPromptSubmit` hook, the persistent instructions file, and the `jane-memory`
+MCP server registration. If the hook is unavailable, perform the same preflight
+at the start of every user prompt. Use the Codex MCP tool
 `query_nearest_jane_memories(query, limit=2, max_distance=0.50)` when available,
 or run:
 
@@ -100,7 +102,7 @@ VESSENCE_HOME=/home/chieh/ambient/vessence \
 VESSENCE_DATA_HOME=/home/chieh/ambient/vessence-data \
 VAULT_HOME=/home/chieh/ambient/vault \
 PYTHONPATH=/home/chieh/ambient/vessence \
-/home/chieh/google-adk-env/adk-venv/bin/python \
+/home/chieh/ambient/venv/bin/python \
     /home/chieh/ambient/vessence/startup_code/codex_auto_memory.py "query here"
 ```
 
@@ -112,7 +114,7 @@ VESSENCE_HOME=/home/chieh/ambient/vessence \
 VESSENCE_DATA_HOME=/home/chieh/ambient/vessence-data \
 VAULT_HOME=/home/chieh/ambient/vault \
 PYTHONPATH=/home/chieh/ambient/vessence \
-/home/chieh/google-adk-env/adk-venv/bin/python \
+/home/chieh/ambient/venv/bin/python \
     /home/chieh/ambient/vessence/startup_code/query_live_memory.py "query here"
 ```
 

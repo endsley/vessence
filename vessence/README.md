@@ -75,8 +75,9 @@ bash vessence/setup.sh
 
 The setup script is intended to be idempotent. It creates `venv`,
 `vessence-data`, `vault`, the runtime `.env`, installs Python dependencies,
-seeds memory, configures Jane, tests the web server, and installs the user
-service when supported.
+seeds memory, configures Jane, installs Codex's Chroma memory hook/MCP bridge
+when Codex CLI is available, tests the web server, and installs the user service
+when supported.
 
 After setup, verify the web app:
 
@@ -126,6 +127,18 @@ To rerun only the env/onboarding step after dependencies exist:
 cd ~/ambient/vessence
 ../venv/bin/python startup_code/first_run_setup.py
 ```
+
+To rerun only the standalone Codex memory integration:
+
+```bash
+cd ~/ambient/vessence
+../venv/bin/python startup_code/install_codex_memory.py
+```
+
+This writes `~/.codex/hooks/jane_memory_hook.py`, the persistent Jane memory
+instructions file, and the `jane-memory` MCP registration in
+`~/.codex/config.toml`. The first interactive Codex boot may ask to trust the
+hook via `/hooks`.
 
 ## Google Cloud Setup
 

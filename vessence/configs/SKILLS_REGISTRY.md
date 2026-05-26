@@ -59,7 +59,8 @@ This document is a detailed index of Jane's major capabilities. It maps a high-l
     -   **Librarian synthesis:** `memory_retrieval.py:get_memory_summary(query)` — calls `build_memory_sections` then synthesizes via local LLM (Qwen Librarian)
     -   **Jane wrapper:** `$VESSENCE_HOME/agent_skills/search_memory.py:get_memory_summary(query)` — thin wrapper that calls `memory_retrieval.get_memory_summary` with `assistant_name="Jane"`
     -   **Full result:** `memory_retrieval.py:retrieve_memory_context(query)` — returns `MemoryRetrievalResult` with sections, facts_block, and summary (with embedding cache)
-    -   **Codex MCP bridge:** `$VESSENCE_HOME/startup_code/codex_memory_mcp.py` — stdio MCP server registered as `jane-memory` for OpenAI Codex sessions; exposes `query_jane_memory(query, max_chars=12000)` and `jane_memory_paths()`
+    -   **Codex MCP bridge:** `$VESSENCE_HOME/startup_code/codex_memory_mcp.py` — stdio MCP server registered as `jane-memory` for OpenAI Codex sessions; exposes `query_jane_memory(query, max_chars=12000)`, `query_nearest_jane_memories(query, limit=2, max_distance=0.50)`, and `jane_memory_paths()`
+    -   **Codex CLI installer:** `$VESSENCE_HOME/startup_code/install_codex_memory.py` — idempotently writes `~/.codex/hooks/jane_memory_hook.py`, `~/.codex/jane-memory-instructions.md`, and the Codex `UserPromptSubmit` hook plus `jane-memory` MCP registration in `~/.codex/config.toml`
 
 -   **Capability:** Qwen Sub-Agent Delegation
     -   **File:** `$VESSENCE_HOME/agent_skills/qwen_query.py`

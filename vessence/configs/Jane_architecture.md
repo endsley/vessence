@@ -501,13 +501,14 @@ For Jane web UI sessions (`JANE_WEB_PERMISSIONS=1`):
 
 ### 7.5 OpenAI Codex CLI Memory Bridge
 
-OpenAI Codex CLI does not use Claude Code's `UserPromptSubmit`,
-`PreToolUse`, `PostToolUse`, or `Stop` hook stack on this machine. To keep
-Codex Jane connected to live memory, Codex is configured with a local stdio
-MCP server:
+OpenAI Codex CLI is configured separately from Claude Code's hook stack. To keep
+Codex Jane connected to live memory, Vessence installs both a Codex
+`UserPromptSubmit` hook and a local stdio MCP server:
 
 - **Server name:** `jane-memory`
 - **File:** `startup_code/codex_memory_mcp.py`
+- **Installer:** `startup_code/install_codex_memory.py`
+- **Hook:** `~/.codex/hooks/jane_memory_hook.py`
 - **Tools:** `query_jane_memory(query, max_chars=12000)`,
   `query_nearest_jane_memories(query, limit=2, max_distance=0.50)`,
   `jane_memory_paths()`
@@ -521,13 +522,13 @@ with a lexical relevance guard and recent short-term promotion. It may inject
 fewer than 2 memories when the second hit is broad/noisy. This gives the web
 Codex path a real automatic memory prelude.
 
-Raw standalone Codex CLI sessions still do not have a native prompt hook, so
-`AGENTS.md` requires the same preflight through
+Standalone Codex CLI sessions get the same nearest-memory preflight from the
+installed hook when Codex trusts it. `~/.codex/jane-memory-instructions.md`
+provides the fallback rule: if `[Jane Auto Memory]` is absent, call
 `query_nearest_jane_memories(query, limit=2, max_distance=0.50)` or
-`startup_code/codex_auto_memory.py`. Broader memory-sensitive prompts should
+`startup_code/codex_auto_memory.py`; broader memory-sensitive prompts should
 still call `query_jane_memory` when the nearest-2 prelude is insufficient.
-Current runtime behavior still requires code/log verification after memory
-recall.
+Current runtime behavior still requires code/log verification after memory recall.
 
 ---
 

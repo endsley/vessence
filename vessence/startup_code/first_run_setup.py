@@ -18,6 +18,7 @@ import os
 import re
 import secrets
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -138,6 +139,43 @@ def open_browser(url: str) -> None:
         webbrowser.open(url)
     except Exception:
         pass
+
+
+def install_codex_memory_integration() -> None:
+    """Install Codex's Jane memory hook/MCP bridge when Codex is available."""
+    if not shutil.which("codex"):
+        return
+
+    installer = VESSENCE_HOME / "startup_code" / "install_codex_memory.py"
+    if not installer.exists():
+        return
+
+    print("Step 7: Codex Chroma memory integration")
+    try:
+        result = subprocess.run(
+            [sys.executable, str(installer)],
+            check=False,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env={
+                **os.environ,
+                "VESSENCE_HOME": str(VESSENCE_HOME),
+                "VESSENCE_DATA_HOME": str(VESSENCE_DATA_HOME),
+                "VAULT_HOME": str(VESSENCE_HOME.parent / "vault"),
+            },
+        )
+    except Exception as exc:
+        print(f"  ⚠ Could not install Codex memory integration: {type(exc).__name__}: {exc}")
+        return
+
+    for line in result.stdout.splitlines():
+        print(f"  {line}")
+    if result.returncode != 0:
+        print("  ⚠ Codex memory integration installer failed.")
+        for line in result.stderr.splitlines()[-6:]:
+            print(f"    {line}")
+    print()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -379,6 +417,8 @@ def main() -> int:
     update_env(new_env)
     print(f"  → Updated {ENV_FILE}")
     print()
+
+    install_codex_memory_integration()
 
     print("=" * 60)
     print("Setup complete!")
