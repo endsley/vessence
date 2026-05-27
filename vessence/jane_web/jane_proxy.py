@@ -815,6 +815,10 @@ CODE_MAP_KEYWORDS = (
     # Auto-evolved from daily conversations
     "model",
     "language",
+    # Auto-evolved from daily conversations
+    "project",
+    "codex",
+    "cold",
 )
 
 

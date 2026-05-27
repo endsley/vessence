@@ -1,19 +1,18 @@
-# Memory Verification Report — 2026-05-26 02:54
+# Memory Verification Report — 2026-05-27 03:01
 
-Checked: 20 | Stale: 15 | Fixed: 15 | Deleted: 0 | Errors: 0 | Skipped recent: 127
+Checked: 20 | Stale: 14 | Fixed: 13 | Deleted: 0 | Errors: 0 | Skipped recent: 142
 
-- **UPDATED** `acccce19-73d` — Confirmed in /home/chieh/code/chieh_class_v2: 0032 exists, but 0033/0034 replaced and dropped prompt_overrides; prompts.py and Prompt now use the prompts table with 0048 source signatures; null_space/q6.py has an empty module-level PROMPT_TEMPLATE.
-- **UPDATED** `0f348850-0a8` — Confirmed Codex was right: the 0033/0034 cache/save path still exists, but current source modules, fallback rendering, source-signature drift detection, and validate_template() make the DB-only/no-detectors claims stale.
-- **UPDATED** `6915f2e4-e10` — Codex was directionally right that 00020/00031 and the fixed registry claim were stale, but live GCP could be checked here and shows an even newer revision, teaching-app-v2-00083-s2w, with classes.chiehwu.com mapped to teaching-app-v2.
-- **UPDATED** `f4352c11-da8` — Verified the teaching app repo, git HEAD/status, Alembic heads, 0035/0036 migrations, models, Vessence auditor, and problem file counts; Codex's PARTIAL verdict was correct.
-- **UPDATED** `d421712e-2f3` — Codex was right: CLAUDE.md has the orientation/history policy, but its current open-loops section still includes snapshot-style deployment/alembic/completed-work details, and the exact phase_N/state_NNNN-MM-DD convention is not stated there.
-- **UPDATED** `2c09a4e6-783` — Confirmed in code: llm_brain/v1/standing_brain.py spawns with cwd=$VESSENCE_HOME, while llm_brain/v1/persistent_claude.py runs Claude subprocesses with cwd=/tmp. The CLAUDE.md files still encode the minimum-necessary/ChromaDB-history policy.
-- **UPDATED** `54ebf8f8-adc` — Confirmed in code: app/main.py creates FastAPI(title="chieh_class_v2") and includes auth/health routers; OAuth is in app/auth/google.py and app/routers/auth.py; DB files are under app/db/; liveness is GET /health, not /healthz.
-- **UPDATED** `d41c8d92-a17` — Confirmed against the current chieh_class_v2 code: the CRUD features and paths are present, app/templates/teacher/ exists, and assert_owns_course is absent; current guards match Codex's verdict.
-- **UPDATED** `4b55a956-525` — Codex was right that the old absolute recovery claim is stale: janitor_memory.py now quarantines janitor deletes before Chroma delete calls, while config and other code still show user_memories plus direct delete-by-id paths; the USB log confirms current read-only backup failures and no WAL/DB-level recovery path was evident.
-- **UPDATED** `94aca46a-9ef` — Confirmed Codex's verdict against /home/chieh/code/chieh_class_v2: the UI, migrations, model, module_macros service, base template, render hooks, admin previews, and concept rendering match the suggested correction.
-- **UPDATED** `ce382ed9-746` — Confirmed against the actual code. Core storage and endpoint were right, but the old memory had stale UI placement and stale rendering/caching details.
-- **UPDATED** `31bc71dc-77c` — Confirmed from agent_skills/google_cloud_receipts.py: the script path and commands exist, default output is Downloads, not Desktop, download requires --count or a date range, and the old command is truncated.
-- **UPDATED** `fd478e39-b62` — Confirmed from agent_skills/google_cloud_receipts.py and tests: Codex was right that the CLI exists and supports those flags, but there is no Gemini-specific billing path; the old end date was stale.
-- **UPDATED** `136c24ff-98c` — Confirmed in agent_skills/google_cloud_receipts.py: default output is Downloads, --start-date needs a YYYY-MM-DD value, and the code handles generic Google Cloud Billing documents rather than explicitly named Gemini API documents.
-- **UPDATED** `da8286ca-8ab` — Actual code and live crontab confirm Codex's architecture verdict; the stored memory is truncated after 'route t', so it is incomplete.
+- **UPDATED** `ef1bd7ff-8bd` — Actual code has q1.py through q10.py and tests expect 10 vector questions; the old memory's five Homework 8 A2 revenue optimization description is stale.
+- **UPDATED** `fa8de932-f4d` — Confirmed by reading q6.py-q10.py and scripts/setup_multi_variate_calculus.py; the remembered old formulas are stale and did not appear in the repo search.
+- **UPDATED** `1efeb6e4-a73` — Codex was right that the original 00057-dnx revision and source-deploy-only wording were stale, but live GCP now shows an even newer 100% revision than Codex's suggested 00083-s2w: teaching-app-v2-00087-xm5.
+- **UPDATED** `dca272e8-326` — Codex was right: CLAUDE.md's current orientation list adds PHASE_2_TODO.md, ChromaDB history, and _sandbox_runner.py, and omits problem_registry.py; run_dev_local.sh, dev-login guard, REGISTRY usage, and pytest venv were checked against the repo.
+- **UPDATED** `d6737ef0-b55` — Verified actual chieh_class_v2 code: alembic heads reports 0056_section_office_hour_owner, migration history includes 0044-0056 after 0043, and models.py contains the post-0043 fields/tables.
+- **UPDATED** `5b82492a-8bd` — Code confirms Codex's partial verdict: registry discovery and template/script custom problems are current, but the old qN.py-only path claim is stale and the C RREF topic is capitalized RREF_C.
+- **UPDATED** `4e7a059b-b5a` — Actual code and pytest confirm the code-backed claims, and live DB rows are currently present; Codex was wrong to remove the DB-row claim, but the original memory was truncated.
+- **UPDATED** `4c1fe65b-dfa` — Verified against persistent_codex.py, memory_retrieval.py, install_codex_memory.py, AGENTS.md, README.md, and Jane_architecture.md. The persistent path is current; the stale part was claiming raw Codex CLI has no hook path. This machine currently has jane-memory MCP config but lacks the hook/instructions files, and installer dry-run would update them.
+- **KEPT** `7c38acc8-a32` — Codex was wrong: direct ChromaDB lookup for id 7c38acc8-a327-47f9-a287-fd47ce56944d shows the memory is already complete. The note metadata, lecture index, and pdfinfo confirm the paths, Google Slides ID, title, and 30-slide count.
+- **UPDATED** `38045705-1e2` — Confirmed from source files, registry output, prompts, and unit tests; the old memory incorrectly described q2/q10/q11 and nonexistent q13-q15.
+- **UPDATED** `51540a64-7e1` — Read the actual q2, q3, q7-q12 sources, confirmed only q1-q12 exist, and ran the close_solution_regression_A unit tests; Codex was right.
+- **UPDATED** `3eb85922-2fd` — Actual code and git history confirm Codex's q9 correction and q1-q12 registry state; the old memory's q4 and prompt-DB sync claims are wrong.
+- **UPDATED** `310bdda4-225` — Confirmed the route, template action, health route, service identity, and passing integration test in actual code; the old 00067 revision claim is stale versus the 2026-05-26 verification report.
+- **UPDATED** `migrated-lon` — Confirmed from the actual template and code references; Codex was right that the old memory overstated the template contents.
