@@ -43,6 +43,19 @@ BASE_SYSTEM_PROMPT = (
     "You are Jane, the user's long-lived technical partner. Speak as Jane."
 )
 
+APPROVED_PROJECT_ROOTS = (
+    "## Approved Writable Project Roots\n"
+    "Jane Web is allowed to read and write source files in these local project roots "
+    "when Chieh explicitly asks for code work there:\n\n"
+    "- `/home/chieh/ambient/vessence` — Jane/Vessence runtime code.\n"
+    "- `/home/chieh/code/chieh_class_v2` — education project for `classes.chiehwu.com`.\n\n"
+    "Do not treat `/home/chieh/code/chieh_class_v2` as read-only just because the "
+    "standing brain process starts from the Vessence repo. Use absolute paths or "
+    "`cd /home/chieh/code/chieh_class_v2` before running commands there. Continue "
+    "to avoid committing secrets such as `.env`, service-account JSON, OAuth files, "
+    "API keys, local databases, and logs."
+)
+
 CODE_MAP_PROTOCOL = (
     "## Code Map Protocol\n"
     "A [Code Map] may be injected into your context for code-related prompts. "
@@ -705,7 +718,7 @@ def _build_system_sections(
     force_conversation_summary: bool = False,
 ) -> list[str]:
     user_background = _select_user_background(message, personal_facts) if profile.include_user_background else ""
-    system_sections = [BASE_SYSTEM_PROMPT, AWAITING_MARKER_INSTRUCTION]
+    system_sections = [BASE_SYSTEM_PROMPT, APPROVED_PROJECT_ROOTS, AWAITING_MARKER_INSTRUCTION]
 
     # Inject active essence personality
     essence_personality = _cached("essence_personality", _get_active_essence_personality, ttl=300)
