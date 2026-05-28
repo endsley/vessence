@@ -20,6 +20,8 @@ _VALID_ACTIONS = {"view", "add", "remove", "clear", "check"}
 def _split_items(raw: Optional[str]) -> list[str]:
     if not raw:
         return []
+    if not isinstance(raw, str):
+        return []
     return [piece.strip() for piece in str(raw).split(",") if piece.strip()]
 
 
@@ -29,12 +31,32 @@ async def handle(prompt: str, params: dict | None = None) -> dict | None:
         logger.info("shopping_list handler: no params — escalating")
         return None
 
-    action = (params.get("action") or "").strip().lower()
+    raw_action = params.get("action")
+    if not isinstance(raw_action, str):
+        logger.info("shopping_list handler: malformed action %r — escalating", raw_action)
+        return None
+
+    action = raw_action.strip().lower()
     if action not in _VALID_ACTIONS:
         logger.info("shopping_list handler: unknown action %r — escalating", action)
         return None
 
     items = _split_items(params.get("items"))
+    confidence = None
+    if action in {"remove", "clear"}:
+        confidence = params.get("confidence")
+        if (
+            isinstance(confidence, bool)
+            or not isinstance(confidence, (int, float))
+            or confidence < 0.80
+        ):
+            logger.info(
+                "shopping_list handler: destructive action %r confidence %r "
+                "below threshold — escalating",
+                action,
+                confidence,
+            )
+            return None
 
     try:
         from agent_skills.shopping_list import (
@@ -66,11 +88,11 @@ async def handle(prompt: str, params: dict | None = None) -> dict | None:
         if not items:
             return None
         for item in items:
-            remove_item(item, list_name)
+            remove_item(item, list_name, confidence=confidence)
         return {"text": f"Removed {', '.join(items)} from your shopping list."}
 
     if action == "clear":
-        clear_list(list_name)
+        clear_list(list_name, confidence=confidence)
         return {"text": "Your shopping list has been cleared."}
 
     if action == "check":
