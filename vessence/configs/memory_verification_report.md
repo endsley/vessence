@@ -1,18 +1,17 @@
-# Memory Verification Report — 2026-05-27 03:01
+# Memory Verification Report — 2026-05-28 02:59
 
-Checked: 20 | Stale: 14 | Fixed: 13 | Deleted: 0 | Errors: 0 | Skipped recent: 142
+Checked: 20 | Stale: 13 | Fixed: 13 | Deleted: 0 | Errors: 0 | Skipped recent: 160
 
-- **UPDATED** `ef1bd7ff-8bd` — Actual code has q1.py through q10.py and tests expect 10 vector questions; the old memory's five Homework 8 A2 revenue optimization description is stale.
-- **UPDATED** `fa8de932-f4d` — Confirmed by reading q6.py-q10.py and scripts/setup_multi_variate_calculus.py; the remembered old formulas are stale and did not appear in the repo search.
-- **UPDATED** `1efeb6e4-a73` — Codex was right that the original 00057-dnx revision and source-deploy-only wording were stale, but live GCP now shows an even newer 100% revision than Codex's suggested 00083-s2w: teaching-app-v2-00087-xm5.
-- **UPDATED** `dca272e8-326` — Codex was right: CLAUDE.md's current orientation list adds PHASE_2_TODO.md, ChromaDB history, and _sandbox_runner.py, and omits problem_registry.py; run_dev_local.sh, dev-login guard, REGISTRY usage, and pytest venv were checked against the repo.
-- **UPDATED** `d6737ef0-b55` — Verified actual chieh_class_v2 code: alembic heads reports 0056_section_office_hour_owner, migration history includes 0044-0056 after 0043, and models.py contains the post-0043 fields/tables.
-- **UPDATED** `5b82492a-8bd` — Code confirms Codex's partial verdict: registry discovery and template/script custom problems are current, but the old qN.py-only path claim is stale and the C RREF topic is capitalized RREF_C.
-- **UPDATED** `4e7a059b-b5a` — Actual code and pytest confirm the code-backed claims, and live DB rows are currently present; Codex was wrong to remove the DB-row claim, but the original memory was truncated.
-- **UPDATED** `4c1fe65b-dfa` — Verified against persistent_codex.py, memory_retrieval.py, install_codex_memory.py, AGENTS.md, README.md, and Jane_architecture.md. The persistent path is current; the stale part was claiming raw Codex CLI has no hook path. This machine currently has jane-memory MCP config but lacks the hook/instructions files, and installer dry-run would update them.
-- **KEPT** `7c38acc8-a32` — Codex was wrong: direct ChromaDB lookup for id 7c38acc8-a327-47f9-a287-fd47ce56944d shows the memory is already complete. The note metadata, lecture index, and pdfinfo confirm the paths, Google Slides ID, title, and 30-slide count.
-- **UPDATED** `38045705-1e2` — Confirmed from source files, registry output, prompts, and unit tests; the old memory incorrectly described q2/q10/q11 and nonexistent q13-q15.
-- **UPDATED** `51540a64-7e1` — Read the actual q2, q3, q7-q12 sources, confirmed only q1-q12 exist, and ran the close_solution_regression_A unit tests; Codex was right.
-- **UPDATED** `3eb85922-2fd` — Actual code and git history confirm Codex's q9 correction and q1-q12 registry state; the old memory's q4 and prompt-DB sync claims are wrong.
-- **UPDATED** `310bdda4-225` — Confirmed the route, template action, health route, service identity, and passing integration test in actual code; the old 00067 revision claim is stale versus the 2026-05-26 verification report.
-- **UPDATED** `migrated-lon` — Confirmed from the actual template and code references; Codex was right that the old memory overstated the template contents.
+- **UPDATED** `migrated-lon` — Confirmed in code: jane_proxy persists history/ledger/FIFO, while update_short_term_memory uses short_term_extractor.should_skip and add_fact.py is the direct user_memories writer.
+- **UPDATED** `migrated-lon` — Codex was right: the fast path and unresolved-recipient escalation still exist, but the old memory is stale for garbled resolved bodies and for assuming Stage 3 always means Opus.
+- **UPDATED** `migrated-lon` — Confirmed in jane_web/jane_v2/classes/todo_list/handler.py: aliases map to Google Doc headers, categories load from todo_list_cache.json, and _speak_category_list filters visible categories with items. Current cache has no students category.
+- **UPDATED** `migrated-lon` — Code confirms the todo_list STAGE2_FOLLOWUP abandon path still exists, but clinic_schedules_info now has local Stage 2 loaders, no_stage3=True, privacy=local_only, and v3 privacy gating. The Stage 3 database-query claim is stale.
+- **UPDATED** `migrated-lon` — Code audit confirms no Uber integration; only loaded tools are life_librarian, music_playlist, and phone. Codex was right on implementation status but the live memory did include both candidate repos.
+- **UPDATED** `migrated-lon` — Confirmed by code search and loader inspection: installed MCPs are phone, life_librarian, and music_playlist; no Uber skill, mcp.json, or Uber API code exists, and MCP descriptors are required for complete Vessence tools.
+- **UPDATED** `migrated-lon` — Codex was mostly right after checking the actual Waterlily code, static files, docs, service unit, env names, and live endpoints; the original memory was truncated and needed the live-site verification status updated.
+- **UPDATED** `migrated-lon` — Codex was right: the inspected code still has the random fallback, so the old memory claiming a hard startup error is stale.
+- **UPDATED** `52c1c4fa-e26` — Codex was right about the code structure, but wrong that the exact DB facts were unverifiable here; the live teaching_app DB on 127.0.0.1:3307 confirms row 36, account id 1, and all three child meeting sections. Update fixes the truncated tail.
+- **UPDATED** `7094af79-ac2` — Confirmed in code: Vessence only has generic DS3000 lecture-anchor retrieval, with no Course Daily Topics/doc-ID reference. Vault lecture index and notes show Lecture 2 lacks Frobenius, Lecture 5 is Disney/Pixar, and Frobenius appears in Lecture 6; original memory is truncated and partially wrong.
+- **UPDATED** `52643b31-fd0` — Code confirms Codex was right that 0057 is now the Alembic head, but live curl/gcloud verification confirms the revision, health, and 100% traffic claims are still true.
+- **UPDATED** `55214a00-a9f` — Confirmed against backend/space_requests.py, backend/main.py, backend/bookings.py, and studio_dashboard.html. The existing memory is mostly right but truncated and missing current approval/waiver/mailto and V1 limitation details.
+- **UPDATED** `41f54ac3-ebf` — Verified against the spec, marketing page, Jane web routes, Android Briefing UI, marketplace harvester modules, and live crontab. Codex was right that the memory is partial/truncated and needs disambiguation; live crontab now confirms the marketplace cron entry.
