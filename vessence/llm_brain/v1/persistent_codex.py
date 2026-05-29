@@ -71,6 +71,23 @@ class CodexPersistentManager:
         self._codex_bin = os.environ.get("CODEX_BIN", shutil.which("codex") or "codex")
         self._active_procs: dict[str, asyncio.subprocess.Process] = {}
         self._workdir = os.environ.get("VESSENCE_HOME", str(Path.home() / "ambient" / "vessence"))
+        self._add_dirs = self._resolve_additional_write_dirs()
+
+    def _resolve_additional_write_dirs(self) -> list[str]:
+        roots_raw = os.environ.get("JANE_CODE_WRITE_ROOTS", str(Path.home() / "code"))
+        workdir = Path(self._workdir).expanduser().resolve()
+        roots: list[str] = []
+        for raw in roots_raw.split(os.pathsep):
+            text = raw.strip()
+            if not text:
+                continue
+            path = Path(text).expanduser().resolve()
+            if not path.is_dir() or path == workdir:
+                continue
+            path_text = str(path)
+            if path_text not in roots:
+                roots.append(path_text)
+        return roots
 
     async def get(self, user_id: str, session_id: str) -> CodexPersistentSession:
         composite_key = f"{user_id}:{session_id}"
@@ -169,6 +186,8 @@ class CodexPersistentManager:
         if session.codex_thread_id:
             base.extend(["resume", session.codex_thread_id])
         base.extend(["--json", "--skip-git-repo-check"])
+        for add_dir in self._add_dirs:
+            base.extend(["--add-dir", add_dir])
         if yolo:
             base.append("--dangerously-bypass-approvals-and-sandbox")
         if model:
