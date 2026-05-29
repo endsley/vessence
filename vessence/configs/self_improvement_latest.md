@@ -1,63 +1,65 @@
 # Most Recent Nightly Self-Improvement
 
-- Run started: 2026-05-27 01:00:01
-- Report generated: 2026-05-27 03:01:23
-- Total runtime: 7282s
+- Run started: 2026-05-28 01:00:01
+- Report generated: 2026-05-28 03:00:02
+- Total runtime: 7201s
 - Jobs: 8 total, 8 ok, 0 timeout, 0 failed
 - Stable latest report path: `/home/chieh/ambient/vessence/configs/self_improvement_latest.md`
-- Archived copy: `/home/chieh/ambient/vessence-data/reports/self_improvement/self_improvement_20260527_010001.md`
+- Archived copy: `/home/chieh/ambient/vessence-data/reports/self_improvement/self_improvement_20260528_010001.md`
 
 ## TL;DR
 
 - 1. ✓ Auto-Commit WIP (pre) (0.0m)
   - Fixes:
-    - 2026-05-27 01:00:01,499 INFO Committed 3 file(s).
-- 2. ✓ Code Auditor (11.8m)
+    - 2026-05-28 01:00:01,633 INFO Committed 3 file(s).
+- 2. ✓ Code Auditor (10.7m)
+  - Problems: none detected
+  - Fixes: none applied
+- 3. ✓ Dead Code Auditor (6.2m)
   - Problems:
-    - 2026-05-27 01:10:01,641 [WARNING] Primary LLM failed: CLI timed out after 600s... Attempting fallback.
-- 3. ✓ Dead Code Auditor (6.1m)
-  - Problems:
-    - Possibly-dead functions: 1.
+    - Dead files — review needed: 1.
+    - Possibly-dead functions: 2.
     - Duplicate function bodies: 10 groups.
   - Fixes:
-    - [dead-code] Done — 0 auto-deleted, 0 flagged, 1 dead funcs, 10 dup groups
-- 4. ✓ Pipeline Audit (30 prompts) (17.2m)
+    - [dead-code] Done — 0 auto-deleted, 1 flagged, 2 dead funcs, 10 dup groups
+- 4. ✓ Pipeline Audit (30 prompts) (5.5m)
   - Problems:
-    - Prompts audited: 10.
-    - Classification failures: 3.
-    - Response failures: 2.
+    - Prompts audited: 5.
+    - Classification failures: 2.
+    - Response failures: 3.
 - 5. ✓ Doc Drift Auditor (0.0m)
   - Problems:
     - CRON_JOBS.md missing entry for active cron script: auto_pull.sh
     - v2_3stage_pipeline.md missing class row: CLINIC_SCHEDULES_INFO
-- 6. ✓ Transcript Quality Review (2.8m)
+- 6. ✓ Transcript Quality Review (1.4m)
   - Problems:
-    - Transcript review found 5 issues: 1 critical, 1 low, 3 medium.
-    - Stage 3 follow-up context was not preserved for the audit web session.
-    - Stage 1 emitted an invalid intent label before falling back to others.
+    - Transcript review found 3 issues: 2 critical, 1 medium.
+    - Project-edit request was escalated to Stage 3 without file/project context or evidence of executable tooling.
+    - Stage 3 latency was far too high for an assistant turn.
   - Fixes:
-    - 2026-05-27 01:38:02,756 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (5 issues)
-    - 2026-05-27 01:38:02,758 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 1 critical, 3 medium, 1...
-- 7. ✓ Memory Janitor (83.3m)
+    - 2026-05-28 01:23:53,977 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (3 issues)
+    - 2026-05-28 01:23:53,978 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 2 critical, 1 medium iss...
+- 7. ✓ Memory Janitor (96.1m)
   - Problems:
-    - [0;93m2026-05-27 02:31:27.134994177 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-27 06:31:27 WARNING] ModelImporter.cpp:739: Make...
-    - [0;93m2026-05-27 02:31:27.135038263 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-27 06:31:27 WARNING] ModelImporter.cpp:739: Make...
-    - [0;93m2026-05-27 02:31:27.135051085 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-27 06:31:27 WARNING] ModelImporter.cpp:739: Make...
+    - [0;93m2026-05-28 02:37:01.228834304 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-28 06:37:01 WARNING] ModelImporter.cpp:739: Make...
+    - [0;93m2026-05-28 02:37:01.228882551 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-28 06:37:01 WARNING] ModelImporter.cpp:739: Make...
+    - [0;93m2026-05-28 02:37:01.228897410 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-28 06:37:01 WARNING] ModelImporter.cpp:739: Make...
   - Fixes:
-    - INFO:agent_skills.self_improve_log:self_improve_log: recorded [medium] Memory Verification — Found 14 stale memories out of 20 checked. Stale memories make J...
+    - INFO:agent_skills.self_improve_log:self_improve_log: recorded [medium] Memory Verification — Found 13 stale memories out of 20 checked. Stale memories make J...
 - 8. ✓ Auto-Commit + Push (post) (0.0m)
   - Fixes:
-    - 2026-05-27 03:01:23,319 INFO Pushed successfully.
+    - 2026-05-28 03:00:00,329 INFO Committed 6 file(s).
+    - 2026-05-28 03:00:02,309 INFO Pushed successfully.
 
 **Top follow-ups:**
 
-- Make sid_override sessions use the same persistent conversation-history key as normal sessions, and add a regression test that repeated turns on one sid produce history > 0.
-- Constrain Stage 1 output to a strict enum or normalize escalation synonyms such as 'force stage3' to the supported escalation/others path before logging a warning.
+- Add an education_project/module_edit intent and handler, or make Stage 3 attach the teaching app/file context and execute audited repo edits with explicit tool logs.
+- Use an async project-edit job with immediate acknowledgement and progress events, or add a fast deterministic handler for known module-edit requests.
 
 ## Executive Summary
 
 - All stages exited cleanly.
-- 6 concrete improvement/fix signals were found in logs or reports.
+- 7 concrete improvement/fix signals were found in logs or reports.
 
 ## Stage 1: Auto-Commit WIP (pre)
 
@@ -74,7 +76,7 @@
 
 ### Improvements It Made
 
-- 2026-05-27 01:00:01,499 INFO Committed 3 file(s).
+- 2026-05-28 01:00:01,633 INFO Committed 3 file(s).
 
 ### Evidence Files
 
@@ -83,7 +85,7 @@
 ## Stage 2: Code Auditor
 
 - Status: `ok`
-- Duration: 710s (11.8 min)
+- Duration: 644s (10.7 min)
 
 ### What It Did
 
@@ -91,7 +93,7 @@
 
 ### Problems It Found
 
-- 2026-05-27 01:10:01,641 [WARNING] Primary LLM failed: CLI timed out after 600s... Attempting fallback.
+- No problems were detected in the available logs/reports.
 
 ### Improvements It Made
 
@@ -106,7 +108,7 @@
 ## Stage 3: Dead Code Auditor
 
 - Status: `ok`
-- Duration: 366s (6.1 min)
+- Duration: 372s (6.2 min)
 
 ### What It Did
 
@@ -114,12 +116,13 @@
 
 ### Problems It Found
 
-- Possibly-dead functions: 1.
+- Dead files — review needed: 1.
+- Possibly-dead functions: 2.
 - Duplicate function bodies: 10 groups.
 
 ### Improvements It Made
 
-- [dead-code] Done — 0 auto-deleted, 0 flagged, 1 dead funcs, 10 dup groups
+- [dead-code] Done — 0 auto-deleted, 1 flagged, 2 dead funcs, 10 dup groups
 
 ### Evidence Files
 
@@ -129,7 +132,7 @@
 ## Stage 4: Pipeline Audit (30 prompts)
 
 - Status: `ok`
-- Duration: 1034s (17.2 min)
+- Duration: 332s (5.5 min)
 
 ### What It Did
 
@@ -137,11 +140,12 @@
 
 ### Problems It Found
 
-- Prompts audited: 10.
-- Classification failures: 3.
-- Response failures: 2.
-- **codex timing** (others/stage3): [ACK]Chieh, I need one clarification on what Codex timing you mean.[/ACK]
-- **also, for each question please write a hint section that's helpful fo the studen** (todo list/stage3): [ACK]Chieh, I can add hint sections, but I need the target questions or file first.[/ACK]
+- Prompts audited: 5.
+- Classification failures: 2.
+- Response failures: 3.
+- **I'm currently you are using cold text as the third brain right** (read messages/stage3): Yes, Chieh. This is Jane running through the Codex/standing-brain path, with memory/context injected. If by “cold text” you meant “Codex,” then yes.
+- **codex timing** (others/stage3): [ACK]Chieh, I need one quick clarification on what “codex timing” refers to.[/ACK]
+- **also, for each question please write a hint section that's helpful fo the studen** (todo list/stage3): [ACK]Got it, Chieh — I can add hint sections, but I need the target questions/file first.[/ACK]
 
 ### Improvements It Made
 
@@ -178,7 +182,7 @@
 ## Stage 6: Transcript Quality Review
 
 - Status: `ok`
-- Duration: 169s (2.8 min)
+- Duration: 83s (1.4 min)
 
 ### What It Did
 
@@ -186,23 +190,21 @@
 
 ### Problems It Found
 
-- Transcript review found 5 issues: 1 critical, 1 low, 3 medium.
-- Stage 3 follow-up context was not preserved for the audit web session.
-- Stage 1 emitted an invalid intent label before falling back to others.
-- Android voice turns were treated as non-voice by the server Stage 3 path.
-- Android/background requests hit API rate limits immediately after the voice interaction.
+- Transcript review found 3 issues: 2 critical, 1 medium.
+- Project-edit request was escalated to Stage 3 without file/project context or evidence of executable tooling.
+- Stage 3 latency was far too high for an assistant turn.
+- Follow-up turn lost the prior module-edit context.
 
 ### Improvements It Made
 
-- 2026-05-27 01:38:02,756 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (5 issues)
-- 2026-05-27 01:38:02,758 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 1 critical, 3 medium, 1 minor issues. The most urgent
+- 2026-05-28 01:23:53,977 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (3 issues)
+- 2026-05-28 01:23:53,978 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 2 critical, 1 medium issues. The most urgent was: Proj
 
 ### Follow-Up Fixes Recommended
 
-- Make sid_override sessions use the same persistent conversation-history key as normal sessions, and add a regression test that repeated turns on one sid produce history > 0.
-- Constrain Stage 1 output to a strict enum or normalize escalation synonyms such as 'force stage3' to the supported escalation/others path before logging a warning.
-- Propagate the Android fromVoice flag into the backend pipeline voice boolean and add an integration test covering Android STT-to-Stage3 routing.
-- Add client-side request coalescing, caching, and exponential backoff for briefing assets and announcements; tune route-specific rate limits so background media fetches do not interfere with assistant use.
+- Add an education_project/module_edit intent and handler, or make Stage 3 attach the teaching app/file context and execute audited repo edits with explicit tool logs.
+- Use an async project-edit job with immediate acknowledgement and progress events, or add a fast deterministic handler for known module-edit requests.
+- Pass bounded session history into Stage 3 and store active project-edit state so continuation phrases like "also" route to the same module-edit workflow before classification.
 
 ### Evidence Files
 
@@ -212,7 +214,7 @@
 ## Stage 7: Memory Janitor
 
 - Status: `ok`
-- Duration: 4998s (83.3 min)
+- Duration: 5765s (96.1 min)
 
 ### What It Did
 
@@ -220,15 +222,15 @@
 
 ### Problems It Found
 
-- [0;93m2026-05-27 02:31:27.134994177 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-27 06:31:27 WARNING] ModelImporter.cpp:739: Make sure input input_ids has Int64 binding.[m
-- [0;93m2026-05-27 02:31:27.135038263 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-27 06:31:27 WARNING] ModelImporter.cpp:739: Make sure input attention_mask has Int64 binding.[m
-- [0;93m2026-05-27 02:31:27.135051085 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-27 06:31:27 WARNING] ModelImporter.cpp:739: Make sure input token_type_ids has Int64 binding.[m
-- [0;93m2026-05-27 02:31:27.317471068 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-27 06:31:27 WARNING] ModelImporter.cpp:739: Make sure input input_ids has Int64 binding.[m
-- [0;93m2026-05-27 02:31:27.317526527 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-27 06:31:27 WARNING] ModelImporter.cpp:739: Make sure input attention_mask has Int64 binding.[m
+- [0;93m2026-05-28 02:37:01.228834304 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-28 06:37:01 WARNING] ModelImporter.cpp:739: Make sure input input_ids has Int64 binding.[m
+- [0;93m2026-05-28 02:37:01.228882551 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-28 06:37:01 WARNING] ModelImporter.cpp:739: Make sure input attention_mask has Int64 binding.[m
+- [0;93m2026-05-28 02:37:01.228897410 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-28 06:37:01 WARNING] ModelImporter.cpp:739: Make sure input token_type_ids has Int64 binding.[m
+- [0;93m2026-05-28 02:37:01.404699635 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-28 06:37:01 WARNING] ModelImporter.cpp:739: Make sure input input_ids has Int64 binding.[m
+- [0;93m2026-05-28 02:37:01.404741373 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-28 06:37:01 WARNING] ModelImporter.cpp:739: Make sure input attention_mask has Int64 binding.[m
 
 ### Improvements It Made
 
-- INFO:agent_skills.self_improve_log:self_improve_log: recorded [medium] Memory Verification — Found 14 stale memories out of 20 checked. Stale memories make Jane give wrong answers about her own
+- INFO:agent_skills.self_improve_log:self_improve_log: recorded [medium] Memory Verification — Found 13 stale memories out of 20 checked. Stale memories make Jane give wrong answers about her own
 
 ### Evidence Files
 
@@ -237,7 +239,7 @@
 ## Stage 8: Auto-Commit + Push (post)
 
 - Status: `ok`
-- Duration: 1s (0.0 min)
+- Duration: 2s (0.0 min)
 
 ### What It Did
 
@@ -249,7 +251,8 @@
 
 ### Improvements It Made
 
-- 2026-05-27 03:01:23,319 INFO Pushed successfully.
+- 2026-05-28 03:00:00,329 INFO Committed 6 file(s).
+- 2026-05-28 03:00:02,309 INFO Pushed successfully.
 
 ### Evidence Files
 
