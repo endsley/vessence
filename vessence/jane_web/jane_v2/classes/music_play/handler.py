@@ -19,6 +19,8 @@ import re
 
 logger = logging.getLogger(__name__)
 
+_ACTIONABLE_KINDS = {"shuffle", "song", "artist", "playlist", "genre", "mood"}
+
 
 def _normalize(s: str) -> str:
     return re.sub(r"\s+", " ", (s or "").lower().strip())
@@ -109,6 +111,10 @@ def handle(prompt: str, params: dict | None = None) -> dict | None:
 
     if not kind:
         logger.info("music handler: missing kind — escalating")
+        return None
+
+    if kind not in _ACTIONABLE_KINDS:
+        logger.info("music handler: unknown kind=%r — escalating", kind)
         return None
 
     logger.info("music handler: kind=%r query=%r", kind, query)
