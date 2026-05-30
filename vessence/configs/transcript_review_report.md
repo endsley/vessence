@@ -1,54 +1,84 @@
-# Transcript Quality Review — 2026-05-28
+# Transcript Quality Review — 2026-05-29
 
-Generated: 2026-05-29 01:19:26
+Generated: 2026-05-30 01:19:59
 
 ## Issue 1 [MEDIUM]
 
-**Turn:** 2026-05-28 01:18:20
-**User said:** for the module span_A.q2, I would like you to not mention the augmented matrix setup
+**Turn:** 2026-05-29 18:13:12
+**User said:** unknown 16-character voice capture
 
-**Problem:** Stage 3 request took nearly four minutes to complete, causing severe voice-assistant latency.
+**Problem:** Extra voice turn was processed as a greeting between two substantive UI-change requests.
 
-**Root cause:** The turn escalated to Stage 3 as others:Low and the OpenAI stream did not finish until 225460ms later. There is no Stage 2 fast path or progress/timeout evidence for this project-edit style request.
+**Root cause:** Android relaunched STT after the long Stage 3 response, captured a 16-character utterance, and sent it. The server classified it as greeting:Very High and handled it in Stage 2. This turn is not present in the chronological user transcript, so it appears to be an unintended relaunch/noise capture rather than a real user request.
 
-**Suggested fix:** Add a dedicated project-edit/task handler or Stage 3 async job mode that immediately acknowledges long-running edits, streams progress, and enforces a voice-safe timeout.
+**Suggested fix:** Add client-side suppression for very short post-TTS captures unless wakeword or explicit user speech confidence is present, and log the recognized text for all voice sends so audits can verify whether the turn was real.
 
 **Log evidence:**
 ```
-2026-05-28 01:18:19 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (1277ms) params={}
+2026-05-29T18:12:31.878Z [voice_flow] voice_flow[stt_result] text_len=16
 ```
 ```
-2026-05-28 01:18:20 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=104 sid_override=True class_protocol=n/a
+2026-05-29T18:12:31.878Z [voice_flow] voice_flow[send_message] text_len=16 fromVoice=True
 ```
 ```
-2026-05-28 01:22:05 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage3 end-to-end (225460ms)
+2026-05-29 18:13:12 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 greeting:Very High (1339ms) params={}
+```
+```
+2026-05-29 18:13:13 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage2 greeting handler (646ms)
 ```
 
 ---
 
-## Issue 2 [CRITICAL]
+## Issue 2 [MEDIUM]
 
-**Turn:** 2026-05-28 01:22:09
-**User said:** also, for each question please write a hint section that's helpful fo the student
+**Turn:** 2026-05-29 18:13:25
+**User said:** I feel like the header is still based on web browser
 
-**Problem:** Follow-up turn was routed to Stage 3 without conversational context, so the assistant likely could not know which questions/module the user meant.
+**Problem:** Stage 3 took nearly 8.3 minutes to complete a follow-up UI edit request.
 
-**Root cause:** The user said 'also', referring to the prior span_A.q2 request, but the Stage 3 proxy log shows history=0 again. No pending_action_resolver event appears before Stage 1, and there is no pending action carrying the previous module-edit context.
+**Root cause:** The turn correctly escalated as others:Low, but the Stage 3 stream ran from 18:13:23 to 18:21:39 with prompt_len=667/history=2. No Stage 2 fast path or progress handling exists for ongoing code-edit follow-ups, so the voice conversation stalled for 497639ms.
 
-**Suggested fix:** Persist Stage 3 conversation history for the audit/session id or have Stage 3 set a pending_action for multi-turn project edits; pending_action_resolver should route short follow-ups like 'also...' back to the same task context before Stage 1.
+**Suggested fix:** For code-edit/project modification intents, route to a dedicated async job handler that immediately acknowledges, streams progress, and keeps the voice client from waiting on the full frontier-brain execution.
 
 **Log evidence:**
 ```
-2026-05-28 01:18:20 INFO [jane.proxy] [audit-177994] stream_message brain=OpenAI history=0 msg_len=104 file_ctx=False
+2026-05-29 18:13:21 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (2890ms) params={}
 ```
 ```
-2026-05-28 01:22:08 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (1145ms) params={}
+2026-05-29 18:13:23 INFO [jane.proxy] [jane_android] stream_message brain=OpenAI history=2 msg_len=667 file_ctx=False
 ```
 ```
-2026-05-28 01:22:08 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=103 sid_override=True class_protocol=n/a
+2026-05-29 18:21:39 INFO [jane.proxy] [jane_android] Jane stream pipeline task finished
 ```
 ```
-2026-05-28 01:22:08 INFO [jane.proxy] [audit-177994] stream_message brain=OpenAI history=0 msg_len=103 file_ctx=False
+2026-05-29 18:21:39 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage3 end-to-end (497639ms)
+```
+
+---
+
+## Issue 3 [MEDIUM]
+
+**Turn:** 2026-05-29 18:21:54
+**User said:** I feel like the header for the red not the web view but the and
+
+**Problem:** Voice follow-up appears truncated or garbled, but was still sent to Stage 3.
+
+**Root cause:** Android relaunched STT after sentence TTS, began recognition at 18:21:50, then the transcript shows an incomplete utterance. The server escalated the malformed text to Stage 3 with history=4 instead of asking for clarification.
+
+**Suggested fix:** Add a voice-input quality gate for low-confidence, incomplete, or syntactically broken STT results. For code-edit follow-ups, ask a short clarification instead of sending garbled text to Stage 3.
+
+**Log evidence:**
+```
+2026-05-29T18:21:47.480Z [voice_flow] voice_flow[relaunch_launched] path=sentence_tts
+```
+```
+2026-05-29T18:21:50.676Z [voice_flow] voice_flow[stt_begin]
+```
+```
+2026-05-29 18:21:51 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (1232ms) params={}
+```
+```
+2026-05-29 18:21:53 INFO [jane.proxy] [jane_android] stream_message brain=OpenAI history=4 msg_len=1279 file_ctx=False
 ```
 
 ---
