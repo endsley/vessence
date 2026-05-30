@@ -60,6 +60,12 @@ EXCLUDES = [
 
 SNAPSHOT_INTERVAL_DAYS = 7
 SNAPSHOT_RETENTION_DAYS = 30
+PREFERRED_USB_MOUNT = os.environ.get("USB_BACKUP_MOUNT")
+PREFERRED_USB_LABELS = tuple(
+    label.strip()
+    for label in os.environ.get("USB_BACKUP_LABELS", "VESSENCE_BACKUP").split(",")
+    if label.strip()
+)
 STALE_TOP_LEVEL_ENTRIES = [
     'vessence',
     'gemini_cli_bridge',
@@ -80,11 +86,21 @@ ADK_PIP    = os.path.join(HOME, 'google-adk-env', 'adk-venv', 'bin', 'pip')
 
 def find_usb_mount() -> str | None:
     user = os.path.basename(HOME)
-    candidates = glob.glob(f'/media/{user}/*') + glob.glob(f'/run/media/{user}/*')
-    for path in sorted(candidates):
-        if os.path.ismount(path):
-            return path
-    return None
+    candidates = sorted(
+        path
+        for path in glob.glob(f'/media/{user}/*') + glob.glob(f'/run/media/{user}/*')
+        if os.path.ismount(path)
+    )
+
+    if PREFERRED_USB_MOUNT and os.path.ismount(PREFERRED_USB_MOUNT):
+        return PREFERRED_USB_MOUNT
+
+    for label in PREFERRED_USB_LABELS:
+        for path in candidates:
+            if os.path.basename(path) == label:
+                return path
+
+    return candidates[0] if candidates else None
 
 
 # ─── Rsync ────────────────────────────────────────────────────────────────────
