@@ -197,6 +197,7 @@ def _end_conversation_phrase_ok(cleaned_prompt: str) -> bool:
 
 # Map ChromaDB uppercase class names → pipeline registry names
 _CLASS_MAP = {
+    "BUILD_APK":         "others",
     "MUSIC_PLAY":        "music play",
     "WEATHER":           "weather",
     "GREETING":          "greeting",
@@ -204,14 +205,21 @@ _CLASS_MAP = {
     "SEND_MESSAGE":      "send message",
     "SYNC_MESSAGES":     "sync messages",
     "SHOPPING_LIST":     "shopping list",
+    "DELETE_MESSAGES":   "delete messages",
     "READ_EMAIL":        "read email",
+    "SEND_EMAIL":        "send email",
+    "DELETE_EMAIL":      "delete email",
     "READ_CALENDAR":     "read calendar",
     "CLINIC_SCHEDULES_INFO": "clinic schedules info",
     "END_CONVERSATION":  "end conversation",
     "GET_TIME":          "get time",
     "TIMER":             "timer",
     "TODO_LIST":         "todo list",
+    "DO_MATH":           "do math",
+    "TELL_JOKE":         "tell joke",
+    "WEB_AUTOMATION":    "web_automation",
     "SELF_IMPROVEMENT":  "self improvement",
+    "RESTART_SERVER":    "others",
     "DELEGATE_OPUS":     "others",
     "FORCE_STAGE3":      "others",
 }
