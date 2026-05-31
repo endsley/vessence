@@ -819,6 +819,12 @@ CODE_MAP_KEYWORDS = (
     "project",
     "codex",
     "cold",
+    # Auto-evolved from daily conversations
+    "education",
+    "access",
+    "student",
+    "view",
+    "header",
 )
 
 

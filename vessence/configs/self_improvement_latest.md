@@ -1,68 +1,71 @@
 # Most Recent Nightly Self-Improvement
 
-- Run started: 2026-05-29 01:00:01
-- Report generated: 2026-05-29 02:08:58
-- Total runtime: 4136s
+- Run started: 2026-05-30 01:00:01
+- Report generated: 2026-05-30 01:54:22
+- Total runtime: 3260s
 - Jobs: 8 total, 8 ok, 0 timeout, 0 failed
 - Stable latest report path: `/home/chieh/ambient/vessence/configs/self_improvement_latest.md`
-- Archived copy: `/home/chieh/ambient/vessence-data/reports/self_improvement/self_improvement_20260529_010001.md`
+- Archived copy: `/home/chieh/ambient/vessence-data/reports/self_improvement/self_improvement_20260530_010001.md`
 
 ## TL;DR
 
 - 1. ✓ Auto-Commit WIP (pre) (0.0m)
   - Fixes:
-    - 2026-05-29 01:00:02,220 INFO Committed 2 file(s).
-- 2. ✓ Code Auditor (7.6m)
+    - 2026-05-30 01:00:03,771 INFO Committed 3 file(s).
+- 2. ✓ Code Auditor (8.1m)
   - Problems: none detected
   - Fixes: none applied
-- 3. ✓ Dead Code Auditor (6.5m)
+- 3. ✓ Dead Code Auditor (6.4m)
   - Problems:
-    - Possibly-dead functions: 1.
+    - Dead files — review needed: 1.
+    - Possibly-dead functions: 2.
     - Duplicate function bodies: 10 groups.
   - Fixes:
-    - [dead-code] Done — 0 auto-deleted, 0 flagged, 1 dead funcs, 10 dup groups
+    - [dead-code] Done — 0 auto-deleted, 1 flagged, 2 dead funcs, 10 dup groups
 - 4. ✓ Pipeline Audit (30 prompts) (4.8m)
   - Problems:
-    - Prompts audited: 5.
-    - Classification failures: 3.
-    - Response failures: 4.
+    - Prompts audited: 8.
+    - Classification failures: 4.
+    - Response failures: 6.
 - 5. ✓ Doc Drift Auditor (0.0m)
   - Problems:
     - CRON_JOBS.md missing entry for active cron script: auto_pull.sh
     - v2_3stage_pipeline.md missing class row: CLINIC_SCHEDULES_INFO
-- 6. ✓ Transcript Quality Review (0.5m)
+- 6. ✓ Transcript Quality Review (0.6m)
   - Problems:
-    - Transcript review found 2 issues: 1 critical, 1 medium.
-    - Stage 3 request took nearly four minutes to complete, causing severe voice-assistant latency.
-    - Follow-up turn was routed to Stage 3 without conversational context, so the assistant likely could not know which questions/module the user meant.
+    - Transcript review found 3 issues: 3 medium.
+    - Extra voice turn was processed as a greeting between two substantive UI-change requests.
+    - Stage 3 took nearly 8.3 minutes to complete a follow-up UI edit request.
   - Fixes:
-    - 2026-05-29 01:19:26,539 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (2 issues)
-    - 2026-05-29 01:19:26,541 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 1 critical, 1 medium iss...
-- 7. ✓ Memory Janitor (49.5m)
+    - 2026-05-30 01:19:59,943 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (3 issues)
+    - 2026-05-30 01:19:59,944 INFO self_improve_log: recorded [medium] Transcript Review — Reviewing yesterday's conversations I spotted 3 medium issues. The most...
+- 7. ✓ Memory Janitor (34.3m)
   - Problems:
-    - [0;93m2026-05-29 01:47:50.423554975 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-29 05:47:50 WARNING] ModelImporter.cpp:739: Make...
-    - [0;93m2026-05-29 01:47:50.423597167 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-29 05:47:50 WARNING] ModelImporter.cpp:739: Make...
-    - [0;93m2026-05-29 01:47:50.423613846 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-29 05:47:50 WARNING] ModelImporter.cpp:739: Make...
+    - [0;93m2026-05-30 01:39:15.601566771 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-30 05:39:15 WARNING] ModelImporter.cpp:739: Make...
+    - [0;93m2026-05-30 01:39:15.601607698 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-30 05:39:15 WARNING] ModelImporter.cpp:739: Make...
+    - [0;93m2026-05-30 01:39:15.601619999 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-30 05:39:15 WARNING] ModelImporter.cpp:739: Make...
   - Fixes:
-    - INFO:agent_skills.self_improve_log:self_improve_log: recorded [medium] Memory Verification — Found 8 stale memories out of 20 checked. Stale memories make Ja...
+    - INFO:memory.v1.conversation_manager:Session 'janitor-window-archival' closed and cleaned up.
+    - INFO:memory_janitor:verify_code_memories: [3/4] e06d26a9-c53 — 2026-05-29: Committed and pushed education repo commit 2f3bd
+    - INFO:agent_skills.self_improve_log:self_improve_log: recorded [medium] Memory Verification — Found 2 stale memories out of 4 checked. Stale memories make Jan...
 - 8. ✓ Auto-Commit + Push (post) (0.0m)
   - Fixes:
-    - 2026-05-29 02:08:58,264 INFO Pushed successfully.
+    - 2026-05-30 01:54:22,008 INFO Pushed successfully.
 
 **Top follow-ups:**
 
-- Add a dedicated project-edit/task handler or Stage 3 async job mode that immediately acknowledges long-running edits, streams progress, and enforces a voice-safe timeout.
-- Persist Stage 3 conversation history for the audit/session id or have Stage 3 set a pending_action for multi-turn project edits; pending_action_resolver should route short follow-ups like 'also...' back to the same task context before Stage 1.
+- Add client-side suppression for very short post-TTS captures unless wakeword or explicit user speech confidence is present, and log the recognized text for all voice sends so audits can verify whether the turn was real.
+- For code-edit/project modification intents, route to a dedicated async job handler that immediately acknowledges, streams progress, and keeps the voice client from waiting on the full frontier-brain execution.
 
 ## Executive Summary
 
 - All stages exited cleanly.
-- 6 concrete improvement/fix signals were found in logs or reports.
+- 8 concrete improvement/fix signals were found in logs or reports.
 
 ## Stage 1: Auto-Commit WIP (pre)
 
 - Status: `ok`
-- Duration: 0s (0.0 min)
+- Duration: 2s (0.0 min)
 
 ### What It Did
 
@@ -74,7 +77,7 @@
 
 ### Improvements It Made
 
-- 2026-05-29 01:00:02,220 INFO Committed 2 file(s).
+- 2026-05-30 01:00:03,771 INFO Committed 3 file(s).
 
 ### Evidence Files
 
@@ -83,7 +86,7 @@
 ## Stage 2: Code Auditor
 
 - Status: `ok`
-- Duration: 457s (7.6 min)
+- Duration: 488s (8.1 min)
 
 ### What It Did
 
@@ -106,7 +109,7 @@
 ## Stage 3: Dead Code Auditor
 
 - Status: `ok`
-- Duration: 387s (6.5 min)
+- Duration: 385s (6.4 min)
 
 ### What It Did
 
@@ -114,12 +117,13 @@
 
 ### Problems It Found
 
-- Possibly-dead functions: 1.
+- Dead files — review needed: 1.
+- Possibly-dead functions: 2.
 - Duplicate function bodies: 10 groups.
 
 ### Improvements It Made
 
-- [dead-code] Done — 0 auto-deleted, 0 flagged, 1 dead funcs, 10 dup groups
+- [dead-code] Done — 0 auto-deleted, 1 flagged, 2 dead funcs, 10 dup groups
 
 ### Evidence Files
 
@@ -129,7 +133,7 @@
 ## Stage 4: Pipeline Audit (30 prompts)
 
 - Status: `ok`
-- Duration: 288s (4.8 min)
+- Duration: 287s (4.8 min)
 
 ### What It Did
 
@@ -137,13 +141,13 @@
 
 ### Problems It Found
 
-- Prompts audited: 5.
-- Classification failures: 3.
-- Response failures: 4.
-- **I'm currently you are using cold text as the third brain right** (read messages/stage3): Yes, Chieh. If “cold text” means Codex, then right now I’m Jane running through the Codex/standing-brain path, with Vessence memory and instructions l
-- **codex timing** (others/stage3): [ACK]Chieh, I need one clarification on what “codex timing” refers to.[/ACK]
-- **for the module span_A.q2, I would like you to not mention the augmented matrix s** (others/stage3): Chieh, I verified `span_A.q2`: the visible prompt already omits “augmented,” “Equivalently,” `A \alpha`, and the augmented matrix display. The remaini
-- **also, for each question please write a hint section that's helpful fo the studen** (todo list/stage3): Got it, Chieh. Send me the questions or the file path, and I’ll add a concise `Hint` section under each one that guides the approach without giving aw
+- Prompts audited: 8.
+- Classification failures: 4.
+- Response failures: 6.
+- **I'm currently you are using cold text as the third brain right** (read messages/stage3): Yes, Chieh. This session is Jane running through the text standing-brain path with memory injected. If you meant “Claude Text” specifically, I’d check
+- **codex timing** (others/stage3): [ACK]Chieh, I need one quick clarification on what “codex timing” refers to.[/ACK]
+- **also, for each question please write a hint section that's helpful fo the studen** (todo list/stage3): [ACK]Got it, Chieh — I’ll add helpful student-facing hints for each question; quick change.[/ACK]
+- **you have access to my education software and I would like you to make some chang** (others/stage3): [ACK]Chieh, I can make the mobile student-view UI changes; I just need the target changes before editing.[/ACK]
 
 ### Improvements It Made
 
@@ -180,7 +184,7 @@
 ## Stage 6: Transcript Quality Review
 
 - Status: `ok`
-- Duration: 31s (0.5 min)
+- Duration: 33s (0.6 min)
 
 ### What It Did
 
@@ -188,19 +192,21 @@
 
 ### Problems It Found
 
-- Transcript review found 2 issues: 1 critical, 1 medium.
-- Stage 3 request took nearly four minutes to complete, causing severe voice-assistant latency.
-- Follow-up turn was routed to Stage 3 without conversational context, so the assistant likely could not know which questions/module the user meant.
+- Transcript review found 3 issues: 3 medium.
+- Extra voice turn was processed as a greeting between two substantive UI-change requests.
+- Stage 3 took nearly 8.3 minutes to complete a follow-up UI edit request.
+- Voice follow-up appears truncated or garbled, but was still sent to Stage 3.
 
 ### Improvements It Made
 
-- 2026-05-29 01:19:26,539 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (2 issues)
-- 2026-05-29 01:19:26,541 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 1 critical, 1 medium issues. The most urgent was: Foll
+- 2026-05-30 01:19:59,943 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (3 issues)
+- 2026-05-30 01:19:59,944 INFO self_improve_log: recorded [medium] Transcript Review — Reviewing yesterday's conversations I spotted 3 medium issues. The most urgent was: Extra voice turn
 
 ### Follow-Up Fixes Recommended
 
-- Add a dedicated project-edit/task handler or Stage 3 async job mode that immediately acknowledges long-running edits, streams progress, and enforces a voice-safe timeout.
-- Persist Stage 3 conversation history for the audit/session id or have Stage 3 set a pending_action for multi-turn project edits; pending_action_resolver should route short follow-ups like 'also...' back to the same task context before Stage 1.
+- Add client-side suppression for very short post-TTS captures unless wakeword or explicit user speech confidence is present, and log the recognized text for all voice sends so audits can verify whether the turn was real.
+- For code-edit/project modification intents, route to a dedicated async job handler that immediately acknowledges, streams progress, and keeps the voice client from waiting on the full frontier-brain execution.
+- Add a voice-input quality gate for low-confidence, incomplete, or syntactically broken STT results. For code-edit follow-ups, ask a short clarification instead of sending garbled text to Stage 3.
 
 ### Evidence Files
 
@@ -210,7 +216,7 @@
 ## Stage 7: Memory Janitor
 
 - Status: `ok`
-- Duration: 2970s (49.5 min)
+- Duration: 2060s (34.3 min)
 
 ### What It Did
 
@@ -218,15 +224,17 @@
 
 ### Problems It Found
 
-- [0;93m2026-05-29 01:47:50.423554975 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-29 05:47:50 WARNING] ModelImporter.cpp:739: Make sure input input_ids has Int64 binding.[m
-- [0;93m2026-05-29 01:47:50.423597167 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-29 05:47:50 WARNING] ModelImporter.cpp:739: Make sure input attention_mask has Int64 binding.[m
-- [0;93m2026-05-29 01:47:50.423613846 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-29 05:47:50 WARNING] ModelImporter.cpp:739: Make sure input token_type_ids has Int64 binding.[m
-- [0;93m2026-05-29 01:47:50.625993543 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-29 05:47:50 WARNING] ModelImporter.cpp:739: Make sure input input_ids has Int64 binding.[m
-- [0;93m2026-05-29 01:47:50.626033626 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-29 05:47:50 WARNING] ModelImporter.cpp:739: Make sure input attention_mask has Int64 binding.[m
+- [0;93m2026-05-30 01:39:15.601566771 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-30 05:39:15 WARNING] ModelImporter.cpp:739: Make sure input input_ids has Int64 binding.[m
+- [0;93m2026-05-30 01:39:15.601607698 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-30 05:39:15 WARNING] ModelImporter.cpp:739: Make sure input attention_mask has Int64 binding.[m
+- [0;93m2026-05-30 01:39:15.601619999 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-30 05:39:15 WARNING] ModelImporter.cpp:739: Make sure input token_type_ids has Int64 binding.[m
+- [0;93m2026-05-30 01:39:15.826016587 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-30 05:39:15 WARNING] ModelImporter.cpp:739: Make sure input input_ids has Int64 binding.[m
+- [0;93m2026-05-30 01:39:15.826055495 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-30 05:39:15 WARNING] ModelImporter.cpp:739: Make sure input attention_mask has Int64 binding.[m
 
 ### Improvements It Made
 
-- INFO:agent_skills.self_improve_log:self_improve_log: recorded [medium] Memory Verification — Found 8 stale memories out of 20 checked. Stale memories make Jane give wrong answers about her own
+- INFO:memory.v1.conversation_manager:Session 'janitor-window-archival' closed and cleaned up.
+- INFO:memory_janitor:verify_code_memories: [3/4] e06d26a9-c53 — 2026-05-29: Committed and pushed education repo commit 2f3bd
+- INFO:agent_skills.self_improve_log:self_improve_log: recorded [medium] Memory Verification — Found 2 stale memories out of 4 checked. Stale memories make Jane give wrong answers about her own a
 
 ### Evidence Files
 
@@ -247,7 +255,7 @@
 
 ### Improvements It Made
 
-- 2026-05-29 02:08:58,264 INFO Pushed successfully.
+- 2026-05-30 01:54:22,008 INFO Pushed successfully.
 
 ### Evidence Files
 
