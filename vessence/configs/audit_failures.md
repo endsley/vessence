@@ -90,3 +90,26 @@ test_code/auto_audit_handler.py::test_is_coherent[I love the way you are-False] 
 test_code/
 ```
 
+## 2026-06-01 01:00 — jane_web/jane_v2/stage2_dispatcher.py
+Tests failing after 3 fix attempts. Reverted.
+
+Last test output:
+```
+============================= test session starts ==============================
+platform linux -- Python 3.13.7, pytest-9.0.2, pluggy-1.6.0 -- /home/chieh/google-adk-env/adk-venv/bin/python
+cachedir: .pytest_cache
+rootdir: /home/chieh/ambient/vessence
+plugins: asyncio-1.3.0, anyio-4.12.1, typeguard-4.5.1
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 65 items
+
+test_code/auto_audit_stage2_dispatcher.py::TestDispatchDocumentedBehavior::test_dispatch_invokes_async_handler_and_returns_dict PASSED [  1%]
+test_code/auto_audit_stage2_dispatcher.py::TestDispatchDocumentedBehavior::test_dispatch_offloads_sync_handler_to_thread PASSED [  3%]
+test_code/auto_audit_stage2_dispatcher.py::TestDispatchDocumentedBehavior::test_async_handler_is_awaited_directly PASSED [  4%]
+test_code/auto_audit_stage2_dispatcher.py::TestDispatchDocumentedBehavior::test_missing_class_returns_none PASSED [  6%]
+test_code/auto_audit_stage2_dispatcher.py::TestDispatchDocumentedBehavior::test_class_with_no_handler_returns_none PASSED [  7%]
+test_code/auto_audit_stage2_dispatcher.py::TestDispatchDocumentedBehavior::test_declining_handler_returning_none_returns_none PASSED [  9%]
+test_code/auto_audit_stage2_dispatcher.py::TestDispatchDocumentedBehavior::test_crashed_handler_returns_none PASSED [ 10%]
+test_code/auto_audit_stage2_dispatcher.py::TestDispatchDocumentedBehavior::test_gate_rejection_returns_none_and_does_n
+```
+
