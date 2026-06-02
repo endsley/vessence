@@ -74,7 +74,10 @@ class CodexPersistentManager:
         self._add_dirs = self._resolve_additional_write_dirs()
 
     def _resolve_additional_write_dirs(self) -> list[str]:
-        roots_raw = os.environ.get("JANE_CODE_WRITE_ROOTS", str(Path.home() / "code"))
+        default_roots = os.pathsep.join([
+            str(Path.home() / "code" / "chieh_class_v2"),
+        ])
+        roots_raw = os.environ.get("JANE_CODE_WRITE_ROOTS", default_roots)
         workdir = Path(self._workdir).expanduser().resolve()
         roots: list[str] = []
         for raw in roots_raw.split(os.pathsep):
@@ -183,11 +186,16 @@ class CodexPersistentManager:
         yolo: bool,
     ) -> list[str]:
         base = [self._codex_bin, "exec"]
-        if session.codex_thread_id:
+        is_resume = bool(session.codex_thread_id)
+        if is_resume:
             base.extend(["resume", session.codex_thread_id])
         base.extend(["--json", "--skip-git-repo-check"])
-        for add_dir in self._add_dirs:
-            base.extend(["--add-dir", add_dir])
+        if not is_resume:
+            base.extend(["--cd", self._workdir])
+            if not yolo:
+                base.extend(["--sandbox", "workspace-write"])
+            for add_dir in self._add_dirs:
+                base.extend(["--add-dir", add_dir])
         if yolo:
             base.append("--dangerously-bypass-approvals-and-sandbox")
         if model:

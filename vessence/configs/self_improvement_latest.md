@@ -1,64 +1,56 @@
 # Most Recent Nightly Self-Improvement
 
-- Run started: 2026-05-31 01:00:01
-- Report generated: 2026-05-31 01:38:01
-- Total runtime: 2279s
-- Jobs: 8 total, 8 ok, 0 timeout, 0 failed
+- Run started: 2026-06-01 01:00:01
+- Report generated: 2026-06-01 01:30:54
+- Total runtime: 1852s
+- Jobs: 8 total, 7 ok, 0 timeout, 1 failed
 - Stable latest report path: `/home/chieh/ambient/vessence/configs/self_improvement_latest.md`
-- Archived copy: `/home/chieh/ambient/vessence-data/reports/self_improvement/self_improvement_20260531_010001.md`
+- Archived copy: `/home/chieh/ambient/vessence-data/reports/self_improvement/self_improvement_20260601_010001.md`
 
 ## TL;DR
 
 - 1. ✓ Auto-Commit WIP (pre) (0.0m)
   - Fixes:
-    - 2026-05-31 01:00:02,020 INFO Committed 3 file(s).
-- 2. ✓ Code Auditor (9.1m)
-  - Problems: none detected
-  - Fixes: none applied
-- 3. ✓ Dead Code Auditor (6.2m)
+    - 2026-06-01 01:00:02,109 INFO Committed 2 file(s).
+- 2. ✗ Code Auditor (11.5m)
   - Problems:
-    - Possibly-dead functions: 1.
+    - 2026-06-01 01:11:33,763 [WARNING] All fix attempts exhausted, reverting
+- 3. ✓ Dead Code Auditor (6.6m)
+  - Problems:
+    - Dead files — review needed: 1.
+    - Possibly-dead functions: 2.
     - Duplicate function bodies: 10 groups.
   - Fixes:
-    - [dead-code] Done — 0 auto-deleted, 0 flagged, 1 dead funcs, 10 dup groups
-- 4. ✓ Pipeline Audit (30 prompts) (4.5m)
+    - [dead-code] Done — 0 auto-deleted, 1 flagged, 2 dead funcs, 10 dup groups
+- 4. ✓ Pipeline Audit (30 prompts) (4.7m)
   - Problems:
-    - Prompts audited: 8.
-    - Classification failures: 4.
-    - Response failures: 5.
+    - Prompts audited: 5.
+    - Classification failures: 1.
+    - Response failures: 3.
 - 5. ✓ Doc Drift Auditor (0.0m)
   - Problems:
     - CRON_JOBS.md missing entry for active cron script: auto_pull.sh
     - v2_3stage_pipeline.md missing class row: BUILD_APK
     - v2_3stage_pipeline.md missing class row: CLINIC_SCHEDULES_INFO
-- 6. ✓ Transcript Quality Review (2.3m)
-  - Problems:
-    - Transcript review found 3 issues: 3 critical.
-    - Project edit request was routed to plain Stage 3 with no file context or execution evidence.
-    - Context-dependent follow-up was escalated without conversation history.
+- 6. ✓ Transcript Quality Review (0.3m)
   - Fixes:
-    - 2026-05-31 01:22:06,669 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (3 issues)
-    - 2026-05-31 01:22:06,670 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 3 critical issues. The m...
-- 7. ✓ Memory Janitor (15.9m)
+    - 2026-06-01 01:23:08,955 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (0 issues)
+    - 2026-06-01 01:23:08,957 INFO self_improve_log: recorded [info] Transcript Review — I reviewed yesterday's conversations and nothing looked off — all turns ha...
+- 7. ✓ Memory Janitor (7.7m)
   - Problems:
-    - [0;93m2026-05-31 01:37:22.692865656 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-31 05:37:22 WARNING] ModelImporter.cpp:739: Make...
-    - [0;93m2026-05-31 01:37:22.692920624 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-31 05:37:22 WARNING] ModelImporter.cpp:739: Make...
-    - [0;93m2026-05-31 01:37:22.692938258 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-31 05:37:22 WARNING] ModelImporter.cpp:739: Make...
+    - [0;93m2026-06-01 01:24:07.609855135 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-06-01 05:24:07 WARNING] ModelImporter.cpp:739: Make...
+    - [0;93m2026-06-01 01:24:07.609922328 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-06-01 05:24:07 WARNING] ModelImporter.cpp:739: Make...
+    - [0;93m2026-06-01 01:24:07.609941345 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-06-01 05:24:07 WARNING] ModelImporter.cpp:739: Make...
   - Fixes:
     - INFO:memory.v1.conversation_manager:Session 'janitor-window-archival' closed and cleaned up.
-    - INFO:agent_skills.self_improve_log:self_improve_log: recorded [medium] Memory Verification — Found 1 stale memories out of 3 checked. Stale memories make Jan...
+    - INFO:agent_skills.self_improve_log:self_improve_log: recorded [info] Memory Verification — Verified 2 code-related memories one at a time. Skipped 200 recent...
 - 8. ✓ Auto-Commit + Push (post) (0.0m)
   - Fixes:
-    - 2026-05-31 01:38:01,411 INFO Pushed successfully.
-
-**Top follow-ups:**
-
-- Add a code/project-edit intent route that hands these requests to a tool-capable Codex/backend agent with repo context, or have Stage 3 explicitly create a tool/action handoff instead of only streaming text.
-- Preserve same-session history when calling stage3_escalate, and create a pending project-edit action for ongoing education-project tasks so follow-ups resolve before Stage 1.
+    - 2026-06-01 01:30:54,694 INFO Pushed successfully.
 
 ## Executive Summary
 
-- All stages exited cleanly.
+- 1 stage(s) need attention because they timed out or exited non-zero.
 - 7 concrete improvement/fix signals were found in logs or reports.
 
 ## Stage 1: Auto-Commit WIP (pre)
@@ -76,7 +68,7 @@
 
 ### Improvements It Made
 
-- 2026-05-31 01:00:02,020 INFO Committed 3 file(s).
+- 2026-06-01 01:00:02,109 INFO Committed 2 file(s).
 
 ### Evidence Files
 
@@ -84,8 +76,8 @@
 
 ## Stage 2: Code Auditor
 
-- Status: `ok`
-- Duration: 544s (9.1 min)
+- Status: `exit-1`
+- Duration: 691s (11.5 min)
 
 ### What It Did
 
@@ -93,7 +85,8 @@
 
 ### Problems It Found
 
-- No problems were detected in the available logs/reports.
+- Job ended with status `exit-1`.
+- 2026-06-01 01:11:33,763 [WARNING] All fix attempts exhausted, reverting
 
 ### Improvements It Made
 
@@ -108,7 +101,7 @@
 ## Stage 3: Dead Code Auditor
 
 - Status: `ok`
-- Duration: 370s (6.2 min)
+- Duration: 394s (6.6 min)
 
 ### What It Did
 
@@ -116,12 +109,13 @@
 
 ### Problems It Found
 
-- Possibly-dead functions: 1.
+- Dead files — review needed: 1.
+- Possibly-dead functions: 2.
 - Duplicate function bodies: 10 groups.
 
 ### Improvements It Made
 
-- [dead-code] Done — 0 auto-deleted, 0 flagged, 1 dead funcs, 10 dup groups
+- [dead-code] Done — 0 auto-deleted, 1 flagged, 2 dead funcs, 10 dup groups
 
 ### Evidence Files
 
@@ -131,7 +125,7 @@
 ## Stage 4: Pipeline Audit (30 prompts)
 
 - Status: `ok`
-- Duration: 272s (4.5 min)
+- Duration: 279s (4.7 min)
 
 ### What It Did
 
@@ -139,13 +133,12 @@
 
 ### Problems It Found
 
-- Prompts audited: 8.
-- Classification failures: 4.
-- Response failures: 5.
-- **codex timing** (others/stage3): [ACK]Chieh, I need one quick clarification on what “codex timing” means.[/ACK]
-- **also, for each question please write a hint section that's helpful fo the studen** (todo list/stage3): [ACK]Chieh, yes — I’ll add student-facing hint sections once I know which question set.[/ACK]
-- **you have access to my education software and I would like you to make some chang** (others/stage3): [ACK]Chieh, I can work on the mobile student view; I need the specific UI changes before editing.[/ACK]
-- **I feel like the header is still based on web browser** (unclear/stage2): <spoken>Sorry, I didn't understand that, can you say it again or clarify?</spoken>
+- Prompts audited: 5.
+- Classification failures: 1.
+- Response failures: 3.
+- **codex timing** (others/stage3): Chieh, do you mean Codex response latency, or do you want me to time a specific command/task? [[AWAITING:codex_timing_scope
+- **also, for each question please write a hint section that's helpful fo the studen** (todo list/stage3): Got it, Chieh. I’ll add a helpful, student-facing `Hint` section for each question that nudges the solving approach without giving away the answer.
+- **you have access to my education software and I would like you to make some chang** (others/stage3): [ACK]Chieh, I can make those mobile student UI changes once you give me the exact screens and desired behavior.[/ACK]
 
 ### Improvements It Made
 
@@ -188,7 +181,7 @@
 ## Stage 6: Transcript Quality Review
 
 - Status: `ok`
-- Duration: 137s (2.3 min)
+- Duration: 20s (0.3 min)
 
 ### What It Did
 
@@ -196,21 +189,12 @@
 
 ### Problems It Found
 
-- Transcript review found 3 issues: 3 critical.
-- Project edit request was routed to plain Stage 3 with no file context or execution evidence.
-- Context-dependent follow-up was escalated without conversation history.
-- Follow-up flow broke after an ambiguous UI-change request.
+- No problems were detected in the available logs/reports.
 
 ### Improvements It Made
 
-- 2026-05-31 01:22:06,669 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (3 issues)
-- 2026-05-31 01:22:06,670 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 3 critical issues. The most urgent was: Project edit r
-
-### Follow-Up Fixes Recommended
-
-- Add a code/project-edit intent route that hands these requests to a tool-capable Codex/backend agent with repo context, or have Stage 3 explicitly create a tool/action handoff instead of only streaming text.
-- Preserve same-session history when calling stage3_escalate, and create a pending project-edit action for ongoing education-project tasks so follow-ups resolve before Stage 1.
-- When Stage 3 asks for clarification, persist a pending_action with the target handler/session and ensure pending_action_resolver consumes the next reply before classification. Add resolver hit/miss logging.
+- 2026-06-01 01:23:08,955 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (0 issues)
+- 2026-06-01 01:23:08,957 INFO self_improve_log: recorded [info] Transcript Review — I reviewed yesterday's conversations and nothing looked off — all turns handled cleanly.
 
 ### Evidence Files
 
@@ -220,7 +204,7 @@
 ## Stage 7: Memory Janitor
 
 - Status: `ok`
-- Duration: 952s (15.9 min)
+- Duration: 464s (7.7 min)
 
 ### What It Did
 
@@ -228,16 +212,16 @@
 
 ### Problems It Found
 
-- [0;93m2026-05-31 01:37:22.692865656 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-31 05:37:22 WARNING] ModelImporter.cpp:739: Make sure input input_ids has Int64 binding.[m
-- [0;93m2026-05-31 01:37:22.692920624 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-31 05:37:22 WARNING] ModelImporter.cpp:739: Make sure input attention_mask has Int64 binding.[m
-- [0;93m2026-05-31 01:37:22.692938258 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-31 05:37:22 WARNING] ModelImporter.cpp:739: Make sure input token_type_ids has Int64 binding.[m
-- [0;93m2026-05-31 01:37:22.921717304 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-31 05:37:22 WARNING] ModelImporter.cpp:739: Make sure input input_ids has Int64 binding.[m
-- [0;93m2026-05-31 01:37:22.921757708 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-05-31 05:37:22 WARNING] ModelImporter.cpp:739: Make sure input attention_mask has Int64 binding.[m
+- [0;93m2026-06-01 01:24:07.609855135 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-06-01 05:24:07 WARNING] ModelImporter.cpp:739: Make sure input input_ids has Int64 binding.[m
+- [0;93m2026-06-01 01:24:07.609922328 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-06-01 05:24:07 WARNING] ModelImporter.cpp:739: Make sure input attention_mask has Int64 binding.[m
+- [0;93m2026-06-01 01:24:07.609941345 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-06-01 05:24:07 WARNING] ModelImporter.cpp:739: Make sure input token_type_ids has Int64 binding.[m
+- [0;93m2026-06-01 01:24:07.870364007 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-06-01 05:24:07 WARNING] ModelImporter.cpp:739: Make sure input input_ids has Int64 binding.[m
+- [0;93m2026-06-01 01:24:07.870403319 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-06-01 05:24:07 WARNING] ModelImporter.cpp:739: Make sure input attention_mask has Int64 binding.[m
 
 ### Improvements It Made
 
 - INFO:memory.v1.conversation_manager:Session 'janitor-window-archival' closed and cleaned up.
-- INFO:agent_skills.self_improve_log:self_improve_log: recorded [medium] Memory Verification — Found 1 stale memories out of 3 checked. Stale memories make Jane give wrong answers about her own a
+- INFO:agent_skills.self_improve_log:self_improve_log: recorded [info] Memory Verification — Verified 2 code-related memories one at a time. Skipped 200 recently verified entries. All checked o
 
 ### Evidence Files
 
@@ -258,7 +242,7 @@
 
 ### Improvements It Made
 
-- 2026-05-31 01:38:01,411 INFO Pushed successfully.
+- 2026-06-01 01:30:54,694 INFO Pushed successfully.
 
 ### Evidence Files
 

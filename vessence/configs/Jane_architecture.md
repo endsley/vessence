@@ -522,6 +522,14 @@ with a lexical relevance guard and recent short-term promotion. It may inject
 fewer than 2 memories when the second hit is broad/noisy. This gives the web
 Codex path a real automatic memory prelude.
 
+Persistent Codex web/Android sessions start fresh with explicit workspace
+permissions: `--cd $VESSENCE_HOME`, `--sandbox workspace-write`, and
+`--add-dir /home/chieh/code/chieh_class_v2` by default. Override the extra
+write roots with colon-separated `JANE_CODE_WRITE_ROOTS` only for approved
+local project roots. `codex exec resume` does not accept new `--add-dir`
+values, so writable roots must be present on the first turn of a persistent
+Codex session; restarting `jane-web.service` clears stale Codex sessions.
+
 Standalone Codex CLI sessions get the same nearest-memory preflight from the
 installed hook when Codex trusts it. `~/.codex/jane-memory-instructions.md`
 provides the fallback rule: if `[Jane Auto Memory]` is absent, call
