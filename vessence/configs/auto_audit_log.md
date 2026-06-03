@@ -61,3 +61,6 @@ Tests now passing. Committed to master.
 ## 2026-06-02 01:00 — jane_web/jane_v2/recent_context.py
 Result: ✅ Module passes all generated tests. Tests committed.
 
+## 2026-06-03 01:00 — intent_classifier/v2/classifier.py
+Result: ✅ Module passes all generated tests. Tests committed.
+
