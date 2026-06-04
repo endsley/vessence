@@ -143,6 +143,79 @@ def insert_draft(
     conn.commit()
 
 
+def _sms_helper_references_elsewhere() -> set[str]:
+    """Return sms_helpers symbols imported or referenced by other repo files."""
+    references: set[str] = set()
+    first_party_roots = [
+        ROOT / "agent_skills",
+        ROOT / "intent_classifier",
+        ROOT / "jane_web",
+        ROOT / "startup_code",
+        ROOT / "test_code",
+        ROOT / "vault_web",
+    ]
+    for first_party_root in first_party_roots:
+        if not first_party_root.exists():
+            continue
+        for path in first_party_root.rglob("*.py"):
+            if path == Path(sms_helpers.__file__).resolve() or path == Path(__file__).resolve():
+                continue
+            if "__pycache__" in path.parts:
+                continue
+            try:
+                tree = ast.parse(path.read_text())
+            except (OSError, SyntaxError, UnicodeDecodeError):
+                continue
+
+            aliases: set[str] = set()
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ImportFrom) and node.module == "agent_skills.sms_helpers":
+                    for alias in node.names:
+                        if alias.name != "*":
+                            references.add(alias.name)
+                elif isinstance(node, ast.Import):
+                    for alias in node.names:
+                        if alias.name == "agent_skills.sms_helpers":
+                            aliases.add(alias.asname or "sms_helpers")
+
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+                    if node.value.id in aliases:
+                        references.add(node.attr)
+    return references
+
+
+def _has_numeric_confidence_threshold(tree: ast.Module) -> bool:
+    """Detect a strict confidence gate such as confidence >= 0.80."""
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Compare):
+            continue
+        if not any(isinstance(op, ast.GtE) for op in node.ops):
+            continue
+
+        names = {
+            child.id
+            for child in ast.walk(node)
+            if isinstance(child, ast.Name) and "confidence" in child.id.lower()
+        }
+        names.update(
+            child.attr
+            for child in ast.walk(node)
+            if isinstance(child, ast.Attribute) and "confidence" in child.attr.lower()
+        )
+        if not names:
+            continue
+
+        numeric_constants = [
+            child.value
+            for child in ast.walk(node)
+            if isinstance(child, ast.Constant) and isinstance(child.value, (int, float))
+        ]
+        if any(value >= 0.80 for value in numeric_constants):
+            return True
+    return False
+
+
 @pytest.mark.parametrize(
     ("raw", "expected"),
     [
@@ -168,6 +241,13 @@ def test_normalize_name_handles_very_long_input_without_truncation():
     assert normalized.startswith("very long name")
     assert "  " not in normalized
     assert normalized.count("very long name") == 1000
+
+
+@pytest.mark.parametrize("prefix", sms_helpers._STOP_PREFIXES)
+def test_stop_prefix_table_values_are_reachable_from_recipient_input(prefix):
+    raw = f"{prefix}Target   Contact"
+
+    assert sms_helpers._normalize_name(raw) == "target contact"
 
 
 def test_resolve_recipient_prefers_alias_over_contacts(isolated_sms_db):
@@ -264,6 +344,28 @@ def test_resolve_recipient_ignores_email_only_contacts(isolated_sms_db):
     assert sms_helpers.resolve_recipient("blank") is None
 
 
+def test_resolve_recipient_malformed_sql_like_input_is_parameterized(
+    isolated_sms_db,
+):
+    conn, _ = isolated_sms_db
+    insert_contact(conn, "Robert Tables", "+15550000030", is_primary=1)
+    malformed = "Robert'); DROP TABLE contacts;--"
+
+    assert sms_helpers.resolve_recipient(malformed) is None
+    assert conn.execute("SELECT COUNT(*) FROM contacts").fetchone()[0] == 1
+
+
+def test_resolve_recipient_wildcard_only_input_cannot_force_unambiguous_send(
+    isolated_sms_db,
+):
+    conn, _ = isolated_sms_db
+    insert_contact(conn, "Alice Example", "+15550000031", is_primary=1)
+    insert_contact(conn, "Bob Example", "+15550000032", is_primary=1)
+
+    assert sms_helpers.resolve_recipient("%") is None
+    assert sms_helpers.resolve_recipient("_") is None
+
+
 @pytest.mark.parametrize("bad_name", ["", "   ", None])
 def test_resolve_recipient_empty_input_returns_none_without_db_query(
     bad_name,
@@ -351,6 +453,22 @@ def test_add_alias_accepts_very_long_alias_and_phone(isolated_sms_db):
     assert row["display_name"] == "Long Contact"
 
 
+def test_add_alias_malformed_sql_string_is_stored_as_data(isolated_sms_db):
+    conn, _ = isolated_sms_db
+    alias = "wife'); DROP TABLE sms_drafts;--"
+
+    assert sms_helpers.add_alias(alias, "+15550000033", "SQL Alias") is True
+    row = conn.execute(
+        "SELECT alias, phone_number, display_name FROM contact_aliases"
+    ).fetchone()
+    assert dict(row) == {
+        "alias": alias.lower(),
+        "phone_number": "+15550000033",
+        "display_name": "SQL Alias",
+    }
+    conn.execute("SELECT COUNT(*) FROM sms_drafts").fetchone()
+
+
 def test_add_alias_returns_false_when_database_import_fails(monkeypatch):
     monkeypatch.setitem(sys.modules, "database", types.ModuleType("database"))
 
@@ -417,6 +535,25 @@ def test_create_draft_accepts_very_long_body(isolated_sms_db):
     assert draft_id is not None
     stored = conn.execute("SELECT body FROM sms_drafts WHERE draft_id = ?", (draft_id,))
     assert stored.fetchone()["body"] == body
+
+
+def test_create_draft_malformed_body_and_phone_are_parameterized_data(
+    isolated_sms_db,
+):
+    conn, _ = isolated_sms_db
+    body = "hello'); DELETE FROM sms_drafts;--"
+    phone = "+15550000034'); DROP TABLE contacts;--"
+
+    draft_id = sms_helpers.create_draft("session-sql", phone, body, "Mal Formed")
+
+    assert draft_id is not None
+    row = conn.execute(
+        "SELECT phone_number, body FROM sms_drafts WHERE draft_id = ?",
+        (draft_id,),
+    ).fetchone()
+    assert row["phone_number"] == phone
+    assert row["body"] == body
+    conn.execute("SELECT COUNT(*) FROM contacts").fetchone()
 
 
 def test_create_draft_returns_none_when_database_write_fails(monkeypatch):
@@ -704,6 +841,13 @@ def test_structural_invariant_no_classifier_confidence_table_to_contradict():
     assert "others" not in constants
 
 
+def test_structural_invariant_referenced_public_symbols_exist():
+    references = _sms_helper_references_elsewhere()
+    missing = sorted(name for name in references if not hasattr(sms_helpers, name))
+
+    assert missing == []
+
+
 def test_structural_invariant_destructive_helpers_are_draft_scoped_not_sms_senders():
     tree = ast.parse(inspect.getsource(sms_helpers))
     source = inspect.getsource(sms_helpers)
@@ -717,6 +861,21 @@ def test_structural_invariant_destructive_helpers_are_draft_scoped_not_sms_sende
     assert "end_conversation" not in function_names
     assert "delete_draft" in function_names
     assert "cleanup_expired_drafts" in function_names
+
+
+def test_structural_invariant_direct_sms_sender_requires_numeric_confidence_gate():
+    source = inspect.getsource(sms_helpers)
+    tree = ast.parse(source)
+    direct_sender_present = any(
+        token in source
+        for token in (
+            "contacts.sms_send_direct",
+            "sms_send_direct(",
+            "[[CLIENT_TOOL:contacts.sms_send",
+        )
+    )
+
+    assert (not direct_sender_present) or _has_numeric_confidence_threshold(tree)
 
 
 def test_structural_invariant_draft_deletion_rejects_borderline_empty_inputs(
