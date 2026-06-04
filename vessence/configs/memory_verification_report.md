@@ -1,6 +1,18 @@
-# Memory Verification Report — 2026-06-02 01:32
+# Memory Verification Report — 2026-06-04 02:38
 
-Checked: 3 | Stale: 2 | Fixed: 2 | Deleted: 0 | Errors: 0 | Skipped recent: 202
+Checked: 20 | Stale: 14 | Fixed: 14 | Deleted: 0 | Errors: 0 | Skipped recent: 187
 
-- **UPDATED** `833e26a1-513` — Code confirms Codex is right: Vessence has Playwright browser automation, accessibility snapshots, screenshots, and optional traces, but no automatic console/response listeners, HAR validator, axe/pa11y/lighthouse checker, or general client-server contract verifier.
-- **UPDATED** `6dbf5f9d-b0d` — Codex was right: source code and the live jane-web process env confirm the memory is stale only because it names a single write root instead of the current multi-root JANE_CODE_WRITE_ROOTS.
+- **UPDATED** `bd14389e-cec` — Codex was right that the old fixed solution ['16/35','13/30'] is stale; q6 now randomizes slope and intercept and returns those values.
+- **UPDATED** `ecfbb892-6de` — Actual code confirms the core split and current manifests, but the old memory was truncated and over-required custom_tools.py/layout.json; it also missed knowledge/chromadb and non-manifest skill folders. Codex was mostly right, with minor corrections for Playwright and preferred_model validation.
+- **UPDATED** `07699ebf-cd6` — Original memory is truncated and incomplete. Code/manifests confirm Codex's core architecture verdict; I adjusted the correction because crontab -l is readable in this run and the runtime Daily Briefing model is qwen2.5:7b while some docs remain stale.
+- **UPDATED** `78a2c726-e5d` — Codex was right: the code confirms the routing, WebView usage, mic button, and HybridTtsManager name; the old memory had an incomplete TTS class name and overstated Work Log as the only WebView exception without qualifying ArticleReaderV2Activity.
+- **UPDATED** `0b79f9cc-9a4` — Confirmed against the Android source. The vault-sync claim is still accurate, but the chat memory is truncated/misnamed: the actual method is ChatRepository.streamChat, not streamC.
+- **UPDATED** `c1874433-4b9` — Codex was right after verification: the architecture docs and unchecked TODOs match, active code only has relay client/config wiring, and the stale part was the incorrect repo-root VESSENCE_TODO.md path.
+- **UPDATED** `813db13b-dd8` — Verified against the actual files. Codex was right that most implementation claims still match, and the stale part is the TODO path; separate/shared Jane mode is still only in specs/TODO, not implemented.
+- **UPDATED** `ab6c6c05-2d0` — Confirmed against the code. The old memory is substantively right but stale/partial because the v3 classifier path is truncated and it omits current heartbeat, continuation-check, and routing details.
+- **UPDATED** `1438587f-d63` — Codex was mostly right: code confirms the vault defaults, managed-user vault/memory paths, file_index_memories, user_memories, short_term_memory, long_term_knowledge, and the SQLite raw transcript ledger. The old memory was truncated and blurred raw history with Chroma summaries.
+- **UPDATED** `e58d0d8d-17b` — Actual code and manifests confirm Codex's PARTIAL verdict, with one adjustment: essence_scheduler scans TOOLS_DIR/ESSENCES_DIR, not SKILLS_DIR directly. The old memory was stale on path envs, scheduler wiring, and current model settings.
+- **UPDATED** `aa8acff2-18e` — Verified against configs/VESCAB.md, runner source, live crontab, cron docs, Amber retirement docs, missing Amber dirs, and changelog; Codex was mostly right but the corrected memory should note live crontab is readable and the Job Queue explicit-only wording is also stale.
+- **UPDATED** `a0f185dc-c42` — Codex was right: the v2 evidence policy still exists, but enforcement is incomplete and the current v3 routing path bypasses it.
+- **UPDATED** `0cc009cd-d02` — Confirmed against the actual code. Codex was right that the original memory was partial because startup also loads through EssenceRuntime, which uses a different path basis and creates the Chroma directory.
+- **UPDATED** `2b8e17ab-9cc` — Actual code and live crontab confirm Codex was right that the old memory is partially stale: /home/chieh/ambient/tools is only a symlink alias, and the installed cron schedule is 2:10 AM fetch plus 3:45 AM pruning, not the manifest/MCP 8 AM and 6 PM schedules.
