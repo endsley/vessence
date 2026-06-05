@@ -43,12 +43,14 @@ def _save(data: dict[str, list[str]]):
     LISTS_FILE.write_text(json.dumps(data, indent=2) + "\n")
 
 
-def _require_confidence(confidence: float | None):
-    if confidence is None:
-        return
-    if not isinstance(confidence, (int, float)):
+def _require_confidence(confidence: float):
+    if (
+        confidence is None
+        or isinstance(confidence, bool)
+        or not isinstance(confidence, (int, float))
+    ):
         raise TypeError("confidence must be numeric")
-    if confidence < _CONFIDENCE_THRESHOLD:
+    if not confidence >= _CONFIDENCE_THRESHOLD:
         raise PermissionError("confidence is below the required threshold")
 
 
@@ -63,6 +65,8 @@ def get_list(name: str = "default") -> list[str]:
 def add_item(item: str, list_name: str = "default") -> list[str]:
     data = _load()
     key = list_name.lower()
+    if not key.strip():
+        raise ValueError("list_name is required")
     if key not in data:
         data[key] = []
     item = item.strip()
@@ -73,7 +77,7 @@ def add_item(item: str, list_name: str = "default") -> list[str]:
 
 
 def remove_item(
-    item: str, list_name: str = "default", *, confidence: float | None = None
+    item: str, list_name: str = "default", *, confidence: float
 ) -> list[str]:
     _require_confidence(confidence)
     key = list_name.lower()
@@ -89,7 +93,7 @@ def remove_item(
     return data.get(key, [])
 
 
-def clear_list(list_name: str = "default", *, confidence: float | None = None):
+def clear_list(list_name: str = "default", *, confidence: float):
     _require_confidence(confidence)
     key = list_name.lower()
     if not key.strip():
