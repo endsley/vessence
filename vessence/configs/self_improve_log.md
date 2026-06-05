@@ -497,3 +497,14 @@ Each row is one orchestrator run. Columns: job → status → duration.
 - ✅ **Transcript Quality Review** — ok (14s) → `self_improve_transcript_quality_review.log`
 - ✅ **Memory Janitor** — ok (45s) → `self_improve_janitor_memory.log`
 - ✅ **Auto-Commit + Push (post)** — ok (1s) → `self_improve_auto_commit_wip.log`
+
+## 2026-06-04 01:00
+
+- ✅ **Auto-Commit WIP (pre)** — ok (0s) → `self_improve_auto_commit_wip.log`
+- ✅ **Code Auditor** — ok (307s) → `self_improve_nightly_code_auditor.log`
+- ✅ **Dead Code Auditor** — ok (348s) → `self_improve_dead_code_auditor.log`
+- ✅ **Pipeline Audit (30 prompts)** — ok (331s) → `self_improve_pipeline_audit_100.log`
+- ✅ **Doc Drift Auditor** — ok (0s) → `self_improve_doc_drift_auditor.log`
+- ✅ **Transcript Quality Review** — ok (35s) → `self_improve_transcript_quality_review.log`
+- ✅ **Memory Janitor** — ok (4913s) → `self_improve_janitor_memory.log`
+- ✅ **Auto-Commit + Push (post)** — ok (1s) → `self_improve_auto_commit_wip.log`

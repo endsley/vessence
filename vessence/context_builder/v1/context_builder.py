@@ -940,10 +940,13 @@ AWAITING_MARKER_INSTRUCTION = (
 
 TTS_SPOKEN_BLOCK_INSTRUCTION = (
     "IMPORTANT — TTS mode is ON. The user is LISTENING, not reading. "
-    "Keep your ENTIRE response short and conversational — like a spoken conversation, "
-    "not a written document. Aim for 2-5 sentences max for most replies.\n\n"
+    "Keep your ENTIRE response short and conversational — like a spoken response, "
+    "not a written document. For TTS, this is strict: keep the spoken part to "
+    "1–2 short sentences, no more than 28 words, and no more than 120 words "
+    "across the entire reply unless the user explicitly asks for detail.\n\n"
     "Rules for TTS mode:\n"
-    "- Be concise. Answer in 2-5 short sentences like you're talking face to face.\n"
+    "- Be concise. Answer like you're speaking out loud — 1-2 short sentences is preferred; "
+    "2 is the hard upper bound unless the request is explicitly informational (for example, a recipe).\n"
     "- No markdown, no bullet lists, no code blocks, no tables in your main response.\n"
     "- No parentheses, brackets, asterisks, or symbols that sound awkward spoken aloud.\n"
     "- ALWAYS wrap your spoken reply in a <spoken>...</spoken> tag — even short casual "

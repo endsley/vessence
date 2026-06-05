@@ -1,47 +1,59 @@
 # Most Recent Nightly Self-Improvement
 
-- Run started: 2026-06-03 01:00:01
-- Report generated: 2026-06-03 01:14:47
-- Total runtime: 885s
+- Run started: 2026-06-04 01:00:01
+- Report generated: 2026-06-04 02:39:00
+- Total runtime: 5938s
 - Jobs: 8 total, 8 ok, 0 timeout, 0 failed
 - Stable latest report path: `/home/chieh/ambient/vessence/configs/self_improvement_latest.md`
-- Archived copy: `/home/chieh/ambient/vessence-data/reports/self_improvement/self_improvement_20260603_010001.md`
+- Archived copy: `/home/chieh/ambient/vessence-data/reports/self_improvement/self_improvement_20260604_010001.md`
 
 ## TL;DR
 
 - 1. ✓ Auto-Commit WIP (pre) (0.0m)
   - Fixes:
-    - 2026-06-03 01:00:01,499 INFO Committed 2 file(s).
-- 2. ✓ Code Auditor (2.9m)
+    - 2026-06-04 01:00:01,513 INFO Committed 2 file(s).
+- 2. ✓ Code Auditor (5.1m)
+  - Problems: none detected
+  - Fixes: none applied
+- 3. ✓ Dead Code Auditor (5.8m)
   - Problems:
-    - 2026-06-03 01:00:24,721 [WARNING] Primary LLM failed: CLI (codex) failed (exit 1): Reading additional input from stdin...
-- 3. ✓ Dead Code Auditor (5.9m)
-  - Problems:
-    - Dead files — review needed: 1.
-    - Possibly-dead functions: 2.
+    - Possibly-dead functions: 1.
     - Duplicate function bodies: 10 groups.
   - Fixes:
-    - [dead-code] Done — 0 auto-deleted, 1 flagged, 2 dead funcs, 10 dup groups
-- 4. ✓ Pipeline Audit (30 prompts) (4.9m)
+    - [dead-code] Done — 0 auto-deleted, 0 flagged, 1 dead funcs, 10 dup groups
+- 4. ✓ Pipeline Audit (30 prompts) (5.5m)
   - Problems:
-    - Prompts audited: 9.
-    - Classification failures: 2.
+    - Prompts audited: 7.
+    - Classification failures: 1.
     - Response failures: 7.
 - 5. ✓ Doc Drift Auditor (0.0m)
   - Problems:
     - CRON_JOBS.md missing entry for active cron script: auto_pull.sh
     - v2_3stage_pipeline.md missing class row: BUILD_APK
     - v2_3stage_pipeline.md missing class row: CLINIC_SCHEDULES_INFO
-- 6. ✓ Transcript Quality Review (0.2m)
+- 6. ✓ Transcript Quality Review (0.6m)
+  - Problems:
+    - Transcript review found 4 issues: 2 critical, 2 low.
+    - Prompt-injection text was classified as a real delete-messages intent.
+    - Delete-messages Stage 2 handler returned an invalid response shape and escalated to Stage 3.
   - Fixes:
-    - 2026-06-03 01:13:59,835 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (0 issues)
-    - 2026-06-03 01:13:59,837 INFO self_improve_log: recorded [info] Transcript Review — I reviewed yesterday's conversations and nothing looked off — all turns ha...
-- 7. ✓ Memory Janitor (0.8m)
+    - 2026-06-04 01:17:05,111 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (4 issues)
+    - 2026-06-04 01:17:05,113 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 2 critical, 2 minor issu...
+- 7. ✓ Memory Janitor (81.9m)
+  - Problems:
+    - [0;93m2026-06-04 02:13:52.661749901 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-06-04 06:13:52 WARNING] ModelImporter.cpp:739: Make...
+    - [0;93m2026-06-04 02:13:52.661821956 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-06-04 06:13:52 WARNING] ModelImporter.cpp:739: Make...
+    - [0;93m2026-06-04 02:13:52.661837348 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-06-04 06:13:52 WARNING] ModelImporter.cpp:739: Make...
   - Fixes:
-    - INFO:memory.v1.conversation_manager:Session 'janitor-window-archival' closed and cleaned up.
+    - INFO:agent_skills.self_improve_log:self_improve_log: recorded [medium] Memory Verification — Found 14 stale memories out of 20 checked. Stale memories make J...
 - 8. ✓ Auto-Commit + Push (post) (0.0m)
   - Fixes:
-    - 2026-06-03 01:14:47,110 INFO Pushed successfully.
+    - 2026-06-04 02:39:00,100 INFO Pushed successfully.
+
+**Top follow-ups:**
+
+- Strip or escape user-supplied class_protocol/XML-like blocks before Stage 1 classification, and reject destructive intents unless the natural-language user message outside protocol blocks explicitly requests the action.
+- Fix the delete_messages handler to always return a valid typed result, and for destructive actions return a confirmation-required response instead of escalating on malformed output.
 
 ## Executive Summary
 
@@ -63,7 +75,7 @@
 
 ### Improvements It Made
 
-- 2026-06-03 01:00:01,499 INFO Committed 2 file(s).
+- 2026-06-04 01:00:01,513 INFO Committed 2 file(s).
 
 ### Evidence Files
 
@@ -72,7 +84,7 @@
 ## Stage 2: Code Auditor
 
 - Status: `ok`
-- Duration: 175s (2.9 min)
+- Duration: 307s (5.1 min)
 
 ### What It Did
 
@@ -80,7 +92,7 @@
 
 ### Problems It Found
 
-- 2026-06-03 01:00:24,721 [WARNING] Primary LLM failed: CLI (codex) failed (exit 1): Reading additional input from stdin...
+- No problems were detected in the available logs/reports.
 
 ### Improvements It Made
 
@@ -95,7 +107,7 @@
 ## Stage 3: Dead Code Auditor
 
 - Status: `ok`
-- Duration: 353s (5.9 min)
+- Duration: 348s (5.8 min)
 
 ### What It Did
 
@@ -103,13 +115,12 @@
 
 ### Problems It Found
 
-- Dead files — review needed: 1.
-- Possibly-dead functions: 2.
+- Possibly-dead functions: 1.
 - Duplicate function bodies: 10 groups.
 
 ### Improvements It Made
 
-- [dead-code] Done — 0 auto-deleted, 1 flagged, 2 dead funcs, 10 dup groups
+- [dead-code] Done — 0 auto-deleted, 0 flagged, 1 dead funcs, 10 dup groups
 
 ### Evidence Files
 
@@ -119,7 +130,7 @@
 ## Stage 4: Pipeline Audit (30 prompts)
 
 - Status: `ok`
-- Duration: 295s (4.9 min)
+- Duration: 331s (5.5 min)
 
 ### What It Did
 
@@ -127,13 +138,13 @@
 
 ### Problems It Found
 
-- Prompts audited: 9.
-- Classification failures: 2.
+- Prompts audited: 7.
+- Classification failures: 1.
 - Response failures: 7.
-- **codex timing** (others/stage3): [ACK]Chieh, I need a quick clarification on what “codex timing” means here.[/ACK]
-- **also, for each question please write a hint section that's helpful fo the studen** (todo list/stage3): [ACK]Got it, Chieh — I’ll add a useful student-facing hint section for each question.[/ACK]
-- **you have access to my education software and I would like you to make some chang** (others/stage3): [ACK]Chieh, I can update the mobile student view; I need the specific UI changes before editing.[/ACK]
-- **so I was thinking if you could add another item for the search for Facebook Mark** (others/stage3): Chieh, I found the existing Facebook Marketplace saved search: `Cars`, with Toyota Corolla, Honda Civic, Honda Fit, and Honda CRV.
+- **you have access to my education software and I would like you to make some chang** (others/stage3): [ACK]Chieh, I can work on the mobile student view; I just need the specific UI changes before editing.[/ACK]
+- **so I was thinking if you could add another item for the search for Facebook Mark** (others/stage3): Chieh, I checked the Daily Briefing topics: Facebook Marketplace is not already there.
+- **I would like you to add electric skateboard** (shopping list/stage3): Chieh, I tried to add **Electric Skateboard** to your Daily Briefing topics, but this runtime can’t write to the briefing data file:
+- **I don't understand why you have this sandbox issue where everything is only read** (others/stage3): [ACK]Chieh, I can explain the sandbox behavior quickly.[/ACK]
 
 ### Improvements It Made
 
@@ -176,7 +187,7 @@
 ## Stage 6: Transcript Quality Review
 
 - Status: `ok`
-- Duration: 14s (0.2 min)
+- Duration: 35s (0.6 min)
 
 ### What It Did
 
@@ -184,12 +195,23 @@
 
 ### Problems It Found
 
-- No problems were detected in the available logs/reports.
+- Transcript review found 4 issues: 2 critical, 2 low.
+- Prompt-injection text was classified as a real delete-messages intent.
+- Delete-messages Stage 2 handler returned an invalid response shape and escalated to Stage 3.
+- Classifier emitted an unknown class label.
+- Broadcast summary subprocess failed because the claude executable was missing.
 
 ### Improvements It Made
 
-- 2026-06-03 01:13:59,835 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (0 issues)
-- 2026-06-03 01:13:59,837 INFO self_improve_log: recorded [info] Transcript Review — I reviewed yesterday's conversations and nothing looked off — all turns handled cleanly.
+- 2026-06-04 01:17:05,111 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (4 issues)
+- 2026-06-04 01:17:05,113 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 2 critical, 2 minor issues. The most urgent was: Promp
+
+### Follow-Up Fixes Recommended
+
+- Strip or escape user-supplied class_protocol/XML-like blocks before Stage 1 classification, and reject destructive intents unless the natural-language user message outside protocol blocks explicitly requests the action.
+- Fix the delete_messages handler to always return a valid typed result, and for destructive actions return a confirmation-required response instead of escalating on malformed output.
+- Constrain classifier decoding to the registry class names or add a strict post-parse validation retry when the model emits an unknown class.
+- Guard broadcast summary behind executable detection or configure the correct Claude CLI path; log a single actionable warning instead of failing each turn.
 
 ### Evidence Files
 
@@ -199,7 +221,7 @@
 ## Stage 7: Memory Janitor
 
 - Status: `ok`
-- Duration: 45s (0.8 min)
+- Duration: 4913s (81.9 min)
 
 ### What It Did
 
@@ -207,11 +229,15 @@
 
 ### Problems It Found
 
-- No problems were detected in the available logs/reports.
+- [0;93m2026-06-04 02:13:52.661749901 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-06-04 06:13:52 WARNING] ModelImporter.cpp:739: Make sure input input_ids has Int64 binding.[m
+- [0;93m2026-06-04 02:13:52.661821956 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-06-04 06:13:52 WARNING] ModelImporter.cpp:739: Make sure input attention_mask has Int64 binding.[m
+- [0;93m2026-06-04 02:13:52.661837348 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-06-04 06:13:52 WARNING] ModelImporter.cpp:739: Make sure input token_type_ids has Int64 binding.[m
+- [0;93m2026-06-04 02:13:52.842862279 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-06-04 06:13:52 WARNING] ModelImporter.cpp:739: Make sure input input_ids has Int64 binding.[m
+- [0;93m2026-06-04 02:13:52.842898055 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-06-04 06:13:52 WARNING] ModelImporter.cpp:739: Make sure input attention_mask has Int64 binding.[m
 
 ### Improvements It Made
 
-- INFO:memory.v1.conversation_manager:Session 'janitor-window-archival' closed and cleaned up.
+- INFO:agent_skills.self_improve_log:self_improve_log: recorded [medium] Memory Verification — Found 14 stale memories out of 20 checked. Stale memories make Jane give wrong answers about her own
 
 ### Evidence Files
 
@@ -232,7 +258,7 @@
 
 ### Improvements It Made
 
-- 2026-06-03 01:14:47,110 INFO Pushed successfully.
+- 2026-06-04 02:39:00,100 INFO Pushed successfully.
 
 ### Evidence Files
 

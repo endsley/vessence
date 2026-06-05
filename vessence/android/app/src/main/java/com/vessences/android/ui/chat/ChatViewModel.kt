@@ -114,6 +114,14 @@ class ChatViewModel(
     private val clientToolMarkerRegex = Regex("\\[\\[CLIENT_TOOL:[a-z][a-z0-9_.]*:\\{[\\s\\S]*?\\}\\]\\]")
     private val awaitingMarkerRegex = Regex("\\[\\[AWAITING:[A-Za-z0-9_\\-\\s]{1,200}\\]\\]", RegexOption.IGNORE_CASE)
     private val trailingPartialAwaitingMarkerRegex = Regex("\\[\\[AWAITING:[A-Za-z0-9_\\-\\s]{0,200}$", RegexOption.IGNORE_CASE)
+    private val spokenSentenceRegex = Regex("([^.!?]+[.!?])")
+    private val ttsCollapseWhitespaceRegex = Regex("\\s+")
+
+    private companion object {
+        private const val MAX_TTS_SENTENCES = 2
+        private const val MAX_TTS_CHARS = 220
+        private const val MAX_TTS_WORDS = 28
+    }
 
     private fun removeTrailingPartialAwaitingMarker(text: String): String {
         val start = text.lastIndexOf("[[")
@@ -158,6 +166,34 @@ class ChatViewModel(
 
     private fun extractedSpokenBlock(raw: String): String? =
         spokenBlockRegex.find(raw)?.groupValues?.getOrNull(1)?.trim()?.takeIf { it.isNotBlank() }
+
+    private fun normalizeTtsText(raw: String?): String =
+        (raw ?: "").trim().replace(ttsCollapseWhitespaceRegex, " ").trim()
+
+    private fun enforceTtsSpokenLength(raw: String?): String? {
+        val text = normalizeTtsText(raw)
+        if (text.isBlank()) return null
+        val sentences = spokenSentenceRegex.findAll(text).map { it.groupValues[1].trim() }.filter { it.isNotBlank() }.toList()
+        var spoken = if (sentences.isNotEmpty()) sentences.take(MAX_TTS_SENTENCES).joinToString(" ") else text
+        if (spoken.isBlank()) return null
+        val words = spoken.split(Regex("\\s+")).filter { it.isNotBlank() }
+        if (words.size > MAX_TTS_WORDS) {
+            spoken = words.take(MAX_TTS_WORDS).joinToString(" ")
+        }
+        if (spoken.length > MAX_TTS_CHARS) {
+            spoken = spoken.take(MAX_TTS_CHARS).trim()
+            val cut = spoken.lastIndexOf(" ")
+            if (cut > 60) {
+                spoken = spoken.substring(0, cut).trim()
+            }
+            spoken = if (!spoken.endsWith(".") && !spoken.endsWith("?") && !spoken.endsWith("!")) {
+                "$spoken…"
+            } else {
+                spoken
+            }
+        }
+        return spoken.trim()
+    }
 
     private fun acquireStreamWakeLock() {
         if (streamWakeLock?.isHeld == true) return
@@ -793,6 +829,14 @@ class ChatViewModel(
                             // otherwise strip <visual> blocks and read the rest
                             val spokenText = spokenTextFromBlock
                                 ?: assistantTextForSpeech(rawText).ifBlank { null }
+                            val enforcedSpokenText = enforceTtsSpokenLength(spokenText)
+                            if (enforcedSpokenText != spokenText) {
+                                android.util.Log.w(
+                                    "ttsdbg",
+                                    "tts_contract_enforced — clipped spoken text for playback "
+                                    + "(orig_len=${spokenText?.length ?: 0}, enforced_len=${enforcedSpokenText?.length ?: 0})"
+                                )
+                            }
                             // If <spoken> tag exists, store both versions for TTS toggle
                             val hasSpokenBlock = spokenTextFromBlock != null
                             // If sentence-level TTS was active, flush remaining buffer,
@@ -868,7 +912,7 @@ class ChatViewModel(
                                         "falling back to stripped text (len=${spokenText.length})"
                                     )
                                     sentenceBuffer.clear()
-                                    sentenceBuffer.append(spokenText)
+                                    sentenceBuffer.append(enforcedSpokenText ?: spokenText)
                                 }
                                 val remaining = sentenceBuffer.toString().trim()
                                 if (remaining.length > 3) {
@@ -887,12 +931,12 @@ class ChatViewModel(
                                 updateAiMessage(
                                     currentMsgId, displayText, isStreaming = false, files = files,
                                     statusLog = statusLog.toList(),
-                                    spokenText = if (hasSpokenBlock) spokenTextFromBlock else null,
+                                    spokenText = if (hasSpokenBlock) enforcedSpokenText else null,
                                     fullText = if (hasSpokenBlock) displayText else null,
                                 )
                                 notifier?.showReplyNotification(senderName = backend.displayName, message = displayText)
                                 // Skip normal TTS in onSendComplete — already played
-                                onSendComplete(fromVoice = false, displayText, spokenText)
+                                onSendComplete(fromVoice = false, displayText, enforcedSpokenText)
                                 // But still handle auto-listen for voice mode
                                 if (fromVoice) {
                                     _state.value = _state.value.copy(isSpeaking = false)
@@ -938,12 +982,12 @@ class ChatViewModel(
                                 updateAiMessage(
                                     currentMsgId, displayText, isStreaming = false, files = files,
                                     statusLog = statusLog.toList(),
-                                    spokenText = if (hasSpokenBlock) spokenTextFromBlock else null,
+                                    spokenText = if (hasSpokenBlock) enforcedSpokenText else null,
                                     fullText = if (hasSpokenBlock) displayText else null,
                                 )
                                 notifier?.showReplyNotification(senderName = backend.displayName, message = displayText)
                                 onSendComplete(
-                                    fromVoice, displayText, spokenText, serverConversationEnd,
+                                    fromVoice, displayText, enforcedSpokenText, serverConversationEnd,
                                     skipBubbleTts = toolHandlesTts,
                                 )
                             }

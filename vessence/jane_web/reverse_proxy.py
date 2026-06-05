@@ -69,6 +69,9 @@ class _ProxyRateLimiter:
 
 _proxy_rate_limiter = _ProxyRateLimiter()
 _PROXY_MAX_REQUESTS_PER_MINUTE = 100
+_PROXY_CLIENT_MAX_SIZE_BYTES = int(
+    os.environ.get("JANE_PROXY_CLIENT_MAX_SIZE_BYTES", str(300 * 1024 * 1024))
+)
 
 
 def _get_proxy_client_ip(request: web.Request) -> str:
@@ -300,6 +303,20 @@ async def proxy_handler(request: web.Request) -> web.StreamResponse:
             {"error": "upstream_unavailable", "detail": str(exc)},
             status=502,
         )
+    except web.HTTPRequestEntityTooLarge as exc:
+        logger.warning(
+            "Request body too large for %s %s: %s",
+            request.method,
+            request.path,
+            exc,
+        )
+        return web.json_response(
+            {
+                "error": "upload_too_large",
+                "detail": f"Request body exceeds proxy limit of {_PROXY_CLIENT_MAX_SIZE_BYTES} bytes.",
+            },
+            status=413,
+        )
     except asyncio.CancelledError:
         raise
     except Exception as exc:
@@ -367,7 +384,7 @@ def create_app(upstream_port: int = 8081) -> web.Application:
         pass
     state.upstream_port = upstream_port
 
-    app = web.Application()
+    app = web.Application(client_max_size=_PROXY_CLIENT_MAX_SIZE_BYTES)
     # Control routes — must be registered before the catch-all
     app.router.add_post("/proxy/switch", handle_switch)
     app.router.add_get("/proxy/status", handle_status)

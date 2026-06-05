@@ -56,6 +56,11 @@ from jane_web.jane_v2.pipeline import (
 )
 from jane_web.session_context import set_current_session_id
 from jane_web.jane_v2.tool_result_parser import strip_tool_result_prefix
+from jane_web.attachment_context import (
+    attachment_stage3_state,
+    copy_chat_body_with_updates,
+    expand_file_context,
+)
 from intent_classifier.v3 import classifier as v3_classifier
 
 
@@ -620,6 +625,13 @@ async def _classify_and_maybe_handle(prompt: str, session_id: str) -> dict:
 
 async def handle_chat(body, request: Request):
     prompt = (body.message or "").strip()
+    expanded_file_context = await expand_file_context(body.file_context)
+    if expanded_file_context != body.file_context:
+        body = copy_chat_body_with_updates(body, file_context=expanded_file_context)
+    has_file_context = bool((expanded_file_context or "").strip())
+    if not prompt and has_file_context:
+        prompt = "Please inspect the attached file."
+        body = copy_chat_body_with_updates(body, message=prompt)
     if not prompt:
         return JSONResponse({
             "response": "",
@@ -634,7 +646,11 @@ async def handle_chat(body, request: Request):
 
     canonical_sid = _canonical_session_id(body, request) or body.session_id
     set_current_session_id(canonical_sid)
-    state = await _classify_and_maybe_handle(prompt, canonical_sid)
+    if has_file_context:
+        logger.info("jane_v3 pipeline: attachment turn → Stage 3 (file_context chars=%d)", len(expanded_file_context or ""))
+        state = attachment_stage3_state()
+    else:
+        state = await _classify_and_maybe_handle(prompt, canonical_sid)
     _apply_privacy_gate(state, prompt)
 
     # ── Stage 2 success: return directly ────────────────────────────────
@@ -730,6 +746,13 @@ def _ndjson(event_type: str, data=None, **extra) -> str:
 async def handle_chat_stream(body, request: Request):
     """Streaming handler — emits NDJSON events compatible with v2's client protocol."""
     prompt = (body.message or "").strip()
+    expanded_file_context = await expand_file_context(body.file_context)
+    if expanded_file_context != body.file_context:
+        body = copy_chat_body_with_updates(body, file_context=expanded_file_context)
+    has_file_context = bool((expanded_file_context or "").strip())
+    if not prompt and has_file_context:
+        prompt = "Please inspect the attached file."
+        body = copy_chat_body_with_updates(body, message=prompt)
 
     async def _stream():
         if not prompt:
@@ -739,7 +762,11 @@ async def handle_chat_stream(body, request: Request):
 
         canonical_sid = _canonical_session_id(body, request) or body.session_id
         set_current_session_id(canonical_sid)
-        state = await _classify_and_maybe_handle(prompt, canonical_sid)
+        if has_file_context:
+            logger.info("jane_v3 pipeline: attachment stream → Stage 3 (file_context chars=%d)", len(expanded_file_context or ""))
+            state = attachment_stage3_state()
+        else:
+            state = await _classify_and_maybe_handle(prompt, canonical_sid)
         _apply_privacy_gate(state, prompt)
 
         # ── Stage 2 success ──────────────────────────────────────────────

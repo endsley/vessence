@@ -28,6 +28,7 @@ Important paths:
 - Example env file: `~/ambient/vessence/.env.example`
 - Main setup script: `~/ambient/vessence/setup.sh`
 - First-run env configurator: `~/ambient/vessence/startup_code/first_run_setup.py`
+- Repo-backed Codex skills: `~/ambient/vessence/codex_skills/`
 - Web app entry point: `~/ambient/vessence/jane_web/main.py`
 - Education homework auditor: `~/ambient/vessence/agent_skills/edu_homework_audit.py`
 
@@ -75,9 +76,10 @@ bash vessence/setup.sh
 
 The setup script is intended to be idempotent. It creates `venv`,
 `vessence-data`, `vault`, the runtime `.env`, installs Python dependencies,
-seeds memory, configures Jane, installs Codex's Chroma memory hook/MCP bridge
-when Codex CLI is available, tests the web server, and installs the user service
-when supported.
+seeds memory, configures Jane, installs repo-backed Codex skills into
+`~/.codex/skills`, installs Codex's Chroma memory hook/MCP bridge when Codex CLI
+is available, tests the web server, and installs the user service when
+supported.
 
 After setup, verify the web app:
 
@@ -139,6 +141,17 @@ This writes `~/.codex/hooks/jane_memory_hook.py`, the persistent Jane memory
 instructions file, and the `jane-memory` MCP registration in
 `~/.codex/config.toml`. The first interactive Codex boot may ask to trust the
 hook via `/hooks`.
+
+To rerun only the repo-backed Codex skill installation:
+
+```bash
+cd ~/ambient/vessence
+../venv/bin/python startup_code/install_codex_skills.py
+```
+
+This copies every skill in `codex_skills/*` that has a `SKILL.md` into
+`~/.codex/skills/`. Treat `codex_skills/` as the durable Git-tracked source and
+`~/.codex/skills/` as the local runtime install target.
 
 ## Google Cloud Setup
 

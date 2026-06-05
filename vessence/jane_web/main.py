@@ -170,8 +170,8 @@ try:
     ANDROID_VERSION = _version_data["version_name"]
     _ANDROID_VERSION_CODE = _version_data["version_code"]
 except FileNotFoundError:
-    ANDROID_VERSION = "0.2.89"
-    _ANDROID_VERSION_CODE = 320
+    ANDROID_VERSION = "0.2.90"
+    _ANDROID_VERSION_CODE = 321
 
 # Startup validation: ensure the APK for the advertised version actually exists
 _expected_apk = MARKETING_DOWNLOADS_DIR / f"vessences-android-v{ANDROID_VERSION}.apk"
@@ -289,7 +289,10 @@ _RATE_LIMIT_UPLOAD_PATHS = frozenset({"/api/files/upload", "/api/tax/upload"})
 # Internal telemetry — phone's DiagnosticReporter bursts up to 50 queued
 # events after a network blip, which trips the 60/min generic bucket. Not
 # an abuse vector (no brain work, write-only), so exempt outright.
-_RATE_LIMIT_EXEMPT_PATHS = frozenset({"/api/device-diagnostics"})
+_RATE_LIMIT_EXEMPT_PATHS = frozenset({
+    "/api/device-diagnostics",
+    "/api/crash-report",
+})
 
 
 def _rate_limit_category(path: str) -> tuple[str, int, float]:
@@ -493,6 +496,24 @@ async def startup():
 async def _start_standing_brains():
     """Start the standing brain CLI process at service startup."""
     try:
+        brain_name = normalize_frontier_provider(os.environ.get("JANE_BRAIN", "gemini"))
+        if brain_name == "openai" and os.environ.get("JANE_WEB_STANDING_CODEX", "1") != "0":
+            from llm_brain.v1.standing_codex import get_codex_app_server_manager
+            manager = get_codex_app_server_manager()
+            await manager.start()
+            health = await manager.health_check()
+            if health.get("alive"):
+                _logger.info(
+                    "Standing Codex alive: model=%s pid=%s sessions=%d roots=%s",
+                    health.get("model"),
+                    health.get("pid"),
+                    health.get("sessions", 0),
+                    health.get("roots"),
+                )
+            else:
+                _logger.warning("Standing Codex not alive after startup: %s", health)
+            return
+
         from llm_brain.v1.standing_brain import get_standing_brain_manager
         manager = get_standing_brain_manager()
         await manager.start()
@@ -782,6 +803,13 @@ async def shutdown():
         await get_standing_brain_manager().shutdown()
     except Exception as e:
         _logger.warning(f"Standing Brain cleanup error (non-fatal): {e}")
+
+    # Standing Codex app-server
+    try:
+        from llm_brain.v1.standing_codex import get_codex_app_server_manager
+        await get_codex_app_server_manager().shutdown()
+    except Exception as e:
+        _logger.warning(f"Standing Codex cleanup error (non-fatal): {e}")
 
     # Cancel background tasks (session reaper, etc.)
     for task in list(_background_tasks):
@@ -1514,7 +1542,13 @@ async def briefing_page(request: Request, _=Depends(require_auth)):
 
 
 @app.post("/api/crash-report")
-async def receive_crash_report(request: Request, _=Depends(require_auth)):
+async def receive_crash_report(request: Request):
+    """Receive Android crash reports.
+
+    This intentionally accepts unauthenticated writes like device diagnostics:
+    crash uploads often happen during app startup before the normal authenticated
+    client stack has restored cookies/trusted-device state.
+    """
     body = (await request.body())[:10000]
     report = body.decode("utf-8", errors="replace")
     crash_file = Path(LOGS_DIR) / "android_crashes.log"

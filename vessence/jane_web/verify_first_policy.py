@@ -70,6 +70,13 @@ _CODE_TRIGGER_RE = re.compile(
       | \bsystemd\b | \bcron(?:tab)?\b | \bjournalctl\b
       | \bcurl\s+(?:-s\s+)?(?:http|localhost)
 
+        # Environment / sandbox access checks. "right access" is a frequent
+        # speech-to-text homophone for "write access" on Android.
+      | \b(?:verify|confirm|check|test)\b.{0,80}\b(?:write|right|read/write|read\s+and\s+write|writable|writeable)\s+access\b
+      | \b(?:verify|confirm|check|test)\b.{0,80}\b(?:permission|permissions|sandbox|writable|writeable)\b
+      | \b(?:do|can)\s+you\s+(?:have|still\s+have)\b.{0,80}\b(?:write|right|read/write|read\s+and\s+write)\s+access\b
+      | \b(?:is|are)\b.{0,80}\b(?:writable|writeable)\b
+
         # File contents — allow path separators in filenames
       | \bwhat'?s\s+in\s+[\w/.\-]+\.\w+
       | \bread\s+[\w/.\-]+\.\w+

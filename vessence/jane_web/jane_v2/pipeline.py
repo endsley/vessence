@@ -44,6 +44,11 @@ from . import (
     stage2_dispatcher,
     stage3_escalate,
 )
+from jane_web.attachment_context import (
+    attachment_stage3_state,
+    copy_chat_body_with_updates,
+    expand_file_context,
+)
 from jane_web.session_context import set_current_session_id
 
 logger = logging.getLogger(__name__)
@@ -1392,6 +1397,13 @@ async def handle_chat(body, request: Request):
     JSON shape (superset of v1's).
     """
     prompt = (body.message or "").strip()
+    expanded_file_context = await expand_file_context(body.file_context)
+    if expanded_file_context != body.file_context:
+        body = copy_chat_body_with_updates(body, file_context=expanded_file_context)
+    has_file_context = bool((expanded_file_context or "").strip())
+    if not prompt and has_file_context:
+        prompt = "Please inspect the attached file."
+        body = copy_chat_body_with_updates(body, message=prompt)
     if not prompt:
         return JSONResponse({
             "response": "",
@@ -1409,7 +1421,11 @@ async def handle_chat(body, request: Request):
     # turn conversation never splits across two session_ids.
     canonical_sid = _canonical_session_id(body, request) or body.session_id
     set_current_session_id(canonical_sid)
-    state = await _classify_and_try_stage2(prompt, canonical_sid)
+    if has_file_context:
+        logger.info("jane_v2 pipeline: attachment turn → Stage 3 (file_context chars=%d)", len(expanded_file_context or ""))
+        state = attachment_stage3_state()
+    else:
+        state = await _classify_and_try_stage2(prompt, canonical_sid)
 
     # ── Stage 2 success → return directly ──────────────────────────────
     if state["result"] is not None:
@@ -1660,6 +1676,26 @@ async def handle_chat(body, request: Request):
     return v1_response
 
 
+def _evidence_correction_for_stream(evidence_meta: dict) -> str:
+    if not evidence_meta.get("flagged"):
+        return ""
+    missing: list[str] = []
+    if evidence_meta.get("requires_code") and int(evidence_meta.get("tool_calls") or 0) == 0:
+        missing.append("a code/log tool result")
+    if evidence_meta.get("requires_memory") and not evidence_meta.get("memory_evidence"):
+        missing.append("Chroma memory evidence")
+    if not missing:
+        missing.append("the required evidence")
+    if len(missing) == 1:
+        missing_text = missing[0]
+    else:
+        missing_text = ", ".join(missing[:-1]) + f", and {missing[-1]}"
+    return (
+        "\n\nChieh, correction: I do not have "
+        f"{missing_text} for that answer, so I should not claim it is verified."
+    )
+
+
 def _persist_fifo_for_stream(
     stage3_text_parts: list[str],
     evidence_meta: dict,
@@ -1667,9 +1703,10 @@ def _persist_fifo_for_stream(
     prompt: str,
     state: dict,
     canonical_sid: str | None,
-) -> None:
+) -> str:
     """Extract AWAITING / SMS-draft state from accumulated Stage 3 deltas
-    and persist the FIFO record.
+    and persist the FIFO record. Returns any corrective text that should be
+    streamed before the terminal event.
 
     Factored out so it can be called from INSIDE the async generator
     BEFORE yielding the ``done`` event.  This eliminates the race where
@@ -1678,6 +1715,7 @@ def _persist_fifo_for_stream(
     hadn't happened yet.
     """
     full_stage3_text = "".join(stage3_text_parts)
+    correction_text = ""
     if evidence_meta.get("required") and evidence_tool_counter is not None:
         try:
             from jane_web.verify_first_policy import summarize_verification_status
@@ -1690,6 +1728,8 @@ def _persist_fifo_for_stream(
             )
             if evidence_meta.get("flagged"):
                 logger.warning("pipeline: evidence policy flagged stream turn: %s", evidence_meta)
+                correction_text = _evidence_correction_for_stream(evidence_meta)
+                full_stage3_text += correction_text
         except Exception as exc:
             logger.warning("pipeline: evidence summary failed: %s", exc)
     cleaned_text, awaiting_topic = _extract_awaiting_marker(full_stage3_text)
@@ -1743,6 +1783,7 @@ def _persist_fifo_for_stream(
         handler_structured=structured_extras,
         extras={"evidence": evidence_meta} if evidence_meta.get("required") else None,
     )
+    return correction_text
 
 
 # ─── streaming entry point (/api/jane/chat/stream) ───────────────────────────
@@ -1752,6 +1793,13 @@ async def handle_chat_stream(body, request: Request):
     """Streaming entry point. Yields NDJSON events compatible with
     existing Alpine/Android chat UI handlers."""
     prompt = (body.message or "").strip()
+    expanded_file_context = await expand_file_context(body.file_context)
+    if expanded_file_context != body.file_context:
+        body = copy_chat_body_with_updates(body, file_context=expanded_file_context)
+    has_file_context = bool((expanded_file_context or "").strip())
+    if not prompt and has_file_context:
+        prompt = "Please inspect the attached file."
+        body = copy_chat_body_with_updates(body, message=prompt)
 
     # Canonical session_id: prefer body (stable client id), fall back to
     # cookie. Captured here so the inner _stream() generator and all FIFO
@@ -1764,8 +1812,12 @@ async def handle_chat_stream(body, request: Request):
             yield _ndjson("done", "")
             return
 
-        yield _ndjson("status", "Classifying…")
-        state = await _classify_and_try_stage2(prompt, canonical_sid)
+        if has_file_context:
+            logger.info("jane_v2 pipeline: attachment stream → Stage 3 (file_context chars=%d)", len(expanded_file_context or ""))
+            state = attachment_stage3_state()
+        else:
+            yield _ndjson("status", "Classifying…")
+            state = await _classify_and_try_stage2(prompt, canonical_sid)
 
         # ── Stage 2 success → emit ack + delta + done ─────────────────
         if state["result"] is not None:
@@ -1984,12 +2036,14 @@ async def handle_chat_stream(body, request: Request):
                     # the next turn's pending_action_resolver races
                     # against the FIFO write and often sees stale state
                     # (no AWAITING pending action → Stage 1 re-classifies).
-                    _persist_fifo_for_stream(
+                    correction = _persist_fifo_for_stream(
                         _stage3_text_parts, evidence_meta,
                         _evidence_tool_counter, prompt, state,
                         canonical_sid,
                     )
                     _fifo_persisted = True
+                    if correction:
+                        yield _ndjson("delta", correction)
                     yield json.dumps(payload, ensure_ascii=True) + "\n"
                     continue
             yield ev
@@ -1999,10 +2053,12 @@ async def handle_chat_stream(body, request: Request):
         if tail:
             yield _ndjson("delta", tail)
         if not _fifo_persisted:
-            _persist_fifo_for_stream(
+            correction = _persist_fifo_for_stream(
                 _stage3_text_parts, evidence_meta,
                 _evidence_tool_counter, prompt, state,
                 canonical_sid,
             )
+            if correction:
+                yield _ndjson("delta", correction)
 
     return StreamingResponse(_stream(), media_type="application/x-ndjson")

@@ -44,19 +44,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
-import androidx.core.content.FileProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.vessences.android.SharedIntentState
 import com.vessences.android.data.api.AppVersion
 import com.vessences.android.data.api.UpdateManager
 import com.vessences.android.data.repository.ChatBackend
-import java.io.File
 import java.util.Locale
 
 private val SlateBg = Color(0xFF0F172A)
@@ -361,10 +358,13 @@ private fun ChatInputBar(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
         if (granted) {
-            val photoFile = File.createTempFile("photo_", ".jpg", context.cacheDir)
-            val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", photoFile)
-            cameraPhotoUri = uri
-            cameraLauncher.launch(uri)
+            try {
+                val uri = createCameraAttachmentUri(context)
+                cameraPhotoUri = uri
+                cameraLauncher.launch(uri)
+            } catch (e: Exception) {
+                reportCameraLaunchFailure(context, "JaneChatScreen", e)
+            }
         }
     }
 
@@ -504,10 +504,13 @@ private fun ChatInputBar(
                                 context, Manifest.permission.CAMERA
                             ) == PackageManager.PERMISSION_GRANTED
                             if (hasCamPerm) {
-                                val photoFile = File.createTempFile("photo_", ".jpg", context.cacheDir)
-                                val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", photoFile)
-                                cameraPhotoUri = uri
-                                cameraLauncher.launch(uri)
+                                try {
+                                    val uri = createCameraAttachmentUri(context)
+                                    cameraPhotoUri = uri
+                                    cameraLauncher.launch(uri)
+                                } catch (e: Exception) {
+                                    reportCameraLaunchFailure(context, "JaneChatScreen", e)
+                                }
                             } else {
                                 cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
                             }

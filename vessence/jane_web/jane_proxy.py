@@ -510,6 +510,20 @@ def _format_tool_results_for_brain(results: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def _latest_user_prompt_from_transcript(transcript: str) -> str:
+    """Extract the newest user turn from a built Jane transcript."""
+    if not transcript:
+        return ""
+    _prefix, sep, tail = transcript.rpartition("User:")
+    prompt = tail if sep else transcript
+    for marker in ("\nJane:", "\nAssistant:"):
+        marker_idx = prompt.find(marker)
+        if marker_idx >= 0:
+            prompt = prompt[:marker_idx]
+            break
+    return prompt.strip().removesuffix("Jane:").strip()
+
+
 def _execute_email_tool_serverside(tc: dict) -> str:
     """Execute an email.* tool call server-side and return a human-readable
     result string. Called from the emit() function when the brain emits
@@ -970,8 +984,16 @@ def _use_persistent_claude(brain_name: str) -> bool:
     return brain_name == "claude" and os.environ.get("JANE_WEB_PERSISTENT_CLAUDE", "1") != "0"
 
 
+def _use_standing_codex(brain_name: str) -> bool:
+    return brain_name in {"openai", "codex"} and os.environ.get("JANE_WEB_STANDING_CODEX", "1") != "0"
+
+
 def _use_persistent_codex(brain_name: str) -> bool:
-    return brain_name in {"openai", "codex"} and os.environ.get("JANE_WEB_PERSISTENT_CODEX", "1") != "0"
+    return (
+        brain_name in {"openai", "codex"}
+        and not _use_standing_codex(brain_name)
+        and os.environ.get("JANE_WEB_PERSISTENT_CODEX", "1") != "0"
+    )
 
 
 def _get_web_chat_model(brain_name: str) -> str:
@@ -1050,11 +1072,33 @@ async def _execute_brain_sync(user_id: str, session_id: str, brain_name: str, ad
             prompt_text = request_ctx.transcript
         else:
             # Only send the latest user message — Claude remembers the rest
-            prompt_text = request_ctx.transcript.split("User:")[-1].strip().removesuffix("Jane:").strip()
+            prompt_text = _latest_user_prompt_from_transcript(request_ctx.transcript)
             # Inject code map on-demand for code-related follow-up messages
             prompt_text, _cm = _maybe_prepend_code_map(prompt_text)
             if _cm:
                 logger.info("[%s] Code map injected (persistent claude sync)", session_id[:12] if 'session_id' in dir() else "?")
+        return await manager.run_turn(
+            user_id,
+            session_id,
+            prompt_text,
+            timeout_seconds=profile.timeout_seconds,
+            model=_get_web_chat_model(brain_name),
+            yolo=profile.mode == "yolo",
+        )
+    if _use_standing_codex(brain_name):
+        from llm_brain.v1.standing_codex import get_codex_app_server_manager
+        manager = get_codex_app_server_manager()
+        profile = _get_execution_profile(brain_name)
+        session = await manager.get(user_id, session_id)
+        if session.is_fresh():
+            prompt_text = f"{request_ctx.system_prompt}\n\n{request_ctx.transcript}".strip()
+        elif not request_ctx.system_prompt:
+            prompt_text = request_ctx.transcript
+        else:
+            prompt_text = _latest_user_prompt_from_transcript(request_ctx.transcript)
+            prompt_text, _cm = _maybe_prepend_code_map(prompt_text)
+            if _cm:
+                logger.info("[%s] Code map injected (standing codex sync)", session_id[:12])
         return await manager.run_turn(
             user_id,
             session_id,
@@ -1073,7 +1117,7 @@ async def _execute_brain_sync(user_id: str, session_id: str, brain_name: str, ad
         elif not request_ctx.system_prompt:
             prompt_text = request_ctx.transcript
         else:
-            prompt_text = request_ctx.transcript.split("User:")[-1].strip().removesuffix("Jane:").strip()
+            prompt_text = _latest_user_prompt_from_transcript(request_ctx.transcript)
             prompt_text, _cm = _maybe_prepend_code_map(prompt_text)
             if _cm:
                 logger.info("[%s] Code map injected (persistent codex sync)", session_id[:12])
@@ -1122,7 +1166,7 @@ async def _execute_brain_stream(user_id: str, session_id: str, brain_name: str, 
             # summary + recent history — send whole so brain keeps context.
             prompt_text = request_ctx.transcript
         else:
-            prompt_text = request_ctx.transcript.split("User:")[-1].strip().removesuffix("Jane:").strip()
+            prompt_text = _latest_user_prompt_from_transcript(request_ctx.transcript)
             # Inject code map on-demand for code-related follow-up messages
             prompt_text, _cm = _maybe_prepend_code_map(prompt_text)
             if _cm:
@@ -1138,6 +1182,34 @@ async def _execute_brain_stream(user_id: str, session_id: str, brain_name: str, 
             model=_get_web_chat_model(brain_name),
             yolo=profile.mode == "yolo",
         )
+    if _use_standing_codex(brain_name):
+        from llm_brain.v1.standing_codex import get_codex_app_server_manager
+        manager = get_codex_app_server_manager()
+        profile = _get_execution_profile(brain_name)
+        session = await manager.get(user_id, session_id)
+        if session.is_fresh():
+            prompt_text = f"{request_ctx.system_prompt}\n\n{request_ctx.transcript}".strip()
+        elif not request_ctx.system_prompt:
+            prompt_text = request_ctx.transcript
+        else:
+            prompt_text = _latest_user_prompt_from_transcript(request_ctx.transcript)
+            prompt_text, _cm = _maybe_prepend_code_map(prompt_text)
+            if _cm:
+                emit("status", "Loading code map for code-related query...")
+                logger.info("[%s] Code map injected (standing codex stream)", session_id[:12])
+        return await manager.run_turn(
+            user_id,
+            session_id,
+            prompt_text,
+            on_delta=lambda delta: emit("delta", delta),
+            on_status=lambda status: emit("status", status),
+            on_thought=lambda thought: emit("thought", thought),
+            on_tool_use=lambda tool: emit("tool_use", tool),
+            on_tool_result=lambda result: emit("tool_result", result),
+            timeout_seconds=profile.timeout_seconds,
+            model=_get_web_chat_model(brain_name),
+            yolo=profile.mode == "yolo",
+        )
     if _use_persistent_codex(brain_name):
         from llm_brain.v1.persistent_codex import get_codex_persistent_manager
         manager = get_codex_persistent_manager()
@@ -1148,7 +1220,7 @@ async def _execute_brain_stream(user_id: str, session_id: str, brain_name: str, 
         elif not request_ctx.system_prompt:
             prompt_text = request_ctx.transcript
         else:
-            prompt_text = request_ctx.transcript.split("User:")[-1].strip().removesuffix("Jane:").strip()
+            prompt_text = _latest_user_prompt_from_transcript(request_ctx.transcript)
             prompt_text, _cm = _maybe_prepend_code_map(prompt_text)
             if _cm:
                 emit("status", "Loading code map for code-related query...")
@@ -1275,6 +1347,105 @@ def _strip_stage3_injections(message: str) -> str:
     return text.strip()
 
 
+_TTS_SPOKEN_BLOCK_RE = _re.compile(
+    r"<spoken>(.*?)</spoken>",
+    _re.IGNORECASE | _re.DOTALL,
+)
+_TTS_SPOKEN_TAG_RE = _re.compile(r"</?(?:spoken|visual|think|thinking|artifact)>", _re.IGNORECASE)
+_TTS_CLIENT_TOOL_MARKER_RE = _re.compile(r"\[\[CLIENT_TOOL:[a-z][a-z0-9_.]*:\{[\s\S]*?\}\]\]", _re.IGNORECASE)
+_TTS_MUSIC_PLAY_RE = _re.compile(r"\[MUSIC_PLAY:[^\]]+\]")
+_TTS_SENTENCE_RE = _re.compile(r"[^.!?]+[.!?]?", _re.DOTALL)
+_TTS_SPOKEN_SENTENCE_LIMIT = 2
+_TTS_SPOKEN_MAX_CHARS = 220
+_TTS_SPOKEN_MAX_WORDS = 28
+
+
+def _normalize_tts_text(raw: str) -> str:
+    if not raw:
+        return ""
+    text = _TTS_SPOKEN_TAG_RE.sub("", raw)
+    text = _TTS_CLIENT_TOOL_MARKER_RE.sub("", text)
+    text = _TTS_MUSIC_PLAY_RE.sub("", text)
+    return _re.sub(r"\s+", " ", text).strip(" \t\r\n-—–")
+
+
+def _take_short_tts_spoken(raw: str) -> tuple[str, str]:
+    compact = _normalize_tts_text(raw)
+    if not compact:
+        return "", ""
+    sentences = [m.strip() for m in _TTS_SENTENCE_RE.findall(compact) if m.strip()]
+    if not sentences:
+        return compact, ""
+    spoken_part = " ".join(sentences[:_TTS_SPOKEN_SENTENCE_LIMIT]).strip()
+    detail_part = " ".join(sentences[_TTS_SPOKEN_SENTENCE_LIMIT:]).strip()
+    spoken_part = _truncate_tts_spoken_text(spoken_part)
+    return spoken_part, detail_part
+
+
+def _truncate_tts_spoken_text(text: str) -> str:
+    text = _normalize_tts_text(text)
+    if not text:
+        return ""
+    words = text.split()
+    if len(words) > _TTS_SPOKEN_MAX_WORDS:
+        text = " ".join(words[:_TTS_SPOKEN_MAX_WORDS])
+    if len(text) <= _TTS_SPOKEN_MAX_CHARS:
+        return text
+    hard = text[: _TTS_SPOKEN_MAX_CHARS].rstrip()
+    cut = hard.rfind(" ")
+    if cut > 60:
+        hard = hard[:cut].rstrip()
+    if not hard:
+        hard = text[: _TTS_SPOKEN_MAX_CHARS].rstrip()
+    if not hard.endswith((".", "!", "?")):
+        hard = hard.rstrip(",;:") + "…"
+    if len(hard) > _TTS_SPOKEN_MAX_CHARS:
+        hard = hard[: _TTS_SPOKEN_MAX_CHARS]
+    return hard
+
+
+def _combine_tts_detail(*parts: str) -> str:
+    return "\n\n".join(p for p in parts if p).strip()
+
+
+def _enforce_tts_output_contract(response: str, session_id: str, source: str) -> str:
+    raw = (response or "").strip()
+    if not raw:
+        return raw
+
+    spoken_match = _TTS_SPOKEN_BLOCK_RE.search(raw)
+    if spoken_match:
+        spoken_source = spoken_match.group(1) or ""
+        preface = raw[:spoken_match.start()].strip()
+        trailing = raw[spoken_match.end():].strip()
+        if preface:
+            spoken_source = f"{preface} {spoken_source}"
+    else:
+        spoken_source = raw
+        trailing = ""
+
+    spoken_text, trailing_from_spoken = _take_short_tts_spoken(spoken_source)
+    trailing = _combine_tts_detail(trailing_from_spoken, trailing)
+    trailing = _normalize_tts_text(trailing)
+
+    if not spoken_text:
+        spoken_text = "Got it."
+
+    enforced = f"<spoken>{spoken_text}</spoken>"
+    if trailing:
+        enforced = f"{enforced}\n\n{trailing}"
+
+    if enforced != raw:
+        logger.warning(
+            "[%s] TTS contract enforcement (%s): normalized response. raw_len=%d enforced_len=%d",
+            session_id[:12],
+            source,
+            len(raw),
+            len(enforced),
+        )
+    return enforced
+
+
 def _message_for_persistence(message: str, file_context: str | None) -> str:
     base = (message or "").strip()
     if not file_context:
@@ -1381,6 +1552,26 @@ def end_session(user_id: str, session_id: str) -> None:
             logger.info("[%s] Removed Gemini API brain session", _session_log_id(session_id))
         except Exception:
             logger.exception("[%s] Failed to remove Gemini API brain session", _session_log_id(session_id))
+    if _use_standing_codex(brain_name):
+        try:
+            from llm_brain.v1.standing_codex import get_codex_app_server_manager
+            manager = get_codex_app_server_manager()
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(manager.end(user_id, session_id))
+            except RuntimeError:
+                def _end_codex_app_server_session():
+                    try:
+                        asyncio.run(asyncio.wait_for(manager.end(user_id, session_id), timeout=10))
+                    except asyncio.TimeoutError:
+                        logger.warning("[%s] Standing Codex shutdown timed out", _session_log_id(session_id))
+                    except Exception as exc:
+                        logger.error("[%s] Error in standing Codex session cleanup: %s", _session_log_id(session_id), exc)
+                thread = threading.Thread(target=_end_codex_app_server_session, daemon=True)
+                thread.start()
+            logger.info("[%s] Ended standing Codex session", _session_log_id(session_id))
+        except Exception:
+            logger.exception("[%s] Failed to end standing Codex session", _session_log_id(session_id))
     if _use_persistent_codex(brain_name):
         try:
             from llm_brain.v1.persistent_codex import get_codex_persistent_manager
@@ -1729,6 +1920,9 @@ async def _send_message_inner(
     _sb_bp = _sb_mgr.brain
     _skip_ctx = (
         _sb_mgr._started and _sb_bp and _sb_bp.alive and _sb_bp.turn_count > 0
+        and not _use_gemini_api(brain_name)
+        and not _use_standing_codex(brain_name)
+        and not _use_persistent_codex(brain_name)
     )
 
     stage_start = time.perf_counter()
@@ -1793,6 +1987,8 @@ async def _send_message_inner(
 
     stage_start = time.perf_counter()
     response = await _execute_brain_sync(user_id, session_id, brain_name, adapter, request_ctx)
+    if tts_enabled:
+        response = _enforce_tts_output_contract(response, session_id, "sync")
     elapsed_ms = int((time.perf_counter() - stage_start) * 1000)
     logger.info("[%s] Brain responded (sync) in %dms, %d chars", session_id[:12], elapsed_ms, len(response or ""))
     _log_stage(session_id, "brain_execute", stage_start, response_chars=len(response or ""))
@@ -1841,6 +2037,8 @@ async def _send_message_inner(
         _notice = _get_sbm().pop_pending_notification()
         if _notice:
             response = f"{_notice}\n\n{response}"
+            if tts_enabled:
+                response = _enforce_tts_output_contract(response, session_id, "sync-notice")
     except Exception:
         pass
 
@@ -3002,6 +3200,9 @@ async def stream_message(
     if _gemma_short_circuit:
         # Gemma handled it — emit model label, response, and done event.
         _raw_emit("model", ROUTER_MODEL)
+        routed_response = _router_response
+        if tts_enabled:
+            routed_response = _enforce_tts_output_contract(_router_response, session_id, "gemma")
         if _gemma_conversation_end:
             _raw_emit("conversation_end", "true")
         for _v2_ct in _gemma_client_tools:
@@ -3009,26 +3210,26 @@ async def stream_message(
                 {"name": _v2_ct["name"], "args": _v2_ct.get("args", {})},
                 ensure_ascii=True,
             ))
-        _raw_emit("delta", _router_response)
-        _raw_emit("done", _router_response)
-        broadcaster.finish(_router_response)
+        _raw_emit("delta", routed_response)
+        _raw_emit("done", routed_response)
+        broadcaster.finish(routed_response)
         user_turn = {"role": "user", "content": persisted_user_message}
         # Tag Gemma-handled turns so the standing brain knows it didn't see them.
         # Without this tag, [Recent exchanges] includes turns Claude never processed,
         # causing its internal conversation memory to diverge from the injected history.
-        assistant_turn = {"role": "assistant", "content": _router_response, "handler": "gemma"}
+        assistant_turn = {"role": "assistant", "content": routed_response, "handler": "gemma"}
         state.history.extend([user_turn, assistant_turn])
         state.history = state.history[-24:]
         _persist_turns_async(
             session_id, state.conv_manager,
             user_turn, assistant_turn,
-            persisted_user_message, _router_response,
+            persisted_user_message, routed_response,
             stage="stage2",
             cls=_classification,
         )
         total_ms = int((time.perf_counter() - request_start) * 1000)
         logger.info("[%s] Gemma short-circuit complete in %dms, response=%d chars",
-                    session_id[:12], total_ms, len(_router_response))
+                    session_id[:12], total_ms, len(routed_response))
         _log_stage(session_id, "request_total", request_start, mode="gemma_short_circuit")
         # Yield the queued events as JSON lines (same format as normal stream)
         while not queue.empty():
@@ -3105,6 +3306,9 @@ async def stream_message(
                 and _sb_brain
                 and _sb_brain.alive
                 and _sb_brain.turn_count > 0
+                and not _use_gemini_api(brain_name)
+                and not _use_standing_codex(brain_name)
+                and not _use_persistent_codex(brain_name)
             )
 
             ctx_stage_start = time.perf_counter()
@@ -3295,6 +3499,7 @@ async def stream_message(
                 and manager.brain
                 and manager.brain.alive
                 and not _use_gemini_api(brain_name)
+                and not _use_standing_codex(brain_name)
                 and not _use_persistent_codex(brain_name)
             )
             if use_standing_brain:
@@ -3328,6 +3533,10 @@ async def stream_message(
                 elif _use_persistent_gemini(brain_name):
                     emit("model", "gemini-2.5-pro")
                     emit("status", "Handing the request to Jane's persistent Gemini brain.")
+                elif _use_standing_codex(brain_name):
+                    model_name = _get_web_chat_model(brain_name)
+                    emit("model", model_name)
+                    emit("status", f"Handing the request to Jane's standing Codex brain ({model_name}).")
                 elif _use_persistent_codex(brain_name):
                     model_name = _get_web_chat_model(brain_name)
                     emit("model", model_name)
@@ -3336,6 +3545,8 @@ async def stream_message(
                     emit("model", adapter.label)
                     emit("status", f"Handing the request to Jane's {adapter.label} brain.")
                 response = await _execute_brain_stream(user_id, session_id, brain_name, adapter, request_ctx, emit)
+                if tts_enabled:
+                    response = _enforce_tts_output_contract(response, session_id, "stream")
             elapsed_ms = int((time.perf_counter() - stage_start) * 1000)
             logger.info("[%s] Brain responded (stream) in %dms, %d chars", session_id[:12], elapsed_ms, len(response or ""))
             _log_stage(session_id, "brain_execute", stage_start, response_chars=len(response or ""))
@@ -3349,8 +3560,12 @@ async def stream_message(
                     _notice = _get_sbm().pop_pending_notification()
                     if _notice:
                         response = f"{_notice}\n\n{response}"
+                        if tts_enabled:
+                            response = _enforce_tts_output_contract(response, session_id, "sync-notice")
                 except Exception:
                     pass
+                if tts_enabled:
+                    response = _enforce_tts_output_contract(response, session_id, "stream-notice")
                 final_response = response
                 emit("done", response)
         except asyncio.CancelledError:

@@ -150,7 +150,7 @@ def install_codex_memory_integration() -> None:
     if not installer.exists():
         return
 
-    print("Step 7: Codex Chroma memory integration")
+    print("Step 8: Codex Chroma memory integration")
     try:
         result = subprocess.run(
             [sys.executable, str(installer)],
@@ -173,6 +173,39 @@ def install_codex_memory_integration() -> None:
         print(f"  {line}")
     if result.returncode != 0:
         print("  ⚠ Codex memory integration installer failed.")
+        for line in result.stderr.splitlines()[-6:]:
+            print(f"    {line}")
+    print()
+
+
+def install_codex_skills() -> None:
+    """Install repo-backed Codex skills into ~/.codex/skills."""
+    installer = VESSENCE_HOME / "startup_code" / "install_codex_skills.py"
+    skills_dir = VESSENCE_HOME / "codex_skills"
+    if not installer.exists() or not skills_dir.exists():
+        return
+
+    print("Step 7: Codex repo-backed skills")
+    try:
+        result = subprocess.run(
+            [sys.executable, str(installer)],
+            check=False,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env={
+                **os.environ,
+                "VESSENCE_HOME": str(VESSENCE_HOME),
+            },
+        )
+    except Exception as exc:
+        print(f"  ⚠ Could not install Codex skills: {type(exc).__name__}: {exc}")
+        return
+
+    for line in result.stdout.splitlines():
+        print(f"  {line}")
+    if result.returncode != 0:
+        print("  ⚠ Codex skill installer failed.")
         for line in result.stderr.splitlines()[-6:]:
             print(f"    {line}")
     print()
@@ -418,6 +451,7 @@ def main() -> int:
     print(f"  → Updated {ENV_FILE}")
     print()
 
+    install_codex_skills()
     install_codex_memory_integration()
 
     print("=" * 60)

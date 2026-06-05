@@ -37,6 +37,24 @@ For the education-project homework auditor, remember that `agent_skills/edu_home
 - Cloud SQL Proxy listening at `127.0.0.1:3307`
 - gcloud access to Secret Manager secret `TEACHING_APP_DB_ROOT_PASSWORD`
 
+## Codex Skills
+
+Repo-backed Codex skills live in `$VESSENCE_HOME/codex_skills`. The local Codex
+runtime loads skills from `$CODEX_HOME/skills` (usually `~/.codex/skills`).
+
+When creating or updating a Codex skill for Chieh:
+
+1. Keep the canonical copy in `$VESSENCE_HOME/codex_skills/<skill-name>/`.
+2. Keep the local runtime copy in `~/.codex/skills/<skill-name>/` synchronized.
+3. Run:
+
+```bash
+python $VESSENCE_HOME/startup_code/install_codex_skills.py
+```
+
+`startup_code/first_run_setup.py` runs this installer automatically, so a fresh
+checkout can restore repo-backed skills into the Codex runtime directory.
+
 ## Text Message (SMS) Protocols
 
 **Sending:** When user says "tell X something" / "text X" / "message X" - this ALWAYS means SMS.

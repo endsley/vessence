@@ -1,5 +1,9 @@
 # Vessence Changelog
 
+## v0.2.90 (2026-06-04)
+- Fix camera photo attachments in Android chat by using a shared safe camera URI path and streaming uploads instead of reading full-resolution photos into memory.
+- Accept Android crash reports before auth/session restoration so future startup and upload crashes are captured server-side.
+
 ## v0.2.89 (2026-05-21)
 - Version bump.
 

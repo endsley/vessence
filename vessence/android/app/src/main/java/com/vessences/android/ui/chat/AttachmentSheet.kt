@@ -35,8 +35,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
-import androidx.core.content.FileProvider
-import java.io.File
 
 private val SlateCard = Color(0xFF1E293B)
 private val SlateMuted = Color(0xFF94A3B8)
@@ -101,10 +99,13 @@ fun AttachmentSheet(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
         if (granted) {
-            val photoFile = File.createTempFile("photo_", ".jpg", context.cacheDir)
-            val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", photoFile)
-            cameraPhotoUri.value = uri
-            cameraLauncher.launch(uri)
+            try {
+                val uri = createCameraAttachmentUri(context)
+                cameraPhotoUri.value = uri
+                cameraLauncher.launch(uri)
+            } catch (e: Exception) {
+                reportCameraLaunchFailure(context, "AttachmentSheet", e)
+            }
         }
     }
 
@@ -152,10 +153,13 @@ fun AttachmentSheet(
                                 context, Manifest.permission.CAMERA
                             ) == PackageManager.PERMISSION_GRANTED
                             if (hasCamPerm) {
-                                val photoFile = File.createTempFile("photo_", ".jpg", context.cacheDir)
-                                val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", photoFile)
-                                cameraPhotoUri.value = uri
-                                cameraLauncher.launch(uri)
+                                try {
+                                    val uri = createCameraAttachmentUri(context)
+                                    cameraPhotoUri.value = uri
+                                    cameraLauncher.launch(uri)
+                                } catch (e: Exception) {
+                                    reportCameraLaunchFailure(context, "AttachmentSheet", e)
+                                }
                             } else {
                                 cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
                             }

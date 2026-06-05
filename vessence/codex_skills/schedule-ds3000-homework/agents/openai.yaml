@@ -1,0 +1,4 @@
+interface:
+  display_name: "Schedule DS3000 Homework"
+  short_description: "Map DS3000 schedule days to section due dates and calendars."
+  default_prompt: "Set homework and exam due dates for a DS3000 semester from the existing class calendar."
