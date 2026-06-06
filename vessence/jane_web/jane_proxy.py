@@ -839,6 +839,10 @@ CODE_MAP_KEYWORDS = (
     "student",
     "view",
     "header",
+    # Auto-evolved from daily conversations
+    "yourself",
+    "image",
+    "restart",
 )
 
 
