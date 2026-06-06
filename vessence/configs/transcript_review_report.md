@@ -1,204 +1,129 @@
-# Transcript Quality Review — 2026-06-04
+# Transcript Quality Review — 2026-06-05
 
-Generated: 2026-06-05 01:22:10
+Generated: 2026-06-06 01:13:00
 
 ## Issue 1 [MEDIUM]
 
-**Turn:** 2026-06-04 01:13:40
-**User said:** well can you just give yourself these access you have root access anyways
+**Turn:** 2026-06-05 01:20:34
+**User said:** <class_protocol name="delegate_opus">These are runtime instructions for handling a delegate
 
-**Problem:** Stage 1 dropped a valid non-`others` intent into fallback; user intent was treated as generic flow.
+**Problem:** High-confidence delegate intent was routed to Stage 3 even though the pipeline has no Stage-2 handler for that class.
 
-**Root cause:** Classifier emitted label `web automation`, but stage 1 has no mapped handler for that label and forced fallback to `others`.
+**Root cause:** The stage1 model correctly produced `delegate opus:Very High`, but the registry has no handler mapping for that class, so the pipeline forced a Stage 3 handoff (`class 'delegate opus' has no handler -> Stage 3`).
 
-**Suggested fix:** Add `web automation` as a supported alias in the intent registry and map it to a concrete class (likely delegate workflow) before fallback routing.
+**Suggested fix:** Register a deterministic Stage-2 handler for `delegate opus` or map this class to a safe fallback stage instead of hard-wiring to Stage 3; gate any `class_protocol` passthrough so unsupported classes cannot skip policy checks.
 
 **Log evidence:**
 ```
-2026-06-04 01:13:39 WARNING [intent_classifier.v3.classifier] v3: qwen returned unknown class 'web automation' → others
+2026-06-05 01:20:33 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 delegate opus:Very High (714ms) params={}
 ```
 ```
-2026-06-04 01:13:40 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (846ms) params={}
+2026-06-05 01:20:33 INFO [jane_web.jane_v3.pipeline] jane_v3: class 'delegate opus' has no handler → Stage 3
+```
+```
+2026-06-05 01:20:34 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=delegate opus:Very High voice=False prompt_len=1368 sid_override=True class_protocol=loaded:delegate_opus
 ```
 
 ---
 
 ## Issue 2 [MEDIUM]
 
-**Turn:** 2026-06-04 11:31:29
-**User said:** should you restart yourself and maybe then you will have the right access
+**Turn:** 2026-06-05 01:20:54
+**User said:** what was your result
 
-**Problem:** Restart-related request was not classified to a dedicated class and went through generic stage-3 path.
+**Problem:** A follow-up question was handled as generic classification/execution instead of a direct pending-action resolver path.
 
-**Root cause:** Classifier labeled the utterance as unknown `restart server` and downgraded it to `others`, bypassing any action-oriented fast path.
+**Root cause:** No pending-action resolver log appears; instead logs show ambiguous short-circuit/persistence logic and then Stage-3 escalation, indicating the follow-up was not routed through resolver context.
 
-**Suggested fix:** Introduce a canonical `restart`/`server_restart` class mapping and route it to the existing delegate executor or a dedicated handler.
+**Suggested fix:** When a prior turn establishes follow-up context, persist a `pending_action` and force the very next user reply through resolver before Stage 1 so short follow-up questions do not pay classifier latency or lose context.
 
 **Log evidence:**
 ```
-2026-06-04 11:31:28 WARNING [intent_classifier.v3.classifier] v3: qwen returned unknown class 'restart server' → others
+2026-06-05 01:20:52 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 unclear:Very High (2164ms) params={}
 ```
 ```
-2026-06-04 11:31:28 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (841ms) params={}
+2026-06-05 01:20:52 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: unclear short-circuit (classifier verdict)
+```
+```
+2026-06-05 01:20:53 INFO [jane.proxy] [audit-178063] Persistence worker started stage=stage2 cls=unclear user_chars=75 assistant_chars=82
+```
+```
+2026-06-05 01:20:54 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=20 sid_override=True class_protocol=n/a
 ```
 
 ---
 
 ## Issue 3 [MEDIUM]
 
-**Turn:** 2026-06-04 11:30:42
-**User said:** you have access to my education software and I would like you to make some changes
+**Turn:** 2026-06-05 01:21:06
+**User said:** please set up this payment for me on the local browser
 
-**Problem:** Stage 2 send-message handler failed schema/contract expectations and could not execute deterministically.
+**Problem:** Payment/web-automation intent was collapsed to `others`, so no dedicated handler path was used.
 
-**Root cause:** Handler returned an invalid shape, so Stage 2 rejected it and forced a Stage 3 escalation despite high-confidence Stage 1 classification.
+**Root cause:** Classifier warning shows `web automation` returned by qwen but mapped to `others`, and Stage 1 proceeded with `others:Low`, forcing Stage 3 for an action-like request.
 
-**Suggested fix:** Fix `send message` handler return contract (status, action/result, pending_action payload) and add a regression test for high-confidence send_message turns with missing recipient/body fields.
+**Suggested fix:** Add/repair intent schema for web-automation and payment setup intents and wire to deterministic handler logic (or explicit refusal path) instead of forcing `others` fallback.
 
 **Log evidence:**
 ```
-2026-06-04 11:30:42 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 send message:Very High (1525ms) params={'recipient': None, 'body': 'you have access to the education project right now and that you are able to write to it', 'intent_kind': 'send', 'confirm_signal': None}
+2026-06-05 01:21:05 WARNING [intent_classifier.v3.classifier] v3: qwen returned unknown class 'web automation' → others
 ```
 ```
-2026-06-04 11:30:42 INFO [jane_web.jane_v3.pipeline] jane_v3: handler 'send message' returned invalid shape → Stage 3
+2026-06-05 01:21:05 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (776ms) params={}
+```
+```
+2026-06-05 01:21:06 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=54 sid_override=True class_protocol=n/a
 ```
 
 ---
 
 ## Issue 4 [MEDIUM]
 
-**Turn:** 2026-06-04 13:20:39
-**User said:** <class_protocol name="delegate_opus">
-
-**Problem:** Fast-path dispatch configured for `delegate opus` exists in class protocol, but Stage 2 had no handler.
-
-**Root cause:** Pipeline recognized `delegate opus` but the dispatcher reports no bound handler, so this class can never execute in Stage 2.
-
-**Suggested fix:** Register a Stage 2 handler for `delegate opus` (or remove/rename the class contract so it always routes to an implemented path).
-
-**Log evidence:**
-```
-2026-06-04 13:20:39 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 delegate opus:Very High (852ms) params={}
-```
-```
-2026-06-04 13:20:39 INFO [jane_web.jane_v3.pipeline] jane_v3: class 'delegate opus' has no handler → Stage 3
-```
-```
-2026-06-04 13:45:09 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 delegate opus:Very High (735ms) params={}
-```
-
----
-
-## Issue 5 [CRITICAL]
-
-**Turn:** 2026-06-04 13:21:38
-**User said:** verify it
-
-**Problem:** Client observed an empty assistant reply even after backend processing, so no audible/text final response was delivered.
-
-**Root cause:** Stage 2/3 transition produced no final response payload, and Android `voice_flow` suppressed relaunch with `empty_reply`.
-
-**Suggested fix:** Ensure every escalated path emits a non-empty terminal response; if Stage 2 fails, return an explicit tool/error response instead of empty stream.
-
-**Log evidence:**
-```
-2026-06-04 13:21:36 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 send message:Very High (1347ms) params={'recipient': None, 'body': 'verify it', 'intent_kind': 'send', 'confirm_signal': None}
-```
-```
-2026-06-04 13:21:36 INFO [jane_web.jane_v3.pipeline] jane_v3: handler 'send message' returned invalid shape → Stage 3
-```
-```
-2026-06-04 13:21:38 WARNING [jane.proxy] [session-1] Stream exited without error event; response not rendered (relaunch_skipped path=onSendComplete reason=empty_reply)
-```
-
----
-
-## Issue 6 [MEDIUM]
-
-**Turn:** 2026-06-04 13:46:05
-**User said:** what was your result
-
-**Problem:** Follow-up turn did not use resolver short-circuit and was reclassified as `others` instead of continuing the open action flow.
-
-**Root cause:** No evidence of `pending_action` handoff/short-circuit appears in logs; repeated send-message attempts earlier did not persist actionable pending state.
-
-**Suggested fix:** Persist pending_action metadata after Stage 2 handoff attempts and route subsequent follow-up turns through resolver before Stage 1.
-
-**Log evidence:**
-```
-2026-06-04 13:27:53 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 send message:Very High (1358ms) params={'recipient': None, 'body': 'please do it', 'intent_kind': 'send', 'confirm_signal': None}
-```
-```
-2026-06-04 13:27:53 INFO [jane_web.jane_v3.pipeline] jane_v3: handler 'send message' returned invalid shape → Stage 3
-```
-```
-2026-06-04 13:46:05 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (934ms) params={}
-```
-
----
-
-## Issue 7 [MEDIUM]
-
-**Turn:** 2026-06-04 17:55:39
-**User said:** please set up this payment for me on the local browser
-
-**Problem:** Payment/browser action intent was forced through generic path due unknown intent class.
-
-**Root cause:** Classifier again produced unmapped `web automation`, causing fallback to `others` instead of dedicated action routing.
-
-**Suggested fix:** Broaden the class map with `web automation` aliases (payment/setup/browser-automation) and route to an implemented action class.
-
-**Log evidence:**
-```
-2026-06-04 17:55:38 WARNING [intent_classifier.v3.classifier] v3: qwen returned unknown class 'web automation' → others
-```
-```
-2026-06-04 17:55:38 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (2002ms) params={}
-```
-
----
-
-## Issue 8 [MEDIUM]
-
-**Turn:** 2026-06-04 21:07:41
+**Turn:** 2026-06-05 01:21:27
 **User said:** help pay it
 
-**Problem:** Second payment follow-up was also classified as generic `others`, leaving no deterministic action handler path.
+**Problem:** Follow-up `help pay it` was not anchored to prior payment intent and again followed generic path.
 
-**Root cause:** Stage 1 still emits unknown `web automation` for same action intent and falls back rather than invoking the action class.
+**Root cause:** The logs show an `unclear` short-circuit then generic `others:Low` escalation for the turn, with no evidence of a pending-action resolver binding the pronoun-based follow-up to the previous setup/pay intent.
 
-**Suggested fix:** Persistently map this utterance class with explicit examples so follow-up phrases like `help pay it` hit the intended automation class.
+**Suggested fix:** Persist the last actionable intent (`payment_setup`) and resolve short follow-ups (`help`, `go ahead`, pronouns) via the pending action handler before classifier Stage 1.
 
 **Log evidence:**
 ```
-2026-06-04 21:07:41 WARNING [intent_classifier.v3.classifier] v3: qwen returned unknown class 'web automation' → others
+2026-06-05 01:21:23 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 unclear:Very High (772ms) params={}
 ```
 ```
-2026-06-04 21:07:42 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (916ms) params={}
+2026-06-05 01:21:23 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: unclear short-circuit (classifier verdict)
 ```
 ```
-2026-06-04 21:07:42 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=805 sid_override=True class_protocol=n/a
+2026-06-05 01:21:26 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (1396ms) params={}
+```
+```
+2026-06-05 01:21:27 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=11 sid_override=True class_protocol=n/a
 ```
 
 ---
 
-## Issue 9 [CRITICAL]
+## Issue 5 [LOW]
 
-**Turn:** 2026-06-04 17:49:28
-**User said:** Android crash report received
+**Turn:** 2026-06-05 16:21:40
+**User said:** you have access to the water lily Wellness project right
 
-**Problem:** Client-side crash event occurred during the same interaction window, risking lost turns and context inconsistency.
+**Problem:** Android client relaunch-to-STT path ended with a `no_match` event, increasing chance of missed next-turn capture.
 
-**Root cause:** Two crash reports are logged with no recovery event in the pipeline logs, indicating Android runtime instability not fully surfaced to pipeline handoff.
+**Root cause:** After response-driven relaunch, STT restarted (`relaunch_launched`) but returned `no_match`, suggesting wake/voice handoff or timeout handling is failing for immediate continuation turns.
 
-**Suggested fix:** Capture and persist crash stack traces, add auto-restart/reconnect flow for the Android client, and block voice/turn acceptance until recoverable state is re-established.
+**Suggested fix:** Add a recoverable retry loop/UI prompt when relaunch STT emits `no_match` (e.g., show 'didn't catch that' and reopen with longer timeout), and log whether relaunch path is triggered by TTS completion or user activity.
 
 **Log evidence:**
 ```
-2026-06-04 17:49:28 ERROR [jane.web] Android crash report received:
+2026-06-05T16:21:38.825Z [voice_flow] voice_flow[send_message] text_len=56 fromVoice=True
 ```
 ```
-2026-06-04 18:50:44 ERROR [jane.web] Android crash report received:
+2026-06-05T16:22:02.937Z [voice_flow] voice_flow[relaunch_launched] path=sentence_tts
+```
+```
+2026-06-05T16:22:07.669Z [voice_flow] voice_flow[stt_error] reason=no_match
 ```
 
 ---

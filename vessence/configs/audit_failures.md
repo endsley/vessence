@@ -113,3 +113,6 @@ test_code/auto_audit_stage2_dispatcher.py::TestDispatchDocumentedBehavior::test_
 test_code/auto_audit_stage2_dispatcher.py::TestDispatchDocumentedBehavior::test_gate_rejection_returns_none_and_does_n
 ```
 
+## 2026-06-06 01:00 — vault_web/recent_turns.py
+Auditor crashed: Command '['git', 'commit', '-m', 'auto-audit: add tests for vault_web/recent_turns.py', '--no-verify']' returned non-zero exit status 1.
+
