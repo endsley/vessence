@@ -52,13 +52,13 @@ def module_ast(module_source: str) -> ast.Module:
 
 
 def _sqlite_timestamp(seconds_ago: int = 0) -> str:
-    return (dt.datetime.utcnow() - dt.timedelta(seconds=seconds_ago)).strftime(
+    return (dt.datetime.now(dt.UTC) - dt.timedelta(seconds=seconds_ago)).strftime(
         "%Y-%m-%d %H:%M:%S"
     )
 
 
 def _iso_timestamp(seconds_from_now: int = 0) -> str:
-    return (dt.datetime.utcnow() + dt.timedelta(seconds=seconds_from_now)).strftime(
+    return (dt.datetime.now(dt.UTC) + dt.timedelta(seconds=seconds_from_now)).strftime(
         "%Y-%m-%dT%H:%M:%SZ"
     )
 
