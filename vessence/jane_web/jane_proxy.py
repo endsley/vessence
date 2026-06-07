@@ -23,6 +23,8 @@ from jane_web.broadcast import StreamBroadcaster
 
 logger = logging.getLogger("jane.proxy")
 
+JANE_RESPONSE_WAIT_SECONDS = int(os.environ.get("JANE_RESPONSE_WAIT_SECONDS", "7200"))
+
 # ── Jane Phone Tools: marker extraction ──────────────────────────────────────
 #
 # Jane's mind emits `[[CLIENT_TOOL:<name>:<json>]]` markers inline in her
@@ -3694,10 +3696,13 @@ async def stream_message(
                 logger.info("[%s] Client disconnected — waiting for adapter task to finish (brain still working)",
                             _session_log_id(session_id))
                 try:
-                    await asyncio.wait_for(task, timeout=300)  # 5 min max wait
+                    await asyncio.wait_for(task, timeout=JANE_RESPONSE_WAIT_SECONDS)
                 except asyncio.TimeoutError:
-                    logger.warning("[%s] Adapter task still running after 5min post-disconnect, cancelling",
-                                   _session_log_id(session_id))
+                    logger.warning(
+                        "[%s] Adapter task still running after %ds post-disconnect, cancelling",
+                        _session_log_id(session_id),
+                        JANE_RESPONSE_WAIT_SECONDS,
+                    )
                     task.cancel()
                     with contextlib.suppress(asyncio.CancelledError):
                         await task

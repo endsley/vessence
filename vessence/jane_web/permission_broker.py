@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import time
 import threading
 from dataclasses import dataclass, field
@@ -22,7 +23,9 @@ from typing import Callable, Optional
 
 logger = logging.getLogger(__name__)
 
-PERMISSION_TIMEOUT_SECONDS = 300  # 5 minutes max wait for user response
+PERMISSION_TIMEOUT_SECONDS = int(
+    os.environ.get("JANE_PERMISSION_TIMEOUT_SECONDS", "7200")
+)  # 2 hours max wait for user response
 
 
 @dataclass

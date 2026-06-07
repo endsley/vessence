@@ -22,6 +22,32 @@ from typing import Any, Callable
 logger = logging.getLogger("jane.standing_codex")
 
 
+def _resolve_float_env(*keys: str, default: float) -> float:
+    for key in keys:
+        value = os.environ.get(key)
+        if not value:
+            continue
+        try:
+            return float(value)
+        except ValueError:
+            logger.warning("Ignoring invalid %s=%r; expected seconds", key, value)
+    return default
+
+
+DEFAULT_TURN_TIMEOUT_SECS = _resolve_float_env(
+    "CODEX_APP_SERVER_TURN_TIMEOUT_SECONDS",
+    "JANE_TIMEOUT_SECONDS_CODEX",
+    "JANE_TIMEOUT_SECONDS_OPENAI",
+    "JANE_TIMEOUT_SECONDS",
+    "JANE_RESPONSE_WAIT_SECONDS",
+    default=7200.0,
+)
+RPC_TIMEOUT_SECS = _resolve_float_env(
+    "CODEX_APP_SERVER_RPC_TIMEOUT_SECONDS",
+    default=120.0,
+)
+
+
 def _kill_process_tree(proc: asyncio.subprocess.Process) -> None:
     if proc.returncode is not None:
         return
@@ -66,7 +92,7 @@ class CodexAppServerManager:
     _MAX_SESSIONS = 20
     _AUTO_MEMORY_LIMIT = int(os.environ.get("CODEX_AUTO_MEMORY_LIMIT", "2"))
     _AUTO_MEMORY_MAX_DISTANCE = float(os.environ.get("CODEX_AUTO_MEMORY_MAX_DISTANCE", "0.50"))
-    _RPC_TIMEOUT_SECS = 30.0
+    _RPC_TIMEOUT_SECS = RPC_TIMEOUT_SECS
     _MAX_CAPTURED_COMMAND_OUTPUT = 20000
 
     def __init__(self):
@@ -152,7 +178,7 @@ class CodexAppServerManager:
         on_thought: Callable[[str], None] | None = None,
         on_tool_use: Callable[[str], None] | None = None,
         on_tool_result: Callable[[str], None] | None = None,
-        timeout_seconds: float = 300.0,
+        timeout_seconds: float = DEFAULT_TURN_TIMEOUT_SECS,
         model: str | None = None,
         yolo: bool = False,
     ) -> str:

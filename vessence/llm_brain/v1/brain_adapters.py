@@ -53,28 +53,28 @@ class ExecutionProfile:
     mode: str = "safe"
     timeout_seconds: int = 180          # legacy: used as idle timeout
     idle_timeout_seconds: int = 120     # kill if no output for this long
-    max_wall_seconds: int = 1800        # absolute safety cap (30 min)
+    max_wall_seconds: int = 7200        # absolute safety cap (2 hours)
 
 
 PROVIDER_TIMEOUT_DEFAULTS = {
-    "claude": 600,
-    "codex": 600,
-    "openai": 600,
-    "gemini": 300,
+    "claude": 7200,
+    "codex": 7200,
+    "openai": 7200,
+    "gemini": 7200,
 }
 
 PROVIDER_IDLE_DEFAULTS = {
-    "claude": 1800,   # 30 min — Claude can think/use tools for long stretches
-    "codex": 1800,
-    "openai": 1800,
-    "gemini": 600,
+    "claude": 7200,   # 2 hours — long code/tool turns may be quiet
+    "codex": 7200,
+    "openai": 7200,
+    "gemini": 7200,
 }
 
 PROVIDER_WALL_DEFAULTS = {
-    "claude": 3600,   # 1 hour hard cap
-    "codex": 1800,
-    "openai": 1800,
-    "gemini": 1800,
+    "claude": 7200,
+    "codex": 7200,
+    "openai": 7200,
+    "gemini": 7200,
 }
 
 

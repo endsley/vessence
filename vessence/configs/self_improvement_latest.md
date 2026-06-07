@@ -1,71 +1,69 @@
 # Most Recent Nightly Self-Improvement
 
-- Run started: 2026-06-05 01:00:01
-- Report generated: 2026-06-05 01:57:07
-- Total runtime: 3425s
-- Jobs: 8 total, 8 ok, 0 timeout, 0 failed
+- Run started: 2026-06-06 01:00:01
+- Report generated: 2026-06-06 01:49:36
+- Total runtime: 2973s
+- Jobs: 8 total, 7 ok, 0 timeout, 1 failed
 - Stable latest report path: `/home/chieh/ambient/vessence/configs/self_improvement_latest.md`
-- Archived copy: `/home/chieh/ambient/vessence-data/reports/self_improvement/self_improvement_20260605_010001.md`
+- Archived copy: `/home/chieh/ambient/vessence-data/reports/self_improvement/self_improvement_20260606_010001.md`
 
 ## TL;DR
 
 - 1. ✓ Auto-Commit WIP (pre) (0.0m)
   - Fixes:
-    - 2026-06-05 01:00:04,287 INFO Committed 25 file(s).
-- 2. ✓ Code Auditor (6.7m)
-  - Problems: none detected
-  - Fixes: none applied
-- 3. ✓ Dead Code Auditor (6.2m)
+    - 2026-06-06 01:00:01,617 INFO Committed 3 file(s).
+- 2. ✗ Code Auditor (4.3m)
   - Problems:
-    - Dead files — review needed: 1.
-    - Possibly-dead functions: 2.
+    - 2026-06-06 01:04:21,369 [ERROR] Auditor crashed: Command '['git', 'commit', '-m', 'auto-audit: add tests for vault_web/recent_turns.py', '--no-verify']' retu...
+- 3. ✓ Dead Code Auditor (6.0m)
+  - Problems:
+    - Possibly-dead functions: 1.
     - Duplicate function bodies: 10 groups.
   - Fixes:
-    - [dead-code] Done — 0 auto-deleted, 1 flagged, 2 dead funcs, 10 dup groups
-- 4. ✓ Pipeline Audit (30 prompts) (8.7m)
+    - [dead-code] Done — 0 auto-deleted, 0 flagged, 1 dead funcs, 10 dup groups
+- 4. ✓ Pipeline Audit (30 prompts) (2.2m)
   - Problems:
-    - Prompts audited: 19.
-    - Classification failures: 5.
-    - Response failures: 15.
+    - Prompts audited: 6.
+    - Classification failures: 2.
+    - Response failures: 3.
 - 5. ✓ Doc Drift Auditor (0.0m)
   - Problems:
     - CRON_JOBS.md missing entry for active cron script: auto_pull.sh
     - v2_3stage_pipeline.md missing class row: BUILD_APK
     - v2_3stage_pipeline.md missing class row: CLINIC_SCHEDULES_INFO
-- 6. ✓ Transcript Quality Review (0.5m)
+- 6. ✓ Transcript Quality Review (0.4m)
   - Problems:
-    - Transcript review found 9 issues: 2 critical, 7 medium.
-    - Stage 1 dropped a valid non-`others` intent into fallback; user intent was treated as generic flow.
-    - Restart-related request was not classified to a dedicated class and went through generic stage-3 path.
+    - Transcript review found 5 issues: 1 low, 4 medium.
+    - High-confidence delegate intent was routed to Stage 3 even though the pipeline has no Stage-2 handler for that class.
+    - A follow-up question was handled as generic classification/execution instead of a direct pending-action resolver path.
   - Fixes:
-    - 2026-06-05 01:22:10,626 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (9 issues)
-    - 2026-06-05 01:22:10,628 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 2 critical, 7 medium iss...
-- 7. ✓ Memory Janitor (34.9m)
+    - 2026-06-06 01:13:00,597 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (5 issues)
+    - 2026-06-06 01:13:00,598 INFO self_improve_log: recorded [medium] Transcript Review — Reviewing yesterday's conversations I spotted 4 medium, 1 minor issues....
+- 7. ✓ Memory Janitor (36.5m)
   - Problems:
-    - 05 01:42:24.699911329 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-06-05 05:42:24 WARNING] ModelImporter.cpp:739: Make sure input toke...
-    - [0;93m2026-06-05 01:46:05.667206563 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-06-05 05:46:05 WARNING] ModelImporter.cpp:739: Make...
-    - [0;93m2026-06-05 01:46:05.667246405 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-06-05 05:46:05 WARNING] ModelImporter.cpp:739: Make...
+    - [0;93m2026-06-06 01:35:17.475615545 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-06-06 05:35:17 WARNING] ModelImporter.cpp:739: Make...
+    - [0;93m2026-06-06 01:35:17.475658975 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-06-06 05:35:17 WARNING] ModelImporter.cpp:739: Make...
+    - [0;93m2026-06-06 01:35:17.475675582 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-06-06 05:35:17 WARNING] ModelImporter.cpp:739: Make...
   - Fixes:
-    - INFO:agent_skills.self_improve_log:self_improve_log: recorded [medium] Memory Verification — Found 10 stale memories out of 20 checked. Stale memories make J...
+    - INFO:agent_skills.self_improve_log:self_improve_log: recorded [medium] Memory Verification — Found 11 stale memories out of 20 checked. Stale memories make J...
 - 8. ✓ Auto-Commit + Push (post) (0.0m)
   - Fixes:
-    - 2026-06-05 01:57:06,017 INFO Committed 6 file(s).
-    - 2026-06-05 01:57:07,450 INFO Pushed successfully.
+    - 2026-06-06 01:49:35,319 INFO Pushed successfully.
 
 **Top follow-ups:**
 
-- Add `web automation` as a supported alias in the intent registry and map it to a concrete class (likely delegate workflow) before fallback routing.
-- Introduce a canonical `restart`/`server_restart` class mapping and route it to the existing delegate executor or a dedicated handler.
+- Register a deterministic Stage-2 handler for `delegate opus` or map this class to a safe fallback stage instead of hard-wiring to Stage 3; gate any `class_protocol` passthrough so unsupported classes cannot skip policy checks.
+- When a prior turn establishes follow-up context, persist a `pending_action` and force the very next user reply through resolver before Stage 1 so short follow-up questions do not pay classifier latency or lose context.
 
 ## Executive Summary
 
-- All stages exited cleanly.
-- 7 concrete improvement/fix signals were found in logs or reports.
+- 1 stage(s) need attention because they timed out or exited non-zero.
+- 6 concrete improvement/fix signals were found in logs or reports.
 
 ## Stage 1: Auto-Commit WIP (pre)
 
 - Status: `ok`
-- Duration: 2s (0.0 min)
+- Duration: 0s (0.0 min)
 
 ### What It Did
 
@@ -77,7 +75,7 @@
 
 ### Improvements It Made
 
-- 2026-06-05 01:00:04,287 INFO Committed 25 file(s).
+- 2026-06-06 01:00:01,617 INFO Committed 3 file(s).
 
 ### Evidence Files
 
@@ -85,8 +83,8 @@
 
 ## Stage 2: Code Auditor
 
-- Status: `ok`
-- Duration: 401s (6.7 min)
+- Status: `exit-2`
+- Duration: 259s (4.3 min)
 
 ### What It Did
 
@@ -94,7 +92,8 @@
 
 ### Problems It Found
 
-- No problems were detected in the available logs/reports.
+- Job ended with status `exit-2`.
+- 2026-06-06 01:04:21,369 [ERROR] Auditor crashed: Command '['git', 'commit', '-m', 'auto-audit: add tests for vault_web/recent_turns.py', '--no-verify']' returned non-zero exit status 1.
 
 ### Improvements It Made
 
@@ -109,7 +108,7 @@
 ## Stage 3: Dead Code Auditor
 
 - Status: `ok`
-- Duration: 372s (6.2 min)
+- Duration: 362s (6.0 min)
 
 ### What It Did
 
@@ -117,13 +116,12 @@
 
 ### Problems It Found
 
-- Dead files — review needed: 1.
-- Possibly-dead functions: 2.
+- Possibly-dead functions: 1.
 - Duplicate function bodies: 10 groups.
 
 ### Improvements It Made
 
-- [dead-code] Done — 0 auto-deleted, 1 flagged, 2 dead funcs, 10 dup groups
+- [dead-code] Done — 0 auto-deleted, 0 flagged, 1 dead funcs, 10 dup groups
 
 ### Evidence Files
 
@@ -133,7 +131,7 @@
 ## Stage 4: Pipeline Audit (30 prompts)
 
 - Status: `ok`
-- Duration: 522s (8.7 min)
+- Duration: 133s (2.2 min)
 
 ### What It Did
 
@@ -141,13 +139,12 @@
 
 ### Problems It Found
 
-- Prompts audited: 19.
-- Classification failures: 5.
-- Response failures: 15.
-- **you have access to my education software and I would like you to make some chang** (others/stage3): [ACK]Chieh, I can update the mobile student view; I need the target screens and changes first.[/ACK]
-- **so I was thinking if you could add another item for the search for Facebook Mark** (others/stage3): [ACK]Got it, Chieh — I can add another Facebook Marketplace search item once I know what to track.[/ACK]
-- **I would like you to add electric skateboard** (shopping list/stage3): [ACK]Chieh, quick clarification before I add electric skateboard.[/ACK]
-- **I don't understand why you have this sandbox issue where everything is only read** (others/stage3): [ACK]Chieh, I can clarify the sandbox behavior quickly.[/ACK]
+- Prompts audited: 6.
+- Classification failures: 2.
+- Response failures: 3.
+- **what was your result** (greeting/stage3): Chieh, I don’t have a prior result visible in this thread. Which result are you asking about? [[AWAITING:which_result
+- **please set up this payment for me on the local browser** (web_automation/stage3): [ACK]Chieh, I can help with the payment setup, but I need one detail first.[/ACK]
+- **help pay it** (web_automation/stage3): [ACK]Chieh, I can help with the payment, but I need one quick detail first.[/ACK]
 
 ### Improvements It Made
 
@@ -190,7 +187,7 @@
 ## Stage 6: Transcript Quality Review
 
 - Status: `ok`
-- Duration: 28s (0.5 min)
+- Duration: 22s (0.4 min)
 
 ### What It Did
 
@@ -198,23 +195,23 @@
 
 ### Problems It Found
 
-- Transcript review found 9 issues: 2 critical, 7 medium.
-- Stage 1 dropped a valid non-`others` intent into fallback; user intent was treated as generic flow.
-- Restart-related request was not classified to a dedicated class and went through generic stage-3 path.
-- Stage 2 send-message handler failed schema/contract expectations and could not execute deterministically.
-- Fast-path dispatch configured for `delegate opus` exists in class protocol, but Stage 2 had no handler.
+- Transcript review found 5 issues: 1 low, 4 medium.
+- High-confidence delegate intent was routed to Stage 3 even though the pipeline has no Stage-2 handler for that class.
+- A follow-up question was handled as generic classification/execution instead of a direct pending-action resolver path.
+- Payment/web-automation intent was collapsed to `others`, so no dedicated handler path was used.
+- Follow-up `help pay it` was not anchored to prior payment intent and again followed generic path.
 
 ### Improvements It Made
 
-- 2026-06-05 01:22:10,626 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (9 issues)
-- 2026-06-05 01:22:10,628 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 2 critical, 7 medium issues. The most urgent was: Clie
+- 2026-06-06 01:13:00,597 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (5 issues)
+- 2026-06-06 01:13:00,598 INFO self_improve_log: recorded [medium] Transcript Review — Reviewing yesterday's conversations I spotted 4 medium, 1 minor issues. The most urgent was: High-co
 
 ### Follow-Up Fixes Recommended
 
-- Add `web automation` as a supported alias in the intent registry and map it to a concrete class (likely delegate workflow) before fallback routing.
-- Introduce a canonical `restart`/`server_restart` class mapping and route it to the existing delegate executor or a dedicated handler.
-- Fix `send message` handler return contract (status, action/result, pending_action payload) and add a regression test for high-confidence send_message turns with missing recipient/body fields.
-- Register a Stage 2 handler for `delegate opus` (or remove/rename the class contract so it always routes to an implemented path).
+- Register a deterministic Stage-2 handler for `delegate opus` or map this class to a safe fallback stage instead of hard-wiring to Stage 3; gate any `class_protocol` passthrough so unsupported classes cannot skip policy checks.
+- When a prior turn establishes follow-up context, persist a `pending_action` and force the very next user reply through resolver before Stage 1 so short follow-up questions do not pay classifier latency or lose context.
+- Add/repair intent schema for web-automation and payment setup intents and wire to deterministic handler logic (or explicit refusal path) instead of forcing `others` fallback.
+- Persist the last actionable intent (`payment_setup`) and resolve short follow-ups (`help`, `go ahead`, pronouns) via the pending action handler before classifier Stage 1.
 
 ### Evidence Files
 
@@ -224,7 +221,7 @@
 ## Stage 7: Memory Janitor
 
 - Status: `ok`
-- Duration: 2095s (34.9 min)
+- Duration: 2192s (36.5 min)
 
 ### What It Did
 
@@ -232,15 +229,15 @@
 
 ### Problems It Found
 
-- 05 01:42:24.699911329 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-06-05 05:42:24 WARNING] ModelImporter.cpp:739: Make sure input token_type_ids has Int64 binding.[m
-- [0;93m2026-06-05 01:46:05.667206563 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-06-05 05:46:05 WARNING] ModelImporter.cpp:739: Make sure input input_ids has Int64 binding.[m
-- [0;93m2026-06-05 01:46:05.667246405 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-06-05 05:46:05 WARNING] ModelImporter.cpp:739: Make sure input attention_mask has Int64 binding.[m
-- [0;93m2026-06-05 01:46:05.667262956 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-06-05 05:46:05 WARNING] ModelImporter.cpp:739: Make sure input token_type_ids has Int64 binding.[m
-- [0;93m2026-06-05 01:46:05.823231899 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-06-05 05:46:05 WARNING] ModelImporter.cpp:739: Make sure input input_ids has Int64 binding.[m
+- [0;93m2026-06-06 01:35:17.475615545 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-06-06 05:35:17 WARNING] ModelImporter.cpp:739: Make sure input input_ids has Int64 binding.[m
+- [0;93m2026-06-06 01:35:17.475658975 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-06-06 05:35:17 WARNING] ModelImporter.cpp:739: Make sure input attention_mask has Int64 binding.[m
+- [0;93m2026-06-06 01:35:17.475675582 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-06-06 05:35:17 WARNING] ModelImporter.cpp:739: Make sure input token_type_ids has Int64 binding.[m
+- [0;93m2026-06-06 01:35:17.663281546 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-06-06 05:35:17 WARNING] ModelImporter.cpp:739: Make sure input input_ids has Int64 binding.[m
+- [0;93m2026-06-06 01:35:17.663325735 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-06-06 05:35:17 WARNING] ModelImporter.cpp:739: Make sure input attention_mask has Int64 binding.[m
 
 ### Improvements It Made
 
-- INFO:agent_skills.self_improve_log:self_improve_log: recorded [medium] Memory Verification — Found 10 stale memories out of 20 checked. Stale memories make Jane give wrong answers about her own
+- INFO:agent_skills.self_improve_log:self_improve_log: recorded [medium] Memory Verification — Found 11 stale memories out of 20 checked. Stale memories make Jane give wrong answers about her own
 
 ### Evidence Files
 
@@ -261,8 +258,7 @@
 
 ### Improvements It Made
 
-- 2026-06-05 01:57:06,017 INFO Committed 6 file(s).
-- 2026-06-05 01:57:07,450 INFO Pushed successfully.
+- 2026-06-06 01:49:35,319 INFO Pushed successfully.
 
 ### Evidence Files
 

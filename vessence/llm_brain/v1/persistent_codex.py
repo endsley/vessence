@@ -19,6 +19,28 @@ from typing import Callable
 logger = logging.getLogger("jane.persistent_codex")
 
 
+def _resolve_float_env(*keys: str, default: float) -> float:
+    for key in keys:
+        value = os.environ.get(key)
+        if not value:
+            continue
+        try:
+            return float(value)
+        except ValueError:
+            logger.warning("Ignoring invalid %s=%r; expected seconds", key, value)
+    return default
+
+
+DEFAULT_TURN_TIMEOUT_SECS = _resolve_float_env(
+    "CODEX_PERSISTENT_TURN_TIMEOUT_SECONDS",
+    "JANE_TIMEOUT_SECONDS_CODEX",
+    "JANE_TIMEOUT_SECONDS_OPENAI",
+    "JANE_TIMEOUT_SECONDS",
+    "JANE_RESPONSE_WAIT_SECONDS",
+    default=7200.0,
+)
+
+
 def _kill_process_tree(proc: asyncio.subprocess.Process) -> None:
     if proc.returncode is not None:
         return
@@ -128,7 +150,7 @@ class CodexPersistentManager:
         on_thought: Callable[[str], None] | None = None,
         on_tool_use: Callable[[str], None] | None = None,
         on_tool_result: Callable[[str], None] | None = None,
-        timeout_seconds: float = 300.0,
+        timeout_seconds: float = DEFAULT_TURN_TIMEOUT_SECS,
         model: str | None = None,
         yolo: bool = False,
     ) -> str:

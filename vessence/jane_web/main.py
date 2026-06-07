@@ -80,6 +80,8 @@ logging.getLogger("jane.proxy").setLevel(logging.DEBUG)
 _logger = logging.getLogger("jane.web")
 _logger.info("=== Jane Web starting (PID %d) ===", os.getpid())
 
+JANE_RESPONSE_WAIT_SECONDS = int(os.environ.get("JANE_RESPONSE_WAIT_SECONDS", "7200"))
+
 
 # Note: port cleanup was previously done here at import time via a hardcoded
 # _clear_port_if_occupied(8081). That was removed 2026-04-16 because it
@@ -3868,7 +3870,7 @@ async def _handle_jane_chat_stream(body: ChatMessage, request: Request):
         _captured: list[str] = []
         _had_error = False
         try:
-            async with asyncio.timeout(1800):  # 30 minute timeout (matches Claude idle timeout)
+            async with asyncio.timeout(JANE_RESPONSE_WAIT_SECONDS):
                 async for chunk in stream_message(user_id, conversation_session_id, body.message, body.file_context, platform=body.platform, tts_enabled=body.tts_enabled or False):
                     if turn_id:
                         _captured.append(chunk)
