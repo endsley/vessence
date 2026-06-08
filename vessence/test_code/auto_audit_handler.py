@@ -1,11 +1,9 @@
 from __future__ import annotations
 
 import ast
-import builtins
 import inspect
 import re
 import sys
-import types
 from pathlib import Path
 
 import pytest
@@ -16,47 +14,48 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 MODULE_PATH = (
-    REPO_ROOT / "jane_web" / "jane_v2" / "classes" / "music_play" / "handler.py"
+    REPO_ROOT / "jane_web" / "jane_v2" / "classes" / "greeting" / "handler.py"
 )
+SPEC_PATH = REPO_ROOT / "configs" / "v2_3stage_pipeline.md"
 
 from jane_web.jane_v2 import classes as class_registry
 from jane_web.jane_v2 import stage1_classifier, stage2_dispatcher
-from jane_web.jane_v2.classes.music_play import handler as music_handler
-from jane_web.jane_v2.classes.music_play import metadata as music_metadata
+from jane_web.jane_v2.classes.greeting import handler as greeting_handler
+from jane_web.jane_v2.classes.greeting import metadata as greeting_metadata
 
 
-DOCUMENTED_KINDS = {
-    "artist",
-    "genre",
-    "mood",
-    "playlist",
-    "resume",
-    "shuffle",
-    "song",
+CANNED_SAMPLE_BY_BUCKET = {
+    "check_in": "how's it going",
+    "hello": "hey",
+    "morning": "good morning",
+    "afternoon": "good afternoon",
+    "evening": "good evening",
+    "thanks": "thanks",
 }
-ACTIONABLE_KINDS = DOCUMENTED_KINDS - {"resume"}
 
-DESTRUCTIVE_NAMES = {
+DESTRUCTIVE_TOKENS = {
     "delete",
     "delete_email",
     "delete_message",
     "delete_messages",
-    "delete_playlist",
+    "drop_table",
     "end_conversation",
     "remove",
     "send_message",
     "sms_send_direct",
     "trash",
-    "update_playlist",
 }
 
-LLM_OR_NETWORK_ROOTS = {
-    "anthropic",
-    "google.generativeai",
-    "httpx",
-    "openai",
-    "requests",
-}
+DB_IMPORT_PREFIXES = (
+    "chromadb",
+    "jane.config",
+    "mysql",
+    "psycopg",
+    "psycopg2",
+    "pymysql",
+    "sqlalchemy",
+    "sqlite3",
+)
 
 
 @pytest.fixture
@@ -69,89 +68,93 @@ def module_ast(module_source: str) -> ast.Module:
     return ast.parse(module_source)
 
 
-def _schema_kind_values() -> set[str]:
-    schema_text = music_metadata.PARAMS_SCHEMA["kind"].lower()
-    enum_part = schema_text.split("one of:", 1)[1].split(".", 1)[0]
-    return {part.strip() for part in enum_part.split("|") if part.strip()}
+@pytest.fixture
+def spec_source() -> str:
+    return SPEC_PATH.read_text()
 
 
-def _assert_stage2_shape(result: dict | None, *, playable: bool) -> None:
-    assert isinstance(result, dict)
-    assert isinstance(result.get("text"), str)
-    assert result["text"]
-    assert "playlist_id" in result
-    assert "playlist_name" in result
-    if playable:
-        assert result["playlist_id"]
-        assert result["playlist_name"]
-        assert f"[MUSIC_PLAY:{result['playlist_id']}]" in result["text"]
-    else:
-        assert result["playlist_id"] is None
-        assert result["playlist_name"] is None
-        assert "[MUSIC_PLAY:" not in result["text"]
+@pytest.fixture
+def record_activity_spy(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    from jane_web.jane_v2 import models
 
-
-def _install_fake_playlists(
-    monkeypatch: pytest.MonkeyPatch,
-    playlists: list[dict],
-    records: dict[str, dict] | None = None,
-) -> dict[str, object]:
-    calls: dict[str, object] = {"list": 0, "get": []}
-    records = records or {
-        item["id"]: {
-            "id": item["id"],
-            "name": item.get("name", ""),
-            "tracks": item.get("tracks", []),
-        }
-        for item in playlists
-    }
-
-    vault_pkg = types.ModuleType("vault_web")
-    playlist_mod = types.ModuleType("vault_web.playlists")
-
-    def list_playlists() -> list[dict]:
-        calls["list"] = int(calls["list"]) + 1
-        return list(playlists)
-
-    def get_playlist(playlist_id: str) -> dict:
-        cast_get_calls = calls["get"]
-        assert isinstance(cast_get_calls, list)
-        cast_get_calls.append(playlist_id)
-        return records[playlist_id]
-
-    playlist_mod.list_playlists = list_playlists
-    playlist_mod.get_playlist = get_playlist
-    vault_pkg.playlists = playlist_mod
-
-    monkeypatch.setitem(sys.modules, "vault_web", vault_pkg)
-    monkeypatch.setitem(sys.modules, "vault_web.playlists", playlist_mod)
-    return calls
-
-
-def _install_fake_library(
-    monkeypatch: pytest.MonkeyPatch, playlist: dict | None
-) -> list[str]:
     calls: list[str] = []
-    main_mod = types.ModuleType("jane_web.main")
-
-    def create_music_playlist_from_query(query: str) -> dict | None:
-        calls.append(query)
-        return playlist
-
-    main_mod.create_music_playlist_from_query = create_music_playlist_from_query
-    monkeypatch.setitem(sys.modules, "jane_web.main", main_mod)
+    monkeypatch.setattr(
+        models,
+        "record_ollama_activity",
+        lambda: calls.append("recorded"),
+        raising=False,
+    )
     return calls
 
 
-def _block_import(monkeypatch: pytest.MonkeyPatch, blocked_name: str) -> None:
-    real_import = builtins.__import__
+@pytest.fixture
+def fake_ollama(monkeypatch: pytest.MonkeyPatch):
+    def install(
+        *,
+        response: str | None = "Hey Chieh.",
+        payload: dict | None = None,
+        post_exc: Exception | None = None,
+        status_exc: Exception | None = None,
+    ) -> list[dict]:
+        calls: list[dict] = []
 
-    def guarded_import(name, globals=None, locals=None, fromlist=(), level=0):
-        if name == blocked_name or name.startswith(f"{blocked_name}."):
-            raise RuntimeError(f"blocked import: {blocked_name}")
-        return real_import(name, globals, locals, fromlist, level)
+        class FakeResponse:
+            def raise_for_status(self) -> None:
+                if status_exc is not None:
+                    raise status_exc
 
-    monkeypatch.setattr(builtins, "__import__", guarded_import)
+            def json(self) -> dict:
+                if payload is not None:
+                    return payload
+                return {"response": response}
+
+        class FakeAsyncClient:
+            def __init__(self, *, timeout):
+                self.timeout = timeout
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+            async def post(self, url: str, json: dict):
+                calls.append({"url": url, "json": json, "timeout": self.timeout})
+                if post_exc is not None:
+                    raise post_exc
+                return FakeResponse()
+
+        monkeypatch.setattr(greeting_handler.httpx, "AsyncClient", FakeAsyncClient)
+        return calls
+
+    return install
+
+
+def _block_ollama(monkeypatch: pytest.MonkeyPatch) -> None:
+    class BombAsyncClient:
+        def __init__(self, *args, **kwargs):
+            raise AssertionError("canned greeting path must not call Ollama")
+
+    monkeypatch.setattr(greeting_handler.httpx, "AsyncClient", BombAsyncClient)
+
+
+def _force_choice(monkeypatch: pytest.MonkeyPatch, expected: str | None = None) -> None:
+    def choose(options):
+        if expected is not None:
+            assert expected in options
+            return expected
+        return options[0]
+
+    monkeypatch.setattr(greeting_handler.random, "choice", choose)
+
+
+def _assert_text_result(result: dict | None) -> None:
+    assert isinstance(result, dict)
+    assert set(result) == {"text"}
+    assert isinstance(result["text"], str)
+    assert result["text"].strip()
+    assert "[[CLIENT_TOOL:" not in result["text"]
+    assert "WRONG_CLASS" not in result["text"].upper()
 
 
 def _qualified_name(node: ast.AST) -> str | None:
@@ -161,6 +164,16 @@ def _qualified_name(node: ast.AST) -> str | None:
         parent = _qualified_name(node.value)
         return f"{parent}.{node.attr}" if parent else node.attr
     return None
+
+
+def _imported_modules(tree: ast.Module) -> set[str]:
+    modules: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            modules.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            modules.add(node.module)
+    return modules
 
 
 def _call_names(tree: ast.Module) -> set[str]:
@@ -173,522 +186,513 @@ def _call_names(tree: ast.Module) -> set[str]:
     return names
 
 
-def _import_roots(tree: ast.Module) -> set[str]:
-    roots: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            roots.update(alias.name.split(".", 1)[0] for alias in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.module:
-            roots.add(node.module.split(".", 1)[0])
-            if node.module.startswith("google.generativeai"):
-                roots.add("google.generativeai")
-    return roots
+def _handle_return_nodes(tree: ast.Module) -> list[ast.Return]:
+    for node in tree.body:
+        if isinstance(node, ast.AsyncFunctionDef) and node.name == "handle":
+            return [child for child in ast.walk(node) if isinstance(child, ast.Return)]
+    raise AssertionError("handle() not found")
 
 
-def _call_safely(prompt: str, params) -> dict | None:
-    try:
-        return music_handler.handle(prompt, params=params)
-    except (AttributeError, TypeError):
-        return None
+class TestDocumentedBehavior:
+    def test_spec_documents_greeting_stage2_contract(self, spec_source: str) -> None:
+        assert "Greeting" in spec_source
+        assert "qwen2.5:7b" in spec_source
+        assert "1-sentence contextual reply" in spec_source
+        assert "FIFO" in spec_source
+        assert "WRONG_CLASS" in spec_source
+        assert "Returning `None` means" in spec_source
+        assert "No -> Stage 3" in spec_source or "No \u2192 Stage 3" in spec_source
 
+    def test_module_docstring_documents_greeting_and_escalation_contract(self) -> None:
+        doc = inspect.getdoc(greeting_handler)
+        assert doc is not None
+        assert "Handles basic greetings" in doc
+        assert "No Opus needed" in doc
+        assert 'Returns {"text": "..."}' in doc
+        assert "None to escalate" in doc
+        assert "follow-up question or task" in doc
 
-def test_normalize_collapses_whitespace_lowercases_and_accepts_none():
-    assert music_handler._normalize("  The\tScientist\nLive   ") == "the scientist live"
-    assert music_handler._normalize("") == ""
-    assert music_handler._normalize(None) == ""
+    @pytest.mark.asyncio
+    async def test_basic_canned_greeting_returns_text_and_skips_ollama(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _block_ollama(monkeypatch)
+        _force_choice(monkeypatch)
 
+        result = await greeting_handler.handle("hey")
 
-def test_format_play_response_adds_marker_and_documented_shape():
-    result = music_handler._format_play_response(
-        {"id": "playlist-123", "name": "Coldplay", "tracks": ["a.mp3", "b.mp3"]}
-    )
+        assert result == {"text": greeting_handler._CANNED_REPLIES["hello"][0]}
+        _assert_text_result(result)
 
-    assert result == {
-        "text": "Playing Coldplay (2 tracks). [MUSIC_PLAY:playlist-123]",
-        "playlist_id": "playlist-123",
-        "playlist_name": "Coldplay",
-    }
-
-
-def test_format_play_response_without_id_omits_marker_but_keeps_shape():
-    result = music_handler._format_play_response({"name": "Loose Tracks", "tracks": None})
-
-    assert result == {
-        "text": "Playing Loose Tracks (0 tracks).",
-        "playlist_id": None,
-        "playlist_name": "Loose Tracks",
-    }
-    assert "[MUSIC_PLAY:" not in result["text"]
-
-
-@pytest.mark.parametrize("params", [None, {}])
-def test_empty_or_none_params_escalate_before_external_integrations(monkeypatch, params):
-    monkeypatch.setattr(
-        music_handler,
-        "_match_existing_playlist",
-        lambda query: pytest.fail("playlist lookup should not run"),
-    )
-    monkeypatch.setattr(
-        music_handler,
-        "_ephemeral_from_library",
-        lambda query: pytest.fail("library resolver should not run"),
-    )
-
-    assert music_handler.handle("play something", params=params) is None
-
-
-def test_resume_escalates_without_db_or_library(monkeypatch):
-    monkeypatch.setattr(
-        music_handler,
-        "_match_existing_playlist",
-        lambda query: pytest.fail("resume should not search playlists"),
-    )
-    monkeypatch.setattr(
-        music_handler,
-        "_ephemeral_from_library",
-        lambda query: pytest.fail("resume should not call the scanner"),
-    )
-
-    assert (
-        music_handler.handle(
-            "continue playing",
-            params={"kind": "  RESUME  ", "query": None},
-        )
-        is None
-    )
-
-
-@pytest.mark.parametrize(
-    "params",
-    [
-        {"query": "Coldplay"},
-        {"kind": "", "query": "Coldplay"},
-        {"kind": "   ", "query": "Coldplay"},
-    ],
-)
-def test_missing_kind_escalates_without_db_or_library(monkeypatch, params):
-    monkeypatch.setattr(
-        music_handler,
-        "_match_existing_playlist",
-        lambda query: pytest.fail("missing kind should not search playlists"),
-    )
-    monkeypatch.setattr(
-        music_handler,
-        "_ephemeral_from_library",
-        lambda query: pytest.fail("missing kind should not call the scanner"),
-    )
-
-    assert music_handler.handle("play Coldplay", params=params) is None
-
-
-def test_existing_playlist_exact_match_preempts_library(monkeypatch):
-    calls = _install_fake_playlists(
-        monkeypatch,
-        [{"id": "pl1", "name": "Road Trip"}],
-        {"pl1": {"id": "pl1", "name": "Road Trip", "tracks": ["a", "b", "c"]}},
-    )
-    monkeypatch.setattr(
-        music_handler,
-        "_ephemeral_from_library",
-        lambda query: pytest.fail("exact playlist match should not fall through"),
-    )
-
-    result = music_handler.handle(
-        "play road trip",
-        params={"kind": "playlist", "query": " road   trip "},
-    )
-
-    assert calls == {"list": 1, "get": ["pl1"]}
-    _assert_stage2_shape(result, playable=True)
-    assert result["text"] == "Playing Road Trip (3 tracks). [MUSIC_PLAY:pl1]"
-
-
-def test_existing_playlist_substring_match_preempts_library(monkeypatch):
-    calls = _install_fake_playlists(
-        monkeypatch,
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("prompt", "bucket"),
         [
-            {"id": "other", "name": "Workout"},
-            {"id": "target", "name": "2026 Road Trip Mix"},
+            ("how's it going?", "check_in"),
+            ("How are you", "check_in"),
+            ("what's up", "check_in"),
+            ("HELLO!!!", "hello"),
+            ("yo", "hello"),
+            ("good morning", "morning"),
+            ("good afternoon", "afternoon"),
+            ("good evening", "evening"),
+            ("thanks!", "thanks"),
+            ("appreciate you", "thanks"),
         ],
-        {
-            "other": {"id": "other", "name": "Workout", "tracks": ["x"]},
-            "target": {"id": "target", "name": "2026 Road Trip Mix", "tracks": ["a"]},
-        },
     )
-    monkeypatch.setattr(
-        music_handler,
-        "_ephemeral_from_library",
-        lambda query: pytest.fail("substring playlist match should not fall through"),
-    )
+    async def test_common_greetings_use_documented_fast_path(
+        self,
+        prompt: str,
+        bucket: str,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _block_ollama(monkeypatch)
+        expected = greeting_handler._CANNED_REPLIES[bucket][-1]
+        _force_choice(monkeypatch, expected)
 
-    result = music_handler.handle(
-        "play road trip",
-        params={"kind": "playlist", "query": "road trip"},
-    )
+        result = await greeting_handler.handle(prompt)
 
-    assert calls == {"list": 1, "get": ["target"]}
-    _assert_stage2_shape(result, playable=True)
-    assert result["playlist_id"] == "target"
+        assert result == {"text": expected}
+        _assert_text_result(result)
 
+    @pytest.mark.asyncio
+    async def test_less_templated_greeting_uses_llm_with_context(
+        self,
+        fake_ollama,
+        record_activity_spy: list[str],
+    ) -> None:
+        calls = fake_ollama(response="Jane: Hey Chieh, good to hear from you.")
+        context = "User: Morning.\nJane: Morning."
 
-def test_existing_playlist_fuzzy_match_uses_highest_score(monkeypatch):
-    calls = _install_fake_playlists(
-        monkeypatch,
+        result = await greeting_handler.handle("hello there", context=context)
+
+        assert result == {"text": "Hey Chieh, good to hear from you."}
+        assert record_activity_spy == ["recorded"]
+        assert len(calls) == 1
+        body = calls[0]["json"]
+        assert calls[0]["url"] == greeting_handler.OLLAMA_URL
+        assert calls[0]["timeout"] == greeting_handler.LOCAL_LLM_TIMEOUT
+        assert body["model"] == greeting_handler.MODEL
+        assert body["stream"] is False
+        assert body["think"] is False
+        assert body["keep_alive"] == -1
+        assert body["options"] == {
+            "temperature": 0.7,
+            "num_predict": 60,
+            "num_ctx": greeting_handler.LOCAL_LLM_NUM_CTX,
+        }
+        assert "First, confirm" in body["prompt"]
+        assert "WRONG_CLASS" in body["prompt"]
+        assert f"Recent conversation:\n{context}\n\n" in body["prompt"]
+        assert "User: hello there" in body["prompt"]
+        assert body["prompt"].rstrip().endswith("Jane:")
+
+    @pytest.mark.asyncio
+    async def test_blank_context_is_omitted_from_llm_prompt(self, fake_ollama) -> None:
+        calls = fake_ollama(response="Hey Chieh.")
+
+        result = await greeting_handler.handle("hello there", context=" \n\t ")
+
+        assert result == {"text": "Hey Chieh."}
+        assert "Recent conversation:" not in calls[0]["json"]["prompt"]
+
+    @pytest.mark.asyncio
+    async def test_llm_wrong_class_response_returns_explicit_escalation_signal(
+        self, fake_ollama
+    ) -> None:
+        calls = fake_ollama(response="WRONG_CLASS")
+
+        result = await greeting_handler.handle("how does the greeting handler work?")
+
+        assert result == {"wrong_class": True}
+        assert len(calls) == 1
+
+    @pytest.mark.asyncio
+    async def test_llm_empty_response_escalates_to_stage3(self, fake_ollama) -> None:
+        calls = fake_ollama(response=" \n\t ")
+
+        result = await greeting_handler.handle("hello there")
+
+        assert result is None
+        assert len(calls) == 1
+
+    @pytest.mark.asyncio
+    async def test_llm_http_error_escalates_to_stage3(
+        self,
+        fake_ollama,
+        record_activity_spy: list[str],
+    ) -> None:
+        calls = fake_ollama(status_exc=RuntimeError("503 from Ollama"))
+
+        result = await greeting_handler.handle("hello there")
+
+        assert result is None
+        assert len(calls) == 1
+        assert record_activity_spy == []
+
+    @pytest.mark.asyncio
+    async def test_llm_transport_error_escalates_to_stage3(
+        self,
+        fake_ollama,
+        record_activity_spy: list[str],
+    ) -> None:
+        calls = fake_ollama(post_exc=RuntimeError("connection refused"))
+
+        result = await greeting_handler.handle("hello there")
+
+        assert result is None
+        assert len(calls) == 1
+        assert record_activity_spy == []
+
+    @pytest.mark.asyncio
+    async def test_greeting_with_followup_task_escalates_instead_of_answering(
+        self, fake_ollama
+    ) -> None:
+        calls = fake_ollama(response="WRONG_CLASS")
+
+        result = await greeting_handler.handle("hi Jane, set a 5 minute timer")
+
+        assert result == {"wrong_class": True}
+        assert len(calls) == 1
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "prompt",
         [
-            {"id": "low", "name": "Morning Mix"},
-            {"id": "high", "name": "Evening Relaxation"},
-            {"id": "skip", "name": "Classical Piano"},
+            "good morning, set a 5 minute timer",
+            "good afternoon, text Sarah that I am late",
+            "good evening, what's the weather tomorrow?",
         ],
-        {
-            "low": {"id": "low", "name": "Morning Mix", "tracks": ["a"]},
-            "high": {"id": "high", "name": "Evening Relaxation", "tracks": ["b", "c"]},
-            "skip": {"id": "skip", "name": "Classical Piano", "tracks": ["d"]},
-        },
     )
-    rapidfuzz_mod = types.ModuleType("rapidfuzz")
-    scores = {
-        "morning mix": 82,
-        "evening relaxation": 94,
-        "classical piano": 10,
-    }
-    rapidfuzz_mod.fuzz = types.SimpleNamespace(
-        token_set_ratio=lambda query, name: scores[name]
-    )
-    monkeypatch.setitem(sys.modules, "rapidfuzz", rapidfuzz_mod)
+    async def test_time_of_day_greeting_with_attached_task_does_not_use_canned_reply(
+        self,
+        prompt: str,
+        fake_ollama,
+    ) -> None:
+        calls = fake_ollama(response="WRONG_CLASS")
 
-    result = music_handler._match_existing_playlist("relax tracks")
+        result = await greeting_handler.handle(prompt)
 
-    assert calls == {"list": 1, "get": ["high"]}
-    assert result == {"id": "high", "name": "Evening Relaxation", "tracks": ["b", "c"]}
+        assert result == {"wrong_class": True}
+        assert len(calls) == 1
 
 
-def test_empty_playlist_query_does_not_hit_database(monkeypatch):
-    calls = _install_fake_playlists(monkeypatch, [{"id": "pl1", "name": "Anything"}])
+class TestEdgeCases:
+    @pytest.mark.asyncio
+    async def test_empty_prompt_escalates_without_crashing(self, fake_ollama) -> None:
+        calls = fake_ollama(response="")
 
-    assert music_handler._match_existing_playlist("   ") is None
-    assert calls == {"list": 0, "get": []}
+        result = await greeting_handler.handle("")
 
+        assert result is None
+        assert len(calls) == 1
+        assert "User: " in calls[0]["json"]["prompt"]
 
-def test_no_existing_playlist_candidates_do_not_fetch_details(monkeypatch):
-    calls = _install_fake_playlists(monkeypatch, [])
+    @pytest.mark.asyncio
+    async def test_whitespace_prompt_escalates_without_crashing(self, fake_ollama) -> None:
+        calls = fake_ollama(response="")
 
-    assert music_handler._match_existing_playlist("Coldplay") is None
-    assert calls == {"list": 1, "get": []}
+        result = await greeting_handler.handle(" \n\t ")
 
+        assert result is None
+        assert len(calls) == 1
+        assert "User: " in calls[0]["json"]["prompt"]
 
-def test_existing_playlist_import_failure_fails_closed(monkeypatch):
-    _block_import(monkeypatch, "vault_web.playlists")
+    @pytest.mark.asyncio
+    async def test_none_prompt_escalates_without_crashing(self, fake_ollama) -> None:
+        fake_ollama(response="")
 
-    assert music_handler._match_existing_playlist("Coldplay") is None
+        result = await greeting_handler.handle(None)
 
+        assert result is None
 
-def test_library_resolver_calls_v1_scanner_with_query(monkeypatch):
-    playlist = {"id": "ephemeral-1", "name": "Playing: Shakira", "tracks": ["a"]}
-    calls = _install_fake_library(monkeypatch, playlist)
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("malformed_prompt", [b"hey", object()])
+    async def test_malformed_prompt_escalates_without_crashing(
+        self,
+        malformed_prompt,
+        fake_ollama,
+    ) -> None:
+        fake_ollama(response="")
 
-    assert music_handler._ephemeral_from_library("Shakira") == playlist
-    assert calls == ["Shakira"]
+        result = await greeting_handler.handle(malformed_prompt)
 
+        assert result is None
 
-def test_library_resolver_import_failure_returns_none(monkeypatch):
-    _block_import(monkeypatch, "jane_web.main")
+    @pytest.mark.asyncio
+    async def test_very_long_prompt_uses_llm_confirmation_before_handling(
+        self, fake_ollama
+    ) -> None:
+        long_prompt = "hello there " + " ".join(f"word{i}" for i in range(5000))
+        calls = fake_ollama(response="WRONG_CLASS")
 
-    assert music_handler._ephemeral_from_library("anything") is None
+        result = await greeting_handler.handle(long_prompt)
 
+        assert result == {"wrong_class": True}
+        assert len(calls) == 1
+        assert calls[0]["json"]["options"]["num_ctx"] == greeting_handler.LOCAL_LLM_NUM_CTX
+        assert long_prompt[:100] in calls[0]["json"]["prompt"]
 
-def test_handle_falls_back_to_library_when_existing_playlist_misses(monkeypatch):
-    calls = _install_fake_playlists(monkeypatch, [])
-    library_calls = _install_fake_library(
-        monkeypatch,
-        {"id": "tmp1", "name": "Playing: Shakira", "tracks": ["song.mp3"]},
-    )
-
-    result = music_handler.handle(
-        "play Shakira",
-        params={"kind": "artist", "query": "Shakira"},
-    )
-
-    assert calls == {"list": 1, "get": []}
-    assert library_calls == ["Shakira"]
-    _assert_stage2_shape(result, playable=True)
-    assert result["text"] == "Playing Playing: Shakira (1 tracks). [MUSIC_PLAY:tmp1]"
-
-
-def test_no_library_match_returns_documented_failure_shape(monkeypatch):
-    monkeypatch.setattr(music_handler, "_match_existing_playlist", lambda query: None)
-    monkeypatch.setattr(music_handler, "_ephemeral_from_library", lambda query: None)
-
-    result = music_handler.handle(
-        "play a missing song",
-        params={"kind": "song", "query": "missing song"},
-    )
-
-    assert result == {
-        "text": "Unable to find the song in our list.",
-        "playlist_id": None,
-        "playlist_name": None,
-    }
-    _assert_stage2_shape(result, playable=False)
-
-
-def test_very_long_query_is_stripped_and_passed_to_both_resolvers(monkeypatch):
-    raw_query = "  " + ("lofi focus " * 2000) + "  "
-    expected_query = raw_query.strip()
-    seen: dict[str, str] = {}
-
-    def fake_existing(query: str) -> None:
-        seen["existing"] = query
-        return None
-
-    def fake_library(query: str) -> dict:
-        seen["library"] = query
-        return {"id": "long1", "name": "Long Query Mix", "tracks": ["a"]}
-
-    monkeypatch.setattr(music_handler, "_match_existing_playlist", fake_existing)
-    monkeypatch.setattr(music_handler, "_ephemeral_from_library", fake_library)
-
-    result = music_handler.handle(
-        "play a very long prompt",
-        params={"kind": "mood", "query": raw_query},
-    )
-
-    assert seen == {"existing": expected_query, "library": expected_query}
-    _assert_stage2_shape(result, playable=True)
-
-
-@pytest.mark.parametrize(
-    "bad_params",
-    [
-        [],
-        object(),
-        {"kind": object(), "query": "Coldplay"},
-        {"kind": "song", "query": object()},
-    ],
-)
-def test_malformed_params_cannot_trigger_playback(monkeypatch, bad_params):
-    monkeypatch.setattr(
-        music_handler,
-        "_match_existing_playlist",
-        lambda query: pytest.fail("malformed params should not search playlists"),
-    )
-    monkeypatch.setattr(
-        music_handler,
-        "_ephemeral_from_library",
-        lambda query: pytest.fail("malformed params should not start playback"),
-    )
-
-    assert _call_safely("play something", bad_params) is None
-
-
-def test_unknown_kind_fails_closed_before_playback(monkeypatch):
-    monkeypatch.setattr(
-        music_handler,
-        "_match_existing_playlist",
-        lambda query: pytest.fail("unknown kind should not search playlists"),
-    )
-    monkeypatch.setattr(
-        music_handler,
-        "_ephemeral_from_library",
-        lambda query: pytest.fail("unknown kind should not start playback"),
-    )
-
-    assert (
-        music_handler.handle(
-            "play Coldplay",
-            params={"kind": "not_in_schema", "query": "Coldplay"},
+    @pytest.mark.asyncio
+    async def test_very_long_time_of_day_prompt_with_task_does_not_short_circuit(
+        self, fake_ollama
+    ) -> None:
+        long_prompt = (
+            "good morning, set a timer for "
+            + " ".join(f"minute{i}" for i in range(1000))
         )
-        is None
-    )
+        calls = fake_ollama(response="WRONG_CLASS")
+
+        result = await greeting_handler.handle(long_prompt)
+
+        assert result == {"wrong_class": True}
+        assert len(calls) == 1
 
 
-def test_param_schema_kind_enum_matches_documented_dispatch_contract():
-    assert _schema_kind_values() == DOCUMENTED_KINDS
+class TestIntegrationPoints:
+    def test_module_uses_ollama_httpx_client_and_no_cloud_llm_clients(
+        self, module_ast: ast.Module
+    ) -> None:
+        imports = _imported_modules(module_ast)
+
+        assert "httpx" in imports
+        assert "openai" not in imports
+        assert "anthropic" not in imports
+        assert "google.generativeai" not in imports
+
+    def test_module_has_no_db_query_integration_points(self, module_ast: ast.Module) -> None:
+        imports = _imported_modules(module_ast)
+        calls = _call_names(module_ast)
+
+        assert not {
+            module
+            for module in imports
+            if module == DB_IMPORT_PREFIXES
+            or any(module == prefix or module.startswith(f"{prefix}.") for prefix in DB_IMPORT_PREFIXES)
+        }
+        assert not any(name.endswith(".execute") for name in calls)
+        assert not any(name.endswith(".executemany") for name in calls)
+        assert not any(name.endswith(".query") for name in calls)
+        assert "get_chroma_client" not in calls
+        assert "chromadb.PersistentClient" not in calls
+
+    @pytest.mark.asyncio
+    async def test_successful_llm_call_records_ollama_activity_once(
+        self,
+        fake_ollama,
+        record_activity_spy: list[str],
+    ) -> None:
+        fake_ollama(response="Hey Chieh.")
+
+        result = await greeting_handler.handle("hello there")
+
+        assert result == {"text": "Hey Chieh."}
+        assert record_activity_spy == ["recorded"]
+
+    @pytest.mark.asyncio
+    async def test_json_payload_missing_response_escalates(self, fake_ollama) -> None:
+        calls = fake_ollama(payload={"not_response": "ignored"})
+
+        result = await greeting_handler.handle("hello there")
+
+        assert result is None
+        assert len(calls) == 1
+
+    @pytest.mark.asyncio
+    async def test_stage2_dispatcher_invokes_registered_greeting_handler_shape(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _force_choice(monkeypatch)
+        _block_ollama(monkeypatch)
+
+        result = await stage2_dispatcher.dispatch("greeting", "hey", min_dist=0.0)
+
+        assert result == {"text": greeting_handler._CANNED_REPLIES["hello"][0]}
+        _assert_text_result(result)
+
+    @pytest.mark.asyncio
+    async def test_stage2_dispatcher_passes_fifo_context_to_greeting_handler(
+        self,
+        fake_ollama,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        async def gate_ok(class_name: str, prompt: str, context: str) -> bool:
+            assert class_name == "greeting"
+            assert prompt == "hello there"
+            assert context == "User: earlier\nJane: earlier reply"
+            return True
+
+        monkeypatch.setattr(stage2_dispatcher, "_gate_check", gate_ok)
+        calls = fake_ollama(response="Hey Chieh.")
+
+        result = await stage2_dispatcher.dispatch(
+            "greeting",
+            "hello there",
+            context="User: earlier\nJane: earlier reply",
+        )
+
+        assert result == {"text": "Hey Chieh."}
+        assert "Recent conversation:" in calls[0]["json"]["prompt"]
 
 
-@pytest.mark.parametrize("kind", sorted(ACTIONABLE_KINDS))
-def test_every_documented_action_kind_reaches_library_from_public_handle(
-    monkeypatch, kind: str
-):
-    calls: list[str] = []
-    monkeypatch.setattr(music_handler, "_match_existing_playlist", lambda query: None)
+class TestStructuralInvariants:
+    def test_canned_reply_table_has_valid_shape(self) -> None:
+        replies = greeting_handler._CANNED_REPLIES
 
-    def fake_library(query: str) -> dict:
-        calls.append(query)
-        return {
-            "id": f"{kind}-playlist",
-            "name": f"{kind.title()} Playlist",
-            "tracks": ["a"],
+        assert isinstance(replies, dict)
+        assert replies
+        assert set(replies) == set(CANNED_SAMPLE_BY_BUCKET)
+        for bucket, options in replies.items():
+            assert isinstance(bucket, str)
+            assert bucket.strip() == bucket
+            assert isinstance(options, list)
+            assert options
+            assert len(options) == len(set(options))
+            for text in options:
+                assert isinstance(text, str)
+                assert text.strip() == text
+                assert text
+                assert "\n" not in text
+                assert not text.startswith(("-", "*", "#"))
+                assert "[[CLIENT_TOOL:" not in text
+                assert "WRONG_CLASS" not in text.upper()
+
+    def test_canned_pattern_buckets_all_exist_and_no_reply_bucket_is_dead(self) -> None:
+        replies = greeting_handler._CANNED_REPLIES
+        referenced = {bucket for _pattern, bucket in greeting_handler._CANNED_PATTERNS}
+
+        assert referenced == set(replies)
+
+    def test_every_canned_reply_value_is_reachable_from_at_least_one_input(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        for bucket, sample in CANNED_SAMPLE_BY_BUCKET.items():
+            for expected in greeting_handler._CANNED_REPLIES[bucket]:
+                _force_choice(monkeypatch, expected)
+
+                assert greeting_handler._canned_reply(sample) == expected
+
+    def test_canned_patterns_do_not_reference_missing_reply_keys(self) -> None:
+        missing = [
+            bucket
+            for _pattern, bucket in greeting_handler._CANNED_PATTERNS
+            if bucket not in greeting_handler._CANNED_REPLIES
+        ]
+
+        assert missing == []
+
+    def test_no_canned_reply_maps_to_destructive_or_escalation_action(self) -> None:
+        forbidden = re.compile(
+            r"WRONG_CLASS|\[\[CLIENT_TOOL:|sms_send_direct|send_message|"
+            r"delete|trash|end conversation|stage 3|opus",
+            re.IGNORECASE,
+        )
+
+        contradictions = {
+            bucket: [text for text in replies if forbidden.search(text)]
+            for bucket, replies in greeting_handler._CANNED_REPLIES.items()
         }
 
-    monkeypatch.setattr(music_handler, "_ephemeral_from_library", fake_library)
+        assert {bucket: values for bucket, values in contradictions.items() if values} == {}
 
-    result = music_handler.handle(
-        f"play {kind}",
-        params={"kind": kind, "query": f"{kind} query"},
-    )
+    def test_prompt_template_contains_required_wrong_class_confirmation(self) -> None:
+        template = greeting_handler._PROMPT_TEMPLATE
 
-    assert calls == [f"{kind} query"]
-    _assert_stage2_shape(result, playable=True)
-    assert result["playlist_id"] == f"{kind}-playlist"
+        assert "The classifier thinks the user is greeting" in template
+        assert "First, confirm" in template
+        assert "output ONLY: WRONG_CLASS" in template
+        assert "No markdown" in template
+        assert "No lists" in template
+        assert "{context_block}User: {prompt}" in template
+        assert template.rstrip().endswith("Jane:")
 
+    def test_handle_return_literals_are_only_documented_shapes(
+        self, module_ast: ast.Module
+    ) -> None:
+        bad_returns: list[ast.Return] = []
+        saw_text_shape = False
+        saw_wrong_class_shape = False
+        saw_none_shape = False
 
-def test_resume_is_the_only_schema_kind_that_escalates_by_design(monkeypatch):
-    monkeypatch.setattr(
-        music_handler,
-        "_match_existing_playlist",
-        lambda query: pytest.fail("resume should not search playlists"),
-    )
-    monkeypatch.setattr(
-        music_handler,
-        "_ephemeral_from_library",
-        lambda query: pytest.fail("resume should not call scanner"),
-    )
+        for node in _handle_return_nodes(module_ast):
+            value = node.value
+            if value is None or (isinstance(value, ast.Constant) and value.value is None):
+                saw_none_shape = True
+                continue
+            if isinstance(value, ast.Dict):
+                keys = {
+                    key.value
+                    for key in value.keys
+                    if isinstance(key, ast.Constant) and isinstance(key.value, str)
+                }
+                if keys == {"text"}:
+                    saw_text_shape = True
+                    continue
+                if keys == {"wrong_class"}:
+                    saw_wrong_class_shape = True
+                    continue
+            bad_returns.append(node)
 
-    assert music_handler.handle("resume", params={"kind": "resume", "query": None}) is None
-    assert "resume" in _schema_kind_values()
-    assert ACTIONABLE_KINDS == _schema_kind_values() - {"resume"}
+        assert bad_returns == []
+        assert saw_text_shape
+        assert saw_wrong_class_shape
+        assert saw_none_shape
 
+    def test_greeting_class_name_is_wired_across_stage1_dispatcher_and_registry(self) -> None:
+        registry = class_registry.get_registry(refresh=True)
 
-def test_music_metadata_few_shots_do_not_map_high_confidence_to_fallback_class():
-    for prompt, label in music_metadata.METADATA["few_shot"]:
-        class_name, confidence = label.rsplit(":", 1)
-        assert prompt.strip()
-        assert class_name == music_metadata.METADATA["name"]
-        assert confidence == "High"
-        assert class_name not in {"others", "delegate opus", "unclear"}
+        assert stage1_classifier._CLASS_MAP["GREETING"] == "greeting"
+        assert stage2_dispatcher._CLASS_DESCRIPTIONS["greeting"]
+        assert greeting_metadata.METADATA["name"] == "greeting"
+        assert "greeting" in registry
+        assert registry["greeting"]["pkg_name"] == "greeting"
+        assert registry["greeting"]["handler"] is greeting_handler.handle
 
+    def test_greeting_metadata_documents_adversarial_non_greeting_inputs(self) -> None:
+        description = greeting_metadata.METADATA["description"]
 
-def test_stage1_class_map_values_exist_in_class_registry_and_music_points_here():
-    registry = class_registry.get_registry(refresh=True)
+        assert "Adversarial phrasings" in description
+        assert "set a 5 minute timer" in description
+        assert "what's the weather" in description
+        assert "send message" in description
+        assert "how does the greeting handler work" in description
 
-    assert stage1_classifier._CLASS_MAP["MUSIC_PLAY"] == "music play"
-    assert set(stage1_classifier._CLASS_MAP.values()).issubset(registry.keys())
-    assert registry["music play"]["pkg_name"] == "music_play"
-    assert registry["music play"]["handler"] is music_handler.handle
-    assert registry["music play"]["params_schema"] is music_metadata.PARAMS_SCHEMA
+    def test_registered_greeting_has_handler_or_explicit_stage3_documentation(
+        self, spec_source: str
+    ) -> None:
+        registry = class_registry.get_registry(refresh=True)
+        greeting = registry["greeting"]
 
+        assert greeting["handler"] is not None
+        assert "GREETING | greeting" in spec_source
+        assert "Yes" in spec_source.split("GREETING | greeting", 1)[1].splitlines()[0]
 
-@pytest.mark.asyncio
-async def test_stage2_dispatch_invokes_registered_music_handler_with_params(monkeypatch):
-    monkeypatch.setattr(music_handler, "_match_existing_playlist", lambda query: None)
-    monkeypatch.setattr(
-        music_handler,
-        "_ephemeral_from_library",
-        lambda query: {
-            "id": "dispatch1",
-            "name": "Dispatch Mix",
-            "tracks": ["a", "b"],
-        },
-    )
+    def test_module_has_no_destructive_operation_surface(self, module_ast: ast.Module) -> None:
+        calls = _call_names(module_ast)
+        lowered_calls = {name.lower().replace(".", "_") for name in calls}
 
-    result = await stage2_dispatcher.dispatch(
-        "music play",
-        "play dispatch mix",
-        params={"kind": "song", "query": "dispatch mix"},
-        min_dist=0.0,
-    )
+        assert lowered_calls.isdisjoint(DESTRUCTIVE_TOKENS)
+        assert not any(token in MODULE_PATH.read_text().lower() for token in (
+            "[[client_tool:",
+            "sms_send_direct",
+            "delete(",
+            "end_conversation(",
+        ))
 
-    _assert_stage2_shape(result, playable=True)
-    assert result["playlist_id"] == "dispatch1"
+    def test_if_destructive_surface_is_added_it_must_have_numeric_threshold_guard(
+        self, module_source: str
+    ) -> None:
+        destructive_present = bool(
+            re.search(
+                r"\b(delete|delete_email|delete_message|delete_messages|"
+                r"end_conversation|send_message|sms_send_direct|trash)\s*\(",
+                module_source,
+                re.IGNORECASE,
+            )
+        ) or "[[CLIENT_TOOL:contacts.sms_send_direct" in module_source
+        threshold_guard_present = bool(
+            re.search(r"confidence\s*[>=]=\s*0\.8|0\.80\s*[<]=\s*confidence", module_source)
+        )
 
-
-@pytest.mark.asyncio
-async def test_stage2_dispatch_escalates_registered_resume_request(monkeypatch):
-    monkeypatch.setattr(
-        music_handler,
-        "_match_existing_playlist",
-        lambda query: pytest.fail("resume should not search playlists"),
-    )
-    monkeypatch.setattr(
-        music_handler,
-        "_ephemeral_from_library",
-        lambda query: pytest.fail("resume should not call scanner"),
-    )
-
-    result = await stage2_dispatcher.dispatch(
-        "music play",
-        "resume",
-        params={"kind": "resume", "query": None},
-        min_dist=0.0,
-    )
-
-    assert result is None
-
-
-def test_registry_classes_have_handlers_or_documented_escalation_path():
-    registry = class_registry.get_registry(refresh=True)
-    classes_dir = REPO_ROOT / "jane_web" / "jane_v2" / "classes"
-
-    for class_name, meta in registry.items():
-        if meta.get("handler") is not None:
-            continue
-
-        metadata_path = classes_dir / meta["pkg_name"] / "metadata.py"
-        metadata_source = metadata_path.read_text()
-        description = meta.get("description")
-        description_text = "" if callable(description) else str(description or "")
-        combined = f"{metadata_source}\n{description_text}".lower()
-
-        if class_name == "end conversation":
-            pipeline_source = (
-                REPO_ROOT / "jane_web" / "jane_v2" / "pipeline.py"
-            ).read_text()
-            assert "END_CONVERSATION short-circuit" in pipeline_source
-            assert "conversation_end" in pipeline_source
-            continue
-
-        has_no_handler_note = "no handler" in combined
-        has_escalation_note = "escalat" in combined or "short-circuit" in combined
-        has_always_escalates_note = "always escalates to stage 3 by design" in combined
-
-        assert has_escalation_note
-        assert has_no_handler_note or has_always_escalates_note
-
-
-def test_music_handler_has_no_destructive_operations(module_ast):
-    calls = _call_names(module_ast)
-    destructive_calls = {
-        name
-        for name in calls
-        if name.rsplit(".", 1)[-1].lower() in DESTRUCTIVE_NAMES
-    }
-
-    assert destructive_calls == set()
-
-
-def test_destructive_end_conversation_gate_has_phrase_guard_and_numeric_floor():
-    source = inspect.getsource(stage1_classifier)
-
-    assert stage1_classifier._end_conversation_phrase_ok("bye") is True
-    assert stage1_classifier._end_conversation_phrase_ok("stop the music") is False
-    assert stage1_classifier._end_conversation_phrase_ok(
-        "I think the context window is not long enough"
-    ) is False
-    assert 'raw_cls == "END_CONVERSATION" and confidence < 0.80' in source
-
-
-def test_music_handler_has_no_direct_llm_or_network_calls(module_ast):
-    imported = _import_roots(module_ast)
-    calls = _call_names(module_ast)
-    forbidden_call_roots = {
-        name.split(".", 1)[0]
-        for name in calls
-        if name.split(".", 1)[0] in {"httpx", "requests", "openai", "anthropic"}
-    }
-
-    assert imported.isdisjoint({root.split(".", 1)[0] for root in LLM_OR_NETWORK_ROOTS})
-    assert forbidden_call_roots == set()
-
-
-def test_every_literal_dict_return_in_music_handler_has_text_key(module_ast):
-    for node in ast.walk(module_ast):
-        if not isinstance(node, ast.Return):
-            continue
-        if not isinstance(node.value, ast.Dict):
-            continue
-        keys = {
-            key.value
-            for key in node.value.keys
-            if isinstance(key, ast.Constant) and isinstance(key.value, str)
-        }
-        assert "text" in keys
+        assert not destructive_present or threshold_guard_present

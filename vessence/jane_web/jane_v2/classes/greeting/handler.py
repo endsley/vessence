@@ -61,9 +61,9 @@ _CANNED_PATTERNS = [
     # bare hellos
     (re.compile(r"^(hi+|hey+|hello+|yo|howdy|heya|hiya)\b[.!? ]*$"), "hello"),
     # time-of-day
-    (re.compile(r"^good morning\b"), "morning"),
-    (re.compile(r"^good afternoon\b"), "afternoon"),
-    (re.compile(r"^good evening\b"), "evening"),
+    (re.compile(r"^good morning\b[.!? ]*$"), "morning"),
+    (re.compile(r"^good afternoon\b[.!? ]*$"), "afternoon"),
+    (re.compile(r"^good evening\b[.!? ]*$"), "evening"),
     # thanks
     (re.compile(r"^(thanks|thank you|thx|ty|appreciate (it|you))\b[.!? ]*$"),
      "thanks"),
@@ -97,6 +97,9 @@ async def handle(prompt: str, context: str = "") -> dict | None:
 
     Returns {"text": "..."} or None to escalate to Stage 3.
     """
+    if not isinstance(prompt, str):
+        return None
+
     canned = _canned_reply(prompt)
     if canned:
         logger.info("greeting handler: canned → %r", canned[:60])
