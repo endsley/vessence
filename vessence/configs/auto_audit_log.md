@@ -74,3 +74,7 @@ Tests now passing. Committed to master.
 ## 2026-06-07 01:00 — vault_web/recent_turns.py
 Result: ✅ Module passes all generated tests. Tests committed.
 
+## 2026-06-08 01:00 — jane_web/jane_v2/classes/greeting/handler.py
+Result: 🔧 Bug found and fixed (attempt 1).
+Tests now passing. Committed to master.
+
