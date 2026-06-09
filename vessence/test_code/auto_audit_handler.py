@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import ast
-import inspect
+import json
 import re
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -14,48 +15,39 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 MODULE_PATH = (
-    REPO_ROOT / "jane_web" / "jane_v2" / "classes" / "greeting" / "handler.py"
+    REPO_ROOT / "jane_web" / "jane_v2" / "classes" / "send_message" / "handler.py"
 )
-SPEC_PATH = REPO_ROOT / "configs" / "v2_3stage_pipeline.md"
+SPEC_PATH = REPO_ROOT / "CLAUDE.md"
 
+from agent_skills import sms_helpers
 from jane_web.jane_v2 import classes as class_registry
 from jane_web.jane_v2 import stage1_classifier, stage2_dispatcher
-from jane_web.jane_v2.classes.greeting import handler as greeting_handler
-from jane_web.jane_v2.classes.greeting import metadata as greeting_metadata
+from jane_web.jane_v2.classes.send_message import handler as send_handler
+from jane_web.jane_v2.classes.send_message import metadata as send_metadata
 
 
-CANNED_SAMPLE_BY_BUCKET = {
-    "check_in": "how's it going",
-    "hello": "hey",
-    "morning": "good morning",
-    "afternoon": "good afternoon",
-    "evening": "good evening",
-    "thanks": "thanks",
-}
-
-DESTRUCTIVE_TOKENS = {
-    "delete",
-    "delete_email",
-    "delete_message",
-    "delete_messages",
-    "drop_table",
-    "end_conversation",
-    "remove",
-    "send_message",
-    "sms_send_direct",
-    "trash",
-}
-
-DB_IMPORT_PREFIXES = (
-    "chromadb",
-    "jane.config",
-    "mysql",
-    "psycopg",
-    "psycopg2",
-    "pymysql",
-    "sqlalchemy",
-    "sqlite3",
+DIRECT_SEND_RE = re.compile(
+    r"\[\[CLIENT_TOOL:contacts\.sms_send_direct:(\{.*?\})\]\]"
 )
+ANY_SMS_TOOL_RE = re.compile(r"\[\[CLIENT_TOOL:contacts\.(sms_[a-z_]+):(\{.*?\})\]\]")
+
+DOCUMENTED_NO_HANDLER_ESCALATES = {
+    "delegate opus",
+    "delete email",
+    "end conversation",
+    "others",
+    "read email",
+    "send email",
+    "unclear",
+}
+
+DESTRUCTIVE_CLASS_NAMES = {
+    "delete email",
+    "delete messages",
+    "end conversation",
+    "send email",
+    "send message",
+}
 
 
 @pytest.fixture
@@ -69,630 +61,1158 @@ def module_ast(module_source: str) -> ast.Module:
 
 
 @pytest.fixture
-def spec_source() -> str:
-    return SPEC_PATH.read_text()
+def sms_protocol_source() -> str:
+    text = SPEC_PATH.read_text()
+    start = text.index("## Text Message (SMS) Protocols")
+    end = text.index("### Reading Messages", start)
+    return text[start:end]
 
 
-@pytest.fixture
-def record_activity_spy(monkeypatch: pytest.MonkeyPatch) -> list[str]:
-    from jane_web.jane_v2 import models
+def _disable_open_draft(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(send_handler, "_check_open_draft", lambda prompt: None)
 
+
+def _block_llm_extraction(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def forbidden(*_args: Any, **_kwargs: Any) -> dict | None:
+        raise AssertionError("params path should not call the LLM extractor")
+
+    monkeypatch.setattr(send_handler, "_extract_via_llm", forbidden)
+
+
+def _install_recipient_resolution(
+    monkeypatch: pytest.MonkeyPatch,
+    mapping: dict[str, dict[str, Any] | None],
+) -> list[str]:
     calls: list[str] = []
-    monkeypatch.setattr(
-        models,
-        "record_ollama_activity",
-        lambda: calls.append("recorded"),
-        raising=False,
-    )
+
+    def resolve_recipient(name: str) -> dict[str, Any] | None:
+        calls.append(name)
+        return mapping.get(name)
+
+    monkeypatch.setattr(sms_helpers, "resolve_recipient", resolve_recipient)
+    monkeypatch.setattr(sms_helpers, "add_alias", lambda *_args, **_kwargs: True)
     return calls
 
 
-@pytest.fixture
-def fake_ollama(monkeypatch: pytest.MonkeyPatch):
-    def install(
-        *,
-        response: str | None = "Hey Chieh.",
-        payload: dict | None = None,
-        post_exc: Exception | None = None,
-        status_exc: Exception | None = None,
-    ) -> list[dict]:
-        calls: list[dict] = []
+def _result_text(result: dict | None) -> str:
+    assert isinstance(result, dict)
+    assert "text" in result
+    assert isinstance(result["text"], str)
+    return result["text"]
+
+
+def _direct_send_payload(text: str) -> dict[str, Any]:
+    match = DIRECT_SEND_RE.search(text)
+    assert match, text
+    return json.loads(match.group(1))
+
+
+def _sms_tool(text: str) -> tuple[str, dict[str, Any]]:
+    match = ANY_SMS_TOOL_RE.search(text)
+    assert match, text
+    return match.group(1), json.loads(match.group(2))
+
+
+def _assert_no_client_tool(result: dict | None) -> None:
+    if result is None:
+        return
+    assert isinstance(result, dict)
+    assert "[[CLIENT_TOOL:" not in result.get("text", "")
+
+
+def _send_confirmation_pending(
+    *,
+    phone: str = "+15551234567",
+    display: str = "Kathia",
+    body: str = "I love you",
+) -> dict[str, Any]:
+    return {
+        "type": "STAGE2_FOLLOWUP",
+        "handler_class": "send message",
+        "awaiting": "send_confirmation",
+        "data": {
+            "awaiting": "send_confirmation",
+            "draft": {"phone": phone, "display": display, "body": body},
+        },
+        "question": f"Message to {display}: {body}. Should I send it?",
+    }
+
+
+def _revised_body_pending(
+    *,
+    phone: str = "+15551234567",
+    display: str = "Kathia",
+) -> dict[str, Any]:
+    return {
+        "type": "STAGE2_FOLLOWUP",
+        "handler_class": "send message",
+        "awaiting": "revised_body",
+        "data": {
+            "awaiting": "revised_body",
+            "draft": {"phone": phone, "display": display},
+        },
+        "question": "Please give me the updated message.",
+    }
+
+
+class _FakeCursor:
+    def __init__(self, row: Any = None):
+        self._row = row
+
+    def fetchone(self) -> Any:
+        return self._row
+
+
+class _FakeConnection:
+    def __init__(self, row: Any = None):
+        self.row = row
+        self.executed: list[tuple[str, tuple[Any, ...]]] = []
+
+    def __enter__(self) -> "_FakeConnection":
+        return self
+
+    def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> bool:
+        return False
+
+    def execute(self, sql: str, params: tuple[Any, ...] = ()) -> _FakeCursor:
+        self.executed.append((sql, params))
+        return _FakeCursor(self.row)
+
+
+class TestDocumentedSmsProtocol:
+    def test_claude_sms_protocol_documents_sms_not_calls(
+        self, sms_protocol_source: str
+    ) -> None:
+        assert "ALWAYS SMS" in sms_protocol_source
+        assert "NEVER use `contacts.call`" in sms_protocol_source
+        assert "sms_send_direct" in sms_protocol_source
+        assert "Rewrite perspective" in sms_protocol_source
+
+    def test_module_docstring_documents_stage2_branches(self) -> None:
+        doc = send_handler.__doc__ or ""
+
+        assert "Fast path" in doc
+        assert "Confirm-or-revise" in doc
+        assert "Escalate" in doc
+        assert "sms_send_direct" in doc
+        assert "conversation_end=True" in doc
+        assert "STAGE2_FOLLOWUP" in doc
+
+    @pytest.mark.asyncio
+    async def test_fast_path_resolved_coherent_body_sends_direct_and_ends(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _disable_open_draft(monkeypatch)
+        _block_llm_extraction(monkeypatch)
+        resolve_calls = _install_recipient_resolution(
+            monkeypatch,
+            {
+                "wife": {
+                    "phone_number": "+15551234567",
+                    "display_name": "Kathia",
+                    "source": "alias",
+                }
+            },
+        )
+
+        result = await send_handler.handle(
+            "tell my wife I love her",
+            params={"recipient": "wife", "body": "I love you", "intent_kind": "send"},
+        )
+
+        text = _result_text(result)
+        payload = _direct_send_payload(text)
+        assert "message sent" in text.lower()
+        assert payload == {"phone_number": "+15551234567", "body": "I love you"}
+        assert result["conversation_end"] is True
+        assert result["structured"]["intent"] == "send message"
+        assert result["structured"]["entities"] == {
+            "recipient": "Kathia",
+            "phone_number": "+15551234567",
+            "message_body": "I love you",
+        }
+        assert result["structured"]["safety"] == {
+            "side_effectful": True,
+            "requires_confirmation": False,
+        }
+        assert resolve_calls == ["wife"]
+
+    @pytest.mark.asyncio
+    async def test_params_intent_kind_ask_escalates_before_contact_lookup(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _disable_open_draft(monkeypatch)
+        _block_llm_extraction(monkeypatch)
+
+        def forbidden_lookup(name: str) -> None:
+            raise AssertionError(f"ask intent must not resolve/send in Stage 2: {name}")
+
+        monkeypatch.setattr(sms_helpers, "resolve_recipient", forbidden_lookup)
+
+        result = await send_handler.handle(
+            "ask Lee what time she is coming",
+            params={
+                "recipient": "Lee",
+                "body": "What time are you coming?",
+                "intent_kind": "ask",
+            },
+        )
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_missing_recipient_escalates_without_llm_or_lookup(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _disable_open_draft(monkeypatch)
+        _block_llm_extraction(monkeypatch)
+        monkeypatch.setattr(
+            sms_helpers,
+            "resolve_recipient",
+            lambda name: (_ for _ in ()).throw(AssertionError(name)),
+        )
+
+        result = await send_handler.handle(
+            "text somebody hi",
+            params={"recipient": "", "body": "hi", "intent_kind": "send"},
+        )
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_missing_body_escalates_and_does_not_send(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _disable_open_draft(monkeypatch)
+        _block_llm_extraction(monkeypatch)
+        _install_recipient_resolution(
+            monkeypatch,
+            {
+                "mom": {
+                    "phone_number": "+15557654321",
+                    "display_name": "Mom",
+                    "source": "alias",
+                }
+            },
+        )
+
+        result = await send_handler.handle(
+            "text mom",
+            params={"recipient": "mom", "body": "", "intent_kind": "send"},
+        )
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_unresolved_recipient_escalates_without_marker(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _disable_open_draft(monkeypatch)
+        _block_llm_extraction(monkeypatch)
+        resolve_calls = _install_recipient_resolution(monkeypatch, {"lee": None})
+
+        result = await send_handler.handle(
+            "text Lee I'm running late",
+            params={"recipient": "lee", "body": "I'm running late", "intent_kind": "send"},
+        )
+
+        assert result is None
+        assert resolve_calls == ["lee"]
+
+    @pytest.mark.asyncio
+    async def test_incoherent_body_asks_for_confirm_or_revise_not_direct_send(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _disable_open_draft(monkeypatch)
+        _block_llm_extraction(monkeypatch)
+        _install_recipient_resolution(
+            monkeypatch,
+            {
+                "mom": {
+                    "phone_number": "+15557654321",
+                    "display_name": "Mom",
+                    "source": "alias",
+                }
+            },
+        )
+
+        result = await send_handler.handle(
+            "text mom I will be at the",
+            params={"recipient": "mom", "body": "I will be at the", "intent_kind": "send"},
+        )
+
+        text = _result_text(result)
+        assert text == "Message to Mom: I will be at the. Should I send it?"
+        assert "[[CLIENT_TOOL:" not in text
+        pending = result["structured"]["pending_action"]
+        assert pending["type"] == "STAGE2_FOLLOWUP"
+        assert pending["handler_class"] == "send message"
+        assert pending["awaiting"] == "send_confirmation"
+        assert pending["data"]["draft"] == {
+            "phone": "+15557654321",
+            "display": "Mom",
+            "body": "I will be at the",
+        }
+
+    @pytest.mark.asyncio
+    async def test_wrong_class_llm_sentinel_propagates_for_dispatcher_self_correction(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _disable_open_draft(monkeypatch)
+
+        async def wrong_class(_prompt: str, _context: str) -> dict:
+            return send_handler._WRONG_CLASS_SENTINEL
+
+        monkeypatch.setattr(send_handler, "_extract_via_llm", wrong_class)
+
+        result = await send_handler.handle("how does the send message handler work?")
+
+        assert result is send_handler._WRONG_CLASS_SENTINEL
+        assert result == {"wrong_class": True}
+
+    @pytest.mark.asyncio
+    async def test_without_params_uses_llm_extraction_then_contact_resolution(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _disable_open_draft(monkeypatch)
+        llm_calls: list[tuple[str, str]] = []
+
+        async def fake_extract(prompt: str, context: str) -> dict[str, Any]:
+            llm_calls.append((prompt, context))
+            return {"recipient": "mom", "body": "I'm here", "coherent": True}
+
+        monkeypatch.setattr(send_handler, "_extract_via_llm", fake_extract)
+        _install_recipient_resolution(
+            monkeypatch,
+            {
+                "mom": {
+                    "phone_number": "+15557654321",
+                    "display_name": "Mom",
+                    "source": "alias",
+                }
+            },
+        )
+
+        result = await send_handler.handle("let mom know I'm here", context="Earlier turn")
+
+        payload = _direct_send_payload(_result_text(result))
+        assert payload == {"phone_number": "+15557654321", "body": "I'm here"}
+        assert llm_calls == [("let mom know I'm here", "Earlier turn")]
+
+
+class TestConfirmOrReviseResume:
+    @pytest.mark.asyncio
+    async def test_resume_yes_sends_existing_draft_directly_and_ends(self) -> None:
+        result = await send_handler.handle("yes", pending=_send_confirmation_pending())
+
+        text = _result_text(result)
+        payload = _direct_send_payload(text)
+        assert payload == {"phone_number": "+15551234567", "body": "I love you"}
+        assert result["conversation_end"] is True
+        assert result["structured"]["safety"] == {
+            "side_effectful": True,
+            "requires_confirmation": False,
+        }
+
+    @pytest.mark.asyncio
+    async def test_resume_yes_with_incomplete_draft_abandons_to_stage3(self) -> None:
+        pending = _send_confirmation_pending(phone="", body="I love you")
+
+        result = await send_handler.handle("yes", pending=pending)
+
+        assert result == {"abandon_pending": True, "force_stage3": True}
+
+    @pytest.mark.asyncio
+    async def test_resume_no_requests_updated_message_without_sending(self) -> None:
+        result = await send_handler.handle("no", pending=_send_confirmation_pending())
+
+        text = _result_text(result)
+        assert text == "Please give me the updated message."
+        assert "[[CLIENT_TOOL:" not in text
+        pending = result["structured"]["pending_action"]
+        assert pending["awaiting"] == "revised_body"
+        assert pending["data"]["draft"] == {
+            "phone": "+15551234567",
+            "display": "Kathia",
+        }
+
+    @pytest.mark.asyncio
+    async def test_resume_cancel_ends_without_sending(self) -> None:
+        result = await send_handler.handle("cancel", pending=_send_confirmation_pending())
+
+        text = _result_text(result)
+        assert text == "Ok."
+        assert "[[CLIENT_TOOL:" not in text
+        assert result["conversation_end"] is True
+        assert result["structured"] == {"intent": "send message"}
+
+    @pytest.mark.asyncio
+    async def test_unrecognized_confirmation_reply_abandons_to_stage3(self) -> None:
+        result = await send_handler.handle(
+            "what do you think?", pending=_send_confirmation_pending()
+        )
+
+        assert result == {"abandon_pending": True, "force_stage3": True}
+
+    @pytest.mark.asyncio
+    async def test_revised_body_slot_treats_one_word_yes_as_message_body(self) -> None:
+        result = await send_handler.handle("yes", pending=_revised_body_pending())
+
+        text = _result_text(result)
+        assert text == "Message to Kathia: yes. Should I send it?"
+        assert "[[CLIENT_TOOL:" not in text
+        pending = result["structured"]["pending_action"]
+        assert pending["awaiting"] == "send_confirmation"
+        assert pending["data"]["draft"] == {
+            "phone": "+15551234567",
+            "display": "Kathia",
+            "body": "yes",
+        }
+
+    @pytest.mark.asyncio
+    async def test_empty_revised_body_abandons_to_stage3(self) -> None:
+        result = await send_handler.handle("   ", pending=_revised_body_pending())
+
+        assert result == {"abandon_pending": True, "force_stage3": True}
+
+    @pytest.mark.asyncio
+    async def test_unknown_pending_awaiting_abandons_to_stage3(self) -> None:
+        result = await send_handler.handle(
+            "anything",
+            pending={
+                "handler_class": "send message",
+                "awaiting": "unexpected",
+                "data": {"awaiting": "unexpected"},
+            },
+        )
+
+        assert result == {"abandon_pending": True, "force_stage3": True}
+
+
+class TestOpenDraftSafetyNet:
+    def _install_open_draft(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        pending_action: dict[str, Any],
+    ) -> None:
+        from jane_web import session_context
+        from vault_web import recent_turns
+
+        monkeypatch.setattr(session_context, "get_current_session_id", lambda: "session-1")
+        monkeypatch.setattr(
+            recent_turns,
+            "get_active_state",
+            lambda session_id: {"pending_action": pending_action},
+        )
+
+    def test_confirm_open_client_draft_emits_sms_send_with_existing_draft_id(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._install_open_draft(
+            monkeypatch,
+            {
+                "type": "SEND_MESSAGE_DRAFT_OPEN",
+                "data": {
+                    "draft_id": "draft-123",
+                    "query": "Kathia",
+                    "body": "I love you",
+                },
+            },
+        )
+
+        result = send_handler._check_open_draft("yes")
+
+        text = _result_text(result)
+        tool, payload = _sms_tool(text)
+        assert tool == "sms_send"
+        assert payload == {"draft_id": "draft-123"}
+        assert "sms_send_direct" not in text
+        assert result["structured"]["pending_action"] == {
+            "type": "SEND_MESSAGE_DRAFT_OPEN",
+            "status": "resolved",
+            "resolution": "sent",
+        }
+
+    def test_cancel_open_client_draft_requires_strong_cancel_phrase(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._install_open_draft(
+            monkeypatch,
+            {
+                "type": "SEND_MESSAGE_DRAFT_OPEN",
+                "data": {
+                    "draft_id": "draft-456",
+                    "query": "Mom",
+                    "body": "Running late",
+                },
+            },
+        )
+
+        assert send_handler._check_open_draft("no") is None
+        result = send_handler._check_open_draft("cancel")
+
+        text = _result_text(result)
+        tool, payload = _sms_tool(text)
+        assert tool == "sms_cancel"
+        assert payload == {"draft_id": "draft-456"}
+        assert result["structured"]["pending_action"]["resolution"] == "cancelled"
+
+    def test_edit_open_client_draft_escalates_to_stage3(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._install_open_draft(
+            monkeypatch,
+            {
+                "type": "SEND_MESSAGE_DRAFT_OPEN",
+                "data": {
+                    "draft_id": "draft-789",
+                    "query": "Mom",
+                    "body": "Running late",
+                },
+            },
+        )
+
+        result = send_handler._check_open_draft("change it to say leaving now")
+
+        assert result is None
+
+
+class TestExtractionParsingAndCoherence:
+    def test_parse_wrong_class_sentinel(self) -> None:
+        assert send_handler._parse_extraction("WRONG_CLASS") is send_handler._WRONG_CLASS_SENTINEL
+
+    def test_parse_structured_llm_output(self) -> None:
+        result = send_handler._parse_extraction(
+            "RECIPIENT: mom\nBODY: I'm on my way\nCOHERENT: yes"
+        )
+
+        assert result == {
+            "recipient": "mom",
+            "body": "I'm on my way",
+            "coherent": True,
+        }
+
+    def test_parse_missing_body_uses_none_sentinel(self) -> None:
+        result = send_handler._parse_extraction("RECIPIENT: wife\nCOHERENT: yes")
+
+        assert result == {"recipient": "wife", "body": "(none)", "coherent": True}
+
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            "",
+            "BODY: hello\nCOHERENT: yes",
+            "RECIPIENT:\nBODY: hello\nCOHERENT: yes",
+            "garbage without labels",
+        ],
+    )
+    def test_parse_malformed_output_returns_none(self, raw: str) -> None:
+        assert send_handler._parse_extraction(raw) is None
+
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            "RECIPIENT: mom\nBODY: I will be at the\nCOHERENT: yes",
+            "RECIPIENT: mom\nBODY: uh I am coming\nCOHERENT: yes",
+            "RECIPIENT: mom\nBODY: Alexa cancel that\nCOHERENT: yes",
+            "RECIPIENT: mom\nBODY: I am coming\nCOHERENT: no",
+        ],
+    )
+    def test_parse_marks_incoherent_when_llm_or_rules_reject_body(self, raw: str) -> None:
+        result = send_handler._parse_extraction(raw)
+
+        assert result is not None
+        assert result["coherent"] is False
+
+    @pytest.mark.parametrize("ending", sorted(send_handler._DANGLING_ENDINGS))
+    def test_every_dangling_ending_is_reachable_by_coherence_rules(
+        self, ending: str
+    ) -> None:
+        assert send_handler._is_coherent(f"I will meet you {ending}") is False
+
+    @pytest.mark.parametrize("filler", sorted(send_handler._FILLER_WORDS))
+    def test_every_filler_word_is_reachable_by_coherence_rules(self, filler: str) -> None:
+        assert send_handler._is_coherent(f"I am {filler} almost there") is False
+
+    @pytest.mark.parametrize("command", sorted(send_handler._DEVICE_COMMANDS))
+    def test_every_background_device_command_is_reachable_by_coherence_rules(
+        self, command: str
+    ) -> None:
+        assert send_handler._is_coherent(f"{command} cancel my alarm") is False
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            "",
+            "(none)",
+            "Alexander can meet tomorrow",
+            "Alexandra can meet tomorrow",
+            "Sirius is visible tonight",
+        ],
+    )
+    def test_coherence_allows_empty_body_and_non_command_substrings(self, body: str) -> None:
+        assert send_handler._is_coherent(body) is True
+
+
+class TestLlmAndDbIntegrationPoints:
+    @pytest.mark.asyncio
+    async def test_extract_via_llm_posts_expected_payload_and_records_activity(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from jane_web.jane_v2 import models
+
+        calls: list[dict[str, Any]] = []
+        activity: list[str] = []
 
         class FakeResponse:
             def raise_for_status(self) -> None:
-                if status_exc is not None:
-                    raise status_exc
+                return None
 
-            def json(self) -> dict:
-                if payload is not None:
-                    return payload
-                return {"response": response}
+            def json(self) -> dict[str, str]:
+                return {
+                    "response": (
+                        "RECIPIENT: mom\n"
+                        "BODY: I'm on my way\n"
+                        "COHERENT: yes"
+                    )
+                }
 
         class FakeAsyncClient:
-            def __init__(self, *, timeout):
+            def __init__(self, *, timeout: float):
                 self.timeout = timeout
 
-            async def __aenter__(self):
+            async def __aenter__(self) -> "FakeAsyncClient":
                 return self
 
-            async def __aexit__(self, exc_type, exc, tb):
+            async def __aexit__(self, exc_type: Any, exc: Any, tb: Any) -> bool:
                 return False
 
-            async def post(self, url: str, json: dict):
+            async def post(self, url: str, json: dict[str, Any]) -> FakeResponse:
                 calls.append({"url": url, "json": json, "timeout": self.timeout})
-                if post_exc is not None:
-                    raise post_exc
                 return FakeResponse()
 
-        monkeypatch.setattr(greeting_handler.httpx, "AsyncClient", FakeAsyncClient)
-        return calls
+        monkeypatch.setattr(send_handler.httpx, "AsyncClient", FakeAsyncClient)
+        monkeypatch.setattr(
+            models,
+            "record_ollama_activity",
+            lambda: activity.append("recorded"),
+            raising=False,
+        )
 
-    return install
+        result = await send_handler._extract_via_llm(
+            "let mom know I'm on my way", "Jane asked about travel."
+        )
 
-
-def _block_ollama(monkeypatch: pytest.MonkeyPatch) -> None:
-    class BombAsyncClient:
-        def __init__(self, *args, **kwargs):
-            raise AssertionError("canned greeting path must not call Ollama")
-
-    monkeypatch.setattr(greeting_handler.httpx, "AsyncClient", BombAsyncClient)
-
-
-def _force_choice(monkeypatch: pytest.MonkeyPatch, expected: str | None = None) -> None:
-    def choose(options):
-        if expected is not None:
-            assert expected in options
-            return expected
-        return options[0]
-
-    monkeypatch.setattr(greeting_handler.random, "choice", choose)
-
-
-def _assert_text_result(result: dict | None) -> None:
-    assert isinstance(result, dict)
-    assert set(result) == {"text"}
-    assert isinstance(result["text"], str)
-    assert result["text"].strip()
-    assert "[[CLIENT_TOOL:" not in result["text"]
-    assert "WRONG_CLASS" not in result["text"].upper()
-
-
-def _qualified_name(node: ast.AST) -> str | None:
-    if isinstance(node, ast.Name):
-        return node.id
-    if isinstance(node, ast.Attribute):
-        parent = _qualified_name(node.value)
-        return f"{parent}.{node.attr}" if parent else node.attr
-    return None
-
-
-def _imported_modules(tree: ast.Module) -> set[str]:
-    modules: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            modules.update(alias.name for alias in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.module:
-            modules.add(node.module)
-    return modules
-
-
-def _call_names(tree: ast.Module) -> set[str]:
-    names: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Call):
-            name = _qualified_name(node.func)
-            if name:
-                names.add(name)
-    return names
-
-
-def _handle_return_nodes(tree: ast.Module) -> list[ast.Return]:
-    for node in tree.body:
-        if isinstance(node, ast.AsyncFunctionDef) and node.name == "handle":
-            return [child for child in ast.walk(node) if isinstance(child, ast.Return)]
-    raise AssertionError("handle() not found")
-
-
-class TestDocumentedBehavior:
-    def test_spec_documents_greeting_stage2_contract(self, spec_source: str) -> None:
-        assert "Greeting" in spec_source
-        assert "qwen2.5:7b" in spec_source
-        assert "1-sentence contextual reply" in spec_source
-        assert "FIFO" in spec_source
-        assert "WRONG_CLASS" in spec_source
-        assert "Returning `None` means" in spec_source
-        assert "No -> Stage 3" in spec_source or "No \u2192 Stage 3" in spec_source
-
-    def test_module_docstring_documents_greeting_and_escalation_contract(self) -> None:
-        doc = inspect.getdoc(greeting_handler)
-        assert doc is not None
-        assert "Handles basic greetings" in doc
-        assert "No Opus needed" in doc
-        assert 'Returns {"text": "..."}' in doc
-        assert "None to escalate" in doc
-        assert "follow-up question or task" in doc
+        assert result == {
+            "recipient": "mom",
+            "body": "I'm on my way",
+            "coherent": True,
+        }
+        assert activity == ["recorded"]
+        assert len(calls) == 1
+        payload = calls[0]["json"]
+        assert calls[0]["url"] == send_handler.OLLAMA_URL
+        assert payload["model"] == send_handler.MODEL
+        assert payload["stream"] is False
+        assert payload["think"] is False
+        assert payload["options"]["temperature"] == 0.0
+        assert payload["options"]["num_predict"] == 100
+        assert "Recent conversation:\nJane asked about travel." in payload["prompt"]
+        assert "User: let mom know I'm on my way" in payload["prompt"]
 
     @pytest.mark.asyncio
-    async def test_basic_canned_greeting_returns_text_and_skips_ollama(
+    async def test_extract_via_llm_http_error_returns_none(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        _block_ollama(monkeypatch)
-        _force_choice(monkeypatch)
+        class FakeAsyncClient:
+            def __init__(self, *, timeout: float):
+                self.timeout = timeout
 
-        result = await greeting_handler.handle("hey")
+            async def __aenter__(self) -> "FakeAsyncClient":
+                return self
 
-        assert result == {"text": greeting_handler._CANNED_REPLIES["hello"][0]}
-        _assert_text_result(result)
+            async def __aexit__(self, exc_type: Any, exc: Any, tb: Any) -> bool:
+                return False
 
-    @pytest.mark.asyncio
-    @pytest.mark.parametrize(
-        ("prompt", "bucket"),
-        [
-            ("how's it going?", "check_in"),
-            ("How are you", "check_in"),
-            ("what's up", "check_in"),
-            ("HELLO!!!", "hello"),
-            ("yo", "hello"),
-            ("good morning", "morning"),
-            ("good afternoon", "afternoon"),
-            ("good evening", "evening"),
-            ("thanks!", "thanks"),
-            ("appreciate you", "thanks"),
-        ],
-    )
-    async def test_common_greetings_use_documented_fast_path(
-        self,
-        prompt: str,
-        bucket: str,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        _block_ollama(monkeypatch)
-        expected = greeting_handler._CANNED_REPLIES[bucket][-1]
-        _force_choice(monkeypatch, expected)
+            async def post(self, url: str, json: dict[str, Any]) -> None:
+                raise RuntimeError("ollama unavailable")
 
-        result = await greeting_handler.handle(prompt)
+        monkeypatch.setattr(send_handler.httpx, "AsyncClient", FakeAsyncClient)
 
-        assert result == {"text": expected}
-        _assert_text_result(result)
+        assert await send_handler._extract_via_llm("text mom hi", "") is None
 
     @pytest.mark.asyncio
-    async def test_less_templated_greeting_uses_llm_with_context(
-        self,
-        fake_ollama,
-        record_activity_spy: list[str],
+    async def test_contact_resolution_from_contacts_queries_alias_table_and_writes_alias(
+        self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        calls = fake_ollama(response="Jane: Hey Chieh, good to hear from you.")
-        context = "User: Morning.\nJane: Morning."
+        from vault_web import database
 
-        result = await greeting_handler.handle("hello there", context=context)
+        _disable_open_draft(monkeypatch)
+        _block_llm_extraction(monkeypatch)
+        add_alias_calls: list[tuple[str, str, str | None]] = []
+        fake_conn = _FakeConnection(row=None)
 
-        assert result == {"text": "Hey Chieh, good to hear from you."}
-        assert record_activity_spy == ["recorded"]
-        assert len(calls) == 1
-        body = calls[0]["json"]
-        assert calls[0]["url"] == greeting_handler.OLLAMA_URL
-        assert calls[0]["timeout"] == greeting_handler.LOCAL_LLM_TIMEOUT
-        assert body["model"] == greeting_handler.MODEL
-        assert body["stream"] is False
-        assert body["think"] is False
-        assert body["keep_alive"] == -1
-        assert body["options"] == {
-            "temperature": 0.7,
-            "num_predict": 60,
-            "num_ctx": greeting_handler.LOCAL_LLM_NUM_CTX,
+        _install_recipient_resolution(
+            monkeypatch,
+            {
+                "Lee": {
+                    "phone_number": "+15550001111",
+                    "display_name": "Lee Nguyen",
+                    "source": "contacts",
+                }
+            },
+        )
+        monkeypatch.setattr(database, "get_db", lambda: fake_conn)
+        monkeypatch.setattr(
+            sms_helpers,
+            "add_alias",
+            lambda alias, phone, display_name=None: add_alias_calls.append(
+                (alias, phone, display_name)
+            )
+            or True,
+        )
+
+        result = await send_handler.handle(
+            "text Lee I am running late",
+            params={"recipient": "Lee", "body": "I am running late", "intent_kind": "send"},
+        )
+
+        assert _direct_send_payload(_result_text(result)) == {
+            "phone_number": "+15550001111",
+            "body": "I am running late",
         }
-        assert "First, confirm" in body["prompt"]
-        assert "WRONG_CLASS" in body["prompt"]
-        assert f"Recent conversation:\n{context}\n\n" in body["prompt"]
-        assert "User: hello there" in body["prompt"]
-        assert body["prompt"].rstrip().endswith("Jane:")
+        assert len(fake_conn.executed) == 1
+        sql, params = fake_conn.executed[0]
+        assert "SELECT 1 FROM contact_aliases" in sql
+        assert params == ("lee",)
+        assert add_alias_calls == [("lee", "+15550001111", "Lee Nguyen")]
 
     @pytest.mark.asyncio
-    async def test_blank_context_is_omitted_from_llm_prompt(self, fake_ollama) -> None:
-        calls = fake_ollama(response="Hey Chieh.")
-
-        result = await greeting_handler.handle("hello there", context=" \n\t ")
-
-        assert result == {"text": "Hey Chieh."}
-        assert "Recent conversation:" not in calls[0]["json"]["prompt"]
-
-    @pytest.mark.asyncio
-    async def test_llm_wrong_class_response_returns_explicit_escalation_signal(
-        self, fake_ollama
+    async def test_existing_alias_row_prevents_auto_alias_overwrite(
+        self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        calls = fake_ollama(response="WRONG_CLASS")
+        from vault_web import database
 
-        result = await greeting_handler.handle("how does the greeting handler work?")
+        _disable_open_draft(monkeypatch)
+        _block_llm_extraction(monkeypatch)
+        fake_conn = _FakeConnection(row={"1": 1})
+        add_alias_calls: list[tuple[Any, ...]] = []
 
-        assert result == {"wrong_class": True}
-        assert len(calls) == 1
+        _install_recipient_resolution(
+            monkeypatch,
+            {
+                "Lee": {
+                    "phone_number": "+15550001111",
+                    "display_name": "Lee Nguyen",
+                    "source": "contacts",
+                }
+            },
+        )
+        monkeypatch.setattr(database, "get_db", lambda: fake_conn)
+        monkeypatch.setattr(
+            sms_helpers,
+            "add_alias",
+            lambda *args, **kwargs: add_alias_calls.append((args, kwargs)) or True,
+        )
 
-    @pytest.mark.asyncio
-    async def test_llm_empty_response_escalates_to_stage3(self, fake_ollama) -> None:
-        calls = fake_ollama(response=" \n\t ")
+        result = await send_handler.handle(
+            "text Lee I am running late",
+            params={"recipient": "Lee", "body": "I am running late", "intent_kind": "send"},
+        )
 
-        result = await greeting_handler.handle("hello there")
-
-        assert result is None
-        assert len(calls) == 1
-
-    @pytest.mark.asyncio
-    async def test_llm_http_error_escalates_to_stage3(
-        self,
-        fake_ollama,
-        record_activity_spy: list[str],
-    ) -> None:
-        calls = fake_ollama(status_exc=RuntimeError("503 from Ollama"))
-
-        result = await greeting_handler.handle("hello there")
-
-        assert result is None
-        assert len(calls) == 1
-        assert record_activity_spy == []
-
-    @pytest.mark.asyncio
-    async def test_llm_transport_error_escalates_to_stage3(
-        self,
-        fake_ollama,
-        record_activity_spy: list[str],
-    ) -> None:
-        calls = fake_ollama(post_exc=RuntimeError("connection refused"))
-
-        result = await greeting_handler.handle("hello there")
-
-        assert result is None
-        assert len(calls) == 1
-        assert record_activity_spy == []
-
-    @pytest.mark.asyncio
-    async def test_greeting_with_followup_task_escalates_instead_of_answering(
-        self, fake_ollama
-    ) -> None:
-        calls = fake_ollama(response="WRONG_CLASS")
-
-        result = await greeting_handler.handle("hi Jane, set a 5 minute timer")
-
-        assert result == {"wrong_class": True}
-        assert len(calls) == 1
-
-    @pytest.mark.asyncio
-    @pytest.mark.parametrize(
-        "prompt",
-        [
-            "good morning, set a 5 minute timer",
-            "good afternoon, text Sarah that I am late",
-            "good evening, what's the weather tomorrow?",
-        ],
-    )
-    async def test_time_of_day_greeting_with_attached_task_does_not_use_canned_reply(
-        self,
-        prompt: str,
-        fake_ollama,
-    ) -> None:
-        calls = fake_ollama(response="WRONG_CLASS")
-
-        result = await greeting_handler.handle(prompt)
-
-        assert result == {"wrong_class": True}
-        assert len(calls) == 1
+        assert _direct_send_payload(_result_text(result))["phone_number"] == "+15550001111"
+        assert add_alias_calls == []
 
 
 class TestEdgeCases:
     @pytest.mark.asyncio
-    async def test_empty_prompt_escalates_without_crashing(self, fake_ollama) -> None:
-        calls = fake_ollama(response="")
-
-        result = await greeting_handler.handle("")
-
-        assert result is None
-        assert len(calls) == 1
-        assert "User: " in calls[0]["json"]["prompt"]
-
-    @pytest.mark.asyncio
-    async def test_whitespace_prompt_escalates_without_crashing(self, fake_ollama) -> None:
-        calls = fake_ollama(response="")
-
-        result = await greeting_handler.handle(" \n\t ")
-
-        assert result is None
-        assert len(calls) == 1
-        assert "User: " in calls[0]["json"]["prompt"]
-
-    @pytest.mark.asyncio
-    async def test_none_prompt_escalates_without_crashing(self, fake_ollama) -> None:
-        fake_ollama(response="")
-
-        result = await greeting_handler.handle(None)
-
-        assert result is None
-
-    @pytest.mark.asyncio
-    @pytest.mark.parametrize("malformed_prompt", [b"hey", object()])
-    async def test_malformed_prompt_escalates_without_crashing(
-        self,
-        malformed_prompt,
-        fake_ollama,
-    ) -> None:
-        fake_ollama(response="")
-
-        result = await greeting_handler.handle(malformed_prompt)
-
-        assert result is None
-
-    @pytest.mark.asyncio
-    async def test_very_long_prompt_uses_llm_confirmation_before_handling(
-        self, fake_ollama
-    ) -> None:
-        long_prompt = "hello there " + " ".join(f"word{i}" for i in range(5000))
-        calls = fake_ollama(response="WRONG_CLASS")
-
-        result = await greeting_handler.handle(long_prompt)
-
-        assert result == {"wrong_class": True}
-        assert len(calls) == 1
-        assert calls[0]["json"]["options"]["num_ctx"] == greeting_handler.LOCAL_LLM_NUM_CTX
-        assert long_prompt[:100] in calls[0]["json"]["prompt"]
-
-    @pytest.mark.asyncio
-    async def test_very_long_time_of_day_prompt_with_task_does_not_short_circuit(
-        self, fake_ollama
-    ) -> None:
-        long_prompt = (
-            "good morning, set a timer for "
-            + " ".join(f"minute{i}" for i in range(1000))
-        )
-        calls = fake_ollama(response="WRONG_CLASS")
-
-        result = await greeting_handler.handle(long_prompt)
-
-        assert result == {"wrong_class": True}
-        assert len(calls) == 1
-
-
-class TestIntegrationPoints:
-    def test_module_uses_ollama_httpx_client_and_no_cloud_llm_clients(
-        self, module_ast: ast.Module
-    ) -> None:
-        imports = _imported_modules(module_ast)
-
-        assert "httpx" in imports
-        assert "openai" not in imports
-        assert "anthropic" not in imports
-        assert "google.generativeai" not in imports
-
-    def test_module_has_no_db_query_integration_points(self, module_ast: ast.Module) -> None:
-        imports = _imported_modules(module_ast)
-        calls = _call_names(module_ast)
-
-        assert not {
-            module
-            for module in imports
-            if module == DB_IMPORT_PREFIXES
-            or any(module == prefix or module.startswith(f"{prefix}.") for prefix in DB_IMPORT_PREFIXES)
-        }
-        assert not any(name.endswith(".execute") for name in calls)
-        assert not any(name.endswith(".executemany") for name in calls)
-        assert not any(name.endswith(".query") for name in calls)
-        assert "get_chroma_client" not in calls
-        assert "chromadb.PersistentClient" not in calls
-
-    @pytest.mark.asyncio
-    async def test_successful_llm_call_records_ollama_activity_once(
-        self,
-        fake_ollama,
-        record_activity_spy: list[str],
-    ) -> None:
-        fake_ollama(response="Hey Chieh.")
-
-        result = await greeting_handler.handle("hello there")
-
-        assert result == {"text": "Hey Chieh."}
-        assert record_activity_spy == ["recorded"]
-
-    @pytest.mark.asyncio
-    async def test_json_payload_missing_response_escalates(self, fake_ollama) -> None:
-        calls = fake_ollama(payload={"not_response": "ignored"})
-
-        result = await greeting_handler.handle("hello there")
-
-        assert result is None
-        assert len(calls) == 1
-
-    @pytest.mark.asyncio
-    async def test_stage2_dispatcher_invokes_registered_greeting_handler_shape(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        _force_choice(monkeypatch)
-        _block_ollama(monkeypatch)
-
-        result = await stage2_dispatcher.dispatch("greeting", "hey", min_dist=0.0)
-
-        assert result == {"text": greeting_handler._CANNED_REPLIES["hello"][0]}
-        _assert_text_result(result)
-
-    @pytest.mark.asyncio
-    async def test_stage2_dispatcher_passes_fifo_context_to_greeting_handler(
-        self,
-        fake_ollama,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        async def gate_ok(class_name: str, prompt: str, context: str) -> bool:
-            assert class_name == "greeting"
-            assert prompt == "hello there"
-            assert context == "User: earlier\nJane: earlier reply"
-            return True
-
-        monkeypatch.setattr(stage2_dispatcher, "_gate_check", gate_ok)
-        calls = fake_ollama(response="Hey Chieh.")
-
-        result = await stage2_dispatcher.dispatch(
-            "greeting",
-            "hello there",
-            context="User: earlier\nJane: earlier reply",
-        )
-
-        assert result == {"text": "Hey Chieh."}
-        assert "Recent conversation:" in calls[0]["json"]["prompt"]
-
-
-class TestStructuralInvariants:
-    def test_canned_reply_table_has_valid_shape(self) -> None:
-        replies = greeting_handler._CANNED_REPLIES
-
-        assert isinstance(replies, dict)
-        assert replies
-        assert set(replies) == set(CANNED_SAMPLE_BY_BUCKET)
-        for bucket, options in replies.items():
-            assert isinstance(bucket, str)
-            assert bucket.strip() == bucket
-            assert isinstance(options, list)
-            assert options
-            assert len(options) == len(set(options))
-            for text in options:
-                assert isinstance(text, str)
-                assert text.strip() == text
-                assert text
-                assert "\n" not in text
-                assert not text.startswith(("-", "*", "#"))
-                assert "[[CLIENT_TOOL:" not in text
-                assert "WRONG_CLASS" not in text.upper()
-
-    def test_canned_pattern_buckets_all_exist_and_no_reply_bucket_is_dead(self) -> None:
-        replies = greeting_handler._CANNED_REPLIES
-        referenced = {bucket for _pattern, bucket in greeting_handler._CANNED_PATTERNS}
-
-        assert referenced == set(replies)
-
-    def test_every_canned_reply_value_is_reachable_from_at_least_one_input(
+    async def test_empty_input_without_metadata_escalates_when_extractor_declines(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        for bucket, sample in CANNED_SAMPLE_BY_BUCKET.items():
-            for expected in greeting_handler._CANNED_REPLIES[bucket]:
-                _force_choice(monkeypatch, expected)
+        _disable_open_draft(monkeypatch)
 
-                assert greeting_handler._canned_reply(sample) == expected
+        async def fake_extract(prompt: str, context: str) -> None:
+            assert prompt == ""
+            assert context == ""
+            return None
 
-    def test_canned_patterns_do_not_reference_missing_reply_keys(self) -> None:
-        missing = [
-            bucket
-            for _pattern, bucket in greeting_handler._CANNED_PATTERNS
-            if bucket not in greeting_handler._CANNED_REPLIES
-        ]
+        monkeypatch.setattr(send_handler, "_extract_via_llm", fake_extract)
 
-        assert missing == []
+        assert await send_handler.handle("") is None
 
-    def test_no_canned_reply_maps_to_destructive_or_escalation_action(self) -> None:
-        forbidden = re.compile(
-            r"WRONG_CLASS|\[\[CLIENT_TOOL:|sms_send_direct|send_message|"
-            r"delete|trash|end conversation|stage 3|opus",
-            re.IGNORECASE,
+    @pytest.mark.asyncio
+    async def test_none_prompt_can_escalate_when_extractor_declines(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _disable_open_draft(monkeypatch)
+
+        async def fake_extract(prompt: None, context: str) -> None:
+            assert prompt is None
+            assert context == ""
+            return None
+
+        monkeypatch.setattr(send_handler, "_extract_via_llm", fake_extract)
+
+        assert await send_handler.handle(None) is None  # type: ignore[arg-type]
+
+    @pytest.mark.asyncio
+    async def test_malformed_params_object_raises_instead_of_sending(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _disable_open_draft(monkeypatch)
+
+        class BadParams:
+            pass
+
+        with pytest.raises(AttributeError):
+            await send_handler.handle("text mom hi", params=BadParams())  # type: ignore[arg-type]
+
+    @pytest.mark.asyncio
+    async def test_very_long_body_round_trips_in_direct_send_marker(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _disable_open_draft(monkeypatch)
+        _block_llm_extraction(monkeypatch)
+        long_body = "x" * 12000
+        _install_recipient_resolution(
+            monkeypatch,
+            {
+                "mom": {
+                    "phone_number": "+15557654321",
+                    "display_name": "Mom",
+                    "source": "alias",
+                }
+            },
         )
 
-        contradictions = {
-            bucket: [text for text in replies if forbidden.search(text)]
-            for bucket, replies in greeting_handler._CANNED_REPLIES.items()
+        result = await send_handler.handle(
+            "text mom " + long_body,
+            params={"recipient": "mom", "body": long_body, "intent_kind": "send"},
+        )
+
+        payload = _direct_send_payload(_result_text(result))
+        assert payload == {"phone_number": "+15557654321", "body": long_body}
+
+
+class TestStructuralMappingInvariants:
+    def test_send_message_class_is_wired_across_stage1_dispatcher_and_registry(
+        self,
+    ) -> None:
+        registry = class_registry.get_registry(refresh=True)
+
+        assert stage1_classifier._CLASS_MAP["SEND_MESSAGE"] == "send message"
+        assert stage2_dispatcher._CLASS_DESCRIPTIONS["send message"]
+        assert send_metadata.METADATA["name"] == "send message"
+        assert "send message" in registry
+        assert registry["send message"]["pkg_name"] == "send_message"
+        assert registry["send message"]["handler"] is send_handler.handle
+
+    def test_sms_related_stage1_keys_do_not_map_to_fallback_or_wrong_sms_class(
+        self,
+    ) -> None:
+        expected = {
+            "SEND_MESSAGE": "send message",
+            "READ_MESSAGES": "read messages",
+            "SYNC_MESSAGES": "sync messages",
         }
 
-        assert {bucket: values for bucket, values in contradictions.items() if values} == {}
+        contradictions = {
+            key: stage1_classifier._CLASS_MAP.get(key)
+            for key, value in expected.items()
+            if stage1_classifier._CLASS_MAP.get(key) != value
+        }
 
-    def test_prompt_template_contains_required_wrong_class_confirmation(self) -> None:
-        template = greeting_handler._PROMPT_TEMPLATE
+        assert contradictions == {}
 
-        assert "The classifier thinks the user is greeting" in template
-        assert "First, confirm" in template
-        assert "output ONLY: WRONG_CLASS" in template
-        assert "No markdown" in template
-        assert "No lists" in template
-        assert "{context_block}User: {prompt}" in template
-        assert template.rstrip().endswith("Jane:")
+    def test_every_stage1_non_fallback_value_exists_in_class_registry(self) -> None:
+        registry = class_registry.get_registry(refresh=True)
+        mapped_values = {
+            value
+            for value in stage1_classifier._CLASS_MAP.values()
+            if value != "others"
+        }
 
-    def test_handle_return_literals_are_only_documented_shapes(
-        self, module_ast: ast.Module
-    ) -> None:
-        bad_returns: list[ast.Return] = []
-        saw_text_shape = False
-        saw_wrong_class_shape = False
-        saw_none_shape = False
+        assert mapped_values <= set(registry)
 
-        for node in _handle_return_nodes(module_ast):
-            value = node.value
-            if value is None or (isinstance(value, ast.Constant) and value.value is None):
-                saw_none_shape = True
-                continue
-            if isinstance(value, ast.Dict):
-                keys = {
-                    key.value
-                    for key in value.keys
-                    if isinstance(key, ast.Constant) and isinstance(key.value, str)
-                }
-                if keys == {"text"}:
-                    saw_text_shape = True
-                    continue
-                if keys == {"wrong_class"}:
-                    saw_wrong_class_shape = True
-                    continue
-            bad_returns.append(node)
+    def test_every_stage1_class_map_value_is_reachable_from_at_least_one_key(self) -> None:
+        reverse: dict[str, list[str]] = {}
+        for key, value in stage1_classifier._CLASS_MAP.items():
+            reverse.setdefault(value, []).append(key)
 
-        assert bad_returns == []
-        assert saw_text_shape
-        assert saw_wrong_class_shape
-        assert saw_none_shape
+        unreachable_values = [
+            value for value in set(stage1_classifier._CLASS_MAP.values()) if not reverse[value]
+        ]
 
-    def test_greeting_class_name_is_wired_across_stage1_dispatcher_and_registry(self) -> None:
+        assert unreachable_values == []
+
+    def test_every_dispatch_description_key_exists_in_registry(self) -> None:
         registry = class_registry.get_registry(refresh=True)
 
-        assert stage1_classifier._CLASS_MAP["GREETING"] == "greeting"
-        assert stage2_dispatcher._CLASS_DESCRIPTIONS["greeting"]
-        assert greeting_metadata.METADATA["name"] == "greeting"
-        assert "greeting" in registry
-        assert registry["greeting"]["pkg_name"] == "greeting"
-        assert registry["greeting"]["handler"] is greeting_handler.handle
+        assert set(stage2_dispatcher._CLASS_DESCRIPTIONS) <= set(registry)
 
-    def test_greeting_metadata_documents_adversarial_non_greeting_inputs(self) -> None:
-        description = greeting_metadata.METADATA["description"]
-
-        assert "Adversarial phrasings" in description
-        assert "set a 5 minute timer" in description
-        assert "what's the weather" in description
-        assert "send message" in description
-        assert "how does the greeting handler work" in description
-
-    def test_registered_greeting_has_handler_or_explicit_stage3_documentation(
-        self, spec_source: str
-    ) -> None:
+    def test_registered_classes_have_handler_or_documented_escalation(self) -> None:
         registry = class_registry.get_registry(refresh=True)
-        greeting = registry["greeting"]
+        undocumented = {
+            name
+            for name, meta in registry.items()
+            if meta.get("handler") is None and name not in DOCUMENTED_NO_HANDLER_ESCALATES
+        }
 
-        assert greeting["handler"] is not None
-        assert "GREETING | greeting" in spec_source
-        assert "Yes" in spec_source.split("GREETING | greeting", 1)[1].splitlines()[0]
+        assert undocumented == set()
 
-    def test_module_has_no_destructive_operation_surface(self, module_ast: ast.Module) -> None:
-        calls = _call_names(module_ast)
-        lowered_calls = {name.lower().replace(".", "_") for name in calls}
+    def test_no_sms_protocol_reference_uses_contacts_call(self, module_source: str) -> None:
+        description = send_metadata.METADATA["description"]
+        escalation_context = send_metadata.METADATA["escalation_context"]
 
-        assert lowered_calls.isdisjoint(DESTRUCTIVE_TOKENS)
-        assert not any(token in MODULE_PATH.read_text().lower() for token in (
-            "[[client_tool:",
-            "sms_send_direct",
-            "delete(",
-            "end_conversation(",
-        ))
+        assert "contacts.call" not in module_source
+        assert "contacts.call" not in description
+        assert "contacts.call" not in escalation_context
 
-    def test_if_destructive_surface_is_added_it_must_have_numeric_threshold_guard(
+    def test_send_metadata_references_only_existing_neighbor_sms_classes(self) -> None:
+        registry = class_registry.get_registry(refresh=True)
+        description = send_metadata.METADATA["description"]
+        referenced = {
+            class_name
+            for class_name in ("others", "read messages", "sync messages", "send message")
+            if class_name in description or class_name == "send message"
+        }
+
+        assert referenced <= set(registry)
+
+
+class TestDestructiveOperationInvariants:
+    def test_direct_send_marker_has_exact_tool_and_json_shape(self) -> None:
+        marker = send_handler._build_send_marker("+15551234567", "I love you")
+
+        payload = _direct_send_payload(marker)
+        assert marker.startswith("[[CLIENT_TOOL:contacts.sms_send_direct:")
+        assert marker.endswith("]]")
+        assert payload == {"phone_number": "+15551234567", "body": "I love you"}
+
+    def test_source_direct_send_surface_requires_numeric_confidence_threshold(
         self, module_source: str
     ) -> None:
-        destructive_present = bool(
+        destructive_present = "[[CLIENT_TOOL:contacts.sms_send_direct" in module_source
+        numeric_threshold_guard = bool(
             re.search(
-                r"\b(delete|delete_email|delete_message|delete_messages|"
-                r"end_conversation|send_message|sms_send_direct|trash)\s*\(",
+                r"(confidence|conf|score|probability|min_dist)[\s\S]{0,80}"
+                r"(>=\s*0\.80|>=\s*0\.8|<=\s*0\.20|<=\s*0\.2)",
                 module_source,
                 re.IGNORECASE,
             )
-        ) or "[[CLIENT_TOOL:contacts.sms_send_direct" in module_source
-        threshold_guard_present = bool(
-            re.search(r"confidence\s*[>=]=\s*0\.8|0\.80\s*[<]=\s*confidence", module_source)
         )
 
-        assert not destructive_present or threshold_guard_present
+        assert not destructive_present or numeric_threshold_guard
+
+    @pytest.mark.asyncio
+    async def test_direct_send_cannot_fire_on_borderline_numeric_confidence(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _disable_open_draft(monkeypatch)
+        _block_llm_extraction(monkeypatch)
+        _install_recipient_resolution(
+            monkeypatch,
+            {
+                "mom": {
+                    "phone_number": "+15557654321",
+                    "display_name": "Mom",
+                    "source": "alias",
+                }
+            },
+        )
+
+        result = await send_handler.handle(
+            "text mom I'm here",
+            params={
+                "recipient": "mom",
+                "body": "I'm here",
+                "intent_kind": "send",
+                "confidence": 0.79,
+            },
+        )
+
+        _assert_no_client_tool(result)
+
+    @pytest.mark.asyncio
+    async def test_direct_send_cannot_fire_on_string_high_confidence_without_score(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _disable_open_draft(monkeypatch)
+        _block_llm_extraction(monkeypatch)
+        _install_recipient_resolution(
+            monkeypatch,
+            {
+                "mom": {
+                    "phone_number": "+15557654321",
+                    "display_name": "Mom",
+                    "source": "alias",
+                }
+            },
+        )
+
+        result = await send_handler.handle(
+            "text mom I'm here",
+            params={
+                "recipient": "mom",
+                "body": "I'm here",
+                "intent_kind": "send",
+                "confidence": "High",
+            },
+        )
+
+        _assert_no_client_tool(result)
+
+    @pytest.mark.asyncio
+    async def test_ambiguous_ask_intent_cannot_fire_direct_send(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _disable_open_draft(monkeypatch)
+        _block_llm_extraction(monkeypatch)
+        _install_recipient_resolution(
+            monkeypatch,
+            {
+                "mom": {
+                    "phone_number": "+15557654321",
+                    "display_name": "Mom",
+                    "source": "alias",
+                }
+            },
+        )
+
+        result = await send_handler.handle(
+            "ask mom if she is coming",
+            params={
+                "recipient": "mom",
+                "body": "Are you coming?",
+                "intent_kind": "ask",
+                "confidence": 0.99,
+            },
+        )
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_borderline_incoherent_body_cannot_fire_direct_send(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _disable_open_draft(monkeypatch)
+        _block_llm_extraction(monkeypatch)
+        _install_recipient_resolution(
+            monkeypatch,
+            {
+                "mom": {
+                    "phone_number": "+15557654321",
+                    "display_name": "Mom",
+                    "source": "alias",
+                }
+            },
+        )
+
+        result = await send_handler.handle(
+            "text mom yeah",
+            params={"recipient": "mom", "body": "yeah", "intent_kind": "send"},
+        )
+
+        _assert_no_client_tool(result)
+        assert isinstance(result, dict)
+        assert result["structured"]["pending_action"]["awaiting"] == "send_confirmation"
+
+
+class TestHandlerDispatchShape:
+    @pytest.mark.asyncio
+    async def test_dispatcher_invokes_registered_send_handler_and_returns_text_shape(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        async def gate_pass(*_args: Any) -> bool:
+            return True
+
+        async def fake_handle(
+            prompt: str,
+            *,
+            context: str = "",
+            pending: dict | None = None,
+            params: dict | None = None,
+        ) -> dict[str, str]:
+            assert prompt == "text mom hi"
+            assert context == "ctx"
+            assert pending is None
+            assert params == {"recipient": "mom", "body": "hi"}
+            return {"text": "ok"}
+
+        monkeypatch.setattr(
+            class_registry,
+            "get_registry",
+            lambda refresh=False: {"send message": {"handler": fake_handle}},
+        )
+        monkeypatch.setattr(stage2_dispatcher, "_gate_check", gate_pass)
+
+        result = await stage2_dispatcher.dispatch(
+            "send message",
+            "text mom hi",
+            context="ctx",
+            min_dist=0.5,
+            params={"recipient": "mom", "body": "hi"},
+        )
+
+        assert result == {"text": "ok"}
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "bad_result",
+        [
+            {},
+            {"response": "missing text"},
+            {"wrong_class": True},
+            None,
+        ],
+    )
+    async def test_dispatcher_filters_handler_returns_without_text(
+        self, monkeypatch: pytest.MonkeyPatch, bad_result: Any
+    ) -> None:
+        async def gate_pass(*_args: Any) -> bool:
+            return True
+
+        async def fake_handle(_prompt: str) -> Any:
+            return bad_result
+
+        monkeypatch.setattr(
+            class_registry,
+            "get_registry",
+            lambda refresh=False: {"send message": {"handler": fake_handle}},
+        )
+        monkeypatch.setattr(stage2_dispatcher, "_gate_check", gate_pass)
+        monkeypatch.setattr(
+            stage2_dispatcher,
+            "_self_correct_classification",
+            lambda *_args: None,
+        )
+
+        result = await stage2_dispatcher.dispatch(
+            "send message", "text mom hi", min_dist=0.5
+        )
+
+        assert result is None
+
+    def test_all_actual_registered_handlers_are_callable_or_documented_no_handler(self) -> None:
+        registry = class_registry.get_registry(refresh=True)
+        violations: dict[str, Any] = {}
+
+        for name, meta in registry.items():
+            handler = meta.get("handler")
+            if handler is None:
+                if name not in DOCUMENTED_NO_HANDLER_ESCALATES:
+                    violations[name] = "missing handler without documented escalation"
+            elif not callable(handler):
+                violations[name] = f"handler is not callable: {handler!r}"
+
+        assert violations == {}
+
+    def test_destructive_registered_classes_are_not_documented_as_fallback_others(self) -> None:
+        registry = class_registry.get_registry(refresh=True)
+        contradictions = {
+            name: registry[name]
+            for name in DESTRUCTIVE_CLASS_NAMES
+            if name in registry and registry[name]["name"] == "others"
+        }
+
+        assert contradictions == {}

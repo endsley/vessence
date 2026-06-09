@@ -128,6 +128,14 @@ def _is_coherent(body: str) -> bool:
 _WRONG_CLASS_SENTINEL = {"wrong_class": True}
 
 
+def _has_direct_send_confidence(confidence: object) -> bool:
+    return (
+        not isinstance(confidence, bool)
+        and isinstance(confidence, (int, float))
+        and confidence >= 0.80
+    )
+
+
 def _parse_extraction(raw: str) -> dict | None:
     """Parse the LLM's structured output into a dict.
     Returns _WRONG_CLASS_SENTINEL if LLM says WRONG_CLASS."""
@@ -401,6 +409,7 @@ async def handle(prompt: str, context: str = "", pending: dict | None = None,
             "recipient": recipient,
             "body": body_text or "(none)",
             "coherent": _is_coherent(body_text or "(none)"),
+            "confidence": params.get("confidence", 1.0),
         }
     else:
         metadata = await _extract_via_llm(prompt, context)
@@ -493,6 +502,13 @@ async def handle(prompt: str, context: str = "", pending: dict | None = None,
                 ),
             },
         }
+
+    if "confidence" in metadata and not _has_direct_send_confidence(metadata["confidence"]):
+        logger.info(
+            "send_message handler: confidence %r below direct-send floor — escalating",
+            metadata["confidence"],
+        )
+        return None
 
     # Step 5: Fast-path send — embed CLIENT_TOOL marker in text and end the
     # conversation so the voice loop returns to wake-word mode.
