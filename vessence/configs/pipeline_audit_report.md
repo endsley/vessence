@@ -1,7 +1,7 @@
-# Pipeline Audit Report — 2026-06-06 01:10
+# Pipeline Audit Report — 2026-06-10 01:13
 
 - Prompts audited: **6**
-- Elapsed: 132s
+- Elapsed: 976s
 - Classification failures: **2**
 - Response failures: **3**
 - Auto-fixes applied (exemplars added): **0**
@@ -10,21 +10,18 @@
 - stage3: 6
 
 ## Classification breakdown
-- others: 3
-- web_automation: 2
-- greeting: 1
+- others: 4
+- web_automation: 1
+- todo list: 1
 
 ## Classification failures (top 30)
 | Prompt | Got | Should be |
 |---|---|---|
-| please set up this payment for me on the local browser | web_automation | others |
 | help pay it | web_automation | others |
+| use the source code as your guide | todo list | others |
 
 ## Response failures (top 20) — usually need code changes
-- **what was your result** (greeting/stage3): Chieh, I don’t have a prior result visible in this thread. Which result are you asking about? [[AWAITING:which_result
-- **please set up this payment for me on the local browser** (web_automation/stage3): [ACK]Chieh, I can help with the payment setup, but I need one detail first.[/ACK]
-
-Which site or bill is this for? I can walk you through it or help f
-- **help pay it** (web_automation/stage3): [ACK]Chieh, I can help with the payment, but I need one quick detail first.[/ACK]
-
-What are we paying: which bill, invoice, or person? If there’s a li
+- **help pay it** (web_automation/stage3): [ACK]Chieh, I can help with the payment once I know which bill this is.[/ACK]
+What are we paying: a bill, invoice, credit card, tuition, or something 
+- **right now, you are using the same codex process for each prompt instead of spawn** (others/stage3): [ACK]Chieh, I’ll verify the Stage 3 brain process model from the runtime code quickly.[/ACK]I found two relevant paths: the v2 Stage 3 wrapper delegat
+- **currently, the waterlily site is web only meant for browsers on laptops and comp** (others/stage3): [ACK]Chieh, I’ll compare the education project’s mobile patterns against Waterlily and then implement responsive mobile UIs across the site; this will

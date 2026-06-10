@@ -1,225 +1,183 @@
-# Transcript Quality Review — 2026-06-08
+# Transcript Quality Review — 2026-06-09
 
-Generated: 2026-06-09 01:39:22
+Generated: 2026-06-10 01:30:45
 
 ## Issue 1 [LOW]
 
-**Turn:** 2026-06-08 01:14:40
+**Turn:** 2026-06-09 01:18:50
 **User said:** you have access to the water lily Wellness project right
 
-**Problem:** Classifier produced an out-of-schema intent label before falling back to others.
+**Problem:** Stage 1 emitted an unsupported intent label before coercing to others.
 
-**Root cause:** The classifier returned 'web automation', which is not a supported category, so the pipeline coerced it to others:Low and escalated to Stage 3. Escalation was acceptable for this complex/project-context request, but the classifier contract is not being enforced.
+**Root cause:** The classifier returned 'web automation', which is not in the allowed class set, so the pipeline downgraded it to others:Low and escalated to Stage 3.
 
-**Suggested fix:** Constrain the Stage 1 classifier output to the allowed enum at decode/parse time, and add an explicit mapping or prompt examples for project/codebase-access questions to route directly to Stage 3 without warning.
+**Suggested fix:** Constrain the classifier prompt/output parser to the exact enum, or map 'web automation' and similar project/code requests explicitly to others without warning.
 
 **Log evidence:**
 ```
-2026-06-08 01:14:38 WARNING [intent_classifier.v3.classifier] v3: qwen returned unknown class 'web automation' → others
+2026-06-09 01:18:49 WARNING [intent_classifier.v3.classifier] v3: qwen returned unknown class 'web automation' → others
 ```
 ```
-2026-06-08 01:14:38 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (864ms) params={}
-```
-```
-2026-06-08 01:14:39 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=56 sid_override=True class_protocol=n/a
+2026-06-09 01:18:49 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (780ms) params={}
 ```
 
 ---
 
 ## Issue 2 [MEDIUM]
 
-**Turn:** 2026-06-08 01:14:53
+**Turn:** 2026-06-09 01:19:05
 **User said:** right now, you are using the same codex process for each prompt instead of spawning
 
-**Problem:** Stage 3 received no conversation history for a contextual follow-up question.
+**Problem:** Stage 3 did not receive conversation history for a follow-up question.
 
-**Root cause:** The user asked a follow-up referencing the Stage 3 brain, but the proxy logged history=0, so Stage 3 was called without prior turns from the same audit session.
+**Root cause:** Every OpenAI stream for the same session id shows history=0, so the brain could not rely on previous turns when answering a contextual continuation.
 
-**Suggested fix:** Persist and pass recent conversation history for the sid/audit session into stream_message, or ensure sid_override resolves to the existing session history before Stage 3 invocation.
+**Suggested fix:** Fix session history lookup/persistence for sid_override sessions so stream_message receives prior turns for the same conversation id.
 
 **Log evidence:**
 ```
-2026-06-08 01:14:53 INFO [jane.proxy] [audit-178089] stream_message brain=OpenAI history=0 msg_len=132 file_ctx=False
+2026-06-09 01:18:50 INFO [jane.proxy] [audit-178098] stream_message brain=OpenAI history=0 msg_len=56 file_ctx=False
 ```
 ```
-2026-06-08 01:16:39 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage3 end-to-end (105558ms)
+2026-06-09 01:19:05 INFO [jane.proxy] [audit-178098] stream_message brain=OpenAI history=0 msg_len=132 file_ctx=False
 ```
 
 ---
 
 ## Issue 3 [LOW]
 
-**Turn:** 2026-06-08 01:14:53
+**Turn:** 2026-06-09 01:19:05
 **User said:** right now, you are using the same codex process for each prompt instead of spawning
 
-**Problem:** Classifier produced an out-of-schema intent label before falling back to others.
+**Problem:** Stage 1 emitted an unsupported intent label before coercing to others.
 
-**Root cause:** The classifier returned 'force stage3', which is not a supported category. The fallback still escalated correctly, but the classifier is inventing routing labels outside the contract.
+**Root cause:** The classifier returned 'force stage3', which is not in the allowed class set, so the pipeline downgraded it to others:Low and escalated.
 
-**Suggested fix:** Make the classifier parser reject or repair labels to the canonical enum, and update the classifier prompt so meta/system questions map to others or a supported Stage 3 escalation category.
+**Suggested fix:** Update the classifier prompt/parser to reject non-enum labels, and normalize meta-routing labels like 'force stage3' to others internally.
 
 **Log evidence:**
 ```
-2026-06-08 01:14:52 WARNING [intent_classifier.v3.classifier] v3: qwen returned unknown class 'force stage3' → others
+2026-06-09 01:19:04 WARNING [intent_classifier.v3.classifier] v3: qwen returned unknown class 'force stage3' → others
 ```
 ```
-2026-06-08 01:14:52 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (811ms) params={}
-```
-```
-2026-06-08 01:14:53 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=132 sid_override=True class_protocol=n/a
+2026-06-09 01:19:04 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (695ms) params={}
 ```
 
 ---
 
 ## Issue 4 [MEDIUM]
 
-**Turn:** 2026-06-08 01:16:43
+**Turn:** 2026-06-09 01:20:59
 **User said:** use the source code as your guide
 
-**Problem:** Stage 3 received no conversation history for an instruction that only makes sense as a follow-up.
+**Problem:** Stage 3 did not receive prior conversation context for an explicitly contextual instruction.
 
-**Root cause:** The user gave a contextual instruction after the previous turn, but Stage 3 was invoked with history=0, so the brain lacked the earlier question unless external state happened to preserve it elsewhere.
+**Root cause:** The OpenAI stream for the same audit session again shows history=0, so the brain likely received only 'use the source code as your guide' without the preceding project question.
 
-**Suggested fix:** Attach session history to Stage 3 calls for the same conversation id, especially when sid_override=True, and add a regression test for short follow-up commands after a long Stage 3 answer.
+**Suggested fix:** Ensure conversation history is appended before each Stage 3 call and retrieved by session id, including web/non-voice audit sessions.
 
 **Log evidence:**
 ```
-2026-06-08 01:16:42 INFO [jane.proxy] [audit-178089] stream_message brain=OpenAI history=0 msg_len=33 file_ctx=False
+2026-06-09 01:20:58 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=33 sid_override=True class_protocol=n/a
 ```
 ```
-2026-06-08 01:16:56 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage3 end-to-end (14584ms)
+2026-06-09 01:20:59 INFO [jane.proxy] [audit-178098] stream_message brain=OpenAI history=0 msg_len=33 file_ctx=False
 ```
 
 ---
 
 ## Issue 5 [MEDIUM]
 
-**Turn:** 2026-06-08 01:16:59
+**Turn:** 2026-06-09 01:21:16
 **User said:** please familiarize yourself with the waterlily project
 
-**Problem:** Stage 3/memory side task hit repeated LLM CLI timeouts and missing fallback binary.
+**Problem:** Stage 3 ran for over three minutes on a broad project-familiarization request.
 
-**Root cause:** After Stage 3 escalation, the short-term memory extractor tried a primary CLI, then Gemini, then Claude. Both primary and Gemini timed out after 45s, and Claude was not installed, producing a failed memory extraction.
+**Root cause:** The Stage 3 brain completed only after 193786ms, indicating the request was allowed to run synchronously for a long time instead of giving progress or using a background task flow.
 
-**Suggested fix:** Separate memory extraction from the user-facing Stage 3 path, lower its timeout, and configure only available fallback providers or disable missing Claude fallback until installed.
+**Suggested fix:** Add a timeout/progress strategy for long Stage 3 codebase exploration requests, with partial status updates and resumable background execution.
 
 **Log evidence:**
 ```
-2026-06-08 01:17:24 WARNING [agent_skills.claude_cli_llm] Primary LLM failed: CLI timed out after 45s... Attempting fallback.
+2026-06-09 01:21:16 INFO [jane.proxy] [audit-178098] stream_message brain=OpenAI history=0 msg_len=54 file_ctx=False
 ```
 ```
-2026-06-08 01:18:09 WARNING [agent_skills.claude_cli_llm] Fallback to gemini failed: CLI timed out after 45s...
-```
-```
-2026-06-08 01:18:09 WARNING [agent_skills.claude_cli_llm] Fallback to claude failed: CLI not found: claude...
-```
-```
-2026-06-08 01:18:09 WARNING [memory.v1.short_term_extractor] short_term_extractor: LLM call failed: CLI not found: claude
+2026-06-09 01:24:29 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage3 end-to-end (193786ms)
 ```
 
 ---
 
-## Issue 6 [MEDIUM]
+## Issue 6 [CRITICAL]
 
-**Turn:** 2026-06-08 01:16:59
-**User said:** please familiarize yourself with the waterlily project
-
-**Problem:** Stage 3 response latency was extremely high for a simple project-familiarization request.
-
-**Root cause:** The Stage 3 end-to-end time was 170163ms. Logs also show two 45s LLM timeout attempts in the same interval, indicating backend/fallback work contributed significant delay.
-
-**Suggested fix:** Do not run slow auxiliary LLM fallback work inline with the response path; stream an immediate acknowledgement and run project indexing/familiarization as an asynchronous task with progress events.
-
-**Log evidence:**
-```
-2026-06-08 01:16:59 INFO [jane.proxy] [audit-178089] stream_message brain=OpenAI history=0 msg_len=54 file_ctx=False
-```
-```
-2026-06-08 01:17:24 WARNING [agent_skills.claude_cli_llm] Primary LLM failed: CLI timed out after 45s... Attempting fallback.
-```
-```
-2026-06-08 01:18:09 WARNING [agent_skills.claude_cli_llm] Fallback to gemini failed: CLI timed out after 45s...
-```
-```
-2026-06-08 01:19:49 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage3 end-to-end (170163ms)
-```
-
----
-
-## Issue 7 [CRITICAL]
-
-**Turn:** 2026-06-08 01:19:52
+**Turn:** 2026-06-09 01:24:32
 **User said:** currently, the waterlily site is web only meant for browsers on laptops and computers
 
-**Problem:** Long Stage 3 coding request was cancelled after the client disconnected, so the user likely did not receive a completed answer.
+**Problem:** Stage 3 failed to complete a large implementation request after the client disconnected.
 
-**Root cause:** Stage 3 ran for about 14 minutes, then the proxy logged client disconnect and brain execution cancellation after 840256ms.
+**Root cause:** The brain worked for about 825 seconds, the client disconnected, and the stream task was cancelled. The user-facing request likely never received a completed answer or implementation result.
 
-**Suggested fix:** For long-running Stage 3/Codex tasks, detach execution from the HTTP/stream lifecycle, persist task state, and let the client reconnect or poll for completion instead of cancelling the brain on disconnect.
+**Suggested fix:** Route long code implementation requests to a durable background Codex job with status polling instead of a single streaming request, and set practical execution timeouts with progress events.
 
 **Log evidence:**
 ```
-2026-06-08 01:19:51 INFO [jane.proxy] [audit-178089] stream_message brain=OpenAI history=0 msg_len=750 file_ctx=False
+2026-06-09 01:24:32 INFO [jane.proxy] [audit-178098] stream_message brain=OpenAI history=0 msg_len=750 file_ctx=False
 ```
 ```
-2026-06-08 01:33:52 INFO [jane.proxy] [audit-178089] Client disconnected — waiting for adapter task to finish (brain still working)
+2026-06-09 01:38:17 INFO [jane.proxy] [audit-178098] Client disconnected — waiting for adapter task to finish (brain still working)
 ```
 ```
-2026-06-08 01:33:52 WARNING [jane.proxy] [audit-178089] Brain execution cancelled (stream) after 840256ms — likely client disconnect or timeout. Stack:
+2026-06-09 01:38:17 WARNING [jane.proxy] [audit-178098] Brain execution cancelled (stream) after 824995ms — likely client disconnect or timeout. Stack:
 ```
 ```
-2026-06-08 01:33:52 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage3 end-to-end (840953ms)
+2026-06-09 01:38:17 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage3 end-to-end (825214ms)
+```
+
+---
+
+## Issue 7 [LOW]
+
+**Turn:** 2026-06-09 01:24:32
+**User said:** currently, the waterlily site is web only meant for browsers on laptops and computers
+
+**Problem:** Stage 1 emitted an unsupported intent label before coercing to others.
+
+**Root cause:** The classifier returned 'web automation', which is outside the configured intent enum. The fallback to others was functionally acceptable, but the classifier output contract was violated.
+
+**Suggested fix:** Add an enum-constrained decoder or post-classification normalization table for unsupported labels produced by the local classifier.
+
+**Log evidence:**
+```
+2026-06-09 01:24:31 WARNING [intent_classifier.v3.classifier] v3: qwen returned unknown class 'web automation' → others
+```
+```
+2026-06-09 01:24:31 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (772ms) params={}
 ```
 
 ---
 
 ## Issue 8 [LOW]
 
-**Turn:** 2026-06-08 01:19:52
+**Turn:** 2026-06-09 01:24:32
 **User said:** currently, the waterlily site is web only meant for browsers on laptops and computers
 
-**Problem:** Classifier produced an out-of-schema intent label before falling back to others.
+**Problem:** Short-term memory extraction failed during the Stage 3 request.
 
-**Root cause:** The classifier returned 'web automation', which is outside the supported intent set. The fallback to others did escalate to Stage 3, but the classifier continues to violate its schema.
+**Root cause:** The primary LLM and Gemini fallback both timed out after 45 seconds, then the Claude fallback was unavailable on PATH, causing the memory extractor to fail.
 
-**Suggested fix:** Add schema-constrained decoding or a strict enum validator with deterministic repair, and include examples for codebase/UI work so these requests classify to a supported Stage 3 route.
+**Suggested fix:** Make memory extraction non-blocking and configure only installed fallback providers; add a shorter extractor-specific timeout and suppress unavailable CLI fallbacks.
 
 **Log evidence:**
 ```
-2026-06-08 01:19:51 WARNING [intent_classifier.v3.classifier] v3: qwen returned unknown class 'web automation' → others
+2026-06-09 01:25:15 WARNING [agent_skills.claude_cli_llm] Primary LLM failed: CLI timed out after 45s... Attempting fallback.
 ```
 ```
-2026-06-08 01:19:51 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (805ms) params={}
+2026-06-09 01:26:00 WARNING [agent_skills.claude_cli_llm] Fallback to gemini failed: CLI timed out after 45s...
 ```
 ```
-2026-06-08 01:19:51 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=750 sid_override=True class_protocol=n/a
-```
-
----
-
-## Issue 9 [MEDIUM]
-
-**Turn:** 2026-06-08 01:19:52
-**User said:** currently, the waterlily site is web only meant for browsers on laptops and computers
-
-**Problem:** Stage 3/memory side task again hit repeated LLM CLI timeouts and missing fallback binary.
-
-**Root cause:** The same primary/Gemini 45s timeouts and missing Claude CLI occurred during the long Stage 3 request, causing short-term memory extraction failure.
-
-**Suggested fix:** Remove unavailable Claude from the fallback chain, add health checks for configured CLI providers at startup, and make memory extraction best-effort background work that cannot extend or destabilize Stage 3 turns.
-
-**Log evidence:**
-```
-2026-06-08 01:20:35 WARNING [agent_skills.claude_cli_llm] Primary LLM failed: CLI timed out after 45s... Attempting fallback.
+2026-06-09 01:26:00 WARNING [agent_skills.claude_cli_llm] Fallback to claude failed: CLI not found: claude...
 ```
 ```
-2026-06-08 01:21:20 WARNING [agent_skills.claude_cli_llm] Fallback to gemini failed: CLI timed out after 45s...
-```
-```
-2026-06-08 01:21:20 WARNING [agent_skills.claude_cli_llm] Fallback to claude failed: CLI not found: claude...
-```
-```
-2026-06-08 01:21:20 WARNING [memory.v1.short_term_extractor] short_term_extractor: LLM call failed: CLI not found: claude
+2026-06-09 01:26:00 WARNING [memory.v1.short_term_extractor] short_term_extractor: LLM call failed: CLI not found: claude
 ```
 
 ---

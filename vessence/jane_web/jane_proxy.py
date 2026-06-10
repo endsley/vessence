@@ -845,6 +845,8 @@ CODE_MAP_KEYWORDS = (
     "yourself",
     "image",
     "restart",
+    # Auto-evolved from daily conversations
+    "waterlily",
 )
 
 
