@@ -1,7 +1,7 @@
-# Pipeline Audit Report — 2026-06-10 01:13
+# Pipeline Audit Report — 2026-06-11 01:13
 
 - Prompts audited: **6**
-- Elapsed: 976s
+- Elapsed: 1188s
 - Classification failures: **2**
 - Response failures: **3**
 - Auto-fixes applied (exemplars added): **0**
@@ -21,7 +21,8 @@
 | use the source code as your guide | todo list | others |
 
 ## Response failures (top 20) — usually need code changes
-- **help pay it** (web_automation/stage3): [ACK]Chieh, I can help with the payment once I know which bill this is.[/ACK]
-What are we paying: a bill, invoice, credit card, tuition, or something 
-- **right now, you are using the same codex process for each prompt instead of spawn** (others/stage3): [ACK]Chieh, I’ll verify the Stage 3 brain process model from the runtime code quickly.[/ACK]I found two relevant paths: the v2 Stage 3 wrapper delegat
-- **currently, the waterlily site is web only meant for browsers on laptops and comp** (others/stage3): [ACK]Chieh, I’ll compare the education project’s mobile patterns against Waterlily and then implement responsive mobile UIs across the site; this will
+- **help pay it** (web_automation/stage3): [ACK]Chieh, I can help, but I need to know what we’re paying first.[/ACK]
+
+What is “it”: a bill, invoice, ticket, subscription, or something else? Sen
+- **right now, you are using the same codex process for each prompt instead of spawn** (others/stage3): [ACK]Chieh, I’ll verify the current Stage 3 brain launch path quickly.[/ACK]I found the relevant implementation: Stage 3 has a dedicated `standing_cod
+- **currently, the waterlily site is web only meant for browsers on laptops and comp** (others/stage3): [ACK]Chieh, I’ll inspect the Waterlily and education projects first, then adapt the Waterlily UI for mobile across the site; this will take a bit.[/AC

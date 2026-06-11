@@ -42,3 +42,6 @@ VESSENCE_HOME=/home/chieh/ambient/vessence
 0 2 * * * $VESSENCE_HOME/startup_code/run_marketplace_cron.sh
 0 * * * * /home/chieh/ambient/vessence/startup_code/auto_pull.sh
 45 3 * * * /home/chieh/google-adk-env/adk-venv/bin/python /home/chieh/ambient/skills/daily_briefing/functions/prune_articles.py >> /home/chieh/ambient/vessence-data/logs/System_log/briefing_prune.log 2>&1
+
+# Waterlily history backup: appointments, payments, reports, receipts, admin history
+20 1 * * * /home/chieh/google-adk-env/adk-venv/bin/python /home/chieh/code/waterlily/scripts/backup_waterlily_history.py >> /home/chieh/ambient/vessence-data/logs/waterlily_history_backup.log 2>&1
