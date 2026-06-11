@@ -16,6 +16,13 @@ This document logs all scheduled tasks (cron jobs) for the system. It must be up
 - **Script Path:** `$VESSENCE_HOME/startup_code/usb_sync.py`
 - **Description:** Incremental rsync to a single `current/` mirror on USB — only transfers changed files. Weekly hard-link snapshots for point-in-time history (kept 30 days).
 
+## 2a. Waterlily History Backup
+- **Schedule:** `20 1 * * *` (Runs daily at 1:20 AM)
+- **Script Path:** `/home/chieh/code/waterlily/scripts/backup_waterlily_history.py`
+- **Log:** `$VESSENCE_DATA_HOME/logs/waterlily_history_backup.log`
+- **Destination:** USB volume `VESSENCE_BACKUP`, directory `waterlily-history-backup/`
+- **Description:** Mirrors Waterlily source plus ignored runtime history needed for crash recovery: `.auth/auth.db` via SQLite backup API, accounting caches/exports, appointment reports, patient payment CSVs, invoices, receipts, email receipt attachments, DASYS claim cache, Waterlily bill cache under `$VESSENCE_DATA_HOME/waterlily/`, `/home/chieh/payment_reports/`, `/home/chieh/payment_report_downloader.py`, and targeted Waterlily/payment report artifacts from Downloads. Writes `restore_manifest.json`, `RESTORE_WATERLILY_HISTORY.md`, checksums, and dated hard-link snapshots.
+
 ## 3. Daily Briefing Fetch
 - **Schedule:** `10 2 * * *` (Daily at 2:10 AM)
 - **Script Path:** `/home/chieh/ambient/skills/daily_briefing/functions/run_briefing.py`
