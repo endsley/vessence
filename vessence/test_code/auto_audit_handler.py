@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import ast
 import builtins
-import inspect
+import re
 import sys
 import types
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from unittest.mock import AsyncMock
 
 import pytest
@@ -17,19 +17,19 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 MODULE_PATH = (
-    REPO_ROOT / "jane_web" / "jane_v2" / "classes" / "read_messages" / "handler.py"
+    REPO_ROOT / "jane_web" / "jane_v2" / "classes" / "shopping_list" / "handler.py"
 )
 METADATA_PATH = MODULE_PATH.with_name("metadata.py")
 
-from intent_classifier.v2.classes import read_messages as classifier_read_messages
 from jane_web.jane_v2 import classes as class_registry
 from jane_web.jane_v2 import stage2_dispatcher
-from jane_web.jane_v2.classes.read_messages import handler as read_handler
-from jane_web.jane_v2.classes.read_messages import metadata as read_metadata
+from jane_web.jane_v2.classes.shopping_list import handler as shopping_handler
+from jane_web.jane_v2.classes.shopping_list import metadata as shopping_metadata
 
 
 DB_AND_LLM_IMPORT_ROOTS = {
     "anthropic",
+    "chromadb",
     "google.generativeai",
     "httpx",
     "mysql",
@@ -37,34 +37,56 @@ DB_AND_LLM_IMPORT_ROOTS = {
     "psycopg",
     "psycopg2",
     "pymysql",
+    "requests",
     "sqlite3",
     "sqlalchemy",
 }
 
-DESTRUCTIVE_NAMES = {
-    "delete",
-    "delete_email",
-    "delete_message",
-    "delete_messages",
-    "end_conversation",
-    "remove",
-    "send_message",
-    "sms_send",
-    "sms_send_direct",
-    "trash",
-}
-
-DOCUMENTED_NO_HANDLER_CLASSES = {
-    "delegate opus",
-    "delete email",
-    "end conversation",
-    "others",
-    "read email",
-    "send email",
-    "unclear",
-}
-
 FALLBACK_CLASSES = {"delegate opus", "others", "unclear"}
+DESTRUCTIVE_ACTIONS = {"remove", "clear"}
+
+
+class FakeShoppingStore:
+    def __init__(self, initial: list[str] | None = None) -> None:
+        self.data: dict[str, list[str]] = {"default": list(initial or [])}
+        self.calls: list[tuple[Any, ...]] = []
+
+    def module(self) -> types.ModuleType:
+        mod = types.ModuleType("agent_skills.shopping_list")
+        mod.add_item = self.add_item
+        mod.remove_item = self.remove_item
+        mod.get_list = self.get_list
+        mod.clear_list = self.clear_list
+        return mod
+
+    def get_list(self, list_name: str = "default") -> list[str]:
+        self.calls.append(("get_list", list_name))
+        return list(self.data.get(list_name.lower(), []))
+
+    def add_item(self, item: str, list_name: str = "default") -> list[str]:
+        self.calls.append(("add_item", item, list_name))
+        key = list_name.lower()
+        self.data.setdefault(key, [])
+        clean = item.strip()
+        if clean and clean.lower() not in [existing.lower() for existing in self.data[key]]:
+            self.data[key].append(clean)
+        return list(self.data[key])
+
+    def remove_item(
+        self, item: str, list_name: str = "default", *, confidence: float
+    ) -> list[str]:
+        self.calls.append(("remove_item", item, list_name, confidence))
+        key = list_name.lower()
+        self.data[key] = [
+            existing
+            for existing in self.data.get(key, [])
+            if existing.lower() != item.strip().lower()
+        ]
+        return list(self.data.get(key, []))
+
+    def clear_list(self, list_name: str = "default", *, confidence: float) -> None:
+        self.calls.append(("clear_list", list_name, confidence))
+        self.data[list_name.lower()] = []
 
 
 @pytest.fixture
@@ -78,521 +100,552 @@ def module_ast(module_source: str) -> ast.Module:
 
 
 @pytest.fixture
-def metadata_source() -> str:
-    return METADATA_PATH.read_text()
+def install_store(monkeypatch: pytest.MonkeyPatch) -> Callable[..., FakeShoppingStore]:
+    def _install(initial: list[str] | None = None) -> FakeShoppingStore:
+        store = FakeShoppingStore(initial)
+        fake_module = store.module()
+        import agent_skills
+
+        monkeypatch.setitem(sys.modules, "agent_skills.shopping_list", fake_module)
+        monkeypatch.setattr(agent_skills, "shopping_list", fake_module, raising=False)
+        return store
+
+    return _install
 
 
 def _import_roots(tree: ast.AST) -> set[str]:
     roots: set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
-            roots.update(alias.name.split(".")[0] for alias in node.names)
+            for alias in node.names:
+                parts = alias.name.split(".")
+                roots.add(parts[0])
+                if len(parts) >= 2:
+                    roots.add(".".join(parts[:2]))
         elif isinstance(node, ast.ImportFrom) and node.module:
             parts = node.module.split(".")
-            roots.add(parts[0] if len(parts) == 1 else ".".join(parts[:2]))
+            roots.add(parts[0])
+            if len(parts) >= 2:
+                roots.add(".".join(parts[:2]))
     return roots
 
 
 def _called_names(tree: ast.AST) -> set[str]:
     names: set[str] = set()
     for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        if isinstance(node.func, ast.Name):
-            names.add(node.func.id.lower())
-        elif isinstance(node.func, ast.Attribute):
-            names.add(node.func.attr.lower())
+        if isinstance(node, ast.Call):
+            if isinstance(node.func, ast.Name):
+                names.add(node.func.id)
+            elif isinstance(node.func, ast.Attribute):
+                names.add(node.func.attr)
     return names
 
 
-def _module_level_dict_tables(tree: ast.Module) -> dict[str, ast.Dict]:
-    tables: dict[str, ast.Dict] = {}
-    markers = ("MAP", "MAPPING", "LOOKUP", "REGISTRY", "TABLE", "DISPATCH")
-    for node in tree.body:
-        value: ast.AST | None = None
-        targets: list[ast.AST] = []
-        if isinstance(node, ast.Assign):
-            value = node.value
-            targets = list(node.targets)
-        elif isinstance(node, ast.AnnAssign):
-            value = node.value
-            targets = [node.target]
-        if not isinstance(value, ast.Dict):
+def _schema_actions() -> set[str]:
+    schema = shopping_metadata.PARAMS_SCHEMA["action"]
+    match = re.search(r"one of:\s*([^.]*)\.", schema)
+    assert match, "PARAMS_SCHEMA action enum must be parseable"
+    return {part.strip() for part in match.group(1).split("|")}
+
+
+def _action_branch_literals(tree: ast.AST) -> set[str]:
+    actions: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Compare):
             continue
-        for target in targets:
-            if isinstance(target, ast.Name) and any(m in target.id.upper() for m in markers):
-                tables[target.id] = value
-    return tables
+        if not isinstance(node.left, ast.Name) or node.left.id != "action":
+            continue
+        for op, comparator in zip(node.ops, node.comparators):
+            if (
+                isinstance(op, ast.Eq)
+                and isinstance(comparator, ast.Constant)
+                and isinstance(comparator.value, str)
+            ):
+                actions.add(comparator.value)
+    return actions
 
 
-def _parse_few_shot_label(label: str) -> tuple[str, str]:
-    class_name, sep, confidence = label.partition(":")
-    assert sep == ":", f"few-shot label lacks confidence delimiter: {label!r}"
-    return class_name.strip(), confidence.strip()
+def _guard_external_imports(monkeypatch: pytest.MonkeyPatch) -> None:
+    original_import = builtins.__import__
 
+    def guarded_import(
+        name: str,
+        globals: dict[str, Any] | None = None,
+        locals: dict[str, Any] | None = None,
+        fromlist: tuple[str, ...] = (),
+        level: int = 0,
+    ) -> Any:
+        parts = name.split(".")
+        roots = {parts[0], ".".join(parts[:2]) if len(parts) >= 2 else parts[0], name}
+        blocked = roots & DB_AND_LLM_IMPORT_ROOTS
+        if blocked:
+            raise AssertionError(f"unexpected DB/LLM import: {name}")
+        return original_import(name, globals, locals, fromlist, level)
 
-class _FakeCursor:
-    def __init__(self, rows: list[dict[str, Any]]):
-        self._rows = rows
-
-    def fetchall(self) -> list[dict[str, Any]]:
-        return self._rows
-
-
-class _FakeConnection:
-    def __init__(self, rows: list[dict[str, Any]]):
-        self.rows = rows
-        self.executed: list[tuple[str, tuple[Any, ...]]] = []
-
-    def __enter__(self) -> "_FakeConnection":
-        return self
-
-    def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> bool:
-        return False
-
-    def execute(self, sql: str, params: tuple[Any, ...] = ()) -> _FakeCursor:
-        self.executed.append((sql, params))
-        return _FakeCursor(self.rows)
-
-
-def _install_fake_database(
-    monkeypatch: pytest.MonkeyPatch,
-    connection: _FakeConnection,
-) -> types.ModuleType:
-    database = types.ModuleType("database")
-    database.get_db = lambda: connection
-    monkeypatch.setitem(sys.modules, "database", database)
-    return database
+    monkeypatch.setattr(builtins, "__import__", guarded_import)
 
 
 class TestDocumentedBehavior:
-    def test_module_docstring_documents_stage3_escalation_contract(
+    def test_docstring_declares_params_driven_stage2_contract(
         self, module_source: str
     ) -> None:
         doc = ast.get_docstring(ast.parse(module_source))
+        normalized_doc = " ".join((doc or "").split())
 
         assert doc is not None
-        assert "always escalates to Stage 3" in doc
-        assert "thin guard" in doc
-        assert "meta / architecture phrases" in doc
-        assert "returns None to escalate" in doc
-        assert "_escalation_context()" in doc
+        assert "params-driven" in normalized_doc
+        assert "supplies `action` and `items`" in normalized_doc
+        assert "dispatches directly on" in normalized_doc
+        assert "no local LLM intent parse needed" in normalized_doc
+        assert "Escalates to Stage 3" in normalized_doc
+
+    @pytest.mark.asyncio
+    async def test_view_empty_list_returns_text_dict(
+        self, install_store: Callable[..., FakeShoppingStore]
+    ) -> None:
+        install_store([])
+
+        result = await shopping_handler.handle(
+            "what is on my shopping list", {"action": "view", "items": None}
+        )
+
+        assert result == {"text": "Your shopping list is empty."}
+
+    @pytest.mark.asyncio
+    async def test_view_existing_list_returns_joined_items(
+        self, install_store: Callable[..., FakeShoppingStore]
+    ) -> None:
+        install_store(["milk", "eggs"])
+
+        result = await shopping_handler.handle(
+            "show my shopping list", {"action": "view", "items": None}
+        )
+
+        assert result == {"text": "Your shopping list has: milk, eggs."}
+
+    @pytest.mark.asyncio
+    async def test_add_splits_comma_separated_items_and_updates_store(
+        self, install_store: Callable[..., FakeShoppingStore]
+    ) -> None:
+        store = install_store(["bread"])
+
+        result = await shopping_handler.handle(
+            "add milk and eggs",
+            {"action": "add", "items": " milk, eggs ,, bread "},
+        )
+
+        assert result == {
+            "text": "Added milk, eggs, bread. Your shopping list now has 3 items."
+        }
+        assert store.data["default"] == ["bread", "milk", "eggs"]
+        assert ("add_item", "milk", "default") in store.calls
+        assert ("add_item", "eggs", "default") in store.calls
+        assert ("add_item", "bread", "default") in store.calls
+
+    @pytest.mark.asyncio
+    async def test_remove_uses_items_and_confidence_against_json_store(
+        self, install_store: Callable[..., FakeShoppingStore]
+    ) -> None:
+        store = install_store(["milk", "eggs", "bread"])
+
+        result = await shopping_handler.handle(
+            "remove eggs",
+            {"action": "remove", "items": "eggs", "confidence": 0.91},
+        )
+
+        assert result == {"text": "Removed eggs from your shopping list."}
+        assert store.data["default"] == ["milk", "bread"]
+        assert ("remove_item", "eggs", "default", 0.91) in store.calls
+
+    @pytest.mark.asyncio
+    async def test_clear_uses_confidence_and_clears_default_list(
+        self, install_store: Callable[..., FakeShoppingStore]
+    ) -> None:
+        store = install_store(["milk", "eggs"])
+
+        result = await shopping_handler.handle(
+            "clear my shopping list",
+            {"action": "clear", "items": None, "confidence": 0.99},
+        )
+
+        assert result == {"text": "Your shopping list has been cleared."}
+        assert store.data["default"] == []
+        assert ("clear_list", "default", 0.99) in store.calls
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
-        "prompt",
+        ("items", "expected_prefix", "expected_terms"),
         [
-            "read my messages",
-            "any new texts?",
-            "what did Kathia text me?",
-            "do I have any unread messages",
-            "check my SMS inbox",
+            ("milk", "Yes", ["milk"]),
+            ("flour", "No", ["flour"]),
+            ("MILK, flour", "Mixed:", ["MILK", "flour"]),
         ],
     )
-    async def test_inbox_read_requests_return_none_to_escalate(self, prompt: str) -> None:
-        result = await read_handler.handle(prompt)
+    async def test_check_reports_present_missing_and_mixed_items(
+        self,
+        install_store: Callable[..., FakeShoppingStore],
+        items: str,
+        expected_prefix: str,
+        expected_terms: list[str],
+    ) -> None:
+        install_store(["Milk", "eggs"])
 
-        assert result is None
-
-    @pytest.mark.asyncio
-    async def test_context_and_params_are_accepted_but_do_not_answer_locally(self) -> None:
-        result = await read_handler.handle(
-            "read the last three text messages",
-            context="Earlier topic was calendar.",
-            params={"filter_sender": None, "unread_only": False, "limit": 3},
+        result = await shopping_handler.handle(
+            "do I need this", {"action": "check", "items": items}
         )
 
-        assert result is None
+        assert isinstance(result, dict)
+        assert result["text"].startswith(expected_prefix)
+        for term in expected_terms:
+            assert term in result["text"]
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("word", read_handler._ARCH_WORDS)
-    async def test_architecture_words_are_blocked_as_wrong_class(self, word: str) -> None:
-        result = await read_handler.handle(f"explain the {word} for read messages")
-
-        assert result == {"wrong_class": True}
-
-    @pytest.mark.asyncio
-    @pytest.mark.parametrize("phrase", read_handler._META_PHRASES)
-    async def test_meta_self_reference_phrases_are_blocked_as_wrong_class(
-        self, phrase: str
+    async def test_action_is_case_and_whitespace_normalized(
+        self, install_store: Callable[..., FakeShoppingStore]
     ) -> None:
-        result = await read_handler.handle(f"{phrase}?")
+        store = install_store([])
 
-        assert result == {"wrong_class": True}
+        result = await shopping_handler.handle(
+            "add apples", {"action": "  ADD  ", "items": "apples"}
+        )
 
-    @pytest.mark.asyncio
-    async def test_guards_are_case_insensitive(self) -> None:
-        assert await read_handler.handle("WHY DID YOU take so long?") == {
-            "wrong_class": True
-        }
-        assert await read_handler.handle("How does the CLASSIFIER work?") == {
-            "wrong_class": True
-        }
-
-    @pytest.mark.asyncio
-    async def test_meta_guard_logs_wrong_class_reason(self, caplog: pytest.LogCaptureFixture) -> None:
-        caplog.set_level("INFO", logger=read_handler.logger.name)
-
-        result = await read_handler.handle("your last reply took so long")
-
-        assert result == {"wrong_class": True}
-        assert "meta/self-reference phrase" in caplog.text
-        assert "wrong_class" in caplog.text
-
-    @pytest.mark.asyncio
-    async def test_normal_escalation_logs_stage3_design_reason(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        caplog.set_level("INFO", logger=read_handler.logger.name)
-
-        result = await read_handler.handle("read my messages")
-
-        assert result is None
-        assert "escalating to Stage 3 by design" in caplog.text
+        assert isinstance(result, dict)
+        assert result["text"].startswith("Added apples.")
+        assert store.data["default"] == ["apples"]
 
 
 class TestEdgeCases:
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("prompt", ["", "   ", "\n\t"])
-    async def test_empty_and_whitespace_prompts_escalate(self, prompt: str) -> None:
-        assert await read_handler.handle(prompt) is None
+    @pytest.mark.parametrize("prompt", [None, "", "   ", "\n\t"])
+    async def test_missing_params_escalates_before_store_import(
+        self, monkeypatch: pytest.MonkeyPatch, prompt: str | None
+    ) -> None:
+        _guard_external_imports(monkeypatch)
 
-    @pytest.mark.asyncio
-    async def test_very_long_prompt_is_linear_guard_only_and_escalates(self) -> None:
-        prompt = "read my messages " + "please " * 50000
-
-        result = await read_handler.handle(prompt)
+        result = await shopping_handler.handle(prompt, None)
 
         assert result is None
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
-        ("prompt", "expected_exception"),
+        "params",
         [
-            (None, AttributeError),
-            (123, AttributeError),
-            (["read", "messages"], AttributeError),
-            ({"prompt": "read messages"}, AttributeError),
-            (b"read my messages", TypeError),
+            {},
+            {"action": None},
+            {"action": 12},
+            {"action": ["add"]},
+            {"action": "archive", "items": "milk"},
+            {"action": "others", "items": "milk"},
+            {"action": "delegate opus", "items": "milk"},
         ],
     )
-    async def test_non_string_prompts_are_rejected_by_lowercase_guard(
-        self, prompt: Any, expected_exception: type[Exception]
+    async def test_empty_malformed_and_unknown_actions_escalate_without_store_import(
+        self, monkeypatch: pytest.MonkeyPatch, params: dict[str, Any]
     ) -> None:
-        with pytest.raises(expected_exception):
-            await read_handler.handle(prompt)  # type: ignore[arg-type]
+        _guard_external_imports(monkeypatch)
 
-    @pytest.mark.asyncio
-    @pytest.mark.parametrize("context", [None, 1, [], {"recent": "turn"}])
-    async def test_malformed_context_is_ignored_because_handler_only_reads_prompt(
-        self, context: Any
-    ) -> None:
-        result = await read_handler.handle("read my texts", context=context)  # type: ignore[arg-type]
+        result = await shopping_handler.handle("shopping list request", params)
 
         assert result is None
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("params", [None, [], "bad", {"limit": "not an int"}])
-    async def test_malformed_params_are_ignored_because_handler_only_reads_prompt(
-        self, params: Any
+    @pytest.mark.parametrize("raw_items", [None, "", "   ", [], {}, 42, False])
+    @pytest.mark.parametrize("action", ["add", "check"])
+    async def test_item_actions_decline_empty_or_malformed_items(
+        self,
+        install_store: Callable[..., FakeShoppingStore],
+        raw_items: Any,
+        action: str,
     ) -> None:
-        result = await read_handler.handle("read my texts", params=params)  # type: ignore[arg-type]
+        store = install_store(["milk"])
+
+        result = await shopping_handler.handle(
+            "shopping list request", {"action": action, "items": raw_items}
+        )
 
         assert result is None
+        assert not any(call[0] in {"add_item", "remove_item"} for call in store.calls)
+
+    @pytest.mark.asyncio
+    async def test_remove_declines_missing_items_even_with_high_confidence(
+        self, install_store: Callable[..., FakeShoppingStore]
+    ) -> None:
+        store = install_store(["milk"])
+
+        result = await shopping_handler.handle(
+            "remove something", {"action": "remove", "items": None, "confidence": 0.99}
+        )
+
+        assert result is None
+        assert not any(call[0] == "remove_item" for call in store.calls)
+
+    @pytest.mark.asyncio
+    async def test_empty_prompt_still_dispatches_when_params_are_complete(
+        self, install_store: Callable[..., FakeShoppingStore]
+    ) -> None:
+        install_store(["rice"])
+
+        result = await shopping_handler.handle("", {"action": "view", "items": None})
+
+        assert result == {"text": "Your shopping list has: rice."}
+
+    @pytest.mark.asyncio
+    async def test_very_long_prompt_does_not_change_params_driven_dispatch(
+        self, install_store: Callable[..., FakeShoppingStore]
+    ) -> None:
+        install_store(["rice"])
+        prompt = "show my shopping list " + ("x " * 10000)
+
+        result = await shopping_handler.handle(prompt, {"action": "view", "items": None})
+
+        assert result == {"text": "Your shopping list has: rice."}
+
+    @pytest.mark.asyncio
+    async def test_very_long_item_is_passed_to_store_without_truncation(
+        self, install_store: Callable[..., FakeShoppingStore]
+    ) -> None:
+        store = install_store([])
+        item = "x" * 10000
+
+        result = await shopping_handler.handle(
+            "add a long item", {"action": "add", "items": item}
+        )
+
+        assert isinstance(result, dict)
+        assert result["text"].endswith("now has 1 items.")
+        assert store.data["default"] == [item]
+
+    def test_split_items_handles_none_non_string_and_extra_commas(self) -> None:
+        assert shopping_handler._split_items(None) == []
+        assert shopping_handler._split_items(123) == []
+        assert shopping_handler._split_items(" milk, eggs ,, bread ") == [
+            "milk",
+            "eggs",
+            "bread",
+        ]
 
 
 class TestIntegrationPoints:
-    def test_handler_module_has_no_direct_database_or_llm_imports(
-        self, module_ast: ast.Module
+    @pytest.mark.asyncio
+    async def test_json_store_skill_is_the_only_runtime_dependency_for_add(
+        self,
+        install_store: Callable[..., FakeShoppingStore],
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        assert _import_roots(module_ast).isdisjoint(DB_AND_LLM_IMPORT_ROOTS)
+        _guard_external_imports(monkeypatch)
+        store = install_store([])
 
-    def test_handler_module_has_no_direct_database_or_llm_calls(
-        self, module_ast: ast.Module
-    ) -> None:
-        banned_calls = {
-            "asyncclient",
-            "chat",
-            "completion",
-            "connect",
-            "cursor",
-            "execute",
-            "get_db",
-            "openai",
-            "post",
-            "query",
-        }
+        result = await shopping_handler.handle(
+            "add milk", {"action": "add", "items": "milk"}
+        )
 
-        assert _called_names(module_ast).isdisjoint(banned_calls)
-
-    def test_metadata_escalation_context_queries_recent_synced_messages(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        rows = [
-            {
-                "sender": "Kathia",
-                "body": "Can you call when you are free?",
-                "timestamp_ms": 1710000000000,
-                "is_contact": 1,
-                "msg_type": "sms",
-            },
-            {
-                "sender": f"Me {chr(0x2192)} Lee",
-                "body": "On my way",
-                "timestamp_ms": 1710000060000,
-                "is_contact": 1,
-                "msg_type": "sms",
-            },
+        assert isinstance(result, dict)
+        assert result["text"] == "Added milk. Your shopping list now has 1 items."
+        assert store.calls == [
+            ("add_item", "milk", "default"),
+            ("get_list", "default"),
         ]
-        conn = _FakeConnection(rows)
-        _install_fake_database(monkeypatch, conn)
 
-        context = read_metadata._escalation_context()
-
-        assert len(conn.executed) == 1
-        sql, params = conn.executed[0]
-        assert params == ()
-        assert "FROM synced_messages" in sql
-        assert "ORDER BY timestamp_ms DESC LIMIT 20" in sql
-        assert "Recent synced messages" in context
-        assert "RECEIVED from Kathia" in context
-        assert "SENT by user to Lee" in context
-        assert "Classify each as important" in context
-        assert "Quote contact messages verbatim" in context
-
-    def test_metadata_escalation_context_reports_empty_database(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        conn = _FakeConnection([])
-        _install_fake_database(monkeypatch, conn)
-
-        assert read_metadata._escalation_context() == "No synced messages in the database yet."
-
-    def test_metadata_escalation_context_reports_database_query_failures(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        class BrokenConnection:
-            def __enter__(self) -> "BrokenConnection":
-                return self
-
-            def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> bool:
-                return False
-
-            def execute(self, *_args: Any, **_kwargs: Any) -> Any:
-                raise RuntimeError("boom")
-
-        database = types.ModuleType("database")
-        database.get_db = lambda: BrokenConnection()
-        monkeypatch.setitem(sys.modules, "database", database)
-
-        assert read_metadata._escalation_context() == "Message query failed: boom"
-
-    def test_metadata_escalation_context_reports_database_import_failures(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.delitem(sys.modules, "database", raising=False)
+    @pytest.mark.asyncio
+    async def test_store_import_failure_escalates(self, monkeypatch: pytest.MonkeyPatch) -> None:
         original_import = builtins.__import__
 
-        def blocked_import(name: str, *args: Any, **kwargs: Any) -> Any:
-            if name == "database":
-                raise ImportError("database unavailable in test")
-            return original_import(name, *args, **kwargs)
+        def failing_import(
+            name: str,
+            globals: dict[str, Any] | None = None,
+            locals: dict[str, Any] | None = None,
+            fromlist: tuple[str, ...] = (),
+            level: int = 0,
+        ) -> Any:
+            if name == "agent_skills.shopping_list":
+                raise ImportError("store unavailable")
+            return original_import(name, globals, locals, fromlist, level)
 
-        monkeypatch.setattr(builtins, "__import__", blocked_import)
+        monkeypatch.setattr(builtins, "__import__", failing_import)
 
-        result = read_metadata._escalation_context()
-
-        assert result == "Message database unavailable: database unavailable in test"
-
-    @pytest.mark.asyncio
-    async def test_stage2_dispatcher_uses_mocked_llm_gate_then_escalates(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        gate = AsyncMock(return_value=True)
-        monkeypatch.setattr(stage2_dispatcher, "_gate_check", gate)
-
-        result = await stage2_dispatcher.dispatch(
-            "read messages",
-            "read my messages",
-            context="recent turn context",
-            min_dist=1.0,
+        result = await shopping_handler.handle(
+            "show my shopping list", {"action": "view", "items": None}
         )
 
         assert result is None
-        gate.assert_awaited_once_with(
-            "read messages", "read my messages", "recent turn context"
-        )
+
+    def test_handler_has_no_direct_db_or_llm_imports(self, module_ast: ast.Module) -> None:
+        assert _import_roots(module_ast).isdisjoint(DB_AND_LLM_IMPORT_ROOTS)
+
+    def test_handler_does_not_call_db_or_llm_client_methods(
+        self, module_ast: ast.Module
+    ) -> None:
+        db_llm_call_names = {
+            "AsyncClient",
+            "Client",
+            "chat",
+            "connect",
+            "create",
+            "execute",
+            "generate",
+            "post",
+            "query",
+            "request",
+        }
+
+        assert _called_names(module_ast).isdisjoint(db_llm_call_names)
 
     @pytest.mark.asyncio
-    async def test_stage2_dispatcher_wrong_class_signal_stays_non_terminal(
-        self, monkeypatch: pytest.MonkeyPatch
+    async def test_stage2_dispatcher_passes_params_to_registered_handler(
+        self,
+        install_store: Callable[..., FakeShoppingStore],
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
+        install_store(["milk"])
         gate = AsyncMock(return_value=True)
         monkeypatch.setattr(stage2_dispatcher, "_gate_check", gate)
-        started_threads: list[Any] = []
-
-        class FakeThread:
-            def __init__(self, *args: Any, **kwargs: Any) -> None:
-                self.args = args
-                self.kwargs = kwargs
-
-            def start(self) -> None:
-                started_threads.append(self)
-
-        monkeypatch.setattr(stage2_dispatcher.threading, "Thread", FakeThread)
+        monkeypatch.setattr(
+            class_registry,
+            "get_registry",
+            lambda refresh=False: {
+                "shopping list": {"handler": shopping_handler.handle}
+            },
+        )
 
         result = await stage2_dispatcher.dispatch(
-            "read messages",
-            "how does the read messages handler work?",
-            min_dist=1.0,
+            "shopping list",
+            "show my shopping list",
+            params={"action": "view", "items": None},
         )
 
-        assert result is None
-        gate.assert_awaited_once_with(
-            "read messages", "how does the read messages handler work?", ""
-        )
-        assert len(started_threads) == 1
-        thread = started_threads[0]
-        assert thread.kwargs["target"] is stage2_dispatcher._self_correct_classification
-        assert thread.kwargs["args"] == (
-            "how does the read messages handler work?",
-            "read messages",
-        )
-        assert thread.kwargs["daemon"] is True
+        assert result == {"text": "Your shopping list has: milk."}
+        gate.assert_awaited_once()
 
 
 class TestStructuralInvariants:
-    def test_guard_tables_are_tuples_with_unique_lowercase_nonempty_entries(self) -> None:
-        for table in (read_handler._ARCH_WORDS, read_handler._META_PHRASES):
-            assert isinstance(table, tuple)
-            assert table
-            assert len(table) == len(set(table))
-            for entry in table:
-                assert isinstance(entry, str)
-                assert entry.strip() == entry
-                assert entry
-                assert entry == entry.lower()
-
-    def test_architecture_guard_does_not_include_core_sms_request_terms(self) -> None:
-        core_sms_terms = {
-            "check",
-            "inbox",
-            "message",
-            "messages",
-            "read",
-            "sms",
-            "text",
-            "texts",
-            "unread",
-        }
-
-        assert core_sms_terms.isdisjoint(set(read_handler._ARCH_WORDS))
-
-    @pytest.mark.asyncio
-    @pytest.mark.parametrize("word", read_handler._ARCH_WORDS)
-    async def test_every_architecture_guard_entry_is_reachable(self, word: str) -> None:
-        result = await read_handler.handle(f"why does the {word} work this way")
-
-        assert result == {"wrong_class": True}
-
-    @pytest.mark.asyncio
-    @pytest.mark.parametrize("phrase", read_handler._META_PHRASES)
-    async def test_every_meta_guard_entry_is_reachable(self, phrase: str) -> None:
-        result = await read_handler.handle(f"{phrase} in our conversation")
-
-        assert result == {"wrong_class": True}
-
-    def test_module_has_no_mapping_lookup_or_dispatch_table(self, module_ast: ast.Module) -> None:
-        assert _module_level_dict_tables(module_ast) == {}
-
-    def test_metadata_few_shot_targets_exist_in_runtime_registry(self) -> None:
-        registry = class_registry.get_registry(refresh=True)
-
-        for _prompt, label in read_metadata.METADATA["few_shot"]:
-            class_name, confidence = _parse_few_shot_label(label)
-            assert class_name in registry
-            assert confidence in {"High", "Low"}
-
-    def test_metadata_few_shots_do_not_mark_fallback_classes_high_confidence(self) -> None:
-        for _prompt, label in read_metadata.METADATA["few_shot"]:
-            class_name, confidence = _parse_few_shot_label(label)
-            assert not (class_name in FALLBACK_CLASSES and confidence == "High")
-
-    def test_classifier_class_name_matches_runtime_registry_key(self) -> None:
-        registry_name = classifier_read_messages.CLASS_NAME.lower().replace("_", " ")
-
-        assert registry_name == read_metadata.METADATA["name"]
-        assert registry_name in class_registry.get_registry(refresh=True)
-
-    def test_read_messages_registry_entry_has_documented_escalating_handler(self) -> None:
-        registry = class_registry.get_registry(refresh=True)
-        meta = registry["read messages"]
-
-        assert meta["pkg_name"] == "read_messages"
-        assert meta["handler"] is read_handler.handle
-        assert meta["escalation_context"] is read_metadata._escalation_context
-        assert "escalate" in (read_handler.__doc__ or "").lower()
-
-    def test_classes_without_handlers_are_explicitly_known_stage3_or_special_cases(self) -> None:
-        registry = class_registry.get_registry(refresh=True)
-        classes_without_handlers = {
-            name for name, meta in registry.items() if meta.get("handler") is None
-        }
-
-        assert classes_without_handlers <= DOCUMENTED_NO_HANDLER_CLASSES
-
-    @pytest.mark.asyncio
-    async def test_read_messages_handler_return_shapes_match_dispatcher_contract(self) -> None:
-        normal = await read_handler.handle("read my messages")
-        wrong_class = await read_handler.handle("how does the handler work?")
-
-        assert normal is None
-        assert wrong_class == {"wrong_class": True}
-        assert set(wrong_class) == {"wrong_class"}
-
-    def test_handle_signature_exposes_only_non_destructive_inputs(self) -> None:
-        signature = inspect.signature(read_handler.handle)
-
-        assert list(signature.parameters) == ["prompt", "context", "params"]
-        assert signature.parameters["context"].default == ""
-        assert signature.parameters["params"].default is None
-        assert "confidence" not in signature.parameters
-
-    def test_module_contains_no_destructive_tool_markers_or_calls(
-        self, module_source: str, module_ast: ast.Module
-    ) -> None:
-        lowered_source = module_source.lower()
-
-        assert "[[client_tool:" not in lowered_source
-        assert _called_names(module_ast).isdisjoint(DESTRUCTIVE_NAMES)
-
-    def test_module_has_no_destructive_operations_requiring_confidence_threshold(
+    def test_metadata_schema_actions_match_handler_registry_and_branches(
         self, module_ast: ast.Module
     ) -> None:
-        function_names = {
-            node.name.lower()
-            for node in ast.walk(module_ast)
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-        }
-        destructive_functions = function_names & DESTRUCTIVE_NAMES
+        schema_actions = _schema_actions()
+        valid_actions = set(shopping_handler._VALID_ACTIONS)
+        branch_actions = _action_branch_literals(module_ast)
 
-        assert destructive_functions == set()
-        assert not any(
-            parameter.arg == "confidence"
-            for node in ast.walk(module_ast)
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-            for parameter in list(node.args.args) + list(node.args.kwonlyargs)
-        )
+        assert valid_actions == {"view", "add", "remove", "clear", "check"}
+        assert schema_actions == valid_actions
+        assert branch_actions == valid_actions
 
-    def test_module_has_no_class_registry_or_handler_dispatch(self, module_ast: ast.Module) -> None:
-        class_defs = [node.name for node in module_ast.body if isinstance(node, ast.ClassDef)]
-        dispatch_functions = [
-            node.name
-            for node in module_ast.body
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-            and node.name not in {"handle"}
-            and any(token in node.name.lower() for token in ("dispatch", "route", "registry"))
-        ]
+    def test_valid_actions_do_not_contain_fallback_or_escalation_classes(self) -> None:
+        assert set(shopping_handler._VALID_ACTIONS).isdisjoint(FALLBACK_CLASSES)
 
-        assert class_defs == []
-        assert dispatch_functions == []
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("params", "initial"),
+        [
+            ({"action": "view", "items": None}, ["milk"]),
+            ({"action": "add", "items": "eggs"}, ["milk"]),
+            ({"action": "remove", "items": "milk", "confidence": 0.80}, ["milk"]),
+            ({"action": "clear", "items": None, "confidence": 0.80}, ["milk"]),
+            ({"action": "check", "items": "milk"}, ["milk"]),
+        ],
+    )
+    async def test_every_valid_action_is_reachable_and_returns_text_shape(
+        self,
+        install_store: Callable[..., FakeShoppingStore],
+        params: dict[str, Any],
+        initial: list[str],
+    ) -> None:
+        install_store(initial)
+
+        result = await shopping_handler.handle("shopping list request", params)
+
+        assert isinstance(result, dict)
+        assert set(result) == {"text"}
+        assert isinstance(result["text"], str)
+        assert result["text"]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("action", sorted(DESTRUCTIVE_ACTIONS))
+    @pytest.mark.parametrize(
+        "confidence",
+        [None, True, False, "High", "0.99", -1, 0, 0.79, 0.799999],
+    )
+    async def test_destructive_actions_require_numeric_confidence_at_least_080(
+        self,
+        install_store: Callable[..., FakeShoppingStore],
+        action: str,
+        confidence: Any,
+    ) -> None:
+        store = install_store(["milk"])
+        params: dict[str, Any] = {"action": action, "items": "milk", "confidence": confidence}
+
+        result = await shopping_handler.handle("destructive request", params)
+
+        assert result is None
+        destructive_calls = {"remove_item", "clear_list"}
+        assert not any(call[0] in destructive_calls for call in store.calls)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("action", sorted(DESTRUCTIVE_ACTIONS))
+    async def test_destructive_actions_allow_exact_threshold_080(
+        self, install_store: Callable[..., FakeShoppingStore], action: str
+    ) -> None:
+        store = install_store(["milk"])
+        params: dict[str, Any] = {"action": action, "items": "milk", "confidence": 0.80}
+
+        result = await shopping_handler.handle("destructive request", params)
+
+        assert isinstance(result, dict)
+        if action == "remove":
+            assert ("remove_item", "milk", "default", 0.80) in store.calls
+        else:
+            assert ("clear_list", "default", 0.80) in store.calls
+
+    def test_destructive_store_calls_pass_confidence_keyword(
+        self, module_ast: ast.Module
+    ) -> None:
+        destructive_calls: list[ast.Call] = []
+        for node in ast.walk(module_ast):
+            if not isinstance(node, ast.Call):
+                continue
+            if isinstance(node.func, ast.Name) and node.func.id in {
+                "remove_item",
+                "clear_list",
+            }:
+                destructive_calls.append(node)
+
+        assert len(destructive_calls) == 2
+        for call in destructive_calls:
+            assert any(keyword.arg == "confidence" for keyword in call.keywords)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "params",
+        [
+            {"action": "remove", "items": "", "confidence": 0.99},
+            {"action": "remove", "items": "   ", "confidence": 0.99},
+            {"action": "remove", "items": [], "confidence": 0.99},
+            {"action": "remove", "items": "milk", "confidence": 0.799999},
+            {"action": "clear", "items": None, "confidence": 0.799999},
+        ],
+    )
+    async def test_destructive_actions_cannot_fire_on_ambiguous_or_borderline_input(
+        self,
+        install_store: Callable[..., FakeShoppingStore],
+        params: dict[str, Any],
+    ) -> None:
+        store = install_store(["milk"])
+
+        result = await shopping_handler.handle("ambiguous destructive request", params)
+
+        assert result is None
+        assert not any(call[0] in {"remove_item", "clear_list"} for call in store.calls)
+
+    def test_shopping_list_class_is_registered_with_handler(self) -> None:
+        registry = class_registry.get_registry(refresh=True)
+        meta = registry["shopping list"]
+
+        assert meta["name"] == "shopping list"
+        assert meta["handler"] is not None
+        assert meta["handler"].__module__ == shopping_handler.handle.__module__
+        assert meta["handler"].__name__ == "handle"
+
+    def test_shopping_list_metadata_documents_params_and_no_handler_gap(self) -> None:
+        assert shopping_metadata.METADATA["name"] == "shopping list"
+        assert shopping_metadata.METADATA["params_schema"] is shopping_metadata.PARAMS_SCHEMA
+        assert set(shopping_metadata.PARAMS_SCHEMA) == {"action", "items"}
+        assert "no handler" not in shopping_metadata.METADATA["description"].lower()
