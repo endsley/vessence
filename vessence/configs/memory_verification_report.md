@@ -1,14 +1,17 @@
-# Memory Verification Report — 2026-06-11 02:32
+# Memory Verification Report — 2026-06-12 02:51
 
-Checked: 20 | Stale: 10 | Fixed: 10 | Deleted: 0 | Errors: 0 | Skipped recent: 184
+Checked: 20 | Stale: 13 | Fixed: 13 | Deleted: 0 | Errors: 0 | Skipped recent: 180
 
-- **UPDATED** `49bad57a-91c` — Confirmed from git status/log plus backend/main.py, backend/events.py, backend/bookings.py, backend/space_requests.py, frontend local-assets, and docs; the old memory's git state is stale but the dirty-worktree and feature-status claims are mostly right.
-- **UPDATED** `5193e292-84c` — Confirmed in backend/accounting.py and backend/main.py: package rows are extracted from service-sales detail rows by numeric invoice id; matched rows set amount from amount_charged, adjusted from amount_adjusted, paid/square_matched/package_matched from amount_received, balance to $0.00, and admin review marks package rows verified.
-- **UPDATED** `df38bd7a-069` — Codex was right: the code sets row['amount'] from amount_charged and row['adjusted'] from amount_adjusted, while paid/package_matched/package_amount_received use amount_received.
-- **UPDATED** `543316d6-a0f` — Confirmed against the actual backup script, crontab, mounted USB, backup log, restore doc, and current manifest. Codex was right substantively; the original memory is partial because it is truncated at 'paym'.
-- **UPDATED** `e694cdbb-549` — Confirmed from actual auth.js and HTML references; Codex was right that the old memory was partially stale.
-- **UPDATED** `0f348850-0a8` — Read the migrations, app/main.py, app/services/prompts.py, app/routers/admin.py, app/problems/base.py, and problem/test examples. Codex was right: the old memory was truncated and omitted the current source-signature stale-row behavior, while the substantive existing claims still match current code.
-- **UPDATED** `6915f2e4-e10` — Codex was right: the core service/project/app claims are confirmed, but the memory was incomplete and needed the deploy-script/runbook caveat plus the exam-script confirmation.
-- **UPDATED** `f4352c11-da8` — Verified against the actual repo: app/main.py defines FastAPI, repo docs/scripts reference classes.chiehwu.com, the Vessence auditor still targets localhost:8501/dev-login and Cloud SQL proxy settings, git HEAD/status match Codex's verdict, and alembic heads reports 0077_section_event_border_color.
-- **UPDATED** `d41c8d92-a17` — Confirmed against teacher.py, deps.py, and templates. Codex was right: the original memory is truncated and overstates TA unenrollment support.
-- **UPDATED** `4b55a956-525` — Codex was mostly right: the original quarantine path was truncated, short-term janitor deletes still bypass quarantine, and current live cron runs via nightly_self_improve; actual code also shows setup.sh still has a standalone janitor cron template.
+- **UPDATED** `6852a648-d83` — Direct inspection confirmed most of Codex's verdict: the memory is stale/truncated at accounting.p and should name backend/accounting.py. Codex was wrong only about this sandbox not being able to read the live crontab; crontab -l succeeded and contains the Waterlily backup line.
+- **UPDATED** `2c894759-104` — Verified against /home/chieh/code/waterlily/backend/main.py, backend/templates/admin.html, and .auth/auth.db. Codex was mostly right; the original memory was truncated, over-implied generic options were removed from taxonomy, and the benchmark stats were not found in code/artifacts.
+- **UPDATED** `a9313c47-cb6` — Actual code confirms the repo, roles, email worker, signature verification, raw-email storage, and Gemma default. Codex was wrong about 8088/8090 not running in this audit, so the corrected memory keeps the service fact but timestamps it.
+- **UPDATED** `ce382ed9-746` — Actual code confirms the storage/model/migration claims, but the old UI placement is stale: the global LaTeX block is before the New module form and module browser, not below a folder-manager link.
+- **UPDATED** `31bc71dc-77c` — Code confirms the workflow claims; the stored memory is only stale because it is truncated at the end.
+- **UPDATED** `fd478e39-b62` — Confirmed against agent_skills/google_cloud_receipts.py and repo search; Codex was right, and the existing memory is only incomplete because it is truncated at the end.
+- **UPDATED** `136c24ff-98c` — Confirmed in code: _default_out_dir() returns ~/Downloads/google_cloud_receipts_<timestamp>/, so the old plain ~/Downloads/ detail was stale; the rest matches the script.
+- **UPDATED** `da8286ca-8ab` — Original memory was truncated and slightly mischaracterized topic_memory; code confirms the core provider centralization claims, and live crontab is readable here and matches the backup.
+- **UPDATED** `ef1bd7ff-8bd` — Confirmed against q1.py through q10.py, the setup script, and the test file; Codex was right that the old memory's test path was stale/incomplete.
+- **UPDATED** `fa8de932-f4d` — Actual q6-q10 code matches Codex's verdict; the stored memory is stale only because q10 is truncated and missing the final gradient-evaluation detail.
+- **UPDATED** `f4f3204b-7d1` — Confirmed from actual code and tests; targeted pytest collected and passed 146 tests, so the old 124 count is stale.
+- **UPDATED** `1efeb6e4-a73` — Codex was right that the memory was partial/stale: the code constants and architecture still match, but live GCP now shows revision teaching-app-v2-00127-jqx rather than teaching-app-v2-00087-xm5.
+- **UPDATED** `dca272e8-326` — Verified against actual files in /home/chieh/code/chieh_class_v2. The substantive claims are current; only the dangling truncated tail "Run lo" is stale/bad.
