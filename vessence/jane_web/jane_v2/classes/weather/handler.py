@@ -111,6 +111,10 @@ def _normalize_day(day: str | None, forecast: list[dict]) -> dict | None:
     return None
 
 
+def _without_debug_fields(entry: dict) -> dict:
+    return {k: v for k, v in entry.items() if not k.startswith("debug_")}
+
+
 def _slice_for(topic: str, day: str | None, data: dict) -> dict | None:
     """Build the smallest dict that answers the topic/day combo. Returns
     None when the slice can't be assembled (escalate)."""
@@ -156,17 +160,18 @@ def _slice_for(topic: str, day: str | None, data: dict) -> dict | None:
                     for d in days]
             return {"topic": "weekly_forecast", "days": slim}
         if day_entry:
-            return {"topic": "day_forecast", "day": day_entry}
+            return {"topic": "day_forecast", "day": _without_debug_fields(day_entry)}
         # default: today
-        return {"topic": "day_forecast", "day": forecast[0] if forecast else {}}
+        return {"topic": "day_forecast",
+                "day": _without_debug_fields(forecast[0]) if forecast else {}}
 
     if topic == "current":
-        return {"topic": "current", "current": current,
-                "today": forecast[0] if forecast else {}}
+        return {"topic": "current", "current": _without_debug_fields(current),
+                "today": _without_debug_fields(forecast[0]) if forecast else {}}
 
     # overview = "how's the weather": current + today's forecast
-    return {"topic": "overview", "current": current,
-            "today": forecast[0] if forecast else {},
+    return {"topic": "overview", "current": _without_debug_fields(current),
+            "today": _without_debug_fields(forecast[0]) if forecast else {},
             "air_quality_aqi": air.get("us_aqi") or air.get("aqi")}
 
 
