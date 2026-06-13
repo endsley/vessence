@@ -1,7 +1,7 @@
-# Pipeline Audit Report — 2026-06-11 01:13
+# Pipeline Audit Report — 2026-06-13 01:12
 
 - Prompts audited: **6**
-- Elapsed: 1188s
+- Elapsed: 1137s
 - Classification failures: **2**
 - Response failures: **3**
 - Auto-fixes applied (exemplars added): **0**
@@ -21,8 +21,7 @@
 | use the source code as your guide | todo list | others |
 
 ## Response failures (top 20) — usually need code changes
-- **help pay it** (web_automation/stage3): [ACK]Chieh, I can help, but I need to know what we’re paying first.[/ACK]
-
-What is “it”: a bill, invoice, ticket, subscription, or something else? Sen
-- **right now, you are using the same codex process for each prompt instead of spawn** (others/stage3): [ACK]Chieh, I’ll verify the current Stage 3 brain launch path quickly.[/ACK]I found the relevant implementation: Stage 3 has a dedicated `standing_cod
-- **currently, the waterlily site is web only meant for browsers on laptops and comp** (others/stage3): [ACK]Chieh, I’ll inspect the Waterlily and education projects first, then adapt the Waterlily UI for mobile across the site; this will take a bit.[/AC
+- **help pay it** (web_automation/stage3): [ACK]Chieh, I can help pay it, but I need one detail first.[/ACK]
+What are we paying, and where should I pay it? [[AWAITING:payment_details
+- **right now, you are using the same codex process for each prompt instead of spawn** (others/stage3): [ACK]Chieh, I’ll verify the Stage 3 brain process behavior from the runtime code quickly.[/ACK]I found the likely path: Stage 3 escalates through `jan
+- **use the source code as your guide** (todo list/stage3): [ACK]Got it, Chieh — I’ll ground this in the source code.[/ACK]
