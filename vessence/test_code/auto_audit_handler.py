@@ -1,570 +1,508 @@
-import asyncio
-import json
+import ast
 import re
 import sys
 import types
-from datetime import timedelta
 from pathlib import Path
 
 import pytest
 
-from jane_web.jane_v2 import classes as class_registry
-from jane_web.jane_v2.classes.weather import handler as weather_handler
-from jane_web.jane_v2.classes.weather import metadata as weather_metadata
+from jane_web.jane_v2.classes.music_play import handler as music_handler
+from jane_web.jane_v2.classes.music_play import metadata as music_metadata
 
 
-MODULE_PATH = Path("/home/chieh/ambient/vessence/jane_web/jane_v2/classes/weather/handler.py")
-CLASSES_DIR = Path("/home/chieh/ambient/vessence/jane_web/jane_v2/classes")
-PIPELINE_PATH = Path("/home/chieh/ambient/vessence/jane_web/jane_v2/pipeline.py")
-
-
-def _run(coro):
-    return asyncio.run(coro)
-
-
-def _weather_data(days=7, include_pollen=True):
-    today = weather_handler.date.today()
-    forecast = []
-    for offset in range(days):
-        day = today + timedelta(days=offset)
-        forecast.append(
-            {
-                "date": day.isoformat(),
-                "weekday": day.strftime("%A"),
-                "high": 70 + offset,
-                "low": 50 + offset,
-                "condition": "partly cloudy" if offset else "clear",
-                "precipitation": {
-                    "chance": 10 + offset,
-                    "amount": round(0.01 * offset, 2),
-                },
-                "wind": {"speed_mph": 8 + offset, "gust_mph": 12 + offset},
-                "humidity": {"min": 40, "max": 70},
-                "uv_index": 4,
-                "debug_full_cache_marker": f"forecast-marker-{offset}",
-            }
-        )
-
-    data = {
-        "current": {
-            "temperature": 61.4,
-            "feels_like": 58.9,
-            "humidity": 54,
-            "wind": {"speed_mph": 9, "gust_mph": 15},
-            "condition": "clear",
-            "debug_full_cache_marker": "current-marker",
-        },
-        "forecast": forecast,
-        "air_quality": {"us_aqi": 35, "pm25": 7.5, "pm10": 12.2},
-    }
-    if include_pollen:
-        data["pollen"] = {"tree": "low", "grass": "moderate", "weed": "low"}
-    return data
-
-
-@pytest.fixture
-def weather_cache(tmp_path, monkeypatch):
-    path = tmp_path / "weather.json"
-    path.write_text(json.dumps(_weather_data()))
-    monkeypatch.setattr(weather_handler, "WEATHER_PATH", path)
-    return path
-
-
-@pytest.fixture
-def phrase_stub(monkeypatch):
-    calls = []
-
-    async def fake_phrase(slice_obj, prompt):
-        calls.append({"slice": slice_obj, "prompt": prompt})
-        return "Mock weather answer."
-
-    monkeypatch.setattr(weather_handler, "_phrase", fake_phrase)
-    return calls
-
-
-def test_handle_success_returns_text_and_stage2_followup(weather_cache, phrase_stub):
-    result = _run(
-        weather_handler.handle(
-            "what's the weather",
-            params={"topic": "overview", "day": None, "location": "Medford, MA"},
-        )
-    )
-
-    assert isinstance(result, dict)
-    assert result["text"] == "Mock weather answer. Want the weather for another day?"
-    pending = result["structured"]["pending_action"]
-    assert pending["type"] == "STAGE2_FOLLOWUP"
-    assert pending["handler_class"] == "weather"
-    assert pending["awaiting"] == "another_day_or_stop"
-    assert pending["data"] == {
-        "awaiting": "another_day_or_stop",
-        "topic": "overview",
-        "location": "medford, ma",
-    }
-    assert pending["expires_at"].endswith("Z")
-    assert phrase_stub[0]["slice"]["topic"] == "overview"
-
-
-@pytest.mark.parametrize(
-    "prompt",
-    [
-        "can you look it up online",
-        "what's causing this rain",
-        "latest on the storm",
-        "search the web for the forecast",
-    ],
+MODULE_PATH = Path(
+    "/home/chieh/ambient/vessence/jane_web/jane_v2/classes/music_play/handler.py"
 )
-def test_research_or_online_questions_escalate_without_cache_or_llm(monkeypatch, prompt):
-    async def answer_for_should_not_run(*args, **kwargs):
-        raise AssertionError("_answer_for should not run for forced escalation")
-
-    monkeypatch.setattr(weather_handler, "_answer_for", answer_for_should_not_run)
-
-    assert _run(weather_handler.handle(prompt, params={"topic": "overview"})) is None
 
 
-@pytest.mark.parametrize("location", ["Tokyo", "Somerville", "San Francisco, CA"])
-def test_non_medford_locations_escalate_without_cache_or_llm(monkeypatch, location):
-    async def answer_for_should_not_run(*args, **kwargs):
-        raise AssertionError("_answer_for should not run for non-Medford locations")
-
-    monkeypatch.setattr(weather_handler, "_answer_for", answer_for_should_not_run)
-
-    result = _run(
-        weather_handler.handle(
-            "what's the weather there",
-            params={"topic": "current", "location": location},
-        )
-    )
-    assert result is None
+def _playlist(pid="playlist-1", name="Test Playlist", tracks=None):
+    return {
+        "id": pid,
+        "name": name,
+        "tracks": tracks if tracks is not None else ["one.mp3", "two.mp3"],
+    }
 
 
-@pytest.mark.parametrize("prompt", ["", None, "weather " + ("very " * 5000)])
-def test_empty_none_and_very_long_prompts_are_handled_when_weather_was_routed(
-    weather_cache, phrase_stub, prompt
-):
-    result = _run(weather_handler.handle(prompt, params={"topic": "overview"}))
-
+def _assert_documented_shape(result):
     assert isinstance(result, dict)
-    assert "text" in result
-    assert result["text"].startswith("Mock weather answer.")
-    assert phrase_stub[0]["prompt"] == prompt
-
-
-def test_malformed_topic_falls_back_to_overview(weather_cache, phrase_stub):
-    result = _run(
-        weather_handler.handle(
-            "weather please",
-            params={"topic": "not-a-real-topic", "day": "%%%"},
-        )
-    )
-
-    assert isinstance(result, dict)
-    assert phrase_stub[0]["slice"]["topic"] == "overview"
-
-
-def test_unreadable_cache_escalates_before_llm(tmp_path, monkeypatch):
-    missing = tmp_path / "missing-weather.json"
-    monkeypatch.setattr(weather_handler, "WEATHER_PATH", missing)
-
-    async def phrase_should_not_run(*args, **kwargs):
-        raise AssertionError("_phrase should not run when the cache is missing")
-
-    monkeypatch.setattr(weather_handler, "_phrase", phrase_should_not_run)
-
-    assert _run(weather_handler._answer_for("weather", "overview", None, None)) is None
-
-
-def test_malformed_cache_escalates_before_llm(tmp_path, monkeypatch):
-    path = tmp_path / "weather.json"
-    path.write_text("{not valid json")
-    monkeypatch.setattr(weather_handler, "WEATHER_PATH", path)
-
-    async def phrase_should_not_run(*args, **kwargs):
-        raise AssertionError("_phrase should not run when the cache is malformed")
-
-    monkeypatch.setattr(weather_handler, "_phrase", phrase_should_not_run)
-
-    assert _run(weather_handler._answer_for("weather", "overview", None, None)) is None
-
-
-def test_pollen_cache_miss_escalates(weather_cache, monkeypatch):
-    weather_cache.write_text(json.dumps(_weather_data(include_pollen=False)))
-
-    async def phrase_should_not_run(*args, **kwargs):
-        raise AssertionError("_phrase should not run when pollen is missing")
-
-    monkeypatch.setattr(weather_handler, "_phrase", phrase_should_not_run)
-
-    assert _run(weather_handler._answer_for("pollen?", "pollen", None, None)) is None
-
-
-def test_empty_llm_answer_escalates(weather_cache, monkeypatch):
-    async def empty_phrase(*args, **kwargs):
-        return ""
-
-    monkeypatch.setattr(weather_handler, "_phrase", empty_phrase)
-
-    assert _run(weather_handler._answer_for("weather", "overview", None, None)) is None
-
-
-@pytest.mark.parametrize(
-    "day_spec,expected_offset",
-    [
-        ("today", 0),
-        ("tomorrow", 1),
-    ],
-)
-def test_normalize_day_today_and_tomorrow(day_spec, expected_offset):
-    data = _weather_data()
-    expected = (
-        weather_handler.date.today() + timedelta(days=expected_offset)
-    ).isoformat()
-
-    assert weather_handler._normalize_day(day_spec, data["forecast"])["date"] == expected
-
-
-def test_normalize_day_accepts_weekday_and_iso_date():
-    data = _weather_data()
-    target_entry = data["forecast"][3]
-    weekday = target_entry["weekday"].lower()
-
-    assert weather_handler._normalize_day(weekday, data["forecast"]) == target_entry
-    assert weather_handler._normalize_day(target_entry["date"], data["forecast"]) == target_entry
-
-
-@pytest.mark.parametrize("day_spec", [None, "", "not-a-day", "2026-99-99", "this_week", "weekend"])
-def test_normalize_day_returns_none_for_missing_multi_day_or_invalid_specs(day_spec):
-    assert weather_handler._normalize_day(day_spec, _weather_data()["forecast"]) is None
-
-
-@pytest.mark.parametrize(
-    "topic,day_spec,expected_shape",
-    [
-        ("pollen", None, {"topic", "pollen"}),
-        ("air_quality", None, {"topic", "air_quality"}),
-        ("wind", "tomorrow", {"topic", "day", "wind"}),
-        ("wind", None, {"topic", "current_wind"}),
-        ("precipitation", "tomorrow", {"topic", "days"}),
-        ("precipitation", "this_week", {"topic", "days"}),
-        ("forecast", "tomorrow", {"topic", "day"}),
-        ("forecast", "this_week", {"topic", "days"}),
-        ("current", None, {"topic", "current", "today"}),
-        ("overview", None, {"topic", "current", "today", "air_quality_aqi"}),
-    ],
-)
-def test_slice_for_builds_small_documented_fact_slices(topic, day_spec, expected_shape):
-    slice_obj = weather_handler._slice_for(topic, day_spec, _weather_data())
-
-    assert isinstance(slice_obj, dict)
-    assert set(slice_obj) == expected_shape
-    assert "debug_full_cache_marker" not in json.dumps(slice_obj)
-
-
-def test_precipitation_default_slice_is_today_plus_next_two_days():
-    data = _weather_data()
-
-    slice_obj = weather_handler._slice_for("precipitation", None, data)
-
-    assert slice_obj["topic"] == "precipitation"
-    assert len(slice_obj["days"]) == 3
-    assert [day["date"] for day in slice_obj["days"]] == [
-        data["forecast"][0]["date"],
-        data["forecast"][1]["date"],
-        data["forecast"][2]["date"],
-    ]
-    assert set(slice_obj["days"][0]) == {
-        "weekday",
-        "date",
-        "precipitation",
-        "condition",
-    }
-
-
-def test_day_reference_and_safety_net_for_non_today_answers():
-    data = _weather_data()
-    tomorrow_entry = data["forecast"][1]
-    future_entry = data["forecast"][3]
-
-    assert weather_handler._day_reference({"day": data["forecast"][0]}) == "today"
-    assert weather_handler._day_reference({"day": tomorrow_entry}) == "tomorrow"
-    assert weather_handler._day_reference({"day": future_entry}) == future_entry["weekday"]
-    assert weather_handler._day_reference({"days": data["forecast"][:3]}) == "the next several days"
-    assert (
-        weather_handler._ensure_day_reference("High around 70.", "tomorrow")
-        == "Tomorrow: high around 70."
-    )
-    assert (
-        weather_handler._ensure_day_reference("High around 70 tomorrow.", "tomorrow")
-        == "High around 70 tomorrow."
-    )
-
-
-def test_resume_followup_with_day_reuses_pending_topic(weather_cache, phrase_stub):
-    pending = {
-        "type": "STAGE2_FOLLOWUP",
-        "handler_class": "weather",
-        "data": {"topic": "forecast", "location": "medford"},
-    }
-
-    result = _run(weather_handler.handle("how about tomorrow", pending=pending))
-
-    assert isinstance(result, dict)
-    assert phrase_stub[0]["slice"]["topic"] == "day_forecast"
-    assert result["structured"]["pending_action"]["data"]["topic"] == "forecast"
-
-
-def test_resume_followup_without_day_abandons_for_stage3(weather_cache, phrase_stub):
-    pending = {
-        "type": "STAGE2_FOLLOWUP",
-        "handler_class": "weather",
-        "data": {"topic": "forecast", "location": "medford"},
-    }
-
-    result = _run(weather_handler.handle("actually something else", pending=pending))
-
-    assert result == {"abandon_pending": True, "force_stage3": True}
-    assert phrase_stub == []
-
-
-def _install_end_conversation_stubs(monkeypatch, is_end):
-    import agent_skills
-
-    end_phrase_mod = types.ModuleType("agent_skills.end_phrase")
-    end_phrase_mod.is_end = is_end
-
-    utils_mod = types.ModuleType("agent_skills.private_handler_utils")
-    calls = []
-
-    def fake_end_conversation(text, structured=None):
-        calls.append({"text": text, "structured": structured})
-        return {"text": text, "structured": structured or {}, "ended": True}
-
-    utils_mod.end_conversation = fake_end_conversation
-    monkeypatch.setitem(sys.modules, "agent_skills.end_phrase", end_phrase_mod)
-    monkeypatch.setitem(sys.modules, "agent_skills.private_handler_utils", utils_mod)
-    monkeypatch.setattr(agent_skills, "end_phrase", end_phrase_mod, raising=False)
-    return calls
-
-
-def test_resume_end_conversation_requires_explicit_end_phrase(monkeypatch, weather_cache):
-    calls = _install_end_conversation_stubs(
-        monkeypatch, lambda prompt: prompt == "no thanks"
-    )
-    pending = {
-        "type": "STAGE2_FOLLOWUP",
-        "handler_class": "weather",
-        "data": {"topic": "forecast", "location": "medford"},
-    }
-
-    ambiguous = _run(weather_handler.handle("maybe later", pending=pending))
-    ended = _run(weather_handler.handle("no thanks", pending=pending))
-
-    assert ambiguous == {"abandon_pending": True, "force_stage3": True}
-    assert ended == {"text": "Ok.", "structured": {"intent": "weather"}, "ended": True}
-    assert calls == [{"text": "Ok.", "structured": {"intent": "weather"}}]
-
-
-def test_phrase_posts_minimal_slice_to_ollama_and_records_day_reference(monkeypatch):
-    posts = []
-
-    class FakeResponse:
-        def raise_for_status(self):
-            return None
-
-        def json(self):
-            return {"response": "High around 71 with partly cloudy skies."}
-
-    class FakeAsyncClient:
-        def __init__(self, timeout):
-            self.timeout = timeout
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, exc_type, exc, tb):
-            return False
-
-        async def post(self, url, json):
-            posts.append({"url": url, "payload": json, "timeout": self.timeout})
-            return FakeResponse()
-
-    monkeypatch.setattr(weather_handler.httpx, "AsyncClient", FakeAsyncClient)
-
-    slice_obj = {"topic": "day_forecast", "day": _weather_data()["forecast"][1]}
-    result = _run(weather_handler._phrase(slice_obj, "what about tomorrow?"))
-
-    assert result == "Tomorrow: high around 71 with partly cloudy skies."
-    assert len(posts) == 1
-    assert posts[0]["url"] == weather_handler.OLLAMA_URL
-    payload = posts[0]["payload"]
-    assert payload["model"] == weather_handler.MODEL
-    assert payload["stream"] is False
-    assert payload["think"] is False
-    assert payload["keep_alive"] == -1
-    assert payload["options"]["num_predict"] == 60
-    assert payload["options"]["num_ctx"] == weather_handler.LOCAL_LLM_NUM_CTX
-    assert '"topic": "day_forecast"' in payload["prompt"]
-    assert "current-marker" not in payload["prompt"]
-    assert "pollen" not in payload["prompt"].lower()
-
-
-def test_phrase_returns_none_when_ollama_call_fails(monkeypatch):
-    class RaisingAsyncClient:
-        def __init__(self, timeout):
-            self.timeout = timeout
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, exc_type, exc, tb):
-            return False
-
-        async def post(self, url, json):
-            raise RuntimeError("ollama unavailable")
-
-    monkeypatch.setattr(weather_handler.httpx, "AsyncClient", RaisingAsyncClient)
-
-    assert _run(weather_handler._phrase({"topic": "overview"}, "weather")) is None
-
-
-def test_weather_handler_has_no_db_queries_or_sql_side_effects():
-    source = MODULE_PATH.read_text()
-    lowered = source.lower()
-
-    assert "sqlite" not in lowered
-    assert "sqlalchemy" not in lowered
-    assert re.search(r"\b(select|insert|update|delete)\s+.+\bfrom\b", lowered) is None
-
-
-def test_no_irreversible_client_actions_exist_and_end_conversation_is_guarded():
-    source = MODULE_PATH.read_text()
-    irreversible_markers = [
-        "sms_send_direct",
-        "contacts.sms_send",
-        "email.send",
-        "email.delete",
-        ".unlink(",
-        "os.remove(",
-        "shutil.rmtree(",
-        "DELETE FROM",
-        "DROP TABLE",
-    ]
-
-    assert [marker for marker in irreversible_markers if marker in source] == []
-    assert "end_conversation" in source
-    assert "if end_phrase.is_end(prompt):" in source
-
-
-def _topic_enum_from_schema(schema_text):
-    match = re.search(r"one of:\s*(.+?)\.\s", schema_text)
-    assert match, "topic schema must document its enum values"
+    assert isinstance(result.get("text"), str)
+    assert "playlist_id" in result
+    assert "playlist_name" in result
+
+
+def _schema_kind_values():
+    schema = music_metadata.PARAMS_SCHEMA["kind"]
+    match = re.search(r"one of:\s*([^.]*)\.", schema)
+    assert match, "PARAMS_SCHEMA['kind'] must document its enum values"
     return {part.strip() for part in match.group(1).split("|")}
 
 
-def test_valid_topics_match_metadata_params_schema_and_handler_branches():
-    source = MODULE_PATH.read_text()
-    schema_topics = _topic_enum_from_schema(weather_metadata.PARAMS_SCHEMA["topic"])
-    branch_topics = set(re.findall(r'if topic == "([^"]+)"', source))
+@pytest.fixture
+def mocked_playlist_db(monkeypatch):
+    state = {"candidates": [], "playlists": {}}
+    calls = {"list_playlists": 0, "get_playlist": []}
 
-    assert schema_topics == weather_handler._VALID_TOPICS
-    assert branch_topics <= weather_handler._VALID_TOPICS
-    assert weather_handler._VALID_TOPICS - branch_topics == {"overview"}
+    vault_pkg = types.ModuleType("vault_web")
+    vault_pkg.__path__ = []
+    playlists_mod = types.ModuleType("vault_web.playlists")
 
+    def list_playlists():
+        calls["list_playlists"] += 1
+        return list(state["candidates"])
 
-def test_all_valid_topics_are_reachable_from_at_least_one_input():
-    data = _weather_data()
-    observed = {}
+    def get_playlist(playlist_id):
+        calls["get_playlist"].append(playlist_id)
+        return state["playlists"].get(playlist_id)
 
-    for topic in sorted(weather_handler._VALID_TOPICS):
-        day = "this_week" if topic in {"forecast", "precipitation"} else "tomorrow"
-        slice_obj = weather_handler._slice_for(topic, day, data)
-        assert slice_obj is not None, f"{topic} did not produce a slice"
-        observed[topic] = slice_obj["topic"]
-
-    assert set(observed) == weather_handler._VALID_TOPICS
-    assert observed["forecast"] in {"day_forecast", "weekly_forecast"}
-    assert observed["overview"] == "overview"
-
-
-def test_day_phrase_map_has_no_contradictory_or_unreachable_values():
-    phrase_to_value = dict(weather_handler._DAY_PHRASE_MAP)
-    phrases = [phrase for phrase, _ in weather_handler._DAY_PHRASE_MAP]
-    allowed_values = {
-        "today",
-        "tomorrow",
-        "this_week",
-        "weekend",
-        *weather_handler._WEEKDAYS,
-    }
-
-    assert len(phrases) == len(set(phrases))
-    assert phrase_to_value["tonight"] == "today"
-    assert phrase_to_value["day after tomorrow"] is None
-    assert phrases.index("day after tomorrow") < phrases.index("tomorrow")
-    for phrase, mapped in weather_handler._DAY_PHRASE_MAP:
-        if phrase == "day after tomorrow":
-            continue
-        assert mapped in allowed_values
-        assert weather_handler._day_from_followup(f"and {phrase}?") == mapped
-
-    day_after = weather_handler._day_from_followup("what about the day after tomorrow?")
-    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", day_after)
+    playlists_mod.list_playlists = list_playlists
+    playlists_mod.get_playlist = get_playlist
+    monkeypatch.setitem(sys.modules, "vault_web", vault_pkg)
+    monkeypatch.setitem(sys.modules, "vault_web.playlists", playlists_mod)
+    return state, calls
 
 
-def test_weather_few_shot_mappings_do_not_mark_fallback_classes_high_confidence():
-    registry = class_registry.get_registry(refresh=True)
-    fallback_classes = {"others", "delegate opus", "unclear"}
+@pytest.fixture
+def mocked_library_resolver(monkeypatch):
+    state = {"playlist": None}
+    calls = []
 
-    for prompt, label in weather_metadata.METADATA["few_shot"]:
-        class_name, confidence = label.rsplit(":", 1)
-        assert class_name in registry, f"{prompt!r} maps to unknown class {class_name!r}"
-        if class_name in fallback_classes:
-            assert confidence != "High", (
-                f"{prompt!r} maps fallback class {class_name!r} with High confidence"
-            )
+    main_mod = types.ModuleType("jane_web.main")
+
+    def create_music_playlist_from_query(query):
+        calls.append(query)
+        return state["playlist"]
+
+    main_mod.create_music_playlist_from_query = create_music_playlist_from_query
+    monkeypatch.setitem(sys.modules, "jane_web.main", main_mod)
+
+    import jane_web
+
+    monkeypatch.setattr(jane_web, "main", main_mod, raising=False)
+    return state, calls
 
 
-def test_registered_classes_have_handlers_or_documented_no_handler_behavior():
-    registry = class_registry.get_registry(refresh=True)
-    pipeline_source = PIPELINE_PATH.read_text()
-    missing = []
+def test_none_and_empty_params_escalate_without_external_work(monkeypatch):
+    def should_not_match(_query):
+        raise AssertionError("playlist DB should not be queried without params")
 
-    for name, meta in registry.items():
-        if meta.get("handler") is not None:
-            continue
-        metadata_path = CLASSES_DIR / meta["pkg_name"] / "metadata.py"
-        text = metadata_path.read_text().lower()
-        documented = any(
-            phrase in text
-            for phrase in (
-                "no handler",
-                "always escalates",
-                "escalate to stage 3",
-                "short-circuits",
-                "fallback",
-            )
+    def should_not_resolve(_query):
+        raise AssertionError("library resolver should not run without params")
+
+    monkeypatch.setattr(music_handler, "_match_existing_playlist", should_not_match)
+    monkeypatch.setattr(music_handler, "_ephemeral_from_library", should_not_resolve)
+
+    assert music_handler.handle("", None) is None
+    assert music_handler.handle("play music", {}) is None
+
+
+def test_resume_escalates_without_external_work(monkeypatch):
+    def should_not_match(_query):
+        raise AssertionError("resume must not query playlists")
+
+    def should_not_resolve(_query):
+        raise AssertionError("resume must not create an ephemeral playlist")
+
+    monkeypatch.setattr(music_handler, "_match_existing_playlist", should_not_match)
+    monkeypatch.setattr(music_handler, "_ephemeral_from_library", should_not_resolve)
+
+    assert (
+        music_handler.handle(
+            "continue playing", {"kind": "resume", "query": None}
         )
-        pipeline_special = name == "end conversation" and 'cls == "end conversation"' in pipeline_source
-        if not documented and not pipeline_special:
-            missing.append(name)
-
-    assert missing == []
-
-
-def test_registered_weather_handler_returns_documented_shape(weather_cache, phrase_stub):
-    registry = class_registry.get_registry(refresh=True)
-    weather_meta = registry["weather"]
-
-    assert weather_meta["handler"] is weather_handler.handle
-
-    result = _run(
-        weather_meta["handler"](
-            "what's the weather",
-            params={"topic": "current", "location": "medford"},
-        )
+        is None
     )
 
-    assert isinstance(result, dict)
-    assert isinstance(result.get("text"), str)
-    assert result["text"]
+
+@pytest.mark.parametrize("kind", ["", "podcast", "delete", "play music", "unknown"])
+def test_missing_or_unknown_kind_escalates_without_side_effects(monkeypatch, kind):
+    def should_not_match(_query):
+        raise AssertionError("unknown kinds must not query playlists")
+
+    def should_not_resolve(_query):
+        raise AssertionError("unknown kinds must not create playlists")
+
+    monkeypatch.setattr(music_handler, "_match_existing_playlist", should_not_match)
+    monkeypatch.setattr(music_handler, "_ephemeral_from_library", should_not_resolve)
+
+    assert music_handler.handle("play something", {"kind": kind, "query": "jazz"}) is None
+
+
+def test_exact_existing_playlist_match_wins_over_v1_library(
+    mocked_playlist_db, mocked_library_resolver
+):
+    db_state, db_calls = mocked_playlist_db
+    library_state, library_calls = mocked_library_resolver
+    db_state["candidates"] = [{"id": "coldplay", "name": "Coldplay"}]
+    db_state["playlists"] = {
+        "coldplay": _playlist("coldplay", "Coldplay", ["a.mp3", "b.mp3"])
+    }
+    library_state["playlist"] = _playlist("tmp", "Playing: coldplay")
+
+    result = music_handler.handle(
+        "play coldplay", {"kind": "playlist", "query": "  coldplay  "}
+    )
+
+    _assert_documented_shape(result)
+    assert result == {
+        "text": "Playing Coldplay (2 tracks). [MUSIC_PLAY:coldplay]",
+        "playlist_id": "coldplay",
+        "playlist_name": "Coldplay",
+    }
+    assert db_calls == {"list_playlists": 1, "get_playlist": ["coldplay"]}
+    assert library_calls == []
+
+
+def test_partial_existing_playlist_match_uses_vault_db(
+    mocked_playlist_db, mocked_library_resolver
+):
+    db_state, db_calls = mocked_playlist_db
+    _library_state, library_calls = mocked_library_resolver
+    db_state["candidates"] = [
+        {"id": "focus", "name": "Deep Focus Instrumentals"},
+        {"id": "sleep", "name": "Sleep Sounds"},
+    ]
+    db_state["playlists"] = {
+        "focus": _playlist("focus", "Deep Focus Instrumentals", ["one.mp3"])
+    }
+
+    result = music_handler.handle(
+        "play focus", {"kind": "playlist", "query": "focus"}
+    )
+
+    _assert_documented_shape(result)
+    assert result["text"] == "Playing Deep Focus Instrumentals (1 tracks). [MUSIC_PLAY:focus]"
+    assert result["playlist_id"] == "focus"
+    assert db_calls == {"list_playlists": 1, "get_playlist": ["focus"]}
+    assert library_calls == []
+
+
+def test_fuzzy_existing_playlist_match_uses_rapidfuzz_when_available(
+    monkeypatch, mocked_playlist_db, mocked_library_resolver
+):
+    db_state, db_calls = mocked_playlist_db
+    _library_state, library_calls = mocked_library_resolver
+    db_state["candidates"] = [{"id": "lofi", "name": "Lo Fi Study Beats"}]
+    db_state["playlists"] = {
+        "lofi": _playlist("lofi", "Lo Fi Study Beats", ["beat.mp3"])
+    }
+
+    rapidfuzz_mod = types.ModuleType("rapidfuzz")
+    rapidfuzz_mod.fuzz = types.SimpleNamespace(
+        token_set_ratio=lambda query, name: 88
+        if query == "lofi study" and name == "lo fi study beats"
+        else 0
+    )
+    monkeypatch.setitem(sys.modules, "rapidfuzz", rapidfuzz_mod)
+
+    result = music_handler.handle(
+        "play lofi study", {"kind": "mood", "query": "lofi study"}
+    )
+
+    _assert_documented_shape(result)
+    assert result["playlist_id"] == "lofi"
+    assert "[MUSIC_PLAY:lofi]" in result["text"]
+    assert db_calls == {"list_playlists": 1, "get_playlist": ["lofi"]}
+    assert library_calls == []
+
+
+def test_library_resolver_runs_when_no_existing_playlist_matches(
+    mocked_playlist_db, mocked_library_resolver
+):
+    db_state, db_calls = mocked_playlist_db
+    library_state, library_calls = mocked_library_resolver
+    db_state["candidates"] = [{"id": "sleep", "name": "Sleep Sounds"}]
+    library_state["playlist"] = _playlist("tmp-jazz", "Playing: jazz", ["jazz.mp3"])
+
+    result = music_handler.handle("play jazz", {"kind": "genre", "query": "jazz"})
+
+    _assert_documented_shape(result)
+    assert result["text"] == "Playing Playing: jazz (1 tracks). [MUSIC_PLAY:tmp-jazz]"
+    assert result["playlist_id"] == "tmp-jazz"
+    assert db_calls == {"list_playlists": 1, "get_playlist": []}
+    assert library_calls == ["jazz"]
+
+
+def test_empty_query_for_shuffle_skips_vault_and_uses_library(
+    mocked_playlist_db, mocked_library_resolver
+):
+    _db_state, db_calls = mocked_playlist_db
+    library_state, library_calls = mocked_library_resolver
+    library_state["playlist"] = _playlist("random", "Random Mix", ["a.mp3"])
+
+    result = music_handler.handle("put on some music", {"kind": "shuffle", "query": ""})
+
+    _assert_documented_shape(result)
+    assert result["text"] == "Playing Random Mix (1 tracks). [MUSIC_PLAY:random]"
+    assert db_calls == {"list_playlists": 0, "get_playlist": []}
+    assert library_calls == [""]
+
+
+def test_none_query_is_treated_as_empty_for_actionable_kind(
+    mocked_playlist_db, mocked_library_resolver
+):
+    _db_state, db_calls = mocked_playlist_db
+    library_state, library_calls = mocked_library_resolver
+    library_state["playlist"] = _playlist("random", "Random Mix", [])
+
+    result = music_handler.handle(None, {"kind": "song", "query": None})
+
+    _assert_documented_shape(result)
+    assert result["text"] == "Playing Random Mix (0 tracks). [MUSIC_PLAY:random]"
+    assert db_calls == {"list_playlists": 0, "get_playlist": []}
+    assert library_calls == [""]
+
+
+def test_library_miss_returns_documented_failure_shape(
+    mocked_playlist_db, mocked_library_resolver
+):
+    _db_state, _db_calls = mocked_playlist_db
+    _library_state, library_calls = mocked_library_resolver
+
+    result = music_handler.handle(
+        "play not in the library", {"kind": "song", "query": "not in the library"}
+    )
+
+    assert result == {
+        "text": "Unable to find the song in our list.",
+        "playlist_id": None,
+        "playlist_name": None,
+    }
+    assert library_calls == ["not in the library"]
+
+
+def test_very_long_query_is_passed_to_library_without_crashing(
+    mocked_playlist_db, mocked_library_resolver
+):
+    _db_state, _db_calls = mocked_playlist_db
+    library_state, library_calls = mocked_library_resolver
+    long_query = "ambient " * 10000
+    library_state["playlist"] = _playlist("long", "Long Query Mix", ["track.mp3"])
+
+    result = music_handler.handle(
+        "play " + long_query, {"kind": "mood", "query": long_query}
+    )
+
+    _assert_documented_shape(result)
+    assert result["playlist_id"] == "long"
+    assert library_calls == [long_query.strip()]
+
+
+def test_format_play_response_uses_defaults_and_omits_marker_without_id():
+    result = music_handler._format_play_response({"tracks": None})
+
+    assert result == {
+        "text": "Playing that playlist (0 tracks).",
+        "playlist_id": None,
+        "playlist_name": "that playlist",
+    }
+    assert "[MUSIC_PLAY:" not in result["text"]
+
+
+def test_normalize_collapses_case_edges_and_internal_whitespace():
+    assert music_handler._normalize("  Lo   Fi\tStudy\nBeats  ") == "lo fi study beats"
+    assert music_handler._normalize("") == ""
+    assert music_handler._normalize(None) == ""
+
+
+def test_vault_import_failure_falls_through_to_library(monkeypatch, mocked_library_resolver):
+    library_state, library_calls = mocked_library_resolver
+    library_state["playlist"] = _playlist("fallback", "Fallback Mix", ["one.mp3"])
+
+    real_import = __import__
+
+    def failing_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "vault_web.playlists":
+            raise ImportError("blocked vault import")
+        return real_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr("builtins.__import__", failing_import)
+
+    result = music_handler.handle(
+        "play anything", {"kind": "playlist", "query": "anything"}
+    )
+
+    _assert_documented_shape(result)
+    assert result["playlist_id"] == "fallback"
+    assert library_calls == ["anything"]
+
+
+def test_v1_library_import_failure_escalates_after_vault_miss(mocked_playlist_db, monkeypatch):
+    db_state, db_calls = mocked_playlist_db
+    db_state["candidates"] = []
+
+    real_import = __import__
+
+    def failing_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "jane_web.main":
+            raise ImportError("blocked library import")
+        return real_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr("builtins.__import__", failing_import)
+
+    result = music_handler.handle("play jazz", {"kind": "genre", "query": "jazz"})
+
+    assert result == {
+        "text": "Unable to find the song in our list.",
+        "playlist_id": None,
+        "playlist_name": None,
+    }
+    assert db_calls == {"list_playlists": 1, "get_playlist": []}
+
+
+def test_actionable_kind_lookup_matches_metadata_enum_without_contradictions():
+    schema_kinds = _schema_kind_values()
+    actionable = music_handler._ACTIONABLE_KINDS
+
+    assert schema_kinds == actionable | {"resume"}
+    assert "resume" not in actionable
+    assert actionable
+    assert all(kind == kind.strip().lower() for kind in actionable)
+    assert all(re.fullmatch(r"[a-z_]+", kind) for kind in actionable)
+    assert actionable.isdisjoint(
+        {"delete", "send", "send_message", "sms_send_direct", "end_conversation"}
+    )
+
+
+def test_kind_literals_referenced_by_handler_are_declared_in_metadata_or_escalate():
+    source = MODULE_PATH.read_text()
+    tree = ast.parse(source)
+    compared_literals = set()
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Compare):
+            continue
+        left_is_kind = isinstance(node.left, ast.Name) and node.left.id == "kind"
+        for comparator in node.comparators:
+            if left_is_kind and isinstance(comparator, ast.Constant):
+                if isinstance(comparator.value, str):
+                    compared_literals.add(comparator.value)
+
+    schema_kinds = _schema_kind_values()
+    assert compared_literals <= schema_kinds
+    assert compared_literals - music_handler._ACTIONABLE_KINDS == {"resume"}
+
+
+@pytest.mark.parametrize("kind", sorted(music_handler._ACTIONABLE_KINDS))
+def test_every_actionable_kind_is_reachable_and_returns_documented_shape(
+    monkeypatch, kind
+):
+    calls = []
+
+    def no_existing_playlist(query):
+        calls.append(("db", query))
+        return None
+
+    def library_playlist(query):
+        calls.append(("library", query))
+        return _playlist(f"{kind}-id", f"{kind.title()} Mix", ["track.mp3"])
+
+    monkeypatch.setattr(music_handler, "_match_existing_playlist", no_existing_playlist)
+    monkeypatch.setattr(music_handler, "_ephemeral_from_library", library_playlist)
+
+    result = music_handler.handle(
+        f"play {kind}", {"kind": kind.upper(), "query": f" {kind} query "}
+    )
+
+    _assert_documented_shape(result)
+    assert result["playlist_id"] == f"{kind}-id"
+    assert result["playlist_name"] == f"{kind.title()} Mix"
+    assert result["text"].endswith(f"[MUSIC_PLAY:{kind}-id]")
+    assert calls == [("db", f"{kind} query"), ("library", f"{kind} query")]
+
+
+def test_resume_schema_value_is_explicitly_documented_as_escalation(monkeypatch):
+    assert "resume" in _schema_kind_values()
+    assert "resume" in music_handler.__doc__
+    assert "resume" in music_metadata.PARAMS_SCHEMA["kind"]
+
+    def should_not_run(_query):
+        raise AssertionError("resume is documented as escalate-only")
+
+    monkeypatch.setattr(music_handler, "_match_existing_playlist", should_not_run)
+    monkeypatch.setattr(music_handler, "_ephemeral_from_library", should_not_run)
+
+    assert music_handler.handle("resume", {"kind": "resume", "query": ""}) is None
+
+
+def test_music_play_class_registry_has_handler_that_returns_documented_shape(monkeypatch):
+    from jane_web.jane_v2 import classes as class_registry
+
+    monkeypatch.setattr(music_handler, "_match_existing_playlist", lambda _query: None)
+    monkeypatch.setattr(
+        music_handler,
+        "_ephemeral_from_library",
+        lambda query: _playlist("registry-id", f"Registry {query}", ["track.mp3"]),
+    )
+
+    registry = class_registry.get_registry(refresh=True)
+    assert "music play" in registry
+    assert registry["music play"]["handler"] is music_handler.handle
+
+    result = registry["music play"]["handler"](
+        "play registry jazz", params={"kind": "genre", "query": "jazz"}
+    )
+    _assert_documented_shape(result)
+    assert result["text"] == "Playing Registry jazz (1 tracks). [MUSIC_PLAY:registry-id]"
+
+
+def test_module_has_no_destructive_operations_or_confidence_free_side_effects():
+    destructive_names = {
+        "delete",
+        "delete_playlist",
+        "end_conversation",
+        "send_message",
+        "sms_send_direct",
+        "sms_send",
+        "remove",
+        "unlink",
+        "rmtree",
+    }
+    source = MODULE_PATH.read_text()
+    tree = ast.parse(source)
+    calls = set()
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            if isinstance(node.func, ast.Name):
+                calls.add(node.func.id)
+            elif isinstance(node.func, ast.Attribute):
+                calls.add(node.func.attr)
+
+    assert calls.isdisjoint(destructive_names)
+
+
+def test_module_has_no_direct_llm_integration_points():
+    llm_import_roots = {
+        "anthropic",
+        "google.generativeai",
+        "openai",
+        "llm_brain",
+        "jane_web.jane_v2.models",
+    }
+    llm_call_names = {
+        "complete",
+        "completion",
+        "chat",
+        "generate",
+        "generate_content",
+        "invoke_llm",
+        "_phrase",
+    }
+    source = MODULE_PATH.read_text()
+    tree = ast.parse(source)
+    imported = set()
+    calls = set()
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imported.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            imported.add(node.module)
+        elif isinstance(node, ast.Call):
+            if isinstance(node.func, ast.Name):
+                calls.add(node.func.id)
+            elif isinstance(node.func, ast.Attribute):
+                calls.add(node.func.attr)
+
+    assert imported.isdisjoint(llm_import_roots)
+    assert calls.isdisjoint(llm_call_names)
