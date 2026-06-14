@@ -1,17 +1,12 @@
-# Memory Verification Report — 2026-06-13 02:43
+# Memory Verification Report — 2026-06-14 02:19
 
-Checked: 20 | Stale: 13 | Fixed: 13 | Deleted: 0 | Errors: 0 | Skipped recent: 189
+Checked: 20 | Stale: 8 | Fixed: 8 | Deleted: 0 | Errors: 0 | Skipped recent: 203
 
-- **UPDATED** `d6737ef0-b55` — Confirmed from actual code: alembic heads reports 0077_section_event_border_color, the listed migration files exist, and app/db/models.py plus services still contain the referenced tables/global LaTeX macro architecture. The old 0056 head claim is stale.
-- **UPDATED** `4e7a059b-b5a` — Verified the current code: all substantive claims are correct, but the stored memory is truncated at the Module display_title.
-- **UPDATED** `4c1fe65b-dfa` — Confirmed against standing_codex.py, persistent_codex.py, memory_retrieval.py, install_codex_memory.py, codex_auto_memory.py, codex_memory_mcp.py, and current ~/.codex state; the old memory was truncated and incomplete.
-- **UPDATED** `7c38acc8-a32` — Confirmed from the Markdown note, lecture series index, and pdfinfo: paths, deck ID, title, and 30-slide count are correct; only the final trigger/title text was truncated.
-- **UPDATED** `e3bd58d1-099` — Code confirms the durable distribution and prompt-cache claims. Codex was wrong that nothing is listening on 127.0.0.1:8501; ss shows uvicorn bound there. Updated to remove the unverified historical restart claim and keep durable facts.
-- **UPDATED** `51540a64-7e1` — Confirmed against the actual repo. Codex was right that the memory is partially stale: q2 and q8 are randomized now, while the q1-q12 registry coverage and q3/q7/q9/q10/q11/q12 descriptions match current code.
-- **UPDATED** `8f16fbf6-501` — Confirmed from scripts/run_dev_local.sh, app/main.py, the enabled user systemd unit, and /tmp logs; the old chieh-class-v2-dev-8501 service/log names are stale.
-- **UPDATED** `310bdda4-225` — Codex was right: the main claims match the current code, but the trailing deploy fragment is incomplete and has no matching current-code reference.
-- **UPDATED** `migrated-lon` — Confirmed from configs/templates/user_profile.md, git check-ignore, startup_code/claude_full_startup_context.py, ~/.claude/settings.json, startup_code/claude_smart_context.py, context_builder/v1/claude_smart_context.py, and context_builder/v1/context_builder.py. Codex was right that only the startup-context claim was stale.
-- **UPDATED** `migrated-lon` — Code confirms Codex was mostly right: v3 Stage 2 writes FIFO and ledger but does not mutate state.history, and ChromaDB writeback only happens on qualifying Stage 3 non-local turns.
-- **UPDATED** `migrated-lon` — The code confirms the original memory was stale/incomplete: current handler prefers params when present, gates ask/low confidence, and keeps incoherent bodies in a Stage 2 confirmation flow.
-- **UPDATED** `migrated-lon` — Actual code confirms the memory was truncated and overbroad: the resolver now clears high-precision interrupts/topic pivots, and Stage 2 follow-up dispatch has an LLM continuation check for longer replies, but short clinic schedule prompts can still be swallowed by todo_list and forced to Stage 3.
-- **UPDATED** `migrated-lon` — Code confirms the FIFO/skip_fifo implementation and completed job status; the stale part was the open commitment/restart-pending framing. Codex was broadly right, with the nuance that only streaming Stage 3 uses stream_message directly.
+- **UPDATED** `migrated-lon` — Confirmed against backend/main.py, backend/events.py, backend/bookings.py, backend/space_requests.py, backend/jane.py, local-assets/public.js/eventlist.js/calendar.js, and Vessence cron docs. Codex was substantively right; I adjusted the corrected memory for exact Jane defaults and the event DOM fallback nuance.
+- **UPDATED** `migrated-lon` — Confirmed in source: the secret fallback and root-email env mismatch remain, while the public rental/space-request form and backend endpoint now exist.
+- **UPDATED** `migrated-lon` — Confirmed in actual code at main.py lines 67-90; existing memory is correct but truncated at the fallback call.
+- **UPDATED** `52643b31-fd0` — Confirmed by reading the repo, migration files, alembic heads, health route code, curl health check, and gcloud service describe. The old Alembic head and Cloud Run revision were stale.
+- **UPDATED** `63af9718-f11` — Confirmed from jane.config, /home/chieh/ambient/vessence-data/.env, jane_web/main.py, jane_web/jane_v3/pipeline.py, intent_classifier/v3/classifier.py, and legacy v2 files; Codex was right that the old memory describes legacy v2, not the active v3 path.
+- **UPDATED** `55214a00-a9f` — Code confirms Codex was right: /api/space-requests is public, bookings uses _require("studio_user"), and role ordering lets root, manager, acupuncturist, and studio_user access it.
+- **UPDATED** `41f54ac3-ebf` — Confirmed against the spec and code: the spec still describes paid essence/skill commerce, the shipped marketplace page is static/free sample data, Stripe/payment work exists only in docs/TODOs, and `/api/marketplace` is Facebook Marketplace tooling.
+- **UPDATED** `0cbb3096-6c5` — Repo search found no classroom/Registrar/ITS routing code, only an unrelated Northeastern mention in edu_homework_audit.py. Live checks show the classroom page and /types/form/ are valid, while /type returns 404; current Registrar and ITS pages point to the Registrar Service Portal, Student Hub forms, and Classroom Dashboard.
