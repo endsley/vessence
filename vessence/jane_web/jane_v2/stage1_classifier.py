@@ -96,7 +96,6 @@ PROVEN_CLASSES = {
     "GREETING",
     "GET_TIME",
     "MUSIC_PLAY",
-    "SEND_MESSAGE",
     "TIMER",
     "CLINIC_SCHEDULES_INFO",
     "END_CONVERSATION",  # has its own 0.80 floor below; still "proven"

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import ast
 import inspect
+import json
 import sys
 import types
 from pathlib import Path
@@ -26,6 +27,16 @@ CLASSES_DIR = VESSENCE_ROOT / "jane_web" / "jane_v2" / "classes"
 INTENT_CLASSES_DIR = VESSENCE_ROOT / "intent_classifier" / "v2" / "classes"
 PIPELINE_PATH = VESSENCE_ROOT / "jane_web" / "jane_v2" / "pipeline.py"
 STAGE2_DISPATCHER_PATH = VESSENCE_ROOT / "jane_web" / "jane_v2" / "stage2_dispatcher.py"
+
+DESTRUCTIVE_RAW_CLASSES = {
+    "DELETE_EMAIL",
+    "DELETE_MESSAGES",
+    "END_CONVERSATION",
+    "SEND_MESSAGE",
+}
+EFFECTIVE_MIN_CONF_OVERRIDES = {
+    "END_CONVERSATION": 0.80,
+}
 
 
 def _mock_result(
@@ -60,6 +71,28 @@ def _intent_classifier_class_names() -> dict[str, Path]:
     return names
 
 
+def _referenced_classifier_outputs() -> dict[str, set[str]]:
+    """Collect raw classifier labels referenced by v2 audit/adversarial fixtures."""
+    refs: dict[str, set[str]] = {}
+    for path in sorted(INTENT_CLASSES_DIR.glob("*.json")):
+        data = json.loads(path.read_text(encoding="utf-8"))
+        stack = [data]
+        labels: set[str] = set()
+        while stack:
+            item = stack.pop()
+            if isinstance(item, dict):
+                for key, value in item.items():
+                    if key == "classification" and isinstance(value, str):
+                        labels.add(value)
+                    elif isinstance(value, (dict, list)):
+                        stack.append(value)
+            elif isinstance(item, list):
+                stack.extend(item)
+        if labels:
+            refs[str(path.relative_to(VESSENCE_ROOT))] = labels
+    return refs
+
+
 def _prompt_for_raw_class(raw_cls: str) -> str:
     prompts = {
         "END_CONVERSATION": "goodbye",
@@ -68,6 +101,9 @@ def _prompt_for_raw_class(raw_cls: str) -> str:
         "READ_EMAIL": "check my email",
         "READ_CALENDAR": "show my calendar",
         "CLINIC_SCHEDULES_INFO": "clinic patient schedule",
+        "DELETE_EMAIL": "delete that email",
+        "DELETE_MESSAGES": "delete that text message",
+        "SEND_MESSAGE": "text Kathia I am running late",
         "DELEGATE_OPUS": "open ended thought",
         "FORCE_STAGE3": "plain prompt",
     }
@@ -193,6 +229,19 @@ def test_all_intent_classifier_class_names_are_mapped_or_explicitly_escalated() 
     )
 
 
+def test_all_classifier_output_labels_referenced_by_fixtures_are_mapped() -> None:
+    referenced = _referenced_classifier_outputs()
+    missing: dict[str, list[str]] = {}
+    for path, labels in referenced.items():
+        unknown = sorted(label for label in labels if label not in s1._CLASS_MAP)
+        if unknown:
+            missing[path] = unknown
+    assert not missing, (
+        "Classifier fixtures reference raw labels that stage1_classifier._CLASS_MAP "
+        f"cannot route: {missing}"
+    )
+
+
 def test_proven_and_strict_sets_reference_known_raw_classes() -> None:
     assert not (s1.PROVEN_CLASSES & s1.STRICT_CLASSES)
     assert s1.PROVEN_CLASSES <= set(s1._CLASS_MAP)
@@ -216,6 +265,26 @@ def test_gate_threshold_order_is_precision_first() -> None:
         assert gate["margin"] > 0
 
 
+def test_destructive_raw_classes_require_at_least_080_gate() -> None:
+    missing = sorted(DESTRUCTIVE_RAW_CLASSES - set(s1._CLASS_MAP))
+    assert not missing
+    too_loose = {
+        raw_cls: {
+            "effective_conf": EFFECTIVE_MIN_CONF_OVERRIDES.get(
+                raw_cls,
+                s1._gate_for(raw_cls)["conf"],
+            ),
+            "gate": s1._gate_for(raw_cls),
+        }
+        for raw_cls in sorted(DESTRUCTIVE_RAW_CLASSES)
+        if EFFECTIVE_MIN_CONF_OVERRIDES.get(raw_cls, s1._gate_for(raw_cls)["conf"]) < 0.80
+    }
+    assert not too_loose, (
+        "Destructive classes must not dispatch on a loose Stage 1 gate. "
+        f"Thresholds below 0.80: {too_loose}"
+    )
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("raw_cls,expected_name", sorted(s1._CLASS_MAP.items()))
 async def test_every_class_map_entry_is_reachable_from_one_chroma_output(
@@ -226,6 +295,21 @@ async def test_every_class_map_entry_is_reachable_from_one_chroma_output(
     chroma_mock.return_value = _mock_result(raw_cls, confidence=1.0, margin=1.0, min_dist=0.01)
     cls, _, _ = await s1.classify(_prompt_for_raw_class(raw_cls))
     assert cls == expected_name
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "raw_cls",
+    sorted(raw_cls for raw_cls, mapped in s1._CLASS_MAP.items() if mapped == "others"),
+)
+async def test_every_others_mapping_is_always_low_confidence(
+    raw_cls: str,
+    chroma_mock: AsyncMock,
+) -> None:
+    chroma_mock.return_value = _mock_result(raw_cls, confidence=1.0, margin=1.0)
+    cls, conf, dist = await s1.classify("plain prompt")
+    assert (cls, conf) == ("others", "Low")
+    assert isinstance(dist, float)
 
 
 @pytest.mark.asyncio
@@ -350,6 +434,26 @@ async def test_end_conversation_requires_at_least_080_even_when_proven(
     chroma_mock.return_value = _mock_result("END_CONVERSATION", confidence=0.79, margin=1.0)
     cls, conf, _ = await s1.classify("goodbye")
     assert (cls, conf) == ("end conversation", "Low")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "raw_cls,prompt",
+    [
+        ("DELETE_EMAIL", "delete that email"),
+        ("DELETE_MESSAGES", "delete that text message"),
+        ("SEND_MESSAGE", "text Kathia I am running late"),
+    ],
+)
+async def test_destructive_action_classes_do_not_fire_on_borderline_confidence(
+    raw_cls: str,
+    prompt: str,
+    chroma_mock: AsyncMock,
+) -> None:
+    chroma_mock.return_value = _mock_result(raw_cls, confidence=0.79, margin=1.0)
+    cls, conf, _ = await s1.classify(prompt)
+    assert cls == s1._CLASS_MAP[raw_cls]
+    assert conf == "Low"
 
 
 @pytest.mark.asyncio
