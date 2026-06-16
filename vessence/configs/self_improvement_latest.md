@@ -1,27 +1,27 @@
 # Most Recent Nightly Self-Improvement
 
-- Run started: 2026-06-14 01:00:01
-- Report generated: 2026-06-14 02:19:28
-- Total runtime: 4766s
-- Jobs: 8 total, 8 ok, 0 timeout, 0 failed
+- Run started: 2026-06-15 01:00:01
+- Report generated: 2026-06-15 02:46:50
+- Total runtime: 6409s
+- Jobs: 8 total, 7 ok, 1 timeout, 0 failed
 - Stable latest report path: `/home/chieh/ambient/vessence/configs/self_improvement_latest.md`
-- Archived copy: `/home/chieh/ambient/vessence-data/reports/self_improvement/self_improvement_20260614_010001.md`
+- Archived copy: `/home/chieh/ambient/vessence-data/reports/self_improvement/self_improvement_20260615_010001.md`
 
 ## TL;DR
 
 - 1. ✓ Auto-Commit WIP (pre) (0.0m)
   - Fixes:
-    - 2026-06-14 01:00:02,550 INFO Committed 2 file(s).
-- 2. ✓ Code Auditor (5.5m)
+    - 2026-06-15 01:00:01,654 INFO Committed 2 file(s).
+- 2. ✓ Code Auditor (7.1m)
   - Problems: none detected
   - Fixes: none applied
-- 3. ✓ Dead Code Auditor (7.1m)
+- 3. ✓ Dead Code Auditor (6.1m)
   - Problems:
-    - Possibly-dead functions: 1.
+    - Possibly-dead functions: 2.
     - Duplicate function bodies: 10 groups.
   - Fixes:
-    - [dead-code] Done — 0 auto-deleted, 0 flagged, 1 dead funcs, 10 dup groups
-- 4. ✓ Pipeline Audit (30 prompts) (19.4m)
+    - [dead-code] Done — 0 auto-deleted, 0 flagged, 2 dead funcs, 10 dup groups
+- 4. ⏱ Pipeline Audit (30 prompts) (20.0m)
   - Problems:
     - Prompts audited: 6.
     - Classification failures: 2.
@@ -31,39 +31,39 @@
     - CRON_JOBS.md missing entry for active cron script: auto_pull.sh
     - v2_3stage_pipeline.md missing class row: BUILD_APK
     - v2_3stage_pipeline.md missing class row: CLINIC_SCHEDULES_INFO
-- 6. ✓ Transcript Quality Review (0.9m)
+- 6. ✓ Transcript Quality Review (2.9m)
   - Problems:
-    - Transcript review found 7 issues: 4 critical, 2 low, 1 medium.
-    - Stage 1 emitted an unsupported intent label before falling back to others.
-    - Stage 1 emitted an unsupported intent label before falling back to others.
+    - Transcript review found 8 issues: 2 critical, 6 medium.
+    - Stage 3 did not preserve multi-turn context for a same-session follow-up.
+    - Stage 1 emitted an unsupported class and took 8.7 seconds before falling back to others.
   - Fixes:
-    - 2026-06-14 01:32:59,245 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (7 issues)
-    - 2026-06-14 01:32:59,247 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 4 critical, 1 medium, 2...
-- 7. ✓ Memory Janitor (46.4m)
+    - 2026-06-15 01:36:10,957 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (8 issues)
+    - 2026-06-15 01:36:10,958 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 2 critical, 6 medium iss...
+- 7. ✓ Memory Janitor (70.6m)
   - Problems:
-    - [0;93m2026-06-14 01:55:44.317197018 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-06-14 05:55:44 WARNING] ModelImporter.cpp:739: Make...
-    - [0;93m2026-06-14 01:55:44.317246360 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-06-14 05:55:44 WARNING] ModelImporter.cpp:739: Make...
-    - [0;93m2026-06-14 01:55:44.317262080 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-06-14 05:55:44 WARNING] ModelImporter.cpp:739: Make...
+    - [0;93m2026-06-15 02:16:23.765388511 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-06-15 06:16:23 WARNING] ModelImporter.cpp:739: Make...
+    - [0;93m2026-06-15 02:16:23.765435906 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-06-15 06:16:23 WARNING] ModelImporter.cpp:739: Make...
+    - [0;93m2026-06-15 02:16:23.765451198 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-06-15 06:16:23 WARNING] ModelImporter.cpp:739: Make...
   - Fixes:
-    - INFO:agent_skills.self_improve_log:self_improve_log: recorded [medium] Memory Verification — Found 8 stale memories out of 20 checked. Stale memories make Ja...
+    - INFO:agent_skills.self_improve_log:self_improve_log: recorded [medium] Memory Verification — Found 10 stale memories out of 20 checked. Stale memories make J...
 - 8. ✓ Auto-Commit + Push (post) (0.0m)
   - Fixes:
-    - 2026-06-14 02:19:28,247 INFO Pushed successfully.
+    - 2026-06-15 02:46:50,317 INFO Pushed successfully.
 
 **Top follow-ups:**
 
-- Constrain the Stage 1 model output to the canonical intent enum, or map 'web automation' explicitly to the intended supported class before logging it as unknown.
-- Add strict enum validation at the classifier prompt/API layer and either remove non-canonical labels like 'force stage3' from examples or map them internally without warning.
+- Hydrate Stage 3 history from the session id before stream_message and persist Stage 3 user/assistant turns immediately after completion. Add an integration test where two turns with the same sid produce history>0 on the second call.
+- Constrain classifier output to the supported enum in prompt/schema validation, map known aliases before warning, and enforce a short Stage 1 timeout with immediate others fallback.
 
 ## Executive Summary
 
-- All stages exited cleanly.
+- 1 stage(s) need attention because they timed out or exited non-zero.
 - 6 concrete improvement/fix signals were found in logs or reports.
 
 ## Stage 1: Auto-Commit WIP (pre)
 
 - Status: `ok`
-- Duration: 1s (0.0 min)
+- Duration: 0s (0.0 min)
 
 ### What It Did
 
@@ -75,7 +75,7 @@
 
 ### Improvements It Made
 
-- 2026-06-14 01:00:02,550 INFO Committed 2 file(s).
+- 2026-06-15 01:00:01,654 INFO Committed 2 file(s).
 
 ### Evidence Files
 
@@ -84,7 +84,7 @@
 ## Stage 2: Code Auditor
 
 - Status: `ok`
-- Duration: 332s (5.5 min)
+- Duration: 428s (7.1 min)
 
 ### What It Did
 
@@ -107,7 +107,7 @@
 ## Stage 3: Dead Code Auditor
 
 - Status: `ok`
-- Duration: 427s (7.1 min)
+- Duration: 364s (6.1 min)
 
 ### What It Did
 
@@ -115,12 +115,12 @@
 
 ### Problems It Found
 
-- Possibly-dead functions: 1.
+- Possibly-dead functions: 2.
 - Duplicate function bodies: 10 groups.
 
 ### Improvements It Made
 
-- [dead-code] Done — 0 auto-deleted, 0 flagged, 1 dead funcs, 10 dup groups
+- [dead-code] Done — 0 auto-deleted, 0 flagged, 2 dead funcs, 10 dup groups
 
 ### Evidence Files
 
@@ -129,8 +129,8 @@
 
 ## Stage 4: Pipeline Audit (30 prompts)
 
-- Status: `ok`
-- Duration: 1161s (19.4 min)
+- Status: `timeout`
+- Duration: 1200s (20.0 min)
 
 ### What It Did
 
@@ -138,6 +138,7 @@
 
 ### Problems It Found
 
+- Job ended with status `timeout`.
 - Prompts audited: 6.
 - Classification failures: 2.
 - Response failures: 1.
@@ -184,7 +185,7 @@
 ## Stage 6: Transcript Quality Review
 
 - Status: `ok`
-- Duration: 55s (0.9 min)
+- Duration: 175s (2.9 min)
 
 ### What It Did
 
@@ -192,23 +193,23 @@
 
 ### Problems It Found
 
-- Transcript review found 7 issues: 4 critical, 2 low, 1 medium.
-- Stage 1 emitted an unsupported intent label before falling back to others.
-- Stage 1 emitted an unsupported intent label before falling back to others.
-- Stage 3 received no conversation history for a context-dependent follow-up.
-- Stage 3 turn took about 230 seconds.
+- Transcript review found 8 issues: 2 critical, 6 medium.
+- Stage 3 did not preserve multi-turn context for a same-session follow-up.
+- Stage 1 emitted an unsupported class and took 8.7 seconds before falling back to others.
+- Stage 1 emitted an unsupported class and spent 28.9 seconds classifying a complex Stage 3 question.
+- The Stage 3 turn started but has no matching completion log before the next user turn.
 
 ### Improvements It Made
 
-- 2026-06-14 01:32:59,245 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (7 issues)
-- 2026-06-14 01:32:59,247 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 4 critical, 1 medium, 2 minor issues. The most urgent
+- 2026-06-15 01:36:10,957 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (8 issues)
+- 2026-06-15 01:36:10,958 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 2 critical, 6 medium issues. The most urgent was: Stag
 
 ### Follow-Up Fixes Recommended
 
-- Constrain the Stage 1 model output to the canonical intent enum, or map 'web automation' explicitly to the intended supported class before logging it as unknown.
-- Add strict enum validation at the classifier prompt/API layer and either remove non-canonical labels like 'force stage3' from examples or map them internally without warning.
-- Fix Stage 3 session history plumbing so sid_override sessions load prior turns before calling stream_message; add a regression test where a short follow-up depends on the previous user turn.
-- Move short-term memory extraction off the blocking response path or enforce a much smaller timeout with best-effort failure; avoid sequential primary/gemini/claude retries during an active user response.
+- Hydrate Stage 3 history from the session id before stream_message and persist Stage 3 user/assistant turns immediately after completion. Add an integration test where two turns with the same sid produce history>0 on the second call.
+- Constrain classifier output to the supported enum in prompt/schema validation, map known aliases before warning, and enforce a short Stage 1 timeout with immediate others fallback.
+- Add strict enum decoding for Stage 1 and a fast rule that complex/meta questions route to others without waiting on a long classifier call.
+- Attach a request id to every Stage 3 escalation and log completion, cancellation, and errors in a finally block. Serialize or explicitly cancel overlapping Stage 3 turns for the same session.
 
 ### Evidence Files
 
@@ -218,7 +219,7 @@
 ## Stage 7: Memory Janitor
 
 - Status: `ok`
-- Duration: 2786s (46.4 min)
+- Duration: 4237s (70.6 min)
 
 ### What It Did
 
@@ -226,15 +227,15 @@
 
 ### Problems It Found
 
-- [0;93m2026-06-14 01:55:44.317197018 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-06-14 05:55:44 WARNING] ModelImporter.cpp:739: Make sure input input_ids has Int64 binding.[m
-- [0;93m2026-06-14 01:55:44.317246360 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-06-14 05:55:44 WARNING] ModelImporter.cpp:739: Make sure input attention_mask has Int64 binding.[m
-- [0;93m2026-06-14 01:55:44.317262080 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-06-14 05:55:44 WARNING] ModelImporter.cpp:739: Make sure input token_type_ids has Int64 binding.[m
-- [0;93m2026-06-14 01:55:44.475794224 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-06-14 05:55:44 WARNING] ModelImporter.cpp:739: Make sure input input_ids has Int64 binding.[m
-- [0;93m2026-06-14 01:55:44.475844534 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-06-14 05:55:44 WARNING] ModelImporter.cpp:739: Make sure input attention_mask has Int64 binding.[m
+- [0;93m2026-06-15 02:16:23.765388511 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-06-15 06:16:23 WARNING] ModelImporter.cpp:739: Make sure input input_ids has Int64 binding.[m
+- [0;93m2026-06-15 02:16:23.765435906 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-06-15 06:16:23 WARNING] ModelImporter.cpp:739: Make sure input attention_mask has Int64 binding.[m
+- [0;93m2026-06-15 02:16:23.765451198 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-06-15 06:16:23 WARNING] ModelImporter.cpp:739: Make sure input token_type_ids has Int64 binding.[m
+- [0;93m2026-06-15 02:16:23.918095265 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-06-15 06:16:23 WARNING] ModelImporter.cpp:739: Make sure input input_ids has Int64 binding.[m
+- [0;93m2026-06-15 02:16:23.918153810 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-06-15 06:16:23 WARNING] ModelImporter.cpp:739: Make sure input attention_mask has Int64 binding.[m
 
 ### Improvements It Made
 
-- INFO:agent_skills.self_improve_log:self_improve_log: recorded [medium] Memory Verification — Found 8 stale memories out of 20 checked. Stale memories make Jane give wrong answers about her own
+- INFO:agent_skills.self_improve_log:self_improve_log: recorded [medium] Memory Verification — Found 10 stale memories out of 20 checked. Stale memories make Jane give wrong answers about her own
 
 ### Evidence Files
 
@@ -243,7 +244,7 @@
 ## Stage 8: Auto-Commit + Push (post)
 
 - Status: `ok`
-- Duration: 2s (0.0 min)
+- Duration: 1s (0.0 min)
 
 ### What It Did
 
@@ -255,7 +256,7 @@
 
 ### Improvements It Made
 
-- 2026-06-14 02:19:28,247 INFO Pushed successfully.
+- 2026-06-15 02:46:50,317 INFO Pushed successfully.
 
 ### Evidence Files
 
