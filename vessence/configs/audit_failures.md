@@ -116,3 +116,6 @@ test_code/auto_audit_stage2_dispatcher.py::TestDispatchDocumentedBehavior::test_
 ## 2026-06-06 01:00 — vault_web/recent_turns.py
 Auditor crashed: Command '['git', 'commit', '-m', 'auto-audit: add tests for vault_web/recent_turns.py', '--no-verify']' returned non-zero exit status 1.
 
+## 2026-06-16 01:00 — jane_web/jane_v2/recent_context.py
+Auditor crashed: Command '['git', 'commit', '-m', 'auto-audit: add tests for jane_web/jane_v2/recent_context.py', '--no-verify']' returned non-zero exit status 1.
+

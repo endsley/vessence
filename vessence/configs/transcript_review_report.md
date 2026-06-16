@@ -1,198 +1,168 @@
-# Transcript Quality Review — 2026-06-14
+# Transcript Quality Review — 2026-06-15
 
-Generated: 2026-06-15 01:36:10
+Generated: 2026-06-16 01:33:10
 
-## Issue 1 [CRITICAL]
+## Issue 1 [LOW]
 
-**Turn:** 2026-06-14 01:14:13
+**Turn:** 2026-06-15 01:13:51
 **User said:** you have access to the water lily Wellness project right
 
-**Problem:** Stage 3 did not preserve multi-turn context for a same-session follow-up.
+**Problem:** Stage 1 produced an unsupported class before falling back to others.
 
-**Root cause:** The same audit session was used, and stage3_escalate had sid_override=True, but jane.proxy started each Stage 3 call with history=0. Follow-up turns therefore reached the frontier brain without prior conversation context.
+**Root cause:** The classifier returned 'web automation', which is not in the allowed taxonomy, so the pipeline coerced it to others:Low. Routing to Stage 3 was acceptable, but the classifier contract is not enforced.
 
-**Suggested fix:** Hydrate Stage 3 history from the session id before stream_message and persist Stage 3 user/assistant turns immediately after completion. Add an integration test where two turns with the same sid produce history>0 on the second call.
+**Suggested fix:** Constrain classifier output to a strict enum or add an explicit alias map/test for unsupported labels like 'web automation'.
 
 **Log evidence:**
 ```
-2026-06-14 01:12:50 INFO [jane.proxy] [audit-178141] stream_message brain=OpenAI history=0 msg_len=11 file_ctx=False
+2026-06-15 01:13:49 WARNING [intent_classifier.v3.classifier] v3: qwen returned unknown class 'web automation' → others
 ```
 ```
-2026-06-14 01:14:11 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=56 sid_override=True class_protocol=n/a
-```
-```
-2026-06-14 01:14:12 INFO [jane.proxy] [audit-178141] stream_message brain=OpenAI history=0 msg_len=56 file_ctx=False
-```
-```
-2026-06-14 01:15:05 INFO [jane.proxy] [audit-178141] stream_message brain=OpenAI history=0 msg_len=132 file_ctx=False
+2026-06-15 01:13:49 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (909ms) params={}
 ```
 
 ---
 
 ## Issue 2 [MEDIUM]
 
-**Turn:** 2026-06-14 01:14:13
-**User said:** you have access to the water lily Wellness project right
+**Turn:** 2026-06-15 01:14:09
+**User said:** right now, you are using the same codex process for each prompt instead of spawning a
 
-**Problem:** Stage 1 emitted an unsupported class and took 8.7 seconds before falling back to others.
+**Problem:** Stage 3 response was very slow for an architecture/status question.
 
-**Root cause:** The classifier model returned 'web automation', which is outside the supported intent enum, so the classifier coerced it to others. The slow classifier path delayed escalation.
+**Root cause:** The turn escalated to Stage 3 and took 121146ms end to end. A broadcast summary subprocess also timed out during the same request, showing auxiliary LLM work was unhealthy while the foreground request was running.
 
-**Suggested fix:** Constrain classifier output to the supported enum in prompt/schema validation, map known aliases before warning, and enforce a short Stage 1 timeout with immediate others fallback.
+**Suggested fix:** Answer runtime architecture questions from deterministic config/source inspection when possible, and decouple broadcast summaries from foreground Stage 3 latency with a circuit breaker/backoff.
 
 **Log evidence:**
 ```
-2026-06-14 01:14:11 WARNING [intent_classifier.v3.classifier] v3: qwen returned unknown class 'web automation' → others
+2026-06-15 01:14:08 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=132 sid_override=True class_protocol=n/a
 ```
 ```
-2026-06-14 01:14:11 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (8700ms) params={}
+2026-06-15 01:15:08 WARNING [jane.broadcast] Broadcast summary failed: Command '['claude', '--model', 'haiku', '--print']' timed out after 50 seconds
+```
+```
+2026-06-15 01:16:09 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage3 end-to-end (121146ms)
 ```
 
 ---
 
-## Issue 3 [MEDIUM]
+## Issue 3 [LOW]
 
-**Turn:** 2026-06-14 01:15:05
-**User said:** right now, you are using the same codex process for each prompt instead of spawning
+**Turn:** 2026-06-15 01:14:09
+**User said:** right now, you are using the same codex process for each prompt instead of spawning a
 
-**Problem:** Stage 1 emitted an unsupported class and spent 28.9 seconds classifying a complex Stage 3 question.
+**Problem:** Stage 1 produced another unsupported class.
 
-**Root cause:** The classifier returned 'force stage3', another label outside the supported enum, then coerced to others after a long model call.
+**Root cause:** The classifier returned 'force stage3', which is a routing intent rather than a valid category, and the pipeline coerced it to others.
 
-**Suggested fix:** Add strict enum decoding for Stage 1 and a fast rule that complex/meta questions route to others without waiting on a long classifier call.
+**Suggested fix:** Keep routing directives separate from intent labels, or add a validated 'escalate' field instead of letting the classifier emit pseudo-classes.
 
 **Log evidence:**
 ```
-2026-06-14 01:15:01 WARNING [intent_classifier.v3.classifier] v3: qwen returned unknown class 'force stage3' → others
+2026-06-15 01:14:07 WARNING [intent_classifier.v3.classifier] v3: qwen returned unknown class 'force stage3' → others
 ```
 ```
-2026-06-14 01:15:01 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (28895ms) params={}
+2026-06-15 01:14:07 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (1036ms) params={}
 ```
 
 ---
 
 ## Issue 4 [MEDIUM]
 
-**Turn:** 2026-06-14 01:15:05
-**User said:** right now, you are using the same codex process for each prompt instead of spawning
+**Turn:** 2026-06-15 01:16:25
+**User said:** use the source code as your guide
 
-**Problem:** The Stage 3 turn started but has no matching completion log before the next user turn.
+**Problem:** Context-dependent follow-up reached Stage 3 with no logged conversation or file context.
 
-**Root cause:** stage3_escalate and stream_message ran for the 01:15:05 turn, but no corresponding 'Jane stream pipeline task finished' or 'stage3 end-to-end' line appears before the 01:16:29 turn began.
+**Root cause:** The user reply depended on the prior turn, but the Stage 3 call logged history=0 and file_ctx=False, with no pending_action_resolver entry. The only recorded prompt context was the 33-character follow-up.
 
-**Suggested fix:** Attach a request id to every Stage 3 escalation and log completion, cancellation, and errors in a finally block. Serialize or explicitly cancel overlapping Stage 3 turns for the same session.
+**Suggested fix:** Carry session transcript/source context into Stage 3 calls, or maintain a durable per-session brain keyed by sid and log that context path explicitly.
 
 **Log evidence:**
 ```
-2026-06-14 01:15:05 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=132 sid_override=True class_protocol=n/a
+2026-06-15 01:16:25 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=33 sid_override=True class_protocol=n/a
 ```
 ```
-2026-06-14 01:15:05 INFO [jane.proxy] [audit-178141] stream_message brain=OpenAI history=0 msg_len=132 file_ctx=False
-```
-```
-2026-06-14 01:16:27 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (23116ms) params={}
+2026-06-15 01:16:25 INFO [jane.proxy] [audit-178150] stream_message brain=OpenAI history=0 msg_len=33 file_ctx=False
 ```
 
 ---
 
 ## Issue 5 [MEDIUM]
 
-**Turn:** 2026-06-14 01:16:29
+**Turn:** 2026-06-15 01:16:48
 **User said:** please familiarize yourself with the waterlily project
 
-**Problem:** Stage 1 took 23.1 seconds to route an obvious Stage 3 project request.
+**Problem:** Stage 3 foreground flow was degraded by repeated auxiliary LLM timeouts.
 
-**Root cause:** The classifier completed as others:Low, which was the right route, but the classifier latency dominated the fast-path decision.
+**Root cause:** The request took 220937ms. During it, the primary LLM, Gemini fallback, Claude fallback, short-term extractor, and broadcast summary all timed out.
 
-**Suggested fix:** Add a cheap preclassifier/rule for project-work commands such as 'familiarize yourself', 'inspect', and 'go over' to route directly to Stage 3.
+**Suggested fix:** Move memory extraction and broadcast summaries off the foreground path, add timeout backoff/circuit breaking, and use bounded local source indexing for project familiarization.
 
 **Log evidence:**
 ```
-2026-06-14 01:16:27 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (23116ms) params={}
+2026-06-15 01:16:55 WARNING [agent_skills.claude_cli_llm] Primary LLM failed: CLI timed out after 45s... Attempting fallback.
 ```
 ```
-2026-06-14 01:16:28 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=54 sid_override=True class_protocol=n/a
+2026-06-15 01:17:40 WARNING [agent_skills.claude_cli_llm] Fallback to gemini failed: CLI timed out after 45s...
+```
+```
+2026-06-15 01:18:25 WARNING [agent_skills.claude_cli_llm] Fallback to claude failed: CLI timed out after 45s...
+```
+```
+2026-06-15 01:18:25 WARNING [memory.v1.short_term_extractor] short_term_extractor: LLM call failed: CLI timed out after 45s
+```
+```
+2026-06-15 01:20:28 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage3 end-to-end (220937ms)
 ```
 
 ---
 
 ## Issue 6 [CRITICAL]
 
-**Turn:** 2026-06-14 01:19:04
+**Turn:** 2026-06-15 01:20:37
 **User said:** currently, the waterlily site is web only meant for browsers on laptops and computers
 
-**Problem:** Stage 3 took almost 13 minutes to finish, with repeated LLM CLI fallback timeouts.
+**Problem:** Long project implementation request never completed for the user.
 
-**Root cause:** The request escalated correctly, but the Stage 3 path did not finish until 777269ms later. During the turn, primary and fallback LLM calls timed out repeatedly, and short-term memory extraction also failed.
+**Root cause:** Stage 3 ran for more than 12 minutes, the client disconnected, and the brain execution was cancelled after 760215ms. The Stage 3 call also logged history=0 and file_ctx=False for a source-code-heavy request.
 
-**Suggested fix:** Put a hard wall-clock budget on Stage 3 turns, stream progress/status for long code tasks, and move memory extraction/fallback chains fully out of the response path with shorter per-provider timeouts.
+**Suggested fix:** Route long code/project work to a durable background Codex job with progress events and source access; do not cancel the job solely because the streaming client disconnects.
 
 **Log evidence:**
 ```
-2026-06-14 01:19:03 WARNING [intent_classifier.v3.classifier] v3: qwen returned unknown class 'web automation' → others
+2026-06-15 01:20:35 INFO [jane.proxy] [audit-178150] stream_message brain=OpenAI history=0 msg_len=750 file_ctx=False
 ```
 ```
-2026-06-14 01:19:04 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=750 sid_override=True class_protocol=n/a
+2026-06-15 01:33:17 INFO [jane.proxy] [audit-178150] Client disconnected — waiting for adapter task to finish (brain still working)
 ```
 ```
-2026-06-14 01:19:39 WARNING [agent_skills.claude_cli_llm] Primary LLM failed: CLI timed out after 45s... Attempting fallback.
+2026-06-15 01:33:18 WARNING [jane.proxy] [audit-178150] Brain execution cancelled (stream) after 760215ms — likely client disconnect or timeout. Stack:
 ```
 ```
-2026-06-14 01:20:25 WARNING [agent_skills.claude_cli_llm] Fallback to gemini failed: CLI timed out after 45s...
-```
-```
-2026-06-14 01:21:10 WARNING [agent_skills.claude_cli_llm] Fallback to claude failed: CLI timed out after 45s...
-```
-```
-2026-06-14 01:32:01 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage3 end-to-end (777269ms)
+2026-06-15 01:33:18 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage3 end-to-end (762379ms)
 ```
 
 ---
 
-## Issue 7 [MEDIUM]
+## Issue 7 [LOW]
 
-**Turn:** 2026-06-14 21:05:37
-**User said:** unknown Android weather voice request, text_len=32
+**Turn:** 2026-06-15 01:20:37
+**User said:** currently, the waterlily site is web only meant for browsers on laptops and computers
 
-**Problem:** The weather fast path took 7.9 seconds even though it had no resolved location and left a follow-up pending.
+**Problem:** Stage 1 again emitted unsupported 'web automation' for a code/project request.
 
-**Root cause:** Stage 1 correctly classified weather with location=None, but the Stage 2 weather handler still ran for 7867ms before returning a response and pending follow-up.
+**Root cause:** The classifier generated a non-taxonomy label and the pipeline collapsed it to others:Low, losing the distinction that this was a long-running project/code task.
 
-**Suggested fix:** Short-circuit the weather handler when location is missing: ask the location follow-up immediately, or use a cached/default location before any slow external lookup.
-
-**Log evidence:**
-```
-2026-06-14 21:05:37 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 weather:Very High (1271ms) params={'topic': 'forecast', 'day': 'tomorrow', 'location': None}
-```
-```
-2026-06-14 21:05:45 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage2 weather handler (7867ms)
-```
-```
-2026-06-14 21:05:59 INFO [jane_web.jane_v2.pending_action_resolver] resolver: global cancel matched for pending STAGE2_FOLLOWUP
-```
-
----
-
-## Issue 8 [MEDIUM]
-
-**Turn:** 2026-06-14 21:06:21
-**User said:** post-weather Android briefing media fetches
-
-**Problem:** Android briefing image/audio requests were rate limited in a burst.
-
-**Root cause:** The generic API rate limiter applied to multiple /api/briefing/image and /api/briefing/audio requests from the Android client IP, blocking media fetches shortly after the voice flow.
-
-**Suggested fix:** Give authenticated/mobile briefing media endpoints a separate static-media rate limit, add client-side batching/caching, or raise the burst allowance for these asset URLs.
+**Suggested fix:** Add a valid project/code-work intent that routes to a background implementation path, or normalize 'web automation' to that intent instead of generic others.
 
 **Log evidence:**
 ```
-2026-06-14 21:06:21 WARNING [jane.web] Rate limited 172.56.199.190 on /api/briefing/image/91c189e7852b (api)
+2026-06-15 01:20:34 WARNING [intent_classifier.v3.classifier] v3: qwen returned unknown class 'web automation' → others
 ```
 ```
-2026-06-14 21:06:21 WARNING [jane.web] Rate limited 172.56.199.190 on /api/briefing/audio/461dd41e16b6/brief (api)
-```
-```
-2026-06-14 21:06:21 WARNING [jane.web] Rate limited 172.56.199.190 on /api/briefing/audio/e8e0c274d3b2/brief (api)
+2026-06-15 01:20:34 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (1081ms) params={}
 ```
 
 ---
