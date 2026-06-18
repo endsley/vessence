@@ -19,6 +19,13 @@ object Constants {
     const val DEFAULT_RELAY_URL = "https://relay.vessences.com"
     const val PREF_CONNECTION_MODE = "connection_mode"  // "direct" or "relay"
     const val PREF_KEEP_SCREEN_ON = "keep_screen_on"
+    const val PREF_CAMERA_SYNC_ENABLED = "camera_sync_enabled"
+    const val PREF_CAMERA_SYNC_WIFI_ONLY = "camera_sync_wifi_only"
+    const val PREF_CAMERA_SYNC_KEYS = "camera_sync_keys"
+    const val PREF_CAMERA_SYNC_LAST_RUN = "camera_sync_last_run"
+    const val PREF_CAMERA_SYNC_LAST_UPLOADED = "camera_sync_last_uploaded"
+    const val PREF_CAMERA_SYNC_LAST_FAILED = "camera_sync_last_failed"
+    const val PREF_CAMERA_SYNC_LAST_MESSAGE = "camera_sync_last_message"
     // Phone tools (contacts / call / SMS draft / messages.read_recent).
     // Default OFF until Phase 5 deployment; dispatcher silently drops tool
     // calls when this flag is false so Android can ship the scaffolding

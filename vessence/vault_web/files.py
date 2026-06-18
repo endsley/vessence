@@ -4,6 +4,7 @@ import sys
 import mimetypes
 import datetime
 import re
+import json
 from pathlib import Path
 from PIL import Image
 import io
@@ -57,7 +58,9 @@ def safe_vault_path(rel_path: str, root_dir: str | Path | None = None) -> Path:
     """Resolve a relative path safely within a vault root."""
     vault = Path(root_dir or VAULT_DIR).resolve()
     target = (vault / rel_path.lstrip("/")).resolve()
-    if not str(target).startswith(str(vault)):
+    try:
+        target.relative_to(vault)
+    except ValueError:
         raise ValueError("Path traversal detected")
     return target
 
@@ -148,6 +151,79 @@ def upsert_file_index_entry(
         return True
     except Exception:
         return False
+
+
+def delete_file_index_entry(rel_path: str, user_id: str | None = None) -> bool:
+    """Remove a vault file record from the dedicated file-index collection."""
+    try:
+        client = get_chroma_client(VECTOR_DB_FILE_INDEX)
+        coll = client.get_or_create_collection(
+            CHROMA_COLLECTION_FILE_INDEX,
+            metadata={"hnsw:space": "cosine"},
+        )
+        scope = (user_id or "host").strip() or "host"
+        doc_id = f"vault_file_{scope}_{rel_path.replace('/', '_').replace('.', '_')}"
+        coll.delete(ids=[doc_id])
+        return True
+    except Exception:
+        return False
+
+
+def _remove_hash_index_entry(rel_path: str, root_dir: str | Path | None = None) -> bool:
+    """Remove hash-index rows that point at a deleted vault file."""
+    vault_root = Path(root_dir or VAULT_DIR).resolve()
+    hash_index_path = vault_root / ".hash_index.json"
+    try:
+        with open(hash_index_path) as f:
+            hash_index = json.load(f)
+    except Exception:
+        return False
+
+    if not isinstance(hash_index, dict):
+        return False
+
+    updated = {
+        key: value
+        for key, value in hash_index.items()
+        if not isinstance(value, dict) or value.get("path") != rel_path
+    }
+    if len(updated) == len(hash_index):
+        return False
+
+    try:
+        with open(hash_index_path, "w") as f:
+            json.dump(updated, f)
+        return True
+    except Exception:
+        return False
+
+
+def delete_vault_file(
+    rel_path: str,
+    root_dir: str | Path | None = None,
+    user_id: str | None = None,
+) -> dict:
+    """Delete one non-system file from the vault and record the change."""
+    vault_root = Path(root_dir or VAULT_DIR).resolve()
+    try:
+        target = safe_vault_path(rel_path, root_dir=vault_root)
+    except ValueError:
+        return {"error": "Invalid path"}
+
+    if not target.exists():
+        return {"error": "Not found"}
+    if not target.is_file():
+        return {"error": "Not a file"}
+    if target.name.startswith(".") or target.suffix.lower() == ".db":
+        return {"error": "Cannot delete system file"}
+
+    rel = str(target.relative_to(vault_root))
+    target.unlink()
+    _remove_hash_index_entry(rel, root_dir=vault_root)
+    delete_file_index_entry(rel, user_id=user_id)
+    with get_db() as conn:
+        conn.execute("INSERT INTO file_changes DEFAULT VALUES")
+    return {"ok": True, "deleted": True, "path": rel}
 
 
 def list_directory(rel_path: str = "", root_dir: str | Path | None = None) -> dict:

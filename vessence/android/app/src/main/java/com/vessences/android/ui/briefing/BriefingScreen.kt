@@ -6,6 +6,7 @@ import java.text.SimpleDateFormat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -286,7 +287,6 @@ fun BriefingScreen(
                                     imageUrl = viewModel.getImageUrl(article.id),
                                     isSaved = true,
                                     onExpand = { bottomSheetArticle = article },
-                                    onSpeakBrief = { viewModel.speakArticle(article, "brief") },
                                     onSpeakFull = { viewModel.speakArticle(article, "full") },
                                     onDismiss = {},
                                     onSave = {},
@@ -405,7 +405,6 @@ fun BriefingScreen(
                     articles = filteredArticles,
                     viewModel = viewModel,
                     onExpand = { bottomSheetArticle = it },
-                    onSpeakBrief = { viewModel.speakArticle(it, "brief") },
                     onSpeakFull = { viewModel.speakArticle(it, "full") },
                     onDismiss = { viewModel.dismissArticle(it.id) },
                 )
@@ -413,7 +412,6 @@ fun BriefingScreen(
         }
 
         // FAB - Read All / Stop Audio
-        var showReadMenu by remember { mutableStateOf(false) }
         if (!showingMarketplace) {
             Column(
                 modifier = Modifier
@@ -422,49 +420,10 @@ fun BriefingScreen(
                 horizontalAlignment = Alignment.End,
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                // Expanded menu options
-                if (showReadMenu && !state.isSpeaking) {
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = Color(0xFF1E293B),
-                        shadowElevation = 8.dp,
-                    ) {
-                        Column(modifier = Modifier.padding(4.dp)) {
-                            Surface(
-                                onClick = { showReadMenu = false; viewModel.readAll("full") },
-                                shape = RoundedCornerShape(8.dp),
-                                color = Color.Transparent,
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                ) {
-                                    Icon(Icons.AutoMirrored.Filled.VolumeUp, "Full", tint = Color.White, modifier = Modifier.size(20.dp))
-                                    Text("Read All (Full)", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Medium)
-                                }
-                            }
-                            Surface(
-                                onClick = { showReadMenu = false; viewModel.readAll("brief") },
-                                shape = RoundedCornerShape(8.dp),
-                                color = Color.Transparent,
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                ) {
-                                    Icon(Icons.AutoMirrored.Filled.VolumeUp, "Brief", tint = Color(0xFF94A3B8), modifier = Modifier.size(20.dp))
-                                    Text("Read All (Brief)", color = Color(0xFF94A3B8), fontSize = 14.sp, fontWeight = FontWeight.Medium)
-                                }
-                            }
-                        }
-                    }
-                }
                 FloatingActionButton(
                     onClick = {
-                        if (state.isSpeaking) { viewModel.stopSpeaking(); showReadMenu = false }
-                        else showReadMenu = !showReadMenu
+                        if (state.isSpeaking) viewModel.stopSpeaking()
+                        else viewModel.readAll()
                     },
                     containerColor = if (state.isSpeaking) Color(0xFFDC2626) else Violet500,
                     contentColor = Color.White,
@@ -911,7 +870,6 @@ private fun ArticleGrid(
     articles: List<BriefingArticle>,
     viewModel: BriefingViewModel,
     onExpand: (BriefingArticle) -> Unit,
-    onSpeakBrief: (BriefingArticle) -> Unit,
     onSpeakFull: (BriefingArticle) -> Unit,
     onDismiss: (BriefingArticle) -> Unit,
 ) {
@@ -944,7 +902,6 @@ private fun ArticleGrid(
                 imageUrl = viewModel.getImageUrl(article.id),
                 isSaved = viewModel.isArticleSaved(article.id),
                 onExpand = { onExpand(article) },
-                onSpeakBrief = { onSpeakBrief(article) },
                 onSpeakFull = { onSpeakFull(article) },
                 onDismiss = { onDismiss(article) },
                 onSave = { viewModel.saveArticle(article.id, it) },
@@ -962,7 +919,6 @@ private fun ArticleCard(
     imageUrl: String,
     isSaved: Boolean = false,
     onExpand: () -> Unit,
-    onSpeakBrief: () -> Unit,
     onSpeakFull: () -> Unit,
     onDismiss: () -> Unit,
     onSave: (String) -> Unit = {},
@@ -1059,42 +1015,21 @@ private fun ArticleCard(
                     maxLines = 3, overflow = TextOverflow.Ellipsis, lineHeight = 15.sp)
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // Audio buttons row: Brief | Full
-                Row(
+                // Full summary audio
+                Surface(
+                    onClick = onSpeakFull,
+                    shape = RoundedCornerShape(6.dp),
+                    color = SlateSubtle,
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    Surface(
-                        onClick = onSpeakBrief,
-                        shape = RoundedCornerShape(6.dp),
-                        color = SlateSubtle,
-                        modifier = Modifier.weight(1f),
+                    Row(
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center,
                     ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center,
-                        ) {
-                            Icon(Icons.AutoMirrored.Filled.VolumeUp, "Brief", tint = SlateMuted, modifier = Modifier.size(14.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Brief", color = SlateMuted, fontSize = 11.sp, fontWeight = FontWeight.Medium)
-                        }
-                    }
-                    Surface(
-                        onClick = onSpeakFull,
-                        shape = RoundedCornerShape(6.dp),
-                        color = SlateSubtle,
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center,
-                        ) {
-                            Icon(Icons.AutoMirrored.Filled.VolumeUp, "Full", tint = Color.White, modifier = Modifier.size(14.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Full", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Medium)
-                        }
+                        Icon(Icons.AutoMirrored.Filled.VolumeUp, "Full", tint = Color.White, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Full", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Medium)
                     }
                 }
 
@@ -1195,7 +1130,23 @@ private fun ArticleDetailSheet(
 ) {
     val context = LocalContext.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val topicColor = TopicColors[article.topic.lowercase()] ?: Violet500
+    var detailArticle by remember(article.id) { mutableStateOf(article) }
+    var loadingFullSummary by remember(article.id) { mutableStateOf(article.fullSummary.isNullOrBlank()) }
+    var detailError by remember(article.id) { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(article.id) {
+        if (article.fullSummary.isNullOrBlank()) {
+            loadingFullSummary = true
+            detailError = null
+            runCatching { viewModel.getArticleDetail(article) }
+                .onSuccess { detailArticle = it }
+                .onFailure { detailError = "Full summary unavailable." }
+            loadingFullSummary = false
+        }
+    }
+
+    val shownArticle = detailArticle
+    val topicColor = TopicColors[shownArticle.topic.lowercase()] ?: Violet500
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -1206,6 +1157,7 @@ private fun ArticleDetailSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp)
                 .padding(bottom = 32.dp),
         ) {
@@ -1218,11 +1170,11 @@ private fun ArticleDetailSheet(
             ) {
                 AsyncImage(
                     model = ImageRequest.Builder(context)
-                        .data(viewModel.getImageUrl(article.id))
+                        .data(viewModel.getImageUrl(shownArticle.id))
                         .crossfade(true)
                         .build(),
                     imageLoader = ApiClient.getAuthenticatedImageLoader(context),
-                    contentDescription = article.title,
+                    contentDescription = shownArticle.title,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize(),
                 )
@@ -1236,7 +1188,7 @@ private fun ArticleDetailSheet(
                         .align(Alignment.TopStart),
                 ) {
                     Text(
-                        text = article.topic,
+                        text = shownArticle.topic,
                         color = Color.White,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.SemiBold,
@@ -1249,7 +1201,7 @@ private fun ArticleDetailSheet(
 
             // Headline
             Text(
-                text = article.title,
+                text = shownArticle.title,
                 color = Color.White,
                 fontSize = 20.sp,
                 fontWeight = FontWeight.Bold,
@@ -1260,20 +1212,48 @@ private fun ArticleDetailSheet(
 
             // Source + time
             Text(
-                text = formatSourceLine(article.source, article.published),
+                text = formatSourceLine(shownArticle.source, shownArticle.published),
                 color = SlateMuted,
                 fontSize = 12.sp,
             )
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Full summary (or brief if full not available)
-            Text(
-                text = article.fullSummary ?: article.briefSummary,
-                color = Color(0xFFE2E8F0),
-                fontSize = 14.sp,
-                lineHeight = 22.sp,
-            )
+            when {
+                loadingFullSummary -> {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        CircularProgressIndicator(
+                            color = Violet500,
+                            strokeWidth = 2.dp,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Text(
+                            text = "Loading full summary...",
+                            color = SlateMuted,
+                            fontSize = 14.sp,
+                        )
+                    }
+                }
+                shownArticle.fullSummary.isNullOrBlank() -> {
+                    Text(
+                        text = detailError ?: "Full summary unavailable.",
+                        color = SlateMuted,
+                        fontSize = 14.sp,
+                        lineHeight = 22.sp,
+                    )
+                }
+                else -> {
+                    Text(
+                        text = shownArticle.fullSummary ?: "",
+                        color = Color(0xFFE2E8F0),
+                        fontSize = 14.sp,
+                        lineHeight = 22.sp,
+                    )
+                }
+            }
 
             Spacer(modifier = Modifier.height(20.dp))
 
@@ -1289,7 +1269,7 @@ private fun ArticleDetailSheet(
                     modifier = Modifier
                         .weight(1f)
                         .clickable {
-                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(article.url))
+                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(shownArticle.url))
                             context.startActivity(intent)
                         },
                 ) {
@@ -1306,36 +1286,7 @@ private fun ArticleDetailSheet(
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            "Read Source",
-                            color = Color.White,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                    }
-                }
-
-                // Brief audio
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = SlateSubtle,
-                    modifier = Modifier
-                        .weight(1f)
-                        .clickable { viewModel.speakArticle(article, "brief") },
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center,
-                    ) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.VolumeUp,
-                            "Brief summary",
-                            tint = Color.White,
-                            modifier = Modifier.size(18.dp),
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            "Brief",
+                            "Source",
                             color = Color.White,
                             fontSize = 13.sp,
                             fontWeight = FontWeight.SemiBold,
@@ -1349,7 +1300,7 @@ private fun ArticleDetailSheet(
                     color = SlateSubtle,
                     modifier = Modifier
                         .weight(1f)
-                        .clickable { viewModel.speakArticle(article, "full") },
+                        .clickable { viewModel.speakArticle(shownArticle, "full") },
                 ) {
                     Row(
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),

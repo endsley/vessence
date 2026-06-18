@@ -49,6 +49,7 @@ class ArticleReaderV2Activity : Activity() {
     private lateinit var preview: TextView
     private lateinit var webView: WebView
     private var extracted = false
+    private var extractionInProgress = false
     private var mode = MODE_SUMMARIZE
     private var articleUrl = ""
 
@@ -84,12 +85,19 @@ class ArticleReaderV2Activity : Activity() {
             textSize = 18f
         }
         preview = TextView(this).apply {
-            text = url
+            text = "Complete any proof or login if the site asks, then tap Extract."
             setTextColor(0xFFCBD5E1.toInt())
             textSize = 14f
             setPadding(0, 18, 0, 18)
             movementMethod = ScrollingMovementMethod()
             isVerticalScrollBarEnabled = true
+        }
+        val extract = Button(this).apply {
+            text = "Extract"
+            setOnClickListener {
+                status.text = "Extracting readable text..."
+                extractAndSpeak(webView)
+            }
         }
         val stop = Button(this).apply {
             text = "Stop and close"
@@ -99,13 +107,25 @@ class ArticleReaderV2Activity : Activity() {
             }
         }
         webView = WebView(this).apply {
-            layoutParams = LinearLayout.LayoutParams(1, 1)
-            visibility = android.view.View.INVISIBLE
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
-            settings.loadsImagesAutomatically = false
+            settings.loadsImagesAutomatically = true
             settings.cacheMode = WebSettings.LOAD_DEFAULT
             settings.userAgentString = settings.userAgentString.replace("; wv", "")
+        }
+        val actions = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            addView(extract, LinearLayout.LayoutParams(
+                0,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                1f,
+            ))
+            addView(stop, LinearLayout.LayoutParams(
+                0,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                1f,
+            ))
         }
 
         root.addView(status, LinearLayout.LayoutParams(
@@ -114,24 +134,26 @@ class ArticleReaderV2Activity : Activity() {
         ))
         root.addView(preview, LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+        ))
+        root.addView(webView, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
             0,
             1f,
         ))
-        root.addView(stop, LinearLayout.LayoutParams(
+        root.addView(actions, LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT,
             ViewGroup.LayoutParams.WRAP_CONTENT,
         ))
-        root.addView(webView)
         setContentView(root)
 
         webView.webViewClient = object : WebViewClient() {
             override fun onPageFinished(view: WebView, loadedUrl: String) {
                 if (extracted) return
-                extracted = true
-                status.text = "Extracting readable text..."
+                status.text = "Article loaded. Extracting readable text..."
                 scope.launch {
                     delay(1_500)
-                    extractAndSpeak(view)
+                    if (!extracted) extractAndSpeak(view, automatic = true)
                 }
             }
 
@@ -148,10 +170,13 @@ class ArticleReaderV2Activity : Activity() {
         webView.loadUrl(url)
     }
 
-    private fun extractAndSpeak(view: WebView) {
+    private fun extractAndSpeak(view: WebView, automatic: Boolean = false) {
+        if (extracted || extractionInProgress) return
+        extractionInProgress = true
         val readabilityJs = readAsset("Readability.js")
         if (readabilityJs.isBlank()) {
             status.text = "Error: Readability.js asset not found."
+            extractionInProgress = false
             return
         }
 
@@ -164,11 +189,18 @@ class ArticleReaderV2Activity : Activity() {
             val raw = obj?.optString("textContent").orEmpty()
             val cleaned = cleanArticleText(title, raw)
             if (cleaned.length < 150) {
-                status.text = "I could not extract enough article text from this page."
-                preview.text = "This page may require login, block WebView, or render text in a way Android cannot read."
+                status.text = if (automatic) {
+                    "Waiting for article text..."
+                } else {
+                    "I could not extract enough article text from this page."
+                }
+                preview.text = "Complete any proof or login if the site asks, wait for the article text to appear, then tap Extract."
+                extractionInProgress = false
                 return@evaluateJavascript
             }
 
+            extracted = true
+            extractionInProgress = false
             when (mode) {
                 MODE_BRIEFING -> submitToBriefing(title, cleaned)
                 else -> summarizeViaServer(title, cleaned)

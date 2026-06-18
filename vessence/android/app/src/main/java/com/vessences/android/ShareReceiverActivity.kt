@@ -29,9 +29,9 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 
 /**
- * Handles shared URLs via a two-option dialog. Both paths send only the URL
- * to the server — the server handles fetching (HTTP + headless browser fallback)
- * and LLM summarization.
+ * Handles shared URLs via a two-option dialog. Both paths go through the local
+ * WebView extractor first so JavaScript-rendered article text can be captured
+ * before the server summarizes or queues it.
  */
 class ShareReceiverActivity : ComponentActivity() {
 
@@ -73,8 +73,8 @@ class ShareReceiverActivity : ComponentActivity() {
             .setTitle("Share Article")
             .setItems(arrayOf("Summarize Now", "Add to Briefing")) { _, which ->
                 when (which) {
-                    0 -> summarizeNow(url)
-                    1 -> addToBriefing(url)
+                    0 -> openArticleReader(url, ArticleReaderV2Activity.MODE_SUMMARIZE)
+                    1 -> openArticleReader(url, ArticleReaderV2Activity.MODE_BRIEFING)
                 }
             }
             .setOnCancelListener { finish() }
@@ -84,6 +84,14 @@ class ShareReceiverActivity : ComponentActivity() {
     private fun extractUrl(text: String): String? {
         val urlPattern = Regex("""https?://\S+""")
         return urlPattern.find(text)?.value
+    }
+
+    private fun openArticleReader(url: String, mode: String) {
+        startActivity(Intent(this, ArticleReaderV2Activity::class.java).apply {
+            putExtra(ArticleReaderV2Activity.EXTRA_URL, url)
+            putExtra(ArticleReaderV2Activity.EXTRA_MODE, mode)
+        })
+        finish()
     }
 
     /**

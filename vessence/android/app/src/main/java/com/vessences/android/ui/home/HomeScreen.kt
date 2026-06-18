@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Newspaper
+import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Work
@@ -119,6 +120,12 @@ fun HomeScreen(
             description = "Your files and documents",
             icon = Icons.Default.Description,
             iconTint = Color(0xFF3B82F6),
+        ),
+        HomeEssenceCard(
+            name = "Photos",
+            description = "Camera library",
+            icon = Icons.Default.PhotoLibrary,
+            iconTint = Color(0xFF06B6D4),
         ),
         HomeEssenceCard(
             name = "Music Playlist",

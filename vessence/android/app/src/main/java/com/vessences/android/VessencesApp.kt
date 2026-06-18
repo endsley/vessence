@@ -33,6 +33,7 @@ import com.vessences.android.ui.components.NavTab
 import com.vessences.android.ui.essences.EssencesScreen
 import com.vessences.android.ui.home.HomeScreen
 import com.vessences.android.ui.music.MusicScreen
+import com.vessences.android.photos.PhotosScreen
 import com.vessences.android.ui.settings.SettingsScreen
 import com.vessences.android.ui.settings.SettingsViewModel
 import com.vessences.android.ui.settings.SettingsViewModelFactory
@@ -206,6 +207,7 @@ private fun EssenceViewRouter(
 ) {
     when (essenceName) {
         "Life Librarian" -> VaultScreen(onBack = onBack)
+        "Photos" -> PhotosScreen(onBack = onBack)
         "Music Playlist" -> MusicScreen(onBack = onBack)
         "Work Log" -> WorkLogScreen(onBack = onBack)
         "Daily Briefing" -> BriefingScreen(onBack = onBack)

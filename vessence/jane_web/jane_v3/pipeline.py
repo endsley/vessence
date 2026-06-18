@@ -200,6 +200,25 @@ def _persist_turn_to_ledger(session_id: str, user_prompt: str, jane_response: st
 # ── Shared routing decision ──────────────────────────────────────────────────
 
 
+def _literal_stage1_get_time(prompt: str) -> tuple[str, str, dict[str, Any]] | None:
+    """Classify plain clock/date prompts without calling Qwen.
+
+    This is still Stage 1: it returns only the intent classification. The normal
+    Stage 2 dispatcher below remains responsible for invoking the get_time
+    handler and producing the answer.
+    """
+    try:
+        from jane_web.jane_v2.classes.get_time.handler import _fast_time_reply
+        text = _fast_time_reply(prompt)
+    except Exception as e:
+        logger.warning("jane_v3: get_time literal classifier failed: %s", e)
+        return None
+    if text is None:
+        return None
+    logger.info("jane_v3 pipeline: stage1 literal get_time")
+    return ("get time", "Very High", {"literal_stage1": True})
+
+
 async def _classify_and_maybe_handle(prompt: str, session_id: str) -> dict:
     """Run v3 classifier + handler dispatch. Shared by chat + chat_stream.
 
@@ -430,11 +449,15 @@ async def _classify_and_maybe_handle(prompt: str, session_id: str) -> dict:
 
     # ── Stage 1 (v3): Haiku classification ───────────────────────────────
     t1 = time.perf_counter()
-    try:
-        cls, conf, params = await v3_classifier.classify(prompt, session_id=session_id)
-    except Exception as e:
-        logger.exception("jane_v3: classifier crashed: %s", e)
-        cls, conf, params = ("others", "Low", {})
+    literal_classification = _literal_stage1_get_time(prompt)
+    if literal_classification is not None:
+        cls, conf, params = literal_classification
+    else:
+        try:
+            cls, conf, params = await v3_classifier.classify(prompt, session_id=session_id)
+        except Exception as e:
+            logger.exception("jane_v3: classifier crashed: %s", e)
+            cls, conf, params = ("others", "Low", {})
     stage1_ms = int((time.perf_counter() - t1) * 1000)
     classification = f"{cls}:{conf}"
     logger.info("jane_v3 pipeline: stage1 %s (%dms) params=%s", classification, stage1_ms, params)

@@ -12,6 +12,17 @@ if str(_VAULT_WEB_DIR) not in sys.path:
 _logger = logging.getLogger(__name__)
 
 
+def _readback_body(row: dict, max_chars: int = 800) -> str:
+    try:
+        from jane_web.message_readback import body_for_readback_prompt
+
+        return body_for_readback_prompt(row, max_chars=max_chars)
+    except Exception as e:
+        _logger.info("read_messages readback enrichment failed: %s", e)
+        body = (row.get("body") or "").strip()
+        return body[:max_chars]
+
+
 def _escalation_context() -> str:
     """Inject recent synced messages so Stage 3 (Opus) can analyze them
     without re-querying the database."""
@@ -41,7 +52,7 @@ def _escalation_context() -> str:
             r["timestamp_ms"] / 1000
         ).strftime("%m/%d %I:%M %p").lstrip("0")
         sender_raw = r["sender"] or "Unknown"
-        body = (r["body"] or "").strip()[:200]
+        body = _readback_body(r)
         kind = "contact" if r.get("is_contact") else (r.get("msg_type") or "unknown")
         if sender_raw.startswith("Me → "):
             other = sender_raw[len("Me → "):].strip()
@@ -59,6 +70,9 @@ def _escalation_context() -> str:
         "SENT = user's outgoing messages, RECEIVED = incoming. "
         "Classify each as important (personal/contact) or spam/promo. "
         "Quote contact messages verbatim; summarize spam briefly."
+        " Use body text from resolved links when available. If a message says "
+        "the linked TalkingPoints content could not be opened automatically, "
+        "say that instead of reading the wrapper notification as the message."
     )
     return "\n".join(lines)
 

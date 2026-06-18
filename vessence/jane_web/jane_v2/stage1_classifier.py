@@ -218,6 +218,8 @@ _CLASS_MAP = {
     "TELL_JOKE":         "tell joke",
     "WEB_AUTOMATION":    "web_automation",
     "SELF_IMPROVEMENT":  "self improvement",
+    "NATIONALGRID BILLS": "nationalgrid bills",
+    "NATIONALGRID_BILLS": "nationalgrid bills",
     "RESTART_SERVER":    "others",
     "DELEGATE_OPUS":     "others",
     "FORCE_STAGE3":      "others",

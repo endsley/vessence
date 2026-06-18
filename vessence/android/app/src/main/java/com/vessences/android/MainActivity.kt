@@ -354,6 +354,7 @@ class MainActivity : ComponentActivity() {
         // Periodic SMS sync every 5 minutes — catches sent messages and
         // fills gaps if notification listener was killed by the system
         SmsSyncManager.startPeriodicSync(applicationContext)
+        try { com.vessences.android.photos.CameraSyncScheduler.ensureScheduled(applicationContext) } catch (_: Exception) {}
         try { ChatNotificationManager(applicationContext).ensureChannels() } catch (_: Exception) {}
         // Auto-start wake word service if always-listen was enabled
         // BUT skip if this is a wake word intent — service just stopped itself on purpose

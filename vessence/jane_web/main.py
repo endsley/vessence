@@ -152,7 +152,7 @@ from vault_web.oauth import oauth, allowed_email, build_external_url, google_oau
 from vault_web.files import (
     list_directory, get_file_metadata, update_description,
     generate_thumbnail, get_last_change_timestamp, safe_vault_path, is_text, TEXT_SIZE_LIMIT, get_mime,
-    make_descriptive_filename, upsert_file_index_entry,
+    make_descriptive_filename, upsert_file_index_entry, delete_vault_file,
 )
 from vault_web.share import create_share, validate_share, list_shares, revoke_share
 from vault_web.playlists import list_playlists, get_playlist, create_playlist, update_playlist, delete_playlist
@@ -172,8 +172,8 @@ try:
     ANDROID_VERSION = _version_data["version_name"]
     _ANDROID_VERSION_CODE = _version_data["version_code"]
 except FileNotFoundError:
-    ANDROID_VERSION = "0.2.90"
-    _ANDROID_VERSION_CODE = 321
+    ANDROID_VERSION = "0.2.93"
+    _ANDROID_VERSION_CODE = 324
 
 # Startup validation: ensure the APK for the advertised version actually exists
 _expected_apk = MARKETING_DOWNLOADS_DIR / f"vessences-android-v{ANDROID_VERSION}.apk"
@@ -2951,6 +2951,21 @@ async def save_file_content(path: str, body: dict, session_id: str = Depends(req
     return {"ok": True}
 
 
+@app.delete("/api/files/{path:path}")
+async def delete_file(path: str, session_id: str = Depends(require_auth)):
+    vault_root, _caps, _managed, uid = _require_capability(session_id, "vault_write")
+    result = delete_vault_file(path, root_dir=vault_root, user_id=uid)
+    error = result.get("error")
+    if error == "Invalid path":
+        raise HTTPException(status_code=403, detail=error)
+    if error == "Not found":
+        raise HTTPException(status_code=404, detail=error)
+    if error:
+        raise HTTPException(status_code=400, detail=error)
+    _log_work_activity(f"File delete: {result.get('path', path)}", category="file_delete")
+    return result
+
+
 @app.post("/api/files/upload")
 async def upload_files(
     files: list[UploadFile] = File(...),
@@ -2986,10 +3001,10 @@ async def upload_files(
             })
             continue
 
+        mime = upload.content_type or get_mime(upload.filename or "")
         if destination:
             subdir = destination.strip("/")
         else:
-            mime = upload.content_type or get_mime(upload.filename or "")
             subdir = _route_subdir(mime)
         description = ""
         if index < len(descriptions):
@@ -3001,7 +3016,7 @@ async def upload_files(
         dest_dir = vault_root / subdir
         dest_dir.mkdir(parents=True, exist_ok=True)
 
-        if is_image_upload:
+        if is_image_upload and not destination:
             safe_name = make_descriptive_filename(upload.filename or "upload", description)
         else:
             safe_name = Path(upload.filename or "upload").name

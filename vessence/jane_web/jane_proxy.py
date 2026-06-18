@@ -1363,6 +1363,20 @@ _TTS_SPOKEN_TAG_RE = _re.compile(r"</?(?:spoken|visual|think|thinking|artifact)>
 _TTS_CLIENT_TOOL_MARKER_RE = _re.compile(r"\[\[CLIENT_TOOL:[a-z][a-z0-9_.]*:\{[\s\S]*?\}\]\]", _re.IGNORECASE)
 _TTS_MUSIC_PLAY_RE = _re.compile(r"\[MUSIC_PLAY:[^\]]+\]")
 _TTS_SENTENCE_RE = _re.compile(r"[^.!?]+[.!?]?", _re.DOTALL)
+_TTS_ABBREVIATIONS = (
+    "Mr.",
+    "Mrs.",
+    "Ms.",
+    "Dr.",
+    "Prof.",
+    "St.",
+    "Jr.",
+    "Sr.",
+    "vs.",
+    "e.g.",
+    "i.e.",
+    "etc.",
+)
 _TTS_SPOKEN_SENTENCE_LIMIT = 2
 _TTS_SPOKEN_MAX_CHARS = 220
 _TTS_SPOKEN_MAX_WORDS = 28
@@ -1377,11 +1391,23 @@ def _normalize_tts_text(raw: str) -> str:
     return _re.sub(r"\s+", " ", text).strip(" \t\r\n-—–")
 
 
+def _split_tts_sentences(text: str) -> list[str]:
+    protected = text or ""
+    for abbr in _TTS_ABBREVIATIONS:
+        pattern = _re.compile(_re.escape(abbr), _re.IGNORECASE)
+        protected = pattern.sub(lambda m: m.group(0).replace(".", "<DOT>"), protected)
+    return [
+        sentence.replace("<DOT>", ".").strip()
+        for sentence in _TTS_SENTENCE_RE.findall(protected)
+        if sentence.strip()
+    ]
+
+
 def _take_short_tts_spoken(raw: str) -> tuple[str, str]:
     compact = _normalize_tts_text(raw)
     if not compact:
         return "", ""
-    sentences = [m.strip() for m in _TTS_SENTENCE_RE.findall(compact) if m.strip()]
+    sentences = _split_tts_sentences(compact)
     if not sentences:
         return compact, ""
     spoken_part = " ".join(sentences[:_TTS_SPOKEN_SENTENCE_LIMIT]).strip()
@@ -2661,7 +2687,8 @@ async def stream_message(
                                 "ORDER BY timestamp_ms DESC LIMIT 30",
                                 (_v2_since_ms,),
                             ).fetchall()
-                    _v2_msgs = [dict(r) for r in _v2_rows]
+                    from jane_web.message_readback import enrich_synced_messages_for_readback
+                    _v2_msgs = enrich_synced_messages_for_readback([dict(r) for r in _v2_rows])
                     if _v2_msgs:
                         from datetime import datetime as _v2dt
                         for _m2 in _v2_msgs:
@@ -2675,6 +2702,10 @@ async def stream_message(
                             + "\n[END SMS INBOX DATA]\n\n"
                             "msg_type guide: personal=important contacts, reminder=appointments, "
                             "notification=shipping/delivery, spam=skip, unknown=mention if important."
+                            " Use body_for_readback as the text to read to the user. If "
+                            "body_resolution is unresolved_talkingpoints_link, say the linked "
+                            "message could not be opened automatically instead of reading the "
+                            "wrapper notification as the message."
                         )
                     else:
                         _v2_task_ctx = "[SMS INBOX DATA]\nNo text messages found in the last 5 days.\n[END SMS INBOX DATA]"
@@ -2948,7 +2979,8 @@ async def stream_message(
                                ORDER BY timestamp_ms DESC LIMIT ?""",
                             (_since_ms, _sms_limit),
                         ).fetchall()
-                    _sms_list = [dict(r) for r in _sms_rows]
+                    from jane_web.message_readback import enrich_synced_messages_for_readback
+                    _sms_list = enrich_synced_messages_for_readback([dict(r) for r in _sms_rows])
 
                 if _sms_list:
                     from datetime import datetime as _dt
@@ -2967,6 +2999,10 @@ async def stream_message(
                         "- 'notification': shipping, delivery, order updates — mention briefly\n"
                         "- 'spam': promotions, deals, marketing — skip unless user asks\n"
                         "- 'unknown': unrecognized sender — mention only if content seems important\n"
+                        "Use body_for_readback as the text to read to the user. If "
+                        "body_resolution is unresolved_talkingpoints_link, say the linked "
+                        "message could not be opened automatically instead of reading the "
+                        "wrapper notification as the message.\n"
                         "Group personal messages by sender. If the user asked about a specific person, focus on those."
                     )
                 else:

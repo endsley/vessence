@@ -421,6 +421,66 @@ class BriefingViewModel(application: Application) : AndroidViewModel(application
         )
     }
 
+    suspend fun getArticleDetail(article: BriefingArticle): BriefingArticle {
+        if (!article.fullSummary.isNullOrBlank()) return article
+        val detail = fetchArticleDetail(article.id)
+        val merged = mergeArticleDetail(article, detail)
+        cacheArticleDetail(merged)
+        return merged
+    }
+
+    private suspend fun fetchArticleDetail(articleId: String): BriefingArticle = withContext(Dispatchers.IO) {
+        val request = Request.Builder()
+            .url("$baseUrl/api/briefing/article/$articleId")
+            .build()
+        client.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) throw Exception("HTTP ${response.code}")
+            val body = response.body?.string() ?: "{}"
+            val parsed = gson.fromJson(body, com.google.gson.JsonObject::class.java)
+            val status = parsed.get("status")?.takeIf { !it.isJsonNull }?.asString
+            if (status == "error") {
+                throw Exception(parsed.get("message")?.takeIf { !it.isJsonNull }?.asString ?: "Article not found")
+            }
+            gson.fromJson(parsed, BriefingArticle::class.java)
+        }
+    }
+
+    private fun mergeArticleDetail(base: BriefingArticle, detail: BriefingArticle): BriefingArticle {
+        return base.copy(
+            title = detail.title.ifBlank { base.title },
+            source = detail.source.ifBlank { base.source },
+            url = detail.url.ifBlank { base.url },
+            published = detail.published.ifBlank { base.published },
+            topic = detail.topic.ifBlank { base.topic },
+            imagePath = detail.imagePath?.takeIf { it.isNotBlank() } ?: base.imagePath,
+            briefSummary = detail.briefSummary.ifBlank { base.briefSummary },
+            fullSummary = detail.fullSummary?.takeIf { it.isNotBlank() } ?: base.fullSummary,
+        )
+    }
+
+    private fun cacheArticleDetail(article: BriefingArticle) {
+        val current = _state.value
+        val hasLoadedArticle = current.articles.any { it.id == article.id }
+        val updatedArticles = current.articles.map {
+            if (it.id == article.id) mergeArticleDetail(it, article) else it
+        }
+        val updatedSavedArticles = current.savedArticles.map { saved ->
+            val savedArticle = saved.article
+            if (savedArticle?.id == article.id) {
+                saved.copy(article = mergeArticleDetail(savedArticle, article))
+            } else {
+                saved
+            }
+        }
+        _state.value = current.copy(
+            articles = updatedArticles,
+            savedArticles = updatedSavedArticles,
+        )
+        if (hasLoadedArticle) {
+            writeArticlesCache(updatedArticles, current.categories)
+        }
+    }
+
     fun getMarketplaceImageUrl(searchName: String, listing: MarketplaceListing): String? {
         val photoName = listing.thumb ?: listing.photos.firstOrNull() ?: return null
         val querySlug = listing.querySlug ?: return null
@@ -432,7 +492,7 @@ class BriefingViewModel(application: Application) : AndroidViewModel(application
 
     private var mediaPlayer: android.media.MediaPlayer? = null
 
-    fun speakArticle(article: BriefingArticle, summaryType: String = "brief") {
+    fun speakArticle(article: BriefingArticle, summaryType: String = "full") {
         viewModelScope.launch {
             _state.value = _state.value.copy(isSpeaking = true)
             // Pause always-listen during audio playback
@@ -440,11 +500,17 @@ class BriefingViewModel(application: Application) : AndroidViewModel(application
             com.vessences.android.voice.AlwaysListeningService.stop(appContext)
 
             // Use device TTS directly — server-side audio generation removed
-            val text = if (summaryType == "full" && article.fullSummary != null) {
-                "${article.title}. ${article.fullSummary}"
+            val articleForSpeech = if (summaryType == "full") {
+                runCatching { getArticleDetail(article) }.getOrDefault(article)
             } else {
-                "${article.title}. ${article.briefSummary}"
+                article
             }
+            val summary = if (summaryType == "full") {
+                articleForSpeech.fullSummary?.takeIf { it.isNotBlank() } ?: articleForSpeech.briefSummary
+            } else {
+                articleForSpeech.briefSummary
+            }
+            val text = "${articleForSpeech.title}. $summary"
             tts.speak(text)
             _state.value = _state.value.copy(isSpeaking = false)
             // Resume always-listen after audio finishes
@@ -549,7 +615,7 @@ class BriefingViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    fun readAll(summaryType: String = "brief") {
+    fun readAll(summaryType: String = "full") {
         readAllJob?.cancel()
         readAllJob = viewModelScope.launch {
             _state.value = _state.value.copy(readAllActive = true, isSpeaking = true)
@@ -559,11 +625,17 @@ class BriefingViewModel(application: Application) : AndroidViewModel(application
             val articles = getFilteredArticles()
             for (article in articles) {
                 if (!_state.value.readAllActive) break
-                val text = if (summaryType == "full" && article.fullSummary != null) {
-                    "${article.title}. ${article.fullSummary}"
+                val articleForSpeech = if (summaryType == "full") {
+                    runCatching { getArticleDetail(article) }.getOrDefault(article)
                 } else {
-                    "${article.title}. ${article.briefSummary}"
+                    article
                 }
+                val summary = if (summaryType == "full") {
+                    articleForSpeech.fullSummary?.takeIf { it.isNotBlank() } ?: articleForSpeech.briefSummary
+                } else {
+                    articleForSpeech.briefSummary
+                }
+                val text = "${articleForSpeech.title}. $summary"
                 tts.speak(text)
             }
             _state.value = _state.value.copy(readAllActive = false, isSpeaking = false)

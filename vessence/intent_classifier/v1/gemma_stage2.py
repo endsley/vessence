@@ -462,6 +462,15 @@ async def stage2_execute(
     elif cls == "GREETING":
         # qwen2.5:7b handles it directly with FIFO context — no Opus needed
         return await _handle_greeting(session_id, message)
+    elif cls in {"NATIONALGRID BILLS", "NATIONALGRID_BILLS"}:
+        try:
+            from jane_web.jane_v2.classes.nationalgrid_bills.handler import handle as _ng_handle
+            handled = await _ng_handle(message)
+            if handled and handled.get("text"):
+                return _result(response=handled["text"])
+        except Exception as e:
+            logger.warning("stage2: nationalgrid bills handler failed: %s", e)
+        return _result(delegate=True)
     elif cls == "DELEGATE_OPUS":
         return await _handle_delegate_opus(session_id, message)
     else:
