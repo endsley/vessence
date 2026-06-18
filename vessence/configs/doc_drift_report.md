@@ -1,4 +1,4 @@
-# Doc Drift Report — 2026-06-17 01:27
+# Doc Drift Report — 2026-06-18 01:28
 
 ## Needs human review
 
@@ -8,6 +8,7 @@
 - v2_3stage_pipeline.md missing class row: DELETE_EMAIL
 - v2_3stage_pipeline.md missing class row: DELETE_MESSAGES
 - v2_3stage_pipeline.md missing class row: DO_MATH
+- v2_3stage_pipeline.md missing class row: NATIONALGRID_BILLS
 - v2_3stage_pipeline.md missing class row: RESTART_SERVER
 - v2_3stage_pipeline.md missing class row: SEND_EMAIL
 - v2_3stage_pipeline.md missing class row: TELL_JOKE
