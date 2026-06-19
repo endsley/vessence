@@ -294,6 +294,7 @@ _RATE_LIMIT_UPLOAD_PATHS = frozenset({"/api/files/upload", "/api/tax/upload"})
 _RATE_LIMIT_EXEMPT_PATHS = frozenset({
     "/api/device-diagnostics",
     "/api/crash-report",
+    "/api/self-healing/report",
 })
 
 
@@ -369,7 +370,71 @@ async def request_logging_middleware(request: Request, call_next):
     except Exception as exc:
         elapsed_ms = int((time.time() - start) * 1000)
         _logger.exception("Unhandled error in %s %s after %dms: %s", method, path, elapsed_ms, exc)
+        _dispatch_self_healing_exception(
+            source="jane_web",
+            exc=exc,
+            request=request,
+            context={
+                "elapsed_ms": elapsed_ms,
+                "method": method,
+                "path": path,
+            },
+        )
         raise
+
+
+def _dispatch_self_healing_exception(
+    *,
+    source: str,
+    exc: BaseException,
+    request: Request,
+    context: dict | None = None,
+):
+    """Fire-and-forget self-healing capture for request exceptions."""
+    try:
+        from agent_skills.self_healing import capture_exception
+        task = asyncio.create_task(asyncio.to_thread(
+            capture_exception,
+            source=source,
+            exc=exc,
+            request=request,
+            project_root=str(CODE_ROOT),
+            context=context or {},
+            tags=["fastapi", "server"],
+        ))
+        _background_tasks.add(task)
+        task.add_done_callback(_background_tasks.discard)
+    except Exception as heal_exc:
+        _logger.warning("self-healing exception dispatch failed: %s", heal_exc)
+
+
+def _dispatch_self_healing_report(
+    *,
+    source: str,
+    category: str,
+    message: str,
+    payload: dict,
+    request: Request,
+    project_root: str | None = None,
+    tags: list[str] | None = None,
+):
+    """Fire-and-forget self-healing capture for diagnostic reports."""
+    try:
+        from agent_skills.self_healing import capture_report
+        task = asyncio.create_task(asyncio.to_thread(
+            capture_report,
+            source=source,
+            category=category,
+            message=message,
+            payload=payload,
+            request=request,
+            project_root=project_root or str(CODE_ROOT),
+            tags=tags or [],
+        ))
+        _background_tasks.add(task)
+        task.add_done_callback(_background_tasks.discard)
+    except Exception as heal_exc:
+        _logger.warning("self-healing report dispatch failed: %s", heal_exc)
 
 SESSION_COOKIE = "jane_session"
 TRUSTED_DEVICE_COOKIE = "jane_trusted_device"
@@ -1557,6 +1622,54 @@ async def receive_crash_report(request: Request):
     with open(crash_file, "a") as f:
         f.write(f"\n{'='*60}\n{report}\n")
     _logger.error("Android crash report received:\n%s", report[:500])
+    _dispatch_self_healing_report(
+        source="android_crash_report",
+        category="android_crash",
+        message=report[:500],
+        payload={"report": report},
+        request=request,
+        project_root=str(CODE_ROOT),
+        tags=["android", "crash"],
+    )
+    return {"status": "received"}
+
+
+def _self_healing_report_authorized(request: Request) -> bool:
+    """Authorize external project error reports that can trigger repair work."""
+    if _is_local_request(request):
+        return True
+    expected = os.environ.get("JANE_SELF_HEAL_TOKEN", "").strip()
+    provided = request.headers.get("x-jane-self-heal-token", "").strip()
+    return bool(expected and provided and secrets.compare_digest(expected, provided))
+
+
+@app.post("/api/self-healing/report")
+async def receive_self_healing_report(request: Request):
+    """Receive structured error reports from sibling apps such as chieh_class_v2."""
+    if not _self_healing_report_authorized(request):
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid JSON"}, status_code=400)
+    if not isinstance(body, dict):
+        return JSONResponse({"error": "expected object"}, status_code=400)
+
+    source = str(body.get("source") or "external_app")
+    category = str(body.get("category") or "error")
+    message = str(body.get("message") or "")[:2000]
+    project_root = str(body.get("project_root") or CODE_ROOT)
+    tags = body.get("tags") if isinstance(body.get("tags"), list) else ["external"]
+    payload = body.get("payload") if isinstance(body.get("payload"), dict) else body
+    _dispatch_self_healing_report(
+        source=source,
+        category=category,
+        message=message,
+        payload=payload,
+        request=request,
+        project_root=project_root,
+        tags=tags,
+    )
     return {"status": "received"}
 
 
@@ -1796,15 +1909,17 @@ async def receive_device_diagnostics(request: Request):
     message = body.get("message", "")
     _logger.info("Android diagnostic [%s]: %s", category, message[:200])
 
-    # chat_error → auto-file an audit job.
-    if category == "chat_error":
-        try:
-            from agent_skills.chat_error_audit import create_audit_job
-            created = create_audit_job(body)
-            if created:
-                _logger.info("chat_error → opened audit job %s", created.name)
-        except Exception as e:
-            _logger.warning("chat_error audit hook failed: %s", e)
+    # chat_error/error → self-healing incident + optional autonomous repair.
+    if category in {"chat_error", "error"}:
+        _dispatch_self_healing_report(
+            source=f"android_{category}",
+            category=category,
+            message=message,
+            payload=body,
+            request=request,
+            project_root=str(CODE_ROOT),
+            tags=["android", category],
+        )
 
     return {"status": "received"}
 

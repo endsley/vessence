@@ -70,14 +70,162 @@ KNOWN_JUNK_PREFIXES = (
     "Job #",
     "Prompt List Item ",
 )
-KNOWN_JUNK_PHRASES = (
-    "delete me",
-    "completed autonomously on",
+STALE_AMBER_RUNTIME_PHRASES = (
+    "amber should periodically provide brief status updates",
+    "amber uses the vault to store physical files",
+    "amber is a universal runtime",
+    "amber is a universal app shell",
+    "amber is a stateless vessel",
+    "branding: amber keeps her name",
+    "rent means a creator hosts amber + essence",
+    "amber not migrated",
+    "amber vault login page",
+    "amber's vault login page",
+)
+STALE_AMBER_KEEP_PHRASES = (
+    "amber's adk runtime is retired",
+    "amber runtime is retired",
+    "amber/ is absent",
+    "single unified identity",
+    "consolidated into a single unified identity",
+    "stale docs",
+    "historical",
+    "retired",
+)
+STALE_DISCORD_PHRASES = (
+    "in discord, amber should periodically",
+    "keep the discord bridge running as fallback",
+    "discord bridge running as fallback",
+)
+STALE_DOCKER_PHRASES = (
+    "docker-compose.yml",
+    "traefik.http.routers",
+    "traefik label",
+    "docker installer",
+    "docker onboarding",
+)
+STALE_DOCKER_KEEP_PHRASES = (
+    "no longer uses docker",
+    "no longer uses a docker",
+    "does not use docker",
+)
+LOW_VALUE_CLASSES_DEPLOY_TOPICS = {
+    "chieh_class_v2",
+    "teaching_app",
+    "teaching_app_v2",
+    "classes.chiehwu.com",
+    "classes_chiehwu",
+    "classes-site",
+    "education_project",
+    "projects",
+}
+LOW_VALUE_CLASSES_KEEP_SUBTOPICS = {
+    "deploy-preferences",
+    "deploy_preferences",
+    "production_deploy",
+    "production deploy",
+    "state",
+    "cloud_sql",
+    "cloud sql",
+}
+LOW_VALUE_CLASSES_DEPLOY_PHRASES = (
+    "cloud run revision",
+    "deployed revision",
+    "deployed to cloud run",
+    "gcloud run deploy",
 )
 
 
 def _utcnow_iso() -> str:
     return datetime.datetime.utcnow().isoformat()
+
+
+def _contains_any(text: str, phrases: tuple[str, ...]) -> bool:
+    return any(phrase in text for phrase in phrases)
+
+
+def _is_known_junk_phrase(text: str, topic: str) -> bool:
+    low = (text or "").strip().lower()
+    if low == "delete me" or low.startswith("delete me\n"):
+        return True
+    if "completed autonomously on" not in low:
+        return False
+    return (
+        topic in KNOWN_JUNK_TOPICS
+        or any((text or "").startswith(prefix) for prefix in KNOWN_JUNK_PREFIXES)
+        or low.startswith("completed autonomously on")
+    )
+
+
+def _meta_label(meta: dict | None, key: str) -> str:
+    return str((meta or {}).get(key) or "").strip().lower()
+
+
+def _codex_skill_exists(skill_name: str) -> bool:
+    return (Path.home() / ".codex" / "skills" / skill_name / "SKILL.md").exists()
+
+
+def _vessence_docker_compose_missing() -> bool:
+    return not os.path.exists(os.path.join(_VESSENCE_HOME, "docker-compose.yml"))
+
+
+def _is_stale_amber_runtime_memory(text: str) -> bool:
+    if "amber" not in text:
+        return False
+    if _contains_any(text, STALE_AMBER_KEEP_PHRASES):
+        return False
+    return _contains_any(text, STALE_AMBER_RUNTIME_PHRASES)
+
+
+def _is_stale_discord_memory(text: str) -> bool:
+    if "discord" not in text:
+        return False
+    return _contains_any(text, STALE_DISCORD_PHRASES)
+
+
+def _is_stale_vessence_docker_memory(text: str, topic: str) -> bool:
+    if not _contains_any(text, STALE_DOCKER_PHRASES):
+        return False
+    if _contains_any(text, STALE_DOCKER_KEEP_PHRASES):
+        return False
+    if topic in LOW_VALUE_CLASSES_DEPLOY_TOPICS:
+        return False
+    if not (
+        "vessence" in text
+        or "amber" in text
+        or "jane" in text
+        or topic in {"vessence", "project_vessence", "project: vessence", "system"}
+    ):
+        return False
+    return _vessence_docker_compose_missing()
+
+
+def _is_stale_waterlily_nationalgrid_memory(topic: str, subtopic: str, text: str) -> bool:
+    if topic != "waterlily" or subtopic not in {"nationalgrid", "national_grid", "nationalgrid-bills"}:
+        return False
+    if "no waterlily nationalgrid bill-extraction implementation" not in text:
+        return False
+    return _codex_skill_exists("waterlily-nationalgrid-bills")
+
+
+def _is_superseded_acubliss_planning_memory(topic: str, subtopic: str, text: str) -> bool:
+    if topic != "waterlily" or subtopic not in {"acubliss-reports", "acubliss", "reports"}:
+        return False
+    if not _codex_skill_exists("waterlily-appointments-report"):
+        return False
+    return _contains_any(text, (
+        "future skill should",
+        "extractor should choose",
+        "download button generates",
+    ))
+
+
+def _is_low_value_classes_deploy_snapshot(topic: str, subtopic: str, text: str) -> bool:
+    if subtopic in LOW_VALUE_CLASSES_KEEP_SUBTOPICS:
+        return False
+    if topic not in LOW_VALUE_CLASSES_DEPLOY_TOPICS and "classes.chiehwu.com" not in text:
+        return False
+    return _contains_any(text, LOW_VALUE_CLASSES_DEPLOY_PHRASES)
 
 
 def _llm_json(prompt: str) -> dict:
@@ -183,13 +331,15 @@ def _classify_known_junk(collection_name: str, doc: str, meta: dict | None) -> s
     text = (doc or "").strip()
     low = text.lower()
     topic = str(meta.get("topic") or "")
+    topic_low = topic.strip().lower()
+    subtopic_low = _meta_label(meta, "subtopic")
 
     if collection_name == CHROMA_COLLECTION_USER_MEMORIES:
         if topic in KNOWN_JUNK_TOPICS:
             return f"Known junk topic `{topic}`"
         if any(text.startswith(prefix) for prefix in KNOWN_JUNK_PREFIXES):
             return "Known queue/prompt transcript artifact"
-        if any(phrase in low for phrase in KNOWN_JUNK_PHRASES):
+        if _is_known_junk_phrase(text, topic):
             return "Known test or queue execution artifact"
         if topic == "system" and (
             low.startswith("refactor test")
@@ -199,6 +349,20 @@ def _classify_known_junk(collection_name: str, doc: str, meta: dict | None) -> s
             return "System test artifact"
         if "the ai assistant's name is amber" in low:
             return "Outdated Amber identity memory"
+        if topic == "ds3000_lecture_notes":
+            return "Superseded DS3000 lecture-note anchor; ds3000_lecture_notes_bge is canonical"
+        if _is_stale_amber_runtime_memory(low):
+            return "Outdated Amber-era runtime memory"
+        if _is_stale_discord_memory(low):
+            return "Outdated Discord bridge/status memory"
+        if _is_stale_vessence_docker_memory(low, topic_low):
+            return "Outdated Vessence Docker/Traefik memory"
+        if _is_stale_waterlily_nationalgrid_memory(topic_low, subtopic_low, low):
+            return "Superseded Waterlily National Grid implementation gap"
+        if _is_superseded_acubliss_planning_memory(topic_low, subtopic_low, low):
+            return "Superseded AcuBliss extraction planning memory"
+        if _is_low_value_classes_deploy_snapshot(topic_low, subtopic_low, low):
+            return "Low-value classes.chiehwu.com deploy revision snapshot"
         return None
 
     if collection_name == CHROMA_COLLECTION_LONG_TERM:
@@ -206,6 +370,14 @@ def _classify_known_junk(collection_name: str, doc: str, meta: dict | None) -> s
             return "Untyped archived transcript fragment with no topic metadata"
         if low.startswith("theme: article-sharing workflow") and "deferred follow-up feature request" in low:
             return "Deferred feature-request snapshot"
+        if _is_stale_amber_runtime_memory(low):
+            return "Outdated Amber-era runtime memory"
+        if _is_stale_discord_memory(low):
+            return "Outdated Discord bridge/status memory"
+        if _is_stale_vessence_docker_memory(low, topic_low):
+            return "Outdated Vessence Docker/Traefik memory"
+        if _is_low_value_classes_deploy_snapshot(topic_low, subtopic_low, low):
+            return "Low-value classes.chiehwu.com deploy revision snapshot"
         return None
 
     return None
@@ -244,6 +416,54 @@ def _collect_collection_rows(collection) -> list[dict]:
             data.get("metadatas", []),
         )
     ]
+
+
+def _normalise_duplicate_doc(doc: str) -> str:
+    return " ".join((doc or "").split()).casefold()
+
+
+def _duplicate_row_timestamp(row: dict) -> datetime.datetime:
+    meta = row.get("meta") or {}
+    for key in ("updated_at", "last_updated_at", "timestamp", "created_at", "archived_at", "code_verified_at"):
+        parsed = _parse_stored_utc(meta.get(key))
+        if parsed is not None:
+            return parsed
+    return datetime.datetime.min
+
+
+def _purge_exact_duplicate_rows(collection, collection_name: str, rows: list[dict]) -> dict:
+    """Delete exact duplicate memories after quarantining the older copies."""
+    groups: dict[tuple[str, str, str], list[dict]] = {}
+    for row in rows:
+        norm_doc = _normalise_duplicate_doc(row.get("doc", ""))
+        if len(norm_doc) < 20:
+            continue
+        meta = row.get("meta") or {}
+        key = (
+            _meta_label(meta, "topic"),
+            _meta_label(meta, "subtopic"),
+            norm_doc,
+        )
+        groups.setdefault(key, []).append(row)
+
+    deleted = 0
+    duplicate_groups = 0
+    for duplicate_rows in groups.values():
+        if len(duplicate_rows) < 2:
+            continue
+        keep = max(duplicate_rows, key=lambda row: (_duplicate_row_timestamp(row), row["id"]))
+        stale_rows = [row for row in duplicate_rows if row["id"] != keep["id"]]
+        if not stale_rows:
+            continue
+        duplicate_groups += 1
+        deleted += _delete_rows_with_quarantine(
+            collection,
+            collection_name,
+            stale_rows,
+            "Exact duplicate long-term memory",
+        )
+
+    return {"deleted": deleted, "groups": duplicate_groups}
 
 
 def _normalize_long_term_memory_rows(collection, rows: list[dict]) -> dict:
@@ -593,10 +813,10 @@ def backfill_thematic_archival(max_sessions: int = 2):
         from memory.v1.conversation_manager import ConversationManager
     except Exception as e:
         logger.warning(f"backfill: imports failed: {e}")
-        return
+        return {"status": "import-failed", "error": str(e)}
     if not os.path.exists(LEDGER_DB_PATH):
         logger.info("backfill: no ledger db at %s; skipping.", LEDGER_DB_PATH)
-        return
+        return {"status": "no-ledger", "ledger": LEDGER_DB_PATH}
     try:
         cm = ConversationManager(session_id="janitor-window-archival")
         try:
@@ -604,10 +824,12 @@ def backfill_thematic_archival(max_sessions: int = 2):
                 force=True, max_windows=max(20, int(max_sessions or 0))
             )
             logger.info("backfill: window archival result: %s", result)
+            return result
         finally:
             cm.close()
     except Exception as e:
         logger.warning(f"Could not run window-archival backfill: {e}")
+        return {"status": "failed", "error": str(e)}
 
 
 def dedup_cross_session_themes(
@@ -780,8 +1002,8 @@ def run_janitor(max_sessions: int = 2, max_topics: int = 3):
     except Exception:
         pass
 
-    # Step 0: Backfill any sessions that missed thematic archival (Limited batch)
-    backfill_thematic_archival(max_sessions=max_sessions)
+    # Step 0: Backfill closed conversation windows that missed thematic archival.
+    conversation_archival = backfill_thematic_archival(max_sessions=max_sessions)
 
     # Step 0.25: Purge expired short-term memories once backfill candidates
     # have had a chance to archive. This lets TTL cleanup happen even if
@@ -824,6 +1046,10 @@ def run_janitor(max_sessions: int = 2, max_topics: int = 3):
         CHROMA_COLLECTION_USER_MEMORIES: {"deleted": 0, "by_reason": {}},
         CHROMA_COLLECTION_LONG_TERM: {"deleted": 0, "by_reason": {}},
     }
+    exact_duplicate_deleted = {
+        CHROMA_COLLECTION_USER_MEMORIES: {"deleted": 0, "groups": 0},
+        CHROMA_COLLECTION_LONG_TERM: {"deleted": 0, "groups": 0},
+    }
     normalization_result = {
         "reviewed": 0,
         "rewritten": 0,
@@ -835,6 +1061,12 @@ def run_janitor(max_sessions: int = 2, max_topics: int = 3):
     if user_collection is not None:
         user_rows = _collect_collection_rows(user_collection)
         known_junk_deleted[CHROMA_COLLECTION_USER_MEMORIES] = _purge_known_junk(
+            user_collection,
+            CHROMA_COLLECTION_USER_MEMORIES,
+            user_rows,
+        )
+        user_rows = _collect_collection_rows(user_collection)
+        exact_duplicate_deleted[CHROMA_COLLECTION_USER_MEMORIES] = _purge_exact_duplicate_rows(
             user_collection,
             CHROMA_COLLECTION_USER_MEMORIES,
             user_rows,
@@ -854,6 +1086,12 @@ def run_janitor(max_sessions: int = 2, max_topics: int = 3):
     if long_term_collection is not None:
         long_term_rows = _collect_collection_rows(long_term_collection)
         known_junk_deleted[CHROMA_COLLECTION_LONG_TERM] = _purge_known_junk(
+            long_term_collection,
+            CHROMA_COLLECTION_LONG_TERM,
+            long_term_rows,
+        )
+        long_term_rows = _collect_collection_rows(long_term_collection)
+        exact_duplicate_deleted[CHROMA_COLLECTION_LONG_TERM] = _purge_exact_duplicate_rows(
             long_term_collection,
             CHROMA_COLLECTION_LONG_TERM,
             long_term_rows,
@@ -881,11 +1119,13 @@ def run_janitor(max_sessions: int = 2, max_topics: int = 3):
         "forgettable_expired_by_ttl": expired_purged,
         "forgettable_expired_by_age": old_forgettable_purged,
         "permanent_memories_protected": permanent_count,
+        "conversation_archival": conversation_archival,
         "topics_processed": {
             CHROMA_COLLECTION_USER_MEMORIES: list(user_topics.keys()),
             CHROMA_COLLECTION_LONG_TERM: list(long_term_topics.keys()),
         },
         "known_junk_deleted": known_junk_deleted,
+        "exact_duplicate_deleted": exact_duplicate_deleted,
         "long_term_normalization": normalization_result,
         "delete_quarantine_log": JANITOR_DELETE_QUARANTINE,
         "log_files_purged": log_files_purged,
@@ -904,7 +1144,9 @@ def run_janitor(max_sessions: int = 2, max_topics: int = 3):
         "merges_performed": len(merge_log),
         "forgettable_purged": expired_purged + old_forgettable_purged,
         "topics_with_merges": list({f"{m['collection']}::{m['topic']}" for m in merge_log}),
+        "conversation_archival": conversation_archival,
         "known_junk_deleted": known_junk_deleted,
+        "exact_duplicate_deleted": exact_duplicate_deleted,
         "long_term_normalization": normalization_result,
         "merges": merge_log,
     }
@@ -929,11 +1171,13 @@ def run_janitor(max_sessions: int = 2, max_topics: int = 3):
     refresh_dynamic_query_markers()
 
     logger.info(
-        "Janitor finished. Reduced %d facts (%d merges), deleted %d known junk rows, normalized %d long-term rows.",
+        "Janitor finished. Reduced %d facts (%d merges), deleted %d stale/junk rows and %d duplicate rows, normalized %d long-term rows.",
         total_reduced,
         len(merge_log),
         known_junk_deleted[CHROMA_COLLECTION_USER_MEMORIES]["deleted"]
         + known_junk_deleted[CHROMA_COLLECTION_LONG_TERM]["deleted"],
+        exact_duplicate_deleted[CHROMA_COLLECTION_USER_MEMORIES]["deleted"]
+        + exact_duplicate_deleted[CHROMA_COLLECTION_LONG_TERM]["deleted"],
         normalization_result["rewritten"] + normalization_result["split"],
     )
 
