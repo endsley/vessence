@@ -268,13 +268,6 @@ class TestGetRecentContextBehavior:
         assert "private turn" in result
         assert "send_message" in result
 
-    @pytest.mark.xfail(
-        reason=(
-            "get_recent_context documents 'Never raises', but a malformed FIFO "
-            "row that is not a string reaches line.strip()."
-        ),
-        strict=True,
-    )
     def test_malformed_fifo_rows_do_not_break_never_raises_contract(
         self, fake_recent_turns
     ):
@@ -282,13 +275,6 @@ class TestGetRecentContextBehavior:
 
         assert isinstance(rc.get_recent_context("session-1"), str)
 
-    @pytest.mark.xfail(
-        reason=(
-            "get_recent_context documents 'Never raises', but malformed "
-            "max_tokens is converted outside the read-failure try block."
-        ),
-        strict=True,
-    )
     def test_malformed_token_budget_does_not_break_never_raises_contract(
         self, fake_recent_turns
     ):
@@ -342,13 +328,6 @@ class TestStage1ContextPacket:
         assert isinstance(packet["last_intent"], str)
         assert isinstance(packet["recent_summary"], str)
 
-    @pytest.mark.xfail(
-        reason=(
-            "A malformed get_active_state return value is used after the try "
-            "block, so state.get raises instead of returning the empty packet."
-        ),
-        strict=True,
-    )
     def test_malformed_active_state_return_does_not_raise(self, fake_recent_turns):
         fake_recent_turns(state_side_effect=lambda session_id: None)
 

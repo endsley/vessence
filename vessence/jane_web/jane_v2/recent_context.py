@@ -86,13 +86,19 @@ def get_recent_context(
     if not turns:
         return ""
 
-    max_chars = max(0, int(max_tokens * _CHARS_PER_TOKEN))
+    try:
+        max_chars = max(0, int(max_tokens * _CHARS_PER_TOKEN))
+    except Exception as e:
+        logger.warning("recent_context: invalid max_tokens: %s", e)
+        return ""
 
     # Build from newest-backward so that when we trim for the budget we
     # drop the OLDEST entries first, preserving the most recent context.
     kept: list[str] = []
     running_chars = 0
     for line in reversed(turns):
+        if not isinstance(line, str):
+            continue
         line = line.strip()
         if not line:
             continue
@@ -134,6 +140,9 @@ def get_stage1_context_packet(session_id: str | None) -> dict:
     try:
         state = get_active_state(session_id)
     except Exception:
+        return {"pending_action": None, "last_intent": "",
+                "last_entities": {}, "recent_summary": ""}
+    if not isinstance(state, dict):
         return {"pending_action": None, "last_intent": "",
                 "last_entities": {}, "recent_summary": ""}
     summaries = state.get("recent_summaries") or []
