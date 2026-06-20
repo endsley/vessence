@@ -125,3 +125,28 @@ Auditor crashed: Command '['git', 'commit', '-m', 'auto-audit: add tests for jan
 ## 2026-06-18 01:00 — jane_web/jane_v2/recent_context.py
 Auditor crashed: Command '['git', 'commit', '-m', 'auto-audit: add tests for jane_web/jane_v2/recent_context.py', '--no-verify']' returned non-zero exit status 1.
 
+## 2026-06-20 01:00 — intent_classifier/v2/classifier.py
+Tests failing after 3 fix attempts. Reverted.
+
+Last test output:
+```
+============================= test session starts ==============================
+platform linux -- Python 3.13.7, pytest-9.0.2, pluggy-1.6.0 -- /home/chieh/google-adk-env/adk-venv/bin/python
+cachedir: .pytest_cache
+rootdir: /home/chieh/ambient/vessence
+plugins: asyncio-1.3.0, anyio-4.12.1, typeguard-4.5.1
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 46 items
+
+test_code/auto_audit_classifier.py::test_spec_default_thresholds_match_precision_first_stage1_contract PASSED [  2%]
+test_code/auto_audit_classifier.py::test_high_confidence_majority_vote_returns_documented_shape PASSED [  4%]
+test_code/auto_audit_classifier.py::test_borderline_three_of_five_votes_delegates_per_spec PASSED [  6%]
+test_code/auto_audit_classifier.py::test_margin_threshold_demotes_ambiguous_vote_even_when_confidence_floor_passes PASSED [  8%]
+test_code/auto_audit_classifier.py::test_nearest_neighbor_distance_gate_overrides_unanimous_vote PASSED [ 10%]
+test_code/auto_audit_classifier.py::test_long_prompt_word_gate_skips_embedding_and_chromadb PASSED [ 13%]
+test_code/auto_audit_classifier.py::test_empty_input_is_safe_and_delegates_when_not_near_training_data PASSED [ 15%]
+test_code/auto_audit_classifier.py::test_malformed_non_string_input_is_rejected_before_db_lookup[None] PASSED [ 17%]
+test_code/auto_audit_classifier.py::test_malformed_non_string_input_is_rejected_before_db_lookup[123] PASSED [ 19%]
+test_cod
+```
+
