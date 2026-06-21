@@ -150,3 +150,6 @@ test_code/auto_audit_classifier.py::test_malformed_non_string_input_is_rejected_
 test_cod
 ```
 
+## 2026-06-21 01:00 — agent_skills/sms_helpers.py
+Auditor crashed: Command '['git', 'commit', '-m', 'auto-audit: add tests for agent_skills/sms_helpers.py', '--no-verify']' returned non-zero exit status 1.
+
