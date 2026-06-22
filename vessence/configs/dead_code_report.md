@@ -1,12 +1,11 @@
-# Dead Code Report — 2026-06-21 01:08
+# Dead Code Report — 2026-06-22 01:08
 
-## Possibly-dead functions (2)
+## Possibly-dead functions (1)
 
 (No references found via grep. May be false positives if called via
  getattr, dynamic dispatch, or HTTP route registration.)
 
-- `memory/v1/topic_memory.py` :: `fire_and_forget()`
-- `memory/v1/janitor_memory.py` :: `purge_expired_forgettable()`
+- `memory/v1/embedding_helpers.py` :: `embed_many()`
 
 ## Duplicate function bodies (10 groups)
 
