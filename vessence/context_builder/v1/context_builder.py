@@ -3,6 +3,7 @@ import sys
 import json
 import asyncio
 import logging
+import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "vault_web"))
 
 
 MAX_DOC_CHARS = 4000
+MAX_SAVED_ARTICLE_CONTEXT_CHARS = 5000
 
 
 # ── In-memory cache for static context parts ─────────────────────────────────
@@ -224,6 +226,157 @@ def _read_json_summary(path: Path, max_chars: int = 600) -> str:
     except Exception:
         return ""
     return json.dumps(data, ensure_ascii=True)[:max_chars]
+
+
+ARTICLE_REFERENCE_KEYWORDS = (
+    "article", "story", "piece", "daily brief", "daily briefing", "briefing",
+    "saved article", "saved articles", "news", "headline",
+)
+
+
+def _article_query_terms(message: str) -> set[str]:
+    stop = {
+        "about", "after", "again", "article", "articles", "brief", "briefing",
+        "could", "daily", "does", "from", "have", "into", "jane", "know",
+        "more", "news", "piece", "read", "said", "save", "saved", "says",
+        "some", "story", "that", "them", "there", "these", "this", "what",
+        "when", "where", "which", "with", "would", "your",
+    }
+    return {
+        term
+        for term in re.findall(r"[a-z0-9][a-z0-9_-]{2,}", (message or "").lower())
+        if term not in stop
+    }
+
+
+def _should_include_saved_articles(message: str) -> bool:
+    lowered = _message_lower(message)
+    return any(keyword in lowered for keyword in ARTICLE_REFERENCE_KEYWORDS)
+
+
+def _saved_articles_index_path() -> Path:
+    data_home = Path(os.environ.get("VESSENCE_DATA_HOME", VESSENCE_DATA_HOME))
+    return data_home / "briefing_saved" / "saved.json"
+
+
+def _briefing_article_path(article_id: str) -> Path:
+    ambient_base = os.environ.get("AMBIENT_BASE", os.path.expanduser("~/ambient"))
+    tools_dir = os.environ.get("TOOLS_DIR", os.path.join(ambient_base, "skills"))
+    return Path(tools_dir) / "daily_briefing" / "essence_data" / "articles" / f"{article_id}.json"
+
+
+def _load_saved_article_entry_article(entry: dict) -> dict:
+    article = entry.get("article")
+    if isinstance(article, dict):
+        return article
+    article_id = str(entry.get("article_id") or "").strip()
+    if not article_id or not re.match(r"^[a-zA-Z0-9_-]+$", article_id):
+        return {}
+    path = _briefing_article_path(article_id)
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8", errors="replace"))
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _score_saved_article(message_terms: set[str], entry: dict, article: dict) -> int:
+    haystacks = [
+        str(entry.get("category") or ""),
+        str(article.get("title") or ""),
+        str(article.get("source") or ""),
+        str(article.get("url") or ""),
+        str(article.get("brief_summary") or ""),
+        str(article.get("full_summary") or ""),
+        str(article.get("full_text") or "")[:3000],
+    ]
+    score = 0
+    for term in message_terms:
+        for idx, haystack in enumerate(haystacks):
+            if term in haystack.lower():
+                score += 4 if idx <= 3 else 1
+                break
+    return score
+
+
+def _format_saved_article_context(entry: dict, article: dict, remaining_chars: int) -> str:
+    article_id = str(entry.get("article_id") or article.get("id") or "").strip()
+    category = str(entry.get("category") or "Uncategorized").strip()
+    title = str(article.get("title") or article_id or "Untitled").strip()
+    source = str(article.get("source") or "").strip()
+    url = str(article.get("url") or "").strip()
+    saved_at = str(entry.get("saved_at") or "").strip()
+    summary = str(article.get("full_summary") or article.get("brief_summary") or "").strip()
+    full_text = str(article.get("full_text") or "").strip()
+    body = summary or full_text
+    excerpt_budget = max(600, remaining_chars - 350)
+    excerpt = " ".join(body.split())[:excerpt_budget].strip()
+    parts = [
+        f"Title: {title}",
+        f"Category: {category}",
+    ]
+    if source:
+        parts.append(f"Source: {source}")
+    if saved_at:
+        parts.append(f"Saved at: {saved_at}")
+    if url:
+        parts.append(f"URL: {url}")
+    if excerpt:
+        parts.append(f"Context excerpt: {excerpt}")
+    return "\n".join(parts)
+
+
+def _build_saved_articles_context(message: str) -> str:
+    if not _should_include_saved_articles(message):
+        return ""
+    path = _saved_articles_index_path()
+    if not path.exists():
+        return ""
+    try:
+        saved = json.loads(path.read_text(encoding="utf-8", errors="replace"))
+    except Exception:
+        return ""
+    if not isinstance(saved, dict):
+        return ""
+
+    terms = _article_query_terms(message)
+    candidates: list[tuple[int, str, dict, dict]] = []
+    for article_id, entry in saved.items():
+        if not isinstance(entry, dict):
+            continue
+        article = _load_saved_article_entry_article(entry)
+        score = _score_saved_article(terms, entry, article) if terms else 0
+        saved_at = str(entry.get("saved_at") or "")
+        candidates.append((score, saved_at, entry, article))
+
+    if not candidates:
+        return ""
+    if terms and any(score > 0 for score, _saved_at, _entry, _article in candidates):
+        candidates = [c for c in candidates if c[0] > 0]
+    candidates.sort(key=lambda c: (c[0], c[1]), reverse=True)
+
+    sections: list[str] = []
+    remaining = MAX_SAVED_ARTICLE_CONTEXT_CHARS
+    for score, _saved_at, entry, article in candidates[:3]:
+        block = _format_saved_article_context(entry, article, remaining)
+        if not block:
+            continue
+        if len(block) > remaining:
+            block = block[:remaining].rstrip()
+        sections.append(block)
+        remaining -= len(block) + 80
+        if remaining <= 800:
+            break
+
+    if not sections:
+        return ""
+    return (
+        "These are the most relevant user-saved Daily Briefing articles for the current question. "
+        "Use this article context when answering; if it is not enough, say what is missing.\n\n"
+        + "\n\n---\n\n".join(sections)
+    )
 
 
 ANAPHORIC_TOKENS = {
@@ -716,6 +869,7 @@ def _build_system_sections(
     personal_facts: dict,
     profile: PromptProfile,
     force_conversation_summary: bool = False,
+    saved_articles_context: str = "",
 ) -> list[str]:
     user_background = _select_user_background(message, personal_facts) if profile.include_user_background else ""
     system_sections = [BASE_SYSTEM_PROMPT, APPROVED_PROJECT_ROOTS, AWAITING_MARKER_INSTRUCTION]
@@ -759,6 +913,8 @@ def _build_system_sections(
         system_sections.append(f"## Research Brief\n{research_brief}")
     if profile.include_file_context and file_context:
         system_sections.append(f"## Active File Context\nThe user is currently viewing or referring to: {file_context}")
+    if saved_articles_context:
+        system_sections.append(f"## Saved Daily Briefing Articles\n{saved_articles_context}")
     # Code map injection disabled — the brain has tools (Grep/Read) to find
     # symbols on demand, which costs fewer tokens than pre-loading the full index.
     # if profile.include_code_map:
@@ -1011,6 +1167,7 @@ def build_jane_context(
     else:
         memory_summary = _normalize_memory_summary("", memory_summary_fallback)
     research_brief = run_research_offload(message) if profile.include_research else ""
+    saved_articles_context = _build_saved_articles_context(message)
     system_sections = _build_system_sections(
         message,
         conversation_summary,
@@ -1021,6 +1178,7 @@ def build_jane_context(
         personal_facts,
         profile,
         force_conversation_summary=skip_memory_for_anaphora,
+        saved_articles_context=saved_articles_context,
     )
 
     if tts_enabled:
@@ -1104,6 +1262,10 @@ async def build_jane_context_async(
     if profile.include_research:
         _status("Running research offload...")
         research_task = asyncio.create_task(asyncio.to_thread(run_research_offload, message))
+    saved_articles_task = None
+    if _should_include_saved_articles(message):
+        _status("Checking saved Daily Briefing articles...")
+        saved_articles_task = asyncio.create_task(asyncio.to_thread(_build_saved_articles_context, message))
 
     try:
         if memory_task is not None:
@@ -1113,12 +1275,19 @@ async def build_jane_context_async(
         if research_task:
             research_brief = await research_task
             _status("Research complete.")
+        saved_articles_context = ""
+        if saved_articles_task:
+            saved_articles_context = await saved_articles_task
+            if saved_articles_context:
+                _status("Saved briefing article context loaded.")
     except Exception:
         # Cancel any pending tasks to avoid fire-and-forget coroutines
         if memory_task and not memory_task.done():
             memory_task.cancel()
         if research_task and not research_task.done():
             research_task.cancel()
+        if saved_articles_task and not saved_articles_task.done():
+            saved_articles_task.cancel()
         raise
 
     _status("Loading essence personality...")
@@ -1133,6 +1302,7 @@ async def build_jane_context_async(
         personal_facts,
         profile,
         force_conversation_summary=skip_memory_for_anaphora,
+        saved_articles_context=saved_articles_context,
     )
 
     # Inject platform context so Jane knows where the user is chatting from

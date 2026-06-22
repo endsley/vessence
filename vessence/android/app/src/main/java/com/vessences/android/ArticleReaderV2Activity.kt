@@ -37,10 +37,14 @@ class ArticleReaderV2Activity : Activity() {
     companion object {
         const val EXTRA_URL = "article_reader_v2_url"
         const val EXTRA_MODE = "article_reader_v2_mode"
+        const val EXTRA_SAVE_CATEGORY = "article_reader_v2_save_category"
         const val MODE_SUMMARIZE = "summarize"
         const val MODE_BRIEFING = "briefing"
         private const val MAX_ARTICLE_CHARS = 40_000
         private const val TTS_CHUNK_CHARS = 2_800
+        private const val MIN_ARTICLE_CHARS = 150
+        private const val MAX_AUTO_EXTRACT_ATTEMPTS = 6
+        private const val AUTO_EXTRACT_RETRY_MS = 1_500L
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -50,14 +54,17 @@ class ArticleReaderV2Activity : Activity() {
     private lateinit var webView: WebView
     private var extracted = false
     private var extractionInProgress = false
+    private var automaticExtractionAttempts = 0
     private var mode = MODE_SUMMARIZE
     private var articleUrl = ""
+    private var saveCategory = ""
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         tts = HybridTtsManager(applicationContext)
         mode = intent.getStringExtra(EXTRA_MODE) ?: MODE_SUMMARIZE
+        saveCategory = intent.getStringExtra(EXTRA_SAVE_CATEGORY)?.trim().orEmpty()
 
         try {
             ApiClient.getOkHttpClient()
@@ -151,10 +158,8 @@ class ArticleReaderV2Activity : Activity() {
             override fun onPageFinished(view: WebView, loadedUrl: String) {
                 if (extracted) return
                 status.text = "Article loaded. Extracting readable text..."
-                scope.launch {
-                    delay(1_500)
-                    if (!extracted) extractAndSpeak(view, automatic = true)
-                }
+                automaticExtractionAttempts = 0
+                scheduleAutomaticExtract(view, AUTO_EXTRACT_RETRY_MS)
             }
 
             override fun onReceivedError(
@@ -188,14 +193,19 @@ class ArticleReaderV2Activity : Activity() {
             val title = obj?.optString("title").orEmpty().trim()
             val raw = obj?.optString("textContent").orEmpty()
             val cleaned = cleanArticleText(title, raw)
-            if (cleaned.length < 150) {
-                status.text = if (automatic) {
-                    "Waiting for article text..."
-                } else {
-                    "I could not extract enough article text from this page."
-                }
-                preview.text = "Complete any proof or login if the site asks, wait for the article text to appear, then tap Extract."
+            if (cleaned.length < MIN_ARTICLE_CHARS) {
                 extractionInProgress = false
+                if (automatic) {
+                    automaticExtractionAttempts += 1
+                    if (automaticExtractionAttempts < MAX_AUTO_EXTRACT_ATTEMPTS) {
+                        status.text = "Waiting for article text..."
+                        preview.text = "The page loaded, but the article body has not appeared yet. I will try again automatically."
+                        scheduleAutomaticExtract(view, AUTO_EXTRACT_RETRY_MS)
+                        return@evaluateJavascript
+                    }
+                }
+                status.text = "I could not extract enough article text from this page."
+                preview.text = "Complete any proof or login if the site asks, wait for the article text to appear, then tap Extract."
                 return@evaluateJavascript
             }
 
@@ -204,6 +214,15 @@ class ArticleReaderV2Activity : Activity() {
             when (mode) {
                 MODE_BRIEFING -> submitToBriefing(title, cleaned)
                 else -> summarizeViaServer(title, cleaned)
+            }
+        }
+    }
+
+    private fun scheduleAutomaticExtract(view: WebView, delayMs: Long) {
+        scope.launch {
+            delay(delayMs)
+            if (!extracted && !isFinishing && !isDestroyed) {
+                extractAndSpeak(view, automatic = true)
             }
         }
     }
@@ -264,7 +283,11 @@ class ArticleReaderV2Activity : Activity() {
     }
 
     private fun submitToBriefing(title: String, text: String) {
-        status.text = "Submitting to daily briefing..."
+        status.text = if (saveCategory.isNotBlank()) {
+            "Submitting and saving to $saveCategory..."
+        } else {
+            "Submitting to daily briefing..."
+        }
 
         val prefs = applicationContext.getSharedPreferences(Constants.PREFS_NAME, MODE_PRIVATE)
         val serverUrl = prefs.getString(Constants.PREF_JANE_URL, Constants.DEFAULT_JANE_BASE_URL)
@@ -278,6 +301,9 @@ class ArticleReaderV2Activity : Activity() {
                         put("url", articleUrl)
                         put("title", title)
                         put("text", text)
+                        if (saveCategory.isNotBlank()) {
+                            put("save_category", saveCategory)
+                        }
                     }.toString().toRequestBody("application/json".toMediaType())
                     val request = Request.Builder()
                         .url("${serverUrl.trimEnd('/')}/api/briefing/articles/submit")
@@ -291,7 +317,13 @@ class ArticleReaderV2Activity : Activity() {
 
             Toast.makeText(
                 applicationContext,
-                if (success) "Article queued for briefing" else "Failed to queue article",
+                if (success && saveCategory.isNotBlank()) {
+                    "Article queued and will be saved to $saveCategory"
+                } else if (success) {
+                    "Article queued for briefing"
+                } else {
+                    "Failed to queue article"
+                },
                 Toast.LENGTH_SHORT,
             ).show()
             finish()
@@ -355,8 +387,98 @@ class ArticleReaderV2Activity : Activity() {
 
     private fun articleExtractionJs(): String = """
         (() => {
-            var article = new Readability(document).parse();
-            return JSON.stringify(article);
+            function clean(value) {
+                return (value || "").replace(/\s+/g, " ").trim();
+            }
+
+            function titleFromPage() {
+                var ogTitle = document.querySelector('meta[property="og:title"]');
+                var twitterTitle = document.querySelector('meta[name="twitter:title"]');
+                return clean(
+                    (ogTitle && ogTitle.content) ||
+                    (twitterTitle && twitterTitle.content) ||
+                    document.title ||
+                    ""
+                );
+            }
+
+            function visibleTextFrom(root) {
+                if (!root) return "";
+                var blocked = {
+                    SCRIPT: true,
+                    STYLE: true,
+                    NOSCRIPT: true,
+                    SVG: true,
+                    CANVAS: true,
+                    NAV: true,
+                    FOOTER: true,
+                    HEADER: true,
+                    FORM: true,
+                    BUTTON: true,
+                    ASIDE: true
+                };
+                var parts = [];
+                var walker = document.createTreeWalker(
+                    root,
+                    NodeFilter.SHOW_TEXT,
+                    {
+                        acceptNode: function(node) {
+                            var text = clean(node.nodeValue);
+                            if (text.length < 30) return NodeFilter.FILTER_REJECT;
+                            var parent = node.parentElement;
+                            while (parent) {
+                                if (blocked[parent.tagName]) return NodeFilter.FILTER_REJECT;
+                                var style = window.getComputedStyle(parent);
+                                if (style && (style.display === "none" || style.visibility === "hidden")) {
+                                    return NodeFilter.FILTER_REJECT;
+                                }
+                                parent = parent.parentElement;
+                            }
+                            return NodeFilter.FILTER_ACCEPT;
+                        }
+                    }
+                );
+                var node;
+                while ((node = walker.nextNode())) {
+                    parts.push(clean(node.nodeValue));
+                    if (parts.join("\n\n").length > ${MAX_ARTICLE_CHARS}) break;
+                }
+                return parts.join("\n\n");
+            }
+
+            function longestVisibleCandidate() {
+                var selectors = ["article", "main", "[role='main']", ".article", ".story", ".entry-content", ".post-content", ".content", "body"];
+                var best = "";
+                for (var i = 0; i < selectors.length; i++) {
+                    var nodes = document.querySelectorAll(selectors[i]);
+                    for (var j = 0; j < nodes.length; j++) {
+                        var text = visibleTextFrom(nodes[j]);
+                        if (text.length > best.length) best = text;
+                    }
+                }
+                return best;
+            }
+
+            try {
+                var article = null;
+                try {
+                    article = new Readability(document.cloneNode(true)).parse();
+                } catch (readabilityError) {
+                    article = null;
+                }
+                var readabilityText = article && article.textContent ? article.textContent : "";
+                var visibleText = readabilityText.length >= ${MIN_ARTICLE_CHARS} ? "" : longestVisibleCandidate();
+                var text = clean(visibleText).length > clean(readabilityText).length ? visibleText : readabilityText;
+                return JSON.stringify({
+                    title: (article && clean(article.title)) || titleFromPage(),
+                    textContent: text
+                });
+            } catch (error) {
+                return JSON.stringify({
+                    title: titleFromPage(),
+                    textContent: document.body ? (document.body.innerText || document.body.textContent || "") : ""
+                });
+            }
         })();
     """.trimIndent()
 

@@ -103,6 +103,33 @@ private val TopicColors = mapOf(
     "world" to Color(0xFF06B6D4),
 )
 
+private const val SavedCategorySeparator = " > "
+
+private fun savedCategoryPath(raw: String): String =
+    raw.ifBlank { "Uncategorized" }
+
+private fun savedCategoryLabel(path: String): String =
+    path.substringAfterLast(SavedCategorySeparator).ifBlank { path }
+
+private fun savedCategoryRoot(path: String): String =
+    path.substringBefore(SavedCategorySeparator).ifBlank { "Uncategorized" }
+
+private fun savedParentCategoryPath(path: String): String? {
+    val index = path.lastIndexOf(SavedCategorySeparator)
+    return if (index > 0) path.substring(0, index) else null
+}
+
+private fun savedChildCategoryPath(parent: String, path: String): String? {
+    if (path == parent) return null
+    val prefix = "$parent$SavedCategorySeparator"
+    if (!path.startsWith(prefix)) return null
+    val child = path.removePrefix(prefix)
+        .substringBefore(SavedCategorySeparator)
+        .trim()
+    if (child.isBlank()) return null
+    return "$parent$SavedCategorySeparator$child"
+}
+
 @Composable
 fun BriefingScreen(
     onBack: (() -> Unit)? = null,
@@ -192,7 +219,7 @@ fun BriefingScreen(
                 if (state.savedFilterCategory == null) {
                     // Level 1: category browser
                     val groups = state.savedArticles
-                        .groupBy { it.category.ifBlank { "Uncategorized" } }
+                        .groupBy { savedCategoryRoot(savedCategoryPath(it.category)) }
                         .toList()
                         .sortedByDescending { it.second.size }
                     if (groups.isEmpty()) {
@@ -232,7 +259,7 @@ fun BriefingScreen(
                                             )
                                             Spacer(modifier = Modifier.width(6.dp))
                                             Text(
-                                                cat,
+                                                savedCategoryLabel(cat),
                                                 color = Color.White,
                                                 fontSize = 13.sp,
                                                 maxLines = 1,
@@ -255,24 +282,35 @@ fun BriefingScreen(
                         }
                     }
                 } else {
-                    // Level 2: articles in chosen category — back row + grid
+                    // Level 2+: subcategories and direct articles in the chosen category.
+                    val selectedSavedCategory = state.savedFilterCategory ?: ""
+                    val childGroups = state.savedArticles
+                        .mapNotNull { saved ->
+                            val path = savedCategoryPath(saved.category)
+                            savedChildCategoryPath(selectedSavedCategory, path)?.let { it to saved }
+                        }
+                        .groupBy({ it.first }, { it.second })
+                        .toList()
+                        .sortedByDescending { it.second.size }
+                    val directArticles = state.savedArticles.filter {
+                        savedCategoryPath(it.category) == selectedSavedCategory
+                    }
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 12.dp, vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        IconButton(onClick = { viewModel.openSavedCategory(null) }) {
+                        IconButton(onClick = {
+                            viewModel.openSavedCategory(savedParentCategoryPath(selectedSavedCategory))
+                        }) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Color(0xFFF59E0B))
                         }
                         Text(
-                            state.savedFilterCategory ?: "",
+                            selectedSavedCategory,
                             color = Color.White,
                             fontSize = 14.sp,
                         )
-                    }
-                    val articlesInCat = state.savedArticles.filter {
-                        (it.category.ifBlank { "Uncategorized" }) == state.savedFilterCategory
                     }
                     LazyVerticalGrid(
                         columns = GridCells.Fixed(2),
@@ -280,7 +318,45 @@ fun BriefingScreen(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        items(articlesInCat, key = { it.articleId }) { saved ->
+                        items(childGroups, key = { it.first }) { (cat, items) ->
+                            Surface(
+                                onClick = { viewModel.openSavedCategory(cat) },
+                                color = SlateCard,
+                                shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, SlateSubtle),
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Column(modifier = Modifier.padding(16.dp)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            Icons.Default.Bookmark,
+                                            "Folder",
+                                            tint = Color(0xFFF59E0B),
+                                            modifier = Modifier.size(18.dp),
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            savedCategoryLabel(cat),
+                                            color = Color.White,
+                                            fontSize = 13.sp,
+                                            maxLines = 1,
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text(
+                                        "${items.size}",
+                                        color = Color(0xFFF59E0B),
+                                        fontSize = 22.sp,
+                                    )
+                                    Text(
+                                        if (items.size == 1) "article" else "articles",
+                                        color = SlateSubtle,
+                                        fontSize = 10.sp,
+                                    )
+                                }
+                            }
+                        }
+                        items(directArticles, key = { it.articleId }) { saved ->
                             saved.article?.let { article ->
                                 ArticleCard(
                                     article = article,

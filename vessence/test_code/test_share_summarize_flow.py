@@ -1,15 +1,16 @@
-"""End-to-end test for the article share → summarize_now → TTS flow.
+"""End-to-end test for the article share → summarize_now flow.
 
 Tests three layers:
 
 1. **Server endpoint**: POST /api/briefing/articles/summarize_now with a real URL
    returns {title, summary} that's not empty and looks like English prose.
 
-2. **Android wiring (static check)**: confirms the Kotlin broadcast/receiver
-   plumbing is intact:
-     - ShareReceiverActivity dispatches to MainActivity with intent extras
-     - MainActivity's handleSharedSummaryIntent() sends a broadcast
-     - ChatViewModel's sharedSummaryReceiver listens and calls tts.speak()
+2. **Android wiring (static check)**: confirms the Kotlin share path is
+   server-first:
+     - Summarize Now calls summarizeNow(url), not ArticleReaderV2Activity
+     - summarizeNow posts the URL to /api/briefing/articles/summarize_now
+     - the returned summary opens SummaryReaderActivity
+     - Save to Daily Briefing posts URL + save_category to /api/briefing/articles/submit
 
 3. **Self-correction**: if any step fails, prints actionable diagnostics
    identifying which layer broke.
@@ -25,11 +26,10 @@ import re
 import sys
 import time
 from pathlib import Path
-
-import httpx
+from urllib import error, request
 
 SERVER = "http://localhost:8080"
-DEFAULT_URL = "https://en.wikipedia.org/wiki/Pickleball"
+DEFAULT_URL = "https://news.cuanschutz.edu/news-stories/rheumatoid-arthritis-begins-before-the-pain-cu-anschutz-researchers-help-uncover-hidden-early-phase-of-the-disease"
 ANDROID_ROOT = Path("/home/chieh/ambient/vessence/android/app/src/main/java/com/vessences/android")
 
 GREEN = "\033[92m"
@@ -60,25 +60,33 @@ def test_summarize_endpoint(url: str) -> dict | None:
 
     started = time.time()
     try:
-        r = httpx.post(
+        payload = json.dumps({"url": url}).encode("utf-8")
+        req = request.Request(
             f"{SERVER}/api/briefing/articles/summarize_now",
-            json={"url": url},
-            timeout=120.0,
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
         )
+        with request.urlopen(req, timeout=180.0) as resp:
+            status_code = resp.status
+            text = resp.read().decode("utf-8", errors="replace")
+    except error.HTTPError as e:
+        status_code = e.code
+        text = e.read().decode("utf-8", errors="replace")
     except Exception as e:
         failed(f"HTTP request failed: {e}")
         return None
 
     elapsed = time.time() - started
-    print(f"    Status: HTTP {r.status_code} in {elapsed:.1f}s")
+    print(f"    Status: HTTP {status_code} in {elapsed:.1f}s")
 
-    if r.status_code != 200:
-        failed(f"Expected 200, got {r.status_code}: {r.text[:200]}")
+    if status_code != 200:
+        failed(f"Expected 200, got {status_code}: {text[:200]}")
         return None
     passed("HTTP 200")
 
     try:
-        data = r.json()
+        data = json.loads(text)
     except Exception as e:
         failed(f"Response is not JSON: {e}")
         return None
@@ -112,52 +120,39 @@ def test_summarize_endpoint(url: str) -> dict | None:
 
 
 def test_android_wiring() -> bool:
-    """Static-check the Kotlin code path from share → MainActivity → ChatViewModel TTS."""
+    """Static-check the Kotlin code path from share → server → summary reader."""
     print(f"\n[2] Android Kotlin wiring (static check)")
 
     checks = [
-        # ShareReceiverActivity must launch MainActivity with summary extras
         (
             ANDROID_ROOT / "ShareReceiverActivity.kt",
-            r'putExtra\("shared_summary_text"',
-            "ShareReceiverActivity passes summary text to MainActivity",
+            r'0\s*->\s*summarizeNow\(url\)',
+            "Summarize Now calls summarizeNow(url)",
         ),
         (
             ANDROID_ROOT / "ShareReceiverActivity.kt",
-            r'startActivity\(mainIntent\)',
-            "ShareReceiverActivity launches MainActivity",
-        ),
-        # MainActivity must read the extra and broadcast it
-        (
-            ANDROID_ROOT / "MainActivity.kt",
-            r'handleSharedSummaryIntent',
-            "MainActivity defines handleSharedSummaryIntent",
+            r'api/briefing/articles/summarize_now',
+            "summarizeNow posts to the server summarize_now endpoint",
         ),
         (
-            ANDROID_ROOT / "MainActivity.kt",
-            r'"com\.vessences\.android\.SHARED_SUMMARY_READY"',
-            "MainActivity broadcasts SHARED_SUMMARY_READY",
+            ANDROID_ROOT / "ShareReceiverActivity.kt",
+            r'SummaryReaderActivity',
+            "summarizeNow opens SummaryReaderActivity with the result",
         ),
         (
-            ANDROID_ROOT / "MainActivity.kt",
-            r'handleSharedSummaryIntent\(intent\)',
-            "MainActivity.onNewIntent calls handleSharedSummaryIntent",
-        ),
-        # ChatViewModel must register a receiver and call tts.speak
-        (
-            ANDROID_ROOT / "ui/chat/ChatViewModel.kt",
-            r'sharedSummaryReceiver',
-            "ChatViewModel defines sharedSummaryReceiver",
+            ANDROID_ROOT / "ShareReceiverActivity.kt",
+            r'addToBriefing\(url,\s*currentCategory\)',
+            "Save to Daily Briefing passes the selected category to addToBriefing",
         ),
         (
-            ANDROID_ROOT / "ui/chat/ChatViewModel.kt",
-            r'"com\.vessences\.android\.SHARED_SUMMARY_READY"',
-            "ChatViewModel registers receiver for SHARED_SUMMARY_READY",
+            ANDROID_ROOT / "ShareReceiverActivity.kt",
+            r'put\("save_category",\s*saveCategory\)',
+            "addToBriefing posts save_category to the server",
         ),
         (
-            ANDROID_ROOT / "ui/chat/ChatViewModel.kt",
-            r'tts\.speak\(text\)',
-            "ChatViewModel calls tts.speak(text) on receive",
+            ANDROID_ROOT / "ShareReceiverActivity.kt",
+            r'api/briefing/articles/submit',
+            "addToBriefing posts to the server submit endpoint",
         ),
     ]
 
@@ -198,7 +193,7 @@ def main() -> int:
         failed("Server side: summarize_now endpoint broken — Android will get nothing to speak")
 
     if android_ok:
-        passed("Android wiring: share → broadcast → receiver → tts.speak() all connected")
+        passed("Android wiring: share → server extractor → summary reader / save queue all connected")
     else:
         failed("Android wiring: at least one link in the chain is broken")
 
@@ -208,8 +203,7 @@ def main() -> int:
         print("   1. Update phone to v0.2.x with these changes")
         print("   2. Open Chrome, share any article URL → Vessence")
         print("   3. Pick 'Summarize Now'")
-        print("   4. Expected: Vessence app comes to focus, summary appears")
-        print("      in chat as Jane message, TTS reads it aloud")
+        print("   4. Expected: SummaryReaderActivity opens and reads the server summary aloud")
         return 0
     else:
         print(f"\n{RED}❌ At least one layer is broken — see ✗ markers above.{RESET}")

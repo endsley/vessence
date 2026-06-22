@@ -1,26 +1,26 @@
 # Most Recent Nightly Self-Improvement
 
-- Run started: 2026-06-20 01:00:01
-- Report generated: 2026-06-20 03:21:55
-- Total runtime: 8513s
+- Run started: 2026-06-21 01:00:01
+- Report generated: 2026-06-21 02:34:31
+- Total runtime: 5670s
 - Jobs: 8 total, 6 ok, 1 timeout, 1 failed
 - Stable latest report path: `/home/chieh/ambient/vessence/configs/self_improvement_latest.md`
-- Archived copy: `/home/chieh/ambient/vessence-data/reports/self_improvement/self_improvement_20260620_010001.md`
+- Archived copy: `/home/chieh/ambient/vessence-data/reports/self_improvement/self_improvement_20260621_010001.md`
 
 ## TL;DR
 
-- 1. ✓ Auto-Commit WIP (pre) (0.1m)
+- 1. ✓ Auto-Commit WIP (pre) (0.0m)
   - Fixes:
-    - 2026-06-20 01:00:05,931 INFO Committed 2 file(s).
-- 2. ✗ Code Auditor (11.5m)
+    - 2026-06-21 01:00:03,486 INFO Committed 3 file(s).
+- 2. ✗ Code Auditor (1.7m)
   - Problems:
-    - 2026-06-20 01:11:36,509 [WARNING] All fix attempts exhausted, reverting
-- 3. ✓ Dead Code Auditor (7.7m)
+    - 2026-06-21 01:01:44,711 [ERROR] Auditor crashed: Command '['git', 'commit', '-m', 'auto-audit: add tests for agent_skills/sms_helpers.py', '--no-verify']' re...
+- 3. ✓ Dead Code Auditor (7.0m)
   - Problems:
-    - Possibly-dead functions: 1.
+    - Possibly-dead functions: 2.
     - Duplicate function bodies: 10 groups.
   - Fixes:
-    - [dead-code] Done — 0 auto-deleted, 0 flagged, 1 dead funcs, 10 dup groups
+    - [dead-code] Done — 0 auto-deleted, 0 flagged, 2 dead funcs, 10 dup groups
 - 4. ⏱ Pipeline Audit (30 prompts) (20.0m)
   - Problems:
     - Prompts audited: 7.
@@ -31,22 +31,31 @@
     - CRON_JOBS.md missing entry for active cron script: auto_pull.sh
     - v2_3stage_pipeline.md missing class row: BUILD_APK
     - v2_3stage_pipeline.md missing class row: CLINIC_SCHEDULES_INFO
-- 6. ✓ Transcript Quality Review (0.5m)
-  - Fixes:
-    - 2026-06-20 01:39:55,613 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (0 issues)
-    - 2026-06-20 01:39:55,615 INFO self_improve_log: recorded [info] Transcript Review — I reviewed yesterday's conversations and nothing looked off — all turns ha...
-- 7. ✓ Memory Janitor (102.0m)
+- 6. ✓ Transcript Quality Review (0.7m)
   - Problems:
-    - [0;93m2026-06-20 02:59:16.472952572 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-06-20 06:59:16 WARNING] ModelImporter.cpp:739: Make...
-    - [0;93m2026-06-20 02:59:16.473003325 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-06-20 06:59:16 WARNING] ModelImporter.cpp:739: Make...
-    - [0;93m2026-06-20 02:59:16.473019381 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-06-20 06:59:16 WARNING] ModelImporter.cpp:739: Make...
+    - Transcript review found 4 issues: 1 critical, 2 low, 1 medium.
+    - Stage 1 classifier emitted an unsupported intent label before falling back to others.
+    - Stage 1 classifier emitted another unsupported intent label before fallback.
   - Fixes:
-    - INFO:agent_skills.self_improve_log:self_improve_log: recorded [medium] Memory Verification — Found 17 stale memories out of 20 checked. Stale memories make J...
+    - 2026-06-21 01:29:32,164 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (4 issues)
+    - 2026-06-21 01:29:32,166 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 1 critical, 1 medium, 2...
+- 7. ✓ Memory Janitor (65.0m)
+  - Problems:
+    - tensorrt_execution_provider.h:92 log] [2026-06-21 06:03:28 WARNING] ModelImporter.cpp:739: Make sure input token_type_ids has Int64 binding.[m
+    - [0;93m2026-06-21 02:03:28.779336433 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-06-21 06:03:28 WARNING] ModelImporter.cpp:739: Make...
+    - [0;93m2026-06-21 02:03:28.779384913 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-06-21 06:03:28 WARNING] ModelImporter.cpp:739: Make...
+  - Fixes:
+    - INFO:agent_skills.self_improve_log:self_improve_log: recorded [medium] Memory Verification — Found 10 stale memories out of 20 checked. Stale memories make J...
 - 8. ✓ Auto-Commit + Push (post) (0.0m)
   - Problems:
-    - 2026-06-20 03:21:54,557 WARNING git push failed: fatal: could not read Username for 'https://github.com': No such device or address
+    - 2026-06-21 02:34:31,745 WARNING git push failed: fatal: could not read Username for 'https://github.com': No such device or address
   - Fixes:
-    - 2026-06-20 03:21:54,311 INFO Committed 5 file(s).
+    - 2026-06-21 02:34:31,467 INFO Committed 5 file(s).
+
+**Top follow-ups:**
+
+- Constrain classifier output to the supported enum, and add explicit normalization/tests for project/source-code questions so they route cleanly to others without warnings.
+- Harden the classifier prompt/parser to only emit valid labels, and add a regression case for architecture/meta questions.
 
 ## Executive Summary
 
@@ -56,7 +65,7 @@
 ## Stage 1: Auto-Commit WIP (pre)
 
 - Status: `ok`
-- Duration: 4s (0.1 min)
+- Duration: 2s (0.0 min)
 
 ### What It Did
 
@@ -68,7 +77,7 @@
 
 ### Improvements It Made
 
-- 2026-06-20 01:00:05,931 INFO Committed 2 file(s).
+- 2026-06-21 01:00:03,486 INFO Committed 3 file(s).
 
 ### Evidence Files
 
@@ -76,8 +85,8 @@
 
 ## Stage 2: Code Auditor
 
-- Status: `exit-1`
-- Duration: 690s (11.5 min)
+- Status: `exit-2`
+- Duration: 101s (1.7 min)
 
 ### What It Did
 
@@ -85,8 +94,8 @@
 
 ### Problems It Found
 
-- Job ended with status `exit-1`.
-- 2026-06-20 01:11:36,509 [WARNING] All fix attempts exhausted, reverting
+- Job ended with status `exit-2`.
+- 2026-06-21 01:01:44,711 [ERROR] Auditor crashed: Command '['git', 'commit', '-m', 'auto-audit: add tests for agent_skills/sms_helpers.py', '--no-verify']' returned non-zero exit status 1.
 
 ### Improvements It Made
 
@@ -101,7 +110,7 @@
 ## Stage 3: Dead Code Auditor
 
 - Status: `ok`
-- Duration: 464s (7.7 min)
+- Duration: 421s (7.0 min)
 
 ### What It Did
 
@@ -109,12 +118,12 @@
 
 ### Problems It Found
 
-- Possibly-dead functions: 1.
+- Possibly-dead functions: 2.
 - Duplicate function bodies: 10 groups.
 
 ### Improvements It Made
 
-- [dead-code] Done — 0 auto-deleted, 0 flagged, 1 dead funcs, 10 dup groups
+- [dead-code] Done — 0 auto-deleted, 0 flagged, 2 dead funcs, 10 dup groups
 
 ### Evidence Files
 
@@ -153,7 +162,7 @@
 ## Stage 5: Doc Drift Auditor
 
 - Status: `ok`
-- Duration: 1s (0.0 min)
+- Duration: 0s (0.0 min)
 
 ### What It Did
 
@@ -182,7 +191,7 @@
 ## Stage 6: Transcript Quality Review
 
 - Status: `ok`
-- Duration: 31s (0.5 min)
+- Duration: 44s (0.7 min)
 
 ### What It Did
 
@@ -190,12 +199,23 @@
 
 ### Problems It Found
 
-- No problems were detected in the available logs/reports.
+- Transcript review found 4 issues: 1 critical, 2 low, 1 medium.
+- Stage 1 classifier emitted an unsupported intent label before falling back to others.
+- Stage 1 classifier emitted another unsupported intent label before fallback.
+- Stage 3 request completed with very high latency.
+- Stage 3 failed to deliver a response before the client disconnected.
 
 ### Improvements It Made
 
-- 2026-06-20 01:39:55,613 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (0 issues)
-- 2026-06-20 01:39:55,615 INFO self_improve_log: recorded [info] Transcript Review — I reviewed yesterday's conversations and nothing looked off — all turns handled cleanly.
+- 2026-06-21 01:29:32,164 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (4 issues)
+- 2026-06-21 01:29:32,166 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 1 critical, 1 medium, 2 minor issues. The most urgent
+
+### Follow-Up Fixes Recommended
+
+- Constrain classifier output to the supported enum, and add explicit normalization/tests for project/source-code questions so they route cleanly to others without warnings.
+- Harden the classifier prompt/parser to only emit valid labels, and add a regression case for architecture/meta questions.
+- Move short_term_extractor off the user-facing request path, or enforce a short total timeout and run memory extraction asynchronously after streaming completes.
+- For long coding tasks, acknowledge quickly and hand off to an asynchronous job with progress updates instead of holding the voice/chat stream open. Also decouple memory extraction from the live response path.
 
 ### Evidence Files
 
@@ -205,7 +225,7 @@
 ## Stage 7: Memory Janitor
 
 - Status: `ok`
-- Duration: 6118s (102.0 min)
+- Duration: 3898s (65.0 min)
 
 ### What It Did
 
@@ -213,15 +233,15 @@
 
 ### Problems It Found
 
-- [0;93m2026-06-20 02:59:16.472952572 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-06-20 06:59:16 WARNING] ModelImporter.cpp:739: Make sure input input_ids has Int64 binding.[m
-- [0;93m2026-06-20 02:59:16.473003325 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-06-20 06:59:16 WARNING] ModelImporter.cpp:739: Make sure input attention_mask has Int64 binding.[m
-- [0;93m2026-06-20 02:59:16.473019381 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-06-20 06:59:16 WARNING] ModelImporter.cpp:739: Make sure input token_type_ids has Int64 binding.[m
-- [0;93m2026-06-20 02:59:16.694620137 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-06-20 06:59:16 WARNING] ModelImporter.cpp:739: Make sure input input_ids has Int64 binding.[m
-- [0;93m2026-06-20 02:59:16.694670284 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-06-20 06:59:16 WARNING] ModelImporter.cpp:739: Make sure input attention_mask has Int64 binding.[m
+- tensorrt_execution_provider.h:92 log] [2026-06-21 06:03:28 WARNING] ModelImporter.cpp:739: Make sure input token_type_ids has Int64 binding.[m
+- [0;93m2026-06-21 02:03:28.779336433 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-06-21 06:03:28 WARNING] ModelImporter.cpp:739: Make sure input input_ids has Int64 binding.[m
+- [0;93m2026-06-21 02:03:28.779384913 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-06-21 06:03:28 WARNING] ModelImporter.cpp:739: Make sure input attention_mask has Int64 binding.[m
+- [0;93m2026-06-21 02:03:28.779401050 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-06-21 06:03:28 WARNING] ModelImporter.cpp:739: Make sure input token_type_ids has Int64 binding.[m
+- [0;93m2026-06-21 02:16:31.525271135 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-06-21 06:16:31 WARNING] ModelImporter.cpp:739: Make sure input input_ids has Int64 binding.[m
 
 ### Improvements It Made
 
-- INFO:agent_skills.self_improve_log:self_improve_log: recorded [medium] Memory Verification — Found 17 stale memories out of 20 checked. Stale memories make Jane give wrong answers about her own
+- INFO:agent_skills.self_improve_log:self_improve_log: recorded [medium] Memory Verification — Found 10 stale memories out of 20 checked. Stale memories make Jane give wrong answers about her own
 
 ### Evidence Files
 
@@ -238,11 +258,11 @@
 
 ### Problems It Found
 
-- 2026-06-20 03:21:54,557 WARNING git push failed: fatal: could not read Username for 'https://github.com': No such device or address
+- 2026-06-21 02:34:31,745 WARNING git push failed: fatal: could not read Username for 'https://github.com': No such device or address
 
 ### Improvements It Made
 
-- 2026-06-20 03:21:54,311 INFO Committed 5 file(s).
+- 2026-06-21 02:34:31,467 INFO Committed 5 file(s).
 
 ### Evidence Files
 

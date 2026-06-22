@@ -172,8 +172,8 @@ try:
     ANDROID_VERSION = _version_data["version_name"]
     _ANDROID_VERSION_CODE = _version_data["version_code"]
 except FileNotFoundError:
-    ANDROID_VERSION = "0.2.93"
-    _ANDROID_VERSION_CODE = 324
+    ANDROID_VERSION = "0.2.97"
+    _ANDROID_VERSION_CODE = 328
 
 # Startup validation: ensure the APK for the advertised version actually exists
 _expected_apk = MARKETING_DOWNLOADS_DIR / f"vessences-android-v{ANDROID_VERSION}.apk"
@@ -4685,8 +4685,9 @@ async def submit_briefing_article(request: Request, _=Depends(require_auth)):
         raise HTTPException(status_code=400, detail="A valid URL starting with http(s):// is required")
     title = (body.get("title") or "").strip()
     text = (body.get("text") or "").strip()
+    save_category = (body.get("save_category") or body.get("category") or "").strip()
     bt = _briefing_tools()
-    result = bt.submit_article(url, title=title, text=text)
+    result = bt.submit_article(url, title=title, text=text, save_category=save_category)
 
     # Spawn detached processor subprocess — survives server restarts.
     # The processor uses a file lock so only one instance runs at a time.
@@ -4727,7 +4728,9 @@ async def summarize_article_now(request: Request, _=Depends(require_auth)):
     if not text and not title:
         raise HTTPException(status_code=422, detail="Could not extract article content from that URL")
 
-    if text:
+    if extracted.get("source_type") == "x_post":
+        summary = text
+    elif text:
         summary = await asyncio.get_event_loop().run_in_executor(
             None, lambda: summarize_full(title, text)
         )
