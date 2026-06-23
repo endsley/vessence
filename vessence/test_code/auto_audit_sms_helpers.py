@@ -366,6 +366,17 @@ def test_resolve_recipient_wildcard_only_input_cannot_force_unambiguous_send(
     assert sms_helpers.resolve_recipient("_") is None
 
 
+@pytest.mark.parametrize("wildcard_name", ["%", "_", "%%", "__", "%_%"])
+def test_resolve_recipient_sql_wildcards_are_not_literal_contact_names(
+    isolated_sms_db,
+    wildcard_name,
+):
+    conn, _ = isolated_sms_db
+    insert_contact(conn, "Single Contact", "+15550000035", is_primary=1)
+
+    assert sms_helpers.resolve_recipient(wildcard_name) is None
+
+
 @pytest.mark.parametrize("bad_name", ["", "   ", None])
 def test_resolve_recipient_empty_input_returns_none_without_db_query(
     bad_name,

@@ -82,10 +82,13 @@ def resolve_recipient(name: str) -> Optional[dict]:
 
             # 2) contacts lookup — LIKE on display_name. Require a phone
             # number (email-only contacts are useless for SMS).
-            like = f"%{norm}%"
+            escaped_norm = (
+                norm.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            )
+            like = f"%{escaped_norm}%"
             rows = conn.execute(
                 "SELECT display_name, phone_number FROM contacts "
-                "WHERE display_name LIKE ? AND phone_number IS NOT NULL "
+                "WHERE display_name LIKE ? ESCAPE '\\' AND phone_number IS NOT NULL "
                 "AND phone_number != '' "
                 "ORDER BY is_primary DESC, display_name LIMIT 5",
                 (like,),
