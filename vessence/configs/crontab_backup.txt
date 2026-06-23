@@ -45,3 +45,12 @@ VESSENCE_HOME=/home/chieh/ambient/vessence
 
 # Waterlily history backup: appointments, payments, reports, receipts, admin history
 20 1 * * * /home/chieh/google-adk-env/adk-venv/bin/python /home/chieh/code/waterlily/scripts/backup_waterlily_history.py >> /home/chieh/ambient/vessence-data/logs/waterlily_history_backup.log 2>&1
+
+# Waterlily cache load health check: fail only for persistent slow cached income reports after retry
+0 0 * * * flock -n /tmp/waterlily-cache-load-health.lock nice -n 19 ionice -c 3 /home/chieh/code/waterlily/scripts/check_income_cache_load_times.py --threshold 1.5 >> /home/chieh/ambient/vessence-data/logs/waterlily_cache_load_health.log 2>&1
+
+# Waterlily current-month accounting report update: rolling daily source sync + local cache rebuild; Sunday does a full current-month refresh
+30 1 * * * flock -n /tmp/waterlily-nightly-current-month-reports.lock nice -n 19 ionice -c 3 /home/chieh/code/waterlily/scripts/nightly_update_current_month_reports.py >> /home/chieh/ambient/vessence-data/logs/waterlily_nightly_reports.log 2>&1
+
+# Nutricost deal monitor: delete sub-30% marketing emails; alert 30%+ deals from juliaprocess
+0 5 * * * VESSENCE_HOME=/home/chieh/ambient/vessence VESSENCE_DATA_HOME=/home/chieh/ambient/vessence-data VAULT_HOME=/home/chieh/ambient/vault PYTHONPATH=/home/chieh/ambient/vessence /home/chieh/google-adk-env/adk-venv/bin/python /home/chieh/ambient/vessence/agent_skills/nutricost_deal_monitor.py >> /home/chieh/ambient/vessence-data/logs/System_log/nutricost_deal_monitor.log 2>&1

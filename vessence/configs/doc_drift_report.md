@@ -1,8 +1,11 @@
-# Doc Drift Report — 2026-06-22 01:26
+# Doc Drift Report — 2026-06-23 01:32
 
 ## Needs human review
 
 - CRON_JOBS.md missing entry for active cron script: auto_pull.sh
+- CRON_JOBS.md missing entry for active cron script: check_income_cache_load_times.py
+- CRON_JOBS.md missing entry for active cron script: nightly_update_current_month_reports.py
+- CRON_JOBS.md missing entry for active cron script: nutricost_deal_monitor.py
 - v2_3stage_pipeline.md missing class row: BUILD_APK
 - v2_3stage_pipeline.md missing class row: CLINIC_SCHEDULES_INFO
 - v2_3stage_pipeline.md missing class row: DELETE_EMAIL
