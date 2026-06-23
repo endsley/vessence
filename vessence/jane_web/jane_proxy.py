@@ -585,13 +585,30 @@ def _execute_email_tool_serverside(tc: dict) -> str:
             to = (args.get("to") or "").strip()
             subject = (args.get("subject") or "").strip()
             body = (args.get("body") or "").strip()
+            from_email = (
+                args.get("from_email")
+                or args.get("from")
+                or args.get("sender")
+                or ""
+            ).strip() or None
             if not to:
                 return "\n\nEmail not sent: no recipient address provided."
             if not body:
                 return "\n\nEmail not sent: empty body."
-            result = send_email(to=to, subject=subject, body=body)
-            logger.info("Email sent: id=%s to=%s", result.get("message_id", "?"), to)
-            return f"\n\n[Email sent to {to}.]"
+            result = send_email(
+                to=to,
+                subject=subject,
+                body=body,
+                from_email=from_email,
+            )
+            sender = result.get("from_email") or from_email or "default Gmail account"
+            logger.info(
+                "Email sent: id=%s from=%s to=%s",
+                result.get("message_id", "?"),
+                sender,
+                to,
+            )
+            return f"\n\n[Email sent from {sender} to {to}.]"
         elif tool == "email.delete":
             # Same contract as email.send — Opus confirms first, then emits.
             from agent_skills.email_tools import delete_email

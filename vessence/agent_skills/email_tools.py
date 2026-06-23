@@ -17,7 +17,7 @@ from typing import Any
 from googleapiclient.discovery import build
 from google.oauth2.credentials import Credentials
 
-from agent_skills.email_oauth import refresh_token_if_needed
+from agent_skills.email_oauth import list_gmail_token_users, refresh_token_if_needed
 
 _logger = logging.getLogger(__name__)
 
@@ -26,12 +26,16 @@ _logger = logging.getLogger(__name__)
 # Service builder
 # ---------------------------------------------------------------------------
 
-def get_gmail_service(credentials_json: dict | None = None):
+def get_gmail_service(
+    credentials_json: dict | None = None,
+    user_id: str | None = None,
+):
     """Build an authorized Gmail API service.
 
     Args:
         credentials_json: Token dict with access_token, refresh_token, etc.
             If None, loads from disk via email_oauth.
+        user_id: Optional Gmail account to load when credentials_json is None.
 
     Returns:
         googleapiclient.discovery.Resource for the Gmail API.
@@ -39,11 +43,14 @@ def get_gmail_service(credentials_json: dict | None = None):
     Raises:
         RuntimeError: If no valid credentials are available.
     """
-    token_data = credentials_json or refresh_token_if_needed()
+    token_data = credentials_json or refresh_token_if_needed(user_id)
     if token_data is None:
-        raise RuntimeError(
-            "No Gmail credentials available. Please sign in with Google first."
-        )
+        if user_id:
+            raise RuntimeError(
+                f"No Gmail credentials available for {user_id}. "
+                "Please sign in with Google first."
+            )
+        raise RuntimeError("No Gmail credentials available. Please sign in with Google first.")
 
     creds = Credentials(
         token=token_data["access_token"],
@@ -193,6 +200,7 @@ def send_email(
     body: str,
     cc: str | None = None,
     bcc: str | None = None,
+    from_email: str | None = None,
 ) -> dict[str, str]:
     """Send an email via the Gmail API.
 
@@ -202,13 +210,28 @@ def send_email(
         body: Plain text email body.
         cc: Optional CC recipients (comma-separated).
         bcc: Optional BCC recipients (comma-separated).
+        from_email: Optional authenticated Gmail account to send from.
 
     Returns:
-        Dict with: message_id, thread_id.
+        Dict with: message_id, thread_id, from_email.
     """
-    service = get_gmail_service()
+    token_data = refresh_token_if_needed(from_email)
+    if token_data is None:
+        if from_email:
+            available = ", ".join(list_gmail_token_users()) or "none"
+            raise RuntimeError(
+                f"No Gmail credentials available for {from_email}. "
+                f"Configured accounts: {available}. "
+                "Please sign in with Google using that account first."
+            )
+        raise RuntimeError("No Gmail credentials available. Please sign in with Google first.")
+
+    sender = token_data.get("user_id", from_email or "")
+    service = get_gmail_service(token_data)
 
     message = MIMEText(body)
+    if sender:
+        message["from"] = sender
     message["to"] = to
     message["subject"] = subject
     if cc:
@@ -221,10 +244,16 @@ def send_email(
         userId="me", body={"raw": raw},
     ).execute()
 
-    _logger.info("Email sent: id=%s thread=%s", sent.get("id"), sent.get("threadId"))
+    _logger.info(
+        "Email sent: id=%s thread=%s from=%s",
+        sent.get("id"),
+        sent.get("threadId"),
+        sender,
+    )
     return {
         "message_id": sent.get("id", ""),
         "thread_id": sent.get("threadId", ""),
+        "from_email": sender,
     }
 
 
@@ -275,7 +304,13 @@ if __name__ == "__main__":
         email = read_email(sys.argv[2])
         print(json.dumps(email, indent=2, default=str))
     elif action == "send" and len(sys.argv) > 4:
-        result = send_email(to=sys.argv[2], subject=sys.argv[3], body=sys.argv[4])
+        from_email = sys.argv[5] if len(sys.argv) > 5 else None
+        result = send_email(
+            to=sys.argv[2],
+            subject=sys.argv[3],
+            body=sys.argv[4],
+            from_email=from_email,
+        )
         print(json.dumps(result, indent=2))
     elif action == "delete" and len(sys.argv) > 2:
         ok = delete_email(sys.argv[2])
@@ -284,4 +319,4 @@ if __name__ == "__main__":
         emails = search_emails(sys.argv[2])
         print(json.dumps(emails, indent=2, default=str))
     else:
-        print("Usage: email_tools.py [inbox|read <id>|send <to> <subj> <body>|delete <id>|search <query>]")
+        print("Usage: email_tools.py [inbox|read <id>|send <to> <subj> <body> [from_email]|delete <id>|search <query>]")

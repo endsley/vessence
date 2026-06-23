@@ -7,7 +7,7 @@ the user edits drafts mid-air. qwen2.5:7b can't hold that conversation
 reliably, so Opus owns it end-to-end.
 
 Output: Opus drafts, reads back, gets explicit user confirmation, THEN
-emits `[[CLIENT_TOOL:email.send:{"to":"...","subject":"...","body":"..."}]]`
+emits `[[CLIENT_TOOL:email.send:{"from_email":"...","to":"...","subject":"...","body":"..."}]]`
 which jane_proxy intercepts and executes server-side via
 `agent_skills.email_tools.send_email`. The marker = "send now"; by the time
 it arrives the user has already said yes.
@@ -39,10 +39,26 @@ def _format_email_block(label: str, emails: list[dict]) -> str:
 def _escalation_context() -> str:
     """Inject recent inbox so Opus has context for replies / threading,
     plus the rules of engagement for sending."""
+    try:
+        from agent_skills.email_oauth import list_gmail_token_users
+        accounts = list_gmail_token_users()
+    except Exception:
+        accounts = []
+    account_line = (
+        ", ".join(accounts)
+        if accounts
+        else "no stored Gmail sender tokens yet"
+    )
+
     rules = (
         "[send email escalation context]\n"
         "\n"
-        'Tool: [[CLIENT_TOOL:email.send:{"to":"<addr>","subject":"<subj>","body":"<body>"}]]\n'
+        'Tool: [[CLIENT_TOOL:email.send:{"from_email":"<sender>","to":"<addr>","subject":"<subj>","body":"<body>"}]]\n'
+        f"  - Available sender accounts: {account_line}.\n"
+        "  - from_email: use the Gmail account the user explicitly requested "
+        "(for example chieh.t.wu@gmail.com or juliaprocess@gmail.com). If the "
+        "user did not specify a sender, omit from_email or use null so the "
+        "server uses the default Gmail account.\n"
         "  - to: a real email address. If the user only gave a name, "
         "resolve it (search recent inbox below, ask the user, or skip).\n"
         "  - subject: infer from the body if the user didn't dictate one.\n"
@@ -51,8 +67,9 @@ def _escalation_context() -> str:
         "  - Server moves the message via the Gmail API — no Android relay.\n"
         "\n"
         "Workflow:\n"
-        "  1. Draft the email in your reply, read it back: 'Email to "
-        "<addr>, subject \"<subj>\", body \"<body>\". Want me to send it?'\n"
+        "  1. Draft the email in your reply, read it back with the sender: "
+        "'Email from <sender or default Gmail account> to <addr>, subject "
+        "\"<subj>\", body \"<body>\". Want me to send it?'\n"
         "  2. WAIT for an explicit yes on the next turn — never emit the "
         "marker until the user confirms.\n"
         "  3. On 'yes' / 'send it' / 'go ahead' — emit the CLIENT_TOOL "
@@ -64,6 +81,9 @@ def _escalation_context() -> str:
         "NEVER guess a recipient address. If the user gave only a name "
         "and there is no match in the inbox below, ask: 'What's <name>'s "
         "email address?'\n"
+        "NEVER guess a non-default sender. If the user asks to send from a "
+        "Gmail account that is not listed above, explain that they need to "
+        "sign in with that Google account first.\n"
     )
 
     try:

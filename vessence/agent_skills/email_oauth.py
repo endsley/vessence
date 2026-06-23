@@ -8,7 +8,9 @@ Token storage path: $VESSENCE_DATA_HOME/credentials/gmail_token.json
 import json
 import logging
 import os
+import re
 import time
+from pathlib import Path
 
 _logger = logging.getLogger(__name__)
 
@@ -18,6 +20,24 @@ _VESSENCE_DATA_HOME = os.environ.get(
 )
 _CREDS_DIR = os.path.join(_VESSENCE_DATA_HOME, "credentials")
 _TOKEN_FILE = os.path.join(_CREDS_DIR, "gmail_token.json")
+_TOKEN_FILE_PREFIX = "gmail_token_"
+
+
+def _normalized_user_id(user_id: str | None) -> str:
+    return (user_id or "").strip().lower()
+
+
+def _token_slug(user_id: str) -> str:
+    normalized = _normalized_user_id(user_id)
+    slug = normalized.replace("@", "_at_").replace(".", "_")
+    return re.sub(r"[^a-z0-9_-]+", "_", slug).strip("_")
+
+
+def _account_token_file(user_id: str) -> str:
+    slug = _token_slug(user_id)
+    if not slug:
+        raise ValueError("Gmail user_id is required for account-specific token storage")
+    return os.path.join(_CREDS_DIR, f"{_TOKEN_FILE_PREFIX}{slug}.json")
 
 
 def _ensure_creds_dir() -> None:
@@ -35,8 +55,11 @@ def store_gmail_token(user_id: str, token_data: dict) -> str:
         Path to the saved token file.
     """
     _ensure_creds_dir()
+    normalized_user = _normalized_user_id(user_id)
+    if not normalized_user:
+        raise ValueError("Gmail user_id is required")
     payload = {
-        "user_id": user_id,
+        "user_id": normalized_user,
         "access_token": token_data.get("access_token", ""),
         "refresh_token": token_data.get("refresh_token", ""),
         "token_type": token_data.get("token_type", "Bearer"),
@@ -44,11 +67,30 @@ def store_gmail_token(user_id: str, token_data: dict) -> str:
         "scope": token_data.get("scope", ""),
         "stored_at": time.time(),
     }
-    with open(_TOKEN_FILE, "w") as f:
+
+    account_file = _account_token_file(normalized_user)
+    with open(account_file, "w") as f:
         json.dump(payload, f, indent=2)
-    os.chmod(_TOKEN_FILE, 0o600)
-    _logger.info("Gmail token stored for user %s at %s", user_id, _TOKEN_FILE)
-    return _TOKEN_FILE
+    os.chmod(account_file, 0o600)
+
+    # Backward compatibility: keep the legacy single-account token file as the
+    # default sender, but do not let a second login overwrite a different
+    # default account. This preserves chieh.t.wu@gmail.com while adding
+    # juliaprocess@gmail.com as an explicit sender.
+    legacy_user = ""
+    if os.path.exists(_TOKEN_FILE):
+        try:
+            with open(_TOKEN_FILE) as f:
+                legacy_user = _normalized_user_id(json.load(f).get("user_id"))
+        except Exception:
+            legacy_user = ""
+    if not legacy_user or legacy_user == normalized_user:
+        with open(_TOKEN_FILE, "w") as f:
+            json.dump(payload, f, indent=2)
+        os.chmod(_TOKEN_FILE, 0o600)
+
+    _logger.info("Gmail token stored for user %s at %s", normalized_user, account_file)
+    return account_file
 
 
 def load_gmail_token(user_id: str | None = None) -> dict | None:
@@ -60,15 +102,59 @@ def load_gmail_token(user_id: str | None = None) -> dict | None:
     Returns:
         Token dict or None if not found / user mismatch.
     """
-    if not os.path.exists(_TOKEN_FILE):
-        _logger.warning("No Gmail token file found at %s", _TOKEN_FILE)
+    normalized_user = _normalized_user_id(user_id)
+
+    if normalized_user:
+        account_file = _account_token_file(normalized_user)
+        if os.path.exists(account_file):
+            with open(account_file) as f:
+                return json.load(f)
+        if os.path.exists(_TOKEN_FILE):
+            with open(_TOKEN_FILE) as f:
+                data = json.load(f)
+            if _normalized_user_id(data.get("user_id")) == normalized_user:
+                return data
+        _logger.warning("No Gmail token found for user %s", normalized_user)
         return None
-    with open(_TOKEN_FILE) as f:
-        data = json.load(f)
-    if user_id and data.get("user_id", "").lower() != user_id.lower():
-        _logger.warning("Token user mismatch: wanted %s, got %s", user_id, data.get("user_id"))
-        return None
-    return data
+
+    default_user = _normalized_user_id(os.environ.get("JANE_DEFAULT_GMAIL_SENDER"))
+    if default_user:
+        return load_gmail_token(default_user)
+
+    if os.path.exists(_TOKEN_FILE):
+        with open(_TOKEN_FILE) as f:
+            return json.load(f)
+
+    account_tokens = [
+        path for path in Path(_CREDS_DIR).glob(f"{_TOKEN_FILE_PREFIX}*.json")
+        if path.name != os.path.basename(_TOKEN_FILE)
+    ]
+    if len(account_tokens) == 1:
+        with open(account_tokens[0]) as f:
+            return json.load(f)
+
+    _logger.warning("No default Gmail token file found at %s", _TOKEN_FILE)
+    return None
+
+
+def list_gmail_token_users() -> list[str]:
+    """Return Gmail accounts with stored OAuth tokens."""
+    users: set[str] = set()
+    paths = []
+    if os.path.exists(_TOKEN_FILE):
+        paths.append(Path(_TOKEN_FILE))
+    paths.extend(Path(_CREDS_DIR).glob(f"{_TOKEN_FILE_PREFIX}*.json"))
+
+    for path in paths:
+        try:
+            with open(path) as f:
+                user = _normalized_user_id(json.load(f).get("user_id"))
+            if user:
+                users.add(user)
+        except Exception:
+            continue
+
+    return sorted(users)
 
 
 def refresh_token_if_needed(user_id: str | None = None) -> dict | None:
