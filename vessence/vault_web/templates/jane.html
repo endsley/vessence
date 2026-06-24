@@ -1251,6 +1251,37 @@
           return detail || `Jane request failed with status ${response.status}.`;
         },
 
+        _streamActiveMessage(janeIndex) {
+          const fallback = this.messages[janeIndex];
+          if (!fallback) return null;
+          const idx = this._currentJaneIndex ?? janeIndex;
+          return this.messages[idx] || fallback;
+        },
+
+        _appendStreamStatus(janeIndex, entry, status) {
+          const active = this._streamActiveMessage(janeIndex);
+          if (!active) return null;
+          if (entry) {
+            active.statusLog = active.statusLog || [];
+            active.statusLog.push(entry);
+          }
+          if (typeof status !== 'undefined') {
+            active.status = status;
+          }
+          this.$nextTick(() => this.scrollBottom());
+          return active;
+        },
+
+        _finishStreamWithText(janeIndex, text) {
+          const active = this._streamActiveMessage(janeIndex);
+          if (!active) return null;
+          active.text = text;
+          active.streamingText = '';
+          active.status = '';
+          this.$nextTick(() => this.scrollBottom());
+          return active;
+        },
+
         applyStreamEvent(line, janeIndex) {
           let event;
           try {
@@ -1259,32 +1290,14 @@
             return false;
           }
 
-          let msg = this.messages[janeIndex];
-          if (!msg) return false;
-
-          // Helper: get the current active bubble
-          const getActive = () => {
-            const idx = this._currentJaneIndex ?? janeIndex;
-            return this.messages[idx] || msg;
-          };
-
-          // Helper: start a new bubble if the current one already has a final response
-          const maybeSplit = () => {
-            const active = getActive();
-            if (active.text && active.text.length > 50) {
-              const newIdx = this.messages.push({ role: 'jane', text: '', ack: '', model: '', status: '', statusLog: [], streamingText: '' }) - 1;
-              this._currentJaneIndex = newIdx;
-              return this.messages[newIdx];
-            }
-            return active;
-          };
+          const active = this._streamActiveMessage(janeIndex);
+          if (!active) return false;
 
           if (event.type === 'heartbeat') {
             return false;
           } else if (event.type === 'offloaded') {
             // Task was offloaded to background — show acknowledgment and mark the
             // bubble with a progress ID so announcement updates can find it
-            const active = getActive();
             active.text = event.data || 'Working on that in the background…';
             active.status = '';
             if (event.task_id) {
@@ -1294,30 +1307,24 @@
             // Don't return true — let the subsequent 'done' event close the stream
           } else if (event.type === 'model') {
             // Store which model is handling this response
-            const active = getActive();
             active.model = event.data || '';
           } else if (event.type === 'ack') {
             // Quick ack from Python classifier — show as status
             if (event.data) {
-              const active = getActive();
-              active.statusLog = active.statusLog || [];
-              active.statusLog.push(event.data);
-              active.status = event.data;
+              this._appendStreamStatus(janeIndex, event.data, event.data);
+            } else {
+              this.$nextTick(() => this.scrollBottom());
             }
-            this.$nextTick(() => this.scrollBottom());
           } else if (event.type === 'status') {
             if (event.data) {
-              const active = getActive();
-              if (!active.statusLog) active.statusLog = [];
-              active.statusLog.push({ text: event.data, type: 'status' });
-              active.status = 'Working…';
+              this._appendStreamStatus(janeIndex, { text: event.data, type: 'status' }, 'Working…');
+            } else {
+              this.$nextTick(() => this.scrollBottom());
             }
-            this.$nextTick(() => this.scrollBottom());
           } else if (event.type === 'permission_request') {
             // Tool permission gate — show approve/deny dialog inline
             try {
               const data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
-              const active = getActive();
               if (!active._permissionRequests) active._permissionRequests = [];
               active._permissionRequests.push(data);
               active.status = `⏳ Waiting for approval: ${data.tool_name}`;
@@ -1325,31 +1332,25 @@
             } catch (e) { console.warn('Bad permission_request event:', e); }
           } else if (event.type === 'thought') {
             if (event.data) {
-              const active = getActive();
-              if (!active.statusLog) active.statusLog = [];
-              active.statusLog.push({ text: event.data, type: 'thought' });
-              active.status = 'Thinking…';
+              this._appendStreamStatus(janeIndex, { text: event.data, type: 'thought' }, 'Thinking…');
+            } else {
+              this.$nextTick(() => this.scrollBottom());
             }
-            this.$nextTick(() => this.scrollBottom());
           } else if (event.type === 'tool_use') {
             if (event.data) {
-              const active = getActive();
-              if (!active.statusLog) active.statusLog = [];
-              active.statusLog.push({ text: event.data, type: 'tool_use' });
-              active.status = 'Working…';
+              this._appendStreamStatus(janeIndex, { text: event.data, type: 'tool_use' }, 'Working…');
+            } else {
+              this.$nextTick(() => this.scrollBottom());
             }
-            this.$nextTick(() => this.scrollBottom());
           } else if (event.type === 'tool_result') {
             if (event.data) {
-              const active = getActive();
-              if (!active.statusLog) active.statusLog = [];
-              active.statusLog.push({ text: event.data, type: 'tool_result' });
+              this._appendStreamStatus(janeIndex, { text: event.data, type: 'tool_result' });
+            } else {
+              this.$nextTick(() => this.scrollBottom());
             }
-            this.$nextTick(() => this.scrollBottom());
           } else if (event.type === 'delta' && event.data) {
             // Accumulate into streamingText (shown inside disclosure triangle while streaming).
             // Only the 'done' event sets msg.text (the visible final response).
-            const active = getActive();
             active.streamingText = (active.streamingText || '') + event.data;
             // Detect [ACK]...[/ACK] block — display as status immediately
             if (!active._ackDelivered) {
@@ -1372,7 +1373,6 @@
             active.streamingText = active.streamingText.replace(/<spoken>[\s\S]*?<\/spoken>/gi, '').replace(/<spoken>[\s\S]*$/i, '');
             this.$nextTick(() => this.scrollBottom());
           } else if (event.type === 'done') {
-            const active = getActive();
             const doneText = event.data || '';
             const deltaText = active.streamingText || '';
             // Always prefer the done payload — it's the canonical complete response.
@@ -1398,14 +1398,9 @@
             this.$nextTick(() => this.scrollBottom());
           } else if (event.type === 'error') {
             // Server-side error — display as the response text
-            const active = getActive();
-            active.text = event.error || event.data || '⚠️ Something went wrong. Please try again.';
-            active.streamingText = '';
-            active.status = '';
-            this.$nextTick(() => this.scrollBottom());
+            this._finishStreamWithText(janeIndex, event.error || event.data || '⚠️ Something went wrong. Please try again.');
             return true;  // terminal event
           } else if (event.type === 'provider_error') {
-            const active = getActive();
             try {
               const errData = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
               const provider = (errData.provider || 'provider').charAt(0).toUpperCase() + (errData.provider || 'provider').slice(1);
@@ -1427,11 +1422,6 @@
               active.status = '';
             }
             this.$nextTick(() => this.scrollBottom());
-            return true;
-          } else if (event.type === 'error') {
-            const active = getActive();
-            active.text = event.data || '⚠️ Could not reach Jane.';
-            active.status = '';
             return true;
           }
           if (event.type === 'conversation_end') {

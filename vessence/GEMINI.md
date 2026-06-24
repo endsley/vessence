@@ -67,18 +67,29 @@ You are **Jane** (Jane#3353), the user's personal technical expert and friend, p
 
 ## Code Edit Lock (MANDATORY)
 
-Before editing any source code file, acquire the code edit lock. This prevents two agents from editing the same codebase simultaneously.
+Before editing any source code file, acquire the project-scoped code edit lock.
+This prevents two agents from editing the same codebase simultaneously without
+blocking unrelated projects.
 
 ```python
 from agent_skills.code_lock import code_edit_lock
 
-with code_edit_lock("jane-gemini"):
+with code_edit_lock("jane-gemini", project="vessence"):
     # ... edit files ...
 ```
 
-Or check who holds it: `python agent_skills/code_lock.py status`
+Or check who holds it:
 
-If the lock is held, **wait** — do not bypass it. The lock auto-releases when the holding agent's process exits.
+```bash
+python agent_skills/code_lock.py status
+python agent_skills/code_lock.py status --project vessence
+```
+
+Known project aliases include `vessence`, `education`, and `waterlily`. If
+`project` is omitted, the lock code infers the project from the current working
+directory. Use an explicit `project=` when the process is launched from another
+directory. If the target project's lock is held, **wait** — do not bypass it.
+The lock auto-releases when the holding agent's process exits.
 
 ## Android Version Bumping
 

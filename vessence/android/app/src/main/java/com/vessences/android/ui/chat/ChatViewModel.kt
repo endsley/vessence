@@ -14,6 +14,7 @@ import com.vessences.android.voice.HybridTtsManager
 import com.vessences.android.voice.SentenceTtsQueue
 import com.vessences.android.data.repository.VoiceSettingsRepository
 import com.vessences.android.notifications.ChatNotificationManager
+import com.vessences.android.util.AssistantMarkup
 import com.vessences.android.util.ChatPersistence
 import com.vessences.android.util.ChatPreferences
 import com.vessences.android.voice.VoiceController
@@ -104,96 +105,6 @@ class ChatViewModel(
 
     // Track last transient-error retry to avoid retry loops on flaky network
     private var lastTransientRetryAt: Long = 0L
-
-    private val spokenBlockRegex = Regex("<spoken>([\\s\\S]*?)</spoken>", RegexOption.IGNORE_CASE)
-    private val spokenOpenRegex = Regex("<spoken>", RegexOption.IGNORE_CASE)
-    private val spokenCloseRegex = Regex("</spoken>", RegexOption.IGNORE_CASE)
-    private val visualBlockRegex = Regex("<visual>([\\s\\S]*?)</visual>", RegexOption.IGNORE_CASE)
-    private val assistantTagRegex = Regex("</?(?:spoken|visual|think|thinking|artifact)>", RegexOption.IGNORE_CASE)
-    private val trailingPartialAssistantTagRegex = Regex("</?(?:spoken|visual|think|thinking|artifact)[^>]*$", RegexOption.IGNORE_CASE)
-    private val clientToolMarkerRegex = Regex("\\[\\[CLIENT_TOOL:[a-z][a-z0-9_.]*:\\{[\\s\\S]*?\\}\\]\\]")
-    private val awaitingMarkerRegex = Regex("\\[\\[AWAITING:[A-Za-z0-9_\\-\\s]{1,200}\\]\\]", RegexOption.IGNORE_CASE)
-    private val trailingPartialAwaitingMarkerRegex = Regex("\\[\\[AWAITING:[A-Za-z0-9_\\-\\s]{0,200}$", RegexOption.IGNORE_CASE)
-    private val spokenSentenceRegex = Regex("([^.!?]+[.!?])")
-    private val ttsCollapseWhitespaceRegex = Regex("\\s+")
-
-    private companion object {
-        private const val MAX_TTS_SENTENCES = 2
-        private const val MAX_TTS_CHARS = 220
-        private const val MAX_TTS_WORDS = 28
-    }
-
-    private fun removeTrailingPartialAwaitingMarker(text: String): String {
-        val start = text.lastIndexOf("[[")
-        if (start < 0) return text
-        val tail = text.substring(start).uppercase()
-        return if ("[[AWAITING:".startsWith(tail) || tail.startsWith("[[AWAITING:")) {
-            text.substring(0, start)
-        } else {
-            text
-        }
-    }
-
-    private fun stripAssistantTags(text: String): String =
-        removeTrailingPartialAwaitingMarker(text)
-            .replace(assistantTagRegex, "")
-            .replace(trailingPartialAssistantTagRegex, "")
-            .replace(clientToolMarkerRegex, "")
-            .replace(awaitingMarkerRegex, "")
-            .replace(trailingPartialAwaitingMarkerRegex, "")
-
-    private fun assistantTextForDisplay(raw: String, trim: Boolean = true): String {
-        val visibleDetail = raw
-            .replace(visualBlockRegex) { it.groupValues[1] }
-            .replace(spokenBlockRegex, "")
-        val cleaned = stripAssistantTags(visibleDetail)
-        val fallback = if (cleaned.isBlank()) assistantTextForSpeech(raw, trim = false) else cleaned
-        return if (trim) fallback.trim() else fallback
-    }
-
-    private fun assistantTextForSpeech(raw: String, trim: Boolean = true): String {
-        val spokenStart = spokenOpenRegex.find(raw)
-        val base = if (spokenStart != null) {
-            val afterOpen = raw.substring(spokenStart.range.last + 1)
-            val spokenEnd = spokenCloseRegex.find(afterOpen)
-            if (spokenEnd != null) afterOpen.substring(0, spokenEnd.range.first) else afterOpen
-        } else {
-            raw.replace(visualBlockRegex, "")
-        }
-        val cleaned = stripAssistantTags(base)
-        return if (trim) cleaned.trim() else cleaned
-    }
-
-    private fun extractedSpokenBlock(raw: String): String? =
-        spokenBlockRegex.find(raw)?.groupValues?.getOrNull(1)?.trim()?.takeIf { it.isNotBlank() }
-
-    private fun normalizeTtsText(raw: String?): String =
-        (raw ?: "").trim().replace(ttsCollapseWhitespaceRegex, " ").trim()
-
-    private fun enforceTtsSpokenLength(raw: String?): String? {
-        val text = normalizeTtsText(raw)
-        if (text.isBlank()) return null
-        val sentences = spokenSentenceRegex.findAll(text).map { it.groupValues[1].trim() }.filter { it.isNotBlank() }.toList()
-        var spoken = if (sentences.isNotEmpty()) sentences.take(MAX_TTS_SENTENCES).joinToString(" ") else text
-        if (spoken.isBlank()) return null
-        val words = spoken.split(Regex("\\s+")).filter { it.isNotBlank() }
-        if (words.size > MAX_TTS_WORDS) {
-            spoken = words.take(MAX_TTS_WORDS).joinToString(" ")
-        }
-        if (spoken.length > MAX_TTS_CHARS) {
-            spoken = spoken.take(MAX_TTS_CHARS).trim()
-            val cut = spoken.lastIndexOf(" ")
-            if (cut > 60) {
-                spoken = spoken.substring(0, cut).trim()
-            }
-            spoken = if (!spoken.endsWith(".") && !spoken.endsWith("?") && !spoken.endsWith("!")) {
-                "$spoken…"
-            } else {
-                spoken
-            }
-        }
-        return spoken.trim()
-    }
 
     private fun acquireStreamWakeLock() {
         if (streamWakeLock?.isHeld == true) return
@@ -735,7 +646,7 @@ class ChatViewModel(
                             // Only show non-ACK content in the bubble.
                             // Strip all markup tags so they never flash in the UI.
                             val rawAccumulated = visibleBuffer.toString()
-                            accumulated = assistantTextForDisplay(rawAccumulated)
+                            accumulated = AssistantMarkup.forDisplay(rawAccumulated)
                             val ackStatus = if (statusLog.isNotEmpty()) statusLog.last() else null
 
                             // Sentence-level TTS: detect complete sentences and submit them to
@@ -762,9 +673,9 @@ class ChatViewModel(
                                 // and display-only detail stay out of the spoken path. If the
                                 // server ever violates the contract, the done-handler safety
                                 // net below logs a warning and voices the stripped fallback.
-                                val spokenOpened = spokenOpenRegex.containsMatchIn(rawAccumulated)
+                                val spokenOpened = AssistantMarkup.hasOpenSpokenTag(rawAccumulated)
                                 if (spokenOpened) {
-                                    val speechAccumulated = assistantTextForSpeech(rawAccumulated, trim = false)
+                                    val speechAccumulated = AssistantMarkup.forSpeech(rawAccumulated, trim = false)
                                     if (speechAccumulated.length >= sentenceSpeechFedChars) {
                                         val cleanDelta = speechAccumulated.substring(sentenceSpeechFedChars)
                                         sentenceSpeechFedChars = speechAccumulated.length
@@ -803,14 +714,13 @@ class ChatViewModel(
                             var rawText = if (event.data.isNotEmpty()) event.data else accumulated
                             files = event.files
                             // Strip [ACK] tags (already spoken during streaming)
-                            val ackRegex = Regex("\\[ACK\\][\\s\\S]*?\\[/ACK\\]\\s*")
-                            rawText = rawText.replace(ackRegex, "").trim()
+                            rawText = AssistantMarkup.removeAckBlocks(rawText).trim()
                             // Strip any leaked [[CLIENT_TOOL:...]] markers so TTS never
                             // speaks raw tool syntax (server should strip these, but
                             // belt-and-suspenders for edge cases).
-                            rawText = rawText.replace(clientToolMarkerRegex, "").trim()
+                            rawText = AssistantMarkup.removeClientToolMarkers(rawText).trim()
                             // TTS mode: main text is spoken-friendly; <visual> blocks are display-only
-                            val spokenTextFromBlock = extractedSpokenBlock(rawText)
+                            val spokenTextFromBlock = AssistantMarkup.spokenBlock(rawText)
                             // Check for music play command: [MUSIC_PLAY:playlist_id]
                             val musicPlayRegex = Regex("\\[MUSIC_PLAY:([^\\]]+)\\]")
                             val musicMatch = musicPlayRegex.find(rawText)
@@ -824,12 +734,12 @@ class ChatViewModel(
                             }
                             rawText = rawText.replace(musicPlayRegex, "").trim()
 
-                            val displayText = assistantTextForDisplay(rawText)
+                            val displayText = AssistantMarkup.forDisplay(rawText)
                             // For TTS: if legacy <spoken> block exists, use it;
                             // otherwise strip <visual> blocks and read the rest
                             val spokenText = spokenTextFromBlock
-                                ?: assistantTextForSpeech(rawText).ifBlank { null }
-                            val enforcedSpokenText = enforceTtsSpokenLength(spokenText)
+                                ?: AssistantMarkup.forSpeech(rawText).ifBlank { null }
+                            val enforcedSpokenText = AssistantMarkup.enforceSpokenLength(spokenText)
                             if (enforcedSpokenText != spokenText) {
                                 android.util.Log.w(
                                     "ttsdbg",
