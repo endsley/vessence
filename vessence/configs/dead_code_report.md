@@ -1,12 +1,18 @@
-# Dead Code Report — 2026-06-23 01:12
+# Dead Code Report — 2026-06-24 01:13
 
-## Possibly-dead functions (2)
+## Dead files — review needed (1)
+
+(Candidates for deletion, but failed an auto-delete safety check —
+ usually means the file is too new, too large, or outside agent_skills/test_code.)
+
+- `startup_code/install_pointer_locator_shortcut.py`
+
+## Possibly-dead functions (1)
 
 (No references found via grep. May be false positives if called via
  getattr, dynamic dispatch, or HTTP route registration.)
 
-- `memory/v1/topic_memory.py` :: `fire_and_forget()`
-- `memory/v1/janitor_memory.py` :: `purge_expired_forgettable()`
+- `memory/v1/embedding_helpers.py` :: `embed_many()`
 
 ## Duplicate function bodies (10 groups)
 

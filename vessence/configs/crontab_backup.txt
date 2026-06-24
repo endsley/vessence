@@ -37,7 +37,7 @@ VESSENCE_DATA_HOME=/home/chieh/ambient/vessence-data
 VESSENCE_HOME=/home/chieh/ambient/vessence
 0 1 * * * /home/chieh/google-adk-env/adk-venv/bin/python /home/chieh/ambient/vessence/agent_skills/nightly_self_improve.py >> /home/chieh/ambient/vessence-data/logs/self_improve_orchestrator.log 2>&1
 */30 * * * * /home/chieh/google-adk-env/adk-venv/bin/python $VESSENCE_HOME/agent_skills/fetch_todo_list.py >> $VESSENCE_DATA_HOME/logs/fetch_todo_list.log 2>&1
-0 */4 * * * /home/chieh/google-adk-env/adk-venv/bin/python $VESSENCE_HOME/startup_code/run_kathia_schedule.py >> $VESSENCE_DATA_HOME/logs/kathia_schedule.log 2>&1
+# PAUSED 2026-06-23 by Jane per Chieh: 0 */4 * * * /home/chieh/google-adk-env/adk-venv/bin/python $VESSENCE_HOME/startup_code/run_kathia_schedule.py >> $VESSENCE_DATA_HOME/logs/kathia_schedule.log 2>&1
 
 0 2 * * * $VESSENCE_HOME/startup_code/run_marketplace_cron.sh
 0 * * * * /home/chieh/ambient/vessence/startup_code/auto_pull.sh
