@@ -1,19 +1,18 @@
-# Memory Verification Report — 2026-06-24 02:52
+# Memory Verification Report — 2026-06-25 03:30
 
-Checked: 20 | Stale: 15 | Fixed: 15 | Deleted: 0 | Errors: 0 | Skipped recent: 226
+Checked: 20 | Stale: 14 | Fixed: 13 | Deleted: 0 | Errors: 0 | Skipped recent: 227
 
-- **UPDATED** `dcf2f212-0ae` — Verified filesystem, skill files, Claude logs, and install_codex_skills.py. The symlink/load claim is current, but the blanket bundled-script/adk-python instruction and installer ownership claim were partially wrong.
-- **UPDATED** `3360bc85-083` — Confirmed from the design note, main.py endpoint routing, current vessence-data .env, v3 pipeline/classifier, v2 classifier, and v2 stage1 wrapper; the old endpoint/current-routing claim was stale and incomplete.
-- **UPDATED** `054561e1-e57` — Confirmed against the actual repo and live crontab. Codex was mostly right, but the sandbox-specific crontab caveat is not true here, and the memory should distinguish stale docstring text from executable behavior.
-- **UPDATED** `e17cda7c-016` — Code confirms the Stage 2 depth, clinic privacy/no_stage3 metadata, and active Stage 1 path; the original final symbol intent_classifier.v2.classifier.s is invalid/truncated.
-- **UPDATED** `ead0d5ad-0a7` — Confirmed from version.json, android/app/build.gradle.kts, rg search, and keytool: Codex was right; the stored version and SHA-1 were stale/incomplete.
-- **UPDATED** `6e76b008-7f1` — Confirmed from docs, Android detector code, asset listing, git-tracked files, repo-wide search, and SHA-256 hashes. Codex was right that the source v7 backup claim is stale.
-- **UPDATED** `ef5612fc-3ee` — Read the actual handler and models code. Codex was right on the architecture; the stored memory is truncated and should be completed.
-- **UPDATED** `5001554f-1cc` — Repo files and scripts match the memory, and `crontab -l` now verifies the live entry; update because the stored memory is truncated. Codex was wrong only about live crontab remaining unverified in this run.
-- **UPDATED** `1ec8aa82-4b3` — Verified against the actual repo and filesystem. The original memory is mostly correct, but its final sentence is truncated and its GCP-only claim needs to be scoped to production/runtime DB because local/dev MySQL and sqlite test paths still exist.
-- **UPDATED** `eef09673-adb` — The paths, imports, Playwright version, browser binaries, and code references check out. Codex was wrong about the current live-launch failure here: direct headless launch and the actual BrowserSessionManager path both succeeded, but the stored memory should be updated because its text is truncated and the verification date is stale.
-- **UPDATED** `a04927a6-a64` — Verified against git state and source code; Codex was right that only the HEAD claim was stale while the public rental request flow still matches.
-- **UPDATED** `5d6c603e-98e` — Actual code confirms Codex's verdict; the stored memory is truncated and should be replaced with the complete corrected version.
-- **UPDATED** `331fa4d4-25e` — Codex was right that the code-backed claims still hold and the old Cloud Run revision fragment is stale; I verified the current live revision with gcloud.
-- **UPDATED** `52389d73-e52` — Code confirms the visible claims, but the stored memory is truncated after "only the per-", so it should be updated with the complete text.
-- **UPDATED** `acacc0e7-035` — Verified against the current repo: Codex's correction matches the source, and the existing memory is truncated/incomplete at q3-q7.
+- **UPDATED** `95db60cc-111` — Confirmed from repo docs, Waterlily README/ARCHITECTURE/AGENTS, systemd units, Cloudflare API, listening ports, cron, and live curl. Original memory was truncated, asserted an unverified 2026-05-24 health check, and omitted the current hybrid backend routing.
+- **UPDATED** `d17c2f11-9aa` — Direct reads of the unit files confirm Codex was right: waterlily-test matches the memory, but waterlily-auth.service has WorkingDirectory=/home/chieh/code/waterlily/backend and ExecStart runs uvicorn main:app on 127.0.0.1:8090; backend/main.py defines app = FastAPI(...).
+- **UPDATED** `aaf029b2-47f` — Confirmed in README.md, AGENTS.md, agent_skills/edu_homework_audit.py, and the schedule skill reference that the education DB path uses local Cloud SQL Auth Proxy at 127.0.0.1:3307; repo search found no api.ipify/public-IP diagnostic code. The original memory is truncated and too easy to misapply to the default education auditor flow.
+- **UPDATED** `8490fd20-135` — Confirmed against /home/chieh/code/waterlily source and SQLite DB. Codex was right that the stale part is the old events.html page path; the live rendered page is events/index.html under /events/.
+- **UPDATED** `7e71fb40-863` — Codex was right: code and docs confirm the repo/backend/routes/auth/accounting/studio pieces, but the Waterlily Jane/Admin Jane claim is stale; route search found no active Jane route surface. Systemd unit files and wants symlinks exist, runtime ports/processes are present, and crontab confirms the daily backup schedule.
+- **UPDATED** `80372137-8b7` — Actual code and fresh gcloud checks confirm the core claims, but the memory's final sentence is truncated and its live infra evidence should be refreshed.
+- **UPDATED** `7373c511-53a` — Codex was right that the stored memory is truncated; code inspection confirmed the migration dates, module_id uniqueness, template-mode functions, and script-mode sandbox/cache path.
+- **UPDATED** `4376bc46-1c8` — Confirmed against course_detail.html, teacher.py, models.py, and curriculum.py; the stored memory is accurate but truncated at the end.
+- **UPDATED** `426c9797-dcf` — Actual code confirms the architecture claims, but the stored memory is truncated and omits the current label-stripped search_text embedding path.
+- **UPDATED** `6cbe75aa-b29` — Code and live DB confirm the core memory, but it was incomplete at the end and missed the current v3 Stage 2 ledger route plus the empty $VESSENCE_DATA_HOME conversation_history_ledger.db distinction.
+- **UPDATED** `2bca4180-d4d` — Confirmed in admin_accounting_income_scripts.html: the paid table summaryColumns/detailColumns have changed; Dur/Room are not paid detail fields, and Room appears in canceled appointment details.
+- **UPDATED** `c35535a3-eb0` — Current code and auth.db confirm Codex's PARTIAL verdict: the no-hint part is right, but the old memory's Items that do not fit elsewhere/test-fixture/removal-date claims are stale or unverified.
+- **UPDATED** `b7c370b1-fce` — Actual code matches the core memory, but the stored crontab line is truncated; live crontab was readable in this audit and matches the backup.
+- **KEPT** `9b042824-445` — Codex's only objection was lack of live-process visibility. Actual code confirms run_dev_local.sh starts uvicorn app.main:app on 127.0.0.1:8501 with DB_URL via 127.0.0.1:3307/teaching_app, app/main.py defines app = FastAPI(...), and the current :8501 listener has cwd /home/chieh/code/chieh_class_v2 with that uvicorn command and DB_URL in environ.
