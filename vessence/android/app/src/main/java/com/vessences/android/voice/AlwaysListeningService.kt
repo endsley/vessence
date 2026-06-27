@@ -25,6 +25,7 @@ import androidx.core.app.NotificationCompat
 import com.vessences.android.MainActivity
 import com.vessences.android.R
 import com.vessences.android.data.repository.VoiceSettingsRepository
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -49,31 +50,37 @@ class AlwaysListeningService : Service() {
         val running: kotlinx.coroutines.flow.StateFlow<Boolean> = _running
 
         /**
-         * Atomic guard that coordinates all calls to [startForegroundService]
-         * across every caller site. Set to true the instant [start] is called,
-         * cleared when either:
-         *  - onStartCommand runs (meaning the service is alive and promoted), OR
-         *  - onDestroy runs (meaning the service tore down), OR
-         *  - start() itself throws (so a broken attempt does not permanently
-         *    deadlock future starts).
-         *
-         * This is the CORRECT way to make start() idempotent. The previous
-         * `_running.value` check was racy because `_running` only flips inside
-         * startListeningLoop() which runs after foreground promotion — two
-         * rapid callers could both see `_running=false` and both enqueue a
-         * redundant startForegroundService(), eventually tripping Android 13's
-         * 5-second foreground-service deadline enforcement.
+         * Service-lifecycle guards shared by every caller site. Android starts
+         * a foreground-service deadline each time startForegroundService() is
+         * accepted; do not enqueue another start while the service is already
+         * foreground, while the first start is still being promoted, or while a
+         * stop needs to finish cleanly.
          */
-        private val startInFlight = java.util.concurrent.atomic.AtomicBoolean(false)
+        private val startInFlight = AtomicBoolean(false)
+        private val serviceInForeground = AtomicBoolean(false)
+        private val stopAfterStart = AtomicBoolean(false)
+        private val restartAfterStop = AtomicBoolean(false)
 
         fun start(context: Context) {
-            // compareAndSet is the atomic primitive that makes this safe across
-            // any number of concurrent callers: only ONE call wins the race and
-            // proceeds to startForegroundService.
-            if (!startInFlight.compareAndSet(false, true)) {
-                android.util.Log.d(TAG, "start() called but another start is in flight — skipping")
+            if (serviceInForeground.get()) {
+                if (stopAfterStart.get()) {
+                    restartAfterStop.set(true)
+                    android.util.Log.d(TAG, "start() requested while stop is pending - will restart after teardown")
+                } else {
+                    android.util.Log.d(TAG, "start() called while service is already foreground - skipping")
+                }
                 return
             }
+            if (!startInFlight.compareAndSet(false, true)) {
+                if (stopAfterStart.get()) {
+                    restartAfterStop.set(true)
+                    android.util.Log.d(TAG, "start() requested during pending stop/start - will restart after teardown")
+                } else {
+                    android.util.Log.d(TAG, "start() called but another start is in flight - skipping")
+                }
+                return
+            }
+            stopAfterStart.set(false)
             try {
                 val intent = Intent(context, AlwaysListeningService::class.java)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -84,11 +91,20 @@ class AlwaysListeningService : Service() {
             } catch (t: Throwable) {
                 // Reset the flag so a legitimate retry can proceed.
                 startInFlight.set(false)
+                serviceInForeground.set(false)
+                stopAfterStart.set(false)
+                restartAfterStop.set(false)
                 throw t
             }
         }
 
         fun stop(context: Context) {
+            stopAfterStart.set(true)
+            restartAfterStop.set(false)
+            if (startInFlight.get()) {
+                android.util.Log.d(TAG, "stop() requested while start is in flight - deferring until foreground promotion")
+                return
+            }
             context.stopService(Intent(context, AlwaysListeningService::class.java))
         }
     }
@@ -145,7 +161,16 @@ class AlwaysListeningService : Service() {
         // I/O and can block on cold start). onStartCommand will replace it
         // with the final notification that has the user's trigger phrase.
         createNotificationChannel()
-        startForegroundWithPlaceholder()
+        try {
+            startForegroundWithPlaceholder()
+            serviceInForeground.set(true)
+        } catch (t: Throwable) {
+            startInFlight.set(false)
+            serviceInForeground.set(false)
+            stopAfterStart.set(false)
+            restartAfterStop.set(false)
+            throw t
+        }
         voiceSettings = VoiceSettingsRepository(applicationContext)
         DiagnosticReporter.init(applicationContext)
         Log.i(TAG, "Service created and promoted to foreground")
@@ -187,7 +212,11 @@ class AlwaysListeningService : Service() {
         // aren't blocked.
         startInFlight.set(false)
         if (intent?.action == ACTION_STOP) {
-            stopSelf()
+            restartAfterStop.set(false)
+            stopAfterStart.set(true)
+        }
+        if (stopAfterStart.get()) {
+            stopSelf(startId)
             return START_NOT_STICKY
         }
         // Foreground promotion already happened in onCreate — here we just
@@ -220,11 +249,14 @@ class AlwaysListeningService : Service() {
 
     override fun onDestroy() {
         DiagnosticReporter.serviceEvent("AlwaysListening", "stopped")
+        val shouldRestartAfterStop = restartAfterStop.getAndSet(false)
         // Clear the start-in-flight guard immediately so a subsequent start()
         // from another caller can proceed without waiting for the rest of
         // onDestroy to finish (we're about to tear down the listener thread
         // which can take up to 3 seconds on the join below).
         startInFlight.set(false)
+        serviceInForeground.set(false)
+        stopAfterStart.set(false)
         if (screenReceiverRegistered) {
             unregisterReceiver(screenReceiver)
             screenReceiverRegistered = false
@@ -251,7 +283,12 @@ class AlwaysListeningService : Service() {
         detector = null
         releaseWakeLock()
         scope.cancel()
+        val appContext = applicationContext
         super.onDestroy()
+        if (shouldRestartAfterStop) {
+            Log.i(TAG, "Restarting after stop completed for pending start request")
+            start(appContext)
+        }
     }
 
     private fun createNotificationChannel() {
@@ -363,6 +400,10 @@ class AlwaysListeningService : Service() {
     }
 
     private fun startListeningLoop() {
+        if (stopAfterStart.get()) {
+            Log.i(TAG, "Skipping listening loop because stop is pending")
+            return
+        }
         isListening = true
         _running.value = true
         // Periodic heartbeat so we can confirm the service is actually running
@@ -440,6 +481,7 @@ class AlwaysListeningService : Service() {
                 return
             }
         }
+        if (!isListening || stopAfterStart.get()) return
         val det = detector ?: return
 
         val minBufSize = AudioRecord.getMinBufferSize(
@@ -471,6 +513,10 @@ class AlwaysListeningService : Service() {
             return
         }
 
+        if (!isListening || stopAfterStart.get()) {
+            record.release()
+            return
+        }
         audioRecord = record
         val buffer = ShortArray(OpenWakeWordDetector.CHUNK_SIZE)
         record.startRecording()
