@@ -175,6 +175,16 @@ def test_add_get_count_and_clear_round_trip_oldest_to_newest(recent_turns):
     assert recent_turns.get_recent(sid) == []
 
 
+def test_clear_is_exactly_session_scoped(recent_turns):
+    recent_turns.add("clear-target", "target row")
+    recent_turns.add("clear-neighbor", "neighbor row")
+
+    recent_turns.clear("clear-target")
+
+    assert recent_turns.get_recent("clear-target") == []
+    assert recent_turns.get_recent("clear-neighbor") == ["neighbor row"]
+
+
 def test_fifo_eviction_is_true_fifo_and_session_scoped(recent_turns):
     for i in range(5):
         recent_turns.add("session-a", f"a-{i}", max_keep=3)
@@ -600,6 +610,44 @@ def test_maybe_idle_flush_returns_false_for_empty_missing_and_recent_sessions(
 
     assert recent_turns.maybe_idle_flush("recent", idle_seconds=30) is False
     assert recent_turns.get_recent("recent") == ["recent row"]
+
+
+def test_maybe_idle_flush_does_not_delete_on_borderline_age(
+    recent_turns, monkeypatch
+):
+    executed_sql: list[str] = []
+
+    class FakeCursor:
+        def __init__(self, row):
+            self._row = row
+
+        def fetchone(self):
+            return self._row
+
+    class FakeConnection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def execute(self, sql, params=()):
+            normalized = " ".join(sql.split())
+            executed_sql.append(normalized)
+            if normalized.startswith("SELECT MAX(created_at)"):
+                return FakeCursor(
+                    {
+                        "last_at": "2026-06-28 12:00:00",
+                        "n": 1,
+                        "age_s": 30.0,
+                    }
+                )
+            raise AssertionError(f"borderline idle age should not run SQL: {sql}")
+
+    monkeypatch.setattr(recent_turns, "get_db", lambda: FakeConnection())
+
+    assert recent_turns.maybe_idle_flush("borderline", idle_seconds=30) is False
+    assert all("DELETE FROM recent_turns" not in sql for sql in executed_sql)
 
 
 def test_maybe_idle_flush_deletes_only_stale_rows_for_target_session(recent_turns):
