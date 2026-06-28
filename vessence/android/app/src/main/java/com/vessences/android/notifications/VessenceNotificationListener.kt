@@ -78,12 +78,18 @@ class VessenceNotificationListener : NotificationListenerService() {
             }
         }
 
-        // Push new SMS to server so Jane has fresh message data.
-        // Only trigger for messaging apps (SMS, WhatsApp, etc.)
-        // Push new messages to server when a new SMS notification arrives
+        // Persist appointment-looking notifications first. This catches
+        // Google Messages RCS/business chats that do not exist in content://sms.
+        //
+        // Then push new SMS rows so Jane has fresh legacy-SMS data too.
         if (entries.isNotEmpty()) {
             val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO + kotlinx.coroutines.SupervisorJob())
             scope.launch {
+                try {
+                    AppointmentNotificationSyncManager.uploadAppointmentCandidates(applicationContext, entries)
+                } catch (e: Exception) {
+                    android.util.Log.d(TAG, "appointment notification upload failed: ${e.message}")
+                }
                 try {
                     com.vessences.android.contacts.SmsSyncManager.pushNewMessages(applicationContext)
                 } catch (e: Exception) {

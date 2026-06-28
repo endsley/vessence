@@ -10,8 +10,9 @@ import java.util.concurrent.ConcurrentLinkedDeque
  * Invariants:
  *  - At most [CAPACITY] entries.
  *  - Newest at the head, oldest at the tail.
- *  - In-memory only — cleared on process kill.
- *  - NEVER uploaded to the server; never touches disk.
+ *  - The buffer itself is in-memory only and cleared on process kill.
+ *  - Separate narrow upload paths may persist selected entries, such as
+ *    medical/dental/lab appointment candidates.
  */
 object RecentMessagesBuffer {
 

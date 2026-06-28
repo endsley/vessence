@@ -4,6 +4,7 @@ import sys
 import secrets
 import hashlib
 import datetime
+import sqlite3
 from pathlib import Path
 import pyotp
 
@@ -18,6 +19,7 @@ from .database import get_db
 MAX_ATTEMPTS = 5
 LOCKOUT_MINUTES = 30
 SESSION_TRUSTED_DAYS = 7
+SESSION_TOUCH_INTERVAL_SECONDS = 60
 
 TOTP_SECRET = os.getenv("VAULT_TOTP_SECRET", "")
 
@@ -148,6 +150,26 @@ def get_session_user(session_id: str) -> str | None:
         return row["user_id"]
 
 
+def _touch_session_last_used(conn, session_id: str) -> None:
+    try:
+        conn.execute(
+            """
+            UPDATE sessions
+            SET last_used=CURRENT_TIMESTAMP
+            WHERE id=?
+              AND (
+                last_used IS NULL
+                OR last_used <= datetime('now', ?)
+              )
+            """,
+            (session_id, f"-{SESSION_TOUCH_INTERVAL_SECONDS} seconds"),
+        )
+    except sqlite3.OperationalError as exc:
+        if "locked" in str(exc).lower():
+            return
+        raise
+
+
 def validate_session(session_id: str, device_fingerprint: str) -> bool:
     if not session_id:
         return False
@@ -164,9 +186,7 @@ def validate_session(session_id: str, device_fingerprint: str) -> bool:
         # Verify device fingerprint matches the one used at session creation
         if row["device_fingerprint"] and device_fingerprint != row["device_fingerprint"]:
             return False
-        conn.execute(
-            "UPDATE sessions SET last_used=CURRENT_TIMESTAMP WHERE id=?", (session_id,)
-        )
+        _touch_session_last_used(conn, session_id)
         return True
 
 

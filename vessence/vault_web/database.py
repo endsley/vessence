@@ -1,6 +1,7 @@
 """database.py — SQLite setup and helpers for vault_web."""
 import sqlite3
 import os
+import threading
 from pathlib import Path
 
 DB_PATH = os.environ.get(
@@ -8,14 +9,47 @@ DB_PATH = os.environ.get(
     os.path.join(os.environ.get("VESSENCE_DATA_HOME", os.environ.get("AMBIENT_HOME", str(Path(__file__).resolve().parents[2]))), "vault_web", "vault_web.db"),
 )
 
+SQLITE_BUSY_TIMEOUT_MS = 30000
+
+_wal_config_lock = threading.Lock()
+_wal_configured_paths: set[str] = set()
+
+
+class _ClosingConnection(sqlite3.Connection):
+    """sqlite3.Connection whose context-manager exit also closes the handle."""
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        try:
+            return super().__exit__(exc_type, exc_value, traceback)
+        finally:
+            self.close()
+
+
+def _ensure_wal_mode(conn: sqlite3.Connection, db_path: str) -> None:
+    with _wal_config_lock:
+        if db_path in _wal_configured_paths:
+            return
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
+        _wal_configured_paths.add(db_path)
+
 
 def get_db():
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA foreign_keys = ON")
-    return conn
+    conn = sqlite3.connect(
+        DB_PATH,
+        timeout=SQLITE_BUSY_TIMEOUT_MS / 1000,
+        factory=_ClosingConnection,
+    )
+    try:
+        conn.row_factory = sqlite3.Row
+        conn.execute(f"PRAGMA busy_timeout={SQLITE_BUSY_TIMEOUT_MS}")
+        _ensure_wal_mode(conn, DB_PATH)
+        conn.execute("PRAGMA foreign_keys = ON")
+        return conn
+    except Exception:
+        conn.close()
+        raise
 
 
 def init_db():
