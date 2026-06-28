@@ -1,4 +1,4 @@
-# Doc Drift Report — 2026-06-27 01:29
+# Doc Drift Report — 2026-06-28 01:30
 
 ## Needs human review
 
@@ -6,6 +6,7 @@
 - CRON_JOBS.md missing entry for active cron script: check_income_cache_load_times.py
 - CRON_JOBS.md missing entry for active cron script: nightly_update_current_month_reports.py
 - CRON_JOBS.md missing entry for active cron script: nutricost_deal_monitor.py
+- CRON_JOBS.md missing entry for active cron script: sync_mychart_doctor_appointments.py
 - CRON_JOBS.md claims run_kathia_schedule.py is active but no matching cron entry exists
 - v2_3stage_pipeline.md missing class row: BUILD_APK
 - v2_3stage_pipeline.md missing class row: CLINIC_SCHEDULES_INFO

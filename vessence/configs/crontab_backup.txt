@@ -54,3 +54,6 @@ VESSENCE_HOME=/home/chieh/ambient/vessence
 
 # Nutricost deal monitor: delete sub-30% marketing emails; alert 30%+ deals from juliaprocess
 0 5 * * * VESSENCE_HOME=/home/chieh/ambient/vessence VESSENCE_DATA_HOME=/home/chieh/ambient/vessence-data VAULT_HOME=/home/chieh/ambient/vault PYTHONPATH=/home/chieh/ambient/vessence /home/chieh/google-adk-env/adk-venv/bin/python /home/chieh/ambient/vessence/agent_skills/nutricost_deal_monitor.py >> /home/chieh/ambient/vessence-data/logs/System_log/nutricost_deal_monitor.log 2>&1
+
+# Doctor appointment sync: MyChart + synced SMS -> Google Calendar + local cache
+0 3 * * * flock -n /tmp/doctor-calendar-sync.lock /home/chieh/google-adk-env/adk-venv/bin/python /home/chieh/.codex/skills/doctor-calendar-events/scripts/sync_mychart_doctor_appointments.py >> /home/chieh/ambient/vessence-data/logs/doctor_calendar_sync.log 2>&1
