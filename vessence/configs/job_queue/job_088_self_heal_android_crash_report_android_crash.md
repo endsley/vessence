@@ -82,3 +82,26 @@ Verification:
 Recording blocker:
 - Canonical Work Log update failed with read-only filesystem at `/home/chieh/ambient/skills/work_log/user_data/activity_log.json`.
 - Canonical incident JSON/report update failed with read-only filesystem at `/home/chieh/ambient/vessence-data/self_healing/incidents/20260626T104225.698556+0000_android_crash_report_a731dc48de8845ad416a3fb3.json`.
+
+## Recheck 2026-06-29
+
+Evidence reviewed again:
+- Incident JSON: `/home/chieh/ambient/vessence-data/self_healing/incidents/20260626T104225.698556+0000_android_crash_report_a731dc48de8845ad416a3fb3.json`
+- Existing repair report: `/home/chieh/ambient/vessence-data/self_healing/reports/20260626T104225.821409+0000_android_crash_report_a731dc48de8845ad416a3fb3.md`
+- Android crash/diagnostic logs: `/home/chieh/ambient/vessence-data/logs/android_crashes.log`, `/home/chieh/ambient/vessence-data/logs/android_diagnostics.jsonl`
+- Source: `android/app/src/main/java/com/vessences/android/voice/AlwaysListeningService.kt`, `android/app/src/main/java/com/vessences/android/CrashReporter.kt`, `jane_web/main.py`
+- Android call-site search for direct `startForegroundService()` / `startService()` / `stopService()` usage.
+
+Outcome:
+- The current source still contains the foreground-service lifecycle repair for the captured Android 13 crash.
+- `AlwaysListeningService` promotes itself to foreground in `onCreate()`, suppresses duplicate starts while foreground/start-in-flight, defers stop during start-in-flight, preserves pending restarts, and prevents late microphone startup when stop is pending.
+- Source search found no direct caller bypassing `AlwaysListeningService.start()` / `AlwaysListeningService.stop()`.
+- No additional source patch was justified.
+
+Verification:
+- `GRADLE_USER_HOME=/tmp/codex-gradle-home nice -n 19 ionice -c 3 ./gradlew :app:compileDebugKotlin` passed: `BUILD SUCCESSFUL in 30s`.
+- `git diff --check -- android/app/src/main/java/com/vessences/android/voice/AlwaysListeningService.kt android/app/src/main/java/com/vessences/android/CrashReporter.kt jane_web/main.py configs/job_queue/job_088_self_heal_android_crash_report_android_crash.md` passed.
+
+Recording blocker:
+- Canonical incident JSON/report update failed with read-only filesystem at `/home/chieh/ambient/vessence-data/self_healing/incidents/20260626T104225.698556+0000_android_crash_report_a731dc48de8845ad416a3fb3.json`.
+- Because the incident update failed before the Work Log helper ran, no canonical Work Log entry was written from this recheck. Prior attempts also showed `/home/chieh/ambient/skills/work_log/user_data/activity_log.json` is blocked by the sandbox.
