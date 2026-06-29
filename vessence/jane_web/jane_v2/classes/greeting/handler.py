@@ -24,26 +24,26 @@ logger = logging.getLogger(__name__)
 # LLM for anything less templated.
 _CANNED_REPLIES = {
     "check_in": [
-        "Going well, thanks for asking. What's up?",
-        "All good here. What's on your mind?",
-        "Doing fine. How can I help?",
+        "Going well, thanks for asking; what's up?",
+        "All good here; what's on your mind?",
+        "Doing fine; what's up?",
     ],
     "hello": [
-        "Hey! What's up?",
-        "Hi! How can I help?",
-        "Hey there. What do you need?",
+        "Hey, what's up?",
+        "Hi, what's up?",
+        "Hey there, what do you need?",
     ],
     "morning": [
-        "Morning! How can I help?",
-        "Good morning! What's on the agenda?",
+        "Morning, what's up?",
+        "Good morning, what's on the agenda?",
     ],
     "afternoon": [
-        "Afternoon! What's up?",
-        "Good afternoon! How can I help?",
+        "Afternoon, what's up?",
+        "Good afternoon, what's up?",
     ],
     "evening": [
-        "Evening! What do you need?",
-        "Good evening! What's up?",
+        "Evening, what do you need?",
+        "Good evening, what's up?",
     ],
     "thanks": [
         "Anytime.",
@@ -142,8 +142,8 @@ async def handle(prompt: str, context: str = "") -> dict | None:
 
     # Classification confirmation: if LLM says WRONG_CLASS, defer to Stage 3
     if "WRONG_CLASS" in text.upper():
-        logger.info("greeting handler: LLM says WRONG_CLASS — escalating with self-correct")
-        return {"wrong_class": True}
+        logger.info("greeting handler: LLM says WRONG_CLASS — escalating to Stage 3")
+        return None
 
     # Clean up common LLM artifacts
     # Remove any self-attribution like "Jane:" at the start
