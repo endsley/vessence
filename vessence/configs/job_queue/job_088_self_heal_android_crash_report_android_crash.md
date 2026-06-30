@@ -105,3 +105,29 @@ Verification:
 Recording blocker:
 - Canonical incident JSON/report update failed with read-only filesystem at `/home/chieh/ambient/vessence-data/self_healing/incidents/20260626T104225.698556+0000_android_crash_report_a731dc48de8845ad416a3fb3.json`.
 - Because the incident update failed before the Work Log helper ran, no canonical Work Log entry was written from this recheck. Prior attempts also showed `/home/chieh/ambient/skills/work_log/user_data/activity_log.json` is blocked by the sandbox.
+
+## Recheck 2026-06-30
+
+Evidence reviewed again:
+- Incident JSON: `/home/chieh/ambient/vessence-data/self_healing/incidents/20260626T104225.698556+0000_android_crash_report_a731dc48de8845ad416a3fb3.json`
+- Existing repair report: `/home/chieh/ambient/vessence-data/self_healing/reports/20260626T104225.821409+0000_android_crash_report_a731dc48de8845ad416a3fb3.md`
+- Android diagnostic log: `/home/chieh/ambient/vessence-data/logs/android_diagnostics.jsonl`
+- Self-healing logs: `/home/chieh/ambient/vessence-data/logs/self_healing.jsonl`, `/home/chieh/ambient/vessence-data/logs/self_healing_repair.log`
+- Source: `android/app/src/main/java/com/vessences/android/voice/AlwaysListeningService.kt`, `android/app/src/main/java/com/vessences/android/CrashReporter.kt`, `jane_web/main.py`
+- Android call-site search for direct service start/stop bypasses.
+
+Outcome:
+- No new source patch was justified.
+- The incident and diagnostic logs still support the prior root cause: Android 13 killed `AlwaysListeningService` after a foreground-service start did not reach foreground promotion in time; diagnostics at `2026-06-25T09:44:28Z` show the service started, stopped within milliseconds, then still loaded the wake-word model and started the mic.
+- Current source still contains the existing repair: immediate foreground promotion in `onCreate()`, shared atomics around `startForegroundService()`, deferred stop while start is in flight, preserved restart-after-stop intent, and guard checks that prevent late mic startup when stop is pending.
+- Current Android call sites still route through `AlwaysListeningService.start()` / `AlwaysListeningService.stop()`; no direct bypass was found.
+
+Verification:
+- `GRADLE_USER_HOME=/tmp/codex-gradle-home nice -n 19 ionice -c 3 ./gradlew :app:compileDebugKotlin` passed: `BUILD SUCCESSFUL in 42s`.
+- A temp-data-root smoke test of `receive_crash_report()` passed: the route returned `{"status": "received"}`, wrote `android_crashes.log`, and dispatched source/category metadata with self-healing stubbed.
+- `git diff --check -- android/app/src/main/java/com/vessences/android/voice/AlwaysListeningService.kt android/app/src/main/java/com/vessences/android/CrashReporter.kt jane_web/main.py` passed.
+
+Recording blocker:
+- Canonical incident JSON is not writable from this sandbox: `/home/chieh/ambient/vessence-data/self_healing/incidents/20260626T104225.698556+0000_android_crash_report_a731dc48de8845ad416a3fb3.json`.
+- Canonical repair report is not writable from this sandbox: `/home/chieh/ambient/vessence-data/self_healing/reports/20260626T104225.821409+0000_android_crash_report_a731dc48de8845ad416a3fb3.md`.
+- Work Log files are not writable from this sandbox: `/home/chieh/ambient/skills/work_log/user_data/activity_log.json`, `/home/chieh/ambient/essences/work_log/user_data/activity_log.json`.
