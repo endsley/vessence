@@ -378,6 +378,9 @@ async def handle(prompt: str, context: str = "", pending: dict | None = None,
                                                      → confirm-or-revise
       None                                          → escalate to Stage 3
     """
+    if not isinstance(prompt, str):
+        return None
+
     # Resume path: STAGE2_FOLLOWUP from a previous send_message turn.
     if pending and (pending.get("handler_class") == "send message"
                     or (pending.get("data") or {}).get("awaiting") in
@@ -409,7 +412,7 @@ async def handle(prompt: str, context: str = "", pending: dict | None = None,
             "recipient": recipient,
             "body": body_text or "(none)",
             "coherent": _is_coherent(body_text or "(none)"),
-            "confidence": params.get("confidence", 1.0),
+            "confidence": params.get("confidence"),
         }
     else:
         metadata = await _extract_via_llm(prompt, context)
