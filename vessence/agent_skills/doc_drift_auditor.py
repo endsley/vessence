@@ -103,7 +103,7 @@ def audit_cron() -> None:
             for key in ("Removed Jobs", "Non-Cron Scheduled Scripts")
         )
         disabled_entry = any(
-            key in header for key in ("DISABLED", "COMMENTED OUT")
+            key in header for key in ("DISABLED", "COMMENTED OUT", "Paused:")
         )
         if inactive_section or disabled_entry:
             inactive_scripts |= set(script_path_re.findall(sec))

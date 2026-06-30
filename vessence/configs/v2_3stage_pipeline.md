@@ -70,28 +70,38 @@ User prompt
 - `JANE_V2_MARGIN` — min vote gap (default 0.40)
 - `JANE_V2_MAX_DISTANCE` — max cosine distance (default 0.30)
 
-### Current Classes (16 in _CLASS_MAP)
+### Current Classes (25 in _CLASS_MAP)
 
 | ChromaDB Name | Pipeline Name | Exemplars | Stage 2 Handler? |
 |---|---|---|---|
 | WEATHER | weather | ~66 | Yes — gemma4:e2b + cached weather.json |
 | MUSIC_PLAY | music play | ~97 | Yes — qwen2.5:7b + playlist DB |
 | GREETING | greeting | ~121 | Yes — qwen2.5:7b, 1-sentence contextual reply |
-| SEND_MESSAGE | send message | ~25 | Yes — qwen2.5:7b extracts recipient+body, resolves contact, fast-path sends |
+| SEND_MESSAGE | send message | ~40 | Yes — qwen2.5:7b extracts recipient+body, resolves contact, fast-path sends |
 | SHOPPING_LIST | shopping list | ~50 | Yes — qwen2.5:7b extracts action+items, reads/writes JSON store |
 | TODO_LIST | todo list | ~82 | Yes — reads cached TODO, groups by category, pivots to Stage 3 for open questions |
 | GET_TIME | get time | ~16 | Yes — returns current time/date |
 | TIMER | timer | ~67 | Yes — sets/manages timers |
+| DO_MATH | do math | ~63 | Yes — qwen parser + Python AST evaluator |
+| TELL_JOKE | tell joke | ~26 | Yes — qwen2.5:7b high-temp joke path |
+| CLINIC_SCHEDULES_INFO | clinic schedules info | ~45 | Yes — local `$VESSENCE_DATA_HOME/schedule.db`; local-only privacy class |
+| NATIONALGRID_BILLS | nationalgrid bills | ~12 | Yes — known Waterlily property utility bill lookup |
+| WEB_AUTOMATION | web_automation | ~37 | Guard only → Stage 3 browser automation loop |
+| DELETE_MESSAGES | delete messages | ~38 | Guard only → Stage 3 with recent message context |
 | SELF_IMPROVEMENT | self improvement | ~0 | Yes — triggers self-improvement routines |
-| READ_CALENDAR | read calendar | ~35 | No → Stage 3 |
-| READ_MESSAGES | read messages | ~76 | No → Stage 3 |
-| SYNC_MESSAGES | sync messages | ~71 | No → Stage 3 |
+| READ_CALENDAR | read calendar | ~46 | Yes for explicit day/week reads; otherwise Stage 3 |
+| READ_MESSAGES | read messages | ~76 | Guard only → Stage 3 |
+| SYNC_MESSAGES | sync messages | ~71 | Yes — emits client SMS sync request |
 | READ_EMAIL | read email | ~48 | No → Stage 3 |
-| END_CONVERSATION | end conversation | ~81 | No → Stage 3 |
-| DELEGATE_OPUS | others | ~249 | No → Stage 3 (catch-all) |
+| SEND_EMAIL | send email | ~38 | No → Stage 3 |
+| DELETE_EMAIL | delete email | ~46 | No → Stage 3 |
+| END_CONVERSATION | end conversation | ~91 | No handler; pipeline ends/clears conversation state |
+| BUILD_APK | others | ~39 | No → Stage 3 |
+| RESTART_SERVER | others | ~47 | No → Stage 3 |
+| DELEGATE_OPUS | others | ~293 | No → Stage 3 (catch-all) |
 | FORCE_STAGE3 | others | ~25 | No → Stage 3 (explicit user escalation) |
 
-**Additional exemplar-only classes** (ChromaDB has exemplars but _CLASS_MAP maps them to "others"): BUILD_APK (~39), RESTART_SERVER (~47), WEB_AUTOMATION (~37).
+Note: the National Grid exemplar file currently uses `CLASS_NAME = "NATIONALGRID BILLS"` while `_CLASS_MAP` accepts both `NATIONALGRID BILLS` and `NATIONALGRID_BILLS`. The underscore row is listed here because the doc-drift auditor parses uppercase table keys without spaces.
 
 ### Adding a New Class
 

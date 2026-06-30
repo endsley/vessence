@@ -1,5 +1,39 @@
 # Vessence Refactor Journal
 
+## 2026-06-30 - Documentation Drift Auditor Cron State
+
+Goal/scope:
+- Keep the Vessence documentation drift auditor aligned with the cron registry's active/paused distinction.
+- Preserve the existing audit behavior for active cron scripts, removed jobs, non-cron scripts, class-map checks, and skills-registry checks.
+
+Files/modules changed:
+- `agent_skills/doc_drift_auditor.py`
+- `tests/test_doc_drift_auditor.py`
+- `configs/CRON_JOBS.md`
+- `configs/v2_3stage_pipeline.md`
+- `configs/Jane_architecture.md`
+- `configs/memory_manage_architecture.md`
+- `configs/doc_drift_report.md`
+
+Behavior intentionally preserved:
+- Uncommented scripts from `crontab -l` are still treated as active.
+- Removed jobs and non-cron scheduled scripts are still excluded from "claims active" warnings.
+- Stage-1 class table drift still compares `configs/v2_3stage_pipeline.md` against `_CLASS_MAP`.
+
+Boundary chosen:
+- The bug was in the auditor's section-state parsing: cron jobs documented under a `Paused:` heading were still treated as active documentation claims. Adding `Paused:` to the existing inactive-header check fixes the false-positive path without changing the broader cron parsing algorithm.
+
+Verification:
+- `python -m py_compile agent_skills/doc_drift_auditor.py` passed.
+- `python -m pytest tests/test_doc_drift_auditor.py -q` passed (`1 passed`).
+- `agent_skills/doc_drift_auditor.py` ran after the documentation updates and wrote a clean `configs/doc_drift_report.md` with no warnings.
+
+Remaining follow-up slices:
+- The auditor still parses `_CLASS_MAP` with a regex and therefore needs table rows to use underscore aliases for class names containing spaces, such as `NATIONALGRID_BILLS`.
+- A future refactor could parse `_CLASS_MAP` with `ast.literal_eval` to remove that documentation constraint.
+- Broad Vessence size audit, excluding local virtualenv/build trees, found the largest source modules are `jane_web/main.py` (~6530 lines), `jane_web/jane_proxy.py` (~3847), `memory/v1/conversation_manager.py` (~2134), `jane_web/jane_v2/pipeline.py` (~2064), and `memory/v1/janitor_memory.py` (~1862). These are the right next refactor targets, but each needs characterization tests because they own live routes, stream contracts, persisted memory schemas, or provider/tool orchestration.
+- Speed/process finding: repo-wide shell scans must exclude `venv/` (~724 MB) and `omniparser_venv/` (~7.2 GB). A naive `find . -name '*.py' | xargs wc -l` spent time counting vendored packages and produced unusable output; future audits should use `rg --files` with explicit excludes.
+
 ## 2026-06-24 - Android/Web Stream Client Helpers
 
 Goal/scope:

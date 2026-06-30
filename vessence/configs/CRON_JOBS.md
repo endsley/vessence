@@ -23,6 +23,20 @@ This document logs all scheduled tasks (cron jobs) for the system. It must be up
 - **Destination:** USB volume `VESSENCE_BACKUP`, directory `waterlily-history-backup/`
 - **Description:** Mirrors Waterlily source plus ignored runtime history needed for crash recovery: `.auth/auth.db` via SQLite backup API, accounting caches/exports, appointment reports, patient payment CSVs, invoices, receipts, email receipt attachments, DASYS claim cache, Waterlily bill cache under `$VESSENCE_DATA_HOME/waterlily/`, `/home/chieh/payment_reports/`, `/home/chieh/payment_report_downloader.py`, and targeted Waterlily/payment report artifacts from Downloads. Writes `restore_manifest.json`, `RESTORE_WATERLILY_HISTORY.md`, checksums, and dated hard-link snapshots.
 
+## 2b. Waterlily Cache Load Health Check
+- **Schedule:** `0 0 * * *` (Runs daily at midnight)
+- **Script Path:** `/home/chieh/code/waterlily/scripts/check_income_cache_load_times.py`
+- **Log:** `$VESSENCE_DATA_HOME/logs/waterlily_cache_load_health.log`
+- **Wrapper:** `flock -n /tmp/waterlily-cache-load-health.lock nice -n 19 ionice -c 3`
+- **Description:** Checks cached Waterlily income-report load times and fails only for persistently slow cached loads after retry. Uses `--threshold 1.5`.
+
+## 2c. Waterlily Current-Month Accounting Report Update
+- **Schedule:** `30 1 * * *` (Runs daily at 1:30 AM)
+- **Script Path:** `/home/chieh/code/waterlily/scripts/nightly_update_current_month_reports.py`
+- **Log:** `$VESSENCE_DATA_HOME/logs/waterlily_nightly_reports.log`
+- **Wrapper:** `flock -n /tmp/waterlily-nightly-current-month-reports.lock nice -n 19 ionice -c 3`
+- **Description:** Runs rolling daily Waterlily source sync and local cache rebuild for the current month. Sunday runs a full current-month refresh.
+
 ## 3. Daily Briefing Fetch
 - **Schedule:** `10 2 * * *` (Daily at 2:10 AM)
 - **Script Path:** `/home/chieh/ambient/skills/daily_briefing/functions/run_briefing.py`
@@ -108,18 +122,36 @@ This document logs all scheduled tasks (cron jobs) for the system. It must be up
 
 ---
 
-## 14. Kathia Schedule Scraper
-- **Schedule:** `0 */4 * * *` (every 4 hours)
+## 19. Auto Pull
+- **Schedule:** `0 * * * *` (hourly)
+- **Script Path:** `$VESSENCE_HOME/startup_code/auto_pull.sh`
+- **Description:** Pulls the Vessence repo automatically on the hourly cron path. This job is currently active again; do not list it as removed.
+
+## Paused: Kathia Schedule Scraper
+- **Schedule:** `0 */4 * * *` (COMMENTED OUT since 2026-06-23)
 - **Script Path:** `$VESSENCE_HOME/startup_code/run_kathia_schedule.py`
 - **Log:** `$VESSENCE_DATA_HOME/logs/kathia_schedule.log`
 - **Tracker:** `$VESSENCE_DATA_HOME/clinic_last_pull.json` (last attempt/success timestamp, row count, AI-trigger count, days window)
-- **Description:** Two-phase Playwright scrape of Kathia Kirschner's weekly schedule on waterlilywellness.acubliss.app. Phase 1: clicks each appointment and triggers AI summary generation ("Give it a try") for any patient that hasn't had one yet. Waits 30 minutes for AI to finish generating. Phase 2: clicks each appointment again and extracts visit_reason, health_concerns, recommendations, visit_summary from the modal. Saves all data to `$VESSENCE_DATA_HOME/schedule.db` (appointments table). The 30-min wait is skipped if all summaries are already generated. On each run, the wrapper writes `clinic_last_pull.json` atomically — success overwrites, failure preserves the prior `last_success_at`. The wrapper also takes a non-blocking singleton lock at `$VESSENCE_DATA_HOME/logs/kathia_schedule.lock` so overlapping cron invocations exit quietly instead of launching concurrent scrapes.
+- **Description:** Two-phase Playwright scrape of Kathia Kirschner's weekly schedule on waterlilywellness.acubliss.app. Phase 1 clicks each appointment and triggers AI summary generation ("Give it a try") for any patient that hasn't had one yet, then waits 30 minutes for AI to finish. Phase 2 extracts visit_reason, health_concerns, recommendations, and visit_summary into `$VESSENCE_DATA_HOME/schedule.db`. It remains documented for restart/re-enable context but is not active in the current crontab.
 
 ## 23. Daily Briefing Article Pruner
 - **Schedule:** `45 3 * * *` (Runs daily at 3:45 AM)
 - **Script Path:** `/home/chieh/ambient/skills/daily_briefing/functions/prune_articles.py`
 - **Log:** `$VESSENCE_DATA_HOME/logs/System_log/briefing_prune.log`
 - **Description:** Deletes daily-briefing article JSON, image, and audio files older than 14 days. Articles with `state == "saved"` are kept indefinitely. Prevents the briefing listing API from ballooning (was reaching ~900 articles / 3.5 MB list payloads, which made the Android app's first paint of the Daily Briefing essence very slow).
+
+## 24. Nutricost Deal Monitor
+- **Schedule:** `0 5 * * *` (Runs daily at 5:00 AM)
+- **Script Path:** `$VESSENCE_HOME/agent_skills/nutricost_deal_monitor.py`
+- **Log:** `$VESSENCE_DATA_HOME/logs/System_log/nutricost_deal_monitor.log`
+- **Description:** Reviews Nutricost marketing mail from `juliaprocess`, deletes sub-30% deal noise, and alerts on deals at 30% or higher.
+
+## 25. Doctor Appointment Sync
+- **Schedule:** `0 3 * * *` (Runs daily at 3:00 AM)
+- **Script Path:** `/home/chieh/.codex/skills/doctor-calendar-events/scripts/sync_mychart_doctor_appointments.py`
+- **Log:** `$VESSENCE_DATA_HOME/logs/doctor_calendar_sync.log`
+- **Wrapper:** `flock -n /tmp/doctor-calendar-sync.lock`
+- **Description:** Syncs MyChart and synced SMS appointment evidence into Google Calendar and the local doctor-appointment cache.
 
 ---
 
@@ -134,7 +166,6 @@ This document logs all scheduled tasks (cron jobs) for the system. It must be up
 | Audit Auto-Fixer (`audit_auto_fixer.py`) | ~2026-04 | Superseded by nightly_self_improve.py |
 | Essence Scheduler (`essence_scheduler.py`) | ~2026-04 | Removed from crontab |
 | Audit Result Notifier (`notify_audit_results.py`) | ~2026-04 | Removed from crontab |
-| Auto Pull (`auto_pull.sh`) | ~2026-04 | Removed from crontab |
 
 ---
 

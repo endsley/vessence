@@ -641,28 +641,25 @@ Background asyncio task monitors CLI stderr for rate-limit/billing/quota errors 
 
 ## 9. Automation & Cron System
 
-18 active cron jobs + essence scheduler. All execute via `/home/chieh/google-adk-env/adk-venv/bin/python`. Automation tasks that need LLM use `jane/automation_runner.py` which routes to the appropriate CLI binary.
+24 active cron jobs are installed in Chieh's user crontab as of 2026-06-30. The authoritative schedule is `configs/CRON_JOBS.md`; this section summarizes the job families so the architecture doc does not drift from `crontab -l`. Python cron jobs use `/home/chieh/google-adk-env/adk-venv/bin/python` unless the wrapper is a shell script. Automation tasks that need an LLM use `jane/automation_runner.py`, which routes to the appropriate CLI binary.
 
 ### 9.1 Job Schedule
 
-| Schedule | Job | File | Purpose |
-|:---------|:----|:-----|:--------|
-| `* * * * *` | Essence Scheduler | `essence_scheduler.py` | Check for due essence tasks |
-| `*/5 * * * *` | Job Queue Runner | `job_queue_runner.py` | Process pending jobs from `configs/job_queue/` |
-| `*/30 * * * *` | Screen Dimmer | `screen_dimmer.py` | Dim display after sunset (zip 02155) |
-| `*/40 * * * *` | Memory Janitor | `janitor_memory.py` | Purge expired, consolidate redundant, cluster images |
-| `0 */6 * * *` | Nightly Audit | `nightly_audit.py` | Code vs. docs drift detection, auto-fix safe issues |
-| `0 2 * * *` | USB Backup | `usb_sync.py` | Incremental rsync, weekly hard-link snapshots (30-day retention) |
-| `0 2 * * *` | Audit Auto-Fixer | `audit_auto_fixer.py` | Apply safe fixes from audit |
-| `10 2 * * *` | Daily Briefing | `run_briefing.py` | Fetch news, summarize (gemma3:12b), TTS via XTTS |
-| `10 2 * * *` | Code Map Keywords | `evolve_code_map_keywords.py` | Extract code keywords from messages, update proxy |
-| `30 2 * * *` | Update Checker | `check_for_updates.py` | Check for codebase/dependency updates |
-| `0 3 * * *` | Identity Essay | `generate_identity_essay.py` | Regenerate Jane identity from recent interactions |
-| `0 3 * * *` | System Janitor | `janitor_system.py` | Temp cleanup, log rotation (2-day retention) |
-| `15 3 * * *` | Jane Context Rebuild | `regenerate_jane_context.py` | Rebuild `jane_context.txt` from source configs |
-| `15 4 * * *` | Code Map Generator | `generate_code_map.py` | Regenerate CODE_MAP_CORE/WEB/ANDROID with line numbers |
-| `0 5 * * *` | Ambient Heartbeat | `ambient_heartbeat.py` | Autonomous research: search 9 topics, implement up to 3 tasks |
-| `0 10 * * *` | Update Notifier | `notify_updates.py` | Notify user of available updates |
+Current active families:
+
+- self-improvement and code health: `nightly_self_improve.py`, `daily_code_review.py`, `generate_code_map.py`, `evolve_code_map_keywords.py`, `check_for_updates.py`, `notify_updates.py`
+- runtime hygiene: `job_queue_runner.py`, `process_watchdog.py`, `janitor_system.py`, `screen_dimmer.py`, `auto_pull.sh`
+- memory/context/bootstrap: `generate_identity_essay.py`, `regenerate_jane_context.py`
+- personal data refresh: `fetch_weather.py`, `fetch_todo_list.py`, doctor appointment sync
+- daily briefing: `run_briefing.py`, `prune_articles.py`
+- backups and external projects: `usb_sync.py`, Waterlily history backup, Waterlily cache health, Waterlily current-month accounting reports
+- marketplace/deal monitoring: `run_marketplace_cron.sh`, `nutricost_deal_monitor.py`
+
+Paused/disabled jobs:
+
+- `startup_code/run_kathia_schedule.py` is documented but commented out in crontab since 2026-06-23.
+- `startup_code/bot_watchdog.sh` is disabled because Discord is disconnected.
+- Old standalone `janitor_memory.py`, `nightly_audit.py`, `audit_auto_fixer.py`, `ambient_heartbeat.py`, and `essence_scheduler.py` cron paths are not active; their responsibilities were removed or folded into the newer orchestrators.
 
 ### 9.2 Automation Runner (`jane/automation_runner.py`)
 

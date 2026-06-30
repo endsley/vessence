@@ -10,7 +10,7 @@ This is the most fundamental decision in the memory system. Every piece of infor
 
 | Store | Path | What goes here | What does NOT go here |
 |-------|------|----------------|-----------------------|
-| **Vault** | `/home/chieh/vault/` | Actual files: PDFs, images, audio, markdown documents, binary artifacts, the SQLite ledger. Things you open, share, or reference by file path. | Extracted facts, summaries, or semantic knowledge |
+| **Vault** | `/home/chieh/ambient/vault/` | Actual files: PDFs, images, audio, markdown documents, binary artifacts, the SQLite ledger. Things you open, share, or reference by file path. | Extracted facts, summaries, or semantic knowledge |
 | **ChromaDB** | `user_memories`, `file_index_memories`, `long_term_knowledge`, `short_term_memory` | Facts, decisions, history of what was built/decided/learned, preferences, events, insights, and file index records in separate retrieval lanes. | Raw files, binary data, large text blobs |
 
 **Decision rule (one question):** Is this a *file* or a *fact*?
@@ -30,9 +30,9 @@ This is the most fundamental decision in the memory system. Every piece of infor
 When processing a prompt, context is assembled from four tiers:
 
 1.  **Active Context Window:** The immediate, live conversation history, including summaries of older parts of the conversation.
-2.  **Short-Term Memory DB:** Shared, persistent ChromaDB at `$VESSENCE_DATA_HOME/vector_db/short_term_memory/`. Stores compact retrieval-oriented summaries of recent conversation turns AND explicitly added time-limited facts. All entries carry a `timestamp` and `expires_at` (default 14-day TTL). Replaces both the old per-session `session_memory` and the separate `forgettable_knowledge` DB. Purged nightly by the Janitor.
-3.  **Long-Term Memory DB:** Curated, permanent facts. Two stores: `user_memories` (Jane's shared long-term store, `memory_type: "long_term"` or `"permanent"`) and `long_term_knowledge` (Jane's conversation archivist output at `vector_db/long_term_memory/`). No TTL — janitor may consolidate/deduplicate but never auto-expires.
-4.  **File Index Memory DB:** Dedicated ChromaDB collection at `$VESSENCE_DATA_HOME/vector_db/file_index_memory/` named `file_index_memories`. Stores file path, MIME/type, and concise descriptions of vault files. For formats the agent can read, the description must be based on the file contents rather than filename/path only. Queried only for file/vault lookup prompts.
+2.  **Short-Term Memory DB:** Shared, persistent ChromaDB at `$VESSENCE_DATA_HOME/memory/v1/vector_db/short_term_memory/`. Stores compact retrieval-oriented summaries of recent conversation turns AND explicitly added time-limited facts. All entries carry a `timestamp` and `expires_at` (default 14-day TTL). Replaces both the old per-session `session_memory` and the separate `forgettable_knowledge` DB. Purged nightly by the Janitor through `nightly_self_improve.py`.
+3.  **Long-Term Memory DB:** Curated, permanent facts. Two stores: `user_memories` (Jane's shared long-term store, `memory_type: "long_term"` or `"permanent"`) and `long_term_knowledge` (Jane's conversation archivist output at `memory/v1/vector_db/long_term_memory/`). No TTL — janitor may consolidate/deduplicate but never auto-expires.
+4.  **File Index Memory DB:** Dedicated ChromaDB collection at `$VESSENCE_DATA_HOME/memory/v1/vector_db/file_index_memory/` named `file_index_memories`. Stores file path, MIME/type, and concise descriptions of vault files. For formats the agent can read, the description must be based on the file contents rather than filename/path only. Queried only for file/vault lookup prompts.
 4.  **Permanent Memory (Startup):** Foundational knowledge loaded at the start of a session from architecture files, identity essays, and registries.
 
 ---
@@ -43,11 +43,11 @@ When processing a prompt, context is assembled from four tiers:
 
 | Collection | Path | What goes here | TTL |
 |-----------|------|----------------|-----|
-| `user_memories` | `$VESSENCE_DATA_HOME/vector_db/` | Permanent + long-term facts for Jane (`memory_type: "permanent"` or `"long_term"`) | None |
+| `user_memories` | `$VESSENCE_DATA_HOME/memory/v1/vector_db/` | Permanent + long-term facts for Jane (`memory_type: "permanent"` or `"long_term"`) | None |
 | `user_memories` | `$VESSENCE_DATA_HOME/users/<user_id>/memory/vector_db/` | Managed-user private permanent + long-term facts seeded at user creation and retrieved only for that user | None |
-| `long_term_knowledge` | `$VESSENCE_DATA_HOME/vector_db/long_term_memory/` | Jane's conversation archivist output (curated, high-signal facts promoted from short-term) | None |
-| `short_term_memory` | `$VESSENCE_DATA_HOME/vector_db/short_term_memory/` | Compact summaries of conversation turns + explicitly added time-limited facts. Shared/persistent across sessions. | 14 days |
-| `file_index_memories` | `$VESSENCE_DATA_HOME/vector_db/file_index_memory/` | Vault file index records: path, file name, MIME/type, content-derived description when readable, tags | None |
+| `long_term_knowledge` | `$VESSENCE_DATA_HOME/memory/v1/vector_db/long_term_memory/` | Jane's conversation archivist output (curated, high-signal facts promoted from short-term) | None |
+| `short_term_memory` | `$VESSENCE_DATA_HOME/memory/v1/vector_db/short_term_memory/` | Compact summaries of conversation turns + explicitly added time-limited facts. Shared/persistent across sessions. | 14 days |
+| `file_index_memories` | `$VESSENCE_DATA_HOME/memory/v1/vector_db/file_index_memory/` | Vault file index records: path, file name, MIME/type, content-derived description when readable, tags | None |
 
 ### 2.1.2. File Index Memory — Design
 
