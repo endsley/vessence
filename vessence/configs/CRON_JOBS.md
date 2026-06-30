@@ -146,6 +146,14 @@ This document logs all scheduled tasks (cron jobs) for the system. It must be up
 - **Log:** `$VESSENCE_DATA_HOME/logs/System_log/nutricost_deal_monitor.log`
 - **Description:** Reviews Nutricost marketing mail from `juliaprocess`, deletes sub-30% deal noise, and alerts on deals at 30% or higher.
 
+## 24a. Facebook Marketplace Message Cleanup
+- **Schedule:** `10 5 * * *` (Runs daily at 5:10 AM)
+- **Script Path:** `$VESSENCE_HOME/startup_code/run_facebook_marketplace_message_cleanup.sh`
+- **Log:** `$VESSENCE_DATA_HOME/logs/facebook_marketplace_message_cleanup.log`
+- **Audit Log:** `$VESSENCE_DATA_HOME/logs/facebook_marketplace_message_cleanup.jsonl`
+- **Wrapper:** `flock -n /tmp/facebook-marketplace-message-cleanup.lock`
+- **Description:** Uses Chieh's logged-in Playwright Chromium profile at `$VESSENCE_DATA_HOME/browser-profiles/facebook-messenger-playwright` to scan Facebook Marketplace Messenger chats. It never deletes the protected `Rickey : 2015 Honda Fit` thread. It deletes chats that look sold/gone or whose latest visible activity is at least 3 days old, capped at 25 deletions per run and logged to JSONL for audit.
+
 ## 25. Doctor Appointment Sync
 - **Schedule:** `0 3 * * *` (Runs daily at 3:00 AM)
 - **Script Path:** `/home/chieh/.codex/skills/doctor-calendar-events/scripts/sync_mychart_doctor_appointments.py`
