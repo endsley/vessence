@@ -3,7 +3,11 @@
 
 At 5 AM, scan yesterday's Nutricost marketing emails. Trash messages whose
 largest advertised discount is below the threshold. For qualifying messages,
-send Chieh a link from the juliaprocess Gmail account.
+send Chieh a link from the juliaprocess Gmail account. Also trash any
+CrunchLabs messages from the same local-day window, older Amazon, Google Maps,
+LinkedIn, or Redfin messages after their retention window, and Google Calendar
+messages whose event date/time has passed. Finally, trash unread messages older
+than three weeks.
 """
 
 from __future__ import annotations
@@ -16,7 +20,7 @@ import logging
 import os
 import re
 import sys
-from email.utils import parsedate_to_datetime
+from email.utils import getaddresses, parsedate_to_datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -35,6 +39,22 @@ RECIPIENT = "chieh.t.wu@gmail.com"
 READER_ACCOUNT = "chieh.t.wu@gmail.com"
 ALERT_SENDER = "juliaprocess@gmail.com"
 NUTRICOST_FROM = "support@nutricost.com"
+CRUNCHLABS_FROM_QUERY = "crunchlabs"
+CRUNCHLABS_SENDER_FRAGMENT = "crunchlabs"
+AMAZON_FROM_QUERY = "(amazon.com OR amazonaws.com OR amazon.science)"
+AMAZON_SENDER_FRAGMENTS: tuple[str, ...] = ()
+AMAZON_SENDER_DOMAINS = ("amazon.com", "amazonaws.com", "amazon.science")
+GOOGLE_MAPS_FROM_QUERY = "(googlemaps OR maps-noreply OR localguides)"
+GOOGLE_MAPS_SENDER_FRAGMENTS = ("google maps", "googlemaps", "maps.google", "localguides", "local guides")
+LINKEDIN_FROM_QUERY = "linkedin"
+LINKEDIN_SENDER_FRAGMENTS = ("linkedin",)
+GOOGLE_CALENDAR_FROM_QUERY = "(calendar-notification OR googlecalendar)"
+GOOGLE_CALENDAR_SENDER_FRAGMENTS = ("calendar-notification", "google calendar", "googlecalendar")
+REDFIN_FROM_QUERY = "redfin"
+REDFIN_SENDER_FRAGMENTS = ("redfin",)
+SENDER_CLEANUP_RETENTION_DAYS = 2
+REDFIN_CLEANUP_RETENTION_DAYS = 3
+UNREAD_CLEANUP_RETENTION_DAYS = 21
 STATE_PATH = Path(VESSENCE_DATA_HOME) / "data" / "nutricost_deal_monitor.json"
 
 LOGGER = logging.getLogger("nutricost_deal_monitor")
@@ -113,6 +133,16 @@ def strip_html(raw_html: str) -> str:
     return html.unescape(re.sub(r"\s+", " ", text)).strip()
 
 
+def unfold_ics_lines(text: str) -> list[str]:
+    lines: list[str] = []
+    for raw_line in str(text or "").replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        if raw_line.startswith((" ", "\t")) and lines:
+            lines[-1] += raw_line[1:]
+        else:
+            lines.append(raw_line)
+    return lines
+
+
 def message_text(message: dict) -> str:
     payload = message.get("payload", {})
     plain_chunks = []
@@ -127,6 +157,16 @@ def message_text(message: dict) -> str:
     if plain_chunks:
         return "\n\n".join(chunk for chunk in plain_chunks if chunk)
     return "\n\n".join(chunk for chunk in html_chunks if chunk)
+
+
+def message_calendar_text(message: dict) -> str:
+    chunks: list[str] = []
+    for part in walk_parts(message.get("payload", {})):
+        mime_type = str(part.get("mimeType") or "").lower()
+        filename = str(part.get("filename") or "").lower()
+        if mime_type in {"text/calendar", "application/ics"} or filename.endswith((".ics", ".ical")):
+            chunks.append(decode_body_data(part))
+    return "\n".join(chunk for chunk in chunks if chunk)
 
 
 def is_marketing_message(message: dict, text: str) -> bool:
@@ -224,6 +264,192 @@ def message_local_date(message: dict) -> dt.date | None:
     except (TypeError, ValueError):
         return None
     return dt.datetime.fromtimestamp(timestamp, tz=ZoneInfo("America/New_York")).date()
+
+
+def message_local_datetime(message: dict) -> dt.datetime | None:
+    raw = message.get("internalDate")
+    if not raw:
+        return None
+    try:
+        timestamp = int(raw) / 1000
+    except (TypeError, ValueError):
+        return None
+    return dt.datetime.fromtimestamp(timestamp, tz=ZoneInfo("America/New_York"))
+
+
+def sender_matches_fragments(sender: str, fragments: tuple[str, ...]) -> bool:
+    sender_lower = str(sender or "").lower()
+    return any(fragment.lower() in sender_lower for fragment in fragments)
+
+
+def sender_matches_domains(sender: str, domains: tuple[str, ...]) -> bool:
+    allowed_domains = tuple(domain.lower().lstrip("@") for domain in domains if domain)
+    if not allowed_domains:
+        return False
+
+    sender_domains: list[str] = []
+    for _, address in getaddresses([str(sender or "")]):
+        if "@" in address:
+            sender_domains.append(address.rsplit("@", 1)[1].strip().lower())
+
+    for sender_domain in sender_domains:
+        for allowed_domain in allowed_domains:
+            if sender_domain == allowed_domain or sender_domain.endswith(f".{allowed_domain}"):
+                return True
+    return False
+
+
+def sender_matches_cleanup_rule(
+    sender: str,
+    fragments: tuple[str, ...],
+    domains: tuple[str, ...] = (),
+) -> bool:
+    return sender_matches_fragments(sender, fragments) or sender_matches_domains(sender, domains)
+
+
+def message_is_older_than_days(
+    message: dict,
+    days: int,
+    *,
+    now: dt.datetime | None = None,
+) -> bool:
+    message_dt = message_local_datetime(message)
+    if not message_dt:
+        return False
+    tz = ZoneInfo("America/New_York")
+    now = now or dt.datetime.now(tz)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=tz)
+    return message_dt < now.astimezone(tz) - dt.timedelta(days=days)
+
+
+def parse_ics_datetime(value: str, params: str = "") -> dt.datetime | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    tz = ZoneInfo("America/New_York")
+    value_is_date = "VALUE=DATE" in str(params or "").upper()
+    if re.fullmatch(r"\d{8}", raw):
+        try:
+            parsed_date = dt.datetime.strptime(raw, "%Y%m%d").date()
+        except ValueError:
+            return None
+        return dt.datetime.combine(parsed_date, dt.time.min, tzinfo=tz)
+
+    raw = raw.rstrip("Z")
+    for fmt in ("%Y%m%dT%H%M%S", "%Y%m%dT%H%M"):
+        try:
+            parsed = dt.datetime.strptime(raw, fmt)
+            return parsed.replace(tzinfo=ZoneInfo("UTC" if value.endswith("Z") else "America/New_York")).astimezone(tz)
+        except ValueError:
+            continue
+    if value_is_date:
+        return parse_ics_datetime(raw[:8])
+    return None
+
+
+def calendar_event_end_from_ics(text: str) -> dt.datetime | None:
+    event_started = False
+    dtstart: dt.datetime | None = None
+    dtend: dt.datetime | None = None
+    for line in unfold_ics_lines(text):
+        clean = line.strip()
+        if clean == "BEGIN:VEVENT":
+            event_started = True
+            dtstart = None
+            dtend = None
+            continue
+        if clean == "END:VEVENT" and event_started:
+            return dtend or dtstart
+        if not event_started:
+            continue
+        match = re.match(r"^(DTSTART|DTEND)(?P<params>;[^:]*)?:(?P<value>.+)$", clean, flags=re.IGNORECASE)
+        if not match:
+            continue
+        parsed = parse_ics_datetime(match.group("value"), match.group("params") or "")
+        if not parsed:
+            continue
+        if match.group(1).upper() == "DTEND":
+            dtend = parsed
+        else:
+            dtstart = parsed
+    return dtend or dtstart
+
+
+def parse_subject_time(value: str, fallback_period: str | None = None) -> dt.time | None:
+    match = re.fullmatch(r"\s*(?P<hour>\d{1,2})(?::(?P<minute>\d{2}))?\s*(?P<period>am|pm)?\s*", value, flags=re.IGNORECASE)
+    if not match:
+        return None
+    hour = int(match.group("hour"))
+    minute = int(match.group("minute") or "0")
+    period = (match.group("period") or fallback_period or "").lower()
+    if minute > 59 or hour < 1 or hour > 23:
+        return None
+    if period:
+        if hour > 12:
+            return None
+        if period == "pm" and hour != 12:
+            hour += 12
+        elif period == "am" and hour == 12:
+            hour = 0
+    return dt.time(hour, minute)
+
+
+def google_calendar_event_end_from_subject(subject: str) -> dt.datetime | None:
+    match = re.search(
+        r"@\s*"
+        r"(?:[A-Z][a-z]{2}\s+)?"
+        r"(?P<month>[A-Z][a-z]{2})\s+"
+        r"(?P<day>\d{1,2}),\s+"
+        r"(?P<year>\d{4})"
+        r"(?:\s+"
+        r"(?P<start>\d{1,2}(?::\d{2})?\s*(?:am|pm)?)"
+        r"(?:\s*-\s*(?P<end>\d{1,2}(?::\d{2})?\s*(?:am|pm)?))?"
+        r")?",
+        str(subject or ""),
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return None
+
+    try:
+        event_date = dt.datetime.strptime(
+            f"{match.group('month')} {match.group('day')} {match.group('year')}",
+            "%b %d %Y",
+        ).date()
+    except ValueError:
+        return None
+
+    start_text = match.group("start")
+    end_text = match.group("end")
+    if not start_text:
+        return dt.datetime.combine(event_date, dt.time.max, tzinfo=ZoneInfo("America/New_York"))
+
+    start_period_match = re.search(r"(am|pm)\s*$", start_text, flags=re.IGNORECASE)
+    start_period = start_period_match.group(1).lower() if start_period_match else None
+    start_time = parse_subject_time(start_text)
+    end_time = parse_subject_time(end_text or start_text, fallback_period=start_period)
+    if not start_time or not end_time:
+        return None
+
+    event_end = dt.datetime.combine(event_date, end_time, tzinfo=ZoneInfo("America/New_York"))
+    event_start = dt.datetime.combine(event_date, start_time, tzinfo=ZoneInfo("America/New_York"))
+    if event_end < event_start:
+        event_end += dt.timedelta(days=1)
+    return event_end
+
+
+def google_calendar_event_has_passed(message: dict, *, now: dt.datetime | None = None) -> bool | None:
+    calendar_text = message_calendar_text(message)
+    subject = header_map(message).get("subject", "")
+    event_end = calendar_event_end_from_ics(calendar_text) or google_calendar_event_end_from_subject(subject)
+    if not event_end:
+        return None
+    tz = ZoneInfo("America/New_York")
+    now = now or dt.datetime.now(tz)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=tz)
+    return event_end < now.astimezone(tz)
 
 
 def list_message_ids(service, query: str) -> list[str]:
@@ -329,7 +555,105 @@ def process_message(service, message_id: str, day: dt.date, threshold: int, dry_
     return "alerted" if not dry_run else "would_alert"
 
 
-def build_query(day: dt.date, include_trash: bool) -> str:
+def process_crunchlabs_message(service, message_id: str, day: dt.date, dry_run: bool) -> str:
+    message = read_message(service, message_id)
+    local_date = message_local_date(message)
+    if local_date != day:
+        LOGGER.info("Skipped out-of-scope CrunchLabs message %s: local_date=%s", message_id, local_date)
+        return "crunchlabs_out_of_scope"
+
+    headers = header_map(message)
+    sender = headers.get("from", "")
+    subject = headers.get("subject", "(no subject)")
+    if CRUNCHLABS_SENDER_FRAGMENT not in sender.lower():
+        LOGGER.info("Skipped non-CrunchLabs message %s: from=%s subject=%s", message_id, sender, subject)
+        return "crunchlabs_skipped"
+
+    trash_message(service, message_id, dry_run=dry_run)
+    LOGGER.info("Trashed CrunchLabs message %s: %s", message_id, subject)
+    return "crunchlabs_trashed" if not dry_run else "crunchlabs_would_trash"
+
+
+def process_sender_cleanup_message(
+    service,
+    message_id: str,
+    *,
+    label: str,
+    sender_fragments: tuple[str, ...],
+    older_than_days: int,
+    dry_run: bool,
+    sender_domains: tuple[str, ...] = (),
+    now: dt.datetime | None = None,
+) -> str:
+    message = read_message(service, message_id)
+    headers = header_map(message)
+    sender = headers.get("from", "")
+    subject = headers.get("subject", "(no subject)")
+    prefix = re.sub(r"[^a-z0-9]+", "_", label.lower()).strip("_") or "sender_cleanup"
+
+    if not sender_matches_cleanup_rule(sender, sender_fragments, sender_domains):
+        LOGGER.info("Skipped non-%s message %s: from=%s subject=%s", label, message_id, sender, subject)
+        return f"{prefix}_skipped"
+    if not message_is_older_than_days(message, older_than_days, now=now):
+        LOGGER.info("Skipped recent %s message %s: subject=%s", label, message_id, subject)
+        return f"{prefix}_too_recent"
+
+    trash_message(service, message_id, dry_run=dry_run)
+    LOGGER.info("Trashed %s message older than %d days %s: %s", label, older_than_days, message_id, subject)
+    return f"{prefix}_trashed" if not dry_run else f"{prefix}_would_trash"
+
+
+def process_google_calendar_message(
+    service,
+    message_id: str,
+    *,
+    dry_run: bool,
+    now: dt.datetime | None = None,
+) -> str:
+    message = read_message(service, message_id)
+    headers = header_map(message)
+    sender = headers.get("from", "")
+    subject = headers.get("subject", "(no subject)")
+    if not sender_matches_fragments(sender, GOOGLE_CALENDAR_SENDER_FRAGMENTS):
+        LOGGER.info("Skipped non-Google Calendar message %s: from=%s subject=%s", message_id, sender, subject)
+        return "google_calendar_skipped"
+
+    event_has_passed = google_calendar_event_has_passed(message, now=now)
+    if event_has_passed is None:
+        LOGGER.info("Skipped Google Calendar message with no parseable event date %s: %s", message_id, subject)
+        return "google_calendar_no_event_date"
+    if not event_has_passed:
+        LOGGER.info("Skipped future Google Calendar event message %s: %s", message_id, subject)
+        return "google_calendar_future_event"
+
+    trash_message(service, message_id, dry_run=dry_run)
+    LOGGER.info("Trashed Google Calendar message for passed event %s: %s", message_id, subject)
+    return "google_calendar_trashed" if not dry_run else "google_calendar_would_trash"
+
+
+def process_unread_cleanup_message(
+    service,
+    message_id: str,
+    *,
+    older_than_days: int,
+    dry_run: bool,
+    now: dt.datetime | None = None,
+) -> str:
+    message = read_message(service, message_id)
+    subject = header_map(message).get("subject", "(no subject)")
+    if "UNREAD" not in (message.get("labelIds") or []):
+        LOGGER.info("Skipped read message from unread cleanup %s: %s", message_id, subject)
+        return "old_unread_skipped_read"
+    if not message_is_older_than_days(message, older_than_days, now=now):
+        LOGGER.info("Skipped recent unread message %s: %s", message_id, subject)
+        return "old_unread_too_recent"
+
+    trash_message(service, message_id, dry_run=dry_run)
+    LOGGER.info("Trashed unread message older than %d days %s: %s", older_than_days, message_id, subject)
+    return "old_unread_trashed" if not dry_run else "old_unread_would_trash"
+
+
+def build_sender_query(day: dt.date, from_query: str, include_trash: bool) -> str:
     # Gmail date queries are not enough for local-day precision. Use a wider
     # search window, then filter by each message's internalDate in New York.
     query_start = day - dt.timedelta(days=1)
@@ -337,9 +661,54 @@ def build_query(day: dt.date, include_trash: bool) -> str:
     parts = [
         "in:anywhere" if include_trash else "",
         f"to:{RECIPIENT}",
-        f"from:{NUTRICOST_FROM}",
+        f"from:{from_query}",
         f"after:{gmail_date(query_start)}",
         f"before:{gmail_date(query_end)}",
+        "-in:spam",
+    ]
+    if not include_trash:
+        parts.append("-in:trash")
+    return " ".join(part for part in parts if part)
+
+
+def build_query(day: dt.date, include_trash: bool) -> str:
+    return build_sender_query(day, NUTRICOST_FROM, include_trash)
+
+
+def build_crunchlabs_query(day: dt.date, include_trash: bool) -> str:
+    return build_sender_query(day, CRUNCHLABS_FROM_QUERY, include_trash)
+
+
+def build_older_sender_query(from_query: str, older_than_days: int, include_trash: bool) -> str:
+    parts = [
+        "in:anywhere" if include_trash else "",
+        f"to:{RECIPIENT}",
+        f"from:{from_query}",
+        f"older_than:{int(older_than_days)}d",
+        "-in:spam",
+    ]
+    if not include_trash:
+        parts.append("-in:trash")
+    return " ".join(part for part in parts if part)
+
+
+def build_google_calendar_query(include_trash: bool) -> str:
+    parts = [
+        "in:anywhere" if include_trash else "",
+        f"to:{RECIPIENT}",
+        f"from:{GOOGLE_CALENDAR_FROM_QUERY}",
+        "-in:spam",
+    ]
+    if not include_trash:
+        parts.append("-in:trash")
+    return " ".join(part for part in parts if part)
+
+
+def build_unread_cleanup_query(older_than_days: int, include_trash: bool) -> str:
+    parts = [
+        "in:anywhere" if include_trash else "",
+        "is:unread",
+        f"older_than:{int(older_than_days)}d",
         "-in:spam",
     ]
     if not include_trash:
@@ -368,9 +737,6 @@ def main() -> int:
     service = get_gmail_service(user_id=READER_ACCOUNT)
     message_ids = list_message_ids(service, query)
     LOGGER.info("Found %d candidate message(s)", len(message_ids))
-    if not message_ids:
-        return 0
-
     state = load_state()
     counts: dict[str, int] = {}
     for message_id in message_ids:
@@ -381,10 +747,89 @@ def main() -> int:
             outcome = "failed"
         counts[outcome] = counts.get(outcome, 0) + 1
 
+    crunchlabs_query = build_crunchlabs_query(day, include_trash=args.include_trash)
+    LOGGER.info("Scanning CrunchLabs messages for %s with query: %s", day.isoformat(), crunchlabs_query)
+    crunchlabs_message_ids = list_message_ids(service, crunchlabs_query)
+    LOGGER.info("Found %d CrunchLabs candidate message(s)", len(crunchlabs_message_ids))
+    for message_id in crunchlabs_message_ids:
+        try:
+            outcome = process_crunchlabs_message(service, message_id, day, args.dry_run)
+        except Exception as exc:
+            LOGGER.exception("Failed processing CrunchLabs message %s: %s", message_id, exc)
+            outcome = "crunchlabs_failed"
+        counts[outcome] = counts.get(outcome, 0) + 1
+
+    cleanup_specs = [
+        (
+            "Amazon",
+            AMAZON_FROM_QUERY,
+            AMAZON_SENDER_FRAGMENTS,
+            AMAZON_SENDER_DOMAINS,
+            SENDER_CLEANUP_RETENTION_DAYS,
+        ),
+        ("Google Maps", GOOGLE_MAPS_FROM_QUERY, GOOGLE_MAPS_SENDER_FRAGMENTS, (), SENDER_CLEANUP_RETENTION_DAYS),
+        ("LinkedIn", LINKEDIN_FROM_QUERY, LINKEDIN_SENDER_FRAGMENTS, (), SENDER_CLEANUP_RETENTION_DAYS),
+        ("Redfin", REDFIN_FROM_QUERY, REDFIN_SENDER_FRAGMENTS, (), REDFIN_CLEANUP_RETENTION_DAYS),
+    ]
+    for label, from_query, sender_fragments, sender_domains, retention_days in cleanup_specs:
+        cleanup_query = build_older_sender_query(
+            from_query,
+            retention_days,
+            include_trash=args.include_trash,
+        )
+        LOGGER.info("Scanning %s messages with query: %s", label, cleanup_query)
+        cleanup_message_ids = list_message_ids(service, cleanup_query)
+        LOGGER.info("Found %d %s candidate message(s)", len(cleanup_message_ids), label)
+        for message_id in cleanup_message_ids:
+            try:
+                outcome = process_sender_cleanup_message(
+                    service,
+                    message_id,
+                    label=label,
+                    sender_fragments=sender_fragments,
+                    sender_domains=sender_domains,
+                    older_than_days=retention_days,
+                    dry_run=args.dry_run,
+                )
+            except Exception as exc:
+                LOGGER.exception("Failed processing %s message %s: %s", label, message_id, exc)
+                outcome = f"{re.sub(r'[^a-z0-9]+', '_', label.lower()).strip('_')}_failed"
+            counts[outcome] = counts.get(outcome, 0) + 1
+
+    google_calendar_query = build_google_calendar_query(include_trash=args.include_trash)
+    LOGGER.info("Scanning Google Calendar messages with query: %s", google_calendar_query)
+    google_calendar_message_ids = list_message_ids(service, google_calendar_query)
+    LOGGER.info("Found %d Google Calendar candidate message(s)", len(google_calendar_message_ids))
+    for message_id in google_calendar_message_ids:
+        try:
+            outcome = process_google_calendar_message(service, message_id, dry_run=args.dry_run)
+        except Exception as exc:
+            LOGGER.exception("Failed processing Google Calendar message %s: %s", message_id, exc)
+            outcome = "google_calendar_failed"
+        counts[outcome] = counts.get(outcome, 0) + 1
+
+    unread_query = build_unread_cleanup_query(UNREAD_CLEANUP_RETENTION_DAYS, include_trash=args.include_trash)
+    LOGGER.info("Scanning unread messages older than %d days with query: %s", UNREAD_CLEANUP_RETENTION_DAYS, unread_query)
+    unread_message_ids = list_message_ids(service, unread_query)
+    LOGGER.info("Found %d old unread candidate message(s)", len(unread_message_ids))
+    if args.dry_run:
+        if unread_message_ids:
+            counts["old_unread_would_trash"] = counts.get("old_unread_would_trash", 0) + len(unread_message_ids)
+        LOGGER.info("DRY RUN: would trash %d unread message(s) older than %d days", len(unread_message_ids), UNREAD_CLEANUP_RETENTION_DAYS)
+    else:
+        for message_id in unread_message_ids:
+            try:
+                trash_message(service, message_id, dry_run=False)
+                outcome = "old_unread_trashed"
+            except Exception as exc:
+                LOGGER.exception("Failed processing old unread message %s: %s", message_id, exc)
+                outcome = "old_unread_failed"
+            counts[outcome] = counts.get(outcome, 0) + 1
+
     if not args.dry_run:
         save_state(state)
     LOGGER.info("Done: %s", counts)
-    return 1 if counts.get("failed") else 0
+    return 1 if any(str(key).endswith("failed") for key in counts) else 0
 
 
 if __name__ == "__main__":
