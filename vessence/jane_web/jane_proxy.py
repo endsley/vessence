@@ -17,6 +17,7 @@ from memory.v1.memory_retrieval import invalidate_memory_summary_cache
 from llm_brain.v1.brain_adapters import BrainAdapterError, ExecutionProfile, build_execution_profile, get_brain_adapter, resolve_timeout_seconds
 from context_builder.v1.context_builder import build_jane_context_async
 from jane.config import ENV_FILE_PATH, LOGS_DIR, PROVIDER_MODELS, normalize_frontier_provider
+from jane.sanitizers import strip_client_tool_markers as _strip_client_tool_markers
 from llm_brain.v1.persistent_gemini import get_gemini_persistent_manager
 from jane.session_summary import format_session_summary, load_session_summary, update_session_summary_async
 from jane_web.broadcast import StreamBroadcaster

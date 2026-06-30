@@ -12,6 +12,8 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 from urllib.parse import urlparse
 
+from jane.sanitizers import strip_client_tool_markers
+
 logger = logging.getLogger(__name__)
 
 _TALKINGPOINTS_URL_RE = re.compile(
@@ -22,7 +24,6 @@ _WRAPPER_BODY_RE = re.compile(
     r"\b(?:has sent you a message|view the full message|full message here)\b",
     re.IGNORECASE,
 )
-_CLIENT_TOOL_MARKER_RE = re.compile(r"\[\[CLIENT_TOOL:", re.IGNORECASE)
 _MUSIC_PLAY_MARKER_RE = re.compile(r"\[MUSIC_PLAY:", re.IGNORECASE)
 _CACHE_TTL_SECONDS = 7 * 24 * 60 * 60
 _FAILED_CACHE_TTL_SECONDS = 60 * 60
@@ -118,7 +119,7 @@ def _truncate_readback(text: str) -> str:
 
 
 def _sanitize_untrusted_text(text: str) -> str:
-    text = _CLIENT_TOOL_MARKER_RE.sub("[[CLIENT-TOOL-STRIPPED:", text or "")
+    text = strip_client_tool_markers(text or "") or ""
     return _MUSIC_PLAY_MARKER_RE.sub("[MUSIC-PLAY-STRIPPED:", text)
 
 

@@ -8,6 +8,8 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
+from jane.sanitizers import strip_client_tool_markers as _strip_client_tool_markers
+
 
 class silence_stderr_fd:
     def __enter__(self):

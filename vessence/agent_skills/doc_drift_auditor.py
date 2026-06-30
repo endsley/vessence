@@ -17,6 +17,7 @@ Run as part of nightly_self_improve.py at 3 AM.
 from __future__ import annotations
 
 import datetime as dt
+import ast
 import os
 import re
 import subprocess
@@ -44,6 +45,63 @@ def warn(msg: str) -> None:
 def record_change(path: Path, msg: str) -> None:
     log(f"FIXED: {msg}")
     _changes.append(f"- {path.name}: {msg}")
+
+
+def _extract_class_map_keys(source: str) -> set[str]:
+    """Return canonical class keys from stage1_classifier.py's _CLASS_MAP.
+
+    The classifier accepts compatibility aliases such as ``NATIONALGRID BILLS``
+    and ``NATIONALGRID_BILLS``. Documentation tables use underscore keys, so
+    normalize whitespace aliases instead of relying on a quote regex that
+    silently skips them.
+    """
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return set()
+
+    for node in tree.body:
+        if not isinstance(node, ast.Assign):
+            continue
+        if not any(isinstance(t, ast.Name) and t.id == "_CLASS_MAP" for t in node.targets):
+            continue
+        try:
+            class_map = ast.literal_eval(node.value)
+        except (ValueError, TypeError):
+            return set()
+        if not isinstance(class_map, dict):
+            return set()
+        return {
+            str(key).upper().replace(" ", "_")
+            for key in class_map
+            if isinstance(key, str)
+        }
+    return set()
+
+
+def _extract_doc_table_classes(doc_text: str) -> set[str]:
+    """Return uppercase class keys from the documented class table."""
+    classes: set[str] = set()
+    in_class_table = False
+    for line in doc_text.splitlines():
+        stripped = line.strip()
+        if in_class_table and not stripped:
+            break
+        if not stripped.startswith("|"):
+            continue
+        cells = [cell.strip().strip("`") for cell in stripped.strip("|").split("|")]
+        if not cells:
+            continue
+        first_cell = cells[0].lower()
+        if first_cell in {"class", "chromadb name"}:
+            in_class_table = True
+            continue
+        if not in_class_table:
+            continue
+        candidate = cells[0]
+        if re.fullmatch(r"[A-Z][A-Z0-9_]{3,}", candidate):
+            classes.add(candidate)
+    return classes
 
 
 # ── Audit 1: CRON_JOBS.md vs actual crontab ─────────────────────────────────
@@ -158,14 +216,14 @@ def audit_pipeline_classes() -> None:
         warn("stage1_classifier.py missing — can't verify classes")
         return
     code = classifier.read_text()
-    real_classes = set(re.findall(r'"([A-Z_]+)":\s*"', code))
+    real_classes = _extract_class_map_keys(code)
     if not real_classes:
         warn("Couldn't parse _CLASS_MAP from stage1_classifier.py")
         return
 
-    # Documented classes (uppercase in the table)
+    # Documented classes (uppercase keys in the first table column)
     doc_text = p.read_text()
-    doc_classes = set(re.findall(r"\|\s*([A-Z_]{4,})\s*\|", doc_text))
+    doc_classes = _extract_doc_table_classes(doc_text)
 
     missing_in_doc = real_classes - doc_classes
     missing_in_code = doc_classes - real_classes

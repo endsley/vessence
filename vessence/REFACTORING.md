@@ -1,5 +1,47 @@
 # Vessence Refactor Journal
 
+## 2026-06-30 - V2 Pipeline Helpers And Sanitizer Guard
+
+Goal/scope:
+- Finish the next behavior-preserving Vessence refactor slice without changing Jane route contracts, stream event shapes, FIFO markers, or Android client-tool marker semantics.
+- Fix small verification bugs found during the pass instead of leaving known broken tests.
+
+Files/modules changed:
+- `jane_web/jane_v2/pipeline.py`
+- `jane_web/jane_v2/awaiting_markers.py`
+- `jane_web/jane_v2/stage2_response.py`
+- `jane_web/jane_v2/pending_sms.py`
+- `jane/sanitizers.py`
+- `jane_web/jane_proxy.py`
+- `jane_web/message_readback.py`
+- `memory/v1/memory_retrieval.py`
+- `agent_skills/doc_drift_auditor.py`
+- Focused tests under `tests/`
+- `configs/doc_drift_report.md`
+
+Behavior intentionally preserved:
+- Stage 3 `[[AWAITING:<topic>]]` markers are still stripped from streamed deltas and only activate when trailing the final response.
+- Stage 2 replies still wrap only the spoken prefix in `<spoken>...</spoken>`, leaving client-tool and music markers outside the spoken text.
+- SMS pending confirmation/draft markers keep the same structured FIFO records and client-tool marker payloads.
+- `jane_web.jane_v2.pipeline` still exposes the private helper aliases imported by v3 compatibility code.
+- Client-tool marker openers in untrusted context are still neutralized as `[[CLIENT-TOOL-STRIPPED:`.
+
+Boundary chosen:
+- The large v2 pipeline owned several pure helper concerns inline. Extracting awaiting-marker streaming, Stage 2 response formatting, and pending-SMS resolution reduced the pipeline by roughly 400 lines while keeping the orchestration and persistence code in place.
+- The sanitizer bug was handled as a tiny shared helper in `jane.sanitizers` so `jane_proxy`, SMS readback, and memory retrieval use the same marker-neutralization behavior without importing from each other.
+- The doc drift auditor now parses `_CLASS_MAP` with `ast.literal_eval` and parses the documented class table structurally, so aliases with spaces and class names containing digits do not create false drift warnings.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane/sanitizers.py jane_web/jane_proxy.py memory/v1/memory_retrieval.py jane_web/message_readback.py agent_skills/doc_drift_auditor.py jane_web/jane_v2/pending_sms.py jane_web/jane_v2/stage2_response.py jane_web/jane_v2/awaiting_markers.py jane_web/jane_v2/pipeline.py jane_web/jane_v3/pipeline.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_client_tool_sanitizer.py tests/test_doc_drift_auditor.py tests/test_pending_sms.py tests/test_stage2_response.py tests/test_awaiting_markers.py test_code/test_stage3_awaiting_marker.py -q` passed (`40 passed, 1 warning`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`38 passed`).
+- `VESSENCE_HOME=/home/chieh/ambient/vessence /home/chieh/google-adk-env/adk-venv/bin/python agent_skills/doc_drift_auditor.py` passed with `0 fixes, 0 warnings`.
+
+Remaining follow-up slices:
+- `jane_web/main.py`, `jane_web/jane_proxy.py`, and `memory/v1/conversation_manager.py` are still the highest-value large-module targets; each needs characterization tests because they own live routes, stream contracts, or memory persistence behavior.
+- The v2 pipeline is smaller now, but route orchestration, FIFO persistence, and Stage 3 streaming can still be split once the stream contract has broader tests.
+- The deprecation warning in `jane_web/jane_v2/pending_action_resolver.py` still needs a small timezone-aware datetime cleanup.
+
 ## 2026-06-30 - Documentation Drift Auditor Cron State
 
 Goal/scope:

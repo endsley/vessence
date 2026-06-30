@@ -38,3 +38,39 @@ def test_paused_cron_section_is_not_claimed_active(tmp_path, monkeypatch):
     auditor.audit_cron()
 
     assert auditor._warnings == []
+
+
+def test_class_map_parser_normalizes_space_aliases():
+    source = """
+_CLASS_MAP = {
+    "WEATHER": "weather",
+    "NATIONALGRID BILLS": "nationalgrid bills",
+    "NATIONALGRID_BILLS": "nationalgrid bills",
+}
+"""
+
+    assert auditor._extract_class_map_keys(source) == {
+        "WEATHER",
+        "NATIONALGRID_BILLS",
+    }
+
+
+def test_doc_table_class_parser_allows_digits_and_first_column_only():
+    doc = """
+| Class | Route | Notes |
+| --- | --- | --- |
+| WEATHER | weather | normal row |
+| FORCE_STAGE3 | others | explicit escalation |
+| notes | FORCE_STAGE3 | prose in another cell should not count |
+| `READ_EMAIL` | email | backtick formatted |
+
+| Env Var | Default | Notes |
+| --- | --- | --- |
+| JANE_PIPELINE | v2 | not a class |
+"""
+
+    assert auditor._extract_doc_table_classes(doc) == {
+        "WEATHER",
+        "FORCE_STAGE3",
+        "READ_EMAIL",
+    }

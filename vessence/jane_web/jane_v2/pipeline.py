@@ -49,6 +49,24 @@ from jane_web.attachment_context import (
     copy_chat_body_with_updates,
     expand_file_context,
 )
+from jane_web.jane_v2.awaiting_markers import (
+    AwaitingDeltaStripper as _AwaitingDeltaStripper,
+    extract_awaiting_marker as _extract_awaiting_marker,
+)
+from jane_web.jane_v2.stage2_response import (
+    assemble_music_text as _assemble_music_text,
+    stage2_response_parts as _stage2_response_parts,
+    wrap_spoken as _wrap_spoken,
+)
+from jane_web.jane_v2.pending_sms import (
+    cancel_pending_sms_confirmation as _cancel_pending_sms_confirmation,
+    cancel_pending_sms_draft as _cancel_pending_sms_draft,
+    extract_sms_draft_state as _extract_sms_draft_state,
+    pending_consumed_marker as _pending_consumed_marker,
+    resolve_pending_sms_confirmation as _resolve_pending_sms_confirmation,
+    resolve_pending_sms_draft_edit as _resolve_pending_sms_draft_edit,
+    resolve_pending_sms_draft_send as _resolve_pending_sms_draft_send,
+)
 from jane_web.session_context import set_current_session_id
 
 logger = logging.getLogger(__name__)
@@ -71,11 +89,6 @@ def _stage2_fifo_turns(cls: str | None, *, default: int = _STAGE2_FIFO_TURNS_DEF
     except Exception:
         pass
     return default
-
-
-_AWAITING_RE = __import__("re").compile(
-    r"\[\[AWAITING:\s*([A-Za-z0-9_\-\s]{1,200})\s*\]\]\s*\Z"
-)
 
 
 def _inject_self_improvement_context(body):
@@ -346,101 +359,6 @@ async def _apply_evidence_policy(
     except Exception as exc:
         logger.warning("pipeline: evidence policy failed: %s", exc)
     return body, metadata
-
-
-class _AwaitingDeltaStripper:
-    """Strip trailing `[[AWAITING:<topic>]]` markers from streaming Stage 3
-    deltas before they reach the client.
-
-    Markers are always at the END of the response, but may arrive split
-    across chunks (e.g. "answer  [[AWAIT", "ING:pasta]]"). Two-state
-    machine:
-
-      STREAMING  : normal flow. Keep a tiny trailing buffer that might
-                   be the beginning of a marker; emit only what's
-                   definitely not part of one.
-      SUPPRESS   : saw `[[AWAITING:`, everything from here to end of
-                   stream is dropped.
-
-    Usage:
-        stripper = _AwaitingDeltaStripper()
-        for chunk in stream:
-            out = stripper.feed(chunk)
-            if out:
-                yield_delta(out)
-        tail = stripper.flush()
-        if tail:
-            yield_delta(tail)
-    """
-
-    _MARKER_START = "[[AWAITING:"
-    # The length of _MARKER_START minus one — the longest trailing
-    # prefix we might have seen that's still ambiguous.
-    _AMBIGUOUS = len(_MARKER_START) - 1
-
-    def __init__(self) -> None:
-        self._buffer = ""
-        self._suppress = False
-
-    def feed(self, chunk: str) -> str:
-        if self._suppress or not chunk:
-            return ""
-
-        combined = self._buffer + chunk
-
-        # Fast path: marker opener anywhere in combined → emit before it,
-        # enter suppress mode, drop the rest.
-        start = combined.find(self._MARKER_START)
-        if start >= 0:
-            self._buffer = ""
-            self._suppress = True
-            return combined[:start]
-
-        # No complete marker opener yet. Safe to emit all but the last
-        # `_AMBIGUOUS` chars — those might be a partial `[[AWAITING:`
-        # prefix that completes in the next chunk.
-        if len(combined) <= self._AMBIGUOUS:
-            self._buffer = combined
-            return ""
-
-        safe_len = len(combined) - self._AMBIGUOUS
-        out = combined[:safe_len]
-        self._buffer = combined[safe_len:]
-        return out
-
-    def flush(self) -> str:
-        """End of stream — emit anything left in buffer (it wasn't a marker).
-
-        If we entered suppress mode, return nothing. Otherwise whatever's
-        in the buffer is just regular text shorter than marker length.
-        """
-        if self._suppress:
-            self._buffer = ""
-            return ""
-        out = self._buffer
-        self._buffer = ""
-        return out
-
-
-def _extract_awaiting_marker(text: str) -> tuple[str, str | None]:
-    """Scan a Stage 3 response for a TRAILING [[AWAITING:<topic>]] marker.
-
-    The marker must be the last non-whitespace thing in the response —
-    Opus echoing the instruction mid-reply is ignored. This prevents
-    accidental (or injected) mid-text markers from activating a
-    follow-up.
-
-    Returns (cleaned_text, topic). If no trailing marker is present,
-    topic is None and cleaned_text == text.
-    """
-    if not text or "[[AWAITING:" not in text:
-        return text, None
-    m = _AWAITING_RE.search(text)
-    if not m:
-        return text, None
-    topic = m.group(1).strip().replace(" ", "_")[:60] or None
-    cleaned = text[:m.start()].rstrip()
-    return cleaned, topic
 
 
 def _persist_turn_to_fifo(
@@ -749,312 +667,6 @@ def _load_v1_chat():
     except Exception as e:
         logger.exception("jane_v2: failed to import v1 _handle_jane_chat: %s", e)
         return None
-
-
-def _assemble_music_text(result: dict) -> str:
-    """Append `[MUSIC_PLAY:<id>]` to text when the handler returned a
-    playlist_id. Idempotent — skips if already present."""
-    text = result.get("text", "")
-    pid = result.get("playlist_id")
-    if pid and "[MUSIC_PLAY:" not in text:
-        text = text.rstrip() + f" [MUSIC_PLAY:{pid}]"
-    return text
-
-
-_STAGE2_MARKER_RE = re.compile(
-    r"\[\[CLIENT_TOOL:|\[\[AWAITING:|\[MUSIC_PLAY:|\[TOOL_RESULT:"
-)
-
-
-def _wrap_spoken(text: str) -> str:
-    """Wrap the spoken prefix of a Stage 2 reply in <spoken>...</spoken>.
-
-    Invariant: every user-facing reply opens with <spoken>. The Android
-    client voices only what's inside the tag, so markers like
-    [[CLIENT_TOOL:...]] and [MUSIC_PLAY:...] must live OUTSIDE the tag or
-    they'd be treated as speech. This function finds the first such marker
-    and wraps only the prose before it; markers after stay untouched.
-
-    Idempotent — if <spoken> is already present, returns unchanged.
-    """
-    if not text or "<spoken>" in text:
-        return text
-    m = _STAGE2_MARKER_RE.search(text)
-    if m is None:
-        return f"<spoken>{text.strip()}</spoken>"
-    spoken_part = text[:m.start()].strip()
-    rest = text[m.start():].strip()
-    if not spoken_part:
-        return rest
-    return f"<spoken>{spoken_part}</spoken> {rest}"
-
-
-def _stage2_response_parts(result: dict) -> tuple[str, dict[str, Any]]:
-    """Normalize a Stage 2 handler result into (user-visible text, extras)."""
-    text = _wrap_spoken(_assemble_music_text(result))
-    # If the handler set a "print" block (too long to speak), append it as text
-    # — AFTER the closing </spoken> so it's displayed but not voiced.
-    if result.get("print"):
-        text = text.rstrip() + "\n\n" + result["print"]
-    extras: dict[str, Any] = {}
-    if result.get("playlist_id"):
-        extras["playlist_id"] = result["playlist_id"]
-        extras["playlist_name"] = result.get("playlist_name")
-    if result.get("client_tools"):
-        extras["client_tools"] = result["client_tools"]
-    if result.get("conversation_end"):
-        extras["conversation_end"] = True
-    return text, extras
-
-
-def _pending_consumed_marker(pending: dict, *, status: str = "resolved",
-                             resolution: str = "answered") -> dict:
-    """Build a FIFO marker that suppresses an older pending_action.
-
-    Stage 2 follow-up handlers receive a pending action, consume the user's
-    answer, and may finish without emitting a new pending_action. The FIFO
-    state scanner needs an explicit marker or the older pending turn remains
-    active and hijacks the next user message.
-    """
-    marker = {
-        "type": pending.get("type", ""),
-        "handler_class": pending.get("handler_class", ""),
-        "status": status,
-        "resolution": resolution,
-    }
-    awaiting = pending.get("awaiting") or (pending.get("data") or {}).get("awaiting")
-    if awaiting:
-        marker["awaiting"] = awaiting
-    return {k: v for k, v in marker.items() if v}
-
-
-def _resolve_pending_sms_confirmation(pending: dict) -> dict:
-    """Build a Stage 2-shaped result dict that sends the pending SMS.
-
-    Marks the pending action as `resolved` in a structured record so the
-    next resolver call won't re-confirm the same pending twice.
-    """
-    import json as _json
-    data = pending.get("data") or {}
-    phone = data.get("phone_number") or ""
-    body = data.get("body") or data.get("message_body") or ""
-    display = data.get("display_name") or data.get("recipient") or "them"
-    tool_args = _json.dumps({"phone_number": phone, "body": body})
-    marker = f"[[CLIENT_TOOL:contacts.sms_send_direct:{tool_args}]]"
-    return {
-        "text": f"Sending to {display}. {marker}",
-        "structured": {
-            "intent": "send message",
-            "entities": {"recipient": display, "message_body": body,
-                         "phone_number": phone},
-            "pending_action": {
-                "type": "SEND_MESSAGE_CONFIRMATION",
-                "status": "resolved",
-                "resolution": "confirmed",
-            },
-            "safety": {"side_effectful": True, "requires_confirmation": False},
-        },
-    }
-
-
-def _cancel_pending_sms_confirmation(pending: dict) -> dict:
-    """Build a Stage 2-shaped result dict that drops the pending SMS."""
-    data = pending.get("data") or {}
-    display = data.get("display_name") or data.get("recipient") or "them"
-    return {
-        "text": f"Okay, not sending that to {display}.",
-        "structured": {
-            "intent": "send message",
-            "pending_action": {
-                "type": "SEND_MESSAGE_CONFIRMATION",
-                "status": "resolved",
-                "resolution": "cancelled",
-            },
-        },
-    }
-
-
-# ─── sms_draft short-circuit helpers ─────────────────────────────────────────
-#
-# Stage 3 (Opus) sometimes emits the full draft protocol (sms_draft →
-# sms_send) rather than the single-shot sms_send_direct. When that
-# happens we track the open draft in FIFO as SEND_MESSAGE_DRAFT_OPEN so
-# the next turn's user confirm/cancel/edit can short-circuit past Stage 1
-# and Stage 2 and directly emit the paired sms_send / sms_cancel /
-# sms_draft_update marker with the EXISTING draft_id.
-
-_SMS_DRAFT_MARKER_RE = __import__("re").compile(
-    r"\[\[CLIENT_TOOL:contacts\.(sms_draft|sms_draft_update|sms_send|sms_cancel):"
-    r"(\{[^\n]*?\})\]\]"
-)
-
-
-def _extract_sms_draft_state(text: str) -> dict | None:
-    """Scan Stage 3 output for SMS draft markers. Return the latest
-    open draft as {draft_id, query, body}, or None if no draft is open
-    (e.g. sms_send or sms_cancel closed it, or no markers at all).
-
-    Multiple markers may appear in one turn (e.g. draft then an update).
-    We walk them in order and track whether a draft is open at the end.
-    """
-    if not text or "[[CLIENT_TOOL:contacts.sms_" not in text:
-        return None
-    import json as _json
-    state: dict | None = None
-    for m in _SMS_DRAFT_MARKER_RE.finditer(text):
-        tool = m.group(1)
-        try:
-            args = _json.loads(m.group(2))
-        except Exception:
-            continue
-        if tool == "sms_draft":
-            state = {
-                "draft_id": args.get("draft_id") or "",
-                "query": args.get("query") or "",
-                "body": args.get("body") or "",
-            }
-        elif tool == "sms_draft_update":
-            if state is not None:
-                state["body"] = args.get("body", state.get("body", ""))
-                # draft_id may be echoed — keep existing if args is missing
-                if args.get("draft_id"):
-                    state["draft_id"] = args["draft_id"]
-            else:
-                # update without prior draft in this turn — start from scratch
-                state = {
-                    "draft_id": args.get("draft_id") or "",
-                    "query": "",
-                    "body": args.get("body") or "",
-                }
-        elif tool in ("sms_send", "sms_cancel"):
-            # Draft is closed — nothing pending after this.
-            state = None
-    if state and state.get("draft_id") and state.get("body"):
-        return state
-    return None
-
-
-def _resolve_pending_sms_draft_send(pending: dict) -> dict:
-    """User confirmed an open sms_draft. Emit sms_send with the draft_id."""
-    import json as _json
-    data = pending.get("data") or {}
-    draft_id = data.get("draft_id") or ""
-    query = data.get("query") or data.get("display_name") or data.get("recipient") or "them"
-    body = data.get("body") or ""
-    tool_args = _json.dumps({"draft_id": draft_id})
-    marker = f"[[CLIENT_TOOL:contacts.sms_send:{tool_args}]]"
-    return {
-        "text": f"Sending to {query}. {marker}",
-        "structured": {
-            "intent": "send message",
-            "entities": {"recipient": query, "message_body": body,
-                         "draft_id": draft_id},
-            "pending_action": {
-                "type": "SEND_MESSAGE_DRAFT_OPEN",
-                "status": "resolved",
-                "resolution": "sent",
-            },
-            "safety": {"side_effectful": True, "requires_confirmation": False},
-        },
-    }
-
-
-def _cancel_pending_sms_draft(pending: dict) -> dict:
-    """User cancelled an open sms_draft. Emit sms_cancel with the draft_id."""
-    import json as _json
-    data = pending.get("data") or {}
-    draft_id = data.get("draft_id") or ""
-    query = data.get("query") or data.get("display_name") or data.get("recipient") or "them"
-    tool_args = _json.dumps({"draft_id": draft_id})
-    marker = f"[[CLIENT_TOOL:contacts.sms_cancel:{tool_args}]]"
-    return {
-        "text": f"Okay, cancelled the message to {query}. {marker}",
-        "structured": {
-            "intent": "send message",
-            "pending_action": {
-                "type": "SEND_MESSAGE_DRAFT_OPEN",
-                "status": "resolved",
-                "resolution": "cancelled",
-            },
-        },
-    }
-
-
-async def _resolve_pending_sms_draft_edit(pending: dict, edit_text: str) -> dict:
-    """User asked to revise an open sms_draft. Compose a new body via a
-    tiny LLM call (same local model the send_message handler uses) and
-    emit sms_draft_update with the EXISTING draft_id — no round-trip
-    through Opus.
-
-    On LLM failure we fall back to a minimal "<old_body>. <edit_text>"
-    concatenation so the draft still progresses rather than silently
-    losing the user's edit.
-    """
-    import json as _json
-    data = pending.get("data") or {}
-    draft_id = data.get("draft_id") or ""
-    query = data.get("query") or data.get("display_name") or data.get("recipient") or "them"
-    old_body = data.get("body") or ""
-    new_body = old_body
-
-    compose_prompt = (
-        "You are revising an SMS draft based on the user's edit instruction.\n"
-        "CRITICAL: output ONLY the new message body — no preamble, no quotes, "
-        "no 'Sure, here is' prefix. Just the revised SMS body text itself.\n\n"
-        f"CURRENT DRAFT BODY: {old_body}\n"
-        f"USER EDIT INSTRUCTION: {edit_text}\n\n"
-        "NEW BODY:"
-    )
-    try:
-        import httpx
-        from jane_web.jane_v2.models import (
-            LOCAL_LLM as _model,
-            LOCAL_LLM_NUM_CTX as _num_ctx,
-            LOCAL_LLM_TIMEOUT as _timeout,
-            OLLAMA_URL as _url,
-        )
-        async with httpx.AsyncClient(timeout=_timeout) as client:
-            r = await client.post(_url, json={
-                "model": _model,
-                "prompt": compose_prompt,
-                "stream": False,
-                "think": False,
-                "options": {"temperature": 0.2, "num_predict": 80, "num_ctx": _num_ctx},
-                "keep_alive": -1,
-            })
-            r.raise_for_status()
-            composed = (r.json().get("response") or "").strip()
-            # Strip any stray quotes / "NEW BODY:" echo
-            composed = composed.strip('"').strip("'").strip()
-            if composed.lower().startswith("new body:"):
-                composed = composed[len("new body:"):].strip()
-            if composed:
-                new_body = composed
-    except Exception as e:
-        logger.warning("draft-edit compose failed (%s) — using fallback concat", e)
-        new_body = f"{old_body}. {edit_text}".strip()
-
-    tool_args = _json.dumps({"draft_id": draft_id, "body": new_body})
-    marker = f"[[CLIENT_TOOL:contacts.sms_draft_update:{tool_args}]]"
-    return {
-        "text": f"Updated. To {query}: {new_body}. {marker}",
-        "structured": {
-            "intent": "send message",
-            "entities": {"recipient": query, "message_body": new_body,
-                         "draft_id": draft_id},
-            "pending_action": {
-                "type": "SEND_MESSAGE_DRAFT_OPEN",
-                "status": "awaiting_user",
-                "awaiting": "confirm_draft",
-                "handler_class": "send message",
-                "data": {
-                    "draft_id": draft_id,
-                    "query": query,
-                    "body": new_body,
-                },
-            },
-        },
-    }
 
 
 def _cookie_session_id(request) -> str | None:
