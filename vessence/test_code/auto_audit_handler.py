@@ -1,987 +1,565 @@
-"""Auto-audit tests for jane_web.jane_v2.classes.send_message.handler."""
+"""Auto-audit tests for jane_web.jane_v2.classes.read_messages.handler."""
 
 from __future__ import annotations
 
 import ast
 import importlib
 import inspect
-import json
-import re
+import logging
 import sys
-import types
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
+from types import ModuleType
+from unittest.mock import Mock
 
 import pytest
 
 
-VESSENCE_ROOT = Path(__file__).resolve().parent.parent
+VESSENCE_ROOT = Path(__file__).resolve().parents[1]
 if str(VESSENCE_ROOT) not in sys.path:
     sys.path.insert(0, str(VESSENCE_ROOT))
 
-MODULE_PATH = VESSENCE_ROOT / "jane_web/jane_v2/classes/send_message/handler.py"
-SPEC_PATH = VESSENCE_ROOT / "CLAUDE.md"
+MODULE_NAME = "jane_web.jane_v2.classes.read_messages.handler"
+METADATA_MODULE_NAME = "jane_web.jane_v2.classes.read_messages.metadata"
+MODULE_PATH = VESSENCE_ROOT / "jane_web/jane_v2/classes/read_messages/handler.py"
 
-handler = importlib.import_module("jane_web.jane_v2.classes.send_message.handler")
-
-
-DIRECT_TOOL = "contacts.sms_send_direct"
-SEND_TOOL = "contacts.sms_send"
-CANCEL_TOOL = "contacts.sms_cancel"
-DOCUMENTED_NO_HANDLER_ESCALATORS = {
-    "delegate opus",
-    "delete email",
-    "end conversation",
-    "others",
-    "read email",
-    "send email",
-    "unclear",
-}
+handler = importlib.import_module(MODULE_NAME)
 
 
-class _FakeOllamaResponse:
-    def __init__(self, payload: dict | None = None, *, status_error: Exception | None = None):
-        self._payload = payload if payload is not None else {"response": ""}
-        self.raise_for_status = MagicMock(side_effect=status_error)
-
-    def json(self) -> dict:
-        return self._payload
-
-
-class _FakeCursor:
-    def __init__(self, row=None):
-        self._row = row
-
-    def fetchone(self):
-        return self._row
-
-
-class _FakeConnection:
-    def __init__(self, *, existing_alias: bool = False):
-        self.existing_alias = existing_alias
-        self.queries: list[tuple[str, tuple]] = []
-
-    def execute(self, sql: str, params: tuple = ()):
-        self.queries.append((sql, params))
-        return _FakeCursor((1,) if self.existing_alias else None)
-
-
-class _FakeDBContext:
-    def __init__(self, conn: _FakeConnection):
-        self.conn = conn
-
-    def __enter__(self):
-        return self.conn
-
-    def __exit__(self, exc_type, exc, tb):
-        return False
+class _LowerReturnsNone:
+    def lower(self):
+        return None
 
 
 @pytest.fixture
-def install_ollama(monkeypatch):
-    clients = []
-
-    def _install(
-        response_text: str = "",
-        *,
-        payload: dict | None = None,
-        post_side_effect: Exception | None = None,
-        status_error: Exception | None = None,
-    ):
-        class _FakeAsyncClient:
-            def __init__(self, timeout=None, **kwargs):
-                self.timeout = timeout
-                self.kwargs = kwargs
-                response = _FakeOllamaResponse(
-                    payload if payload is not None else {"response": response_text},
-                    status_error=status_error,
-                )
-                self.post = AsyncMock(return_value=response)
-                if post_side_effect is not None:
-                    self.post.side_effect = post_side_effect
-                clients.append(self)
-
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, exc_type, exc, tb):
-                return False
-
-        monkeypatch.setattr(handler.httpx, "AsyncClient", _FakeAsyncClient)
-        return clients
-
-    return _install
+def read_handler():
+    return importlib.import_module(MODULE_NAME)
 
 
 @pytest.fixture
-def unexpected_ollama(monkeypatch):
-    calls = []
-
-    class _UnexpectedAsyncClient:
-        def __init__(self, *args, **kwargs):
-            calls.append((args, kwargs))
-            raise AssertionError("unexpected Ollama call")
-
-    monkeypatch.setattr(handler.httpx, "AsyncClient", _UnexpectedAsyncClient)
-    return calls
+def read_metadata():
+    return importlib.import_module(METADATA_MODULE_NAME)
 
 
-def _source_tree() -> ast.Module:
+@pytest.fixture
+def forbidden_database_module(monkeypatch):
+    fake_database = ModuleType("database")
+    fake_database.get_db = Mock(
+        side_effect=AssertionError("read_messages.handler must not query the DB")
+    )
+    monkeypatch.setitem(sys.modules, "database", fake_database)
+    return fake_database
+
+
+@pytest.fixture
+def forbidden_llm_modules(monkeypatch):
+    modules: dict[str, ModuleType] = {}
+
+    fake_httpx = ModuleType("httpx")
+    fake_httpx.AsyncClient = Mock(
+        side_effect=AssertionError("read_messages.handler must not call an LLM")
+    )
+    modules["httpx"] = fake_httpx
+
+    fake_openai = ModuleType("openai")
+    fake_openai.OpenAI = Mock(
+        side_effect=AssertionError("read_messages.handler must not call OpenAI")
+    )
+    fake_openai.AsyncOpenAI = Mock(
+        side_effect=AssertionError("read_messages.handler must not call OpenAI")
+    )
+    modules["openai"] = fake_openai
+
+    fake_ollama = ModuleType("ollama")
+    fake_ollama.chat = Mock(
+        side_effect=AssertionError("read_messages.handler must not call Ollama")
+    )
+    fake_ollama.generate = Mock(
+        side_effect=AssertionError("read_messages.handler must not call Ollama")
+    )
+    modules["ollama"] = fake_ollama
+
+    fake_models = ModuleType("jane_web.jane_v2.models")
+    fake_models.LOCAL_LLM = "should-not-be-read"
+    fake_models.call_model = Mock(
+        side_effect=AssertionError("read_messages.handler must not call models")
+    )
+    modules["jane_web.jane_v2.models"] = fake_models
+
+    for name, module in modules.items():
+        monkeypatch.setitem(sys.modules, name, module)
+
+    return modules
+
+
+def _module_ast() -> ast.Module:
     return ast.parse(MODULE_PATH.read_text())
-
-
-def _source_text() -> str:
-    return MODULE_PATH.read_text()
 
 
 def _call_name(node: ast.AST) -> str:
     if isinstance(node, ast.Name):
         return node.id
     if isinstance(node, ast.Attribute):
-        return node.attr
+        parent = _call_name(node.value)
+        return f"{parent}.{node.attr}" if parent else node.attr
     return ""
 
 
-def _direct_marker_payload(text: str, tool: str = DIRECT_TOOL) -> dict:
-    match = re.search(
-        r"\[\[CLIENT_TOOL:" + re.escape(tool) + r":(?P<payload>\{.*?\})\]\]",
-        text,
+def _assert_documented_handler_shape(result):
+    if result is None:
+        return
+    assert isinstance(result, dict)
+    if result == {"wrong_class": True}:
+        return
+    assert isinstance(result.get("text"), str)
+
+
+def test_docstring_is_the_spec_and_documents_escalation_contract(read_handler):
+    doc = inspect.getdoc(read_handler)
+
+    assert doc is not None
+    assert "always escalates to Stage 3" in doc
+    assert "returns None to escalate" in doc
+    assert "wrong_class" not in doc.lower() or "misclassified" in doc.lower()
+    assert "_escalation_context()" in doc
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        "read my messages",
+        "any new texts?",
+        "what did Kathia text me?",
+        "any unread messages",
+        "check my inbox",
+        "do I have any new messages",
+        "please read the SMS inbox",
+    ],
+)
+async def test_documented_read_message_requests_escalate_to_stage3(read_handler, prompt):
+    result = await read_handler.handle(prompt)
+
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_context_and_params_do_not_change_stage3_escalation(read_handler):
+    params = {"filter_sender": "Kathia", "unread_only": True, "limit": 5}
+    before = dict(params)
+
+    result = await read_handler.handle(
+        "what did Kathia text me?",
+        context="The previous assistant turn mentioned architecture.",
+        params=params,
     )
-    assert match, text
-    return json.loads(match.group("payload"))
+
+    assert result is None
+    assert params == before
 
 
-def _has_tool_marker(result: dict | None, tool: str = DIRECT_TOOL) -> bool:
-    return isinstance(result, dict) and tool in str(result.get("text", ""))
+@pytest.mark.asyncio
+@pytest.mark.parametrize("arch_word", sorted(handler._ARCH_WORDS))
+async def test_architecture_lookup_words_return_wrong_class(read_handler, arch_word):
+    result = await read_handler.handle(f"Can you explain the {arch_word} for this?")
+
+    assert result == {"wrong_class": True}
 
 
-def _install_sms_helpers(monkeypatch, *, resolved=None, add_alias_return: bool = True):
-    import agent_skills.sms_helpers as sms_helpers
+@pytest.mark.asyncio
+@pytest.mark.parametrize("meta_phrase", sorted(handler._META_PHRASES))
+async def test_meta_lookup_phrases_return_wrong_class(read_handler, meta_phrase):
+    result = await read_handler.handle(f"{meta_phrase}?")
 
-    calls = {"resolve": [], "add_alias": []}
-
-    def resolve_recipient(name):
-        calls["resolve"].append(name)
-        value = resolved(name) if callable(resolved) else resolved
-        return dict(value) if value else None
-
-    def add_alias(alias, phone_number, display_name=None):
-        calls["add_alias"].append((alias, phone_number, display_name))
-        return add_alias_return
-
-    monkeypatch.setattr(sms_helpers, "resolve_recipient", resolve_recipient)
-    monkeypatch.setattr(sms_helpers, "add_alias", add_alias)
-    return calls
+    assert result == {"wrong_class": True}
 
 
-def _install_fake_vault_database(monkeypatch, *, existing_alias: bool = False):
-    conn = _FakeConnection(existing_alias=existing_alias)
-    database_mod = types.ModuleType("vault_web.database")
-    database_mod.get_db = lambda: _FakeDBContext(conn)
-    monkeypatch.setitem(sys.modules, "vault_web.database", database_mod)
-    return conn
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        "WHY WAS YOUR LAST REPLY SO SLOW?",
+        "Can you explain the HANDLER pipeline?",
+        "Your Previous Message took a while.",
+    ],
+)
+async def test_wrong_class_guards_are_case_insensitive(read_handler, prompt):
+    result = await read_handler.handle(prompt)
+
+    assert result == {"wrong_class": True}
 
 
-def _install_open_draft_state(monkeypatch, *, state: dict, session_id: str | None = "session-1"):
-    recent_turns_mod = types.ModuleType("vault_web.recent_turns")
-    recent_turns_mod.get_active_state = lambda sid: state
+@pytest.mark.asyncio
+async def test_non_meta_message_word_still_escalates(read_handler):
+    result = await read_handler.handle("read the message from Mom")
 
-    session_context_mod = types.ModuleType("jane_web.session_context")
-    session_context_mod.get_current_session_id = lambda: session_id
+    assert result is None
 
-    resolver_mod = types.ModuleType("jane_web.jane_v2.pending_action_resolver")
-    resolver_mod._normalize = lambda text: re.sub(r"[^\w\s']", "", (text or "").strip().lower())
-    resolver_mod._STAGE3_CANCEL_STRONG = {"cancel", "nevermind", "never mind", "stop"}
-    resolver_mod._is_confirm = lambda text: resolver_mod._normalize(text) in {
-        "yes",
-        "yes send it",
-        "send it",
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("prompt", ["", " ", "\n\t", "???"])
+async def test_empty_or_content_free_input_escalates_to_stage3(read_handler, prompt):
+    result = await read_handler.handle(prompt)
+
+    assert result is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("bad_prompt", "expected_exception"),
+    [
+        (None, AttributeError),
+        (123, AttributeError),
+        (object(), AttributeError),
+        (b"read my messages", TypeError),
+        (_LowerReturnsNone(), TypeError),
+    ],
+)
+async def test_malformed_prompt_types_fail_loudly(read_handler, bad_prompt, expected_exception):
+    with pytest.raises(expected_exception):
+        await read_handler.handle(bad_prompt)
+
+
+@pytest.mark.asyncio
+async def test_none_context_and_malformed_params_are_ignored_for_valid_prompt(read_handler):
+    result = await read_handler.handle(
+        "any new texts?",
+        context=None,
+        params="not-a-dict",
+    )
+
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_very_long_read_prompt_escalates_without_side_effects(read_handler):
+    long_prompt = "please read my texts. " * 10_000
+
+    result = await read_handler.handle(long_prompt)
+
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_very_long_meta_prompt_still_trips_wrong_class_guard(read_handler):
+    long_prompt = ("please " * 10_000) + "why was your last reply so slow?"
+
+    result = await read_handler.handle(long_prompt)
+
+    assert result == {"wrong_class": True}
+
+
+@pytest.mark.asyncio
+async def test_escalation_path_logs_stage3_decision(read_handler, caplog):
+    caplog.set_level(logging.INFO, logger=read_handler.logger.name)
+
+    result = await read_handler.handle("read my messages")
+
+    assert result is None
+    assert "escalating to Stage 3" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_meta_guard_logs_wrong_class_decision(read_handler, caplog):
+    caplog.set_level(logging.INFO, logger=read_handler.logger.name)
+
+    result = await read_handler.handle("your last reply took too long")
+
+    assert result == {"wrong_class": True}
+    assert "wrong_class" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_handler_does_not_query_db_or_call_llm_for_read_requests(
+    read_handler,
+    forbidden_database_module,
+    forbidden_llm_modules,
+):
+    result = await read_handler.handle(
+        "read my unread texts from Kathia",
+        context="existing context",
+        params={"filter_sender": "Kathia", "unread_only": True, "limit": 3},
+    )
+
+    assert result is None
+    forbidden_database_module.get_db.assert_not_called()
+    forbidden_llm_modules["httpx"].AsyncClient.assert_not_called()
+    forbidden_llm_modules["openai"].OpenAI.assert_not_called()
+    forbidden_llm_modules["openai"].AsyncOpenAI.assert_not_called()
+    forbidden_llm_modules["ollama"].chat.assert_not_called()
+    forbidden_llm_modules["ollama"].generate.assert_not_called()
+    forbidden_llm_modules["jane_web.jane_v2.models"].call_model.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_handler_does_not_pull_metadata_escalation_context(
+    read_handler,
+    read_metadata,
+    monkeypatch,
+):
+    context_builder = Mock(
+        side_effect=AssertionError("metadata escalation context is Stage 3 prefetch only")
+    )
+    monkeypatch.setattr(read_metadata, "_escalation_context", context_builder)
+    monkeypatch.setitem(read_metadata.METADATA, "escalation_context", context_builder)
+
+    result = await read_handler.handle("check my inbox")
+
+    assert result is None
+    context_builder.assert_not_called()
+
+
+def test_handler_imports_only_logging_as_runtime_dependency():
+    imported_modules = set()
+    for node in ast.walk(_module_ast()):
+        if isinstance(node, ast.Import):
+            imported_modules.update(alias.name.split(".", 1)[0] for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module != "__future__":
+            imported_modules.add((node.module or "").split(".", 1)[0])
+
+    assert imported_modules == {"logging"}
+
+
+def test_handler_ast_has_no_db_llm_network_or_tool_calls():
+    dangerous_fragments = {
+        "get_db",
+        "execute",
+        "fetchall",
+        "fetchone",
+        "commit",
+        "AsyncClient",
+        "OpenAI",
+        "AsyncOpenAI",
+        "chat",
+        "generate",
+        "complete",
+        "sms_send",
+        "send_direct",
     }
-    resolver_mod._is_cancel = lambda text: resolver_mod._normalize(text) in {
-        "cancel",
-        "nevermind",
-        "never mind",
-        "stop",
+    calls = [_call_name(node.func) for node in ast.walk(_module_ast()) if isinstance(node, ast.Call)]
+    offending = {
+        call
+        for call in calls
+        for fragment in dangerous_fragments
+        if fragment in call
     }
-    resolver_mod._is_edit_intent = lambda text: "change" in resolver_mod._normalize(text)
 
-    monkeypatch.setitem(sys.modules, "vault_web.recent_turns", recent_turns_mod)
-    monkeypatch.setitem(sys.modules, "jane_web.session_context", session_context_mod)
-    monkeypatch.setitem(sys.modules, "jane_web.jane_v2.pending_action_resolver", resolver_mod)
-
-
-def _resolved_contact(
-    *,
-    phone: str = "+15551234567",
-    display: str = "Kathia Wu",
-    source: str = "alias",
-) -> dict:
-    return {"phone_number": phone, "display_name": display, "source": source}
-
-
-class TestDocumentedBehavior:
-    def test_claude_sms_protocol_documents_the_direct_send_contract(self):
-        spec = SPEC_PATH.read_text()
-        spec_lower = spec.lower()
-
-        assert "Text Message (SMS) Protocols" in spec
-        assert "Tell X something" in spec
-        assert "ALWAYS SMS" in spec
-        assert "contacts.call" in spec
-        assert "sms_send_direct" in spec
-        assert "do not use `sms_draft` or `sms_send`" in spec_lower
-        assert "Rewrite perspective before sending" in spec
-
-    def test_module_docstring_documents_fast_confirm_and_escalate_paths(self):
-        doc = inspect.getdoc(handler)
-
-        assert doc is not None
-        assert "Fast path" in doc
-        assert "Confirm-or-revise" in doc
-        assert "Escalate" in doc
-        assert "conversation_end=True" in doc
-        assert "force_stage3" in doc
-
-    @pytest.mark.asyncio
-    async def test_fast_path_sends_direct_sms_and_returns_documented_shape(
-        self, monkeypatch, unexpected_ollama
-    ):
-        _install_sms_helpers(monkeypatch, resolved=_resolved_contact())
-
-        result = await handler.handle(
-            "text my wife I am on my way",
-            params={
-                "recipient": "my wife",
-                "body": "I am on my way",
-                "intent_kind": "send",
-                "confidence": 0.80,
-            },
-        )
-
-        assert result["text"].startswith("Done, message sent.")
-        assert result["conversation_end"] is True
-        assert result["structured"]["intent"] == "send message"
-        assert result["structured"]["safety"] == {
-            "side_effectful": True,
-            "requires_confirmation": False,
-        }
-        payload = _direct_marker_payload(result["text"])
-        assert payload == {"phone_number": "+15551234567", "body": "I am on my way"}
-        assert "contacts.call" not in result["text"]
-        assert unexpected_ollama == []
-
-    @pytest.mark.asyncio
-    async def test_ask_intent_escalates_for_stage3_draft_confirmation(
-        self, monkeypatch, unexpected_ollama
-    ):
-        calls = _install_sms_helpers(monkeypatch, resolved=_resolved_contact())
-
-        result = await handler.handle(
-            "ask Lee what time she is coming",
-            params={
-                "recipient": "Lee",
-                "body": "What time are you coming?",
-                "intent_kind": "ask",
-                "confidence": 0.99,
-            },
-        )
-
-        assert result is None
-        assert calls["resolve"] == []
-        assert unexpected_ollama == []
-
-    @pytest.mark.asyncio
-    async def test_missing_recipient_escalates_to_stage3(self, monkeypatch, unexpected_ollama):
-        calls = _install_sms_helpers(monkeypatch, resolved=_resolved_contact())
-
-        result = await handler.handle(
-            "text I am late",
-            params={"recipient": "", "body": "I am late", "intent_kind": "send", "confidence": 0.99},
-        )
-
-        assert result is None
-        assert calls["resolve"] == []
-        assert unexpected_ollama == []
-
-    @pytest.mark.asyncio
-    async def test_unresolved_recipient_escalates_to_stage3(self, monkeypatch):
-        calls = _install_sms_helpers(monkeypatch, resolved=None)
-
-        result = await handler.handle(
-            "text romeo hello",
-            params={
-                "recipient": "romeo",
-                "body": "Hello",
-                "intent_kind": "send",
-                "confidence": 0.99,
-            },
-        )
-
-        assert result is None
-        assert calls["resolve"] == ["romeo"]
-
-    @pytest.mark.asyncio
-    async def test_missing_body_escalates_without_sending(self, monkeypatch):
-        _install_sms_helpers(monkeypatch, resolved=_resolved_contact(display="Mom"))
-
-        result = await handler.handle(
-            "text mom",
-            params={"recipient": "mom", "body": "", "intent_kind": "send", "confidence": 0.99},
-        )
-
-        assert result is None
-
-    @pytest.mark.asyncio
-    async def test_incoherent_body_creates_confirm_or_revise_followup_not_direct_send(
-        self, monkeypatch
-    ):
-        _install_sms_helpers(monkeypatch, resolved=_resolved_contact(display="Kathia"))
-
-        result = await handler.handle(
-            "text Kathia I am uh",
-            params={
-                "recipient": "Kathia",
-                "body": "I am uh",
-                "intent_kind": "send",
-                "confidence": 0.99,
-            },
-        )
-
-        assert result["text"] == "Message to Kathia: I am uh. Should I send it?"
-        assert DIRECT_TOOL not in result["text"]
-        pending = result["structured"]["pending_action"]
-        assert pending["type"] == "STAGE2_FOLLOWUP"
-        assert pending["handler_class"] == "send message"
-        assert pending["awaiting"] == "send_confirmation"
-        assert pending["data"]["draft"] == {
-            "phone": "+15551234567",
-            "display": "Kathia",
-            "body": "I am uh",
-        }
-
-    @pytest.mark.asyncio
-    async def test_llm_fallback_fast_path_uses_extracted_recipient_and_body(
-        self, monkeypatch, install_ollama
-    ):
-        _install_sms_helpers(monkeypatch, resolved=_resolved_contact(display="Mom"))
-        install_ollama("RECIPIENT: mom\nBODY: I'm on my way\nCOHERENT: yes")
-
-        result = await handler.handle("let mom know I'm on my way")
-
-        assert result["conversation_end"] is True
-        payload = _direct_marker_payload(result["text"])
-        assert payload == {"phone_number": "+15551234567", "body": "I'm on my way"}
-
-
-class TestFollowupResumeBehavior:
-    @pytest.fixture
-    def pending_confirmation(self):
-        return {
-            "handler_class": "send message",
-            "awaiting": "send_confirmation",
-            "data": {
-                "draft": {
-                    "phone": "+15551234567",
-                    "display": "Kathia",
-                    "body": "I am on my way",
-                }
-            },
-        }
-
-    @pytest.mark.asyncio
-    async def test_resume_yes_sends_and_ends_conversation(self, pending_confirmation):
-        result = await handler.handle("yes", pending=pending_confirmation)
-
-        assert result["text"].startswith("Done.")
-        assert result["conversation_end"] is True
-        assert result["structured"]["safety"] == {
-            "side_effectful": True,
-            "requires_confirmation": False,
-        }
-        payload = _direct_marker_payload(result["text"])
-        assert payload == {"phone_number": "+15551234567", "body": "I am on my way"}
-
-    @pytest.mark.asyncio
-    async def test_resume_yes_with_incomplete_draft_abandons_to_stage3(self):
-        pending = {
-            "handler_class": "send message",
-            "awaiting": "send_confirmation",
-            "data": {"draft": {"phone": "", "display": "Kathia", "body": "Hi"}},
-        }
-
-        result = await handler.handle("yes", pending=pending)
-
-        assert result == {"abandon_pending": True, "force_stage3": True}
-
-    @pytest.mark.asyncio
-    async def test_resume_no_requests_updated_message_body(self, pending_confirmation):
-        result = await handler.handle("no", pending=pending_confirmation)
-
-        assert result["text"] == "Please give me the updated message."
-        pending = result["structured"]["pending_action"]
-        assert pending["type"] == "STAGE2_FOLLOWUP"
-        assert pending["handler_class"] == "send message"
-        assert pending["awaiting"] == "revised_body"
-        assert pending["data"]["draft"] == {
-            "phone": "+15551234567",
-            "display": "Kathia",
-        }
-
-    @pytest.mark.asyncio
-    async def test_resume_cancel_ends_without_sms_marker(self, pending_confirmation):
-        result = await handler.handle("cancel", pending=pending_confirmation)
-
-        assert result == {
-            "text": "Ok.",
-            "conversation_end": True,
-            "structured": {"intent": "send message"},
-        }
-
-    @pytest.mark.asyncio
-    async def test_resume_ambiguous_confirmation_abandons_to_stage3(self, pending_confirmation):
-        result = await handler.handle("maybe in a minute", pending=pending_confirmation)
-
-        assert result == {"abandon_pending": True, "force_stage3": True}
-
-    @pytest.mark.asyncio
-    async def test_revised_body_slot_treats_yes_as_message_text_not_confirmation(self):
-        pending = {
-            "handler_class": "send message",
-            "awaiting": "revised_body",
-            "data": {"draft": {"phone": "+15551234567", "display": "Kathia"}},
-        }
-
-        result = await handler.handle("yes", pending=pending)
-
-        assert result["text"] == "Message to Kathia: yes. Should I send it?"
-        assert DIRECT_TOOL not in result["text"]
-        pending_action = result["structured"]["pending_action"]
-        assert pending_action["awaiting"] == "send_confirmation"
-        assert pending_action["data"]["draft"] == {
-            "phone": "+15551234567",
-            "display": "Kathia",
-            "body": "yes",
-        }
-
-    @pytest.mark.asyncio
-    async def test_revised_body_empty_abandons_to_stage3(self):
-        pending = {
-            "handler_class": "send message",
-            "awaiting": "revised_body",
-            "data": {"draft": {"phone": "+15551234567", "display": "Kathia"}},
-        }
-
-        result = await handler.handle("   ", pending=pending)
-
-        assert result == {"abandon_pending": True, "force_stage3": True}
-
-
-class TestEdgeCases:
-    @pytest.mark.asyncio
-    async def test_empty_input_with_empty_body_escalates_without_destructive_marker(
-        self, monkeypatch
-    ):
-        _install_sms_helpers(monkeypatch, resolved=_resolved_contact(display="Kathia"))
-
-        result = await handler.handle(
-            "",
-            params={"recipient": "Kathia", "body": "", "intent_kind": "send", "confidence": 0.99},
-        )
-
-        assert result is None
-
-    @pytest.mark.asyncio
-    async def test_none_prompt_does_not_emit_destructive_send(self, monkeypatch):
-        _install_sms_helpers(monkeypatch, resolved=_resolved_contact(display="Kathia"))
-
-        result = await handler.handle(None)
-
-        assert result is None
-
-    @pytest.mark.asyncio
-    async def test_none_body_param_escalates_without_sending(self, monkeypatch):
-        _install_sms_helpers(monkeypatch, resolved=_resolved_contact(display="Kathia"))
-
-        result = await handler.handle(
-            "text Kathia",
-            params={
-                "recipient": "Kathia",
-                "body": None,
-                "intent_kind": "send",
-                "confidence": 0.99,
-            },
-        )
-
-        assert result is None
-
-    @pytest.mark.asyncio
-    async def test_malformed_llm_output_escalates_without_sending(self, install_ollama):
-        install_ollama("not the requested structured format")
-
-        result = await handler.handle("\x00\x00 ???")
-
-        assert result is None
-
-    @pytest.mark.asyncio
-    async def test_very_long_prompt_uses_bounded_llm_generation_options(
-        self, monkeypatch, install_ollama
-    ):
-        _install_sms_helpers(monkeypatch, resolved=_resolved_contact(display="Sarah"))
-        long_prompt = "text Sarah " + ("I will be a little late " * 600)
-        clients = install_ollama("RECIPIENT: Sarah\nBODY: I will be a little late\nCOHERENT: yes")
-
-        result = await handler.handle(long_prompt)
-
-        assert result["conversation_end"] is True
-        args, kwargs = clients[0].post.await_args
-        assert args == (handler.OLLAMA_URL,)
-        payload = kwargs["json"]
-        assert payload["options"] == {
-            "temperature": 0.0,
-            "num_predict": 100,
-            "num_ctx": handler.LOCAL_LLM_NUM_CTX,
-        }
-        assert payload["stream"] is False
-        assert payload["think"] is False
-        assert payload["keep_alive"] == -1
-
-    @pytest.mark.parametrize(
-        "raw",
-        [
-            "",
-            "BODY: hello\nCOHERENT: yes",
-            "RECIPIENT:\nBODY: hello\nCOHERENT: yes",
-            "RECIPIENT:   \nBODY: hello",
-        ],
+    assert offending == set()
+
+
+def test_lookup_tables_are_literal_nonempty_lowercase_tuples(read_handler):
+    for name in ("_ARCH_WORDS", "_META_PHRASES"):
+        table = getattr(read_handler, name)
+        assert isinstance(table, tuple)
+        assert table
+        assert len(table) == len(set(table))
+        for item in table:
+            assert isinstance(item, str)
+            assert item.strip() == item
+            assert item
+            assert item == item.lower()
+
+
+def test_lookup_tables_do_not_have_known_contradictory_entries(read_handler):
+    arch_words = set(read_handler._ARCH_WORDS)
+    meta_phrases = set(read_handler._META_PHRASES)
+    positive_read_starters = (
+        "read my",
+        "any new",
+        "what did",
+        "check my inbox",
+        "do i have",
     )
-    def test_malformed_extraction_returns_none(self, raw):
-        assert handler._parse_extraction(raw) is None
+
+    assert arch_words.isdisjoint(meta_phrases)
+    for entry in arch_words | meta_phrases:
+        assert not entry.startswith(positive_read_starters)
 
 
-class TestIntegrationPoints:
-    @pytest.mark.asyncio
-    async def test_llm_call_uses_shared_model_config_context_and_activity_recorder(
-        self, monkeypatch, install_ollama
-    ):
-        from jane_web.jane_v2 import models
+@pytest.mark.asyncio
+async def test_every_architecture_lookup_value_is_reachable(read_handler):
+    for arch_word in read_handler._ARCH_WORDS:
+        result = await read_handler.handle(f"debug the {arch_word} please")
+        assert result == {"wrong_class": True}, arch_word
 
-        record_activity = MagicMock()
-        monkeypatch.setattr(models, "record_ollama_activity", record_activity)
-        clients = install_ollama("RECIPIENT: Mom\nBODY: I'm home\nCOHERENT: yes")
 
-        result = await handler._extract_via_llm(
-            "let mom know I'm home",
-            "User: where are you?\nJane: I asked mom.",
+@pytest.mark.asyncio
+async def test_every_meta_lookup_value_is_reachable(read_handler):
+    for meta_phrase in read_handler._META_PHRASES:
+        result = await read_handler.handle(meta_phrase)
+        assert result == {"wrong_class": True}, meta_phrase
+
+
+def test_handler_module_has_no_mapping_dict_or_dispatch_registry(read_handler):
+    module_level_dicts = {
+        name: value
+        for name, value in vars(read_handler).items()
+        if not name.startswith("__") and isinstance(value, dict)
+    }
+
+    assert module_level_dicts == {}
+
+
+def test_handler_source_has_no_destructive_operations_or_client_tool_markers():
+    source = MODULE_PATH.read_text()
+    destructive_markers = {
+        "contacts.sms_send_direct",
+        "sms_send_direct",
+        "send_message(",
+        "email.send",
+        "email.delete",
+        "messages.delete",
+        "timer.delete",
+        "end_conversation",
+        "DELETE FROM",
+        "UPDATE ",
+        "INSERT INTO",
+    }
+    offending = {marker for marker in destructive_markers if marker in source}
+
+    assert offending == set()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "ambiguous_prompt",
+    [
+        "tell Bob I can read his message later",
+        "I might need to check messages eventually",
+        "do not send anything, just wondering about texts",
+    ],
+)
+async def test_ambiguous_input_never_emits_destructive_or_direct_tool_result(
+    read_handler,
+    ambiguous_prompt,
+):
+    result = await read_handler.handle(ambiguous_prompt)
+
+    assert result is None or result == {"wrong_class": True}
+    if isinstance(result, dict):
+        assert "text" not in result
+        assert "CLIENT_TOOL" not in repr(result)
+
+
+def test_stage1_read_messages_mapping_is_registered_and_not_fallback():
+    from jane_web.jane_v2 import classes, stage1_classifier
+
+    registry = classes.get_registry(refresh=True)
+    mapped = stage1_classifier._CLASS_MAP["READ_MESSAGES"]
+
+    assert mapped == "read messages"
+    assert mapped in registry
+    assert mapped != "others"
+    assert "READ_MESSAGES" in stage1_classifier.STRICT_CLASSES
+    assert stage1_classifier._gate_for("READ_MESSAGES")["conf"] >= 0.80
+
+
+def test_stage1_fallback_mappings_do_not_contradict_strict_or_proven_sets():
+    from jane_web.jane_v2 import stage1_classifier
+
+    fallback_keys = {
+        raw_class
+        for raw_class, registry_name in stage1_classifier._CLASS_MAP.items()
+        if registry_name == "others"
+    }
+    contradictory = (
+        fallback_keys
+        & (
+            set(stage1_classifier.PROVEN_CLASSES)
+            | set(stage1_classifier.STRICT_CLASSES)
+            | set(stage1_classifier._STRICT_KEYWORDS)
         )
-
-        assert result == {"recipient": "Mom", "body": "I'm home", "coherent": True}
-        assert len(clients) == 1
-        assert clients[0].timeout == handler.LOCAL_LLM_TIMEOUT
-        clients[0].post.assert_awaited_once()
-        args, kwargs = clients[0].post.await_args
-        assert args == (handler.OLLAMA_URL,)
-        payload = kwargs["json"]
-        assert payload["model"] == handler.MODEL
-        assert payload["stream"] is False
-        assert payload["think"] is False
-        assert payload["keep_alive"] == -1
-        assert payload["options"] == {
-            "temperature": 0.0,
-            "num_predict": 100,
-            "num_ctx": handler.LOCAL_LLM_NUM_CTX,
-        }
-        assert "Recent conversation:" in payload["prompt"]
-        assert "User: where are you?" in payload["prompt"]
-        assert "User: let mom know I'm home" in payload["prompt"]
-        record_activity.assert_called_once_with()
-
-    @pytest.mark.asyncio
-    async def test_llm_http_failure_escalates_as_none(self, install_ollama):
-        install_ollama(post_side_effect=RuntimeError("ollama unavailable"))
-
-        assert await handler._extract_via_llm("text Sarah hi", "") is None
-
-    @pytest.mark.asyncio
-    async def test_llm_status_failure_escalates_as_none(self, install_ollama):
-        install_ollama(
-            "RECIPIENT: Sarah\nBODY: Hi\nCOHERENT: yes",
-            status_error=RuntimeError("500"),
-        )
-
-        assert await handler._extract_via_llm("text Sarah hi", "") is None
-
-    @pytest.mark.asyncio
-    async def test_auto_alias_queries_db_and_writes_alias_for_contact_resolution(
-        self, monkeypatch
-    ):
-        calls = _install_sms_helpers(
-            monkeypatch,
-            resolved=_resolved_contact(display="Kathia Wu", source="contacts"),
-        )
-        conn = _install_fake_vault_database(monkeypatch, existing_alias=False)
-
-        result = await handler.handle(
-            "text my wife I am late",
-            params={
-                "recipient": "my wife",
-                "body": "I am late",
-                "intent_kind": "send",
-                "confidence": 0.99,
-            },
-        )
-
-        assert result["conversation_end"] is True
-        assert calls["resolve"] == ["my wife"]
-        assert len(conn.queries) == 1
-        sql, params = conn.queries[0]
-        assert "SELECT 1 FROM contact_aliases" in sql
-        assert params == ("wife",)
-        assert calls["add_alias"] == [("wife", "+15551234567", "Kathia Wu")]
-
-    @pytest.mark.asyncio
-    async def test_existing_alias_prevents_auto_alias_overwrite(self, monkeypatch):
-        calls = _install_sms_helpers(
-            monkeypatch,
-            resolved=_resolved_contact(display="Kathia Wu", source="contacts"),
-        )
-        _install_fake_vault_database(monkeypatch, existing_alias=True)
-
-        result = await handler.handle(
-            "text my wife I am late",
-            params={
-                "recipient": "my wife",
-                "body": "I am late",
-                "intent_kind": "send",
-                "confidence": 0.99,
-            },
-        )
-
-        assert result["conversation_end"] is True
-        assert calls["add_alias"] == []
-
-    @pytest.mark.asyncio
-    async def test_alias_source_does_not_query_alias_db_or_rewrite_alias(self, monkeypatch):
-        calls = _install_sms_helpers(
-            monkeypatch,
-            resolved=_resolved_contact(display="Kathia Wu", source="alias"),
-        )
-        conn = _install_fake_vault_database(monkeypatch, existing_alias=False)
-
-        result = await handler.handle(
-            "text my wife I am late",
-            params={
-                "recipient": "my wife",
-                "body": "I am late",
-                "intent_kind": "send",
-                "confidence": 0.99,
-            },
-        )
-
-        assert result["conversation_end"] is True
-        assert conn.queries == []
-        assert calls["add_alias"] == []
-
-    def test_open_draft_confirm_uses_draft_send_marker(self, monkeypatch):
-        _install_open_draft_state(
-            monkeypatch,
-            state={
-                "pending_action": {
-                    "type": "SEND_MESSAGE_DRAFT_OPEN",
-                    "data": {
-                        "draft_id": "draft-123",
-                        "query": "Kathia",
-                        "body": "I am late",
-                    },
-                }
-            },
-        )
-
-        result = handler._check_open_draft("yes send it")
-
-        assert result["structured"]["pending_action"]["resolution"] == "sent"
-        payload = _direct_marker_payload(result["text"], tool=SEND_TOOL)
-        assert payload == {"draft_id": "draft-123"}
-
-    def test_open_draft_cancel_uses_cancel_marker(self, monkeypatch):
-        _install_open_draft_state(
-            monkeypatch,
-            state={
-                "pending_action": {
-                    "type": "SEND_MESSAGE_DRAFT_OPEN",
-                    "data": {"draft_id": "draft-123", "query": "Kathia", "body": "Hi"},
-                }
-            },
-        )
-
-        result = handler._check_open_draft("cancel")
-
-        assert result["structured"]["pending_action"]["resolution"] == "cancelled"
-        payload = _direct_marker_payload(result["text"], tool=CANCEL_TOOL)
-        assert payload == {"draft_id": "draft-123"}
-
-    @pytest.mark.asyncio
-    async def test_stage2_dispatcher_calls_send_message_handler_with_documented_shape(
-        self, monkeypatch
-    ):
-        from jane_web.jane_v2 import classes as class_registry
-        from jane_web.jane_v2 import stage2_dispatcher
-
-        _install_sms_helpers(monkeypatch, resolved=_resolved_contact(display="Kathia"))
-        registry = class_registry.get_registry(refresh=True)
-
-        assert "send message" in registry
-        assert registry["send message"]["handler"] is handler.handle
-        assert registry["send message"].get("ack") is None
-
-        result = await stage2_dispatcher.dispatch(
-            "send message",
-            "text Kathia I am on my way",
-            min_dist=0.0,
-            params={
-                "recipient": "Kathia",
-                "body": "I am on my way",
-                "intent_kind": "send",
-                "confidence": 0.99,
-            },
-        )
-
-        assert isinstance(result, dict)
-        assert isinstance(result["text"], str)
-        assert result["text"].strip()
-        assert DIRECT_TOOL in result["text"]
-
-
-class TestParsingAndCoherence:
-    def test_wrong_class_sentinel_is_parsed(self):
-        assert handler._parse_extraction("WRONG_CLASS") is handler._WRONG_CLASS_SENTINEL
-
-    def test_parse_extraction_preserves_rewritten_body_and_recipient(self):
-        parsed = handler._parse_extraction(
-            "RECIPIENT: wife\nBODY: I love you today\nCOHERENT: yes"
-        )
-
-        assert parsed == {"recipient": "wife", "body": "I love you today", "coherent": True}
-
-    def test_parse_extraction_defaults_missing_body_to_none_sentinel(self):
-        parsed = handler._parse_extraction("RECIPIENT: wife\nCOHERENT: yes")
-
-        assert parsed == {"recipient": "wife", "body": "(none)", "coherent": True}
-
-    @pytest.mark.parametrize(
-        "body",
-        [
-            "I will be at",
-            "I am uh",
-            "Hey Siri remind me later",
-            "ok google text Sarah",
-            "Alexa stop",
-        ],
     )
-    def test_parse_extraction_marks_rule_detected_garbled_body_incoherent(self, body):
-        parsed = handler._parse_extraction(f"RECIPIENT: Sarah\nBODY: {body}\nCOHERENT: yes")
 
-        assert parsed == {"recipient": "Sarah", "body": body, "coherent": False}
-
-    def test_llm_coherent_no_is_never_overridden_by_rules(self):
-        parsed = handler._parse_extraction("RECIPIENT: Sarah\nBODY: Clear body\nCOHERENT: no")
-
-        assert parsed == {"recipient": "Sarah", "body": "Clear body", "coherent": False}
-
-    @pytest.mark.parametrize("body", [None, "", "(none)"])
-    def test_empty_or_missing_body_is_coherent_intent_not_sendable_body(self, body):
-        assert handler._is_coherent(body) is True
-
-    @pytest.mark.parametrize("ending", sorted(handler._DANGLING_ENDINGS))
-    def test_every_dangling_ending_is_reachable_by_coherence_rules(self, ending):
-        assert handler._is_coherent(f"I will meet you {ending}") is False
-
-    @pytest.mark.parametrize("filler", sorted(handler._FILLER_WORDS))
-    def test_every_filler_word_is_reachable_by_coherence_rules(self, filler):
-        assert handler._is_coherent(f"I am {filler} on my way") is False
-
-    @pytest.mark.parametrize("command", handler._DEVICE_COMMANDS)
-    def test_every_device_command_is_reachable_by_coherence_rules(self, command):
-        assert handler._is_coherent(f"{command} remind me to text Sarah") is False
-
-    @pytest.mark.parametrize(
-        "body",
-        [
-            "Alexander said hello",
-            "Alexandra is running late",
-            "I talked to Alex about dinner",
-            "I will be there soon.",
-        ],
-    )
-    def test_device_command_filter_does_not_shadow_similar_contact_names(self, body):
-        assert handler._is_coherent(body) is True
+    assert contradictory == set()
 
 
-class TestStructuralInvariants:
-    def test_direct_send_confidence_helper_requires_numeric_non_bool_at_least_080(self):
-        rejected = [None, False, True, "High", "0.99", 0, 0.5, 0.799999]
-        accepted = [0.80, 0.800001, 1, 1.0]
+def test_every_stage1_mapping_value_exists_in_registry_or_is_explicit_fallback():
+    from jane_web.jane_v2 import classes, stage1_classifier
 
-        assert [handler._has_direct_send_confidence(value) for value in rejected] == [
-            False
-        ] * len(rejected)
-        assert [handler._has_direct_send_confidence(value) for value in accepted] == [
-            True
-        ] * len(accepted)
+    registry = classes.get_registry(refresh=True)
+    missing = {
+        raw_class: registry_name
+        for raw_class, registry_name in stage1_classifier._CLASS_MAP.items()
+        if registry_name != "others" and registry_name not in registry
+    }
 
-    @pytest.mark.parametrize("confidence", [0.0, 0.79, 0.799999, "High", True, False, None])
-    @pytest.mark.asyncio
-    async def test_borderline_or_non_numeric_confidence_cannot_fire_direct_send(
-        self, monkeypatch, confidence
-    ):
-        _install_sms_helpers(monkeypatch, resolved=_resolved_contact(display="Kathia"))
+    assert missing == {}
 
-        result = await handler.handle(
-            "text Kathia I am on my way",
-            params={
-                "recipient": "Kathia",
-                "body": "I am on my way",
-                "intent_kind": "send",
-                "confidence": confidence,
-            },
-        )
 
-        assert result is None
+def test_read_messages_registry_entry_points_to_this_handler_and_documents_escalation(
+    read_handler,
+):
+    from jane_web.jane_v2 import classes
 
-    @pytest.mark.asyncio
-    async def test_missing_confidence_cannot_fire_destructive_direct_send(self, monkeypatch):
-        _install_sms_helpers(monkeypatch, resolved=_resolved_contact(display="Kathia"))
+    registry = classes.get_registry(refresh=True)
+    metadata = registry["read messages"]
+    description = str(metadata.get("description") or "").lower()
 
-        result = await handler.handle(
-            "text Kathia I am on my way",
-            params={"recipient": "Kathia", "body": "I am on my way", "intent_kind": "send"},
-        )
+    assert metadata["pkg_name"] == "read_messages"
+    assert metadata["handler"] is read_handler.handle
+    assert "stage 3" in (inspect.getdoc(read_handler) or "").lower()
+    assert "not this class" in description
 
-        assert result is None
 
-    @pytest.mark.parametrize(
-        "params",
-        [
-            {"recipient": "", "body": "Hi", "intent_kind": "send", "confidence": 0.99},
-            {"recipient": "Kathia", "body": "", "intent_kind": "send", "confidence": 0.99},
-            {"recipient": "Kathia", "body": "I am uh", "intent_kind": "send", "confidence": 0.99},
-            {"recipient": "Kathia", "body": "Hi", "intent_kind": "ask", "confidence": 0.99},
-        ],
-    )
-    @pytest.mark.asyncio
-    async def test_ambiguous_or_non_send_params_do_not_emit_direct_marker(self, monkeypatch, params):
-        _install_sms_helpers(monkeypatch, resolved=_resolved_contact(display="Kathia"))
+def test_read_messages_strict_keywords_are_present_for_classifier_guard():
+    from jane_web.jane_v2 import stage1_classifier
 
-        result = await handler.handle("text Kathia", params=params)
+    keywords = stage1_classifier._STRICT_KEYWORDS["READ_MESSAGES"]
 
-        assert not _has_tool_marker(result, DIRECT_TOOL)
+    assert "READ_MESSAGES" in stage1_classifier.STRICT_CLASSES
+    for expected in ("text", "message", "msg", "sms", "inbox"):
+        assert expected in keywords
 
-    def test_build_send_marker_json_round_trips_special_characters(self):
-        marker = handler._build_send_marker("+15551234567", 'He said "yes" ]].')
 
-        payload = _direct_marker_payload(marker)
-        assert payload == {"phone_number": "+15551234567", "body": 'He said "yes" ]].'}
+@pytest.mark.asyncio
+async def test_positive_read_messages_few_shots_reach_documented_escalation(
+    read_handler,
+    read_metadata,
+):
+    positive_prompts = [
+        prompt
+        for prompt, label in read_metadata.METADATA["few_shot"]
+        if str(label).startswith("read messages:")
+    ]
 
-    def test_no_phone_call_tool_is_reachable_from_send_message_handler_source(self):
-        source = _source_text()
+    assert positive_prompts
+    for prompt in positive_prompts:
+        result = await read_handler.handle(prompt)
+        assert result is None, prompt
 
-        assert "contacts.call" not in source
-        assert "contacts.sms_send_direct" in source
 
-    def test_destructive_marker_construction_is_centralized(self):
-        tree = _source_tree()
-        marker_functions = []
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        "read my messages",
+        "your previous reply was slow",
+        "explain the classifier",
+    ],
+)
+async def test_handler_return_values_match_documented_dispatch_shapes(read_handler, prompt):
+    result = await read_handler.handle(prompt)
 
-        for node in ast.walk(tree):
-            if isinstance(node, ast.FunctionDef):
-                body_text = ast.get_source_segment(_source_text(), node) or ""
-                if "contacts.sms_send_direct" in body_text:
-                    marker_functions.append(node.name)
+    _assert_documented_handler_shape(result)
 
-        assert marker_functions == ["_build_send_marker"]
 
-    def test_stage1_send_message_mapping_points_to_registered_non_fallback_class(self):
-        from jane_web.jane_v2 import classes as class_registry
-        from jane_web.jane_v2 import stage1_classifier
+def test_read_messages_params_schema_keys_are_stable_and_stage3_owned(read_metadata):
+    schema = read_metadata.PARAMS_SCHEMA
 
-        registry = class_registry.get_registry(refresh=True)
+    assert set(schema) == {"filter_sender", "unread_only", "limit"}
+    assert read_metadata.METADATA["params_schema"] is schema
+    assert callable(read_metadata.METADATA["escalation_context"])
 
-        assert stage1_classifier._CLASS_MAP["SEND_MESSAGE"] == "send message"
-        assert stage1_classifier._CLASS_MAP["SEND_MESSAGE"] in registry
-        assert stage1_classifier._CLASS_MAP["SEND_MESSAGE"] != "others"
-        assert callable(registry["send message"]["handler"])
 
-    def test_stage1_fallback_keys_do_not_contradict_send_message_routing(self):
-        from jane_web.jane_v2 import stage1_classifier
+def test_read_messages_references_in_v2_code_have_registered_mapping():
+    from jane_web.jane_v2 import stage1_classifier
 
-        assert stage1_classifier._CLASS_MAP["DELEGATE_OPUS"] == "others"
-        assert stage1_classifier._CLASS_MAP["FORCE_STAGE3"] == "others"
-        assert stage1_classifier._CLASS_MAP["RESTART_SERVER"] == "others"
-        assert stage1_classifier._CLASS_MAP["SEND_EMAIL"] == "send email"
-        assert stage1_classifier._CLASS_MAP["READ_MESSAGES"] == "read messages"
+    references = []
+    for path in (VESSENCE_ROOT / "jane_web" / "jane_v2").rglob("*.py"):
+        text = path.read_text()
+        if "READ_MESSAGES" in text:
+            references.append(path.relative_to(VESSENCE_ROOT).as_posix())
 
-    def test_every_stage1_class_map_value_exists_in_registry(self):
-        from jane_web.jane_v2 import classes as class_registry
-        from jane_web.jane_v2 import stage1_classifier
-
-        registry = class_registry.get_registry(refresh=True)
-        missing = {
-            stage1_name: registry_name
-            for stage1_name, registry_name in stage1_classifier._CLASS_MAP.items()
-            if registry_name not in registry
-        }
-
-        assert missing == {}
-
-    def test_every_dispatch_description_key_exists_in_registry(self):
-        from jane_web.jane_v2 import classes as class_registry
-        from jane_web.jane_v2 import stage2_dispatcher
-
-        registry = class_registry.get_registry(refresh=True)
-
-        assert set(stage2_dispatcher._CLASS_DESCRIPTIONS) <= set(registry)
-
-    def test_no_handler_registry_entries_are_explicit_escalators(self):
-        from jane_web.jane_v2 import classes as class_registry
-
-        registry = class_registry.get_registry(refresh=True)
-        no_handler = {name for name, meta in registry.items() if meta.get("handler") is None}
-
-        assert no_handler == DOCUMENTED_NO_HANDLER_ESCALATORS
-
-    @pytest.mark.asyncio
-    async def test_registered_send_message_handler_returns_dict_with_text_key(self, monkeypatch):
-        from jane_web.jane_v2 import classes as class_registry
-
-        _install_sms_helpers(monkeypatch, resolved=_resolved_contact(display="Kathia"))
-        registry = class_registry.get_registry(refresh=True)
-        result = await registry["send message"]["handler"](
-            "text Kathia I am on my way",
-            params={
-                "recipient": "Kathia",
-                "body": "I am on my way",
-                "intent_kind": "send",
-                "confidence": 0.99,
-            },
-        )
-
-        assert isinstance(result, dict)
-        assert isinstance(result["text"], str)
-        assert result["text"].strip()
-
-    def test_send_message_params_schema_keys_are_stable_and_referenced(self):
-        metadata_mod = importlib.import_module("jane_web.jane_v2.classes.send_message.metadata")
-        schema_keys = set(metadata_mod.PARAMS_SCHEMA)
-
-        assert schema_keys == {"recipient", "body", "intent_kind", "confirm_signal"}
-        source = _source_text()
-        for key in {"recipient", "body", "intent_kind", "confidence"}:
-            assert f'params.get("{key}"' in source
-
-    def test_send_message_metadata_documents_sms_not_call_disambiguation(self):
-        metadata_mod = importlib.import_module("jane_web.jane_v2.classes.send_message.metadata")
-        description = metadata_mod.METADATA["description"]
-
-        assert "call my wife" in description
-        assert "'others' (phone call, NOT SMS)" in description
-        assert "what did my wife text me" in description
-        assert "'read messages'" in description
+    assert references
+    assert "READ_MESSAGES" in stage1_classifier._CLASS_MAP
+    assert stage1_classifier._CLASS_MAP["READ_MESSAGES"] == "read messages"
