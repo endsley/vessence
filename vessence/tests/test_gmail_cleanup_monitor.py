@@ -140,6 +140,91 @@ def test_sender_cleanup_respects_age_and_sender_header():
     assert "older_than:3d" in monitor.build_older_sender_query("redfin", 3, include_trash=False)
 
 
+def test_sender_cleanup_can_require_category_and_subject():
+    now = dt.datetime(2026, 6, 29, 12, 0, tzinfo=NY)
+    service = _Service({
+        "missed-discord": _message(
+            now - dt.timedelta(days=4),
+            "Discord <noreply@discord.com>",
+            "You missed messages in Chieh's server",
+            labels=["CATEGORY_UPDATES"],
+        ),
+        "security-discord": _message(
+            now - dt.timedelta(days=4),
+            "Discord <noreply@discord.com>",
+            "Your Discord login code",
+            labels=["CATEGORY_UPDATES"],
+        ),
+        "uncategorized-discord": _message(
+            now - dt.timedelta(days=4),
+            "Discord <noreply@discord.com>",
+            "You missed messages in Chieh's server",
+            labels=[],
+        ),
+    })
+
+    assert monitor.process_sender_cleanup_message(
+        service,
+        "missed-discord",
+        label="Discord Missed Messages",
+        sender_fragments=("noreply@discord.com",),
+        older_than_days=3,
+        dry_run=False,
+        subject_fragments=("you missed messages",),
+        required_label_ids=("CATEGORY_UPDATES",),
+        now=now,
+    ) == "discord_missed_messages_trashed"
+    assert monitor.process_sender_cleanup_message(
+        service,
+        "security-discord",
+        label="Discord Missed Messages",
+        sender_fragments=("noreply@discord.com",),
+        older_than_days=3,
+        dry_run=False,
+        subject_fragments=("you missed messages",),
+        required_label_ids=("CATEGORY_UPDATES",),
+        now=now,
+    ) == "discord_missed_messages_skipped_subject"
+    assert monitor.process_sender_cleanup_message(
+        service,
+        "uncategorized-discord",
+        label="Discord Missed Messages",
+        sender_fragments=("noreply@discord.com",),
+        older_than_days=3,
+        dry_run=False,
+        subject_fragments=("you missed messages",),
+        required_label_ids=("CATEGORY_UPDATES",),
+        now=now,
+    ) == "discord_missed_messages_skipped_labels"
+    assert service.trashed == ["missed-discord"]
+
+
+def test_low_priority_cleanup_specs_use_three_day_targeted_queries():
+    specs = {spec.label: spec for spec in monitor.SENDER_CLEANUP_SPECS}
+
+    assert specs["LinkedIn"].retention_days == 3
+    assert specs["LinkedIn"].query_terms == ("category:social",)
+    assert specs["The Covery Promotions"].retention_days == 3
+    assert specs["Museum of Science Promotions"].retention_days == 3
+    assert specs["Spotify Promotions"].retention_days == 3
+    assert specs["Discord Missed Messages"].query_terms == ('subject:"You missed messages"',)
+    assert specs["Discord Missed Messages"].subject_fragments == ("you missed messages",)
+    assert specs["LifespanIO Newsletters"].query_terms == ('subject:"Weekly News"',)
+    assert specs["LifespanIO Newsletters"].subject_fragments == ("weekly news",)
+    assert specs["Glassdoor Updates"].query_terms == ('subject:"employee reviews"',)
+    assert specs["Glassdoor Updates"].subject_fragments == ("employee reviews",)
+
+    query = monitor.build_older_sender_query(
+        specs["The Covery Promotions"].from_query,
+        specs["The Covery Promotions"].retention_days,
+        include_trash=False,
+        extra_terms=specs["The Covery Promotions"].query_terms,
+    )
+    assert "from:woburn@thecovery.com" in query
+    assert "category:promotions" in query
+    assert "older_than:3d" in query
+
+
 def test_amazon_cleanup_uses_two_day_retention():
     now = dt.datetime(2026, 6, 29, 12, 0, tzinfo=NY)
     service = _Service({

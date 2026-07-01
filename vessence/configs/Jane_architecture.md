@@ -641,7 +641,7 @@ Background asyncio task monitors CLI stderr for rate-limit/billing/quota errors 
 
 ## 9. Automation & Cron System
 
-24 active cron jobs are installed in Chieh's user crontab as of 2026-06-30. The authoritative schedule is `configs/CRON_JOBS.md`; this section summarizes the job families so the architecture doc does not drift from `crontab -l`. Python cron jobs use `/home/chieh/google-adk-env/adk-venv/bin/python` unless the wrapper is a shell script. Automation tasks that need an LLM use `jane/automation_runner.py`, which routes to the appropriate CLI binary.
+25 active cron jobs are installed in Chieh's user crontab as of 2026-06-30. The authoritative schedule is `configs/CRON_JOBS.md`; this section summarizes the job families so the architecture doc does not drift from `crontab -l`. Python cron jobs use `/home/chieh/google-adk-env/adk-venv/bin/python` unless the wrapper is a shell script. Automation tasks that need an LLM use `jane/automation_runner.py`, which routes to the appropriate CLI binary.
 
 ### 9.1 Job Schedule
 
@@ -654,6 +654,7 @@ Current active families:
 - daily briefing: `run_briefing.py`, `prune_articles.py`
 - backups and external projects: `usb_sync.py`, Waterlily history backup, Waterlily cache health, Waterlily current-month accounting reports
 - marketplace/deal monitoring: `run_marketplace_cron.sh`, `nutricost_deal_monitor.py`
+- medical-literature research support: `ra_research_cron.py` runs every 2 hours, caches RA remission/asymptomatic-state papers and summaries, uses Codex as the high-judgment synthesis pass, keeps a compressed context for the next run, regenerates an explicit action plan covering at-home actions, tracking, tests to discuss, food/diet, lifestyle, medical strategy questions, and neuromodulation/technology leads, then emails Chieh an initial report after 4 runs and every 72 hours after that. It is research support only; clinician decisions remain with Kathia's rheumatologist.
 
 Paused/disabled jobs:
 

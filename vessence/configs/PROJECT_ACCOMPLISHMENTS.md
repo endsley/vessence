@@ -1,3 +1,12 @@
+### 2026-06-30: RA Remission Research Cron
+
+- **New RA research loop:** added `agent_skills/ra_research_cron.py`, a 2-hour cron researcher for Kathia's rheumatoid arthritis remission/asymptomatic-state goal.
+- **Evidence caching:** every processed source is saved under `$VAULT_HOME/research/rheumatoid_arthritis_remission/papers/`; per-source summaries are cached in `summaries/`; raw run artifacts are cached under `$VESSENCE_DATA_HOME/research/rheumatoid_arthritis_remission/cache/`.
+- **Smart synthesis:** each run invokes Codex as the high-judgment synthesis pass, rereads the compressed context and cached summaries, restates the mission, updates `context/compressed_context.md`, `discoveries.md`, `ra_remission_recommendation_scheme.md`, and the explicit action plan at `recommendations/recommendation_plan.md`.
+- **Actionable recommendations:** the action plan converts cached research into at-home actions, tracking steps, tests/labs/imaging to discuss, food/diet options, lifestyle changes, medical strategy questions, and emerging technology/neuromodulation leads such as vagus-nerve stimulation.
+- **Report cadence:** the first email report goes from `julioprocess@gmail.com` to Chieh after 4 runs; later reports send every 72 hours. The job uses `flock`, `timeout`, `nice`, and `ionice` to avoid overlap and reduce system impact.
+- **Safety boundary:** the research dossier is explicit that medication/supplement/treatment changes require Kathia's rheumatologist.
+
 ### 2026-05-26: Standalone Codex Chroma Memory Bootstrap
 
 - **Codex memory installer:** added `startup_code/install_codex_memory.py`, an idempotent setup script that writes the Codex `UserPromptSubmit` hook, persistent Jane memory instructions, and `jane-memory` MCP registration into `~/.codex/config.toml`.

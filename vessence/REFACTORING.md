@@ -1,5 +1,40 @@
 # Vessence Refactor Journal
 
+## 2026-06-30 - Pending Action Expiry Timezone Helper
+
+Goal/scope:
+- Complete one small behavior-preserving Vessence refactor slice from the previous follow-up list.
+- Replace the pending-action resolver's naive UTC expiry comparison with a tiny UTC-aware parsing helper.
+
+Files/modules changed:
+- `jane_web/jane_v2/pending_action_resolver.py`
+- `tests/test_pending_action_expiry.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Missing or malformed `pending_action.expires_at` still fails open as "not expired".
+- Existing `YYYY-MM-DDTHH:MM:SSZ` timestamps still parse.
+- Older naive ISO timestamps without `Z` still parse and are treated as UTC.
+- Public route behavior, FIFO record shape, pending-action action names, and Stage 2/Stage 3 routing decisions are unchanged.
+
+Boundary chosen:
+- Expiry parsing is pure resolver-local logic with focused tests, so it is safer than splitting `jane_web/main.py`, `jane_proxy.py`, or `conversation_manager.py`.
+- The helper removes the resolver's remaining `datetime.utcnow()` deprecation path without changing handlers that create expiry strings.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v2/pending_action_resolver.py tests/test_pending_action_expiry.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_pending_action_expiry.py test_code/test_stage3_awaiting_marker.py test_code/test_stage2_followup_pending_resolution.py -q` passed (`24 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`41 passed`).
+- A first attempt to run `test_code/test_pending_action_resolver.py` as part of a broader focused command exposed unrelated stale `TimerStateMachineTests` expectations: they assert no resolved pending marker, while the current timer handler emits `{"type": "STAGE2_FOLLOWUP", "handler_class": "timer", "status": "resolved"}`.
+
+Lock note:
+- `python agent_skills/code_lock.py status --project vessence` reported the lock free, but acquiring it failed because this sandbox cannot write `/home/chieh/ambient/vessence-data/locks/code_edit_vessence.lock`.
+
+Remaining follow-up slices:
+- Extract expiry-string construction used by Stage 2 handlers into a shared helper, once handler-focused tests are updated around resolved pending markers.
+- Split `jane_web/main.py`, `jane_web/jane_proxy.py`, or `memory/v1/conversation_manager.py` only after adding route/stream/persistence characterization tests.
+- Repair the stale timer state-machine assertions in `test_code/test_pending_action_resolver.py` or move them to current resolved-marker semantics.
+
 ## 2026-06-30 - V2 Pipeline Helpers And Sanitizer Guard
 
 Goal/scope:

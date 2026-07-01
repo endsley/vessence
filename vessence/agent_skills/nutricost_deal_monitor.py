@@ -5,9 +5,9 @@ At 5 AM, scan yesterday's Nutricost marketing emails. Trash messages whose
 largest advertised discount is below the threshold. For qualifying messages,
 send Chieh a link from the juliaprocess Gmail account. Also trash any
 CrunchLabs messages from the same local-day window, older Amazon, Google Maps,
-LinkedIn, or Redfin messages after their retention window, and Google Calendar
-messages whose event date/time has passed. Finally, trash unread messages older
-than three weeks.
+LinkedIn, Redfin, or approved low-priority newsletter/promotion messages after
+their retention window, and Google Calendar messages whose event date/time has
+passed. Finally, trash unread messages older than three weeks.
 """
 
 from __future__ import annotations
@@ -20,6 +20,7 @@ import logging
 import os
 import re
 import sys
+from dataclasses import dataclass
 from email.utils import getaddresses, parsedate_to_datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -54,10 +55,106 @@ REDFIN_FROM_QUERY = "redfin"
 REDFIN_SENDER_FRAGMENTS = ("redfin",)
 SENDER_CLEANUP_RETENTION_DAYS = 2
 REDFIN_CLEANUP_RETENTION_DAYS = 3
+LOW_PRIORITY_CLEANUP_RETENTION_DAYS = 3
 UNREAD_CLEANUP_RETENTION_DAYS = 21
 STATE_PATH = Path(VESSENCE_DATA_HOME) / "data" / "nutricost_deal_monitor.json"
 
 LOGGER = logging.getLogger("nutricost_deal_monitor")
+
+
+@dataclass(frozen=True)
+class SenderCleanupSpec:
+    label: str
+    from_query: str
+    sender_fragments: tuple[str, ...]
+    sender_domains: tuple[str, ...] = ()
+    retention_days: int = SENDER_CLEANUP_RETENTION_DAYS
+    query_terms: tuple[str, ...] = ()
+    subject_fragments: tuple[str, ...] = ()
+    required_label_ids: tuple[str, ...] = ()
+
+
+SENDER_CLEANUP_SPECS: tuple[SenderCleanupSpec, ...] = (
+    SenderCleanupSpec(
+        "Amazon",
+        AMAZON_FROM_QUERY,
+        AMAZON_SENDER_FRAGMENTS,
+        sender_domains=AMAZON_SENDER_DOMAINS,
+    ),
+    SenderCleanupSpec("Google Maps", GOOGLE_MAPS_FROM_QUERY, GOOGLE_MAPS_SENDER_FRAGMENTS),
+    SenderCleanupSpec(
+        "LinkedIn",
+        LINKEDIN_FROM_QUERY,
+        LINKEDIN_SENDER_FRAGMENTS,
+        retention_days=LOW_PRIORITY_CLEANUP_RETENTION_DAYS,
+        query_terms=("category:social",),
+        required_label_ids=("CATEGORY_SOCIAL",),
+    ),
+    SenderCleanupSpec(
+        "Redfin",
+        REDFIN_FROM_QUERY,
+        REDFIN_SENDER_FRAGMENTS,
+        retention_days=REDFIN_CLEANUP_RETENTION_DAYS,
+    ),
+    SenderCleanupSpec(
+        "The Covery Promotions",
+        "woburn@thecovery.com",
+        ("woburn@thecovery.com",),
+        retention_days=LOW_PRIORITY_CLEANUP_RETENTION_DAYS,
+        query_terms=("category:promotions",),
+        required_label_ids=("CATEGORY_PROMOTIONS",),
+    ),
+    SenderCleanupSpec(
+        "Museum of Science Promotions",
+        "friends@e.mos.org",
+        ("friends@e.mos.org",),
+        retention_days=LOW_PRIORITY_CLEANUP_RETENTION_DAYS,
+        query_terms=("category:promotions",),
+        required_label_ids=("CATEGORY_PROMOTIONS",),
+    ),
+    SenderCleanupSpec(
+        "Spotify Promotions",
+        "no-reply@spotify.com",
+        ("no-reply@spotify.com",),
+        retention_days=LOW_PRIORITY_CLEANUP_RETENTION_DAYS,
+        query_terms=("category:promotions",),
+        required_label_ids=("CATEGORY_PROMOTIONS",),
+    ),
+    SenderCleanupSpec(
+        "Discord Missed Messages",
+        "noreply@discord.com",
+        ("noreply@discord.com",),
+        retention_days=LOW_PRIORITY_CLEANUP_RETENTION_DAYS,
+        query_terms=('subject:"You missed messages"',),
+        required_label_ids=("CATEGORY_UPDATES",),
+        subject_fragments=("you missed messages",),
+    ),
+    SenderCleanupSpec(
+        "Boston Globe Newsletters",
+        "(newsletters@bostonglobe.com OR newsletters@email.bostonglobe.com)",
+        ("newsletters@bostonglobe.com", "newsletters@email.bostonglobe.com"),
+        retention_days=LOW_PRIORITY_CLEANUP_RETENTION_DAYS,
+        required_label_ids=("CATEGORY_UPDATES",),
+    ),
+    SenderCleanupSpec(
+        "LifespanIO Newsletters",
+        "pr@lifespan.io",
+        ("pr@lifespan.io",),
+        retention_days=LOW_PRIORITY_CLEANUP_RETENTION_DAYS,
+        query_terms=('subject:"Weekly News"',),
+        required_label_ids=("CATEGORY_UPDATES",),
+        subject_fragments=("weekly news",),
+    ),
+    SenderCleanupSpec(
+        "Glassdoor Updates",
+        "noreply@glassdoor.com",
+        ("noreply@glassdoor.com",),
+        retention_days=LOW_PRIORITY_CLEANUP_RETENTION_DAYS,
+        query_terms=('subject:"employee reviews"',),
+        required_label_ids=("CATEGORY_UPDATES",),
+        subject_fragments=("employee reviews",),
+    ),
+)
 
 
 def bootstrap_env() -> None:
@@ -583,6 +680,8 @@ def process_sender_cleanup_message(
     older_than_days: int,
     dry_run: bool,
     sender_domains: tuple[str, ...] = (),
+    subject_fragments: tuple[str, ...] = (),
+    required_label_ids: tuple[str, ...] = (),
     now: dt.datetime | None = None,
 ) -> str:
     message = read_message(service, message_id)
@@ -594,12 +693,25 @@ def process_sender_cleanup_message(
     if not sender_matches_cleanup_rule(sender, sender_fragments, sender_domains):
         LOGGER.info("Skipped non-%s message %s: from=%s subject=%s", label, message_id, sender, subject)
         return f"{prefix}_skipped"
+    if required_label_ids and not set(required_label_ids).issubset(set(message.get("labelIds") or [])):
+        LOGGER.info(
+            "Skipped %s message without required labels %s: id=%s subject=%s",
+            label,
+            required_label_ids,
+            message_id,
+            subject,
+        )
+        return f"{prefix}_skipped_labels"
+    if subject_fragments and not any(fragment.lower() in subject.lower() for fragment in subject_fragments):
+        LOGGER.info("Skipped %s message without subject match %s: %s", label, message_id, subject)
+        return f"{prefix}_skipped_subject"
     if not message_is_older_than_days(message, older_than_days, now=now):
         LOGGER.info("Skipped recent %s message %s: subject=%s", label, message_id, subject)
         return f"{prefix}_too_recent"
 
     trash_message(service, message_id, dry_run=dry_run)
-    LOGGER.info("Trashed %s message older than %d days %s: %s", label, older_than_days, message_id, subject)
+    action = "Would trash" if dry_run else "Trashed"
+    LOGGER.info("%s %s message older than %d days %s: %s", action, label, older_than_days, message_id, subject)
     return f"{prefix}_trashed" if not dry_run else f"{prefix}_would_trash"
 
 
@@ -679,11 +791,17 @@ def build_crunchlabs_query(day: dt.date, include_trash: bool) -> str:
     return build_sender_query(day, CRUNCHLABS_FROM_QUERY, include_trash)
 
 
-def build_older_sender_query(from_query: str, older_than_days: int, include_trash: bool) -> str:
+def build_older_sender_query(
+    from_query: str,
+    older_than_days: int,
+    include_trash: bool,
+    extra_terms: tuple[str, ...] = (),
+) -> str:
     parts = [
         "in:anywhere" if include_trash else "",
         f"to:{RECIPIENT}",
         f"from:{from_query}",
+        *extra_terms,
         f"older_than:{int(older_than_days)}d",
         "-in:spam",
     ]
@@ -759,41 +877,32 @@ def main() -> int:
             outcome = "crunchlabs_failed"
         counts[outcome] = counts.get(outcome, 0) + 1
 
-    cleanup_specs = [
-        (
-            "Amazon",
-            AMAZON_FROM_QUERY,
-            AMAZON_SENDER_FRAGMENTS,
-            AMAZON_SENDER_DOMAINS,
-            SENDER_CLEANUP_RETENTION_DAYS,
-        ),
-        ("Google Maps", GOOGLE_MAPS_FROM_QUERY, GOOGLE_MAPS_SENDER_FRAGMENTS, (), SENDER_CLEANUP_RETENTION_DAYS),
-        ("LinkedIn", LINKEDIN_FROM_QUERY, LINKEDIN_SENDER_FRAGMENTS, (), SENDER_CLEANUP_RETENTION_DAYS),
-        ("Redfin", REDFIN_FROM_QUERY, REDFIN_SENDER_FRAGMENTS, (), REDFIN_CLEANUP_RETENTION_DAYS),
-    ]
-    for label, from_query, sender_fragments, sender_domains, retention_days in cleanup_specs:
+    for spec in SENDER_CLEANUP_SPECS:
         cleanup_query = build_older_sender_query(
-            from_query,
-            retention_days,
+            spec.from_query,
+            spec.retention_days,
             include_trash=args.include_trash,
+            extra_terms=spec.query_terms,
         )
-        LOGGER.info("Scanning %s messages with query: %s", label, cleanup_query)
+        LOGGER.info("Scanning %s messages with query: %s", spec.label, cleanup_query)
         cleanup_message_ids = list_message_ids(service, cleanup_query)
-        LOGGER.info("Found %d %s candidate message(s)", len(cleanup_message_ids), label)
+        LOGGER.info("Found %d %s candidate message(s)", len(cleanup_message_ids), spec.label)
         for message_id in cleanup_message_ids:
             try:
                 outcome = process_sender_cleanup_message(
                     service,
                     message_id,
-                    label=label,
-                    sender_fragments=sender_fragments,
-                    sender_domains=sender_domains,
-                    older_than_days=retention_days,
+                    label=spec.label,
+                    sender_fragments=spec.sender_fragments,
+                    sender_domains=spec.sender_domains,
+                    older_than_days=spec.retention_days,
                     dry_run=args.dry_run,
+                    subject_fragments=spec.subject_fragments,
+                    required_label_ids=spec.required_label_ids,
                 )
             except Exception as exc:
-                LOGGER.exception("Failed processing %s message %s: %s", label, message_id, exc)
-                outcome = f"{re.sub(r'[^a-z0-9]+', '_', label.lower()).strip('_')}_failed"
+                LOGGER.exception("Failed processing %s message %s: %s", spec.label, message_id, exc)
+                outcome = f"{re.sub(r'[^a-z0-9]+', '_', spec.label.lower()).strip('_')}_failed"
             counts[outcome] = counts.get(outcome, 0) + 1
 
     google_calendar_query = build_google_calendar_query(include_trash=args.include_trash)

@@ -161,6 +161,20 @@ This document logs all scheduled tasks (cron jobs) for the system. It must be up
 - **Wrapper:** `flock -n /tmp/doctor-calendar-sync.lock`
 - **Description:** Syncs MyChart and synced SMS appointment evidence into Google Calendar and the local doctor-appointment cache.
 
+## 26. Rheumatoid Arthritis Remission Research Loop
+- **Schedule:** `0 */2 * * *` (Runs every 2 hours)
+- **Script Path:** `$VESSENCE_HOME/agent_skills/ra_research_cron.py`
+- **Log:** `$VESSENCE_DATA_HOME/logs/ra_research.log`
+- **Wrapper:** `flock -n /tmp/ra-research-cron.lock timeout 110m nice -n 19 ionice -c 3`
+- **Description:** Ongoing RA literature researcher for Kathia's remission/asymptomatic-state goal. Searches PubMed/PMC and guideline sources, saves every processed paper/source under `$VAULT_HOME/research/rheumatoid_arthritis_remission/papers/`, caches every paper summary under `$VAULT_HOME/research/rheumatoid_arthritis_remission/summaries/`, writes raw run cache under `$VESSENCE_DATA_HOME/research/rheumatoid_arthritis_remission/cache/`, and every run combines all cached evidence into an explicit action plan at `$VAULT_HOME/research/rheumatoid_arthritis_remission/recommendations/recommendation_plan.md` plus a living recommendation scheme. The action plan covers at-home actions, tracking steps, tests/labs/imaging to discuss, food/diet, lifestyle, medical strategy questions, and emerging technology/neuromodulation such as vagus-nerve stimulation. Uses the smartest configured model via Codex (`RA_RESEARCH_SMART_PROVIDER=codex`) for the high-judgment synthesis pass, with local Ollama only as fallback. The first email report is sent from `julioprocess@gmail.com` to Chieh after 4 runs; after that, reports send every 72 hours. This is research support only and does not authorize medication/supplement changes without Kathia's rheumatologist.
+
+## 27. Iterative Project Refactor Scheduler
+- **Schedule:** `52 * * * *` (Runs hourly at minute 52 until five iterations have been enqueued; shifted after Chieh manually started iteration 1 at 09:52 on 2026-06-30)
+- **Script Path:** `$VESSENCE_HOME/agent_skills/iterative_refactor_scheduler.py`
+- **Log:** `$VESSENCE_DATA_HOME/logs/iterative_refactor_scheduler.log`
+- **Wrapper:** `flock -n /tmp/iterative-project-refactor-scheduler.lock nice -n 19 ionice -c 3`
+- **Description:** Bounded scheduler requested by Chieh on 2026-06-30. Each hourly run enqueues one refactor job for Waterlily (`/home/chieh/code/waterlily`), one for the education app (`/home/chieh/code/chieh_class_v2`), and one for Vessence (`$VESSENCE_HOME`). Each generated job instructs the agent to use the refactoring workflow, choose exactly one behavior-preserving speed/readability slice, run tests, update the project refactor journal, and commit only intended local changes when verification passes. State is tracked in `$VESSENCE_DATA_HOME/state/iterative_refactor_scheduler.json`. After the fifth hourly iteration is enqueued, the script comments out its own crontab line so it stops scheduling more jobs.
+
 ---
 
 ## Removed Jobs (historical reference)

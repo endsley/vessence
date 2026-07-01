@@ -71,6 +71,26 @@ def _is_high_precision_interrupt(text: str) -> bool:
     return bool(_HIGH_PRECISION_INTERRUPT_RE.search(text.strip()))
 
 
+def _utc_now() -> _dt.datetime:
+    return _dt.datetime.now(_dt.timezone.utc)
+
+
+def _parse_expires_at(raw: str) -> _dt.datetime:
+    """Parse pending_action expires_at values as UTC-aware datetimes.
+
+    Existing handlers write timestamps like ``YYYY-MM-DDTHH:MM:SSZ``. Older
+    callers may omit the trailing ``Z``; keep those valid by treating naive
+    values as UTC.
+    """
+    text = (raw or "").strip()
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    expires_at = _dt.datetime.fromisoformat(text)
+    if expires_at.tzinfo is None:
+        return expires_at.replace(tzinfo=_dt.timezone.utc)
+    return expires_at.astimezone(_dt.timezone.utc)
+
+
 def _is_expired(pending: dict) -> bool:
     """True when pending.expires_at is set AND has passed.
 
@@ -83,9 +103,7 @@ def _is_expired(pending: dict) -> bool:
     if not raw:
         return False
     try:
-        ts = raw.rstrip("Z")
-        exp = _dt.datetime.fromisoformat(ts)
-        return _dt.datetime.utcnow() >= exp
+        return _utc_now() >= _parse_expires_at(raw)
     except Exception:
         return False
 
