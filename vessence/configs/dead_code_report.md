@@ -1,13 +1,14 @@
-# Dead Code Report — 2026-06-30 01:15
+# Dead Code Report — 2026-07-01 01:12
 
-## Possibly-dead functions (1)
+## Possibly-dead functions (2)
 
 (No references found via grep. May be false positives if called via
  getattr, dynamic dispatch, or HTTP route registration.)
 
-- `memory/v1/embedding_helpers.py` :: `embed_many()`
+- `memory/v1/topic_memory.py` :: `fire_and_forget()`
+- `memory/v1/janitor_memory.py` :: `purge_expired_forgettable()`
 
-## Duplicate function bodies (10 groups)
+## Duplicate function bodies (11 groups)
 
 (Identical bodies — candidates for extraction into a shared helper.)
 
@@ -17,6 +18,9 @@
 - group `2801b6ebda51`:
     - `agent_skills/ambient_heartbeat.py`
     - `agent_skills/ambient_task_research.py`
+- group `390eb2a0a8c9`:
+    - `agent_skills/ra_research_cron.py`
+    - `agent_skills/ra_research_cron.py`
 - group `e70d20004e7a`:
     - `agent_skills/nightly_audit.py`
     - `startup_code/usb_sync.py`

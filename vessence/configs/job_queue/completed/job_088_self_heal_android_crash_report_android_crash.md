@@ -131,3 +131,29 @@ Recording blocker:
 - Canonical incident JSON is not writable from this sandbox: `/home/chieh/ambient/vessence-data/self_healing/incidents/20260626T104225.698556+0000_android_crash_report_a731dc48de8845ad416a3fb3.json`.
 - Canonical repair report is not writable from this sandbox: `/home/chieh/ambient/vessence-data/self_healing/reports/20260626T104225.821409+0000_android_crash_report_a731dc48de8845ad416a3fb3.md`.
 - Work Log files are not writable from this sandbox: `/home/chieh/ambient/skills/work_log/user_data/activity_log.json`, `/home/chieh/ambient/essences/work_log/user_data/activity_log.json`.
+
+## Recheck 2026-07-01
+
+Evidence reviewed again:
+- Incident JSON: `/home/chieh/ambient/vessence-data/self_healing/incidents/20260626T104225.698556+0000_android_crash_report_a731dc48de8845ad416a3fb3.json`
+- Existing repair report: `/home/chieh/ambient/vessence-data/self_healing/reports/20260626T104225.821409+0000_android_crash_report_a731dc48de8845ad416a3fb3.md`
+- Android diagnostic log: `/home/chieh/ambient/vessence-data/logs/android_diagnostics.jsonl`
+- Job queue log: `/home/chieh/ambient/vessence-data/logs/job_queue.log`
+- Source: `android/app/src/main/java/com/vessences/android/voice/AlwaysListeningService.kt`, `android/app/src/main/java/com/vessences/android/CrashReporter.kt`, `jane_web/main.py`
+- Android call-site search for direct service start/stop bypasses.
+
+Outcome:
+- No new source patch was justified.
+- The incident is already marked `repair_finished`, and the current source still contains the foreground-service lifecycle repair for the captured Android 13 crash.
+- `AlwaysListeningService` promotes itself to foreground immediately in `onCreate()`, suppresses duplicate starts while already foreground or start-in-flight, defers stop while start is in flight, preserves restart-after-stop requests, and prevents late mic startup when stop is pending.
+- Current Android call sites still route through `AlwaysListeningService.start()` / `AlwaysListeningService.stop()`; no direct bypass was found.
+- `/home/chieh/ambient/vessence-data/logs/android_crashes.log` is no longer present, but the incident JSON and `android_diagnostics.jsonl` preserve the captured crash and lifecycle evidence.
+
+Verification:
+- `GRADLE_USER_HOME=/tmp/codex-gradle-home nice -n 19 ionice -c 3 ./gradlew :app:compileDebugKotlin` passed: `BUILD SUCCESSFUL in 1m 5s`.
+- A temp-data-root smoke test of `receive_crash_report()` passed using `/home/chieh/google-adk-env/adk-venv/bin/python`: the route returned `{"status": "received"}`, wrote `android_crashes.log`, and dispatched source/category metadata with self-healing stubbed.
+- `git diff --check -- android/app/src/main/java/com/vessences/android/voice/AlwaysListeningService.kt android/app/src/main/java/com/vessences/android/CrashReporter.kt jane_web/main.py configs/job_queue/completed/job_088_self_heal_android_crash_report_android_crash.md` passed before this entry was appended.
+
+Recording blocker:
+- Canonical incident JSON/report files live under `/home/chieh/ambient/vessence-data`, which is outside the current writable sandbox roots, so this recheck is recorded in the repository job work log instead.
+- The documented Vessence venv path `/home/chieh/ambient/venv/bin/python` is absent on this machine; the route smoke test used the available ADK Python.
