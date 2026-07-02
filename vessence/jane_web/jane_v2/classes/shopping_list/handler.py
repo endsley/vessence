@@ -10,6 +10,7 @@ intent doesn't fit the simple add/remove/view/clear/check verbs.
 from __future__ import annotations
 
 import logging
+import math
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -48,6 +49,7 @@ async def handle(prompt: str, params: dict | None = None) -> dict | None:
         if (
             isinstance(confidence, bool)
             or not isinstance(confidence, (int, float))
+            or not math.isfinite(confidence)
             or confidence < 0.80
         ):
             logger.info(
