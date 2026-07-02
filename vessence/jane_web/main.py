@@ -44,6 +44,7 @@ import asyncio
 import aiofiles
 import base64
 import hashlib
+import hmac
 import json
 import logging
 import re
@@ -172,8 +173,8 @@ try:
     ANDROID_VERSION = _version_data["version_name"]
     _ANDROID_VERSION_CODE = _version_data["version_code"]
 except FileNotFoundError:
-    ANDROID_VERSION = "0.2.98"
-    _ANDROID_VERSION_CODE = 329
+    ANDROID_VERSION = "0.2.99"
+    _ANDROID_VERSION_CODE = 330
 
 # Startup validation: ensure the APK for the advertised version actually exists
 _expected_apk = MARKETING_DOWNLOADS_DIR / f"vessences-android-v{ANDROID_VERSION}.apk"
@@ -440,6 +441,12 @@ SESSION_COOKIE = "jane_session"
 TRUSTED_DEVICE_COOKIE = "jane_trusted_device"
 STATIC_DIR = VAULT_WEB_DIR / "static"
 ANNOUNCEMENTS_PATH = Path(ENV_FILE_PATH).parent / "data" / "jane_announcements.jsonl"
+RA_REPORTS_ROOT = Path(VAULT_DIR) / "research" / "rheumatoid_arthritis_remission" / "reports"
+RA_HTML_REPORTS_DIR = RA_REPORTS_ROOT / "html"
+RA_REPORT_ID_RE = re.compile(r"^\d{8}_\d{6}$")
+RA_REPORT_GRANT_SECONDS = 45 * 60
+RA_REPORT_TOKEN_SECONDS = 7 * 24 * 60 * 60
+_ra_report_recent_grants: dict[tuple[str, str], float] = {}
 
 
 def _session_log_id(session_id: Optional[str]) -> str:
@@ -503,6 +510,127 @@ def _read_announcements(since: Optional[str]) -> list[dict]:
                     continue
             rows.append(payload)
     return rows
+
+
+def _ra_report_html_path(report_id: str) -> Path:
+    if not RA_REPORT_ID_RE.match(report_id):
+        raise HTTPException(status_code=404, detail="Report not found")
+    path = RA_HTML_REPORTS_DIR / f"ra_research_run_{report_id}.html"
+    if not path.exists() or not path.is_file():
+        raise HTTPException(status_code=404, detail="Report not found")
+    return path
+
+
+def _latest_ra_report_html_path() -> Path:
+    if not RA_HTML_REPORTS_DIR.exists():
+        raise HTTPException(status_code=404, detail="No RA reports found")
+    reports = [
+        path
+        for path in RA_HTML_REPORTS_DIR.glob("ra_research_run_*.html")
+        if path.is_file() and report_id_from_ra_html_path(path)
+    ]
+    if not reports:
+        raise HTTPException(status_code=404, detail="No RA reports found")
+    return max(reports, key=lambda path: path.stat().st_mtime)
+
+
+def report_id_from_ra_html_path(path: Path) -> str:
+    report_id = path.stem.removeprefix("ra_research_run_")
+    return report_id if RA_REPORT_ID_RE.match(report_id) else ""
+
+
+def _prune_ra_report_grants() -> None:
+    now = time.time()
+    stale = [key for key, expires_at in _ra_report_recent_grants.items() if expires_at <= now]
+    for key in stale:
+        _ra_report_recent_grants.pop(key, None)
+
+
+def _grant_ra_report_access(request: Request, report_id: str) -> None:
+    _prune_ra_report_grants()
+    _ra_report_recent_grants[(_client_ip(request), report_id)] = time.time() + RA_REPORT_GRANT_SECONDS
+
+
+def _has_recent_ra_report_grant(request: Request, report_id: str) -> bool:
+    _prune_ra_report_grants()
+    return _ra_report_recent_grants.get((_client_ip(request), report_id), 0) > time.time()
+
+
+def _sign_ra_report_token(report_id: str, expires_at: int) -> str:
+    secret = _session_secret or os.getenv("SESSION_SECRET_KEY", "")
+    message = f"{report_id}:{expires_at}".encode("utf-8")
+    return hmac.new(secret.encode("utf-8"), message, hashlib.sha256).hexdigest()
+
+
+def _issue_ra_report_token(report_id: str) -> str:
+    expires_at = int(time.time() + RA_REPORT_TOKEN_SECONDS)
+    return f"{expires_at}.{_sign_ra_report_token(report_id, expires_at)}"
+
+
+def _valid_ra_report_token(report_id: str, token: Optional[str]) -> bool:
+    if not token or "." not in token:
+        return False
+    expires_raw, _, supplied = token.partition(".")
+    try:
+        expires_at = int(expires_raw)
+    except ValueError:
+        return False
+    if expires_at <= time.time():
+        return False
+    expected = _sign_ra_report_token(report_id, expires_at)
+    return hmac.compare_digest(supplied, expected)
+
+
+def _require_ra_report_access(request: Request, report_id: str, token: Optional[str]) -> str:
+    try:
+        session_id = require_auth(request)
+        _grant_ra_report_access(request, report_id)
+        return session_id
+    except HTTPException as exc:
+        if exc.status_code != 401:
+            raise
+        if _valid_ra_report_token(report_id, token) or _has_recent_ra_report_grant(request, report_id):
+            return "temporary_report_access"
+        raise
+
+
+def _tokenize_ra_report_item(item: dict, request: Request) -> dict:
+    if item.get("type") != "report_ready":
+        return item
+    report_id = str(item.get("report_id") or "").strip()
+    if not RA_REPORT_ID_RE.match(report_id):
+        return item
+    _grant_ra_report_access(request, report_id)
+    token = _issue_ra_report_token(report_id)
+    updated = dict(item)
+    updated["id"] = f"ra_report_{report_id}_signed"
+    updated["report_url"] = f"/api/research/ra/reports/{report_id}.html?rt={token}"
+    updated["access_expires_in_seconds"] = RA_REPORT_TOKEN_SECONDS
+    return updated
+
+
+def _ra_report_metadata(path: Path, request: Request | None = None) -> dict:
+    report_id = report_id_from_ra_html_path(path)
+    if not report_id:
+        raise HTTPException(status_code=404, detail="Report not found")
+    created = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc).isoformat()
+    report_url = f"/api/research/ra/reports/{report_id}.html"
+    if request is not None:
+        _grant_ra_report_access(request, report_id)
+        report_url = f"{report_url}?rt={_issue_ra_report_token(report_id)}"
+    return {
+        "id": f"ra_report_{report_id}_signed",
+        "type": "report_ready",
+        "report_kind": "ra_research",
+        "report_id": report_id,
+        "title": "RA research update ready",
+        "message": "Tap to read the latest RA research HTML report.",
+        "created_at": created,
+        "timestamp": created,
+        "report_url": report_url,
+        "web_url": f"/research/ra/reports/{report_id}",
+        "access_expires_in_seconds": RA_REPORT_TOKEN_SECONDS,
+    }
 
 
 # ─── Init ─────────────────────────────────────────────────────────────────────
@@ -2435,13 +2563,40 @@ async def is_new_device(request: Request):
 
 
 @app.get("/api/jane/announcements")
-async def get_announcements(since: Optional[str] = None, _=Depends(require_auth)):
-    result = {"items": _read_announcements(since)}
+async def get_announcements(request: Request, since: Optional[str] = None, _=Depends(require_auth)):
+    result = {"items": [_tokenize_ra_report_item(item, request) for item in _read_announcements(since)]}
     # Piggyback pending device commands on announcement polls
     cmds = _drain_pending_commands()
     if cmds:
         result["pending_commands"] = cmds
     return result
+
+
+@app.get("/api/research/ra/reports/latest")
+async def get_latest_ra_report(request: Request, _=Depends(require_auth)):
+    path = _latest_ra_report_html_path()
+    return _ra_report_metadata(path, request)
+
+
+@app.get("/api/research/ra/reports/{report_id}.html")
+async def get_ra_report_html(report_id: str, request: Request, rt: Optional[str] = None):
+    path = _ra_report_html_path(report_id)
+    _require_ra_report_access(request, report_id, rt)
+    return FileResponse(str(path), media_type="text/html; charset=utf-8")
+
+
+@app.get("/research/ra/reports/latest", response_class=HTMLResponse)
+async def latest_ra_report_page(request: Request, _=Depends(require_auth)):
+    path = _latest_ra_report_html_path()
+    _ra_report_metadata(path, request)
+    return HTMLResponse(path.read_text(encoding="utf-8", errors="replace"))
+
+
+@app.get("/research/ra/reports/{report_id}", response_class=HTMLResponse)
+async def ra_report_page(report_id: str, request: Request, rt: Optional[str] = None):
+    path = _ra_report_html_path(report_id)
+    _require_ra_report_access(request, report_id, rt)
+    return HTMLResponse(path.read_text(encoding="utf-8", errors="replace"))
 
 
 # ─── Device command queue (server → Android) ─────────────────────────────────

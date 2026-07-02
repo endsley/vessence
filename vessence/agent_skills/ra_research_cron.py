@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import html
 import json
 import logging
 import os
@@ -55,6 +56,7 @@ VAULT_ROOT = Path(VAULT_DIR) / "research" / "rheumatoid_arthritis_remission"
 PAPERS_DIR = VAULT_ROOT / "papers"
 SUMMARY_DIR = VAULT_ROOT / "summaries"
 REPORTS_DIR = VAULT_ROOT / "reports"
+HTML_REPORTS_DIR = REPORTS_DIR / "html"
 RECOMMENDATIONS_DIR = VAULT_ROOT / "recommendations"
 CODEX_DIR = VAULT_ROOT / "codex_synthesis"
 CONTEXT_DIR = VAULT_ROOT / "context"
@@ -69,6 +71,7 @@ LATEST_CODEX_SYNTHESIS_PATH = CODEX_DIR / "latest_codex_synthesis.md"
 
 RECIPIENT_EMAIL = os.environ.get("RA_RESEARCH_REPORT_TO", "chieh.t.wu@gmail.com")
 REPORT_FROM_EMAIL = os.environ.get("RA_RESEARCH_REPORT_FROM", "julioprocess@gmail.com")
+REPORT_CHANNEL = os.environ.get("RA_RESEARCH_REPORT_CHANNEL", "app").strip().lower()
 REPORT_INTERVAL_HOURS = int(os.environ.get("RA_RESEARCH_REPORT_INTERVAL_HOURS", "72"))
 INITIAL_REPORT_AFTER_RUNS = int(os.environ.get("RA_RESEARCH_INITIAL_REPORT_AFTER_RUNS", "4"))
 SMART_PROVIDER = os.environ.get("RA_RESEARCH_SMART_PROVIDER", "codex")
@@ -237,6 +240,7 @@ def ensure_dirs() -> None:
         PAPERS_DIR,
         SUMMARY_DIR,
         REPORTS_DIR,
+        HTML_REPORTS_DIR,
         RECOMMENDATIONS_DIR,
         CODEX_DIR,
         CONTEXT_DIR,
@@ -1007,28 +1011,71 @@ def load_all_summaries(limit: int = 120) -> list[dict[str, Any]]:
     return summaries
 
 
+def text_value(value: Any, max_chars: int = 400) -> str:
+    text = clean_text(str(value or ""))
+    if len(text) <= max_chars:
+        return text
+    return text[: max_chars - 1].rstrip() + "..."
+
+
+def list_values(values: Any, *, max_items: int = 5, max_chars: int = 220) -> list[str]:
+    if isinstance(values, list):
+        raw_values = values
+    elif values:
+        raw_values = [values]
+    else:
+        raw_values = []
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for value in raw_values:
+        text = text_value(value, max_chars)
+        key = text.lower()
+        if not text or key in seen:
+            continue
+        cleaned.append(text)
+        seen.add(key)
+        if len(cleaned) >= max_items:
+            break
+    return cleaned
+
+
+def dedupe_summaries(summaries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    deduped: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for summary in summaries:
+        source_id = str(summary.get("source_id") or summary.get("title") or "").strip()
+        if not source_id:
+            continue
+        key = source_id.lower()
+        if key in seen:
+            continue
+        deduped.append(summary)
+        seen.add(key)
+    return deduped
+
+
 def compact_summary_payload(summaries: list[dict[str, Any]], limit: int = 120) -> list[dict[str, Any]]:
     payload = []
     for summary in summaries[:limit]:
         payload.append(
             {
-                "source_id": summary.get("source_id", ""),
-                "title": summary.get("title", ""),
-                "citation": summary.get("citation", ""),
-                "url": summary.get("url", ""),
-                "scope": summary.get("evidence_scope", ""),
-                "type": summary.get("study_type", ""),
-                "findings": summary.get("main_findings", []),
-                "relevance": summary.get("remission_relevance", ""),
-                "actions": summary.get("actionable_implications", []),
-                "tests_or_monitoring": summary.get("tests_or_monitoring", []),
-                "food_diet": summary.get("food_diet_implications", []),
-                "lifestyle": summary.get("lifestyle_implications", []),
-                "technology": summary.get("technology_implications", []),
-                "safety": summary.get("safety_concerns", []),
-                "limitations": summary.get("limitations", []),
-                "clinician_questions": summary.get("clinician_discussion_points", []),
-                "artifact_dir": summary.get("artifact_dir", ""),
+                "source_id": text_value(summary.get("source_id", ""), 80),
+                "title": text_value(summary.get("title", ""), 220),
+                "citation": text_value(summary.get("citation", ""), 300),
+                "url": text_value(summary.get("url", ""), 180),
+                "scope": text_value(summary.get("evidence_scope", ""), 80),
+                "type": text_value(summary.get("study_type", ""), 80),
+                "findings": list_values(summary.get("main_findings"), max_items=4, max_chars=260),
+                "relevance": text_value(summary.get("remission_relevance", ""), 320),
+                "actions": list_values(summary.get("actionable_implications"), max_items=4, max_chars=240),
+                "tests_or_monitoring": list_values(summary.get("tests_or_monitoring"), max_items=4, max_chars=220),
+                "food_diet": list_values(summary.get("food_diet_implications"), max_items=3, max_chars=220),
+                "lifestyle": list_values(summary.get("lifestyle_implications"), max_items=3, max_chars=220),
+                "technology": list_values(summary.get("technology_implications"), max_items=3, max_chars=220),
+                "safety": list_values(summary.get("safety_concerns"), max_items=4, max_chars=240),
+                "limitations": list_values(summary.get("limitations"), max_items=4, max_chars=240),
+                "clinician_questions": list_values(summary.get("clinician_discussion_points"), max_items=4, max_chars=240),
+                "artifact_dir": text_value(summary.get("artifact_dir", ""), 240),
             }
         )
     return payload
@@ -1037,7 +1084,7 @@ def compact_summary_payload(summaries: list[dict[str, Any]], limit: int = 120) -
 def previous_context_text() -> str:
     if COMPRESSED_CONTEXT_PATH.exists():
         try:
-            return COMPRESSED_CONTEXT_PATH.read_text(encoding="utf-8")[:30000]
+            return COMPRESSED_CONTEXT_PATH.read_text(encoding="utf-8")[:12000]
         except Exception:
             return ""
     return ""
@@ -1075,10 +1122,12 @@ def run_codex_synthesis(
             "For every recommendation, include evidence strength, source IDs, why it might help symptoms/remission, safety caveats, and whether it is actionable at home now, a tracking/logging step, or only a clinician discussion point.",
             "Be medically conservative: no unsupervised medication, supplement, or treatment changes.",
             "Preserve source IDs and artifact paths so Jane can trace every claim.",
+            "Make the app-facing report useful to Chieh: start with what changed, what matters, what is low-value/noise, what to ask Kathia's rheumatologist, what to track, and what to research next.",
+            "Do not make the report a source dump. A source should appear in the app report only when it changes a decision, clarifies a question, or is explicitly categorized as low-value/noise.",
         ],
         "previous_compressed_context": previous_context_text(),
         "new_source_ids_this_run": [s.get("source_id", "") for s in new_summaries],
-        "all_cached_source_summaries": compact_summary_payload(summaries, limit=140),
+        "all_cached_source_summaries": compact_summary_payload(summaries, limit=90),
         "required_output": {
             "format": "strict JSON object only",
             "keys": {
@@ -1086,6 +1135,7 @@ def run_codex_synthesis(
                 "compressed_context": "Markdown context for next run, <=2500 words",
                 "recommendation_scheme_markdown": "full Markdown scheme with sections: Status, Safety Boundary, Working Model, Recommendation Scheme, Tracking Checklist, Clinician Questions, Evidence Register, New Evidence This Run, Next Research Questions",
                 "recommendation_plan_markdown": "action-oriented Markdown with sections: Executive Summary, At-Home Actions Now, Tracking Steps, Tests To Discuss, Food/Diet Options, Lifestyle Changes, Medical Strategy Questions, Emerging Technology/Neuromodulation, What Not To Do Without Clinician, Evidence Matrix, What Would Change This Plan",
+                "useful_report_markdown": "brief Markdown for Chieh's phone with sections: Bottom Line, What Changed This Run, Most Useful Findings, Questions For Rheumatologist, What To Track, Low-Value Or Noisy Sources, Next Run Focus",
                 "discoveries": ["high-signal discoveries or changed beliefs this run"],
                 "open_questions": ["specific research questions for future runs"],
                 "safety_flags": ["risks or places requiring rheumatologist discussion"],
@@ -1357,6 +1407,485 @@ def list_to_markdown(values: Any) -> str:
     return "- None captured."
 
 
+def source_heading(summary: dict[str, Any], max_chars: int = 120) -> str:
+    source_id = summary.get("source_id", "")
+    title = text_value(summary.get("title", "Untitled source"), max_chars)
+    return f"`{source_id}` {title}" if source_id else title
+
+
+def summary_text_blob(summary: dict[str, Any]) -> str:
+    fields = [
+        summary.get("title", ""),
+        summary.get("study_type", ""),
+        summary.get("evidence_scope", ""),
+        summary.get("remission_relevance", ""),
+        summary.get("population", ""),
+        summary.get("intervention_or_exposure", ""),
+        " ".join(list_values(summary.get("main_findings"), max_items=8, max_chars=300)),
+        " ".join(list_values(summary.get("limitations"), max_items=8, max_chars=300)),
+    ]
+    return " ".join(str(field) for field in fields if field).lower()
+
+
+def summary_signal_score(summary: dict[str, Any]) -> int:
+    text = summary_text_blob(summary)
+    study_type = str(summary.get("study_type") or "").lower()
+    scope = str(summary.get("evidence_scope") or "").lower()
+    score = 0
+    if "guideline" in study_type or "guideline" in scope:
+        score += 6
+    if "randomized" in study_type or "randomised" in study_type or "rct" in study_type:
+        score += 5
+    if "systematic" in study_type or "meta" in study_type:
+        score += 4
+    if "cohort" in study_type:
+        score += 3
+    if "review" in study_type:
+        score += 2
+    if "open_access_full_text" in scope or "guideline_or_review_page" in scope:
+        score += 2
+    if "abstract_only" in scope:
+        score -= 1
+    if list_values(summary.get("main_findings")):
+        score += 1
+    if list_values(summary.get("actionable_implications")) or list_values(summary.get("clinician_discussion_points")):
+        score += 2
+    if list_values(summary.get("tests_or_monitoring")):
+        score += 2
+    if list_values(summary.get("food_diet_implications")) or list_values(summary.get("lifestyle_implications")):
+        score += 1
+    if list_values(summary.get("technology_implications")):
+        score += 1
+    if summary.get("needs_llm_review"):
+        score -= 5
+    if "needs manual/llm review" in text:
+        score -= 5
+    if "does not directly address" in text or "did not directly address" in text or "not directly address" in text:
+        score -= 3
+    if "psoriatic arthritis" in text and "rheumatoid arthritis" not in text.replace("psoriatic arthritis", ""):
+        score -= 4
+    if "scenario" in text or "speculative" in text:
+        score -= 2
+    return score
+
+
+def low_value_reason(summary: dict[str, Any]) -> str:
+    text = summary_text_blob(summary)
+    reasons: list[str] = []
+    if summary.get("needs_llm_review") or "needs manual/llm review" in text:
+        reasons.append("needs manual review before relying on it")
+    if "abstract_only" in str(summary.get("evidence_scope") or "").lower():
+        reasons.append("abstract-only")
+    if "does not directly address" in text or "did not directly address" in text or "not directly address" in text:
+        reasons.append("does not directly answer remission/asymptomatic strategy")
+    if "psoriatic arthritis" in text and "rheumatoid arthritis" not in text.replace("psoriatic arthritis", ""):
+        reasons.append("not actually RA-focused")
+    if "scenario" in text or "speculative" in text:
+        reasons.append("speculative/future-facing rather than actionable")
+    return "; ".join(reasons)
+
+
+def is_strong_evidence_type(summary: dict[str, Any]) -> bool:
+    study_type = str(summary.get("study_type") or "").lower()
+    scope = str(summary.get("evidence_scope") or "").lower()
+    return any(
+        needle in study_type or needle in scope
+        for needle in ("guideline", "randomized", "randomised", "rct", "systematic", "meta")
+    )
+
+
+def is_low_value_summary(summary: dict[str, Any]) -> bool:
+    reason = low_value_reason(summary)
+    if not reason:
+        return False
+    score = summary_signal_score(summary)
+    reasons = [part.strip() for part in reason.split(";") if part.strip()]
+    serious_reasons = [part for part in reasons if part != "abstract-only"]
+    if not serious_reasons:
+        return score < 2
+    if any("does not directly" in part for part in serious_reasons):
+        return not (is_strong_evidence_type(summary) and score >= 7)
+    return True
+
+
+def evidence_label(summary: dict[str, Any]) -> str:
+    parts = [
+        text_value(summary.get("study_type", "unknown"), 80) or "unknown type",
+        text_value(summary.get("evidence_scope", "unknown scope"), 80) or "unknown scope",
+    ]
+    return ", ".join(parts)
+
+
+def is_usable_report_item(item: str) -> bool:
+    item_lower = item.lower()
+    if not item.strip():
+        return False
+    if item_lower.startswith("no safety concerns"):
+        return False
+    if item_lower.startswith("safety outcomes were similar"):
+        return False
+    if item_lower.startswith("feasibility concerns"):
+        return False
+    if "sle" in item_lower or "lupus" in item_lower:
+        return False
+    return True
+
+
+def filter_report_items(items: list[str]) -> list[str]:
+    return [item for item in items if is_usable_report_item(item)]
+
+
+def collect_report_items(
+    summaries: list[dict[str, Any]],
+    fields: tuple[str, ...],
+    *,
+    max_items: int,
+    max_chars: int = 220,
+) -> list[str]:
+    items: list[str] = []
+    seen: set[str] = set()
+    for summary in summaries:
+        for field in fields:
+            for item in list_values(summary.get(field), max_items=6, max_chars=max_chars):
+                if not is_usable_report_item(item):
+                    continue
+                key = item.lower()
+                if key in seen:
+                    continue
+                items.append(item)
+                seen.add(key)
+                if len(items) >= max_items:
+                    return items
+    return items
+
+
+def infer_report_themes(summaries: list[dict[str, Any]], limit: int = 4) -> list[str]:
+    rules = [
+        ("treat-to-target and remission scoring", ("treat to target", "t2t", "das28", "cdai", "sdai", "boolean", "outcome measure")),
+        ("medication strategy", ("methotrexate", "dmard", "biologic", "jak", "anti-tnf", "tofacitinib", "adalimumab", "upadacitinib", "otilimab")),
+        ("tapering or drug-free remission", ("taper", "discontinuation", "drug-free", "withdrawal", "dose reduction")),
+        ("tests and biomarkers", ("biomarker", "anti-ccp", "rheumatoid factor", "crp", "esr", "granulocyte", "imaging", "ultrasound", "mri")),
+        ("lifestyle and diet adjuncts", ("diet", "exercise", "sleep", "stress", "omega", "vitamin", "smoking", "periodontal", "lifestyle")),
+        ("neuromodulation and technology", ("vagus", "neuromodulation", "bioelectronic", "auricular", "wearable", "digital", "car t", "genomic")),
+        ("safety and comorbidities", ("safety", "infection", "cardiovascular", "lipid", "steroid", "adverse")),
+    ]
+    counts: dict[str, int] = {}
+    for summary in summaries:
+        text = summary_text_blob(summary)
+        for theme, needles in rules:
+            if any(needle in text for needle in needles):
+                counts[theme] = counts.get(theme, 0) + 1
+    return [theme for theme, _ in sorted(counts.items(), key=lambda item: item[1], reverse=True)[:limit]]
+
+
+def default_clinician_questions() -> list[str]:
+    return [
+        "Which validated target is being used for Kathia right now: CDAI, SDAI, DAS28, RAPID3, or ACR/EULAR Boolean remission?",
+        "If she is not at target, what is the next clinician-supervised adjustment and the reassessment date?",
+        "Are symptoms tracking active inflammation, residual pain/fatigue, medication side effects, or another process?",
+        "What medication safety labs, infection precautions, vaccine updates, or steroid-sparing steps are relevant to her current regimen?",
+    ]
+
+
+def default_tracking_items() -> list[str]:
+    return [
+        "Morning stiffness duration, pain, fatigue, function, flares, and swollen/tender joint pattern.",
+        "Current medications, missed doses, side effects, infections, steroid/NSAID use, and what improves or worsens symptoms.",
+        "Recent ESR/CRP, clinician disease activity score, tender/swollen joint count, and medication safety labs from visits.",
+    ]
+
+
+def build_useful_report_markdown(
+    new_summaries: list[dict[str, Any]],
+    all_summaries: list[dict[str, Any]],
+    codex_result: dict[str, Any] | None,
+    source_count: int,
+) -> str:
+    unique_new = dedupe_summaries(new_summaries)
+    ranked_new = sorted(unique_new, key=summary_signal_score, reverse=True)
+    high_signal = [
+        summary for summary in ranked_new
+        if summary_signal_score(summary) >= 3 and not is_low_value_summary(summary)
+    ][:5]
+    low_signal = [
+        summary for summary in sorted(unique_new, key=summary_signal_score)
+        if is_low_value_summary(summary)
+    ][:6]
+    themes = infer_report_themes(unique_new) or infer_report_themes(all_summaries[:30])
+    discoveries = list_values((codex_result or {}).get("discoveries"), max_items=5, max_chars=260)
+    open_questions = list_values((codex_result or {}).get("open_questions"), max_items=5, max_chars=260)
+    useful_for_questions = high_signal or [summary for summary in ranked_new if not is_low_value_summary(summary)]
+    safety_flags = collect_report_items(useful_for_questions, ("safety_concerns",), max_items=4)
+
+    lines = [
+        "## Bottom Line",
+        f"- This run processed {len(unique_new)} unique new or upgraded source summar{'y' if len(unique_new) == 1 else 'ies'}; the cache now has {source_count} sources.",
+    ]
+    if themes:
+        lines.append(f"- Main themes this run: {', '.join(themes)}.")
+    if high_signal:
+        best = high_signal[0]
+        lines.append(
+            f"- Highest-value item: {source_heading(best, 95)}. Practical read: "
+            f"{text_value(best.get('remission_relevance'), 260) or 'use as background evidence only.'}"
+        )
+    else:
+        lines.append("- No new source rose above the high-signal threshold; treat this run mostly as cache-building.")
+    lines.append(
+        "- The standing practical path remains clinician-led treat-to-target care, objective disease-activity scoring, symptom tracking, and no unsupervised medication/supplement changes."
+    )
+
+    if discoveries:
+        lines.extend(["", "## What Changed This Run"])
+        lines.extend(f"- {item}" for item in discoveries)
+    elif high_signal:
+        lines.extend(["", "## What Changed This Run"])
+        for summary in high_signal[:4]:
+            lines.append(
+                f"- {source_heading(summary, 90)}: {text_value(summary.get('remission_relevance'), 260)}"
+            )
+    else:
+        lines.extend(["", "## What Changed This Run", "- Nothing strong enough to change the current plan; the run mostly added background sources."])
+
+    lines.extend(["", "## Most Useful Findings"])
+    if not high_signal:
+        lines.append("- None this run. The report is flagging this explicitly instead of burying the signal in a source list.")
+    for summary in high_signal:
+        findings = list_values(summary.get("main_findings"), max_items=2, max_chars=260)
+        actions = filter_report_items(list_values(summary.get("actionable_implications"), max_items=2, max_chars=240))
+        questions = filter_report_items(list_values(summary.get("clinician_discussion_points"), max_items=2, max_chars=240))
+        caveats = filter_report_items(list_values(summary.get("limitations"), max_items=1, max_chars=240))
+        safety = filter_report_items(list_values(summary.get("safety_concerns"), max_items=1, max_chars=240))
+        lines.extend(
+            [
+                f"### {source_heading(summary)}",
+                f"- Evidence: {evidence_label(summary)}.",
+                f"- Why it matters: {text_value(summary.get('remission_relevance'), 340) or 'No remission relevance captured.'}",
+            ]
+        )
+        for finding in findings:
+            lines.append(f"- Finding: {finding}")
+        for action in actions:
+            lines.append(f"- Useful next step: {action}")
+        for question in questions:
+            lines.append(f"- Clinician question: {question}")
+        for caveat in caveats:
+            lines.append(f"- Caveat: {caveat}")
+        for flag in safety:
+            if not flag.lower().startswith("no safety concerns"):
+                lines.append(f"- Safety note: {flag}")
+
+    questions = collect_report_items(
+        useful_for_questions,
+        ("clinician_discussion_points", "actionable_implications"),
+        max_items=6,
+    ) or default_clinician_questions()
+    lines.extend(["", "## Questions For Rheumatologist"])
+    lines.extend(f"- {item}" for item in questions)
+
+    tracking = collect_report_items(
+        useful_for_questions,
+        ("tests_or_monitoring", "lifestyle_implications", "food_diet_implications"),
+        max_items=6,
+    ) or default_tracking_items()
+    lines.extend(["", "## What To Track"])
+    lines.extend(f"- {item}" for item in tracking)
+
+    lines.extend(["", "## Safety Flags"])
+    if safety_flags:
+        lines.extend(f"- {item}" for item in safety_flags)
+    else:
+        lines.append("- No new specific safety flag was extracted, but medication, supplement, steroid, biologic, JAK inhibitor, NSAID, or device decisions still require the rheumatologist.")
+
+    lines.extend(["", "## Low-Value Or Noisy Sources"])
+    if low_signal:
+        for summary in low_signal:
+            lines.append(f"- {source_heading(summary, 100)}: {low_value_reason(summary)}.")
+    else:
+        lines.append("- No obvious low-value/noisy source was added this run.")
+
+    next_focus = open_questions or [
+        "Prioritize evidence that changes a practical decision for Kathia, not broad background reviews.",
+        "Keep separating objective inflammatory activity from residual pain, fatigue, function, and medication side effects.",
+        "Prefer guidelines, randomized trials, systematic reviews, and directly RA-focused monitoring evidence over speculative future-tech articles.",
+    ]
+    lines.extend(["", "## Next Run Focus"])
+    lines.extend(f"- {item}" for item in next_focus[:5])
+
+    lines.extend(
+        [
+            "",
+            "## Full Files",
+            f"- Living recommendation scheme: `{RECOMMENDATION_PATH}`",
+            f"- Action plan: `{ACTION_PLAN_PATH}`",
+            f"- Compressed context for future runs: `{COMPRESSED_CONTEXT_PATH}`",
+            f"- Discoveries log: `{DISCOVERIES_PATH}`",
+        ]
+    )
+
+    lines.extend(["", "## Source Trace"])
+    if unique_new:
+        for summary in unique_new:
+            lines.append(
+                f"- {source_heading(summary, 120)} | {evidence_label(summary)} | {summary.get('url', '')}"
+            )
+    else:
+        lines.append("- No new source trace for this run.")
+
+    return "\n".join(lines).strip() + "\n"
+
+
+def markdown_to_report_html(markdown: str) -> str:
+    """Small Markdown subset renderer for app-facing research reports."""
+    blocks: list[str] = []
+    list_lines: list[tuple[str, str]] = []
+    para_lines: list[str] = []
+
+    def inline_html(text: str) -> str:
+        escaped = html.escape(text)
+        escaped = re.sub(r"`([^`]+)`", lambda m: f"<code>{m.group(1)}</code>", escaped)
+        escaped = re.sub(r"\*\*([^*]+)\*\*", lambda m: f"<strong>{m.group(1)}</strong>", escaped)
+        escaped = re.sub(
+            r"\[([^\]]+)\]\((https?://[^)]+)\)",
+            lambda m: f'<a href="{m.group(2)}">{m.group(1)}</a>',
+            escaped,
+        )
+        return escaped
+
+    def flush_paragraph() -> None:
+        nonlocal para_lines
+        if para_lines:
+            blocks.append(f"<p>{inline_html(' '.join(para_lines))}</p>")
+            para_lines = []
+
+    def flush_list() -> None:
+        nonlocal list_lines
+        if list_lines:
+            tag = "ol" if list_lines[0][0] == "ol" else "ul"
+            items = "".join(f"<li>{inline_html(item)}</li>" for _, item in list_lines)
+            blocks.append(f"<{tag}>{items}</{tag}>")
+            list_lines = []
+
+    for raw in markdown.splitlines():
+        stripped = raw.strip()
+        if not stripped:
+            flush_paragraph()
+            flush_list()
+            continue
+        heading = re.match(r"^(#{1,4})\s+(.+)$", stripped)
+        if heading:
+            flush_paragraph()
+            flush_list()
+            level = min(len(heading.group(1)), 4)
+            blocks.append(f"<h{level}>{html.escape(heading.group(2))}</h{level}>")
+            continue
+        bullet = re.match(r"^[-*]\s+(.+)$", stripped)
+        numbered = re.match(r"^\d+\.\s+(.+)$", stripped)
+        if bullet or numbered:
+            flush_paragraph()
+            kind = "ol" if numbered else "ul"
+            text = (numbered or bullet).group(1)
+            if list_lines and list_lines[0][0] != kind:
+                flush_list()
+            list_lines.append((kind, text))
+            continue
+        flush_list()
+        para_lines.append(stripped)
+
+    flush_paragraph()
+    flush_list()
+    return "\n".join(blocks)
+
+
+def report_id_from_path(report_path: Path) -> str:
+    return report_path.stem.removeprefix("ra_research_run_")
+
+
+def build_report_html(report_markdown: str, report_id: str, source_count: int, new_count: int) -> str:
+    generated = local_now().strftime("%B %-d, %Y at %-I:%M %p %Z")
+    title = "RA remission research update"
+    body_html = markdown_to_report_html(report_markdown)
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{html.escape(title)}</title>
+  <style>
+    :root {{
+      color-scheme: light;
+      --ink: #172033;
+      --muted: #637086;
+      --line: #d8e2ef;
+      --bg: #f6f8fb;
+      --panel: #ffffff;
+      --accent: #0f7b75;
+      --accent-soft: #dff4f1;
+      --warn: #8a4b00;
+      --warn-soft: #fff0d9;
+    }}
+    * {{ box-sizing: border-box; }}
+    body {{
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font: 16px/1.58 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }}
+    main {{ width: min(980px, 100%); margin: 0 auto; padding: 24px 18px 56px; }}
+    header {{ padding: 28px 0 20px; border-bottom: 1px solid var(--line); margin-bottom: 22px; }}
+    .eyebrow {{ color: var(--accent); font-size: 13px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; margin: 0 0 8px; }}
+    h1 {{ font-size: clamp(30px, 7vw, 52px); line-height: 1.04; margin: 0 0 14px; letter-spacing: 0; }}
+    .meta {{ display: flex; flex-wrap: wrap; gap: 10px; color: var(--muted); font-size: 14px; }}
+    .pill {{ background: var(--accent-soft); color: #07534f; border: 1px solid #b9e4df; border-radius: 999px; padding: 5px 10px; font-weight: 650; }}
+    .safety {{ background: var(--warn-soft); border: 1px solid #ffd79c; color: var(--warn); padding: 14px 16px; border-radius: 8px; margin: 0 0 24px; font-weight: 600; }}
+    article {{ background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: clamp(18px, 4vw, 34px); box-shadow: 0 12px 40px rgba(15, 35, 55, .07); }}
+    h1, h2, h3, h4 {{ color: var(--ink); }}
+    article h1:first-child {{ display: none; }}
+    h2 {{ font-size: 24px; margin: 30px 0 12px; padding-top: 8px; border-top: 1px solid var(--line); }}
+    h3 {{ font-size: 19px; margin: 24px 0 8px; }}
+    p {{ margin: 0 0 14px; }}
+    ul, ol {{ padding-left: 1.35rem; margin: 0 0 16px; }}
+    li {{ margin: 6px 0; }}
+    code {{ background: #edf2f7; border: 1px solid #d8e2ef; border-radius: 5px; padding: 1px 5px; font-size: .92em; overflow-wrap: anywhere; }}
+    a {{ color: var(--accent); }}
+    @media (max-width: 640px) {{
+      main {{ padding: 18px 12px 42px; }}
+      header {{ padding-top: 20px; }}
+      article {{ border-radius: 0; margin-inline: -12px; border-left: 0; border-right: 0; }}
+    }}
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <p class="eyebrow">Rheumatoid Arthritis Research</p>
+      <h1>RA remission research update</h1>
+      <div class="meta">
+        <span class="pill">{new_count} new source{'' if new_count == 1 else 's'}</span>
+        <span class="pill">{source_count} cached source{'' if source_count == 1 else 's'}</span>
+        <span>{html.escape(generated)}</span>
+        <span>Report {html.escape(report_id)}</span>
+      </div>
+    </header>
+    <div class="safety">Research support only. Use this to prepare discussion with Kathia and her rheumatologist; do not change medication, supplements, or treatment from this report alone.</div>
+    <article>
+      {body_html}
+    </article>
+  </main>
+</body>
+</html>
+"""
+
+
+def write_html_report(report_path: Path, report_markdown: str, source_count: int, new_count: int) -> Path:
+    report_id = report_id_from_path(report_path)
+    html_path = HTML_REPORTS_DIR / f"{report_path.stem}.html"
+    html_text = build_report_html(report_markdown, report_id, source_count, new_count)
+    atomic_write_text(html_path, html_text)
+    atomic_write_text(HTML_REPORTS_DIR / "latest.html", html_text)
+    return html_path
+
+
 def append_discoveries(run_id: str, discoveries: Any, safety_flags: Any, open_questions: Any) -> None:
     block = (
         f"\n## Run {run_id} — {local_now().strftime('%Y-%m-%d %H:%M %Z')}\n\n"
@@ -1489,48 +2018,65 @@ def build_recommendation_scheme(summaries: list[dict[str, Any]], new_summaries: 
     return generated.strip() + "\n"
 
 
-def write_run_report(new_summaries: list[dict[str, Any]], recommendation_text: str, action_plan_text: str) -> Path:
+def write_run_report(
+    new_summaries: list[dict[str, Any]],
+    all_summaries: list[dict[str, Any]],
+    recommendation_text: str,
+    action_plan_text: str,
+    source_count: int,
+    codex_result: dict[str, Any] | None = None,
+) -> tuple[Path, Path]:
     ts = local_now().strftime("%Y%m%d_%H%M%S")
     report_path = REPORTS_DIR / f"ra_research_run_{ts}.md"
+    useful_report = build_useful_report_markdown(new_summaries, all_summaries, codex_result, source_count)
     lines = [
         f"# RA Research Run {local_now().strftime('%Y-%m-%d %H:%M %Z')}",
         "",
-        f"New sources processed: {len(new_summaries)}",
+        f"New or upgraded source summaries: {len(dedupe_summaries(new_summaries))}",
+        f"Cached sources: {source_count}",
         f"Recommendation file: `{RECOMMENDATION_PATH}`",
         f"Action plan: `{ACTION_PLAN_PATH}`",
         f"Compressed context: `{COMPRESSED_CONTEXT_PATH}`",
         f"Latest Codex synthesis: `{LATEST_CODEX_SYNTHESIS_PATH}`",
         f"Discoveries log: `{DISCOVERIES_PATH}`",
         "",
-        "## New Source Summaries",
+        useful_report,
+        "",
+        "## New Source Details",
     ]
-    if not new_summaries:
+    unique_new = dedupe_summaries(new_summaries)
+    if not unique_new:
         lines.append("- No new sources processed this run; cached recommendation scheme was refreshed.")
-    for summary in new_summaries:
+    for summary in unique_new:
         lines.extend(
             [
                 f"### {summary.get('title', 'Untitled')}",
                 f"- Source ID: `{summary.get('source_id', '')}`",
                 f"- URL: {summary.get('url', '')}",
                 f"- Scope: {summary.get('evidence_scope', '')}",
+                f"- Evidence type: {summary.get('study_type', '')}",
                 f"- Saved artifact: `{summary.get('artifact_dir', '')}`",
                 f"- Remission relevance: {summary.get('remission_relevance', '')}",
+                f"- Usefulness label: {'low-value/noisy - ' + low_value_reason(summary) if is_low_value_summary(summary) else 'useful signal'}",
+                f"- Signal score: {summary_signal_score(summary)}",
                 "",
             ]
         )
     lines.extend(
         [
-            "## Current Action Plan Snapshot",
+            "## Standing Action Plan Snapshot",
             "",
-            action_plan_text[:12000],
+            action_plan_text[:3500],
             "",
-            "## Current Scheme Snapshot",
+            "## Standing Scheme Snapshot",
             "",
-            recommendation_text[:8000],
+            recommendation_text[:2500],
         ]
     )
-    atomic_write_text(report_path, "\n".join(lines).strip() + "\n")
-    return report_path
+    report_markdown = "\n".join(lines).strip() + "\n"
+    atomic_write_text(report_path, report_markdown)
+    html_path = write_html_report(report_path, report_markdown, source_count, len(new_summaries))
+    return report_path, html_path
 
 
 def should_send_report(state: dict[str, Any], force: bool) -> bool:
@@ -1604,6 +2150,80 @@ def send_email_report(
         return False
 
 
+def append_jane_announcement(payload: dict[str, Any]) -> None:
+    ANNOUNCEMENTS_PATH = Path(VESSENCE_DATA_HOME) / "data" / "jane_announcements.jsonl"
+    ANNOUNCEMENTS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with ANNOUNCEMENTS_PATH.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n")
+
+
+def send_app_report_notification(
+    state: dict[str, Any],
+    report_path: Path,
+    html_report_path: Path,
+    new_count: int,
+    force: bool,
+) -> bool:
+    if not should_send_report(state, force):
+        return False
+
+    processed_count = len(state.get("processed_sources", {}))
+    report_id = report_id_from_path(report_path)
+    created_at = iso_now()
+    if new_count == 1:
+        source_phrase = "1 new/upgraded source summary"
+    else:
+        source_phrase = f"{new_count} new/upgraded source summaries"
+    message = (
+        f"{source_phrase}; {processed_count} cached sources total. "
+        "Tap to read the HTML report."
+    )
+    payload = {
+        "id": f"ra_report_{report_id}",
+        "type": "report_ready",
+        "report_kind": "ra_research",
+        "title": "RA research update ready",
+        "message": message,
+        "created_at": created_at,
+        "timestamp": created_at,
+        "final": True,
+        "report_id": report_id,
+        "report_url": f"/api/research/ra/reports/{report_id}.html",
+        "web_url": f"/research/ra/reports/{report_id}",
+        "markdown_path": str(report_path),
+        "html_path": str(html_report_path),
+        "new_sources": new_count,
+        "total_sources": processed_count,
+    }
+    append_jane_announcement(payload)
+    state["last_report_sent_at"] = created_at
+    state["last_report_source_count"] = processed_count
+    state["initial_report_sent"] = True
+    state["last_report_error"] = None
+    state["last_report_channel"] = "app"
+    state["last_html_report_path"] = str(html_report_path)
+    LOGGER.info("Published RA research app notification announcement %s", payload["id"])
+    return True
+
+
+def send_report_update(
+    state: dict[str, Any],
+    report_path: Path,
+    html_report_path: Path,
+    recommendation_text: str,
+    action_plan_text: str,
+    new_count: int,
+    force: bool,
+) -> bool:
+    if REPORT_CHANNEL in {"email", "gmail"}:
+        state["last_report_channel"] = "email"
+        return send_email_report(state, report_path, recommendation_text, action_plan_text, force)
+    if REPORT_CHANNEL in {"none", "off", "disabled"}:
+        state["last_report_channel"] = "disabled"
+        return False
+    return send_app_report_notification(state, report_path, html_report_path, new_count, force)
+
+
 def log_short_term(new_count: int, processed_total: int) -> None:
     fact = (
         f"RA research cron ran at {iso_now()}. New sources processed: {new_count}. "
@@ -1646,6 +2266,7 @@ def run_once(max_new_sources: int, *, no_email: bool, force_report: bool) -> dic
     upgraded_summaries = retry_pending_llm_reviews(state)
     if upgraded_summaries:
         new_summaries.extend(upgraded_summaries)
+    new_summaries = dedupe_summaries(new_summaries)
     summaries = load_all_summaries()
     fallback_recommendation = build_recommendation_scheme(summaries, new_summaries)
     fallback_action_plan = deterministic_action_plan(summaries)
@@ -1657,11 +2278,20 @@ def run_once(max_new_sources: int, *, no_email: bool, force_report: bool) -> dic
         fallback_action_plan,
     )
     atomic_write_text(RECOMMENDATION_PATH, recommendation_text)
-    report_path = write_run_report(new_summaries, recommendation_text, action_plan_text)
+    processed_total = len(state.get("processed_sources", {}))
+    report_path, html_report_path = write_run_report(
+        new_summaries,
+        summaries,
+        recommendation_text,
+        action_plan_text,
+        processed_total,
+        codex_result,
+    )
 
     state["last_run_finished_at"] = iso_now()
     state["last_new_source_count"] = len(new_summaries)
     state["last_report_path"] = str(report_path)
+    state["last_html_report_path"] = str(html_report_path)
     state["recommendation_path"] = str(RECOMMENDATION_PATH)
     state["action_plan_path"] = str(ACTION_PLAN_PATH)
     state["last_action_plan_path"] = str(action_plan_path)
@@ -1672,22 +2302,42 @@ def run_once(max_new_sources: int, *, no_email: bool, force_report: bool) -> dic
     state["smart_provider"] = SMART_PROVIDER
     state["smart_model_label"] = SMART_MODEL_LABEL
 
-    email_sent = False
+    report_notification_sent = False
     if not no_email:
-        email_sent = send_email_report(state, report_path, recommendation_text, action_plan_text, force_report)
+        report_notification_sent = send_report_update(
+            state,
+            report_path,
+            html_report_path,
+            recommendation_text,
+            action_plan_text,
+            len(new_summaries),
+            force_report,
+        )
+    if REPORT_CHANNEL in {"email", "gmail"}:
+        active_report_channel = "email"
+    elif REPORT_CHANNEL in {"none", "off", "disabled"}:
+        active_report_channel = "disabled"
+    else:
+        active_report_channel = "app"
+    email_sent = report_notification_sent if active_report_channel == "email" else False
     state["last_email_sent_this_run"] = email_sent
+    state["last_report_notification_sent_this_run"] = report_notification_sent
+    state["last_report_channel"] = active_report_channel
     save_state(state)
-    log_short_term(len(new_summaries), len(state.get("processed_sources", {})))
+    log_short_term(len(new_summaries), processed_total)
 
     return {
         "new_sources": len(new_summaries),
         "total_sources": len(state.get("processed_sources", {})),
         "report_path": str(report_path),
+        "html_report_path": str(html_report_path),
         "recommendation_path": str(RECOMMENDATION_PATH),
         "action_plan_path": str(ACTION_PLAN_PATH),
         "compressed_context_path": str(COMPRESSED_CONTEXT_PATH),
         "codex_synthesis_path": str(codex_path) if codex_path else "",
         "email_sent": email_sent,
+        "report_notification_sent": report_notification_sent,
+        "report_channel": active_report_channel,
         "run_count": state["run_count"],
         "initial_report_sent": bool(state.get("initial_report_sent")),
     }
@@ -1704,8 +2354,8 @@ def configure_logging(verbose: bool = False) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description="RA remission research cron")
     parser.add_argument("--max-new-sources", type=int, default=int(os.environ.get("RA_RESEARCH_MAX_NEW_SOURCES", "10")))
-    parser.add_argument("--no-email", action="store_true", help="Do not send the 3-day email report")
-    parser.add_argument("--send-report-now", action="store_true", help="Send report even if 72h have not elapsed")
+    parser.add_argument("--no-email", action="store_true", help="Do not deliver the scheduled report")
+    parser.add_argument("--send-report-now", action="store_true", help="Deliver report even if the interval has not elapsed")
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
 

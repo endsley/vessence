@@ -1,5 +1,5 @@
 # Job: Waterlily iterative refactor 2/5
-Status: pending
+Status: completed
 Priority: medium
 Created: 2026-06-30
 Tags: scheduled-refactor, waterlily, iteration-2
@@ -39,3 +39,6 @@ This is iteration 2 of 5 for `waterlily`. The goal is to build on whatever previ
 - `/home/chieh/code/waterlily`
 - Project refactor journal, usually `/home/chieh/code/waterlily/REFACTORING.md`
 - Vessence job queue file `job_097_waterlily_refactor_iter_02.md`
+
+## Result
+[ACK]Chieh, I’ll inspect the Waterlily refactor notes, choose one bounded slice, implement it, test it, journal it, and commit if clean; this will take a bit.[/ACK]I’m using the `refactoring` skill for the workflow and the Waterlily project context from memory. I’ll read the repo instructions and cu

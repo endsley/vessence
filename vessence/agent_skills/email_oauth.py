@@ -21,6 +21,7 @@ _VESSENCE_DATA_HOME = os.environ.get(
 _CREDS_DIR = os.path.join(_VESSENCE_DATA_HOME, "credentials")
 _TOKEN_FILE = os.path.join(_CREDS_DIR, "gmail_token.json")
 _TOKEN_FILE_PREFIX = "gmail_token_"
+_BOOTSTRAPPED_GOOGLE_OAUTH_ENV = False
 
 
 def _normalized_user_id(user_id: str | None) -> str:
@@ -114,6 +115,15 @@ def load_gmail_token(user_id: str | None = None) -> dict | None:
                 data = json.load(f)
             if _normalized_user_id(data.get("user_id")) == normalized_user:
                 return data
+        for path in Path(_CREDS_DIR).glob(f"{_TOKEN_FILE_PREFIX}*.json"):
+            try:
+                with open(path) as f:
+                    data = json.load(f)
+            except Exception:
+                continue
+            if _normalized_user_id(data.get("user_id")) == normalized_user:
+                _logger.info("Loaded Gmail token for %s from %s", normalized_user, path)
+                return data
         _logger.warning("No Gmail token found for user %s", normalized_user)
         return None
 
@@ -157,6 +167,38 @@ def list_gmail_token_users() -> list[str]:
     return sorted(users)
 
 
+def _bootstrap_google_oauth_env() -> None:
+    """Load OAuth client settings for cron-safe Gmail token refresh."""
+    global _BOOTSTRAPPED_GOOGLE_OAUTH_ENV
+    if _BOOTSTRAPPED_GOOGLE_OAUTH_ENV:
+        return
+    _BOOTSTRAPPED_GOOGLE_OAUTH_ENV = True
+
+    try:
+        from dotenv import load_dotenv
+        from jane.config import ENV_FILE_PATH
+
+        load_dotenv(ENV_FILE_PATH)
+    except Exception as exc:
+        _logger.debug("Gmail OAuth dotenv bootstrap skipped: %s", exc)
+
+    if os.environ.get("GOOGLE_CLIENT_ID") and os.environ.get("GOOGLE_CLIENT_SECRET"):
+        return
+
+    try:
+        from agent_skills.secret_store import SecretStore
+
+        store = SecretStore()
+        if not store.is_unlocked():
+            return
+        for key in ("GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"):
+            value = store.get(key)
+            if value and not os.environ.get(key):
+                os.environ[key] = value
+    except Exception as exc:
+        _logger.debug("Gmail OAuth SecretStore bootstrap skipped: %s", exc)
+
+
 def refresh_token_if_needed(user_id: str | None = None) -> dict | None:
     """Refresh the access token if it has expired.
 
@@ -179,6 +221,7 @@ def refresh_token_if_needed(user_id: str | None = None) -> dict | None:
         _logger.error("No refresh token available — cannot refresh Gmail access token")
         return None
 
+    _bootstrap_google_oauth_env()
     client_id = os.environ.get("GOOGLE_CLIENT_ID", "")
     client_secret = os.environ.get("GOOGLE_CLIENT_SECRET", "")
     if not client_id or not client_secret:

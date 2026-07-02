@@ -55,12 +55,13 @@ def _run_codex(prompt: str, *, timeout_seconds: int, workdir: str) -> str:
         workdir,
         "-o",
         output_path,
-        prompt,
+        "-",
     ]
 
     try:
         result = subprocess.run(
             cmd,
+            input=prompt,
             capture_output=True,
             text=True,
             timeout=timeout_seconds,

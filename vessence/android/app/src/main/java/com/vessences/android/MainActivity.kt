@@ -356,6 +356,9 @@ class MainActivity : ComponentActivity() {
         SmsSyncManager.startPeriodicSync(applicationContext)
         try { com.vessences.android.photos.CameraSyncScheduler.ensureScheduled(applicationContext) } catch (_: Exception) {}
         try { ChatNotificationManager(applicationContext).ensureChannels() } catch (_: Exception) {}
+        try { com.vessences.android.reports.ResearchReportNotificationManager(applicationContext).ensureChannel() } catch (_: Exception) {}
+        try { com.vessences.android.reports.ResearchReportScheduler.ensureScheduled(applicationContext) } catch (_: Exception) {}
+        try { com.vessences.android.reports.ResearchReportScheduler.checkNow(applicationContext) } catch (_: Exception) {}
         // Auto-start wake word service if always-listen was enabled
         // BUT skip if this is a wake word intent — service just stopped itself on purpose
         val isWakeWordLaunch = intent?.getBooleanExtra("wake_word", false) == true
