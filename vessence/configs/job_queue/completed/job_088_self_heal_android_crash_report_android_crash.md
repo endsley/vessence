@@ -157,3 +157,29 @@ Verification:
 Recording blocker:
 - Canonical incident JSON/report files live under `/home/chieh/ambient/vessence-data`, which is outside the current writable sandbox roots, so this recheck is recorded in the repository job work log instead.
 - The documented Vessence venv path `/home/chieh/ambient/venv/bin/python` is absent on this machine; the route smoke test used the available ADK Python.
+
+## Recheck 2026-07-02
+
+Evidence reviewed again:
+- Incident JSON: `/home/chieh/ambient/vessence-data/self_healing/incidents/20260626T104225.698556+0000_android_crash_report_a731dc48de8845ad416a3fb3.json`
+- Existing repair report: `/home/chieh/ambient/vessence-data/self_healing/reports/20260626T104225.821409+0000_android_crash_report_a731dc48de8845ad416a3fb3.md`
+- Android diagnostic log: `/home/chieh/ambient/vessence-data/logs/android_diagnostics.jsonl`
+- Source: `android/app/src/main/java/com/vessences/android/voice/AlwaysListeningService.kt`, `android/app/src/main/java/com/vessences/android/CrashReporter.kt`, `jane_web/main.py`
+- Android call-site search for direct service start/stop bypasses.
+
+Outcome:
+- No new source patch was justified.
+- The incident is already marked `repair_finished`, and the current source still contains the foreground-service lifecycle repair for the captured Android 13 crash.
+- Diagnostic evidence at `2026-06-25T09:44:28Z` still shows `AlwaysListening` started, stopped milliseconds later, then continued through model load and mic startup; current code guards this path with immediate foreground promotion, shared start/foreground/stop atomics, deferred stop while start is in flight, restart-after-stop preservation, and late mic-start checks.
+- Current Android call sites still route through `AlwaysListeningService.start()` / `AlwaysListeningService.stop()`; no direct bypass was found.
+- `/home/chieh/ambient/vessence-data/logs/android_crashes.log` is no longer present; the incident JSON and `android_diagnostics.jsonl` preserve the captured crash and lifecycle evidence.
+
+Verification:
+- Temp-data-root smoke test of `POST /api/crash-report` passed using `/home/chieh/google-adk-env/adk-venv/bin/python`: the route returned `{"status": "received"}`, wrote `android_crashes.log`, and dispatched `android_crash_report` / `android_crash` metadata with self-healing stubbed.
+- `GRADLE_USER_HOME=/tmp/codex-gradle-home ./gradlew --no-daemon :app:compileDebugKotlin` passed: `BUILD SUCCESSFUL in 5m 41s`.
+- The original `GRADLE_USER_HOME=/tmp/codex-gradle-home nice -n 19 ionice -c 3 ./gradlew :app:compileDebugKotlin` check also completed: `BUILD SUCCESSFUL in 7m 27s`.
+- Both Gradle runs hit the known sandbox-only Kotlin daemon read-only warning for `/home/chieh/.local/share/kotlin`, then fell back to non-daemon compilation successfully.
+- `git diff --check -- android/app/src/main/java/com/vessences/android/voice/AlwaysListeningService.kt android/app/src/main/java/com/vessences/android/CrashReporter.kt jane_web/main.py configs/job_queue/completed/job_088_self_heal_android_crash_report_android_crash.md` passed before this entry was appended.
+
+Recording blocker:
+- Canonical incident JSON/report files live under `/home/chieh/ambient/vessence-data`, which is outside the current writable sandbox roots, so this recheck is recorded in the repository job work log instead.

@@ -1,15 +1,15 @@
-# Memory Verification Report — 2026-07-01 02:39
+# Memory Verification Report — 2026-07-02 03:00
 
-Checked: 20 | Stale: 11 | Fixed: 10 | Deleted: 0 | Errors: 0 | Skipped recent: 230
+Checked: 20 | Stale: 11 | Fixed: 11 | Deleted: 0 | Errors: 0 | Skipped recent: 247
 
-- **UPDATED** `e2d28b52-c41` — Code, imports, doc-drift parser/tests, and git refs confirm the refactor claims; 21 relevant focused tests pass. Codex was wrong about current GitHub access still being unclean.
-- **UPDATED** `53d9824a-2f1` — Actual code, CRON_JOBS.md, live crontab, state.json, and run logs confirm Codex was mostly right. The old memory was stale because the final recommendation path was truncated and it omitted the recent Codex argument-length fallback; Codex's note that live crontab was unreadable is not true in this environment because `crontab -l` was readable and shows the active job.
-- **UPDATED** `86f8e8fb-ca6` — Confirmed from the script, CRON_JOBS.md, scheduler state/logs, and current crontab that the only stale part was minute 7; the actual completed schedule was minute 52.
-- **KEPT** `46d29735-929` — Codex was wrong to require a correction: commit 0a57ed4 is on origin/master, the implementation/wrapper/docs match the memory, and the live crontab confirms the 10 5 * * * schedule.
-- **UPDATED** `fdb2813d-69f` — Confirmed in the live script: DEFAULT_OUT_DIR is /home/chieh/code/waterlily/.auth/download_artifacts and --out-dir defaults to it; no Downloads fallback found.
-- **UPDATED** `ce89971f-01c` — Confirmed in startup_code/bump_android_version.py, android/app/build.gradle.kts, and jane_web/main.py; the original memory is accurate but truncated and missing fallback behavior.
-- **UPDATED** `ae21d358-1a9` — Codex was right: the stale part is the validator claim. Actual validate_manifest allows preferred_model: null while requiring the key and validating object subfields only when present as an object.
-- **UPDATED** `bd704a5d-98b` — Code confirms the model-config facts, runtime v3 enablement, and shared imports. The stale part is that the original memory treated v2 gate/continuation checks as active in the current v3 pipeline; they still exist but are skipped by active v3 routing.
-- **UPDATED** `046fc30a-7ec` — Confirmed against configs/VESSENCE_SPEC.md, jane_web/main.py, agent_skills/essence_loader.py, vault_web/static/essences.html, and Android Essences UI/repository code. Codex was right that the stored memory is truncated and partially incomplete.
-- **UPDATED** `473c4e96-5ac` — Confirmed against README.md, CLAUDE.md, app code/config, and git state; Codex was right that the old current-checkout portion was stale/incomplete.
-- **UPDATED** `00698b9a-68f` — Confirmed in jane/config.py, jane_web/jane_proxy.py, llm_brain/v1/standing_codex.py, jane/persistent_codex.py, and llm_brain/v1/persistent_codex.py; the old memory was truncated and overstated JANE_CODE_WRITE_ROOTS as the only standing Codex write-root source.
+- **UPDATED** `71f0adca-e72` — Actual code confirms the OAuth fallback and app-default RA report channel. Current state/logs do not support the claimed RA Gmail send or message id; crontab was readable and reinforces that the channel is not set to email.
+- **UPDATED** `f1754f9f-0b7` — Original 2-day claim is stale. Codex was right about the code default/no internal 2pm gate, but wrong about current live crontab: it now runs daily at 14:00 EDT with --send-report-now.
+- **UPDATED** `7556a72f-52d` — Actual code, lsblk/findmnt, live crontab, log grep/tail, and snapshot directory listing confirm the memory was stale/incomplete; Codex was right but omitted the newer 2026-07-02 snapshot.
+- **UPDATED** `ef78f2aa-91f` — Verified against the current code. The core behavior is accurate, but the old memory is stale because report orchestration and helpers are now split across accounting_income_report, accounting_income_products, accounting_income_charges, and accounting_income_invoice_charge_audits.
+- **UPDATED** `398b73f7-b00` — Confirmed against the backup script, documented cron files, live crontab, existing paths, and backup log; only the truncated mount path and stale date needed correction.
+- **UPDATED** `9ecfcc9d-704` — Confirmed against /etc/fstab, the backup script, the backup log, and the existing snapshot directory; the stale part was the truncated snapshot path.
+- **UPDATED** `1466722a-a4e` — Confirmed against current code: jane.py is absent/untracked, the Jane spawn-timeout symbols are absent, and the Gemma/Ollama receipt-enrichment settings and non-streaming /api/chat request match the suggested correction.
+- **UPDATED** `92fc790e-acb` — Codex was right: direct code and service-file checks confirm backend/jane.py was deleted, the spawn-timeout symbols are gone, current Gemma config lives in backend/app_config.py, and the waterlily-auth service claim is still accurate.
+- **UPDATED** `032cc1f6-19b` — Code confirms the active-state part was stale; Codex was mostly right, except list_available is imported but not actually used in jane_web/main.py.
+- **UPDATED** `5fbb727b-767` — Confirmed from the repo: `jane_web/main.py` exists and contains the app entrypoint, while there is no repo-root `main.py`; so `main.py` is only valid as a short visible label, not as a repo-relative path.
+- **UPDATED** `6dbf5f9d-b0d` — Source confirms the core routing and normalization claims, but the stored memory is truncated and omits the safe/yolo sandbox distinction.
