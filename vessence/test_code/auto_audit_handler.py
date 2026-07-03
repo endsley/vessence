@@ -1,17 +1,16 @@
-"""Auto-audit tests for jane_web.jane_v2.classes.shopping_list.handler."""
+"""Auto-audit tests for jane_web.jane_v2.classes.weather.handler."""
 
 from __future__ import annotations
 
 import ast
-import builtins
 import importlib
 import inspect
-import math
+import json
 import re
 import sys
+from datetime import date, timedelta
 from pathlib import Path
-from types import ModuleType
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -20,74 +19,36 @@ VESSENCE_ROOT = Path(__file__).resolve().parents[1]
 if str(VESSENCE_ROOT) not in sys.path:
     sys.path.insert(0, str(VESSENCE_ROOT))
 
-MODULE_NAME = "jane_web.jane_v2.classes.shopping_list.handler"
-METADATA_MODULE_NAME = "jane_web.jane_v2.classes.shopping_list.metadata"
-MODULE_PATH = VESSENCE_ROOT / "jane_web/jane_v2/classes/shopping_list/handler.py"
-METADATA_PATH = VESSENCE_ROOT / "jane_web/jane_v2/classes/shopping_list/metadata.py"
-TODO_HANDLER_PATH = VESSENCE_ROOT / "jane_web/jane_v2/classes/todo_list/handler.py"
-
-
-class _FakeShoppingStore:
-    def __init__(self, initial: list[str] | tuple[str, ...] = ()):
-        self.items = list(initial)
-        self.module = ModuleType("agent_skills.shopping_list")
-        self.module.add_item = Mock(side_effect=self.add_item)
-        self.module.remove_item = Mock(side_effect=self.remove_item)
-        self.module.get_list = Mock(side_effect=self.get_list)
-        self.module.clear_list = Mock(side_effect=self.clear_list)
-
-    def add_item(self, item: str, list_name: str = "default") -> list[str]:
-        self.items.append(item)
-        return list(self.items)
-
-    def remove_item(
-        self,
-        item: str,
-        list_name: str = "default",
-        *,
-        confidence: float,
-    ) -> list[str]:
-        needle = item.strip().lower()
-        self.items = [current for current in self.items if current.lower() != needle]
-        return list(self.items)
-
-    def get_list(self, list_name: str = "default") -> list[str]:
-        return list(self.items)
-
-    def clear_list(self, list_name: str = "default", *, confidence: float) -> None:
-        self.items.clear()
-        return None
+MODULE_NAME = "jane_web.jane_v2.classes.weather.handler"
+METADATA_MODULE_NAME = "jane_web.jane_v2.classes.weather.metadata"
+SLICES_MODULE_NAME = "jane_web.jane_v2.classes.weather.slices"
+CLASSES_MODULE_NAME = "jane_web.jane_v2.classes"
+MODULE_PATH = VESSENCE_ROOT / "jane_web/jane_v2/classes/weather/handler.py"
+SLICES_PATH = VESSENCE_ROOT / "jane_web/jane_v2/classes/weather/slices.py"
+WEATHER_CLASS_DIR = VESSENCE_ROOT / "jane_web/jane_v2/classes/weather"
 
 
 @pytest.fixture
-def shopping_handler():
+def weather_handler():
     return importlib.import_module(MODULE_NAME)
 
 
 @pytest.fixture
-def shopping_metadata():
+def weather_metadata():
     return importlib.import_module(METADATA_MODULE_NAME)
 
 
 @pytest.fixture
-def fake_store(monkeypatch):
-    store = _FakeShoppingStore()
-    monkeypatch.setitem(sys.modules, "agent_skills.shopping_list", store.module)
-    return store
-
-
-def _install_fake_store(monkeypatch, initial=()):
-    store = _FakeShoppingStore(initial)
-    monkeypatch.setitem(sys.modules, "agent_skills.shopping_list", store.module)
-    return store
-
-
-def _module_ast() -> ast.Module:
-    return ast.parse(MODULE_PATH.read_text())
+def weather_slices():
+    return importlib.import_module(SLICES_MODULE_NAME)
 
 
 def _source(path: Path = MODULE_PATH) -> str:
     return path.read_text()
+
+
+def _module_ast(path: Path = MODULE_PATH) -> ast.Module:
+    return ast.parse(_source(path))
 
 
 def _call_name(node: ast.AST) -> str:
@@ -99,25 +60,94 @@ def _call_name(node: ast.AST) -> str:
     return ""
 
 
+def _weather_data(start: date | None = None) -> dict:
+    start = start or date.today()
+    forecast = []
+    for offset in range(8):
+        current = start + timedelta(days=offset)
+        forecast.append(
+            {
+                "date": current.isoformat(),
+                "weekday": current.strftime("%A"),
+                "high": 70 + offset,
+                "low": 50 + offset,
+                "condition": "clear" if offset < 2 else "partly cloudy",
+                "precipitation": {"chance": offset * 10},
+                "wind": {"speed": 5 + offset},
+                "debug_provider_payload": {"raw": True},
+            }
+        )
+    return {
+        "forecast": forecast,
+        "current": {
+            "temperature": 69,
+            "feels_like": 68,
+            "condition": "clear",
+            "wind": {"speed": 4},
+            "debug_station": "drop me",
+        },
+        "air_quality": {"us_aqi": 35, "aqi": 40},
+        "pollen": {"tree": "low", "grass": "moderate", "weed": "low"},
+    }
+
+
+def _write_weather_cache(tmp_path: Path, monkeypatch, weather_handler, data: dict) -> Path:
+    path = tmp_path / "weather.json"
+    path.write_text(json.dumps(data))
+    monkeypatch.setattr(weather_handler, "WEATHER_PATH", path)
+    return path
+
+
+def _install_llm(monkeypatch, weather_handler, answer: str | None = "It is clear."):
+    calls: list[dict] = []
+
+    async def fake_llm(prompt, payload_builder):
+        payload = payload_builder(
+            prompt,
+            model="test-weather-model",
+            num_ctx=1234,
+            keep_alive="1m",
+        )
+        calls.append({"prompt": prompt, "payload": payload})
+        return answer
+
+    monkeypatch.setattr(weather_handler, "_post_local_llm_response", fake_llm)
+    return calls
+
+
 def _assert_text_response(result: dict | None) -> None:
     assert isinstance(result, dict)
     assert isinstance(result.get("text"), str)
     assert result["text"]
 
 
-def _actions_from_metadata_schema(shopping_metadata) -> set[str]:
-    action_schema = shopping_metadata.PARAMS_SCHEMA["action"]
-    match = re.search(r"one of:\s*([^.]*)\.", action_schema)
+def _assert_weather_followup_shape(result: dict | None, topic: str, location: str) -> None:
+    _assert_text_response(result)
+    assert "Want the weather for another day?" in result["text"]
+    pending = result["structured"]["pending_action"]
+    assert pending["type"] == "STAGE2_FOLLOWUP"
+    assert pending["handler_class"] == "weather"
+    assert pending["awaiting"] == "another_day_or_stop"
+    assert pending["question"] == "Want the weather for another day?"
+    assert pending["data"]["topic"] == topic
+    assert pending["data"]["location"] == location
+    assert pending["data"]["awaiting"] == "another_day_or_stop"
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", pending["expires_at"])
+
+
+def _schema_topics(weather_metadata) -> set[str]:
+    topic_schema = weather_metadata.PARAMS_SCHEMA["topic"]
+    match = re.search(r"one of:\s*([^.]*)\.", topic_schema)
     assert match is not None
     return {piece.strip() for piece in match.group(1).split("|")}
 
 
-def _action_branch_literals() -> set[str]:
-    actions: set[str] = set()
-    for node in ast.walk(_module_ast()):
+def _slice_topic_branch_literals() -> set[str]:
+    topics: set[str] = set()
+    for node in ast.walk(_module_ast(SLICES_PATH)):
         if not isinstance(node, ast.Compare):
             continue
-        if not isinstance(node.left, ast.Name) or node.left.id != "action":
+        if not isinstance(node.left, ast.Name) or node.left.id != "topic":
             continue
         for op, comparator in zip(node.ops, node.comparators):
             if (
@@ -125,417 +155,479 @@ def _action_branch_literals() -> set[str]:
                 and isinstance(comparator, ast.Constant)
                 and isinstance(comparator.value, str)
             ):
-                actions.add(comparator.value)
-    return actions
+                topics.add(comparator.value)
+    return topics
 
 
-def _string_literals_in_path(path: Path) -> set[str]:
-    values: set[str] = set()
-    for node in ast.walk(ast.parse(_source(path))):
-        if isinstance(node, ast.Constant) and isinstance(node.value, str):
-            values.add(node.value)
-    return values
+def _string_literals(path: Path) -> set[str]:
+    return {
+        node.value
+        for node in ast.walk(_module_ast(path))
+        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+    }
 
 
-def test_docstring_is_the_params_driven_stage2_spec(shopping_handler):
-    doc = inspect.getdoc(shopping_handler)
+def test_docstring_is_the_weather_stage2_spec(weather_handler):
+    doc = inspect.getdoc(weather_handler)
 
     assert doc is not None
-    assert "params-driven" in doc
-    assert 'params["action"]' in doc
-    assert "no local LLM intent parse" in doc
-    assert "Escalates to Stage 3" in doc
-    assert "add/remove/view/clear/check" in doc
+    assert "params-driven slice" in doc
+    assert "Stage 1" in doc
+    assert "{topic, day, location}" in doc
+    assert "small fact slice" in doc
+    assert '{"text": "<answer>"}' in doc
+    assert "None" in doc
+    assert "non-Medford" in doc
+    assert "research/online questions" in doc
 
 
-def test_public_handler_contract_is_async_and_params_driven(shopping_handler):
-    signature = inspect.signature(shopping_handler.handle)
+def test_public_handler_contract_is_async_and_stage2_shaped(weather_handler):
+    signature = inspect.signature(weather_handler.handle)
 
-    assert inspect.iscoroutinefunction(shopping_handler.handle)
-    assert list(signature.parameters) == ["prompt", "params"]
+    assert inspect.iscoroutinefunction(weather_handler.handle)
+    assert list(signature.parameters) == ["prompt", "context", "pending", "params"]
+    assert signature.parameters["context"].default == ""
+    assert signature.parameters["pending"].default is None
     assert signature.parameters["params"].default is None
-    assert isinstance(shopping_handler._VALID_ACTIONS, set)
-
-
-@pytest.mark.parametrize(
-    ("raw", "expected"),
-    [
-        (None, []),
-        ("", []),
-        ("   ", []),
-        (",,,", []),
-        ("milk", ["milk"]),
-        (" milk , eggs , bread ", ["milk", "eggs", "bread"]),
-        ("milk,, eggs,  , bread", ["milk", "eggs", "bread"]),
-        (["milk"], []),
-        (123, []),
-    ],
-)
-def test_split_items_handles_empty_malformed_and_comma_separated_input(
-    shopping_handler,
-    raw,
-    expected,
-):
-    assert shopping_handler._split_items(raw) == expected
-
-
-def test_split_items_preserves_very_long_item_text(shopping_handler):
-    long_item = "x" * 20_000
-
-    assert shopping_handler._split_items(f" milk , {long_item} ") == [
-        "milk",
-        long_item,
-    ]
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("params", [None, {}, []])
-async def test_missing_or_empty_params_escalate_without_store_calls(
-    shopping_handler,
-    fake_store,
-    params,
+async def test_success_uses_params_slice_cache_and_mocked_llm(
+    weather_handler,
+    monkeypatch,
+    tmp_path,
 ):
-    result = await shopping_handler.handle("show my shopping list", params=params)
+    data = _weather_data()
+    _write_weather_cache(tmp_path, monkeypatch, weather_handler, data)
+    llm_calls = _install_llm(monkeypatch, weather_handler, "High around 71 and clear.")
+
+    result = await weather_handler.handle(
+        "what is tomorrow's weather in Medford?",
+        params={"topic": "forecast", "day": "tomorrow", "location": "Medford"},
+    )
+
+    _assert_weather_followup_shape(result, topic="forecast", location="medford")
+    assert result["text"].startswith("Tomorrow: high around 71 and clear.")
+    assert len(llm_calls) == 1
+    payload = llm_calls[0]["payload"]
+    assert payload["model"] == "test-weather-model"
+    assert payload["stream"] is False
+    assert payload["think"] is False
+    assert payload["options"] == {
+        "temperature": 0.2,
+        "num_predict": 60,
+        "num_ctx": 1234,
+    }
+    assert payload["keep_alive"] == "1m"
+    assert '"topic": "day_forecast"' in payload["prompt"]
+    assert '"debug_provider_payload"' not in payload["prompt"]
+    assert "User question: what is tomorrow's weather in Medford?" in payload["prompt"]
+
+
+@pytest.mark.asyncio
+async def test_unknown_topic_falls_back_to_overview(
+    weather_handler,
+    monkeypatch,
+    tmp_path,
+):
+    _write_weather_cache(tmp_path, monkeypatch, weather_handler, _weather_data())
+    llm_calls = _install_llm(monkeypatch, weather_handler, "It is mild.")
+
+    result = await weather_handler.handle(
+        "what's it like out?",
+        params={"topic": "mystery", "day": None, "location": ""},
+    )
+
+    _assert_weather_followup_shape(result, topic="overview", location="")
+    assert "It is mild." in result["text"]
+    assert len(llm_calls) == 1
+    assert '"topic": "overview"' in llm_calls[0]["payload"]["prompt"]
+
+
+@pytest.mark.asyncio
+async def test_params_none_defaults_to_overview(weather_handler, monkeypatch, tmp_path):
+    _write_weather_cache(tmp_path, monkeypatch, weather_handler, _weather_data())
+    _install_llm(monkeypatch, weather_handler, "It is comfortable.")
+
+    result = await weather_handler.handle("weather", params=None)
+
+    _assert_weather_followup_shape(result, topic="overview", location="")
+    assert "It is comfortable." in result["text"]
+
+
+@pytest.mark.asyncio
+async def test_non_medford_location_escalates_without_cache_or_llm(
+    weather_handler,
+    monkeypatch,
+):
+    path_spy = Mock()
+    path_spy.read_text.side_effect = RuntimeError("cache should not be read")
+    llm_mock = AsyncMock(side_effect=AssertionError("LLM should not be called"))
+    monkeypatch.setattr(weather_handler, "WEATHER_PATH", path_spy)
+    monkeypatch.setattr(weather_handler, "_post_local_llm_response", llm_mock)
+
+    result = await weather_handler.handle(
+        "what's the weather in Tokyo?",
+        params={"topic": "current", "day": "today", "location": "Tokyo"},
+    )
 
     assert result is None
-    fake_store.module.add_item.assert_not_called()
-    fake_store.module.remove_item.assert_not_called()
-    fake_store.module.get_list.assert_not_called()
-    fake_store.module.clear_list.assert_not_called()
+    path_spy.read_text.assert_not_called()
+    llm_mock.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        "can you look up the weather online?",
+        "do a search for the latest on the storm",
+        "what's causing the haze?",
+        "why is the sky orange today?",
+        "news about the storm",
+    ],
+)
+async def test_research_or_online_phrases_escalate_before_cache_or_llm(
+    weather_handler,
+    monkeypatch,
+    prompt,
+):
+    path_spy = Mock()
+    path_spy.read_text.side_effect = RuntimeError("cache should not be read")
+    llm_mock = AsyncMock(side_effect=AssertionError("LLM should not be called"))
+    monkeypatch.setattr(weather_handler, "WEATHER_PATH", path_spy)
+    monkeypatch.setattr(weather_handler, "_post_local_llm_response", llm_mock)
+
+    result = await weather_handler.handle(
+        prompt,
+        params={"topic": "overview", "day": None, "location": ""},
+    )
+
+    assert result is None
+    path_spy.read_text.assert_not_called()
+    llm_mock.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cache_text", ["", "{", "[]", "null"])
+async def test_unreadable_or_malformed_cache_escalates_without_llm(
+    weather_handler,
+    monkeypatch,
+    tmp_path,
+    cache_text,
+):
+    path = tmp_path / "weather.json"
+    path.write_text(cache_text)
+    llm_mock = AsyncMock(side_effect=AssertionError("LLM should not be called"))
+    monkeypatch.setattr(weather_handler, "WEATHER_PATH", path)
+    monkeypatch.setattr(weather_handler, "_post_local_llm_response", llm_mock)
+
+    result = await weather_handler.handle(
+        "weather",
+        params={"topic": "overview", "day": None, "location": ""},
+    )
+
+    assert result is None
+    llm_mock.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_cache_miss_escalates_without_llm(weather_handler, monkeypatch, tmp_path):
+    data = {**_weather_data(), "pollen": None}
+    _write_weather_cache(tmp_path, monkeypatch, weather_handler, data)
+    llm_mock = AsyncMock(side_effect=AssertionError("LLM should not be called"))
+    monkeypatch.setattr(weather_handler, "_post_local_llm_response", llm_mock)
+
+    result = await weather_handler.handle(
+        "how is the pollen?",
+        params={"topic": "pollen", "day": None, "location": ""},
+    )
+
+    assert result is None
+    llm_mock.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("llm_answer", [None, ""])
+async def test_empty_llm_response_escalates(
+    weather_handler,
+    monkeypatch,
+    tmp_path,
+    llm_answer,
+):
+    _write_weather_cache(tmp_path, monkeypatch, weather_handler, _weather_data())
+    _install_llm(monkeypatch, weather_handler, llm_answer)
+
+    result = await weather_handler.handle(
+        "weather",
+        params={"topic": "overview", "day": None, "location": ""},
+    )
+
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_llm_exception_escalates(weather_handler, monkeypatch, tmp_path):
+    _write_weather_cache(tmp_path, monkeypatch, weather_handler, _weather_data())
+
+    async def boom(prompt, payload_builder):
+        raise RuntimeError("ollama unavailable")
+
+    monkeypatch.setattr(weather_handler, "_post_local_llm_response", boom)
+
+    result = await weather_handler.handle(
+        "weather",
+        params={"topic": "overview", "day": None, "location": ""},
+    )
+
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_phrase_builds_payload_and_enforces_day_reference(weather_handler, monkeypatch):
+    captured: dict = {}
+
+    async def fake_llm(prompt, payload_builder):
+        captured["payload"] = payload_builder(
+            prompt,
+            model="qwen-test",
+            num_ctx=4096,
+            keep_alive=-1,
+        )
+        return "High near 70."
+
+    monkeypatch.setattr(weather_handler, "_post_local_llm_response", fake_llm)
+    monkeypatch.setattr(weather_handler, "_day_reference", lambda slice_obj: "Saturday")
+    slice_obj = {
+        "topic": "day_forecast",
+        "day": {"date": "2026-07-04", "weekday": "Saturday", "high": 70},
+    }
+
+    result = await weather_handler._phrase(slice_obj, "how hot?")
+
+    assert result == "Saturday: high near 70."
+    payload = captured["payload"]
+    assert payload["model"] == "qwen-test"
+    assert payload["options"]["num_ctx"] == 4096
+    assert payload["keep_alive"] == -1
+    assert '"topic": "day_forecast"' in payload["prompt"]
+    assert "User question: how hot?" in payload["prompt"]
+
+
+@pytest.mark.asyncio
+async def test_resume_followup_uses_pending_topic_and_followup_day(
+    weather_handler,
+    monkeypatch,
+    tmp_path,
+):
+    _write_weather_cache(tmp_path, monkeypatch, weather_handler, _weather_data())
+    _install_llm(monkeypatch, weather_handler, "High around 71 and clear.")
+    pending = {"data": {"topic": "forecast", "location": "medford"}}
+
+    result = await weather_handler.handle("tomorrow", pending=pending)
+
+    _assert_weather_followup_shape(result, topic="forecast", location="medford")
+    assert result["text"].startswith("Tomorrow: high around 71 and clear.")
+
+
+@pytest.mark.asyncio
+async def test_resume_without_day_abandons_pending_and_forces_stage3(weather_handler):
+    result = await weather_handler.handle(
+        "maybe later",
+        pending={"data": {"topic": "forecast", "location": "medford"}},
+    )
+
+    assert result == {"abandon_pending": True, "force_stage3": True}
+
+
+@pytest.mark.asyncio
+async def test_resume_cache_miss_abandons_pending_and_forces_stage3(
+    weather_handler,
+    monkeypatch,
+    tmp_path,
+):
+    data = {**_weather_data(), "pollen": None}
+    _write_weather_cache(tmp_path, monkeypatch, weather_handler, data)
+    pending = {"data": {"topic": "pollen", "location": "medford"}}
+
+    result = await weather_handler.handle("tomorrow", pending=pending)
+
+    assert result == {"abandon_pending": True, "force_stage3": True}
+
+
+@pytest.mark.asyncio
+async def test_resume_end_phrase_returns_conversation_end_without_cache_or_llm(
+    weather_handler,
+    monkeypatch,
+):
+    path_spy = Mock()
+    path_spy.read_text.side_effect = RuntimeError("cache should not be read")
+    llm_mock = AsyncMock(side_effect=AssertionError("LLM should not be called"))
+    monkeypatch.setattr(weather_handler, "WEATHER_PATH", path_spy)
+    monkeypatch.setattr(weather_handler, "_post_local_llm_response", llm_mock)
+
+    result = await weather_handler.handle(
+        "no",
+        pending={"data": {"topic": "forecast", "location": "medford"}},
+    )
+
+    assert result == {
+        "text": "Ok.",
+        "conversation_end": True,
+        "structured": {"intent": "weather"},
+    }
+    path_spy.read_text.assert_not_called()
+    llm_mock.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "prompt",
+    ["no, tomorrow", "maybe tomorrow", "stop by Friday", "cancel tomorrow"],
+)
+async def test_borderline_end_like_followups_do_not_end_conversation(
+    weather_handler,
+    monkeypatch,
+    prompt,
+):
+    from agent_skills import private_handler_utils
+
+    end_mock = Mock(side_effect=AssertionError("ambiguous input must not end"))
+    calls: list[tuple] = []
+
+    async def fake_answer(prompt_arg, topic, day, location):
+        calls.append((prompt_arg, topic, day, location))
+        return {"text": "followup answer"}
+
+    monkeypatch.setattr(private_handler_utils, "end_conversation", end_mock)
+    monkeypatch.setattr(weather_handler, "_answer_for", fake_answer)
+
+    result = await weather_handler.handle(
+        prompt,
+        pending={"data": {"topic": "forecast", "location": "medford"}},
+    )
+
+    assert result == {"text": "followup answer"}
+    assert calls
+    end_mock.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_resume_with_non_medford_pending_location_escalates_without_medford_cache_answer(
+    weather_handler,
+    monkeypatch,
+):
+    llm_mock = AsyncMock(side_effect=AssertionError("LLM should not be called"))
+    path_spy = Mock()
+    path_spy.read_text.return_value = json.dumps(_weather_data())
+    monkeypatch.setattr(weather_handler, "WEATHER_PATH", path_spy)
+    monkeypatch.setattr(weather_handler, "_post_local_llm_response", llm_mock)
+
+    result = await weather_handler.handle(
+        "tomorrow",
+        pending={"data": {"topic": "forecast", "location": "tokyo"}},
+    )
+
+    assert result == {"abandon_pending": True, "force_stage3": True}
+    llm_mock.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("prompt", ["", None])
+async def test_empty_and_none_prompt_still_use_valid_params(
+    weather_handler,
+    monkeypatch,
+    tmp_path,
+    prompt,
+):
+    _write_weather_cache(tmp_path, monkeypatch, weather_handler, _weather_data())
+    llm_calls = _install_llm(monkeypatch, weather_handler, "It is clear.")
+
+    result = await weather_handler.handle(
+        prompt,
+        params={"topic": "current", "day": "today", "location": ""},
+    )
+
+    _assert_weather_followup_shape(result, topic="current", location="")
+    assert "It is clear." in result["text"]
+    assert len(llm_calls) == 1
+    assert llm_calls[0]["prompt"] is prompt
+
+
+@pytest.mark.asyncio
+async def test_very_long_prompt_is_passed_to_single_llm_call(
+    weather_handler,
+    monkeypatch,
+    tmp_path,
+):
+    _write_weather_cache(tmp_path, monkeypatch, weather_handler, _weather_data())
+    llm_calls = _install_llm(monkeypatch, weather_handler, "It is clear.")
+    long_prompt = "what is the weather " * 20_000
+
+    result = await weather_handler.handle(
+        long_prompt,
+        params={"topic": "overview", "day": None, "location": ""},
+    )
+
+    _assert_weather_followup_shape(result, topic="overview", location="")
+    assert len(llm_calls) == 1
+    assert llm_calls[0]["prompt"] == long_prompt
+    assert long_prompt in llm_calls[0]["payload"]["prompt"]
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "params",
     [
-        {"items": "milk"},
-        {"action": None, "items": "milk"},
-        {"action": 123, "items": "milk"},
-        {"action": ["add"], "items": "milk"},
-        {"action": "archive", "items": "milk"},
-        {"action": "others", "items": "milk"},
-        {"action": "", "items": "milk"},
-        {"action": "   ", "items": "milk"},
+        "not a dict",
+        ["forecast"],
+        123,
+        {"topic": object(), "day": None, "location": ""},
+        {"topic": "overview", "day": None, "location": object()},
     ],
 )
-async def test_malformed_or_unknown_actions_escalate_without_store_calls(
-    shopping_handler,
-    fake_store,
+async def test_malformed_params_escalate_without_cache_or_llm(
+    weather_handler,
+    monkeypatch,
     params,
 ):
-    result = await shopping_handler.handle("shopping list", params=params)
+    path_spy = Mock()
+    path_spy.read_text.side_effect = RuntimeError("cache should not be read")
+    llm_mock = AsyncMock(side_effect=AssertionError("LLM should not be called"))
+    monkeypatch.setattr(weather_handler, "WEATHER_PATH", path_spy)
+    monkeypatch.setattr(weather_handler, "_post_local_llm_response", llm_mock)
+
+    result = await weather_handler.handle("weather", params=params)
 
     assert result is None
-    fake_store.module.add_item.assert_not_called()
-    fake_store.module.remove_item.assert_not_called()
-    fake_store.module.get_list.assert_not_called()
-    fake_store.module.clear_list.assert_not_called()
+    path_spy.read_text.assert_not_called()
+    llm_mock.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_view_empty_list_returns_documented_text(shopping_handler, monkeypatch):
-    store = _install_fake_store(monkeypatch, initial=())
-
-    result = await shopping_handler.handle(
-        "what is on my shopping list?",
-        params={"action": "view", "items": None},
-    )
-
-    assert result == {"text": "Your shopping list is empty."}
-    store.module.get_list.assert_called_once_with("default")
-    store.module.add_item.assert_not_called()
-    store.module.remove_item.assert_not_called()
-    store.module.clear_list.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_view_populated_list_returns_joined_items(shopping_handler, monkeypatch):
-    store = _install_fake_store(monkeypatch, initial=("milk", "eggs"))
-
-    result = await shopping_handler.handle(
-        "show my shopping list",
-        params={"action": "view", "items": None},
-    )
-
-    assert result == {"text": "Your shopping list has: milk, eggs."}
-    store.module.get_list.assert_called_once_with("default")
-
-
-@pytest.mark.asyncio
-async def test_add_splits_items_writes_each_item_and_reports_count(
-    shopping_handler,
+@pytest.mark.parametrize(
+    "pending",
+    ["not a dict", ["forecast"], 123, {"data": "not a dict"}],
+)
+async def test_malformed_pending_escalates_without_cache_or_llm(
+    weather_handler,
     monkeypatch,
+    pending,
 ):
-    store = _install_fake_store(monkeypatch, initial=("coffee",))
+    path_spy = Mock()
+    path_spy.read_text.side_effect = RuntimeError("cache should not be read")
+    llm_mock = AsyncMock(side_effect=AssertionError("LLM should not be called"))
+    monkeypatch.setattr(weather_handler, "WEATHER_PATH", path_spy)
+    monkeypatch.setattr(weather_handler, "_post_local_llm_response", llm_mock)
 
-    result = await shopping_handler.handle(
-        "add milk, eggs, bread",
-        params={"action": " ADD ", "items": " milk, eggs,, bread "},
-    )
+    result = await weather_handler.handle("tomorrow", pending=pending)
 
-    assert result == {
-        "text": "Added milk, eggs, bread. Your shopping list now has 4 items."
-    }
-    assert store.items == ["coffee", "milk", "eggs", "bread"]
-    assert store.module.add_item.call_args_list == [
-        (("milk", "default"),),
-        (("eggs", "default"),),
-        (("bread", "default"),),
-    ]
-    store.module.get_list.assert_called_once_with("default")
-    store.module.remove_item.assert_not_called()
-    store.module.clear_list.assert_not_called()
+    assert result == {"abandon_pending": True, "force_stage3": True}
+    path_spy.read_text.assert_not_called()
+    llm_mock.assert_not_called()
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize("items", [None, "", "   ", ",,,", 123])
-async def test_add_without_items_escalates_without_mutating_store(
-    shopping_handler,
-    monkeypatch,
-    items,
-):
-    store = _install_fake_store(monkeypatch, initial=("coffee",))
-
-    result = await shopping_handler.handle(
-        "add something",
-        params={"action": "add", "items": items},
-    )
-
-    assert result is None
-    assert store.items == ["coffee"]
-    store.module.add_item.assert_not_called()
-    store.module.get_list.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_remove_requires_confidence_and_passes_it_to_store(
-    shopping_handler,
-    monkeypatch,
-):
-    store = _install_fake_store(monkeypatch, initial=("milk", "eggs", "Bread"))
-
-    result = await shopping_handler.handle(
-        "remove milk and bread",
-        params={"action": "remove", "items": "milk, bread", "confidence": 0.80},
-    )
-
-    assert result == {"text": "Removed milk, bread from your shopping list."}
-    assert store.items == ["eggs"]
-    assert store.module.remove_item.call_args_list == [
-        (("milk", "default"), {"confidence": 0.80}),
-        (("bread", "default"), {"confidence": 0.80}),
-    ]
-    store.module.clear_list.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_clear_requires_confidence_and_passes_it_to_store(
-    shopping_handler,
-    monkeypatch,
-):
-    store = _install_fake_store(monkeypatch, initial=("milk", "eggs"))
-
-    result = await shopping_handler.handle(
-        "clear my shopping list",
-        params={"action": "clear", "items": None, "confidence": 0.80},
-    )
-
-    assert result == {"text": "Your shopping list has been cleared."}
-    assert store.items == []
-    store.module.clear_list.assert_called_once_with("default", confidence=0.80)
-    store.module.remove_item.assert_not_called()
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("items", [None, "", "   ", ",,,", 123])
-async def test_remove_without_items_escalates_even_with_valid_confidence(
-    shopping_handler,
-    monkeypatch,
-    items,
-):
-    store = _install_fake_store(monkeypatch, initial=("milk",))
-
-    result = await shopping_handler.handle(
-        "remove it",
-        params={"action": "remove", "items": items, "confidence": 0.80},
-    )
-
-    assert result is None
-    assert store.items == ["milk"]
-    store.module.remove_item.assert_not_called()
-    store.module.clear_list.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_check_all_present_is_case_insensitive(shopping_handler, monkeypatch):
-    store = _install_fake_store(monkeypatch, initial=("Milk", "Eggs"))
-
-    result = await shopping_handler.handle(
-        "do I need milk?",
-        params={"action": "check", "items": "milk, EGGS"},
-    )
-
-    _assert_text_response(result)
-    assert result["text"].startswith("Yes")
-    assert "milk" in result["text"]
-    assert "EGGS" in result["text"]
-    store.module.get_list.assert_called_once_with("default")
-
-
-@pytest.mark.asyncio
-async def test_check_all_missing_returns_no_text(shopping_handler, monkeypatch):
-    _install_fake_store(monkeypatch, initial=("milk",))
-
-    result = await shopping_handler.handle(
-        "do I need bread?",
-        params={"action": "check", "items": "bread"},
-    )
-
-    _assert_text_response(result)
-    assert result["text"].startswith("No")
-    assert "bread" in result["text"]
-
-
-@pytest.mark.asyncio
-async def test_check_mixed_items_reports_present_and_missing(
-    shopping_handler,
-    monkeypatch,
-):
-    _install_fake_store(monkeypatch, initial=("milk",))
-
-    result = await shopping_handler.handle(
-        "do I need milk or bread?",
-        params={"action": "check", "items": "milk, bread"},
-    )
-
-    assert result == {"text": "Mixed: milk is on the list; bread is not."}
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("items", [None, "", "   ", ",,,", 123])
-async def test_check_without_items_escalates_without_store_read(
-    shopping_handler,
-    monkeypatch,
-    items,
-):
-    store = _install_fake_store(monkeypatch, initial=("milk",))
-
-    result = await shopping_handler.handle(
-        "do I need it?",
-        params={"action": "check", "items": items},
-    )
-
-    assert result is None
-    store.module.get_list.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_prompt_content_is_not_reparsed_when_params_are_complete(
-    shopping_handler,
-    monkeypatch,
-):
-    store = _install_fake_store(monkeypatch, initial=("milk",))
-
-    result = await shopping_handler.handle(
-        "this prompt says clear, but params say view",
-        params={"action": "view", "items": "ignored"},
-    )
-
-    assert result == {"text": "Your shopping list has: milk."}
-    store.module.get_list.assert_called_once_with("default")
-    store.module.clear_list.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_very_long_items_input_is_split_and_dispatched(
-    shopping_handler,
-    monkeypatch,
-):
-    item_names = [f"item{i}" for i in range(500)]
-    store = _install_fake_store(monkeypatch)
-
-    result = await shopping_handler.handle(
-        "add many things",
-        params={"action": "add", "items": ",".join(item_names)},
-    )
-
-    _assert_text_response(result)
-    assert len(store.items) == len(item_names)
-    assert store.items[:3] == ["item0", "item1", "item2"]
-    assert store.items[-1] == "item499"
-    assert store.module.add_item.call_count == 500
-
-
-@pytest.mark.asyncio
-async def test_agent_skills_import_failure_escalates(shopping_handler, monkeypatch):
-    real_import = builtins.__import__
-
-    def fail_shopping_list_import(name, globals=None, locals=None, fromlist=(), level=0):
-        if name == "agent_skills.shopping_list":
-            raise ImportError("boom")
-        return real_import(name, globals, locals, fromlist, level)
-
-    monkeypatch.setattr(builtins, "__import__", fail_shopping_list_import)
-
-    result = await shopping_handler.handle(
-        "show my shopping list",
-        params={"action": "view", "items": None},
-    )
-
-    assert result is None
-
-
-@pytest.mark.asyncio
-async def test_view_integration_reads_json_store_adapter_without_writes(
-    shopping_handler,
-    monkeypatch,
-):
-    store = _install_fake_store(monkeypatch, initial=("milk",))
-
-    result = await shopping_handler.handle(
-        "view",
-        params={"action": "view", "items": None},
-    )
-
-    assert result == {"text": "Your shopping list has: milk."}
-    store.module.get_list.assert_called_once_with("default")
-    store.module.add_item.assert_not_called()
-    store.module.remove_item.assert_not_called()
-    store.module.clear_list.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_handler_has_no_db_or_llm_integration_calls(
-    shopping_handler,
-    monkeypatch,
-):
-    store = _install_fake_store(monkeypatch, initial=("milk",))
-
-    forbidden_modules = {
-        "openai": ModuleType("openai"),
-        "ollama": ModuleType("ollama"),
-        "httpx": ModuleType("httpx"),
-        "sqlite3": ModuleType("sqlite3"),
-        "pymysql": ModuleType("pymysql"),
-        "sqlalchemy": ModuleType("sqlalchemy"),
-    }
-    for module in forbidden_modules.values():
-        module.__getattr__ = Mock(
-            side_effect=AssertionError("handler should not use DB or LLM modules")
-        )
-    for name, module in forbidden_modules.items():
-        monkeypatch.setitem(sys.modules, name, module)
-
-    result = await shopping_handler.handle(
-        "prompt text is ignored",
-        params={"action": "view", "items": None},
-    )
-
-    assert result == {"text": "Your shopping list has: milk."}
-    store.module.get_list.assert_called_once_with("default")
-
-
-def test_source_contains_no_db_or_llm_call_sites():
+def test_no_database_query_integration_points_in_handler_source():
     tree = _module_ast()
     imported_roots: set[str] = set()
     call_names: set[str] = set()
@@ -549,29 +641,25 @@ def test_source_contains_no_db_or_llm_call_sites():
             call_names.add(_call_name(node.func).lower())
 
     assert imported_roots.isdisjoint(
-        {"openai", "ollama", "httpx", "requests", "sqlite3", "pymysql", "sqlalchemy"}
+        {"sqlite3", "pymysql", "psycopg2", "sqlalchemy", "mysql", "duckdb"}
     )
     assert not any(
         token in call_name
         for call_name in call_names
-        for token in ("llm", "model", "completion", "chat", "execute", "query")
+        for token in (".execute", ".executemany", ".query", ".delete", ".commit")
     )
 
 
-def test_action_registry_matches_metadata_schema(shopping_handler, shopping_metadata):
-    assert shopping_handler._VALID_ACTIONS == {
-        "view",
-        "add",
-        "remove",
-        "clear",
-        "check",
-    }
-    assert shopping_handler._VALID_ACTIONS == _actions_from_metadata_schema(
-        shopping_metadata
-    )
+def test_valid_topic_registry_matches_metadata_schema_and_slice_branches(
+    weather_handler,
+    weather_metadata,
+):
+    assert weather_handler._VALID_TOPICS == _schema_topics(weather_metadata)
+    assert _slice_topic_branch_literals() <= weather_handler._VALID_TOPICS
+    assert "overview" in weather_handler._VALID_TOPICS
 
 
-def test_action_registry_has_no_fallback_or_confidence_labels(shopping_handler):
+def test_topic_registry_has_no_fallback_confidence_or_boolean_contradictions(weather_handler):
     contradictory_values = {
         "other",
         "others",
@@ -582,211 +670,163 @@ def test_action_registry_has_no_fallback_or_confidence_labels(shopping_handler):
         "low",
         "true",
         "false",
+        "none",
     }
 
-    assert shopping_handler._VALID_ACTIONS.isdisjoint(contradictory_values)
-    assert all(action == action.strip().lower() for action in shopping_handler._VALID_ACTIONS)
+    assert weather_handler._VALID_TOPICS.isdisjoint(contradictory_values)
+    assert all(topic == topic.strip().lower() for topic in weather_handler._VALID_TOPICS)
+    assert all(" " not in topic for topic in weather_handler._VALID_TOPICS)
 
 
-def test_every_action_branch_is_registered_and_every_registered_action_has_branch(
-    shopping_handler,
-):
-    branch_actions = _action_branch_literals()
-
-    assert branch_actions == shopping_handler._VALID_ACTIONS
-
-
-def test_every_shopping_action_referenced_by_neighbor_handlers_is_registered(
-    shopping_handler,
-    shopping_metadata,
-):
-    metadata_actions = _actions_from_metadata_schema(shopping_metadata)
-    todo_literals = _string_literals_in_path(TODO_HANDLER_PATH)
-    todo_referenced_actions = {
-        literal for literal in todo_literals if literal in metadata_actions
-    }
-
-    assert metadata_actions == shopping_handler._VALID_ACTIONS
-    assert todo_referenced_actions
-    assert todo_referenced_actions <= shopping_handler._VALID_ACTIONS
-
-
-@pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("action", "params", "initial_items"),
+    ("topic", "day"),
     [
-        ("view", {"action": "view", "items": None}, ("milk",)),
-        ("add", {"action": "add", "items": "eggs"}, ("milk",)),
-        ("remove", {"action": "remove", "items": "milk", "confidence": 0.80}, ("milk",)),
-        ("clear", {"action": "clear", "items": None, "confidence": 0.80}, ("milk",)),
-        ("check", {"action": "check", "items": "milk"}, ("milk",)),
+        ("current", "today"),
+        ("forecast", "tomorrow"),
+        ("precipitation", "this_week"),
+        ("wind", "today"),
+        ("air_quality", None),
+        ("pollen", None),
+        ("overview", None),
     ],
 )
-async def test_every_registered_action_is_reachable_and_returns_text_shape(
-    shopping_handler,
-    monkeypatch,
-    action,
-    params,
-    initial_items,
+def test_every_registered_topic_is_reachable_from_one_input(weather_slices, topic, day):
+    result = weather_slices.slice_for(topic, day, _weather_data())
+
+    assert isinstance(result, dict)
+    assert isinstance(result.get("topic"), str)
+    assert result["topic"]
+    assert "debug_provider_payload" not in json.dumps(result)
+    assert "debug_station" not in json.dumps(result)
+
+
+def test_day_phrase_map_has_unique_specific_and_noncontradictory_entries(
+    weather_handler,
 ):
-    assert action in shopping_handler._VALID_ACTIONS
-    _install_fake_store(monkeypatch, initial=initial_items)
+    day_map = weather_handler._DAY_PHRASE_MAP
+    phrases = [phrase for phrase, _mapped in day_map]
+    allowed_mapped = {
+        None,
+        "today",
+        "tomorrow",
+        "this_week",
+        "weekend",
+        *weather_handler._WEEKDAYS,
+    }
 
-    result = await shopping_handler.handle(f"{action} shopping list", params=params)
+    assert len(phrases) == len(set(phrases))
+    assert all(phrase and phrase == phrase.lower().strip() for phrase in phrases)
+    assert {mapped for _phrase, mapped in day_map} <= allowed_mapped
+    assert not ({mapped for _phrase, mapped in day_map if mapped} & {"others", "high", "low"})
 
-    _assert_text_response(result)
+    for earlier_index, earlier in enumerate(phrases):
+        for later in phrases[earlier_index + 1 :]:
+            if later in earlier:
+                continue
+            assert earlier not in later
 
 
-def test_destructive_action_registry_matches_irreversible_store_calls(shopping_handler):
+@pytest.mark.parametrize("phrase,mapped", importlib.import_module(SLICES_MODULE_NAME).DAY_PHRASE_MAP)
+def test_every_day_phrase_mapping_is_reachable(weather_slices, phrase, mapped):
+    fixed_today = date(2026, 7, 3)
+
+    result = weather_slices.day_from_followup(f"please show {phrase}", today=fixed_today)
+
+    if phrase == "day after tomorrow":
+        assert result == "2026-07-05"
+    else:
+        assert result == mapped
+
+
+def test_force_escalate_phrases_are_unique_lowercase_and_not_overbroad(weather_handler):
+    phrases = weather_handler._FORCE_ESCALATE_PHRASES
+
+    assert len(phrases) == len(set(phrases))
+    assert all(phrase and phrase == phrase.lower() and phrase.strip() for phrase in phrases)
+    assert all(not phrase.startswith(" ") for phrase in phrases)
+    assert all("  " not in phrase for phrase in phrases)
+    assert not any(phrase in {"weather", "forecast", "rain", "snow"} for phrase in phrases)
+    assert any("search" in phrase for phrase in phrases)
+    assert any("why" in phrase or "cause" in phrase for phrase in phrases)
+
+
+def test_end_conversation_call_is_limited_to_strict_resume_phrase_gate():
     source = _source()
 
-    assert {"remove", "clear"} <= shopping_handler._VALID_ACTIONS
-    assert "remove_item(" in source
-    assert "clear_list(" in source
-    assert "add_item(" in source
-    assert "get_list(" in source
+    assert "end_conversation(" in source
+    assert "end_phrase.is_end(prompt)" in source
+    assert source.index("if pending:") < source.index("end_phrase.is_end(prompt)")
+    assert source.index("end_phrase.is_end(prompt)") < source.index("end_conversation(")
 
 
-def test_destructive_confidence_guard_is_structurally_before_store_import():
-    source = _source()
+def test_non_end_destructive_operations_would_require_numeric_confidence_threshold():
+    destructive_names = {
+        "delete",
+        "delete_message",
+        "delete_email",
+        "send_message",
+        "sms_send_direct",
+        "sms_send",
+        "email.send",
+        "unlink",
+        "rmtree",
+    }
+    calls = {
+        _call_name(node.func)
+        for node in ast.walk(_module_ast())
+        if isinstance(node, ast.Call)
+    }
+    destructive_calls = {
+        call_name
+        for call_name in calls
+        if call_name.split(".")[-1] in destructive_names or call_name in destructive_names
+    }
 
-    confidence_guard_index = source.index('if action in {"remove", "clear"}:')
-    threshold_index = source.index("confidence < 0.80")
-    import_index = source.index("from agent_skills.shopping_list import")
-    remove_call_index = source.index("remove_item(item, list_name, confidence=confidence)")
-    clear_call_index = source.index("clear_list(list_name, confidence=confidence)")
-
-    assert confidence_guard_index < threshold_index < import_index
-    assert import_index < remove_call_index
-    assert import_index < clear_call_index
-    assert "isinstance(confidence, bool)" in source
+    assert destructive_calls == set()
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize("action", ["remove", "clear"])
-@pytest.mark.parametrize(
-    "confidence",
-    [None, True, False, "High", "0.95", object(), -1, 0, 0.79, 0.799999],
-)
-async def test_destructive_actions_block_non_numeric_and_borderline_confidence(
-    shopping_handler,
-    monkeypatch,
-    action,
-    confidence,
-):
-    store = _install_fake_store(monkeypatch, initial=("milk",))
+def test_weather_class_registry_entry_has_handler_or_documented_escalation():
+    classes_mod = importlib.import_module(CLASSES_MODULE_NAME)
 
-    result = await shopping_handler.handle(
-        f"{action} shopping list",
-        params={"action": action, "items": "milk", "confidence": confidence},
-    )
+    meta = classes_mod._load_one(WEATHER_CLASS_DIR)
 
-    assert result is None
-    assert store.items == ["milk"]
-    store.module.remove_item.assert_not_called()
-    store.module.clear_list.assert_not_called()
+    assert meta is not None
+    assert meta["name"] == "weather"
+    assert meta["handler"] is importlib.import_module(MODULE_NAME).handle
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("action", ["remove", "clear"])
-@pytest.mark.parametrize("confidence", [math.nan, float("nan")])
-async def test_destructive_actions_block_nan_confidence_as_ambiguous_input(
-    shopping_handler,
+async def test_registered_weather_handler_returns_documented_text_shape(
+    weather_handler,
     monkeypatch,
-    action,
-    confidence,
+    tmp_path,
 ):
-    store = _install_fake_store(monkeypatch, initial=("milk",))
+    classes_mod = importlib.import_module(CLASSES_MODULE_NAME)
+    meta = classes_mod._load_one(WEATHER_CLASS_DIR)
+    _write_weather_cache(tmp_path, monkeypatch, weather_handler, _weather_data())
+    _install_llm(monkeypatch, weather_handler, "It is clear.")
 
-    result = await shopping_handler.handle(
-        f"{action} shopping list",
-        params={"action": action, "items": "milk", "confidence": confidence},
+    result = await meta["handler"](
+        "weather",
+        params={"topic": "overview", "day": None, "location": ""},
     )
 
-    assert result is None
-    assert store.items == ["milk"]
-    store.module.remove_item.assert_not_called()
-    store.module.clear_list.assert_not_called()
+    _assert_weather_followup_shape(result, topic="overview", location="")
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize("confidence", [0.80, 0.800001, 1, 1.0])
-async def test_remove_allows_exact_threshold_and_above(
-    shopping_handler,
-    monkeypatch,
-    confidence,
+def test_handler_source_references_only_registered_day_and_topic_lookup_tables(
+    weather_handler,
 ):
-    store = _install_fake_store(monkeypatch, initial=("milk", "eggs"))
-
-    result = await shopping_handler.handle(
-        "remove milk",
-        params={"action": "remove", "items": "milk", "confidence": confidence},
+    literals = _string_literals(MODULE_PATH)
+    literal_topics = literals & weather_handler._VALID_TOPICS
+    literal_day_tokens = literals & (
+        set(weather_handler._WEEKDAYS) | {"today", "tomorrow", "this_week", "weekend"}
     )
 
-    assert result == {"text": "Removed milk from your shopping list."}
-    assert store.items == ["eggs"]
-    store.module.remove_item.assert_called_once_with(
-        "milk",
-        "default",
-        confidence=confidence,
+    assert literal_topics <= weather_handler._VALID_TOPICS
+    assert literal_day_tokens <= (
+        set(weather_handler._WEEKDAYS) | {"today", "tomorrow", "this_week", "weekend"}
     )
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("confidence", [0.80, 0.800001, 1, 1.0])
-async def test_clear_allows_exact_threshold_and_above(
-    shopping_handler,
-    monkeypatch,
-    confidence,
-):
-    store = _install_fake_store(monkeypatch, initial=("milk", "eggs"))
-
-    result = await shopping_handler.handle(
-        "clear shopping list",
-        params={"action": "clear", "items": None, "confidence": confidence},
-    )
-
-    assert result == {"text": "Your shopping list has been cleared."}
-    assert store.items == []
-    store.module.clear_list.assert_called_once_with(
-        "default",
-        confidence=confidence,
-    )
-
-
-@pytest.mark.asyncio
-async def test_destructive_action_with_unknown_action_name_cannot_fire(
-    shopping_handler,
-    monkeypatch,
-):
-    store = _install_fake_store(monkeypatch, initial=("milk",))
-
-    result = await shopping_handler.handle(
-        "delete all shopping items",
-        params={"action": "delete", "items": "milk", "confidence": 1.0},
-    )
-
-    assert result is None
-    assert store.items == ["milk"]
-    store.module.remove_item.assert_not_called()
-    store.module.clear_list.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_registered_handler_results_have_documented_shape_for_all_actions(
-    shopping_handler,
-    monkeypatch,
-):
-    cases = [
-        ({"action": "view", "items": None}, ("milk",)),
-        ({"action": "add", "items": "eggs"}, ("milk",)),
-        ({"action": "remove", "items": "milk", "confidence": 0.80}, ("milk",)),
-        ({"action": "clear", "items": None, "confidence": 0.80}, ("milk",)),
-        ({"action": "check", "items": "milk"}, ("milk",)),
-    ]
-
-    for params, initial_items in cases:
-        store = _install_fake_store(monkeypatch, initial=initial_items)
-        result = await shopping_handler.handle("shopping list", params=params)
-        _assert_text_response(result)
-        sys.modules["agent_skills.shopping_list"] = store.module
+    assert "medford" in literals
+    assert "medford ma" in literals
+    assert "medford, ma" in literals

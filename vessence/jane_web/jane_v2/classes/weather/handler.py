@@ -84,6 +84,10 @@ async def _answer_for(prompt: str, topic: str, day, location: str | None) -> dic
     except Exception as e:
         logger.warning("weather handler: cache unreadable: %s", e)
         return None
+    if not isinstance(data, dict):
+        logger.warning("weather handler: cache malformed: expected object, got %s",
+                       type(data).__name__)
+        return None
     slice_obj = _slice_for(topic, day, data)
     if slice_obj is None:
         return None
@@ -109,9 +113,26 @@ async def handle(prompt: str, context: str = "", pending: dict | None = None,
         if end_phrase.is_end(prompt):
             logger.info("weather handler: end-phrase on resume — closing")
             return end_conversation("Ok.", structured={"intent": "weather"})
-        data = pending.get("data") if isinstance(pending.get("data"), dict) else pending
-        topic = (data or {}).get("topic") or "overview"
-        location = (data or {}).get("location") or ""
+        if not isinstance(pending, dict):
+            logger.info("weather handler: malformed pending state → abandon")
+            return {"abandon_pending": True, "force_stage3": True}
+        if "data" in pending:
+            data = pending.get("data")
+            if not isinstance(data, dict):
+                logger.info("weather handler: malformed pending data → abandon")
+                return {"abandon_pending": True, "force_stage3": True}
+        else:
+            data = pending
+        topic = data.get("topic") or "overview"
+        location = data.get("location") or ""
+        if not isinstance(topic, str) or not isinstance(location, str):
+            logger.info("weather handler: malformed pending fields → abandon")
+            return {"abandon_pending": True, "force_stage3": True}
+        location = location.strip().lower()
+        if location and location not in ("medford", "medford ma", "medford, ma"):
+            logger.info("weather handler: non-Medford pending location %r → abandon", location)
+            return {"abandon_pending": True, "force_stage3": True}
+        topic = topic.strip().lower()
         day_spec = _day_from_followup(prompt)
         if not day_spec:
             logger.info("weather handler: no day in follow-up reply → escalate")
@@ -121,13 +142,23 @@ async def handle(prompt: str, context: str = "", pending: dict | None = None,
             return {"abandon_pending": True, "force_stage3": True}
         return result
 
-    params = params or {}
-    location = (params.get("location") or "").strip().lower()
+    if params is None:
+        params = {}
+    elif not isinstance(params, dict):
+        logger.info("weather handler: malformed params → escalate")
+        return None
+
+    location = params.get("location") or ""
+    topic = params.get("topic") or "overview"
+    if not isinstance(location, str) or not isinstance(topic, str):
+        logger.info("weather handler: malformed params fields → escalate")
+        return None
+    location = location.strip().lower()
     if location and location not in ("medford", "medford ma", "medford, ma"):
         logger.info("weather handler: non-Medford location %r → escalate", location)
         return None
 
-    topic = (params.get("topic") or "overview").strip().lower()
+    topic = topic.strip().lower()
     if topic not in _VALID_TOPICS:
         logger.info("weather handler: unknown topic %r → overview", topic)
         topic = "overview"
