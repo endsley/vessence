@@ -15,20 +15,18 @@ Usage:
 
 import os
 import sys
-import json
 import time
 import argparse
 import datetime
 import subprocess
 import requests
-import re
 import logging
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from dotenv import load_dotenv
-from jane.config import get_chroma_client, ENV_FILE_PATH
+from jane.config import ENV_FILE_PATH
 load_dotenv(ENV_FILE_PATH)
 
 from jane.config import (
@@ -46,6 +44,36 @@ from jane.config import (
     VECTOR_DB_SHORT_TERM, ADK_VENV_PYTHON,
 )
 # automation_runner no longer used — queue now calls internal web API directly
+from agent_skills.prompt_queue_docs import (
+    delete_prompt_entry,
+    parse_prompt_list,
+    prompt_summary,
+    remove_completed_prompt_entries,
+    render_prompt_status_update,
+    render_completed_archive_section,
+    renumber_prompt_entries,
+)
+from agent_skills.prompt_queue_idle import (
+    is_idle_from_timestamp as _is_idle_from_timestamp,
+    most_recent_activity_timestamp as _most_recent_activity_timestamp,
+    read_activity_timestamp as _read_activity_timestamp,
+)
+from agent_skills.prompt_queue_memory import (
+    completion_fact as _completion_fact,
+    mutation_prompt_summary as _mutation_prompt_summary,
+    prompt_queue_chroma_purge_script as _prompt_queue_chroma_purge_script,
+)
+from agent_skills.queue_progress_announcements import (
+    append_queue_progress_announcement as _append_queue_progress_announcement,
+    queue_announcements_path as _queue_announcements_path,
+    queue_progress_id as _queue_progress_id,
+    queue_progress_json_line as _queue_progress_json_line,
+)
+from agent_skills.queue_jane_api import (
+    parse_queue_stream_lines as _parse_queue_stream_lines,
+    queue_chat_payload as _queue_chat_payload,
+    run_queue_chat_request as _run_queue_chat_request,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -62,31 +90,13 @@ def is_idle() -> bool:
     Any recent activity in either source counts as active.
     """
     now = time.time()
-    most_recent_ts = 0
-
-    # Check Discord activity (Amber)
-    try:
-        with open(USER_STATE_PATH) as f:
-            state = json.load(f)
-        ts = state.get("last_message_ts", 0)
-        if ts > most_recent_ts:
-            most_recent_ts = ts
-    except FileNotFoundError:
-        pass
-    except Exception as e:
-        logger.warning(f"user_state.json read error: {e}")
-
-    # Check Claude Code terminal activity
-    try:
-        with open(IDLE_STATE_PATH) as f:
-            state = json.load(f)
-        ts = state.get("last_active_ts", 0)
-        if ts > most_recent_ts:
-            most_recent_ts = ts
-    except FileNotFoundError:
-        pass
-    except Exception as e:
-        logger.warning(f"idle_state.json read error: {e}")
+    most_recent_ts = _most_recent_activity_timestamp(
+        (
+            (USER_STATE_PATH, "last_message_ts"),
+            (IDLE_STATE_PATH, "last_active_ts"),
+        ),
+        logger=logger,
+    )
 
     if most_recent_ts == 0:
         logger.info("No activity state found — assuming idle")
@@ -94,7 +104,7 @@ def is_idle() -> bool:
 
     idle_secs = now - most_recent_ts
     logger.info(f"Idle check: {idle_secs:.0f}s since last activity (threshold: {IDLE_THRESHOLD}s)")
-    return idle_secs >= IDLE_THRESHOLD
+    return _is_idle_from_timestamp(now, most_recent_ts, IDLE_THRESHOLD)
 
 
 # ── Notification sender (no-op — Discord disconnected, work log reserved for completions only)
@@ -105,63 +115,8 @@ def send_discord(message: str):
 
 # ── Prompt list parser ──────────────────────────────────────────────────────────
 def load_prompts() -> list[dict]:
-    """
-    Parse prompt_list.md into a list of {index, text, status} dicts.
-
-    Format per entry:
-        N. [status]
-        Verbatim prompt text (possibly multiline)
-
-           - sub-bullet outcome/note
-    """
     with open(PROMPT_LIST_PATH) as f:
-        content = f.read()
-
-    STATUS_TAGS = {
-        "[completed]":  "complete",
-        "[COMPLETE]":   "complete",   # legacy
-        "[incomplete]": "incomplete",
-        "[INCOMPLETE]": "incomplete", # legacy
-        "[new]":        "pending",
-    }
-
-    prompts = []
-    chunks = re.split(r'\n(?=\d+\.\s)', content)
-    for chunk in chunks:
-        chunk = chunk.strip()
-        if not chunk:
-            continue
-        lines = chunk.splitlines()
-        first = lines[0].strip()
-        m = re.match(r'^(\d+)\.\s*', first)
-        if not m:
-            continue
-        idx = int(m.group(1))
-        after_num = first[m.end():]
-
-        status = "pending"
-        inline_text = after_num
-        for tag, s in STATUS_TAGS.items():
-            if after_num.startswith(tag):
-                status = s
-                inline_text = after_num[len(tag):].strip()
-                break
-
-        # Collect verbatim lines; stop at first sub-bullet ("   - ")
-        body_lines = []
-        if inline_text:
-            body_lines.append(inline_text)
-        for line in lines[1:]:
-            if line.startswith("   -") or line.startswith("\t-"):
-                break
-            if line.strip() == "---":
-                break
-            body_lines.append(line)
-
-        text = "\n".join(body_lines).strip()
-        prompts.append({"index": idx, "text": text, "status": status})
-
-    return prompts
+        return parse_prompt_list(f.read())
 
 
 def mark_prompt(index: int, status: str, note: str = ""):
@@ -172,44 +127,8 @@ def mark_prompt(index: int, status: str, note: str = ""):
     with open(PROMPT_LIST_PATH) as f:
         content = f.read()
 
-    tag = {"complete": "[completed]", "incomplete": "[incomplete]"}.get(status, "[new]")
-    entry_re = re.compile(rf"^{index}\.\s")
-
-    lines = content.split("\n")
-    new_lines = []
-    i = 0
-    while i < len(lines):
-        line = lines[i]
-        if entry_re.match(line):
-            new_lines.append(f"{index}. {tag}")
-            i += 1
-            # Copy verbatim body lines; drop old sub-bullets
-            body_lines = []
-            while i < len(lines):
-                l = lines[i]
-                if re.match(r"^\d+\.\s", l):
-                    break
-                if l.startswith("   -") or l.startswith("\t-"):
-                    i += 1
-                    continue
-                body_lines.append(l)
-                i += 1
-            # Strip trailing blank lines from body
-            while body_lines and not body_lines[-1].strip():
-                body_lines.pop()
-            new_lines.extend(body_lines)
-            # Append new sub-bullet
-            if note:
-                new_lines.append("")
-                prefix = "" if status == "complete" else "Attempted: "
-                new_lines.append(f"   - {prefix}{note}")
-            new_lines.append("")
-        else:
-            new_lines.append(line)
-            i += 1
-
     with open(PROMPT_LIST_PATH, "w") as f:
-        f.write("\n".join(new_lines))
+        f.write(render_prompt_status_update(content, index, status, note))
 
     log_queue_mutation(f"status → {status}", index, note=note)
 
@@ -252,29 +171,8 @@ def delete_prompt(index: int):
         print(f"Error: prompt #{index} not found.")
         return
 
-    # Remove the entry block from the file
-    entry_re = re.compile(rf"^{index}\.\s")
-    lines = content.split("\n")
-    new_lines = []
-    i = 0
-    while i < len(lines):
-        line = lines[i]
-        if entry_re.match(line):
-            i += 1
-            # Skip the entire block until the next numbered entry
-            while i < len(lines) and not re.match(r"^\d+\.\s", lines[i]):
-                i += 1
-        else:
-            new_lines.append(line)
-            i += 1
-
-    # Strip any extra trailing blank lines left behind
-    while new_lines and not new_lines[-1].strip():
-        new_lines.pop()
-    new_lines.append("")
-
     with open(PROMPT_LIST_PATH, "w") as f:
-        f.write("\n".join(new_lines))
+        f.write(delete_prompt_entry(content, index))
 
     # Re-number remaining prompts to close the gap
     _renumber_prompts()
@@ -289,18 +187,8 @@ def _renumber_prompts():
     with open(PROMPT_LIST_PATH) as f:
         content = f.read()
 
-    lines = content.split("\n")
-    new_lines = []
-    counter = 1
-    for line in lines:
-        m = re.match(r"^(\d+)\.\s", line)
-        if m:
-            line = re.sub(r"^\d+\.", f"{counter}.", line, count=1)
-            counter += 1
-        new_lines.append(line)
-
     with open(PROMPT_LIST_PATH, "w") as f:
-        f.write("\n".join(new_lines))
+        f.write(renumber_prompt_entries(content))
 
 
 def run_prompt(prompt_text: str) -> tuple[str, bool]:
@@ -312,95 +200,50 @@ def run_prompt(prompt_text: str) -> tuple[str, bool]:
     logger.info("Sending prompt to persistent session via internal API...")
 
     short_desc = prompt_text[:80] + ("..." if len(prompt_text) > 80 else "")
-    _announcements_path = os.path.join(
+    _announcements_path = _queue_announcements_path(
         os.environ.get("VESSENCE_DATA_HOME", os.path.expanduser("~/ambient/vessence-data")),
-        "data", "jane_announcements.jsonl"
     )
-    _progress_id = f"queue_{int(time.time()*1000)}"
+    _progress_id = _queue_progress_id("queue", int(time.time()*1000))
 
     def _push_announcement(msg_text: str, is_final: bool = False):
         try:
-            entry = json.dumps({
-                "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-                "type": "queue_progress",
-                "id": _progress_id,
-                "message": msg_text,
-                "final": is_final,
-            })
-            with open(_announcements_path, "a") as f:
-                f.write(entry + "\n")
+            _append_queue_progress_announcement(
+                _announcements_path,
+                _progress_id,
+                msg_text,
+                is_final,
+                datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            )
         except Exception:
             pass
 
     _push_announcement(f"**Working on:** {short_desc}")
 
     jane_url = os.environ.get("JANE_WEB_URL", "http://localhost:8081")
-    api_url = f"{jane_url}/api/jane/chat/stream"
 
     try:
-        # Use a dedicated session for queue prompts so they share context
-        # but don't pollute interactive user sessions
-        resp = requests.post(
-            api_url,
-            json={
-                "message": prompt_text,
-                "session_id": "prompt_queue_session",
-                "platform": "queue",
-            },
-            stream=True,
-            timeout=(10, None),  # 10s connect timeout, no read timeout
+        stream_result = _run_queue_chat_request(
+            jane_url,
+            prompt_text,
+            "prompt_queue_session",
+            post=requests.post,
         )
-        if resp.status_code == 401:
-            # Internal API needs auth bypass — fall back to sync endpoint
-            resp = requests.post(
-                f"{jane_url}/api/jane/chat",
-                json={
-                    "message": prompt_text,
-                    "session_id": "prompt_queue_session",
-                    "platform": "queue",
-                },
-                timeout=(10, 600),  # 10min read timeout for sync
-            )
-            if resp.ok:
-                data = resp.json()
-                response = data.get("text", "")
-                _push_announcement(f"**Completed:** {short_desc}", is_final=True)
-                return response, bool(response)
-            else:
-                _push_announcement(f"**Failed:** HTTP {resp.status_code}", is_final=True)
-                return f"Error: HTTP {resp.status_code}", False
-
-        # Stream SSE response and collect full text
-        response_text = ""
-        for line in resp.iter_lines(decode_unicode=True):
-            if not line:
-                continue
-            try:
-                event = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-
-            if event.get("type") == "delta":
-                response_text += event.get("data", "")
-            elif event.get("type") == "done":
-                if not response_text:
-                    response_text = event.get("data", "")
-                break
-            elif event.get("type") == "error":
-                err = event.get("data", "Unknown error")
-                _push_announcement(f"**Failed:** {err[:100]}", is_final=True)
-                return f"Error: {err}", False
+        if stream_result.error:
+            _push_announcement(f"**Failed:** {stream_result.error[:100]}", is_final=True)
+            return stream_result.text, False
+        response_text = stream_result.text
 
         # Log to Work Log
-        try:
-            from agent_skills.work_log_tools import log_activity
-            result_snippet = (response_text or "")[:150].replace("\n", " ").strip()
-            log_activity(f"Completed: {short_desc} → {result_snippet}", category="prompt_completed")
-        except Exception:
-            pass
+        if stream_result.source == "stream":
+            try:
+                from agent_skills.work_log_tools import log_activity
+                result_snippet = (response_text or "")[:150].replace("\n", " ").strip()
+                log_activity(f"Completed: {short_desc} → {result_snippet}", category="prompt_completed")
+            except Exception:
+                pass
 
         _push_announcement(f"**Completed:** {short_desc}", is_final=True)
-        return response_text, bool(response_text.strip())
+        return response_text, stream_result.success
 
     except requests.ConnectionError:
         msg = "Jane web is not running — skipping this cycle"
@@ -420,8 +263,7 @@ def log_queue_mutation(action: str, prompt_index: int, prompt_text: str = "", no
     with low-value entries. Only successful completions (via log_to_memory)
     should be persisted to memory.
     """
-    date_str = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
-    summary = prompt_text[:80] + ('...' if len(prompt_text) > 80 else '') if prompt_text else ''
+    summary = _mutation_prompt_summary(prompt_text)
     logger.info(
         "Queue mutation: %s item #%d%s%s",
         action, prompt_index,
@@ -438,12 +280,7 @@ def log_to_memory(prompt_index: int, prompt_text: str, result: str, success: boo
         return
 
     date_str = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
-    fact = (
-        f"Prompt queue item {prompt_index} processed autonomously on {date_str}. "
-        f"Status: SUCCESS. "
-        f"Prompt: {prompt_text[:100]}{'...' if len(prompt_text) > 100 else ''}. "
-        f"Result summary: {result[:300]}{'...' if len(result) > 300 else ''}"
-    )
+    fact = _completion_fact(prompt_index, prompt_text, result, date_str)
     try:
         # Short-term: expires in 14 days
         subprocess.run(
@@ -457,24 +294,6 @@ def log_to_memory(prompt_index: int, prompt_text: str, result: str, success: boo
         )
     except Exception as e:
         logger.warning(f"Failed to log to memory: {e}")
-
-
-# ── Prompt summary ──────────────────────────────────────────────────────────────
-def prompt_summary(text: str, max_chars: int = 400) -> str:
-    """
-    Return a readable summary of the prompt for Discord notifications.
-    Shows the full prompt up to max_chars so the user can recognize what's running.
-    """
-    text = text.strip()
-    if len(text) <= max_chars:
-        return text
-    # Try to cut at a sentence or line boundary near max_chars
-    cut = text[:max_chars]
-    for sep in ('\n', '. ', '! ', '? '):
-        idx = cut.rfind(sep)
-        if idx > max_chars // 2:
-            return cut[:idx + len(sep)].strip() + "\n_(prompt continues…)_"
-    return cut.rstrip() + "…"
 
 
 # ── Archiver ────────────────────────────────────────────────────────────────────
@@ -496,52 +315,21 @@ def archive_completed_prompts():
     # ── Append to accomplished_prompts.md ──
     now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
     with open(ACCOMPLISHED_PATH, "a") as f:
-        f.write(f"\n\n## Archived {now}\n\n")
-        for p in completed:
-            f.write(f"### Prompt #{p['index']}\n\n{p['text']}\n\n---\n")
+        f.write(render_completed_archive_section(completed, now))
 
     # ── Remove completed entries from prompt_list.md ──
     with open(PROMPT_LIST_PATH) as f:
         content = f.read()
 
     completed_indices = {p["index"] for p in completed}
-    chunks = re.split(r'\n(?=\d+\.\s)', content)
-    kept = []
-    for chunk in chunks:
-        m = re.match(r'^(\d+)\.\s', chunk.strip())
-        if m and int(m.group(1)) in completed_indices:
-            continue
-        kept.append(chunk)
-
-    # Re-number remaining prompts sequentially
-    header_chunks = [c for c in kept if not re.match(r'^\d+\.\s', c.strip())]
-    item_chunks   = [c for c in kept if re.match(r'^\d+\.\s', c.strip())]
-    renumbered = []
-    for new_idx, chunk in enumerate(item_chunks, start=1):
-        chunk = re.sub(r'^\d+\.', f"{new_idx}.", chunk.strip())
-        renumbered.append(chunk)
-
-    new_content = "\n\n".join(header_chunks + renumbered).strip() + "\n"
     with open(PROMPT_LIST_PATH, "w") as f:
-        f.write(new_content)
+        f.write(remove_completed_prompt_entries(content, completed_indices))
 
     # ── Delete ChromaDB short-term memory entries for archived prompts ──
     try:
         _REQUIRED_PYTHON = ADK_VENV_PYTHON
         SHORT_TERM_DB = VECTOR_DB_SHORT_TERM
-        purge_script = (
-            "import os; os.environ['ORT_LOGGING_LEVEL']='3'\n"
-            "import chromadb, sys\n"
-            f"client = get_chroma_client(path='{SHORT_TERM_DB}')\n"
-            "col = client.get_or_create_collection('short_term_memory')\n"
-            f"indices = {list(completed_indices)}\n"
-            "results = col.get(where={'topic': 'prompt_queue'}, include=['metadatas'])\n"
-            "to_delete = [id for id, meta in zip(results['ids'], results['metadatas'])\n"
-            "             if any(meta.get('subtopic','') == f'item_{i}' for i in indices)]\n"
-            "if to_delete:\n"
-            "    col.delete(ids=to_delete)\n"
-            "    print(f'Deleted {len(to_delete)} ChromaDB entries')\n"
-        )
+        purge_script = _prompt_queue_chroma_purge_script(SHORT_TERM_DB, completed_indices)
         subprocess.run([_REQUIRED_PYTHON, "-c", purge_script], capture_output=True, timeout=30)
     except Exception as e:
         logger.warning(f"ChromaDB purge error: {e}")

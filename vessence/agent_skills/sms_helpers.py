@@ -15,12 +15,22 @@ from __future__ import annotations
 
 import logging
 import os
-import re
 import sys
 import time
 import uuid
 from pathlib import Path
 from typing import Optional
+
+from agent_skills.sms_helper_rules import (
+    STOP_PREFIXES as _STOP_PREFIXES,
+    alias_match_from_row as _alias_match_from_row,
+    contact_lookup_from_rows as _contact_lookup_from_rows,
+    draft_is_expired as _draft_is_expired,
+    draft_payload_from_row as _draft_payload_from_row,
+    escape_sql_like as _escape_sql_like,
+    expired_draft_cutoff_text as _expired_draft_cutoff_text,
+    normalize_name as _normalize_name,
+)
 
 # vault_web is the single source of truth for contacts/aliases/drafts.
 _VAULT_WEB_DIR = Path(__file__).resolve().parents[1] / "vault_web"
@@ -29,22 +39,8 @@ if str(_VAULT_WEB_DIR) not in sys.path:
 
 logger = logging.getLogger(__name__)
 
-# Stop-words stripped from relational phrases before lookup so "my wife",
-# "the wife", and "wife" all hit the same alias row.
-_STOP_PREFIXES = ("my ", "the ", "to ", "for ")
-
 # Drafts older than this are considered stale and ignored/cleaned up.
 DRAFT_TTL_SECONDS = 300  # 5 minutes
-
-
-def _normalize_name(name: str) -> str:
-    """Lowercase, strip stop-words, and collapse whitespace."""
-    n = (name or "").strip().lower()
-    for prefix in _STOP_PREFIXES:
-        if n.startswith(prefix):
-            n = n[len(prefix):].strip()
-            break
-    return re.sub(r"\s+", " ", n)
 
 
 def resolve_recipient(name: str) -> Optional[dict]:
@@ -73,18 +69,13 @@ def resolve_recipient(name: str) -> Optional[dict]:
                 "WHERE LOWER(alias) = ? LIMIT 1",
                 (norm,),
             ).fetchone()
-            if row and row["phone_number"]:
-                return {
-                    "phone_number": row["phone_number"],
-                    "display_name": row["display_name"] or norm,
-                    "source": "alias",
-                }
+            alias_match = _alias_match_from_row(row, norm)
+            if alias_match:
+                return alias_match
 
             # 2) contacts lookup — LIKE on display_name. Require a phone
             # number (email-only contacts are useless for SMS).
-            escaped_norm = (
-                norm.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-            )
+            escaped_norm = _escape_sql_like(norm)
             like = f"%{escaped_norm}%"
             rows = conn.execute(
                 "SELECT display_name, phone_number FROM contacts "
@@ -95,22 +86,13 @@ def resolve_recipient(name: str) -> Optional[dict]:
             ).fetchall()
             # Collapse duplicates on display_name (contacts can have multiple
             # phone rows — pick the primary).
-            seen: dict[str, str] = {}
-            for r in rows:
-                dn = r["display_name"]
-                if dn not in seen:
-                    seen[dn] = r["phone_number"]
-            if len(seen) == 1:
-                dn, phone = next(iter(seen.items()))
-                return {
-                    "phone_number": phone,
-                    "display_name": dn,
-                    "source": "contacts",
-                }
-            if len(seen) > 1:
+            contact_lookup = _contact_lookup_from_rows(rows)
+            if contact_lookup.match:
+                return contact_lookup.match
+            if contact_lookup.ambiguous_count:
                 logger.info(
                     "resolve_recipient: '%s' matched %d contacts — ambiguous",
-                    name, len(seen),
+                    name, contact_lookup.ambiguous_count,
                 )
                 return None
     except Exception as e:
@@ -189,16 +171,15 @@ def get_latest_draft(session_id: str) -> Optional[dict]:
             if not row:
                 return None
             created_epoch = int(row["created_epoch"] or 0)
-            if time.time() - created_epoch > DRAFT_TTL_SECONDS:
+            if _draft_is_expired(
+                created_epoch,
+                now=time.time(),
+                ttl_seconds=DRAFT_TTL_SECONDS,
+            ):
                 # Stale — garbage-collect and pretend it doesn't exist.
                 conn.execute("DELETE FROM sms_drafts WHERE draft_id = ?", (row["draft_id"],))
                 return None
-            return {
-                "draft_id": row["draft_id"],
-                "phone_number": row["phone_number"],
-                "display_name": row["display_name"],
-                "body": row["body"],
-            }
+            return _draft_payload_from_row(row)
     except Exception as e:
         logger.warning("get_latest_draft failed: %s", e)
         return None
@@ -223,10 +204,10 @@ def cleanup_expired_drafts() -> int:
     try:
         from database import get_db
         with get_db() as conn:
-            cutoff = time.time() - DRAFT_TTL_SECONDS
+            cutoff = _expired_draft_cutoff_text(time.time(), DRAFT_TTL_SECONDS)
             cur = conn.execute(
                 "DELETE FROM sms_drafts WHERE strftime('%s', created_at) < ?",
-                (str(int(cutoff)),),
+                (cutoff,),
             )
             return cur.rowcount or 0
     except Exception as e:

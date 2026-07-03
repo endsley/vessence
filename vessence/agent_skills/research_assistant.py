@@ -7,6 +7,7 @@ from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from agent_skills.research_result_helpers import parse_research_note_json as _parse_research_note_json
 from jane.llm_config import LOCAL_LLM_MODEL, LOCAL_LLM_BASE_URL, LOCAL_LLM_MODEL_LITELLM
 
 def analyze_research(raw_data_path, output_path):
@@ -38,14 +39,8 @@ def analyze_research(raw_data_path, output_path):
             ]
         )
         
-        # Extract and parse JSON
         text = response['message']['content']
-        if "```json" in text:
-            text = text.split("```json")[1].split("```")[0]
-        elif "```" in text:
-            text = text.split("```")[1].split("```")[0]
-            
-        analysis = json.loads(text.strip())
+        analysis = _parse_research_note_json(text)
         
         # Save the technical note to the research vault
         with open(output_path, 'w') as f:

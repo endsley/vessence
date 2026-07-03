@@ -18,6 +18,11 @@ from jane.config import (
     JANE_ESSAY,
     LOCAL_LLM_MODEL,
 )
+from agent_skills.fallback_personas import (
+    amber_fallback_persona as _amber_fallback_persona,
+    build_amber_persona as _build_amber_persona,
+    build_jane_persona as _build_jane_persona,
+)
 
 load_dotenv(ENV_FILE_PATH)
 
@@ -41,59 +46,32 @@ def get_amber_persona():
         with open(CAPABILITIES_PATH, "r") as f:
             manifest = json.load(f)
 
-        persona = (
-            f"You are {manifest['identity']}, {manifest['role']} "
-            f"Family: {manifest['family_context']}. "
-            "You are currently an emergency fallback brain. "
-            "Your physical body and tools are still active. "
-            "CAPABILITIES:\n"
-        )
-
-        for cap in manifest['capabilities']:
-            persona += f"- {cap['name']}: {cap['description']} (Tools: {', '.join(cap['tools'])})\n"
-            if 'fallback_tag' in cap:
-                persona += f"  IMPORTANT: To use this, say '{cap['fallback_tag']}' on a new line.\n"
-
-        persona += "\nIDENTITY RULES:\n"
-        for rule in manifest.get('identity_rules', []):
-            persona += f"- {rule}\n"
-
-        persona += (
-            f"\nVISUALS: Your photo is '{manifest['visuals']['self']}'. Jane is '{manifest['visuals']['colleague']}'. "
-            "Never say you cannot perform a task that falls within these capabilities. "
-            f"Be warm, efficient, and stay in character as {os.environ.get('USER_NAME', 'the user')}'s assistant Amber."
-        )
-
         # Load initialization context (identity essays)
         amber_essay = _load_file(IDENTITY_ESSAYS["amber"])
         user_essay = _load_file(IDENTITY_ESSAYS["user"])
         jane_essay = _load_file(IDENTITY_ESSAYS["jane"])
 
-        if amber_essay:
-            persona += f"\n\n## YOUR IDENTITY (Amber):\n{amber_essay}"
-        if user_essay:
-            persona += f"\n\n## ABOUT {_USER_NAME.upper()} (your user):\n{user_essay}"
-        if jane_essay:
-            persona += f"\n\n## ABOUT JANE (your colleague):\n{jane_essay}"
-
-        return persona
+        return _build_amber_persona(
+            manifest,
+            user_name=os.environ.get("USER_NAME", "the user"),
+            essay_user_name=_USER_NAME,
+            amber_essay=amber_essay,
+            user_essay=user_essay,
+            jane_essay=jane_essay,
+        )
     except Exception as e:
         # Fallback to a basic string if JSON fails
-        return f"You are Amber, {os.environ.get('USER_NAME', 'the user')}'s assistant. You are currently in fallback mode."
+        return _amber_fallback_persona(os.environ.get("USER_NAME", "the user"))
 
 def get_jane_persona():
-    base = (
-        f"You are Jane, {os.environ.get('USER_NAME', 'the user')}'s technical expert and friend. "
-        "You are currently acting as an emergency fallback because the primary model is unavailable. "
-        "Keep your expert persona and help the user as much as you can with your knowledge."
-    )
     jane_essay = _load_file(IDENTITY_ESSAYS["jane"])
     user_essay = _load_file(IDENTITY_ESSAYS["user"])
-    if jane_essay:
-        base += f"\n\n## YOUR IDENTITY (Jane):\n{jane_essay}"
-    if user_essay:
-        base += f"\n\n## ABOUT {_USER_NAME.upper()} (your user):\n{user_essay}"
-    return base
+    return _build_jane_persona(
+        user_name=os.environ.get("USER_NAME", "the user"),
+        essay_user_name=_USER_NAME,
+        jane_essay=jane_essay,
+        user_essay=user_essay,
+    )
 
 PERSONAS = {
     "jane": get_jane_persona(),

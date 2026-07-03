@@ -10,55 +10,52 @@ intent doesn't fit the simple add/remove/view/clear/check verbs.
 from __future__ import annotations
 
 import logging
-import math
-from typing import Optional
+from .actions import (
+    VALID_ACTIONS as _VALID_ACTIONS,
+    destructive_confidence_ok as _destructive_confidence_ok,
+    parse_action_params as _parse_action_params,
+    split_items as _split_items,
+    split_present_missing as _split_present_missing,
+)
+from .responses import (
+    build_add_response as _build_add_response,
+    build_check_response as _build_check_response,
+    build_clear_response as _build_clear_response,
+    build_remove_response as _build_remove_response,
+    build_view_response as _build_view_response,
+)
 
 logger = logging.getLogger(__name__)
-
-_VALID_ACTIONS = {"view", "add", "remove", "clear", "check"}
-
-
-def _split_items(raw: Optional[str]) -> list[str]:
-    if not raw:
-        return []
-    if not isinstance(raw, str):
-        return []
-    return [piece.strip() for piece in str(raw).split(",") if piece.strip()]
 
 
 async def handle(prompt: str, params: dict | None = None) -> dict | None:
     """Dispatch a shopping-list action from the classifier-extracted params."""
-    if not params:
+    status, parsed = _parse_action_params(params)
+    if status == "missing_params":
         logger.info("shopping_list handler: no params — escalating")
         return None
-
-    raw_action = params.get("action")
-    if not isinstance(raw_action, str):
-        logger.info("shopping_list handler: malformed action %r — escalating", raw_action)
+    if status == "malformed_action":
+        logger.info(
+            "shopping_list handler: malformed action %r — escalating",
+            (parsed or {}).get("raw_action"),
+        )
+        return None
+    if status == "unknown_action":
+        logger.info("shopping_list handler: unknown action %r — escalating", (parsed or {}).get("action"))
+        return None
+    if status == "low_confidence":
+        logger.info(
+            "shopping_list handler: destructive action %r confidence %r "
+            "below threshold — escalating",
+            (parsed or {}).get("action"),
+            (parsed or {}).get("confidence"),
+        )
         return None
 
-    action = raw_action.strip().lower()
-    if action not in _VALID_ACTIONS:
-        logger.info("shopping_list handler: unknown action %r — escalating", action)
-        return None
-
-    items = _split_items(params.get("items"))
-    confidence = None
-    if action in {"remove", "clear"}:
-        confidence = params.get("confidence")
-        if (
-            isinstance(confidence, bool)
-            or not isinstance(confidence, (int, float))
-            or not math.isfinite(confidence)
-            or confidence < 0.80
-        ):
-            logger.info(
-                "shopping_list handler: destructive action %r confidence %r "
-                "below threshold — escalating",
-                action,
-                confidence,
-            )
-            return None
+    parsed = parsed or {}
+    action = parsed["action"]
+    items = parsed["items"]
+    confidence = parsed["confidence"]
 
     try:
         from agent_skills.shopping_list import (
@@ -72,9 +69,7 @@ async def handle(prompt: str, params: dict | None = None) -> dict | None:
 
     if action == "view":
         current = get_list(list_name)
-        if not current:
-            return {"text": "Your shopping list is empty."}
-        return {"text": f"Your shopping list has: {', '.join(current)}."}
+        return _build_view_response(current)
 
     if action == "add":
         if not items:
@@ -82,36 +77,23 @@ async def handle(prompt: str, params: dict | None = None) -> dict | None:
         for item in items:
             add_item(item, list_name)
         current = get_list(list_name)
-        return {
-            "text": f"Added {', '.join(items)}. Your shopping list now has {len(current)} items."
-        }
+        return _build_add_response(items, current)
 
     if action == "remove":
         if not items:
             return None
         for item in items:
             remove_item(item, list_name, confidence=confidence)
-        return {"text": f"Removed {', '.join(items)} from your shopping list."}
+        return _build_remove_response(items)
 
     if action == "clear":
         clear_list(list_name, confidence=confidence)
-        return {"text": "Your shopping list has been cleared."}
+        return _build_clear_response()
 
     if action == "check":
         if not items:
             return None
-        current_lower = [i.lower() for i in get_list(list_name)]
-        present = [i for i in items if i.lower() in current_lower]
-        missing = [i for i in items if i.lower() not in current_lower]
-        if present and not missing:
-            return {"text": f"Yes — {', '.join(present)} is on your shopping list."}
-        if missing and not present:
-            return {"text": f"No — {', '.join(missing)} is not on your shopping list."}
-        return {
-            "text": (
-                f"Mixed: {', '.join(present)} is on the list; "
-                f"{', '.join(missing)} is not."
-            )
-        }
+        present, missing = _split_present_missing(items, get_list(list_name))
+        return _build_check_response(present, missing)
 
     return None

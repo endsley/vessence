@@ -22,9 +22,11 @@ which are in end_phrase but not in is_no — so rule 3 still catches them.
 
 from __future__ import annotations
 
-import re
-
-_PUNCT_RE = re.compile(r"[^\w\s']")
+from agent_skills.phrase_matcher import (
+    PUNCT_RE as _PUNCT_RE,
+    normalize_phrase as _normalize,
+    phrase_in_set as _phrase_in_set,
+)
 
 _YES_PHRASES = frozenset({
     "yes",
@@ -67,14 +69,8 @@ _NO_PHRASES = frozenset({
 })
 
 
-def _normalize(text: str) -> str:
-    return _PUNCT_RE.sub("", text.strip().lower())
-
-
 def is_yes(text: str | None) -> bool:
-    if not text:
-        return False
-    return _normalize(text) in _YES_PHRASES
+    return _phrase_in_set(text, _YES_PHRASES)
 
 
 def is_no(text: str | None) -> bool:
@@ -85,6 +81,4 @@ def is_no(text: str | None) -> bool:
     end-of-conversation should use a stronger phrase like 'cancel' or
     'nevermind' (see end_phrase.is_end).
     """
-    if not text:
-        return False
-    return _normalize(text) in _NO_PHRASES
+    return _phrase_in_set(text, _NO_PHRASES)

@@ -1,25 +1,72 @@
 import os
 import sys
-import json
 import asyncio
 import logging
-import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
 
 from memory.v1.memory_retrieval import build_memory_sections
 from jane.config import VESSENCE_DATA_HOME, VESSENCE_HOME
-from jane.research_router import run_research_offload, should_offload_research
+from jane.research_router import run_research_offload
+from context_builder.v1.essence_context import (
+    get_active_essence_chromadb_path as _get_active_essence_chromadb_path,
+    get_active_essence_personality as _get_active_essence_personality,
+    get_essence_tools_description as _get_essence_tools_description,
+)
+from context_builder.v1.prompt_profiles import (
+    AI_CODING_KEYWORDS,
+    MUSIC_KEYWORDS,
+    PromptProfile,
+    _classify_prompt_profile,
+    _is_task_related,
+    _message_lower,
+    _profile_for_intent_level,
+    _profile_for_message_category,
+    _should_include_conversation_summary,
+)
+from context_builder.v1.memory_summary import normalize_memory_summary as _normalize_memory_summary
+from context_builder.v1.memory_plan import build_memory_summary_plan as _build_memory_summary_plan
+from context_builder.v1.context_assembly import (
+    assemble_context_parts as _assemble_context_parts,
+    platform_context_line as _platform_context_line,
+)
+from context_builder.v1.context_sources import (
+    read_json_summary_file as _read_json_summary_file,
+    read_text_file as _read_text_file,
+)
+from context_builder.v1.managed_user_context import (
+    build_managed_user_context as _build_managed_user_context,
+)
+from context_builder.v1.recent_history import (
+    build_user_transcript as _build_user_transcript,
+    format_recent_history as _format_recent_history,
+)
+from context_builder.v1.saved_articles_context import (
+    build_saved_articles_context as _build_saved_articles_context,
+    should_include_saved_articles as _should_include_saved_articles,
+)
+from context_builder.v1.system_prompt_sections import default_operational_sections
+from context_builder.v1.tool_protocols import (
+    CLASSIFICATION_TO_INTENT,
+    PHONE_TOOLS_PROTOCOL,
+    TOOL_CTX_CALL,
+    TOOL_CTX_READ_EMAIL,
+    TOOL_CTX_READ_MESSAGES,
+    TOOL_CTX_SMS,
+)
+from context_builder.v1.user_background import (
+    PERSONAL_FACTS_FILE,
+    _format_fact_snippet,
+    _load_personal_facts,
+    _select_user_background,
+)
 
 # Add vault_web to path for database access
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "vault_web"))
 
 
 MAX_DOC_CHARS = 4000
-MAX_SAVED_ARTICLE_CONTEXT_CHARS = 5000
-
-
 # ── In-memory cache for static context parts ─────────────────────────────────
 _context_cache: dict[str, tuple[float, object]] = {}
 _CACHE_TTL = 300  # 5 minutes — static parts rarely change
@@ -40,7 +87,6 @@ def _cached(key: str, loader, ttl: float = _CACHE_TTL):
         for k in expired:
             _context_cache.pop(k, None)
     return val
-MAX_MEMORY_CHARS = 6000
 BASE_SYSTEM_PROMPT = (
     "You are Jane, the user's long-lived technical partner. Speak as Jane."
 )
@@ -71,122 +117,7 @@ CODE_MAP_PROTOCOL = (
     "Do NOT guess file paths or grep blindly when the Code Map is available. "
     "The map is your first lookup tool for navigating this codebase."
 )
-
-PHONE_TOOLS_PROTOCOL = (
-    "## Phone Tools (Android only)\n"
-    "Emit `[[CLIENT_TOOL:<name>:<json_args>]]` markers to invoke phone-side tools.\n"
-    "The proxy strips markers from visible text. On web, phone tools are unavailable.\n\n"
-    "### contacts.call\n"
-    "`[[CLIENT_TOOL:contacts.call:{\"query\":\"Sarah\"}]]` — resolve relational names\n"
-    "(my wife→Sarah) via personal facts. Keep visible text minimal.\n\n"
-    "### SMS draft protocol (stateful multi-turn loop)\n"
-    "Tools: `contacts.sms_draft` → `contacts.sms_draft_update` → `contacts.sms_send` / `contacts.sms_cancel`\n"
-    "- One open draft at a time, 120s expiry\n"
-    "- Each draft needs a fresh `draft_id`; reuse it on update/send/cancel\n"
-    "- For indirect requests ('tell mom I'm safe'), compose the body yourself\n"
-    "- Keep visible text MINIMAL — Android TTS reads the draft body aloud\n"
-    "- sms_draft: emit marker only. sms_send: just 'Sent.' sms_draft_update: 'Updated.' + marker\n"
-    "- User's next turn: approval→sms_send, edit→sms_draft_update (FULL new body), reject→sms_cancel\n"
-    "- NEVER emit sms_send without a prior sms_draft. NEVER send without user approval.\n\n"
-    "### messages.read_inbox (preferred for reading texts)\n"
-    "Queries SMS database directly. Args: limit (default 20), sender (optional), since_ms (optional).\n"
-    "`[[CLIENT_TOOL:messages.read_inbox:{\"sender\":\"Sarah\",\"limit\":10}]]`\n"
-    "Results arrive via [PHONE TOOL RESULTS] on next turn. Triage: read personal messages,\n"
-    "skip spam/promos/OTPs. Never invent content — quote only what's in the data.\n\n"
-    "### messages.fetch_unread (active notifications only)\n"
-    "Returns non-dismissed notification messages. Use when user asks specifically about NEW notifications.\n"
-    "`[[CLIENT_TOOL:messages.fetch_unread:{\"limit\":20}]]`\n"
-    "Prefer read_inbox unless user explicitly asks about unread notifications.\n\n"
-    "### timer.set / timer.cancel / timer.list / timer.delete (alarm/reminder)\n"
-    "Schedule exact alarms on the phone via AlarmManager — survives Doze, fires offline.\n"
-    "`[[CLIENT_TOOL:timer.set:{\"duration_ms\":<int>,\"label\":\"<short>\"}]]`\n"
-    "- duration_ms: milliseconds from now (3s = 3000, 5min = 300000, 2hr = 7200000)\n"
-    "- label: short phrase the phone TTS speaks when it fires (e.g. \"pasta\", \"laundry\"); empty = generic \"time's up\"\n"
-    "`[[CLIENT_TOOL:timer.cancel:{}]]` cancels ALL outstanding timers.\n"
-    "`[[CLIENT_TOOL:timer.list:{}]]` returns remaining time for each running timer.\n"
-    "`[[CLIENT_TOOL:timer.delete:{\"id\":N}]]` or `{\"index\":N}` or `{\"label\":\"pasta\"}` deletes one.\n"
-    "If the user asks for an alarm/timer/reminder and you have a duration, emit timer.set.\n"
-    "If duration is missing, ASK for it first and end with [[AWAITING:timer_duration]].\n\n"
-    "### sync.force_sms (force message sync)\n"
-    "Triggers a full re-sync of the last 14 days of SMS messages from the phone to the server.\n"
-    "Use when the user says 'sync my messages', 'resync texts', 'refresh my messages', etc.\n"
-    "`[[CLIENT_TOOL:sync.force_sms:{}]]`\n"
-    "No args needed. Results arrive via [TOOL_RESULT] on next turn.\n\n"
-    "### Tool result feedback\n"
-    "Android prepends `[TOOL_RESULT:{json}]` to the next user turn. Statuses:\n"
-    "completed→acknowledge, failed→explain, needs_user→ask clarifying question,\n"
-    "unsupported→apologize, cancelled→don't re-emit.\n\n"
-    "### Safety\n"
-    "- Never emit tool markers when intent is ambiguous — ask first\n"
-    "- Never include sensitive data (passwords, 2FA) in SMS unless user dictated it\n"
-    "- Never emit more than one sms_draft per turn"
-)
 logger = logging.getLogger(__name__)
-
-# ── Per-tool context blocks (injected individually based on Gemma classification) ──
-# These are minimal instruction sets for tool_mode — Opus only sees the one it needs.
-
-TOOL_CTX_SMS = (
-    "## SMS Tool\n"
-    "Emit `[[CLIENT_TOOL:<name>:<json_args>]]` markers. Proxy strips them from visible text.\n\n"
-    "Tools: `contacts.sms_draft` → `contacts.sms_draft_update` → `contacts.sms_send` / `contacts.sms_cancel`\n"
-    "- One draft at a time, 120s expiry. Each draft needs a fresh `draft_id`.\n"
-    "- For indirect requests ('tell mom I'm safe'), compose the body yourself.\n"
-    "- Resolve relational names (my wife→Sarah) via personal facts.\n"
-    "- Keep visible text MINIMAL — Android TTS reads the draft body aloud.\n"
-    "- sms_draft: just emit marker. sms_send: 'Sent.' sms_draft_update: 'Updated.' + marker.\n"
-    "- NEVER send without user approval. NEVER emit sms_send without prior sms_draft.\n"
-)
-
-TOOL_CTX_CALL = (
-    "## Call Tool\n"
-    "Emit `[[CLIENT_TOOL:contacts.call:{\"query\":\"ContactName\"}]]` to place a call.\n"
-    "Resolve relational names (my wife→Sarah) via personal facts. Keep text minimal.\n"
-)
-
-TOOL_CTX_READ_MESSAGES = (
-    "## Read Messages\n"
-    "Message data has been pre-fetched and included below. Triage: read personal messages,\n"
-    "skip spam/promos/OTPs. Never invent content — quote only what's in the data.\n"
-    "For specific sender queries, filter and quote only their messages.\n"
-)
-
-TOOL_CTX_READ_EMAIL = (
-    "## Read Email\n"
-    "Email data has been pre-fetched and included below. Summarize for the user:\n"
-    "triage important vs spam, quote sender and subject for important ones.\n"
-    "Never invent content — only reference what's in the data.\n"
-)
-
-# Map Gemma classification → (intent_level, tool_context)
-CLASSIFICATION_TO_INTENT = {
-    "self_handle": ("greeting", None),
-    "read_messages": ("data_mode", TOOL_CTX_READ_MESSAGES),
-    "read_email": ("data_mode", TOOL_CTX_READ_EMAIL),
-    "sync_messages": ("data_mode", None),  # sync instruction injected into message by server
-    "music_play": ("data_mode", None),  # music data injected into message by server
-    "delegate_opus": (None, None),  # full context, no override
-    # shopping_list is handled by its own code path in jane_proxy.py
-}
-
-TASK_KEYWORDS = (
-    "task", "project", "working on", "roadmap", "transition", "migration",
-    "bug", "fix", "implement", "patch", "code", "repo", "architecture",
-    "deploy", "systemd", "cron", "backup", "chromadb", "optimiz", "todo",
-)
-AI_CODING_KEYWORDS = (
-    "ml", "machine learning", "llm", "prompt engineering", "token usage", "coding",
-    "code", "python", "javascript", "typescript", "bug", "debug", "api endpoint",
-    "system prompt", "architecture", "repo", "database", "chromadb",
-)
-MUSIC_KEYWORDS = (
-    "piano", "music", "song", "melody", "harmony", "chord", "practice", "compose",
-)
-PERSONAL_FACTS_FILE = "user_profile_facts.json"
-SIMPLE_FACTUAL_PREFIXES = (
-    "who", "what", "when", "where", "which", "favorite", "my favorite", "do you know",
-)
-
 
 @dataclass
 class JaneRequestContext:
@@ -195,342 +126,12 @@ class JaneRequestContext:
     retrieved_memory_summary: str = ""
 
 
-@dataclass(frozen=True)
-class PromptProfile:
-    name: str
-    include_user_background: bool = False
-    include_task_state: bool = False
-    include_conversation_summary: bool = False
-    include_memory_summary: bool = True
-    include_research: bool = False
-    include_file_context: bool = False
-    include_code_map: bool = False
-    include_tool_protocols: bool = True  # inject all tool prompt.md sections
-    tool_context_override: str | None = None  # if set, inject ONLY this instead of all tool protocols
-
-
 def _read_text(path: Path, max_chars: int = MAX_DOC_CHARS) -> str:
-    if not path.exists() or not path.is_file():
-        return ""
-    try:
-        return path.read_text(encoding="utf-8", errors="replace")[:max_chars].strip()
-    except Exception:
-        return ""
+    return _read_text_file(path, max_chars)
 
 
 def _read_json_summary(path: Path, max_chars: int = 600) -> str:
-    if not path.exists() or not path.is_file():
-        return ""
-    try:
-        data = json.loads(path.read_text(encoding="utf-8", errors="replace"))
-    except Exception:
-        return ""
-    return json.dumps(data, ensure_ascii=True)[:max_chars]
-
-
-ARTICLE_REFERENCE_KEYWORDS = (
-    "article", "story", "piece", "daily brief", "daily briefing", "briefing",
-    "saved article", "saved articles", "news", "headline",
-)
-
-
-def _article_query_terms(message: str) -> set[str]:
-    stop = {
-        "about", "after", "again", "article", "articles", "brief", "briefing",
-        "could", "daily", "does", "from", "have", "into", "jane", "know",
-        "more", "news", "piece", "read", "said", "save", "saved", "says",
-        "some", "story", "that", "them", "there", "these", "this", "what",
-        "when", "where", "which", "with", "would", "your",
-    }
-    return {
-        term
-        for term in re.findall(r"[a-z0-9][a-z0-9_-]{2,}", (message or "").lower())
-        if term not in stop
-    }
-
-
-def _should_include_saved_articles(message: str) -> bool:
-    lowered = _message_lower(message)
-    return any(keyword in lowered for keyword in ARTICLE_REFERENCE_KEYWORDS)
-
-
-def _saved_articles_index_path() -> Path:
-    data_home = Path(os.environ.get("VESSENCE_DATA_HOME", VESSENCE_DATA_HOME))
-    return data_home / "briefing_saved" / "saved.json"
-
-
-def _briefing_article_path(article_id: str) -> Path:
-    ambient_base = os.environ.get("AMBIENT_BASE", os.path.expanduser("~/ambient"))
-    tools_dir = os.environ.get("TOOLS_DIR", os.path.join(ambient_base, "skills"))
-    return Path(tools_dir) / "daily_briefing" / "essence_data" / "articles" / f"{article_id}.json"
-
-
-def _load_saved_article_entry_article(entry: dict) -> dict:
-    article = entry.get("article")
-    if isinstance(article, dict):
-        return article
-    article_id = str(entry.get("article_id") or "").strip()
-    if not article_id or not re.match(r"^[a-zA-Z0-9_-]+$", article_id):
-        return {}
-    path = _briefing_article_path(article_id)
-    if not path.exists():
-        return {}
-    try:
-        data = json.loads(path.read_text(encoding="utf-8", errors="replace"))
-    except Exception:
-        return {}
-    return data if isinstance(data, dict) else {}
-
-
-def _score_saved_article(message_terms: set[str], entry: dict, article: dict) -> int:
-    haystacks = [
-        str(entry.get("category") or ""),
-        str(article.get("title") or ""),
-        str(article.get("source") or ""),
-        str(article.get("url") or ""),
-        str(article.get("brief_summary") or ""),
-        str(article.get("full_summary") or ""),
-        str(article.get("full_text") or "")[:3000],
-    ]
-    score = 0
-    for term in message_terms:
-        for idx, haystack in enumerate(haystacks):
-            if term in haystack.lower():
-                score += 4 if idx <= 3 else 1
-                break
-    return score
-
-
-def _format_saved_article_context(entry: dict, article: dict, remaining_chars: int) -> str:
-    article_id = str(entry.get("article_id") or article.get("id") or "").strip()
-    category = str(entry.get("category") or "Uncategorized").strip()
-    title = str(article.get("title") or article_id or "Untitled").strip()
-    source = str(article.get("source") or "").strip()
-    url = str(article.get("url") or "").strip()
-    saved_at = str(entry.get("saved_at") or "").strip()
-    summary = str(article.get("full_summary") or article.get("brief_summary") or "").strip()
-    full_text = str(article.get("full_text") or "").strip()
-    body = summary or full_text
-    excerpt_budget = max(600, remaining_chars - 350)
-    excerpt = " ".join(body.split())[:excerpt_budget].strip()
-    parts = [
-        f"Title: {title}",
-        f"Category: {category}",
-    ]
-    if source:
-        parts.append(f"Source: {source}")
-    if saved_at:
-        parts.append(f"Saved at: {saved_at}")
-    if url:
-        parts.append(f"URL: {url}")
-    if excerpt:
-        parts.append(f"Context excerpt: {excerpt}")
-    return "\n".join(parts)
-
-
-def _build_saved_articles_context(message: str) -> str:
-    if not _should_include_saved_articles(message):
-        return ""
-    path = _saved_articles_index_path()
-    if not path.exists():
-        return ""
-    try:
-        saved = json.loads(path.read_text(encoding="utf-8", errors="replace"))
-    except Exception:
-        return ""
-    if not isinstance(saved, dict):
-        return ""
-
-    terms = _article_query_terms(message)
-    candidates: list[tuple[int, str, dict, dict]] = []
-    for article_id, entry in saved.items():
-        if not isinstance(entry, dict):
-            continue
-        article = _load_saved_article_entry_article(entry)
-        score = _score_saved_article(terms, entry, article) if terms else 0
-        saved_at = str(entry.get("saved_at") or "")
-        candidates.append((score, saved_at, entry, article))
-
-    if not candidates:
-        return ""
-    if terms and any(score > 0 for score, _saved_at, _entry, _article in candidates):
-        candidates = [c for c in candidates if c[0] > 0]
-    candidates.sort(key=lambda c: (c[0], c[1]), reverse=True)
-
-    sections: list[str] = []
-    remaining = MAX_SAVED_ARTICLE_CONTEXT_CHARS
-    for score, _saved_at, entry, article in candidates[:3]:
-        block = _format_saved_article_context(entry, article, remaining)
-        if not block:
-            continue
-        if len(block) > remaining:
-            block = block[:remaining].rstrip()
-        sections.append(block)
-        remaining -= len(block) + 80
-        if remaining <= 800:
-            break
-
-    if not sections:
-        return ""
-    return (
-        "These are the most relevant user-saved Daily Briefing articles for the current question. "
-        "Use this article context when answering; if it is not enough, say what is missing.\n\n"
-        + "\n\n---\n\n".join(sections)
-    )
-
-
-ANAPHORIC_TOKENS = {
-    "it", "that", "this", "them", "those", "these", "the button",
-    "the file", "the page", "the link", "the thing", "the one",
-}
-
-
-def _is_short_anaphoric(message: str) -> bool:
-    """Return True when the message is short and relies on conversational context
-    (pronouns/demonstratives) rather than standing on its own semantically."""
-    words = (message or "").strip().split()
-    if len(words) > 8:
-        return False
-    lowered = " ".join(words).lower()
-    return any(token in lowered for token in ANAPHORIC_TOKENS)
-
-
-def _message_lower(message: str) -> str:
-    return (message or "").strip().lower()
-
-
-def _is_task_related(message: str) -> bool:
-    lowered = _message_lower(message)
-    return any(keyword in lowered for keyword in TASK_KEYWORDS)
-
-
-def _should_include_conversation_summary(message: str) -> bool:
-    lowered = _message_lower(message)
-    if not lowered:
-        return False
-    if _is_task_related(message):
-        return True
-    if any(keyword in lowered for keyword in AI_CODING_KEYWORDS):
-        return True
-    if lowered.startswith(SIMPLE_FACTUAL_PREFIXES):
-        return False
-    if len(lowered) <= 40 and "?" in lowered:
-        return False
-    return True
-
-
-def _classify_prompt_profile(
-    message: str,
-    file_context: str | None = None,
-    intent_level: str | None = None,
-    tool_context: str | None = None,
-) -> PromptProfile:
-    # Tool mode: minimal context for tool execution (SMS, calls, etc.)
-    # Only inject the specific tool's rules — no memory, no history, no personality bloat.
-    if intent_level == "tool_mode":
-        return PromptProfile(
-            name="tool_mode",
-            include_user_background=True,   # need contact name resolution
-            include_task_state=False,
-            include_conversation_summary=False,
-            include_memory_summary=False,
-            include_research=False,
-            include_file_context=False,
-            include_code_map=False,
-            include_tool_protocols=False,    # don't inject ALL tool protocols
-            tool_context_override=tool_context,  # inject only the relevant tool rules
-        )
-    # Data mode: server already pre-fetched data (email, messages), brain just needs to
-    # respond naturally about it. Data is injected into the message, not the system prompt.
-    if intent_level == "data_mode":
-        return PromptProfile(
-            name="data_mode",
-            include_user_background=True,
-            include_task_state=False,
-            include_conversation_summary=False,
-            include_memory_summary=False,
-            include_research=False,
-            include_file_context=False,
-            include_code_map=False,
-            include_tool_protocols=False,
-        )
-    # Greeting: minimal context — just personality + user name, no memory or task state
-    if intent_level == "greeting":
-        return PromptProfile(
-            name="greeting",
-            include_user_background=False,
-            include_task_state=False,
-            include_conversation_summary=False,
-            include_memory_summary=False,
-            include_research=False,
-            include_file_context=False,
-            include_tool_protocols=False,
-        )
-    # Simple: include user background but skip memory retrieval and task state
-    if intent_level == "simple":
-        return PromptProfile(
-            name="simple_query",
-            include_user_background=True,
-            include_task_state=False,
-            include_conversation_summary=False,
-            include_memory_summary=False,
-            include_research=False,
-            include_file_context=bool(file_context),
-            include_tool_protocols=False,
-        )
-    lowered = _message_lower(message)
-    if file_context or any(marker in lowered for marker in ("file", "folder", "document", "pdf", "vault", "path")):
-        return PromptProfile(
-            name="file_lookup",
-            include_user_background=False,
-            include_task_state=False,
-            include_conversation_summary=False,
-            include_memory_summary=True,
-            include_research=False,
-            include_file_context=True,
-            include_code_map=True,
-        )
-    if _is_task_related(message) or any(keyword in lowered for keyword in AI_CODING_KEYWORDS):
-        return PromptProfile(
-            name="project_work",
-            include_user_background=True,
-            include_task_state=True,
-            include_conversation_summary=True,
-            include_memory_summary=True,
-            include_research=should_offload_research(message),
-            include_file_context=bool(file_context),
-            include_code_map=True,
-        )
-    if lowered.startswith(SIMPLE_FACTUAL_PREFIXES) or (len(lowered) <= 40 and "?" in lowered):
-        return PromptProfile(
-            name="factual_personal",
-            include_user_background=True,
-            include_task_state=False,
-            include_conversation_summary=False,
-            include_memory_summary=True,
-            include_research=False,
-            include_file_context=False,
-        )
-    return PromptProfile(
-        name="casual_followup",
-        include_user_background=True,
-        include_task_state=False,
-        include_conversation_summary=False,
-        include_memory_summary=True,
-        include_research=False,
-        include_file_context=bool(file_context),
-        include_code_map=False,
-    )
-
-
-def _normalize_memory_summary(memory_summary: str, fallback_summary: str | None = None) -> str:
-    summary = (memory_summary or "").strip()
-    if summary and summary != "No relevant context found.":
-        return summary[:MAX_MEMORY_CHARS]
-    fallback = (fallback_summary or "").strip()
-    if fallback and fallback != "No relevant context found.":
-        return fallback[:MAX_MEMORY_CHARS]
-    return ""
+    return _read_json_summary_file(path, max_chars)
 
 
 def _managed_user_runtime_context(user_id: str | None) -> tuple[dict, str | None, str]:
@@ -547,22 +148,8 @@ def _managed_user_runtime_context(user_id: str | None) -> tuple[dict, str | None
     if not config.get("managed"):
         return {}, None, ""
 
-    capability_labels = {cap["id"]: cap["label"] for cap in AVAILABLE_CAPABILITIES}
-    capabilities = config.get("capabilities") or []
-    enabled_labels = [capability_labels.get(cap, cap) for cap in capabilities]
-    memory_path = config.get("memory_chromadb_path") if "memory" in capabilities else None
-    lines = [
-        "## Active Managed User",
-        f"User ID: {config.get('user_id') or user_id}",
-        f"Display name: {config.get('display_name') or config.get('email') or user_id}",
-        "Personal memory scope: private ChromaDB for this user" if memory_path else "Personal memory scope: disabled for this user",
-        "Enabled capabilities: " + (", ".join(enabled_labels) if enabled_labels else "none"),
-        (
-            "Capability boundary: use only the enabled user-facing capabilities for this user. "
-            "If a requested capability is not enabled, say it is not enabled for this user."
-        ),
-    ]
-    return config, memory_path, "\n".join(lines)
+    user_context = _build_managed_user_context(config, user_id, AVAILABLE_CAPABILITIES)
+    return config, user_context.memory_path, user_context.context_block
 
 
 def _safe_get_memory_summary(
@@ -624,231 +211,6 @@ def _safe_get_memory_summary(
         logger.exception("Jane memory retrieval failed")
         return _normalize_memory_summary("", fallback_summary)
     return _normalize_memory_summary(memory_summary, fallback_summary)
-
-
-def _load_personal_facts(data_root: Path) -> dict:
-    path = data_root / PERSONAL_FACTS_FILE
-    if not path.exists() or not path.is_file():
-        return {}
-    try:
-        data = json.loads(path.read_text(encoding="utf-8", errors="replace"))
-    except Exception:
-        return {}
-    return data if isinstance(data, dict) else {}
-
-
-def _format_fact_snippet(fact: dict) -> str:
-    label = str(fact.get("label", "")).strip()
-    value = str(fact.get("value", "")).strip()
-    if not label or not value:
-        return ""
-    return f"{label}: {value}"
-
-
-def _select_user_background(message: str, personal_facts: dict) -> str:
-    lowered = _message_lower(message)
-    snippets: list[str] = []
-
-    for fact in personal_facts.get("always", []):
-        if isinstance(fact, dict):
-            snippet = _format_fact_snippet(fact)
-            if snippet:
-                snippets.append(snippet)
-
-    topical_groups = []
-    if any(keyword in lowered for keyword in AI_CODING_KEYWORDS):
-        topical_groups.append("ai_coding")
-    if any(keyword in lowered for keyword in MUSIC_KEYWORDS):
-        topical_groups.append("music")
-    if "teach" in lowered or "student" in lowered or "class" in lowered or "lecture" in lowered:
-        topical_groups.append("teaching")
-
-    topic_map = personal_facts.get("topic_map", {})
-    for group in topical_groups:
-        for fact in topic_map.get(group, []):
-            if isinstance(fact, dict):
-                snippet = _format_fact_snippet(fact)
-                if snippet and snippet not in snippets:
-                    snippets.append(snippet)
-
-    return "\n".join(snippets)
-
-
-def _get_active_essence_personality() -> str:
-    """Read the active essence's personality.md and return its content."""
-    data_home = os.environ.get("VESSENCE_DATA_HOME", os.path.expanduser("~/ambient/vessence-data"))
-    active_file = os.path.join(data_home, "data", "active_essence.json")
-    if not os.path.isfile(active_file):
-        return ""
-    try:
-        with open(active_file, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        active_list = data.get("active", [])
-        if not active_list:
-            # Also check the EssenceRuntime format
-            active_name = data.get("active_essence")
-            if active_name:
-                active_list = [active_name]
-        if not active_list:
-            return ""
-    except (json.JSONDecodeError, OSError):
-        return ""
-
-    ambient_base = os.environ.get("AMBIENT_BASE", os.path.expanduser("~/ambient"))
-    tools_dir = os.environ.get("TOOLS_DIR",
-                               os.environ.get("ESSENCES_DIR",
-                                               os.path.join(ambient_base, "skills")))
-    essences_dir = os.path.join(ambient_base, "essences")
-    parts = []
-    for name in active_list:
-        # Check tools/ first, then essences/
-        personality_path = os.path.join(tools_dir, name, "personality.md")
-        if not os.path.isfile(personality_path):
-            personality_path = os.path.join(essences_dir, name, "personality.md")
-        if os.path.isfile(personality_path):
-            try:
-                content = Path(personality_path).read_text(encoding="utf-8", errors="replace").strip()
-                if content:
-                    parts.append(f"### Active Essence: {name}\n{content}")
-            except Exception:
-                pass
-    return "\n\n".join(parts)
-
-
-def _get_active_essence_chromadb_path() -> str | None:
-    """Return the ChromaDB path for the currently active essence, if any."""
-    data_home = os.environ.get("VESSENCE_DATA_HOME", os.path.expanduser("~/ambient/vessence-data"))
-    active_file = os.path.join(data_home, "data", "active_essence.json")
-    if not os.path.isfile(active_file):
-        return None
-    try:
-        with open(active_file, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        active_list = data.get("active", [])
-        if not active_list:
-            active_name = data.get("active_essence")
-            if active_name:
-                active_list = [active_name]
-        if not active_list:
-            return None
-    except (json.JSONDecodeError, OSError):
-        return None
-
-    ambient_base = os.environ.get("AMBIENT_BASE", os.path.expanduser("~/ambient"))
-    tools_dir = os.environ.get("TOOLS_DIR",
-                               os.environ.get("ESSENCES_DIR",
-                                               os.path.join(ambient_base, "skills")))
-    essences_dir = os.path.join(ambient_base, "essences")
-    # Return the first active essence's ChromaDB path (check tools/ then essences/)
-    for name in active_list:
-        for search_dir in [tools_dir, essences_dir]:
-            chroma_path = os.path.join(search_dir, name, "knowledge", "chromadb")
-            if os.path.isdir(chroma_path):
-                return chroma_path
-    return None
-
-
-def _get_essence_tools_description() -> str:
-    """Scan loaded essences/tools and build a description for Jane's context.
-
-    Items with type=tool are listed as tools that Jane invokes directly.
-    Items with type=essence are listed as AI agents that Jane delegates to.
-    """
-    ambient_base = os.environ.get("AMBIENT_BASE", os.path.expanduser("~/ambient"))
-    tools_dir = os.environ.get("TOOLS_DIR",
-                               os.environ.get("ESSENCES_DIR",
-                                               os.path.join(ambient_base, "skills")))
-    essences_dir = os.path.join(ambient_base, "essences")
-
-    # Collect entries from both directories
-    scan_entries: list[str] = []  # (dir, entry_name) tuples stored as full paths
-    for scan_dir in [tools_dir, essences_dir]:
-        if os.path.isdir(scan_dir):
-            for entry in sorted(os.listdir(scan_dir)):
-                scan_entries.append(os.path.join(scan_dir, entry))
-
-    if not scan_entries:
-        return ""
-
-    tool_sections = []
-    essence_sections = []
-    for entry_path in scan_entries:
-        entry = os.path.basename(entry_path)
-        manifest_path = os.path.join(entry_path, "manifest.json")
-        tools_path = os.path.join(entry_path, "functions", "custom_tools.py")
-        if not os.path.isfile(manifest_path):
-            continue
-
-        try:
-            with open(manifest_path) as f:
-                m = json.load(f)
-        except (json.JSONDecodeError, OSError):
-            continue
-
-        name = m.get("essence_name", entry)
-        item_type = m.get("type", "tool")  # default to "tool" for backward compat
-        description = m.get("description", "")
-
-        if item_type == "essence":
-            # Essences are AI agents — Jane delegates to them
-            section = f"### {name} (Essence — AI Agent)\n"
-            section += f"Description: {description}\n"
-            section += "Interaction: Delegate conversation to this essence. It has its own LLM brain and handles multi-step workflows autonomously.\n"
-            # Still list callable tools if they exist
-            if os.path.isfile(tools_path):
-                tools = _extract_tool_signatures(tools_path)
-                if tools:
-                    python_bin = os.environ.get("PYTHON_BIN", sys.executable)
-                    section += f"Direct tool invoke (optional): `{python_bin} {tools_path} <function_name> '<json_args>'`\n"
-                    section += "Available functions:\n"
-                    for t in tools:
-                        section += f"- `{t}`\n"
-            essence_sections.append(section)
-        else:
-            # Tools are utilities — Jane invokes directly
-            if not os.path.isfile(tools_path):
-                continue
-            tools = _extract_tool_signatures(tools_path)
-            if not tools:
-                continue
-
-            python_bin = os.environ.get("PYTHON_BIN", sys.executable)
-            section = f"### {name} (Tool)\n"
-            section += f"Invoke: `{python_bin} {tools_path} <function_name> '<json_args>'`\n"
-            section += "Available tools:\n"
-            for t in tools:
-                section += f"- `{t}`\n"
-            tool_sections.append(section)
-
-    parts = []
-    if tool_sections:
-        parts.append("## Tools\nYou invoke these directly on the user's behalf.\n\n" + "\n".join(tool_sections))
-    if essence_sections:
-        parts.append("## Essences (AI Agents)\nYou delegate to these — hand off the conversation when the user needs their expertise.\n\n" + "\n".join(essence_sections))
-
-    return "\n\n".join(parts)
-
-
-def _extract_tool_signatures(tools_path: str) -> list[str]:
-    """Extract public function signatures from a custom_tools.py file."""
-    tools = []
-    try:
-        with open(tools_path) as f:
-            for line in f:
-                line = line.strip()
-                if line.startswith("def ") and not line.startswith("def _"):
-                    sig = line[4:]
-                    paren_end = sig.find(") ->")
-                    if paren_end == -1:
-                        paren_end = sig.find("):")
-                    if paren_end >= 0:
-                        sig = sig[:paren_end + 1]
-                    else:
-                        sig = sig.rstrip(":").strip()
-                    tools.append(sig.strip())
-    except OSError:
-        pass
-    return tools
 
 
 CODE_MAP_CORE_PATH = Path(VESSENCE_HOME) / "configs" / "CODE_MAP_CORE.md"
@@ -938,147 +300,8 @@ def _build_system_sections(
             system_sections.append(PHONE_TOOLS_PROTOCOL)
     # else: no tool protocols injected (tool_mode with data pre-fetched, greeting, etc.)
 
-    # Standing brain mode: the brain runs from the project directory now and
-    # loads CLAUDE.md, which gives it full project rules + tool access. But
-    # CLAUDE.md also has automation rules (job queue processing, code edit
-    # lock) that are meant for CLI-interactive sessions, NOT for the
-    # web/Android standing brain. This override tells the model to skip
-    # those specific sections while honoring everything else.
-    system_sections.append(
-        "## Standing Brain Mode — IMPORTANT OVERRIDE\n"
-        "You are running as the web/Android standing brain, NOT as an interactive\n"
-        "CLI session. CLAUDE.md is loaded and most of its rules apply. However,\n"
-        "you MUST SKIP these CLAUDE.md sections entirely — they are designed for\n"
-        "interactive CLI use and will cause empty responses or infinite loops if\n"
-        "executed in standing-brain mode:\n\n"
-        "- **Run Job Queue**: Do NOT process the job queue unless the user explicitly asks.\n"
-        "- **Code Edit Lock**: Do NOT acquire the code edit lock (another agent may hold it).\n"
-        "- **Review Process (AI Review Panel)**: Do NOT run consult_panel.py.\n\n"
-        "Everything else in CLAUDE.md (identity, memory rules, preferences, update rules,\n"
-        "essence builder, preference enforcement, environment paths) applies normally.\n"
-        "Respond directly to the user's message. Do not run background automation."
-    )
-
-    # Conversational acknowledgment: brain outputs a brief [ACK] before the full response
-    system_sections.append(
-        "## Response Format — Acknowledgment\n"
-        "IMPORTANT: Before ANY tool calls, reasoning, or other output, you MUST output a brief "
-        "acknowledgment wrapped in [ACK]...[/ACK] tags as your VERY FIRST output. "
-        "This acknowledgment is displayed/spoken immediately while your full response streams.\n"
-        "The [ACK] should:\n"
-        "- Address the user by name\n"
-        "- Show you understood what they asked (be specific, not generic)\n"
-        "- Give a sense of how long it will take (quick lookup vs. complex task)\n"
-        "- Be 1 short sentence, conversational tone\n\n"
-        "Examples:\n"
-        "[ACK]Sure, let me check the weather real quick.[/ACK]\n"
-        "[ACK]On it — let me dig into that auth issue.[/ACK]\n"
-        "[ACK]That's a big refactor. Let me plan it out — this'll take a minute.[/ACK]\n\n"
-        "For simple greetings or very short replies, skip the [ACK] tags and just respond naturally."
-    )
-    # Subagent delegation: Sonnet handles conversation, Opus handles heavy work
-    system_sections.append(
-        "## Delegation — When to Use Subagents\n"
-        "You are running as Sonnet (fast, conversational). For tasks that need deep reasoning "
-        "or complex code work, spawn an Opus subagent using the Agent tool. Delegate when:\n"
-        "- Writing or refactoring more than ~20 lines of code\n"
-        "- Debugging complex multi-file issues\n"
-        "- Deep architectural analysis or planning\n"
-        "- Multi-step research across the codebase\n\n"
-        "For everything else — conversation, quick answers, simple file reads, short edits, "
-        "status checks — handle it yourself. Don't delegate trivial tasks."
-    )
-    # Rich content tags for Android/web rendering
-    system_sections.append(
-        "## Rich Content Tags\n"
-        "When showing images from the vault, wrap the vault path in action tags:\n"
-        "  {{image:images/photo.jpg}} — renders as a clickable thumbnail\n"
-        "  {{navigate:Life Librarian}} — renders as a navigation button\n"
-        "Always use these tags when referencing vault files so the UI can render them properly.\n\n"
-        "IMPORTANT: Do NOT use {{play:...}} tags. Music playback is handled automatically by "
-        "the proxy when the user says 'play X' — you will not receive those messages. "
-        "Never embed audio players in chat bubbles.\n\n"
-        "## File Downloads\n"
-        "When the user asks for the actual file (download, send me the file, give me the mp3, etc.) "
-        "— as opposed to playing it — provide a markdown download link in your response:\n"
-        "  [The Scientist.mp3](/api/files/serve/Music/Coldplay/The%20Scientist.mp3)\n"
-        "The link renders as a clickable download in the chat bubble. "
-        "This is DIFFERENT from playing music (which uses [MUSIC_PLAY:id] and navigates to the player). "
-        "Examples:\n"
-        '- "play the scientist" → search + [MUSIC_PLAY:id] (navigates to player, conversation ends)\n'
-        '- "give me the scientist mp3" → [The Scientist.mp3](/api/files/serve/Music/...) (download link in chat)\n'
-        '- "send me that pdf" → [report.pdf](/api/files/serve/Documents/report.pdf) (download link in chat)\n'
-        "Use this for ANY file the user wants to download, not just music."
-    )
-    # Music playback instruction
-    system_sections.append(
-        "## Music Playback\n"
-        "Music play requests (e.g., 'play the scientist', 'play some coldplay') are handled "
-        "automatically by the proxy — you will NOT receive these messages. The proxy creates "
-        "a playlist and responds with [MUSIC_PLAY:id] directly.\n"
-        "If a music request somehow reaches you (e.g., complex phrasing), respond naturally "
-        "and mention you couldn't find a match, or suggest the user try 'play <artist/song>'."
-    )
-    # Default tools awareness
-    system_sections.append(
-        "## Available Tools\n"
-        "You have these tools available that users can interact with:\n"
-        "- **Life Librarian** — file browser for the user's vault (personal cloud storage). Navigate with {{navigate:Life Librarian}}\n"
-        "- **Music Playlist** — browse audio files, build playlists, play music. Navigate with {{navigate:Music Playlist}}\n"
-        "- **Daily Briefing** — daily news digest and topic summaries. Navigate with {{navigate:Daily Briefing}}\n"
-        "When users ask about their files, photos, music, or news, reference these tools."
-    )
-    system_sections.append(
-        "Prefer the user's most recent explicit message when it conflicts with older memory."
-    )
-    system_sections.append(
-        "## Conversational Hygiene (IMPORTANT)\n"
-        "Everything you emit is spoken or displayed to the user. Treat your reply as a "
-        "message to a person, not a shell transcript.\n"
-        "- Do NOT name internal Python functions, APIs, or parameter names "
-        "(e.g. 'create_event', 'quick_add', 'sms_draft_update'). Describe capabilities "
-        "in plain human terms: say 'I can add it to your calendar', not 'I have a "
-        "create_event function'.\n"
-        "- Do NOT emit reasoning preambles, meta-commentary, or narration of your process "
-        "(e.g. 'The user is asking me to...', 'Let me think about this...', 'No evidence "
-        "needed for...'). Just respond as Jane. If a hook asks you for evidence on a "
-        "purely conversational turn, briefly answer and move on — do not narrate why.\n"
-        "- Do NOT mention tool result fields, API shapes, or raw IDs unless the user asked "
-        "for them.\n"
-        "- When you confirm you did something, verify against the tool's returned value "
-        "(e.g. the actual start time in the calendar event), not the value you sent in. "
-        "Google and other APIs may normalize timezones or fields; the response is ground "
-        "truth."
-    )
+    system_sections.extend(default_operational_sections())
     return system_sections
-
-
-def _format_recent_history(history: list[dict], max_turns: int = 6, max_chars: int = 2400) -> str:
-    if not history:
-        return ""
-
-    recent = history[-max_turns:]
-    lines: list[str] = []
-    remaining = max_chars
-
-    for entry in recent:
-        role = str(entry.get("role", "user")).strip().lower()
-        content = " ".join(str(entry.get("content", "")).split()).strip()
-        if not content:
-            continue
-
-        speaker = "Jane" if role == "assistant" else "User"
-        line = f"{speaker}: {content}"
-        if len(line) > remaining:
-            if remaining <= len(speaker) + 2:
-                break
-            line = line[: remaining - 1].rstrip() + "..."
-        lines.append(line)
-        remaining -= len(line) + 1
-        if remaining <= 0:
-            break
-
-    return "\n".join(lines).strip()
 
 
 AWAITING_MARKER_INSTRUCTION = (
@@ -1151,12 +374,14 @@ def build_jane_context(
     personal_facts = {} if managed_user_config else _cached("personal_facts",
         lambda: _load_personal_facts(data_root),
         ttl=300)  # 5 min — rarely changes
-    skip_memory_for_anaphora = _is_short_anaphoric(message)
-    if skip_memory_for_anaphora:
-        memory_summary = ""
-    elif memory_summary_override is not None:
-        memory_summary = _normalize_memory_summary(memory_summary_override, memory_summary_fallback)
-    elif enable_memory_retrieval and profile.include_memory_summary:
+    memory_plan = _build_memory_summary_plan(
+        message,
+        include_memory_summary=profile.include_memory_summary,
+        enable_memory_retrieval=enable_memory_retrieval,
+        memory_summary_override=memory_summary_override,
+        memory_summary_fallback=memory_summary_fallback,
+    )
+    if memory_plan.should_retrieve:
         memory_summary = _safe_get_memory_summary(
             message,
             conversation_summary=conversation_summary,
@@ -1165,7 +390,7 @@ def build_jane_context(
             user_id=user_id,
         )
     else:
-        memory_summary = _normalize_memory_summary("", memory_summary_fallback)
+        memory_summary = memory_plan.memory_summary
     research_brief = run_research_offload(message) if profile.include_research else ""
     saved_articles_context = _build_saved_articles_context(message)
     system_sections = _build_system_sections(
@@ -1177,26 +402,23 @@ def build_jane_context(
         current_task_state,
         personal_facts,
         profile,
-        force_conversation_summary=skip_memory_for_anaphora,
+        force_conversation_summary=memory_plan.force_conversation_summary,
         saved_articles_context=saved_articles_context,
     )
 
     if tts_enabled:
-        system_sections.append(TTS_SPOKEN_BLOCK_INSTRUCTION)
-    if managed_user_block:
-        system_sections.append(managed_user_block)
-
-    recent_history = _format_recent_history(history)
-    user_sections: list[str] = []
-    if recent_history:
-        user_sections.append(f"Recent Conversation:\n{recent_history}")
-    user_sections.extend([f"User: {message}", "Jane:"])
-
-    return JaneRequestContext(
-        system_prompt="\n\n".join(system_sections).strip(),
-        transcript="\n\n".join(user_sections).strip(),
+        tts_instruction = TTS_SPOKEN_BLOCK_INSTRUCTION
+    else:
+        tts_instruction = ""
+    assembly = _assemble_context_parts(
+        system_sections,
+        message=message,
+        history=history,
         retrieved_memory_summary=memory_summary,
+        tts_instruction=tts_instruction,
+        managed_user_block=managed_user_block,
     )
+    return JaneRequestContext(**assembly.__dict__)
 
 
 async def build_jane_context_async(
@@ -1233,19 +455,17 @@ async def build_jane_context_async(
         lambda: _load_personal_facts(data_root),
         ttl=300)  # 5 min — rarely changes
 
-    # Short anaphoric messages ("remove it", "do that", "fix this") — skip ChromaDB.
-    # The session topic summary + last 2 exchanges give the LLM enough context to
-    # resolve the reference; ChromaDB would just return irrelevant noise.
-    skip_memory_for_anaphora = _is_short_anaphoric(message)
-
+    memory_plan = _build_memory_summary_plan(
+        message,
+        include_memory_summary=profile.include_memory_summary,
+        enable_memory_retrieval=enable_memory_retrieval,
+        memory_summary_override=memory_summary_override,
+        memory_summary_fallback=memory_summary_fallback,
+    )
     memory_task = None
-    if skip_memory_for_anaphora:
-        _status("Short contextual message — using session context instead of memory.")
-        memory_summary = ""
-    elif memory_summary_override is not None:
-        memory_summary = _normalize_memory_summary(memory_summary_override, memory_summary_fallback)
-    elif enable_memory_retrieval and profile.include_memory_summary:
-        _status("Retrieving memory from ChromaDB...")
+    if memory_plan.status_message:
+        _status(memory_plan.status_message)
+    if memory_plan.should_retrieve:
         memory_task = asyncio.create_task(
             asyncio.to_thread(
                 _safe_get_memory_summary,
@@ -1257,7 +477,7 @@ async def build_jane_context_async(
             )
         )
     else:
-        memory_summary = _normalize_memory_summary("", memory_summary_fallback)
+        memory_summary = memory_plan.memory_summary
     research_task = None
     if profile.include_research:
         _status("Running research offload...")
@@ -1301,33 +521,25 @@ async def build_jane_context_async(
         current_task_state,
         personal_facts,
         profile,
-        force_conversation_summary=skip_memory_for_anaphora,
+        force_conversation_summary=memory_plan.force_conversation_summary,
         saved_articles_context=saved_articles_context,
     )
-
-    # Inject platform context so Jane knows where the user is chatting from
-    if platform:
-        platform_labels = {"android": "Android app", "web": "web interface", "cli": "CLI terminal"}
-        label = platform_labels.get(platform, platform)
-        system_sections.append(f"[Platform] The user is chatting from the {label}.")
 
     # Navigation tag syntax removed from per-request context (2026-03-29).
     # Tag syntax ({{navigate:X}}, {{image:X}}, {{play:X}}, {{search_results:audio:X}})
     # is stored in ChromaDB memory and retrieved on demand when relevant.
 
     if tts_enabled:
-        system_sections.append(TTS_SPOKEN_BLOCK_INSTRUCTION)
-    if managed_user_block:
-        system_sections.append(managed_user_block)
-
-    recent_history = _format_recent_history(history)
-    user_sections: list[str] = []
-    if recent_history:
-        user_sections.append(f"Recent Conversation:\n{recent_history}")
-    user_sections.extend([f"User: {message}", "Jane:"])
-
-    return JaneRequestContext(
-        system_prompt="\n\n".join(system_sections).strip(),
-        transcript="\n\n".join(user_sections).strip(),
+        tts_instruction = TTS_SPOKEN_BLOCK_INSTRUCTION
+    else:
+        tts_instruction = ""
+    assembly = _assemble_context_parts(
+        system_sections,
+        message=message,
+        history=history,
         retrieved_memory_summary=memory_summary,
+        platform=platform,
+        tts_instruction=tts_instruction,
+        managed_user_block=managed_user_block,
     )
+    return JaneRequestContext(**assembly.__dict__)

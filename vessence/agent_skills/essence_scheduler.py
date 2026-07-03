@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from agent_skills.cron_schedule import matches_schedule as _matches_schedule
 from jane.config import LOGS_DIR
 
 logging.basicConfig(
@@ -63,37 +64,6 @@ def _is_user_idle() -> bool:
     for path in indicators:
         if os.path.exists(path):
             if now - os.path.getmtime(path) < IDLE_THRESHOLD_SECONDS:
-                return False
-    return True
-
-
-def _matches_schedule(schedule: str, now: datetime) -> bool:
-    """Simple cron schedule matcher for: minute hour dom month dow."""
-    parts = schedule.strip().split()
-    if len(parts) != 5:
-        return False
-
-    fields = [now.minute, now.hour, now.day, now.month, now.weekday()]
-    # weekday: cron uses 0=Sun, Python uses 0=Mon
-    fields[4] = (fields[4] + 1) % 7  # Convert to cron format
-
-    for field_val, pattern in zip(fields, parts):
-        if pattern == "*":
-            continue
-        if "/" in pattern:
-            base, step = pattern.split("/")
-            base = 0 if base == "*" else int(base)
-            if (field_val - base) % int(step) != 0:
-                return False
-        elif "," in pattern:
-            if field_val not in [int(x) for x in pattern.split(",")]:
-                return False
-        elif "-" in pattern:
-            lo, hi = pattern.split("-")
-            if not (int(lo) <= field_val <= int(hi)):
-                return False
-        else:
-            if field_val != int(pattern):
                 return False
     return True
 

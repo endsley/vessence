@@ -10,6 +10,12 @@ import subprocess
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from agent_skills.qwen_orchestrator_helpers import (
+    finalized_harvested_context as _finalized_harvested_context,
+    harvested_context_section as _harvested_context_section,
+    package_name_from_requirement as _package_name_from_requirement,
+    search_name_for_package as _search_name_for_package,
+)
 from jane.llm_config import LOCAL_LLM_MODEL, LOCAL_LLM_BASE_URL, LOCAL_LLM_MODEL_LITELLM
 from jane.config import CONFIGS_DIR, LOGS_DIR, VESSENCE_HOME
 
@@ -109,12 +115,11 @@ class QwenOrchestrator:
         try:
             with open(requirements_file, 'r') as f:
                 for line in f:
-                    line = line.split('#')[0].strip()
-                    if not line:
+                    package_name = _package_name_from_requirement(line)
+                    if not package_name:
                         continue
-                    
-                    package_name = line.split('==')[0].split('>=')[0].split('<=')[0].split('[')[0].strip()
-                    search_name = package_name.replace('-', '_')
+
+                    search_name = _search_name_for_package(package_name)
                     spec = importlib.util.find_spec(search_name)
                     if not spec:
                         spec = importlib.util.find_spec(package_name)
@@ -139,15 +144,11 @@ class QwenOrchestrator:
             try:
                 cmd = ["grep", "-r", "-n", "--include=*.py", pattern, search_dir]
                 result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
-                if result.stdout:
-                    lines = result.stdout.splitlines()[:5]
-                    harvested_context += f"--- Matches for '{pattern}' ---\n"
-                    harvested_context += "\n".join(lines) + "\n\n"
+                harvested_context += _harvested_context_section(pattern, result.stdout)
             except Exception as e:
                 logger.error(f"Harvesting failed for pattern '{pattern}': {e}")
-                
-        if not harvested_context:
-            harvested_context = "No idiomatic context harvested."
+
+        harvested_context = _finalized_harvested_context(harvested_context)
             
         logger.info("Context harvesting complete.")
         self.update_state(4, "completed", "Harvested idiomatic snippets.")

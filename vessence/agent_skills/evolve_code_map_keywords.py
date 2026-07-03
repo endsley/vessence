@@ -11,11 +11,9 @@ Schedule: 10 2 * * * (2:10 AM daily)
 import datetime
 import logging
 import os
-import re
 import sqlite3
 import subprocess
 import sys
-from collections import Counter
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -40,6 +38,15 @@ logging.basicConfig(
     format="%(asctime)s [evolve_keywords] %(message)s",
 )
 logger = logging.getLogger("evolve_keywords")
+
+from agent_skills.code_keyword_evolution import (
+    append_keywords_to_source as _append_keywords_to_source,
+    extract_candidate_keywords as _extract_candidate_keywords,
+    extract_code_map_names as _extract_code_map_names,
+    is_code_related_message as _is_code_related_message,
+    parse_tuple_assignment as _parse_tuple_assignment,
+    tuple_assignment_inner as _tuple_assignment_inner,
+)
 
 # ---------------------------------------------------------------------------
 # Stopwords — common English words that should never become keywords
@@ -124,15 +131,11 @@ def get_todays_user_messages() -> list[str]:
 def parse_tuple_from_file(filepath: Path, var_name: str) -> tuple[str, ...]:
     """Parse a Python tuple assigned to var_name from a source file."""
     source = filepath.read_text()
-    # Match: VAR_NAME = (\n  ...\n)
-    pattern = rf'{var_name}\s*=\s*\((.*?)\)'
-    match = re.search(pattern, source, re.DOTALL)
-    if not match:
+    if _tuple_assignment_inner(source, var_name) is None:
         logger.warning("Could not parse %s from %s", var_name, filepath)
         return ()
-    inner = match.group(1)
-    # Extract all quoted strings
-    return tuple(re.findall(r'"([^"]*)"', inner))
+    values = _parse_tuple_assignment(source, var_name)
+    return values
 
 
 def load_all_keywords() -> set[str]:
@@ -156,25 +159,7 @@ def load_code_map_names() -> set[str]:
         return names
 
     text = CODE_MAP_PATH.read_text()
-
-    # File names from "### path/to/file.py (N lines)" headers
-    for m in re.finditer(r'###\s+(\S+\.(?:py|html|kt|js|ts))', text):
-        full_path = m.group(1)
-        filename = full_path.rsplit("/", 1)[-1]
-        names.add(filename.lower())
-        # Also add without extension for matching
-        stem = filename.rsplit(".", 1)[0]
-        names.add(stem.lower())
-
-    # Function/class names from "  name() → L123" or "  class Name → L123"
-    for m in re.finditer(r'(\w+)\(\)\s*→\s*L\d+', text):
-        name = m.group(1)
-        if len(name) > 2:  # Skip very short names
-            names.add(name.lower())
-    for m in re.finditer(r'class\s+(\w+)', text):
-        name = m.group(1)
-        if len(name) > 2:
-            names.add(name.lower())
+    names = _extract_code_map_names(text)
 
     logger.info("Loaded %d file/function/class names from code map", len(names))
     return names
@@ -185,14 +170,7 @@ def load_code_map_names() -> set[str]:
 # ---------------------------------------------------------------------------
 def is_code_related(message: str, keywords: set[str], code_map_names: set[str]) -> bool:
     """Check if a message is code-related based on keywords and code map names."""
-    lowered = message.lower()
-    # Check existing keywords
-    if any(kw in lowered for kw in keywords):
-        return True
-    # Check code map file/function names
-    if any(name in lowered for name in code_map_names if len(name) > 3):
-        return True
-    return False
+    return _is_code_related_message(message, keywords, code_map_names)
 
 
 # ---------------------------------------------------------------------------
@@ -213,28 +191,12 @@ def extract_candidates(
 
     if len(code_messages) < 2:
         return []
-
-    # Build the set of all known words to exclude
-    known_lower = {kw.lower() for kw in existing_keywords}
-    known_lower.update(STOPWORDS)
-
-    # Count words across code-related messages
-    word_counter: Counter[str] = Counter()
-    for msg in code_messages:
-        # Tokenize: alphanumeric words and underscored identifiers
-        words = set(re.findall(r'[a-zA-Z_][a-zA-Z0-9_]*', msg.lower()))
-        for w in words:
-            if (len(w) >= 3
-                    and w not in known_lower
-                    and not w.isdigit()
-                    and "_" not in w[:1]):  # skip leading underscore (private names)
-                word_counter[w] += 1
-
-    # Only keep words in 2+ code-related messages
-    candidates = [
-        word for word, count in word_counter.most_common()
-        if count >= 2
-    ]
+    candidates = _extract_candidate_keywords(
+        messages,
+        existing_keywords,
+        code_map_names,
+        STOPWORDS,
+    )
 
     logger.info("Found %d candidate keywords (2+ occurrences)", len(candidates))
     return candidates
@@ -253,26 +215,10 @@ def update_keywords_file(new_keywords: list[str]) -> bool:
 
     source = JANE_PROXY_PATH.read_text()
 
-    # Find the closing paren of CODE_MAP_KEYWORDS
-    pattern = r'(CODE_MAP_KEYWORDS\s*=\s*\(.*?)(^\))'
-    match = re.search(pattern, source, re.DOTALL | re.MULTILINE)
-    if not match:
+    new_source = _append_keywords_to_source(source, new_keywords)
+    if new_source is None:
         logger.error("Could not locate CODE_MAP_KEYWORDS tuple in %s", JANE_PROXY_PATH)
         return False
-
-    before_close = match.group(1)
-    # Build the new keyword lines
-    keyword_lines = []
-    for kw in new_keywords:
-        keyword_lines.append(f'    "{kw}",')
-
-    insert_block = (
-        "    # Auto-evolved from daily conversations\n"
-        + "\n".join(keyword_lines)
-        + "\n"
-    )
-
-    new_source = source[:match.end(1)] + insert_block + source[match.start(2):]
     JANE_PROXY_PATH.write_text(new_source)
     logger.info("Updated %s with %d new keywords: %s",
                 JANE_PROXY_PATH, len(new_keywords), new_keywords)

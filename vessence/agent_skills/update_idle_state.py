@@ -19,25 +19,27 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from agent_skills.idle_state_helpers import (
+    atomic_tmp_path as _atomic_tmp_path,
+    claude_code_activity_path as _claude_code_activity_path,
+    idle_state_payload as _idle_state_payload,
+)
 from jane.config import IDLE_STATE_PATH
 
 IDLE_STATE_FILE = IDLE_STATE_PATH
-CC_ACTIVITY_FILE = Path(IDLE_STATE_FILE).parent / "claude_code_activity.json"
+CC_ACTIVITY_FILE = _claude_code_activity_path(IDLE_STATE_FILE)
 
 
 def _atomic_write(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp = _atomic_tmp_path(path)
     with open(tmp, "w") as f:
         json.dump(payload, f)
     os.replace(tmp, path)
 
 
 def main():
-    state = {
-        "last_active_ts": time.time(),
-        "last_active_iso": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-    }
+    state = _idle_state_payload(time.time())
     _atomic_write(Path(IDLE_STATE_FILE), state)
     _atomic_write(CC_ACTIVITY_FILE, state)
 

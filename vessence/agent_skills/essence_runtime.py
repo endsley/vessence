@@ -24,6 +24,10 @@ from jane.config import (
     VECTOR_DB_USER_MEMORIES,
     CHROMA_COLLECTION_USER_MEMORIES,
 )
+from agent_skills.essence_routing import (
+    best_essence_route,
+    capability_plan_steps,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -187,31 +191,16 @@ class EssenceRuntime:
         Simple keyword matching against capability names and manifest
         descriptions. Returns None if no match is found.
         """
-        query_lower = query.lower()
-        best_name: str | None = None
-        best_score = 0
-
-        for name, state in self._loaded.items():
-            score = 0
-            # Score based on capability keyword overlap
-            for cap in state.capabilities_provides:
-                for word in cap.lower().replace("_", " ").split():
-                    if word in query_lower:
-                        score += 2
-            # Score based on role_title / description
-            role = state.manifest.get("role_title", "").lower()
-            desc = state.manifest.get("description", "").lower()
-            for word in query_lower.split():
-                if len(word) > 2:
-                    if word in role:
-                        score += 3
-                    if word in desc:
-                        score += 1
-            if score > best_score:
-                best_score = score
-                best_name = name
-
-        return best_name
+        candidates = (
+            (
+                name,
+                state.capabilities_provides,
+                state.manifest.get("role_title", ""),
+                state.manifest.get("description", ""),
+            )
+            for name, state in self._loaded.items()
+        )
+        return best_essence_route(query, candidates)
 
     # ── Active essence persistence ───────────────────────────────────────
 
@@ -302,20 +291,7 @@ class JaneOrchestrator:
             [{"subtask": str, "target_essence": str, "capability_needed": str}, ...]
         """
         caps_map = self.runtime.get_capabilities_map()
-        request_lower = user_request.lower()
-        plan: list[dict] = []
-
-        # Match each capability that has keyword overlap with the request
-        for capability, providers in caps_map.items():
-            cap_words = set(capability.lower().replace("_", " ").split())
-            request_words = set(request_lower.split())
-            overlap = cap_words & request_words
-            if overlap:
-                plan.append({
-                    "subtask": f"Handle '{capability}' aspect of the request",
-                    "target_essence": providers[0],  # pick first provider
-                    "capability_needed": capability,
-                })
+        plan = capability_plan_steps(caps_map, user_request)
 
         # If nothing matched, try routing the whole request
         if not plan:

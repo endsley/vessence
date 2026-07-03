@@ -42,6 +42,12 @@ from google.genai import types
 from google.adk.memory.base_memory_service import BaseMemoryService
 from google.adk.memory.memory_entry import MemoryEntry
 from google.adk.memory.base_memory_service import SearchMemoryResponse
+from memory.v1.local_vector_memory_helpers import (
+    bucket_memory_facts as _bucket_memory_facts,
+    librarian_system_instruction as _librarian_system_instruction,
+    librarian_user_prompt as _librarian_user_prompt,
+    memory_tier_sections as _memory_tier_sections,
+)
 
 logger = logging.getLogger('discord_agent.memory.local_vector')
 
@@ -138,45 +144,12 @@ class LocalVectorMemoryService(BaseMemoryService):
 
         # 2. Bucket results into tiers, filtering expired forgettable entries
         now_iso = datetime.datetime.utcnow().isoformat()
-        permanent_facts, long_term_facts, forgettable_facts = [], [], []
-
-        def _is_expired(meta):
-            exp = meta.get("expires_at", "")
-            if not exp:
-                return False
-            try:
-                return str(exp) < now_iso  # ISO strings compare lexicographically
-            except Exception:
-                return False
-
-        def _fmt(doc, meta):
-            ts = meta.get("timestamp", meta.get("created_at", "Unknown Time"))
-            topic = meta.get("topic", "General")
-            exp = meta.get("expires_at", "")
-            expiry_str = f", expires {str(exp)[:10]}" if exp else ""
-            return f"[{str(ts)[:19]}] ({topic}{expiry_str}): {doc}"
-
-        for i, doc in enumerate(results["documents"][0]):
-            meta = results["metadatas"][0][i]
-            mtype = meta.get("memory_type", "long_term")
-            if mtype == "forgettable":
-                if not _is_expired(meta):
-                    forgettable_facts.append(_fmt(doc, meta))
-            elif mtype == "permanent":
-                permanent_facts.append(_fmt(doc, meta))
-            else:
-                long_term_facts.append(_fmt(doc, meta))
-
-        sections = []
-        if permanent_facts:
-            sections.append("## Permanent Memory\n" + "\n".join(permanent_facts))
-        if long_term_facts:
-            sections.append("## Long-Term Memory\n" + "\n".join(long_term_facts))
-        if forgettable_facts:
-            sections.append(
-                "## Recent/Forgettable Memory  ← highest recency, treat as most current\n"
-                + "\n".join(forgettable_facts)
-            )
+        permanent_facts, long_term_facts, forgettable_facts = _bucket_memory_facts(
+            results["documents"][0],
+            results["metadatas"][0],
+            now_iso=now_iso,
+        )
+        sections = _memory_tier_sections(permanent_facts, long_term_facts, forgettable_facts)
 
         if not sections:
             return SearchMemoryResponse(memories=[])
@@ -184,21 +157,8 @@ class LocalVectorMemoryService(BaseMemoryService):
         facts_block = "\n\n".join(sections)
 
         # 3. Call Qwen 'The Librarian' locally to synthesize
-        system_instr = (
-            f"You are the Memory Librarian for {os.environ.get('USER_NAME', 'the user')}'s assistant. "
-            "Your task is to analyze the provided tiered memories relative to the user's query. "
-            "Synthesize a single, high-fidelity, and concise summary of all relevant facts. "
-            "Rules:\n"
-            "1. Recency priority: Recent/Forgettable > Long-Term > Permanent. "
-            "When facts contradict, the more recent tier wins.\n"
-            "2. 'Recent/Forgettable Memory' captures recent work, changes, and discoveries — "
-            "always surface these if even tangentially relevant.\n"
-            "3. Ignore noise that is clearly irrelevant to the query.\n"
-            "4. If no memories are relevant, respond with 'No relevant context found.'\n"
-            "5. Respond only with the synthesized summary."
-        )
-
-        user_prompt = f"User Query: {query}\n\nMemory Tiers:\n{facts_block}"
+        system_instr = _librarian_system_instruction(os.environ.get('USER_NAME', 'the user'))
+        user_prompt = _librarian_user_prompt(query, facts_block)
 
         try:
             response = ollama.chat(

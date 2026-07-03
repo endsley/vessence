@@ -22,11 +22,25 @@ import datetime as dt
 import json
 import logging
 import os
-import re
 import subprocess
 import sys
 import time
 from pathlib import Path
+
+from agent_skills.nightly_code_audit_helpers import (
+    audit_branch_name as _audit_branch_name,
+    audit_fix_prompt as _audit_fix_prompt,
+    audit_report_stash_name as _audit_report_stash_name,
+    audit_test_generation_prompt as _audit_test_generation_prompt,
+    auto_audit_test_path as _auto_audit_test_path,
+    default_auditor_state as _default_auditor_state,
+    fix_attempt_declined as _fix_attempt_declined,
+    integration_contract_context as _integration_contract_context,
+    nonblank_porcelain_lines as _nonblank_porcelain_lines,
+    parse_whitelist_modules as _parse_whitelist_modules,
+    pick_next_module_in_rotation as _pick_next_module_in_rotation,
+    unexpected_porcelain_changes as _unexpected_porcelain_changes,
+)
 
 # Paths
 VESSENCE_HOME = Path(os.environ.get("VESSENCE_HOME", str(Path(__file__).resolve().parents[1])))
@@ -54,16 +68,7 @@ logger = logging.getLogger("nightly_audit")
 def load_whitelist() -> list[dict]:
     """Parse the auditable_modules.md table into a list of dicts."""
     text = WHITELIST_PATH.read_text()
-    modules = []
-    for line in text.splitlines():
-        # Match table rows: | `path` | spec | safety |
-        m = re.match(r"\|\s*`([^`]+)`\s*\|\s*([^|]+?)\s*\|\s*(\w+)\s*\|", line)
-        if not m:
-            continue
-        path, spec, safety = m.group(1), m.group(2).strip(), m.group(3)
-        if safety in ("safe", "careful"):
-            modules.append({"path": path, "spec": spec, "safety": safety})
-    return modules
+    return _parse_whitelist_modules(text)
 
 
 # ── Rotation state ───────────────────────────────────────────────────────────
@@ -75,7 +80,7 @@ def load_state() -> dict:
             return json.loads(STATE_PATH.read_text())
         except Exception:
             pass
-    return {"last_index": -1, "history": []}
+    return _default_auditor_state()
 
 
 def save_state(state: dict) -> None:
@@ -85,10 +90,7 @@ def save_state(state: dict) -> None:
 
 def pick_next_module(modules: list[dict], state: dict) -> dict:
     """Pick the next module in rotation, skipping recently-audited ones."""
-    last = state.get("last_index", -1)
-    next_idx = (last + 1) % len(modules)
-    state["last_index"] = next_idx
-    return modules[next_idx]
+    return _pick_next_module_in_rotation(modules, state)
 
 
 # ── Git helpers ──────────────────────────────────────────────────────────────
@@ -113,26 +115,8 @@ def is_clean_working_tree() -> bool:
     r = git("status", "--porcelain", check=False)
     if r.returncode != 0:
         return False
-    lines = [ln for ln in r.stdout.splitlines() if ln.strip()]
-    # Git porcelain format: "XY path" where XY is status code.
-    # Expected transient outputs from earlier self-improve jobs — safe to ignore.
-    EXPECTED_OUTPUTS = (
-        "configs/dead_code_report.md",
-        "configs/pipeline_audit_report.md",
-        "configs/doc_drift_report.md",
-        "configs/transcript_review_report.md",
-        "configs/self_improve_log.md",
-        "configs/auto_audit_log.md",
-        "configs/audit_failures.md",
-    )
-    unexpected = []
-    for ln in lines:
-        path = ln[3:].strip()
-        if path in EXPECTED_OUTPUTS:
-            continue
-        if path.startswith(".git.backup"):
-            continue
-        unexpected.append(ln)
+    lines = _nonblank_porcelain_lines(r.stdout)
+    unexpected = _unexpected_porcelain_changes(lines)
     if unexpected:
         logger.info("is_clean_working_tree: %d unexpected change(s): %s",
                     len(unexpected), unexpected[:3])
@@ -141,7 +125,7 @@ def is_clean_working_tree() -> bool:
     # a truly clean tree. The orchestrator's outer stash restores them
     # at the end of the run.
     if lines:
-        stash_name = f"auditor-pre-report-stash-{dt.datetime.now().strftime('%Y%m%d-%H%M%S')}"
+        stash_name = _audit_report_stash_name(dt.datetime.now())
         git("stash", "push", "-u", "-m", stash_name, check=False)
         logger.info("is_clean_working_tree: stashed %d report file(s) as %s",
                     len(lines), stash_name)
@@ -149,7 +133,7 @@ def is_clean_working_tree() -> bool:
 
 
 def make_audit_branch() -> str:
-    branch = f"auto-audit/{dt.datetime.now().strftime('%Y-%m-%d-%H%M')}"
+    branch = _audit_branch_name(dt.datetime.now())
     git("checkout", "-b", branch)
     return branch
 
@@ -200,7 +184,6 @@ def phase1_generate_tests(module: dict, target_test_path: Path) -> bool:
         return False
 
     code = module_path.read_text()
-    spec = module["spec"]
 
     # Load any cross-stack integration contracts that mention this module
     integrations = ""
@@ -209,53 +192,11 @@ def phase1_generate_tests(module: dict, target_test_path: Path) -> bool:
             full = INTEGRATIONS_PATH.read_text()
             # Crude but effective: include the whole file if any contract
             # mentions this module path. The file is short.
-            if module["path"] in full:
-                integrations = (
-                    "\n\nCROSS-STACK INTEGRATION CONTRACTS:\n"
-                    "This module participates in cross-stack contracts. The full\n"
-                    "contract file is below — write tests that verify the invariants\n"
-                    "for any contract where this module is the Producer:\n\n"
-                    + full
-                )
+            integrations = _integration_contract_context(module["path"], full)
     except Exception:
         pass
 
-    prompt = f"""You are auditing a Python module for the Vessence project.
-
-MODULE PATH: {module["path"]}
-SPEC SOURCE: {spec}{integrations}
-
-MODULE CODE:
-```python
-{code[:8000]}
-```
-
-Write a comprehensive pytest file at {target_test_path} that includes:
-
-1. **Behavioral tests** — verify documented behavior from docstring/spec
-2. **Edge cases** — empty input, malformed input, None, very long input
-3. **Integration points** — DB queries, LLM calls (use mocks if needed)
-4. **STRUCTURAL INVARIANTS** (CRITICAL — these catch the highest-leverage bugs):
-   - If the module has a mapping/lookup table (dict, registry), test that:
-     a. No key maps to a value that contradicts other invariants
-       (e.g. classifier wrappers must not return "High" confidence with
-        a fallback class like "others" — that's a logical contradiction)
-     b. Every key referenced elsewhere in the codebase exists in the table
-     c. Every value in the table is reachable from at least one input
-   - If the module has destructive operations (delete, end_conversation,
-     send_message, sms_send_direct, irreversible state changes), test that:
-     a. They require a strict confidence threshold (>= 0.80, not just "High")
-     b. They cannot fire on borderline / ambiguous input
-   - If the module has a class registry / handler dispatch, test that:
-     a. Every registered class has a corresponding handler OR is explicitly
-        documented as "no handler — escalates"
-     b. Every handler returns the documented shape (dict with "text" key)
-
-5. **Each test should be independent and runnable in isolation**
-
-Output ONLY the Python code, no markdown, no explanation. Use `import pytest` and proper pytest fixtures.
-Save the file at {target_test_path} using the Write tool. Do not modify the module being tested."""
-
+    prompt = _audit_test_generation_prompt(module, code, target_test_path, integrations)
     output = run_claude(prompt, timeout=600)
     return target_test_path.exists()
 
@@ -281,29 +222,9 @@ def phase3_attempt_fix(module: dict, test_output: str, attempt: int) -> bool:
     module_path = VESSENCE_HOME / module["path"]
     code = module_path.read_text()
 
-    prompt = f"""A test you just wrote is failing for module: {module["path"]}
-
-CURRENT MODULE CODE:
-```python
-{code[:6000]}
-```
-
-TEST FAILURE OUTPUT:
-```
-{test_output[:3000]}
-```
-
-ATTEMPT {attempt} of {MAX_FIX_ATTEMPTS}.
-
-Diagnose the failure. If it's a real bug in the module, fix it by editing
-{module["path"]} using the Edit tool. Make the smallest change possible.
-Do NOT modify the test file. Do NOT touch any other module.
-
-If the test itself is wrong (not the module), output: TEST_WRONG
-If you can't determine the cause, output: GIVE_UP"""
-
+    prompt = _audit_fix_prompt(module["path"], code, test_output, attempt, MAX_FIX_ATTEMPTS)
     output = run_claude(prompt, timeout=600)
-    if "TEST_WRONG" in output or "GIVE_UP" in output:
+    if _fix_attempt_declined(output):
         return False
     # Check if module file was actually modified
     return module_path.read_text() != code
@@ -348,8 +269,7 @@ def main() -> int:
     logger.info("Created branch: %s", branch)
 
     # Generate test file path
-    module_name = Path(target["path"]).stem
-    test_path = TEST_DIR / f"auto_audit_{module_name}.py"
+    test_path = _auto_audit_test_path(target["path"], TEST_DIR)
 
     try:
         # Phase 1: generate tests

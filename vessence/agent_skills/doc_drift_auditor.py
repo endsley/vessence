@@ -17,12 +17,21 @@ Run as part of nightly_self_improve.py at 3 AM.
 from __future__ import annotations
 
 import datetime as dt
-import ast
 import os
 import re
 import subprocess
 import sys
 from pathlib import Path
+
+from agent_skills.doc_drift_helpers import (
+    build_drift_report as _build_drift_report,
+    drift_vocal_summary_kwargs as _drift_vocal_summary_kwargs,
+    extract_active_cron_script_names as _extract_active_cron_script_names,
+    extract_class_map_keys as _extract_class_map_keys,
+    extract_doc_table_classes as _extract_doc_table_classes,
+    extract_documented_cron_script_names as _extract_documented_cron_script_names,
+    extract_inactive_documented_cron_script_names as _extract_inactive_documented_cron_script_names,
+)
 
 VESSENCE_HOME = Path(os.environ.get("VESSENCE_HOME", str(Path(__file__).resolve().parents[1])))
 CONFIGS = VESSENCE_HOME / "configs"
@@ -47,63 +56,6 @@ def record_change(path: Path, msg: str) -> None:
     _changes.append(f"- {path.name}: {msg}")
 
 
-def _extract_class_map_keys(source: str) -> set[str]:
-    """Return canonical class keys from stage1_classifier.py's _CLASS_MAP.
-
-    The classifier accepts compatibility aliases such as ``NATIONALGRID BILLS``
-    and ``NATIONALGRID_BILLS``. Documentation tables use underscore keys, so
-    normalize whitespace aliases instead of relying on a quote regex that
-    silently skips them.
-    """
-    try:
-        tree = ast.parse(source)
-    except SyntaxError:
-        return set()
-
-    for node in tree.body:
-        if not isinstance(node, ast.Assign):
-            continue
-        if not any(isinstance(t, ast.Name) and t.id == "_CLASS_MAP" for t in node.targets):
-            continue
-        try:
-            class_map = ast.literal_eval(node.value)
-        except (ValueError, TypeError):
-            return set()
-        if not isinstance(class_map, dict):
-            return set()
-        return {
-            str(key).upper().replace(" ", "_")
-            for key in class_map
-            if isinstance(key, str)
-        }
-    return set()
-
-
-def _extract_doc_table_classes(doc_text: str) -> set[str]:
-    """Return uppercase class keys from the documented class table."""
-    classes: set[str] = set()
-    in_class_table = False
-    for line in doc_text.splitlines():
-        stripped = line.strip()
-        if in_class_table and not stripped:
-            break
-        if not stripped.startswith("|"):
-            continue
-        cells = [cell.strip().strip("`") for cell in stripped.strip("|").split("|")]
-        if not cells:
-            continue
-        first_cell = cells[0].lower()
-        if first_cell in {"class", "chromadb name"}:
-            in_class_table = True
-            continue
-        if not in_class_table:
-            continue
-        candidate = cells[0]
-        if re.fullmatch(r"[A-Z][A-Z0-9_]{3,}", candidate):
-            classes.add(candidate)
-    return classes
-
-
 # ── Audit 1: CRON_JOBS.md vs actual crontab ─────────────────────────────────
 
 
@@ -126,45 +78,18 @@ def audit_cron() -> None:
         warn(f"crontab read failed: {e}")
         return
 
-    actual_scripts = set()
-    for ln in actual_lines:
-        s = ln.strip()
-        if not s or s.startswith("#"):
-            continue
-        # Skip env-var assignments like SHELL=/bin/sh
-        if "=" in s and not s.startswith(("0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "*", "@")):
-            continue
-        for tok in s.split():
-            if tok.endswith(".py") or tok.endswith(".sh"):
-                actual_scripts.add(Path(tok).name)
+    actual_scripts = _extract_active_cron_script_names(actual_lines)
 
     # Extract documented script names ONLY from **Script Path:** lines. Inline
     # mentions in prose (e.g. "appends to CODE_MAP_KEYWORDS in jane_proxy.py")
     # must not be treated as cron entries.
     doc_text = cron_path.read_text()
-    script_path_re = re.compile(
-        r"\*\*Script Path:\*\*\s*`[^`]*?/([^/`]+\.(?:py|sh))`"
-    )
-    doc_scripts = set(script_path_re.findall(doc_text))
+    doc_scripts = _extract_documented_cron_script_names(doc_text)
 
     # Identify entries documented as INACTIVE so they don't fire false positives:
     # - anything under "Removed Jobs" or "Non-Cron Scheduled Scripts" sections
     # - any entry whose section header contains "DISABLED" or "COMMENTED OUT"
-    inactive_scripts: set[str] = set()
-    sections = re.split(r"^##\s+", doc_text, flags=re.MULTILINE)
-    for sec in sections:
-        if not sec.strip():
-            continue
-        header = sec.splitlines()[0]
-        inactive_section = any(
-            key in header
-            for key in ("Removed Jobs", "Non-Cron Scheduled Scripts")
-        )
-        disabled_entry = any(
-            key in header for key in ("DISABLED", "COMMENTED OUT", "Paused:")
-        )
-        if inactive_section or disabled_entry:
-            inactive_scripts |= set(script_path_re.findall(sec))
+    inactive_scripts = _extract_inactive_documented_cron_script_names(doc_text)
 
     active_doc_scripts = doc_scripts - inactive_scripts
 
@@ -317,18 +242,7 @@ def audit_skills_registry() -> None:
 def write_report() -> None:
     DRIFT_REPORT.parent.mkdir(parents=True, exist_ok=True)
     ts = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
-    body = [f"# Doc Drift Report — {ts}\n"]
-    if _changes:
-        body.append("## Auto-fixed\n")
-        body.extend(_changes)
-        body.append("")
-    if _warnings:
-        body.append("## Needs human review\n")
-        body.extend(f"- {w}" for w in _warnings)
-        body.append("")
-    if not _changes and not _warnings:
-        body.append("All docs in sync. ✅\n")
-    DRIFT_REPORT.write_text("\n".join(body) + "\n")
+    DRIFT_REPORT.write_text(_build_drift_report(_changes, _warnings, ts))
 
 
 def commit_if_changed() -> None:
@@ -354,42 +268,7 @@ def _log_vocal() -> None:
         from agent_skills.self_improve_log import log_vocal_summary
     except Exception:
         return
-    if not _changes and not _warnings:
-        log_vocal_summary(
-            job="Doc Drift Audit",
-            summary=(
-                "I checked that docs like the cron registry, skill "
-                "registry, and pipeline class map still match the code. "
-                "Everything lined up — no drift."
-            ),
-            severity="info",
-        )
-        return
-    sev = "medium" if _warnings else "info"
-    n_fix = len(_changes)
-    n_warn = len(_warnings)
-    log_vocal_summary(
-        job="Doc Drift Audit",
-        what_was_wrong=(
-            f"I found {n_warn} spot{'s' if n_warn != 1 else ''} where "
-            f"docs drifted from the code"
-        ) if n_warn else (
-            f"I found {n_fix} doc{'s' if n_fix != 1 else ''} that needed "
-            "small fixes"
-        ),
-        why_it_mattered=(
-            "Stale docs make it easy to ship changes that break "
-            "undocumented behavior"
-        ),
-        what_was_done=(
-            f"I auto-fixed {n_fix} and flagged the rest in the doc "
-            f"drift report for you to review"
-        ) if n_fix else (
-            "I flagged them in the doc drift report for your review — "
-            "the ambiguous ones need a human call"
-        ),
-        severity=sev,
-    )
+    log_vocal_summary(**_drift_vocal_summary_kwargs(_changes, _warnings))
 
 
 def main() -> int:

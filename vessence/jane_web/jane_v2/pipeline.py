@@ -29,7 +29,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 import time
 import asyncio
 from typing import Any, AsyncIterator
@@ -49,15 +48,24 @@ from jane_web.attachment_context import (
     copy_chat_body_with_updates,
     expand_file_context,
 )
+from jane_web.evidence_context import (
+    append_required_memory_evidence as _append_required_memory_evidence,
+    initial_evidence_metadata as _initial_evidence_metadata,
+    prepend_architecture_context as _prepend_architecture_context,
+)
 from jane_web.jane_v2.awaiting_markers import (
     AwaitingDeltaStripper as _AwaitingDeltaStripper,
     extract_awaiting_marker as _extract_awaiting_marker,
 )
-from jane_web.jane_v2.stage2_response import (
-    assemble_music_text as _assemble_music_text,
-    stage2_response_parts as _stage2_response_parts,
-    wrap_spoken as _wrap_spoken,
+from jane_web.jane_v2.body_message_updates import (
+    append_body_message as _copy_body_with_appended_message,
+    prepend_body_message as _copy_body_with_prepended_message,
 )
+from jane_web.jane_v2.stage2_response import (
+    stage2_response_parts as _stage2_response_parts,
+    stage2_visible_text_and_client_tool_calls as _stage2_visible_text_and_client_tool_calls,
+)
+from jane_web.jane_v2.ollama_client import post_ollama_response as _post_ollama_response
 from jane_web.jane_v2.pending_sms import (
     cancel_pending_sms_confirmation as _cancel_pending_sms_confirmation,
     cancel_pending_sms_draft as _cancel_pending_sms_draft,
@@ -66,6 +74,22 @@ from jane_web.jane_v2.pending_sms import (
     resolve_pending_sms_confirmation as _resolve_pending_sms_confirmation,
     resolve_pending_sms_draft_edit as _resolve_pending_sms_draft_edit,
     resolve_pending_sms_draft_send as _resolve_pending_sms_draft_send,
+)
+from jane_web.jane_v2.sms_tool_markers import (
+    stage3_sms_request_context as _stage3_sms_request_context,
+)
+from jane_web.jane_v2.delegate_ack import (
+    ACK_FALLBACK as _ACK_FALLBACK,
+    avoid_got_it_default as _avoid_got_it_default,
+    delegate_ack_prompt as _delegate_ack_prompt,
+    estimate_duration as _estimate_duration,
+    normalize_delegate_ack_response as _normalize_delegate_ack_response,
+)
+from jane_web.jane_v2.fifo_records import (
+    build_fifo_turn_record as _build_fifo_turn_record,
+)
+from jane_web.self_improvement_context import (
+    build_self_improvement_context_block as _build_self_improvement_context_block,
 )
 from jane_web.session_context import set_current_session_id
 
@@ -103,110 +127,9 @@ def _inject_self_improvement_context(body):
         logger.warning("self_improvement injection: could not load summaries: %s", exc)
         return body
 
-    log_path = "$VESSENCE_DATA_HOME/self_improve_vocal_log.jsonl"
-    tech_logs = "$VESSENCE_DATA_HOME/logs/self_improve_*.log"
-    latest_report = "$VESSENCE_HOME/configs/self_improvement_latest.md"
-    if not entries:
-        block = (
-            "\n\n[SELF IMPROVEMENT CONTEXT]\n"
-            f"Readable latest report: {latest_report}\n"
-            f"Vocal summary log file: {log_path}\n"
-            f"Technical job logs: {tech_logs}\n"
-            "No recent self-improvement entries found (empty log or "
-            "older than 14 days). Tell the user nothing's been logged "
-            "yet and the nightly job may not have run recently.\n"
-            "[END SELF IMPROVEMENT CONTEXT]"
-        )
-    else:
-        # Group for the headline by job category
-        from collections import Counter
-        by_job = Counter(e.get("job", "?") for e in entries)
+    block = _build_self_improvement_context_block(entries)
 
-        lines = ["\n\n[SELF IMPROVEMENT CONTEXT]"]
-        lines.append(f"Readable latest report: {latest_report}")
-        lines.append(f"Vocal summary log file: {log_path}")
-        lines.append(f"Technical job logs: {tech_logs}")
-        lines.append(
-            "RESPONSE STYLE — CRITICAL. The user is on voice and doesn't "
-            "want a long recital. Your reply should be CONVERSATIONAL:\n"
-            "  0) When the user asks for the most recent self-improvement "
-            "or asks what happened last night, read the readable latest "
-            "report first if exact per-stage details are needed.\n"
-            "  1) Open with a one-sentence headline: how many changes in "
-            "total and roughly what categories (e.g. 'I logged 7 changes "
-            "overnight — mostly transcript review fixes plus a couple doc "
-            "tweaks').\n"
-            "  2) Ask which one the user wants to hear about, offering by "
-            "NUMBER: 'want me to walk through number 3, the timer bug?'\n"
-            "  3) Do NOT enumerate every entry. Do NOT read timestamps, "
-            "job names, severity labels, or file paths aloud. Do NOT use "
-            "bullet points or lists — speak it like a friend giving a "
-            "quick update.\n"
-            "  4) If the user asks for 'number N', jump to entry N below "
-            "and speak its summary conversationally (one to three "
-            "sentences).\n"
-            "  5) If the user asks about a specific topic (timers, "
-            "transcripts, etc.), filter to matching entries and apply "
-            "the same short-headline-plus-offer pattern.\n\n"
-            f"Total entries in context window: {len(entries)} "
-            f"(most recent first). Job categories: "
-            + ", ".join(f"{job} ({n})" for job, n in by_job.most_common())
-            + "."
-        )
-        lines.append("")
-        lines.append("Entries (numbered for drill-down reference):")
-        for i, e in enumerate(entries, 1):
-            ts = e.get("timestamp", "?")
-            job = e.get("job", "?")
-            sev = e.get("severity", "info")
-            summ = e.get("summary", "").strip()
-            lines.append(f"{i}. [{ts} | {job} | {sev}] {summ}")
-        lines.append("[END SELF IMPROVEMENT CONTEXT]")
-        block = "\n".join(lines)
-
-    try:
-        return body.model_copy(
-            update={"message": (body.message or "") + block}
-        )
-    except AttributeError:
-        return body.copy(
-            update={"message": (body.message or "") + block}
-        )
-
-
-def _copy_body_with_appended_message(body, extra: str):
-    if not extra:
-        return body
-    new_message = (getattr(body, "message", "") or "") + extra
-    try:
-        return body.model_copy(update={"message": new_message})
-    except AttributeError:
-        if hasattr(body, "copy"):
-            return body.copy(update={"message": new_message})
-        setattr(body, "message", new_message)
-        return body
-
-
-def _copy_body_with_prepended_message(body, extra: str):
-    """Prepend `extra` ABOVE the existing message content.
-
-    Used by the verify-first policy so the `<verify_first>` / `<memory_verify>`
-    XML blocks are the first thing Opus reads in the user turn, not something
-    tacked onto the end where they compete with later context injections for
-    attention.
-    """
-    if not extra:
-        return body
-    existing = getattr(body, "message", "") or ""
-    sep = "\n\n" if existing and not extra.endswith("\n\n") else ""
-    new_message = extra + sep + existing
-    try:
-        return body.model_copy(update={"message": new_message})
-    except AttributeError:
-        if hasattr(body, "copy"):
-            return body.copy(update={"message": new_message})
-        setattr(body, "message", new_message)
-        return body
+    return _copy_body_with_appended_message(body, block)
 
 
 async def _fetch_required_memory_evidence(prompt: str, user_id: str | None = None) -> tuple[str, bool]:
@@ -288,15 +211,7 @@ async def _apply_evidence_policy(
     user_id: str | None = None,
 ) -> tuple[Any, dict]:
     """Apply shared code/memory evidence requirements to a Stage 3 body."""
-    metadata = {
-        "required": False,
-        "requires_code": False,
-        "requires_memory": False,
-        "memory_evidence": False,
-        "memory_chars": 0,
-        "memory_chars_after_dedup": 0,
-        "architecture_context_chars": 0,
-    }
+    metadata = _initial_evidence_metadata()
     try:
         from jane_web.verify_first_policy import (
             classify_evidence_requirements,
@@ -323,16 +238,7 @@ async def _apply_evidence_policy(
         if req.code:
             arch_ctx = _load_jane_architecture_context()
             if arch_ctx:
-                verify_block = (
-                    "<jane_architecture>\n"
-                    "Authoritative snapshot of Jane's system. Use this before "
-                    "guessing about architecture, cron jobs, or which file "
-                    "owns what. If you need detail beyond this summary, Read "
-                    "the specific configs/*.md file.\n\n"
-                    + arch_ctx +
-                    "\n</jane_architecture>\n\n"
-                    + verify_block
-                )
+                verify_block = _prepend_architecture_context(verify_block, arch_ctx)
                 metadata["architecture_context_chars"] = len(arch_ctx)
         if req.memory:
             memory_text, memory_ok = await _fetch_required_memory_evidence(prompt, user_id=user_id)
@@ -341,13 +247,7 @@ async def _apply_evidence_policy(
             if memory_text:
                 deduped = _dedup_memory_for_session(memory_text, session_id)
                 metadata["memory_chars_after_dedup"] = len(deduped or "")
-                if deduped and deduped.strip():
-                    verify_block = (
-                        verify_block
-                        + "\n\n[REQUIRED CHROMA MEMORY EVIDENCE]\n"
-                        + deduped
-                        + "\n[END REQUIRED CHROMA MEMORY EVIDENCE]"
-                    )
+                verify_block = _append_required_memory_evidence(verify_block, deduped)
         body = _copy_body_with_prepended_message(body, verify_block)
         logger.info(
             "pipeline: evidence policy applied code=%s memory=%s memory_ok=%s "
@@ -397,31 +297,17 @@ def _persist_turn_to_fifo(
         from agent_skills.private_handler_utils import privacy_for
 
         privacy = privacy_for(intent)
-        record: dict = {
-            "user_text": user_prompt or "",
-            "assistant_text": jane_response,
-            "summary": _format_turn_compact(user_prompt or "", jane_response),
-            "stage": stage,
-            "intent": intent or "",
-        }
-        if privacy:
-            record["privacy"] = privacy
-        if confidence:
-            record["confidence"] = confidence
-        if handler_structured:
-            for k, v in handler_structured.items():
-                if v is not None:
-                    record[k] = v
-        if extras:
-            if extras.get("client_tools"):
-                record.setdefault("tool_results", []).extend(
-                    [{"name": t.get("name") or t.get("tool"), "args": t.get("args", {})}
-                     for t in extras["client_tools"]]
-                )
-            if extras.get("conversation_end"):
-                record.setdefault("metadata", {})["conversation_end"] = True
-            if extras.get("evidence"):
-                record.setdefault("metadata", {})["evidence"] = extras["evidence"]
+        record = _build_fifo_turn_record(
+            user_prompt=user_prompt or "",
+            jane_response=jane_response,
+            summary=_format_turn_compact(user_prompt or "", jane_response),
+            stage=stage,
+            intent=intent or "",
+            privacy=privacy,
+            confidence=confidence,
+            handler_structured=handler_structured,
+            extras=extras,
+        )
         add_structured(session_id, record)
         # When the turn ends the conversation, wipe the FIFO so the next
         # user prompt starts with a clean slate. Stale FIFO context was
@@ -475,30 +361,6 @@ def _fifo_as_fake_history(session_id: str | None) -> list[dict]:
     return [{"role": "assistant", "content": s} for s in summaries if s]
 
 
-import random as _random
-
-# Heuristics for estimating Opus duration without running it.
-def _estimate_duration(prompt: str) -> str:
-    """Return 'a few seconds' | 'a minute or two' | 'a while' based on prompt."""
-    p = prompt.lower()
-    word_count = len(prompt.split())
-    long_signals = ("build", "implement", "refactor", "write code",
-                    "debug", "analyze the codebase", "trace through",
-                    "compare and contrast", "summarize the entire")
-    medium_signals = ("research", "look online", "compare", "analyze",
-                      "explain how", "explain why", "walk me through",
-                      "what are the differences", "pros and cons",
-                      "investigate", "trace")
-    if any(s in p for s in long_signals) or word_count > 60:
-        return "a while"
-    if any(s in p for s in medium_signals) or word_count > 25:
-        return "a minute or two"
-    return "a few seconds"
-
-
-_ACK_FALLBACK = "Got it, give me a moment to look into that."
-
-
 def _recent_ack_context(session_id: str | None, max_chars: int = 900) -> str:
     """Return a compact recent-flow block for the spoken ack prompt.
 
@@ -522,27 +384,6 @@ def _recent_ack_context(session_id: str | None, max_chars: int = 900) -> str:
     return ctx
 
 
-def _avoid_got_it_default(text: str, cls: str = "others") -> str:
-    """Prevent the spoken ack from collapsing into a repeated "Got it" tic."""
-    cleaned = (text or "").strip()
-    if not cleaned.lower().startswith("got it"):
-        return cleaned
-
-    re_mod = __import__("re")
-    rest = re_mod.sub(r"^got it[\s,.\-—:]*", "", cleaned, flags=re_mod.IGNORECASE).strip()
-    if rest:
-        rest = rest[0].upper() + rest[1:]
-
-    cls_key = (cls or "").strip().lower()
-    if cls_key in {"read calendar", "read email", "read messages"} and rest:
-        if rest.lower().startswith(("checking", "pulling", "looking", "reading")):
-            return rest
-        return f"Let me check, {rest[0].lower() + rest[1:]}"
-    if cls_key in {"todo list", "send message", "shopping list", "timer"}:
-        return f"Okay, {rest[0].lower() + rest[1:]}" if rest else "Okay, one sec."
-    return f"On it, {rest[0].lower() + rest[1:]}" if rest else "On it."
-
-
 async def _generate_delegate_ack(prompt: str, session_id: str | None,
                                   cls: str = "others") -> str:
     """Produce an ack for a Stage 3 escalation using the local LLM.
@@ -558,7 +399,6 @@ async def _generate_delegate_ack(prompt: str, session_id: str | None,
     so net latency is unchanged.
     """
     import os
-    import httpx
     from jane_web.jane_v2.models import LOCAL_LLM, LOCAL_LLM_NUM_CTX, LOCAL_LLM_TIMEOUT, OLLAMA_KEEP_ALIVE
     duration = _estimate_duration(prompt)
     model = os.environ.get("JANE_ACK_MODEL", LOCAL_LLM)
@@ -571,81 +411,25 @@ async def _generate_delegate_ack(prompt: str, session_id: str | None,
 
     flow_context = _recent_ack_context(session_id)
 
-    # Topic-aware ack. Previous version forbade mentioning the topic which
-    # produced disconnected/flippant acks ("Heh yeah, give me a sec" after
-    # a serious email question). User feedback 2026-04-18: the ack should
-    # briefly acknowledge Jane received the specific message and signal a
-    # short wait, matching the topic context.
-    #
-    # We still deliberately avoid SUMMARIZING the answer or predicting what
-    # Jane will say — that's Opus's job. Just 4-10 words: "Got it — <short
-    # topic reference>, one sec."
-    flow_section = ""
-    if flow_context:
-        flow_section = (
-            "Recent conversation flow, oldest to newest. Use this only to avoid a disconnected ack; "
-            "do not quote it or reveal internal state:\n"
-            f"{flow_context}\n\n"
-        )
-
-    gen_prompt = (
-        "You are writing a ONE-sentence acknowledgment Jane (a voice assistant) will speak OUT LOUD while she works on the user's request in the background. The reply itself is coming separately — this is just so the user knows Jane heard them.\n\n"
-        + flow_section +
-        "Requirements:\n"
-        "1. Start with a varied, natural acknowledgment (\"Okay\", \"Sure\", \"One sec\", \"Let me check\", \"On it\"). Do not default to \"Got it\"; use it only when it is clearly the best fit. Never clown-speak (\"Heh\", \"Mmkay\", \"Oh nice\").\n"
-        "2. Match the conversation flow. If the user is following up, correcting, confirming, or answering a question, acknowledge that continuation instead of treating the text as a brand-new topic.\n"
-        "3. Briefly reference what the user asked about — 2–6 words max, no details. The user already knows what they asked; this is a breadcrumb that you heard the specific thing.\n"
-        "4. End with a short time signal — \"one sec\", \"give me a moment\", \"this'll take a moment\", etc. Rough scale: " + duration + ".\n"
-        "5. ONE sentence. 6–14 words total. No questions. No summarizing the likely answer. No filler. No emoji.\n\n"
-        "Good examples:\n"
-        "  user: \"What was the last email from Bob about?\" → \"Let me check your email, one sec.\"\n"
-        "  user: \"Explain how rsync works\"                → \"Sure — rsync breakdown coming, give me a moment.\"\n"
-        "  user: \"When did we talk about the scheduler?\"  → \"On it, let me pull up the scheduler thread.\"\n"
-        "  user: \"Rewrite this function\"                  → \"Okay, refactoring now — this'll take a moment.\"\n\n"
-        "Flow-aware examples:\n"
-        "  previous: Jane asked which TODO category. user: \"clinic\" → \"Okay, checking the clinic TODOs now.\"\n"
-        "  previous: discussing ack quality. user: \"it feels off\" → \"On it, tuning the ack flow now.\"\n"
-        "  previous: drafting SMS. user: \"make it warmer\" → \"Okay, revising that message tone now.\"\n\n"
-        "Bad examples:\n"
-        "  \"Hmm, give me a sec.\"                           ← topic-blind, feels disconnected\n"
-        "  \"Oh nice, this might take a minute or two.\"     ← clown opener, still disconnected\n"
-        "  \"Let me check your email and summarize the three most recent threads.\"  ← over-specifying Opus's answer\n\n"
-        f"Routing class: {cls}\n"
-        f"User message: {(prompt or '').strip()[:400]}\n\n"
-        "Your one-sentence acknowledgment (plain text, no quotes):"
+    gen_prompt = _delegate_ack_prompt(
+        prompt,
+        cls=cls,
+        duration=duration,
+        flow_context=flow_context,
     )
     try:
-        async with httpx.AsyncClient(timeout=LOCAL_LLM_TIMEOUT) as client:
-            r = await client.post(
-                "http://localhost:11434/api/generate",
-                json={
-                    "model": model, "prompt": gen_prompt, "stream": False,
-                    "think": False,
-                    "options": {"temperature": 0.6, "top_p": 0.9, "num_predict": 40, "num_ctx": LOCAL_LLM_NUM_CTX},
-                    "keep_alive": ack_keep_alive,
-                },
-            )
-            r.raise_for_status()
-            try:
-                from jane_web.jane_v2.models import record_ollama_activity
-                record_ollama_activity()
-            except Exception:
-                pass
-            text = (r.json().get("response") or "").strip()
-            # Strip stray quotes + any leading label the model sometimes adds
-            text = text.strip('"').strip("'").strip()
-            if text.lower().startswith("acknowledgment:"):
-                text = text.split(":", 1)[1].strip()
-            # Cap length defensively — if the model went long, truncate at
-            # the first period to preserve a single sentence.
-            if len(text) > 120:
-                first_period = text.find(".")
-                if 10 < first_period < 120:
-                    text = text[:first_period + 1]
-                else:
-                    text = text[:120]
-            text = _avoid_got_it_default(text, cls=cls)
-            return text or _ACK_FALLBACK
+        raw = await _post_ollama_response(
+            "http://localhost:11434/api/generate",
+            {
+                "model": model, "prompt": gen_prompt, "stream": False,
+                "think": False,
+                "options": {"temperature": 0.6, "top_p": 0.9, "num_predict": 40, "num_ctx": LOCAL_LLM_NUM_CTX},
+                "keep_alive": ack_keep_alive,
+            },
+            timeout=LOCAL_LLM_TIMEOUT,
+        )
+        text = _normalize_delegate_ack_response(raw, cls=cls)
+        return text or _ACK_FALLBACK
     except Exception as e:
         logger.warning("ack generation failed (%s) — using fallback", e)
         return _ACK_FALLBACK
@@ -1044,12 +828,7 @@ async def handle_chat(body, request: Request):
         text, extras = _stage2_response_parts(state["result"])
         # Strip [[CLIENT_TOOL:...]] markers from user-visible text
         # and surface them as structured client_tools in the JSON response
-        from jane_web.jane_proxy import ToolMarkerExtractor
-        _extractor = ToolMarkerExtractor()
-        visible, tool_calls = _extractor.feed(text)
-        tail, tail_calls = _extractor.flush()
-        visible_text = (visible or "") + (tail or "")
-        all_tool_calls = tool_calls + tail_calls
+        visible_text, all_tool_calls = _stage2_visible_text_and_client_tool_calls(text)
         resp: dict[str, Any] = {
             "response": visible_text or text,
             "ack": None,  # acks only emitted when Stage 3 runs
@@ -1162,21 +941,10 @@ async def handle_chat(body, request: Request):
     effective_body = stage3_escalate._maybe_voice_wrap(effective_body)
     # Inject SMS context for unresolved send-message requests
     if state["cls"] == "send message":
-        sms_ctx = (
-            "\n\n[SMS SEND REQUEST — Stage 2 could not resolve recipient]\n"
-            "Use sms_send_direct: [[CLIENT_TOOL:contacts.sms_send_direct:"
-            "{\"phone_number\":\"<number>\",\"body\":\"<message>\"}]]\n"
-            "Resolve the recipient, confirm with user, send via sms_send_direct.\n"
-            "[END SMS SEND REQUEST]"
+        effective_body = _copy_body_with_appended_message(
+            effective_body,
+            _stage3_sms_request_context(),
         )
-        try:
-            effective_body = effective_body.model_copy(
-                update={"message": (effective_body.message or "") + sms_ctx}
-            )
-        except AttributeError:
-            effective_body = effective_body.copy(
-                update={"message": (effective_body.message or "") + sms_ctx}
-            )
     if state.get("stage3_followup_topic"):
         topic = state["stage3_followup_topic"]
         hint = (
@@ -1184,14 +952,7 @@ async def handle_chat(body, request: Request):
             f"[[AWAITING:{topic}]] — the user's message above is their "
             f"answer to that pending question. Continue the task.\n"
         )
-        try:
-            effective_body = effective_body.model_copy(
-                update={"message": (effective_body.message or "") + hint}
-            )
-        except AttributeError:
-            effective_body = effective_body.copy(
-                update={"message": (effective_body.message or "") + hint}
-            )
+        effective_body = _copy_body_with_appended_message(effective_body, hint)
     if state["cls"] == "self improvement":
         effective_body = _inject_self_improvement_context(effective_body)
     effective_body, evidence_meta = await _apply_evidence_policy(
@@ -1443,12 +1204,8 @@ async def handle_chat_stream(body, request: Request):
                 )
             # Extract [[CLIENT_TOOL:...]] markers from text and emit as
             # structured client_tool_call events (Android expects these)
-            from jane_web.jane_proxy import ToolMarkerExtractor
-            _extractor = ToolMarkerExtractor()
-            visible, tool_calls = _extractor.feed(text)
-            tail, tail_calls = _extractor.flush()
-            visible_text = (visible or "") + (tail or "")
-            for tc in tool_calls + tail_calls:
+            visible_text, tool_calls = _stage2_visible_text_and_client_tool_calls(text)
+            for tc in tool_calls:
                 # Android NdjsonParser uses asString on "data", so the
                 # tool call payload must be a JSON *string*, not a nested object.
                 yield _ndjson("client_tool_call", json.dumps(tc, ensure_ascii=True))
@@ -1537,24 +1294,10 @@ async def handle_chat_stream(body, request: Request):
         # knows how to handle the request (e.g., SMS protocol).
         effective_body = body
         if state["cls"] == "send message":
-            sms_ctx = (
-                "\n\n[SMS SEND REQUEST — Stage 2 could not resolve recipient]\n"
-                "The user wants to send a TEXT MESSAGE (SMS). Use sms_send_direct:\n"
-                "[[CLIENT_TOOL:contacts.sms_send_direct:{\"phone_number\":\"<number>\",\"body\":\"<message>\"}]]\n"
-                "Steps: 1) Figure out who the recipient is from memory/contacts. "
-                "2) Compose the message body (rewrite perspective: 'tell X I love her' → 'I love you'). "
-                "3) Confirm with the user, then send via sms_send_direct. "
-                "NEVER use contacts.call. NEVER use sms_draft for simple sends.\n"
-                "[END SMS SEND REQUEST]"
+            effective_body = _copy_body_with_appended_message(
+                body,
+                _stage3_sms_request_context(streaming=True),
             )
-            try:
-                effective_body = body.model_copy(
-                    update={"message": (body.message or "") + sms_ctx}
-                )
-            except AttributeError:
-                effective_body = body.copy(
-                    update={"message": (body.message or "") + sms_ctx}
-                )
 
         if state.get("stage3_followup_topic"):
             topic = state["stage3_followup_topic"]
@@ -1564,14 +1307,7 @@ async def handle_chat_stream(body, request: Request):
                 f"their answer to that pending question. Continue the "
                 f"task.\n"
             )
-            try:
-                effective_body = effective_body.model_copy(
-                    update={"message": (effective_body.message or "") + hint}
-                )
-            except AttributeError:
-                effective_body = effective_body.copy(
-                    update={"message": (effective_body.message or "") + hint}
-                )
+            effective_body = _copy_body_with_appended_message(effective_body, hint)
 
         if state["cls"] == "self improvement":
             effective_body = _inject_self_improvement_context(effective_body)

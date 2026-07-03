@@ -51,6 +51,55 @@ from jane.config import (
     ARCHIVIST_SMART_AFTER_HOUR, ARCHIVIST_SMART_IDLE_SECS,
     LOGS_DIR,
 )
+from memory.v1.conversation_text import (
+    BAD_THEMATIC_META_PREFIX_PATTERNS,
+    BAD_THEMATIC_PROTOCOL_PATTERNS,
+    build_short_term_summary_plan,
+    looks_like_bad_thematic_output,
+    looks_like_code_edit,
+    normalize_short_term_summary,
+    prepare_thematic_turn,
+    should_store_short_term_turn,
+    strip_injected_metadata,
+)
+from memory.v1.conversation_archival import (
+    archivist_triage_prompt,
+    conversation_summary_prompt,
+    normalize_triage_decision,
+    select_archivist_model,
+    should_reject_generated_summary,
+    should_wait_for_smart_archival,
+    triage_prefilter_decision,
+)
+from memory.v1.context_compaction import compaction_split_index
+from memory.v1.conversation_themes import (
+    USER_IDENTITY_SIGNALS,
+    archivist_prompt,
+    clean_theme_title_response,
+    filter_short_term_theme_results,
+    format_theme_registry_for_prompt,
+    identity_signal_count,
+    initial_theme_title_prompt,
+    normalize_theme_title,
+    parse_theme_classification_response,
+    theme_classification_prompt,
+    theme_entries_from_results,
+    theme_summary_prompt,
+)
+from memory.v1.conversation_windows import (
+    build_session_transcript,
+    build_window_transcript,
+    group_ledger_turns,
+    latest_metadata_timestamp,
+    normalize_timestamp_for_sql,
+    parse_ledger_ts,
+)
+from memory.v1.long_term_promotion import (
+    archivist_memory_metadata,
+    memory_merge_prompt,
+    merge_candidates_from_query_result,
+)
+from memory.v1.short_term_structured import short_term_memory_metadata
 
 # --- Configuration ---
 TOKEN_ENCODING_MODEL = "cl100k_base"
@@ -310,17 +359,7 @@ class ConversationManager:
                 (self.session_id,)
             )
             rows = cursor.fetchall()
-            lines = []
-            for role, content in rows:
-                cleaned = re.sub(
-                    r"\s+",
-                    " ",
-                    self._strip_injected_metadata(content or ""),
-                ).strip()
-                if not cleaned or self._looks_like_bad_thematic_output(cleaned):
-                    continue
-                lines.append(f"{role.upper()}: {cleaned}")
-            return "\n\n".join(lines)
+            return build_session_transcript(rows)
         except Exception as e:
             logger.warning("Failed to fetch session transcript: %s", e)
             return ""
@@ -386,58 +425,10 @@ class ConversationManager:
         window-archival watermark only advances past transcripts that fully
         succeeded (a rate-limited or errored window is retried later).
         """
-        prompt = (
-            "You are The Thematic Archivist for Chieh's personal AI partner (Jane). "
-            "Analyze the session transcript and extract memories that are WORTH REMEMBERING.\n\n"
-
-            "WORTH REMEMBERING — save it if any of these apply:\n"
-            "1. Facts about Chieh that aren't in code or git: preferences, life context, "
-            "family, work, teaching style, what he finds satisfying or annoying.\n"
-            "2. Decisions and the *why* behind them — rationale doesn't survive in commit "
-            "messages reliably.\n"
-            "3. Commitments and open threads — what's promised, blocked, mid-flight.\n"
-            "4. Architectural shape and rationale — boundaries between components, why "
-            "something is split this way (NOT impl details — those are in code).\n"
-            "5. Failures and the lesson — what we tried that didn't work and why.\n"
-            "6. External relationships — people, services, accounts, deadlines.\n"
-            "7. Identity/values shifts — anything about how we work together as partners.\n\n"
-
-            "DROP IT — do not save:\n"
-            "- Status updates and config values that already live in code or CLAUDE.md.\n"
-            "- Tool output, command results, file paths used once.\n"
-            "- Intermediate debugging that succeeded — the fix is in the diff.\n"
-            "- Anything re-derivable from `git log`, the repo, or config files.\n"
-            "- Routine task completions.\n\n"
-
-            "TWO HEURISTICS:\n"
-            "- 'Would a new agent picking up cold make the wrong call without this?' → save.\n"
-            "- 'If we deleted this in 6 months and re-encountered the situation, would we "
-            "re-learn it painlessly?' → painful → save.\n\n"
-
-            "OUTPUT SHAPE — each memory is either a THEME or an ATOMIC fact.\n"
-            "For THEME memories, first decide whether it belongs to an existing registered theme "
-            "or needs a new theme.\n\n"
-            f"Existing registered themes:\n{self._format_theme_registry_for_prompt()}\n\n"
-            "THEME rules:\n"
-            "- Use 'existing_theme_id' when this memory extends or updates one of the registered themes.\n"
-            "- Use 'new_theme_title' only when the memory clearly introduces a recurring long-lived area "
-            "that does not fit any registered theme.\n"
-            "- Exactly one of 'existing_theme_id' or 'new_theme_title' must be populated for kind='theme'.\n"
-            "- If a fact clearly belongs to vessence/classes.chiehwu.com/waterlily, prefer the matching "
-            "'Project: <name>' theme unless it truly introduces a new recurring area.\n\n"
-            "ATOMIC rules:\n"
-            "- Use one of these atomic topics: Decision, Commitment, Failure Lesson, External Relationship.\n"
-            f"- Valid atomic topics: {', '.join(self._ATOMIC_MEMORY_TOPICS)}\n\n"
-            "Output a single JSON list. Each object must have:\n"
-            "- 'kind':    'theme' | 'atomic'\n"
-            "- 'title':   concise phrase\n"
-            "- 'content': comprehensive summary including context and outcome\n"
-            "- 'why_kept': one sentence — which rubric criterion this hits\n"
-            "- 'existing_theme_id': registered theme id or ''\n"
-            "- 'new_theme_title': new recurring theme title or ''\n"
-            "- 'atomic_topic': one of the atomic topics above or ''\n\n"
-            "If nothing in the transcript is worth remembering, return [].\n\n"
-            f"Transcript (truncated if needed):\n{transcript[-20000:]}"
+        prompt = archivist_prompt(
+            transcript,
+            theme_registry_text=self._format_theme_registry_for_prompt(),
+            atomic_topics=self._ATOMIC_MEMORY_TOPICS,
         )
 
         from agent_skills.claude_cli_llm import completion_json
@@ -478,26 +469,11 @@ class ConversationManager:
 
     def _parse_ledger_ts(self, raw) -> datetime.datetime | None:
         """Parse a ledger timestamp (SQLite CURRENT_TIMESTAMP or ISO) to UTC."""
-        if not raw:
-            return None
-        try:
-            return datetime.datetime.fromisoformat(
-                str(raw).replace("T", " ").split("+")[0].split(".")[0].strip()
-            )
-        except Exception:
-            return None
+        return parse_ledger_ts(raw)
 
     def _build_window_transcript(self, window: list) -> str:
         """Render a window of (id, role, content, ts) turns into a transcript."""
-        lines = []
-        for _tid, role, content, _ts in window:
-            cleaned = re.sub(
-                r"\s+", " ", self._strip_injected_metadata(content or "")
-            ).strip()
-            if not cleaned or self._looks_like_bad_thematic_output(cleaned):
-                continue
-            lines.append(f"{(role or '').upper()}: {cleaned}")
-        return "\n\n".join(lines)
+        return build_window_transcript(window)
 
     def _get_archival_state(self, key: str) -> str | None:
         if not self.db_conn:
@@ -532,23 +508,14 @@ class ConversationManager:
         latest_iso = None
         try:
             got = self.long_term_collection.get(include=["metadatas"])
-            stamps = []
-            for m in (got.get("metadatas") or []):
-                if not m:
-                    continue
-                for k in ("archived_at", "timestamp", "created_at", "updated_at"):
-                    if m.get(k):
-                        stamps.append(str(m[k]))
-                        break
-            if stamps:
-                latest_iso = max(stamps)
+            latest_iso = latest_metadata_timestamp(got.get("metadatas") or [])
         except Exception as e:
             logger.warning("Watermark seed: could not read long-term timestamps: %s", e)
         try:
             with self._db_lock:
                 cur = self.db_conn.cursor()
                 if latest_iso:
-                    norm = latest_iso.replace("T", " ").split("+")[0].split(".")[0].strip()[:19]
+                    norm = normalize_timestamp_for_sql(latest_iso)
                     cur.execute(
                         "SELECT MAX(id) FROM turns "
                         "WHERE replace(substr(timestamp,1,19),'T',' ') <= ?",
@@ -627,24 +594,11 @@ class ConversationManager:
                 return {"status": "nothing-new", "watermark": watermark}
 
             gap = datetime.timedelta(minutes=idle_gap_minutes)
-            windows: list[list] = []
-            current: list = []
-            prev_ts = None
-            for tid, role, content, ts_raw in rows:
-                ts = self._parse_ledger_ts(ts_raw)
-                gap_break = (
-                    prev_ts is not None and ts is not None and (ts - prev_ts) > gap
-                )
-                size_break = len(current) >= self.WINDOW_MAX_TURNS
-                if current and (gap_break or size_break):
-                    windows.append(current)
-                    current = []
-                current.append((tid, role, content, ts))
-                if ts is not None:
-                    prev_ts = ts
-            if current:
-                windows.append(current)
-
+            windows = group_ledger_turns(
+                rows,
+                idle_gap_minutes=idle_gap_minutes,
+                max_turns=self.WINDOW_MAX_TURNS,
+            )
             cutoff = datetime.datetime.utcnow() - gap
             archived = skipped = 0
             new_watermark = watermark
@@ -823,13 +777,23 @@ class ConversationManager:
 
     def _should_wait_for_smart_archival(self, idle_seconds: float) -> bool:
         now = datetime.datetime.now()
-        return now.hour >= ARCHIVIST_SMART_AFTER_HOUR and idle_seconds < ARCHIVIST_SMART_IDLE_SECS
+        return should_wait_for_smart_archival(
+            current_hour=now.hour,
+            idle_seconds=idle_seconds,
+            smart_after_hour=ARCHIVIST_SMART_AFTER_HOUR,
+            smart_idle_seconds=ARCHIVIST_SMART_IDLE_SECS,
+        )
 
     def _select_archivist_model(self, idle_seconds: float) -> str:
         now = datetime.datetime.now()
-        if now.hour >= ARCHIVIST_SMART_AFTER_HOUR and idle_seconds >= ARCHIVIST_SMART_IDLE_SECS:
-            return ARCHIVIST_SMART_MODEL_LITELLM
-        return ARCHIVIST_MODEL
+        return select_archivist_model(
+            current_hour=now.hour,
+            idle_seconds=idle_seconds,
+            smart_after_hour=ARCHIVIST_SMART_AFTER_HOUR,
+            smart_idle_seconds=ARCHIVIST_SMART_IDLE_SECS,
+            default_model=ARCHIVIST_MODEL,
+            smart_model=ARCHIVIST_SMART_MODEL_LITELLM,
+        )
 
     def _triage_memory(self, memory_content: str, model_name: str) -> str:
         """
@@ -837,66 +801,32 @@ class ConversationManager:
         Returns 'Keep', 'Forgettable', 'Discard', or 'Retry'.
         """
         # --- Noise Pre-Filter (Saves LLM tokens and prevents low-signal archive) ---
-        text = str(memory_content or "").strip()
-        noise_patterns = [
-            r"^User logged in with Google account.*",
-            r"^System in 'Waiting for auth' state.*",
-            r"^User interface ready for interaction.*",
-            r"^Deprecation warning for --allowed-tools.*",
-            r"^Automatic Gemini CLI update.*",
-            r"^Gemini CLI update available.*",
-            r"^What does Jane web streaming mean\?.*",
-            r"^User interface includes YOLO shortcut.*",
-            r"^No relevant context found.*",
-            r"^jane you still thinking\?.*",
-            r"^jane/.*"
-        ]
-        for pat in noise_patterns:
-            if re.search(pat, text, re.IGNORECASE):
-                return "Discard"
+        prefilter_decision = triage_prefilter_decision(memory_content)
+        if prefilter_decision:
+            return prefilter_decision
 
-        prompt = (
-            "You are The Archivist. Respond with ONLY one word: 'Keep', 'Forgettable', or 'Discard'.\n\n"
-            "Rules:\n"
-            "- Keep: permanent-ish facts — user-specific details (family, profession, preferences), "
-            "architecture changes, project goals, fixed root causes, and hard-won implementation "
-            "knowledge. If it's something the user explicitly wants me to remember, classify it as Keep.\n"
-            "- Forgettable: temporary context — current session progress, recent code changes, "
-            "bugs just fixed, test results. These will expire after 14 days.\n"
-            "- Discard: noise, greetings, trivial state updates (e.g., 'system ready', 'login successful'), "
-            "filler, and redundant repetition of things I already know.\n\n"
-            "BE RUTHLESS. When in doubt, Discard or Forgettable. Only Keep durable, high-value knowledge.\n\n"
-            f"Memory: {memory_content}"
-        )
+        prompt = archivist_triage_prompt(memory_content)
         try:
             from agent_skills.claude_cli_llm import completion
             decision = completion(prompt, max_tokens=5, timeout=30)
-            return decision if decision in ["Keep", "Forgettable", "Discard"] else "Retry"
+            return normalize_triage_decision(decision)
         except Exception as e:
             logger.warning("Triage failed: %s", e)
             return "Retry"
 
     # Keyword signals that an arc is about the user as a person, not the system.
-    _USER_IDENTITY_SIGNALS = re.compile(
-        r"\b(?:user(?:'s| is| has| was| lives| works| owns| prefers| enjoys| likes)"
-        r"|(?:wife|husband|spouse|daughter|son|child|parent|family|pet|dog|cat)"
-        r"|(?:professor|teacher|doctor|clinic|office|employer|workplace)"
-        r"|(?:hobby|hobbies|born|birthday|age|hometown|home address)"
-        r"|(?:favorite (?:food|restaurant|color|music|sport|game|movie|book))"
-        r"|(?:personal preference|life event|relationship|married|wedding))\b",
-        re.IGNORECASE,
-    )
+    _USER_IDENTITY_SIGNALS = USER_IDENTITY_SIGNALS
 
     @classmethod
     def _reclassify_if_user_identity(cls, category: str, content: str) -> str:
         """If the LLM miscategorized a user-personal arc, reclassify it."""
         if category == "Identity Evolution":
             return category  # already correct
-        matches = cls._USER_IDENTITY_SIGNALS.findall(content)
-        if len(matches) >= 2:
+        matches = identity_signal_count(content)
+        if matches >= 2:
             logger.info(
                 "Reclassified arc from '%s' → 'Identity Evolution' "
-                "(matched %d user-identity signals).", category, len(matches),
+                "(matched %d user-identity signals).", category, matches,
             )
             return "Identity Evolution"
         return category
@@ -909,18 +839,10 @@ class ConversationManager:
 
     @staticmethod
     def _normalize_theme_title(title: str) -> str:
-        clean = re.sub(r"\s+", " ", str(title or "").strip())
-        clean = clean.strip(" -_:;,.")
-        return clean[:80]
+        return normalize_theme_title(title)
 
     def _format_theme_registry_for_prompt(self) -> str:
-        themes = self._fetch_theme_registry()
-        if not themes:
-            return "- (none)"
-        return "\n".join(
-            f"- {theme['theme_id']}: {theme['title']} — {theme.get('description') or 'No description.'}"
-            for theme in themes
-        )
+        return format_theme_registry_for_prompt(self._fetch_theme_registry())
 
     def _fetch_theme_registry(self) -> list[dict]:
         if not self.db_conn:
@@ -1119,38 +1041,10 @@ class ConversationManager:
             )
 
             best_match_id = None
-            distances = existing.get("distances") or []
-            if existing and existing['documents'] and existing['documents'][0]:
-                matches = []
-                for i in range(len(existing['documents'][0])):
-                    matches.append({
-                        "id": existing['ids'][0][i],
-                        "doc": existing['documents'][0][i],
-                        "dist": (
-                            distances[0][i]
-                            if distances and distances[0] and i < len(distances[0])
-                            else 1.0
-                        ),
-                    })
-
+            matches = merge_candidates_from_query_result(existing)
+            if matches:
                 # 2. Ask Sonnet if we should merge
-                prompt = (
-                    "You are a Memory Architect. I want to add a new memory arc to the long-term knowledge base.\n\n"
-                    f"New Memory Category: {category}\n"
-                    f"New Memory Content: {content}\n\n"
-                    "Here are the most similar existing memories in this category:\n"
-                )
-                for i, m in enumerate(matches):
-                    prompt += f"Match {i+1} (ID: {m['id']}, Distance: {m['dist']:.4f}):\n{m['doc']}\n\n"
-                
-                prompt += (
-                    "Decision Criteria:\n"
-                    "- MERGE: If the new memory is a continuation, update, or near-duplicate of an existing one. "
-                    "Provide a single comprehensive summary that includes ALL unique details from both.\n"
-                    "- NEW: If the new memory represents a distinct event, different architectural component, or unrelated fact.\n\n"
-                    "Respond ONLY with a JSON object:\n"
-                    "{ \"decision\": \"MERGE\" | \"NEW\", \"target_id\": \"id_to_overwrite\", \"merged_content\": \"new_summary_if_merge\" }"
-                )
+                prompt = memory_merge_prompt(category, content, matches)
 
                 from agent_skills.claude_cli_llm import completion_json
                 result = completion_json(prompt, tier="agent")
@@ -1159,17 +1053,14 @@ class ConversationManager:
                     best_match_id = result["target_id"]
                     new_doc = result["merged_content"]
                     logger.info("Intelligent MERGE: Integrating new memory into ID: %s", best_match_id)
-                    merge_meta = {
-                        "source": "conversation_archivist",
-                        "session_id": self.session_id,
-                        "topic": category,
-                        "timestamp": datetime.datetime.utcnow().isoformat(),
-                        "status": "updated_thematic",
-                    }
-                    if is_user_memory:
-                        merge_meta["user_id"] = os.environ.get("USER_NAME", "user")
-                        merge_meta["memory_type"] = "long_term"
-                        merge_meta["author"] = "archivist"
+                    merge_meta = archivist_memory_metadata(
+                        session_id=self.session_id,
+                        category=category,
+                        timestamp=datetime.datetime.utcnow().isoformat(),
+                        is_user_memory=is_user_memory,
+                        user_name=os.environ.get("USER_NAME", "user"),
+                        status="updated_thematic",
+                    )
                     target_collection.update(
                         ids=[best_match_id],
                         documents=[new_doc],
@@ -1178,16 +1069,13 @@ class ConversationManager:
                     return True
 
             # 3. If NEW or no matches found, add as a fresh entry
-            new_meta = {
-                "source": "conversation_archivist",
-                "session_id": self.session_id,
-                "topic": category,
-                "timestamp": datetime.datetime.utcnow().isoformat(),
-            }
-            if is_user_memory:
-                new_meta["user_id"] = os.environ.get("USER_NAME", "user")
-                new_meta["memory_type"] = "long_term"
-                new_meta["author"] = "archivist"
+            new_meta = archivist_memory_metadata(
+                session_id=self.session_id,
+                category=category,
+                timestamp=datetime.datetime.utcnow().isoformat(),
+                is_user_memory=is_user_memory,
+                user_name=os.environ.get("USER_NAME", "user"),
+            )
             target_collection.add(
                 documents=[content],
                 metadatas=[new_meta],
@@ -1217,19 +1105,13 @@ class ConversationManager:
 
         logger.info("Context window at %d tokens. Compacting...", stats['current_tokens'])
 
-        tokens_to_remove = (stats["current_tokens"] - self.compaction_threshold
-                            + int(self.max_tokens * 0.25))
-        split_index = 0
-        tokens_so_far = 0
-        for i, message in enumerate(self.conversation_history):
-            tokens_so_far += get_token_count(message.get('content', ''))
-            if tokens_so_far >= tokens_to_remove:
-                split_index = i + 1
-                break
-
-        if split_index >= len(self.conversation_history) - 1:
-            split_index = len(self.conversation_history) - 2
-        if split_index <= 0:
+        split_index = compaction_split_index(
+            [get_token_count(message.get('content', '')) for message in self.conversation_history],
+            current_tokens=stats["current_tokens"],
+            compaction_threshold=self.compaction_threshold,
+            max_tokens=self.max_tokens,
+        )
+        if split_index is None:
             return None
 
         part_to_summarize = self.conversation_history[:split_index]
@@ -1258,31 +1140,7 @@ class ConversationManager:
         are system metadata — not conversation — and cause the summarizer
         LLM to respond to them instead of summarizing.
         """
-        content = re.sub(
-            r'<class_protocol[^>]*>.*?</class_protocol>',
-            '', content, flags=re.DOTALL,
-        )
-        content = re.sub(
-            r'\[EXTRACTED PARAMS\].*?(?=\n\n|\Z)',
-            '', content, flags=re.DOTALL,
-        )
-        content = re.sub(
-            r'\[[A-Z][A-Z_ ]*DATA\].*?(?=\n\n|\Z)',
-            '', content, flags=re.DOTALL,
-        )
-        content = re.sub(
-            r'\[CURRENT CONVERSATION STATE\].*?\[END CURRENT CONVERSATION STATE\]\s*',
-            '', content, flags=re.DOTALL,
-        )
-        content = re.sub(
-            r'\(voice request — .*?\)\n*',
-            '', content, flags=re.DOTALL,
-        )
-        content = re.sub(
-            r'\[STANDING BRAIN MODE\].*?(?=\n|\Z)',
-            '', content,
-        )
-        return content.strip()
+        return strip_injected_metadata(content)
 
     _BAD_SUMMARY_PATTERNS = (
         "I need clarification",
@@ -1293,50 +1151,12 @@ class ConversationManager:
         "I don't understand",
         "Let me know if you",
     )
-    _BAD_THEMATIC_META_PREFIX_PATTERNS = (
-        r"^i need clarification\b",
-        r"^there(?:'|’)s no conversation turn to summarize\b",
-        r"^no action needed\b",
-        r"^i notice there(?:'|’)s a mismatch here\b",
-    )
-    _BAD_THEMATIC_PROTOCOL_PATTERNS = (
-        r"^\*{0,2}\s*class protocol:",
-        r"<class_protocol\b",
-        r"\[extracted params\]",
-        r"\[current conversation state\]",
-        r"\[standing brain mode\]",
-        r"\bclass protocol metadata\b",
-        r"\bdocumentation \(belongs in code/config\)\b",
-        r"\bprovided (?:class )?protocol\b",
-        r"\bclass protocol you provided\b",
-        r"\bnew turn.*class protocol metadata\b",
-    )
+    _BAD_THEMATIC_META_PREFIX_PATTERNS = BAD_THEMATIC_META_PREFIX_PATTERNS
+    _BAD_THEMATIC_PROTOCOL_PATTERNS = BAD_THEMATIC_PROTOCOL_PATTERNS
 
     @classmethod
     def _looks_like_bad_thematic_output(cls, text: str) -> bool:
-        normalized = re.sub(r"\s+", " ", str(text or "")).strip()
-        if not normalized:
-            return False
-        protocol_hit = any(
-            re.search(pattern, normalized, re.IGNORECASE)
-            for pattern in cls._BAD_THEMATIC_PROTOCOL_PATTERNS
-        )
-        if not protocol_hit:
-            return False
-        if re.search(r"^\*{0,2}\s*class protocol:", normalized, re.IGNORECASE):
-            return True
-        return any(
-            re.search(pattern, normalized, re.IGNORECASE)
-            for pattern in cls._BAD_THEMATIC_META_PREFIX_PATTERNS
-        ) or any(
-            marker in normalized.lower()
-            for marker in (
-                "<class_protocol",
-                "[extracted params]",
-                "[current conversation state]",
-                "[standing brain mode]",
-            )
-        )
+        return looks_like_bad_thematic_output(text)
 
     @classmethod
     def _prepare_thematic_turn(cls, user_msg: str, assistant_msg: str) -> str:
@@ -1346,38 +1166,14 @@ class ConversationManager:
         protocol blocks, injected server-side data, or assistant replies that
         are themselves clarifying those metadata artifacts.
         """
-        cleaned_user = re.sub(r"\s+", " ", cls._strip_injected_metadata(user_msg or "")).strip()
-        cleaned_assistant = re.sub(r"\s+", " ", cls._strip_injected_metadata(assistant_msg or "")).strip()
-
-        if cls._looks_like_bad_thematic_output(cleaned_user):
-            cleaned_user = ""
-        if cls._looks_like_bad_thematic_output(cleaned_assistant):
-            cleaned_assistant = ""
-
-        if not cleaned_user and not cleaned_assistant:
-            return ""
-
-        lines = []
-        if cleaned_user:
-            lines.append(f"User: {cleaned_user}")
-        if cleaned_assistant:
-            lines.append(f"Jane: {cleaned_assistant}")
-        return "\n".join(lines).strip()
+        return prepare_thematic_turn(user_msg, assistant_msg)
 
     def _generate_summary(self, content: str) -> str:
         try:
             from agent_skills.claude_cli_llm import completion
-            prompt = (
-                "You are a summarizer. Output ONLY a concise factual summary "
-                "of the conversation below. Do NOT respond to the content, "
-                "do NOT ask questions, do NOT ask for clarification, do NOT "
-                "include system metadata or protocol descriptions. Just "
-                "summarize what the user and assistant discussed: topics, "
-                "decisions, and outcomes. Neutral, 3rd person, 2-4 sentences "
-                "max.\n\n" + content
-            )
+            prompt = conversation_summary_prompt(content)
             summary = completion(prompt, max_tokens=300, timeout=60)
-            if any(pat.lower() in summary.lower() for pat in self._BAD_SUMMARY_PATTERNS):
+            if should_reject_generated_summary(summary, self._BAD_SUMMARY_PATTERNS):
                 logger.warning("Summarizer produced a non-summary response, rejecting: %.100s", summary)
                 return "Summary generation failed."
             return summary
@@ -1617,18 +1413,14 @@ class ConversationManager:
             + datetime.timedelta(days=SHORT_TERM_TTL_DAYS)
         ).isoformat()
         doc_id = str(uuid.uuid4())
-        metadata = {
-            "session_id": self.session_id,
-            "timestamp": now_iso,
-            "expires_at": expires_iso,
-            "memory_type": "short_term",
-            "author": "conversation_manager",
-            "topic": "turn_memory",
-            "role": "turn",
-            "raw_chars": len(turn_text),
-            "summary_chars": len(note),
-            **extracted_meta,
-        }
+        metadata = short_term_memory_metadata(
+            session_id=self.session_id,
+            timestamp=now_iso,
+            expires_at=expires_iso,
+            raw_text=turn_text,
+            note=note,
+            extracted_meta=extracted_meta,
+        )
         # Embed the label-stripped form for sharper retrieval; the labeled
         # ``note`` stays as the displayed document. See
         # ``short_term_extractor.flatten_to_search_text``.
@@ -1798,23 +1590,9 @@ class ConversationManager:
                 include=["documents", "metadatas"],
             )
             # Post-filter for theme entries
-            filtered = {"ids": [], "documents": [], "metadatas": []}
-            for i, meta in enumerate(results.get("metadatas", [])):
-                if (meta or {}).get("memory_type") == "short_term_theme":
-                    filtered["ids"].append(results["ids"][i])
-                    filtered["documents"].append(results["documents"][i])
-                    filtered["metadatas"].append(meta)
-            results = filtered
+            results = filter_short_term_theme_results(results)
 
-        themes = []
-        for i, doc_id in enumerate(results.get("ids", [])):
-            themes.append({
-                "id": doc_id,
-                "document": results["documents"][i],
-                "metadata": results["metadatas"][i] or {},
-            })
-        themes.sort(key=lambda t: t["metadata"].get("theme_index", 0))
-        return themes
+        return theme_entries_from_results(results)
 
     def _classify_turn_theme(self, themes: list[dict], turn_text: str) -> dict:
         """Ask the Utility (Haiku) model whether this turn belongs to an
@@ -1828,44 +1606,22 @@ class ConversationManager:
         if not themes:
             try:
                 title = completion_utility(
-                    f"Give a short (3-8 word) theme title for this conversation turn. "
-                    f"Return ONLY the title, nothing else.\n\n{turn_text[:500]}",
+                    initial_theme_title_prompt(turn_text),
                     max_tokens=30, timeout=30,
-                ).strip().strip('"').strip("'")
+                )
+                title = clean_theme_title_response(title)
             except Exception:
                 title = turn_text[:50].replace("\n", " ").strip()
             return {"action": "new", "title": title or "General discussion"}
 
-        theme_list = "\n".join(
-            f'{i}. "{t["metadata"].get("theme_title", "Untitled")}" — '
-            f'{t["document"][:100]}'
-            for i, t in enumerate(themes)
-        )
-        prompt = (
-            f"Given these existing conversation themes:\n{theme_list}\n\n"
-            f"New turn:\n{turn_text[:800]}\n\n"
-            f"Does this turn add detail to an existing theme, or introduce a "
-            f"genuinely new topic?\n"
-            f"Prefer matching existing themes — only say NEW if this is "
-            f"clearly a different subject.\n\n"
-            f"Respond with EXACTLY one of:\n"
-            f"- EXISTING: <number>\n"
-            f"- NEW: <short theme title, 3-8 words>\n"
-            f"No other text."
-        )
+        prompt = theme_classification_prompt(themes, turn_text)
         try:
             response = completion_utility(prompt, max_tokens=50, timeout=45).strip()
-            if response.upper().startswith("EXISTING:"):
-                idx = int(response.split(":", 1)[1].strip())
-                if 0 <= idx < len(themes):
-                    return {"action": "existing", "theme_index": idx}
-                return {"action": "existing", "theme_index": len(themes) - 1}
-            elif response.upper().startswith("NEW:"):
-                title = response.split(":", 1)[1].strip().strip('"').strip("'")
-                return {"action": "new", "title": title or "General discussion"}
-            else:
+            parsed = parse_theme_classification_response(response, len(themes))
+            if parsed is None:
                 logger.warning("Unparseable theme classification: %s", response[:100])
                 return {"action": "existing", "theme_index": len(themes) - 1}
+            return parsed
         except Exception as exc:
             logger.warning("Theme classification LLM failed: %s", exc)
             return {"action": "existing", "theme_index": len(themes) - 1}
@@ -1879,24 +1635,7 @@ class ConversationManager:
         """
         from agent_skills.claude_cli_llm import completion_utility
 
-        if current_summary:
-            prompt = (
-                f"Here is the current summary for a conversation theme:\n"
-                f"---\n{current_summary}\n---\n\n"
-                f"Incorporate the key details from this new turn. "
-                f"Keep it concise (3-6 sentences). Preserve all important facts, "
-                f"decisions, file paths, errors, and open items. Drop filler.\n\n"
-                f"New turn:\n{turn_text[:800]}\n\n"
-                f"Return ONLY the updated summary."
-            )
-        else:
-            prompt = (
-                f"Summarize this conversation turn into a concise memory note "
-                f"(2-4 sentences). Keep concrete facts, decisions, file paths, "
-                f"errors, and open items. Drop filler.\n\n"
-                f"{turn_text[:800]}\n\n"
-                f"Return ONLY the summary."
-            )
+        prompt = theme_summary_prompt(current_summary, turn_text)
         try:
             summary = completion_utility(prompt, max_tokens=300, timeout=45)
             summary = summary.strip()
@@ -1961,53 +1700,7 @@ class ConversationManager:
 
     @staticmethod
     def _should_store_short_term_turn(role: str, content: str) -> bool:
-        text = re.sub(r"\s+", " ", str(content or "")).strip().lower()
-        if not text:
-            return False
-        # --- exact low-value tokens ---
-        low_value_exact = {
-            "ok", "okay", "yes", "yeah", "yep", "no", "nope", "thanks", "thank you",
-            "got it", "sounds good", "cool", "nice", "done", "send", "sent",
-            "/new", "none",
-        }
-        if text in low_value_exact:
-            return False
-        # --- short ambiguous questions ---
-        if role == "user" and len(text) <= 12 and text.endswith("?") and text in {"why?", "how?", "which?", "where?", "when?"}:
-            return False
-        # --- signal/test strings (all-caps markers, test pings) ---
-        _upper = text.upper()
-        if _upper == text and len(text) < 40 and re.match(r"^[A-Z_]+$", text.replace(" ", "")):
-            return False  # e.g. FINAL_MEMORY_OK, MEMORY_SYSTEM_OK, JANE_WEB_RECOVERED
-        # --- greeting/filler patterns (user) ---
-        if role == "user":
-            _greeting_pats = [
-                r"^hey\s*(jane)?\s*[,!.]?\s*(how.s it going|are you|you there|testing|can you say)?\s*[?!.]?\s*$",
-                r"^(hi|hello|yo)\s*(jane)?\s*[!.]?\s*$",
-                r"^you (working|there) now\??$",
-                r"^(hey )?jane did you crash\??$",
-                r"^let.s (run this test|see how long|test this)",
-                r"^can you respond to this message so i can test",
-                r"^what is \d+\+\d+\??\s*$",
-            ]
-            for pat in _greeting_pats:
-                if re.search(pat, text):
-                    return False
-        # --- assistant filler (no recall value) ---
-        if role == "assistant":
-            _filler_pats = [
-                r"^hey \w+[!.,]?\s*(i.m here|going well|what.s up|what do you)",
-                r"^(i.m here|here)\.\s*what do you",
-                r"^jane here\.\s*(what|i.ll)",
-                r"^doing well\.?\s*(in the workspace|ready)",
-                r"^fresh start\.?\s*what.s up",
-                r"^yeah\.?\s*what do you need",
-                r"^when you what\?",
-            ]
-            for pat in _filler_pats:
-                if re.search(pat, text):
-                    return False
-        return True
+        return should_store_short_term_turn(role, content)
 
     def _release_short_term_handles(self):
         """Releases ChromaDB client handles. Does NOT delete — short-term DB is shared/persistent."""
@@ -2019,30 +1712,7 @@ class ConversationManager:
 
     @staticmethod
     def _looks_like_code_edit(content: str) -> bool:
-        text = str(content or "")
-        markers = [
-            "```",
-            "*** Begin Patch",
-            "*** Update File:",
-            "*** Add File:",
-            "*** Delete File:",
-            "diff --git",
-            "@@",
-            "+def ",
-            "-def ",
-            "+import ",
-            "-import ",
-            "Syntax check passed",
-            "File changed:",
-            os.path.expanduser("~/"),
-            ".py",
-            ".ts",
-            ".tsx",
-            ".js",
-            ".jsx",
-            ".md",
-        ]
-        return any(marker in text for marker in markers)
+        return looks_like_code_edit(content)
 
     @staticmethod
     def _summarize_for_short_term(role: str, content: str) -> tuple[str, str]:
@@ -2050,85 +1720,29 @@ class ConversationManager:
         Compresses a turn into the shortest retrieval-friendly memory note.
         Raw text is still preserved in the SQLite ledger; Chroma gets the compact form.
         """
-        clean = re.sub(r"\s+", " ", str(content or "")).strip()
-        if not clean:
-            return "", "concise_turn_memory_v1"
-
-        summary_style = "concise_turn_memory_v1"
-        if role == "assistant" and ConversationManager._looks_like_code_edit(content):
-            summary_style = "code_change_turn_memory_v1"
-            prompt = (
-                "Summarize this assistant turn as a compact code-change memory note for later retrieval.\n"
-                "Rules:\n"
-                "- Do NOT restate the full diff or prose explanation.\n"
-                "- Extract only: files changed, core behavior change, key functions/classes, and any open risk or next step.\n"
-                "- Prefer 2 to 4 very short bullets in plain text.\n"
-                "- Start each bullet with '- '.\n"
-                "- Keep file paths when they matter.\n"
-                "- Omit filler, acknowledgements, and formatting chatter.\n"
-                "- If no durable code-change context exists, return exactly: No durable context.\n\n"
-                f"Role: {role}\n"
-                f"Turn: {clean}"
-            )
-        else:
-            if len(clean) <= 150:
-                return clean[:150], "rule_based_turn_memory_v1"
-            prompt = (
-                "Compress this single conversation turn into the shortest and most concise memory note "
-                "that will maximally help later context retrieval.\n"
-                "Rules:\n"
-                "- Keep only concrete facts, decisions, requests, constraints, file paths, errors, or open loops.\n"
-                "- Remove filler, politeness, repetition, style words, and nonessential explanation.\n"
-                "- Prefer one compact sentence or two very short bullets in plain text.\n"
-                "- Do not add analysis or speculation.\n"
-                "- If the turn contains no durable or useful context, return exactly: No durable context.\n\n"
-                f"Role: {role}\n"
-                f"Turn: {clean}"
-            )
+        plan = build_short_term_summary_plan(role, content)
+        if plan.prompt is None:
+            return plan.immediate_summary or "", plan.summary_style
 
         try:
             from agent_skills.claude_cli_llm import completion_utility
-            summarized = completion_utility(prompt, max_tokens=120, timeout=30)
+            summarized = completion_utility(plan.prompt, max_tokens=120, timeout=30)
         except Exception:
             summarized = ""
 
         if not summarized:
+            clean = re.sub(r"\s+", " ", str(content or "")).strip()
             fallback = clean[:280]
-            return fallback, summary_style
+            return fallback, plan.summary_style
 
         summarized = ConversationManager._normalize_short_term_summary(
             summarized,
-            preserve_bullets=(summary_style == "code_change_turn_memory_v1"),
+            preserve_bullets=plan.preserve_bullets,
         )
         if summarized == "No durable context.":
-            return summarized, summary_style
-        return summarized[:320], summary_style
+            return summarized, plan.summary_style
+        return summarized[:320], plan.summary_style
 
     @staticmethod
     def _normalize_short_term_summary(text: str, preserve_bullets: bool) -> str:
-        text = str(text or "").strip()
-        if not text:
-            return ""
-        if not preserve_bullets:
-            return re.sub(r"\s+", " ", text).strip()
-
-        lines = []
-        for raw_line in text.splitlines():
-            line = re.sub(r"\s+", " ", raw_line).strip()
-            if not line:
-                continue
-            if re.match(r"^[-*]\s+", line):
-                line = "- " + line[2:].strip()
-            elif re.match(r"^\d+\.\s+", line):
-                line = "- " + re.sub(r"^\d+\.\s+", "", line).strip()
-            lines.append(line)
-
-        if not lines:
-            return ""
-        if len(lines) > 1:
-            lines = [line for line in lines if line != "No durable context." and line != "- No durable context."]
-        if not lines:
-            return "No durable context."
-        if len(lines) == 1 and lines[0] != "No durable context.":
-            return f"- {re.sub(r'^[-*]\s+', '', lines[0]).strip()}"
-        return "\n".join(lines)
+        return normalize_short_term_summary(text, preserve_bullets)

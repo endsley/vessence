@@ -40,6 +40,12 @@ from typing import Any
 from fastapi import Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
+from jane_web.client_tool_markers import visible_text_and_client_tool_calls
+from jane_web.jane_v3.privacy_gate import (
+    privacy_gate_decision,
+    privacy_neighbors_in_range,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -115,28 +121,25 @@ def _stage3_privacy_check(prompt: str) -> bool:
         )
         metas = results.get("metadatas", [[]])[0]
         dists = results.get("distances", [[]])[0]
-        in_range: list[tuple[float, str | None, str | None]] = []
-        for meta, dist in zip(metas, dists):
-            if dist is None or dist > _PRIVACY_GATE_DISTANCE:
-                continue
-            cls = (meta or {}).get("class")
-            in_range.append((float(dist), cls, privacy_for(cls)))
-        if not in_range:
-            return False
+        in_range = privacy_neighbors_in_range(
+            metas,
+            dists,
+            max_distance=_PRIVACY_GATE_DISTANCE,
+            privacy_for=privacy_for,
+        )
         # Rule (a): closest neighbor is private
-        closest_dist, closest_cls, closest_priv = in_range[0]
-        if closest_priv == "local_only":
+        decision = privacy_gate_decision(in_range)
+        if decision.reason == "closest":
             logger.info(
                 "jane_v3 privacy gate: closest neighbor %r is private (dist=%.3f) → refuse",
-                closest_cls, closest_dist,
+                decision.closest_cls, decision.closest_dist or 0.0,
             )
             return True
         # Rule (b): majority of in-range neighbors are private
-        private_count = sum(1 for _, _, p in in_range if p == "local_only")
-        if private_count >= 3 and private_count > len(in_range) - private_count:
+        if decision.reason == "majority":
             logger.info(
                 "jane_v3 privacy gate: %d/%d in-range neighbors private → refuse",
-                private_count, len(in_range),
+                decision.private_count, decision.in_range_count,
             )
             return True
     except Exception as e:
@@ -679,12 +682,7 @@ async def handle_chat(body, request: Request):
     # ── Stage 2 success: return directly ────────────────────────────────
     if state["result"] is not None and not state["force_stage3"]:
         text, extras = _stage2_response_parts(state["result"])
-        from jane_web.jane_proxy import ToolMarkerExtractor
-        _extractor = ToolMarkerExtractor()
-        visible, tool_calls = _extractor.feed(text)
-        tail, tail_calls = _extractor.flush()
-        visible_text = (visible or "") + (tail or "")
-        all_tool_calls = tool_calls + tail_calls
+        visible_text, all_tool_calls = visible_text_and_client_tool_calls(text)
         resp: dict[str, Any] = {
             "response": visible_text or text,
             "ack": None,
@@ -801,12 +799,8 @@ async def handle_chat_stream(body, request: Request):
             if structured and structured.get("pending_action"):
                 yield _ndjson("pending_action", json.dumps(structured["pending_action"], ensure_ascii=True))
             # Extract embedded CLIENT_TOOL markers
-            from jane_web.jane_proxy import ToolMarkerExtractor
-            _extractor = ToolMarkerExtractor()
-            visible, tool_calls = _extractor.feed(text)
-            tail, tail_calls = _extractor.flush()
-            visible_text = (visible or "") + (tail or "")
-            for tc in (tool_calls or []) + (tail_calls or []):
+            visible_text, tool_calls = visible_text_and_client_tool_calls(text)
+            for tc in tool_calls:
                 yield _ndjson("client_tool_call", json.dumps(tc, ensure_ascii=True))
             yield _ndjson("delta", visible_text or text)
             # Emit the conversation_end signal BEFORE `done` so the client

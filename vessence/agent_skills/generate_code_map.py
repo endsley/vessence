@@ -14,12 +14,29 @@ Usage:
     python agent_skills/generate_code_map.py android   # generate only android
 """
 
-import ast
 import os
-import re
 import sys
 from datetime import datetime, timezone
-from pathlib import Path
+
+from agent_skills.code_map_indexers import (
+    MAX_ENTRIES_PRIORITY,
+    MAX_ENTRIES_SECONDARY,
+    SKIP_DIRS,
+    cap_entries as _cap_entries,
+    count_lines,
+    index_file as _index_file,
+    index_html_file,
+    index_kotlin_file,
+    index_python_file,
+    should_skip as _should_skip,
+)
+from agent_skills.code_map_output import (
+    combined_code_map_index as _combined_code_map_index,
+    generated_header as _generated_header,
+    merge_preserved_header as _merge_preserved_header,
+    rendered_line_count as _rendered_line_count,
+    short_android_path as _short_android_path,
+)
 
 VESSENCE_HOME = os.environ.get("VESSENCE_HOME", os.path.expanduser("~/ambient/vessence"))
 CONFIGS_DIR = os.path.join(VESSENCE_HOME, "configs")
@@ -117,211 +134,22 @@ ANDROID_ROOT = "android"
 
 # ── Shared config ────────────────────────────────────────────────────────────
 
-SKIP_DIRS = {"__pycache__", "node_modules", "omniparser", ".git", "test_code", "venv", "build", ".gradle"}
-SKIP_FILES = {"__init__.py"}
-
 MARKER = "<!-- AUTO-GENERATED BELOW — do not edit below this line -->"
-
-MAX_ENTRIES_PRIORITY = 50
-MAX_ENTRIES_SECONDARY = 20
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Parsers
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def count_lines(filepath: str) -> int:
-    try:
-        with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
-            return sum(1 for _ in f)
-    except Exception:
-        return 0
-
-
-def index_python_file(filepath: str) -> list[str]:
-    """Extract functions, classes, decorators, and constants from a Python file."""
-    entries = []
-    try:
-        with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
-            source = f.read()
-        tree = ast.parse(source, filename=filepath)
-    except (SyntaxError, Exception):
-        return entries
-
-    for node in ast.iter_child_nodes(tree):
-        if isinstance(node, ast.ClassDef):
-            end = getattr(node, "end_lineno", node.lineno)
-            entries.append(f"  class {node.name} → L{node.lineno}-{end}")
-            for item in ast.iter_child_nodes(node):
-                if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                    item_end = getattr(item, "end_lineno", item.lineno)
-                    entries.append(f"    {item.name}() → L{item.lineno}-{item_end}")
-        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            end = getattr(node, "end_lineno", node.lineno)
-            route = ""
-            for dec in node.decorator_list:
-                if isinstance(dec, ast.Call) and isinstance(dec.func, ast.Attribute):
-                    attr = dec.func.attr
-                    if attr in ("get", "post", "put", "delete", "patch"):
-                        if dec.args and isinstance(dec.args[0], ast.Constant):
-                            route = f"  {attr.upper()} {dec.args[0].value} → L{node.lineno}"
-                            break
-            if route:
-                entries.append(route)
-            else:
-                entries.append(f"  {node.name}() → L{node.lineno}-{end}")
-        elif isinstance(node, ast.Assign):
-            for target in node.targets:
-                if isinstance(target, ast.Name) and target.id.isupper() and len(target.id) > 2:
-                    entries.append(f"  {target.id} = ... → L{node.lineno}")
-
-    return entries
-
-
-def index_html_file(filepath: str) -> list[str]:
-    """Extract Alpine.js methods and event handlers from HTML."""
-    entries = []
-    try:
-        with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
-            lines = f.readlines()
-    except Exception:
-        return entries
-
-    for i, line in enumerate(lines, 1):
-        m = re.match(r'\s{8,}(async\s+)?(\w+)\s*\(.*\)\s*\{', line)
-        if m and m.group(2) not in ("if", "for", "while", "switch", "catch", "else", "function", "return"):
-            name = m.group(2)
-            prefix = "async " if m.group(1) else ""
-            entries.append(f"  {prefix}{name}() → L{i}")
-
-        m = re.search(r"event\.type\s*===?\s*['\"](\w+)['\"]", line)
-        if m:
-            entries.append(f"  event.type === '{m.group(1)}' → L{i}")
-
-    seen = set()
-    unique = []
-    for e in entries:
-        if e not in seen:
-            seen.add(e)
-            unique.append(e)
-    return unique
-
-
-def index_kotlin_file(filepath: str) -> list[str]:
-    """Extract classes, objects, functions, and @Composable functions from a Kotlin file."""
-    entries = []
-    try:
-        with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
-            lines = f.readlines()
-    except Exception:
-        return entries
-
-    # Track class/object nesting for indentation
-    current_class = None
-
-    for i, line in enumerate(lines, 1):
-        stripped = line.strip()
-
-        # Skip comments and blank lines
-        if stripped.startswith("//") or stripped.startswith("/*") or stripped.startswith("*") or not stripped:
-            continue
-
-        # Class / object / interface declarations
-        m = re.match(r'^\s*((?:data|sealed|abstract|open|private|internal)\s+)*(class|object|interface)\s+(\w+)', line)
-        if m:
-            kind = m.group(2)
-            name = m.group(3)
-            current_class = name
-            entries.append(f"  {kind} {name} → L{i}")
-            continue
-
-        # @Composable function (always top-level in Compose)
-        if stripped == "@Composable":
-            # Look ahead for the function name
-            if i < len(lines):
-                next_line = lines[i].strip()  # i is 1-indexed, lines[i] is the next line
-                m = re.match(r'(?:(?:private|internal)\s+)?fun\s+(\w+)', next_line)
-                if m:
-                    entries.append(f"  @Composable {m.group(1)}() → L{i + 1}")
-                    # Mark next line as consumed so the fun matcher skips it
-                    lines[i] = "\n"
-            continue
-
-        # Top-level and class-level fun declarations
-        m = re.match(r'^(\s*)((?:override|suspend|private|internal|protected|open)\s+)*fun\s+(\w+)', line)
-        if m:
-            indent = len(m.group(1))
-            name = m.group(3)
-            modifiers = (m.group(2) or "").strip()
-            prefix = ""
-            if "suspend" in modifiers:
-                prefix = "suspend "
-            if "override" in modifiers:
-                prefix = "override "
-            if indent >= 4:
-                entries.append(f"    {prefix}{name}() → L{i}")
-            else:
-                entries.append(f"  {prefix}{name}() → L{i}")
-            continue
-
-        # Companion object constants (val NAME = ...)
-        m = re.match(r'^\s+(?:const\s+)?val\s+([A-Z_]{3,})\s*[=:]', line)
-        if m:
-            entries.append(f"    {m.group(1)} → L{i}")
-
-    return entries
-
-
-def _index_file(fpath: str, functions_only: bool = False) -> list[str]:
-    """Index a single file."""
-    if fpath.endswith(".py"):
-        entries = index_python_file(fpath)
-        if functions_only:
-            entries = [e for e in entries if "()" in e or e.strip().startswith(("GET ", "POST ", "PUT ", "DELETE ", "PATCH "))]
-        return entries
-    elif fpath.endswith(".html"):
-        return index_html_file(fpath)
-    elif fpath.endswith(".kt"):
-        entries = index_kotlin_file(fpath)
-        if functions_only:
-            entries = [e for e in entries if "()" in e or "class " in e or "object " in e or "interface " in e]
-        return entries
-    return []
-
-
-def _should_skip(fpath: str, fname: str) -> bool:
-    if fname in SKIP_FILES:
-        return True
-    if any(skip in fpath for skip in SKIP_DIRS):
-        return True
-    return False
-
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Map generators
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _cap_entries(entries: list[str]) -> list[str]:
-    """Apply priority-file entry cap."""
-    if len(entries) <= MAX_ENTRIES_PRIORITY:
-        return entries
-    routes = [e for e in entries if any(m in e for m in ("GET ", "POST ", "PUT ", "DELETE ", "PATCH "))]
-    funcs = [e for e in entries if "()" in e]
-    classes = [e for e in entries if "class " in e]
-    consts = [e for e in entries if "= ..." in e]
-    result = classes + routes + funcs
-    remaining = MAX_ENTRIES_PRIORITY - len(result)
-    if remaining > 0:
-        result.extend(consts[:remaining])
-    return result[:MAX_ENTRIES_PRIORITY]
-
-
 def generate_core_map() -> str:
     """Generate CODE_MAP_CORE.md — Python backend files."""
-    sections = []
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    sections.append("# Code Map — Core (Python Backend)")
-    sections.append(f"_Auto-generated on {now} by `generate_code_map.py`_\n")
+    sections = _generated_header("# Code Map — Core (Python Backend)", now)
 
     indexed_paths = set()
     sections.append("## Priority Files\n")
@@ -373,10 +201,8 @@ def generate_core_map() -> str:
 
 def generate_web_map() -> str:
     """Generate CODE_MAP_WEB.md — HTML/JS frontend files."""
-    sections = []
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    sections.append("# Code Map — Web Frontend")
-    sections.append(f"_Auto-generated on {now} by `generate_code_map.py`_\n")
+    sections = _generated_header("# Code Map — Web Frontend", now)
 
     indexed_paths = set()
 
@@ -421,10 +247,8 @@ def generate_web_map() -> str:
 
 def generate_android_map() -> str:
     """Generate CODE_MAP_ANDROID.md — Kotlin Android files."""
-    sections = []
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    sections.append("# Code Map — Android (Kotlin)")
-    sections.append(f"_Auto-generated on {now} by `generate_code_map.py`_\n")
+    sections = _generated_header("# Code Map — Android (Kotlin)", now)
 
     android_dir = os.path.join(VESSENCE_HOME, ANDROID_ROOT)
     if not os.path.isdir(android_dir):
@@ -446,8 +270,7 @@ def generate_android_map() -> str:
         if line_count < 20:
             continue
         rel_path = os.path.relpath(fpath, VESSENCE_HOME)
-        # Shorten android path for readability
-        short_path = rel_path.replace("android/app/src/main/java/com/vessences/android/", "android:.../")
+        short_path = _short_android_path(rel_path)
         entries = _index_file(fpath, functions_only=False)
         if not entries:
             continue
@@ -467,17 +290,16 @@ def generate_android_map() -> str:
 def _write_map(output_path: str, content: str):
     """Write a code map, preserving any hand-written header above the marker."""
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    header = ""
+    existing = ""
     if os.path.isfile(output_path):
         with open(output_path, "r", encoding="utf-8") as f:
             existing = f.read()
-        if MARKER in existing:
-            header = existing[:existing.index(MARKER) + len(MARKER)] + "\n\n"
+    output = _merge_preserved_header(existing, content, MARKER)
 
     with open(output_path, "w", encoding="utf-8") as f:
-        f.write(header + content)
+        f.write(output)
 
-    line_count = (header + content).count("\n") + 1
+    line_count = _rendered_line_count(output)
     print(f"  {output_path} ({line_count} lines)")
 
 
@@ -497,15 +319,7 @@ def main():
 
     # Also write combined CODE_MAP.md for backwards compat (just a pointer)
     combined_path = os.path.join(CONFIGS_DIR, "CODE_MAP.md")
-    _write_map(combined_path,
-        "# Code Map Index\n\n"
-        "Split into three targeted maps:\n"
-        "- `CODE_MAP_CORE.md` — Python backend (jane/, agent_skills/, startup_code/)\n"
-        "- `CODE_MAP_WEB.md` — Web frontend (vault_web/templates/)\n"
-        "- `CODE_MAP_ANDROID.md` — Android app (Kotlin)\n\n"
-        "Run `python agent_skills/generate_code_map.py` to regenerate all, "
-        "or pass `core`, `web`, or `android` to regenerate one.\n"
-    )
+    _write_map(combined_path, _combined_code_map_index())
 
     print("Done.")
 

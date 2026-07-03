@@ -1,7 +1,6 @@
 import os
 import sys
 import subprocess
-import json
 import base64
 import io
 from PIL import Image
@@ -10,6 +9,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from jane.config import VAULT_DIR, VESSENCE_HOME
+from agent_skills.omniparser_output import (
+    parsed_result_from_output as _parsed_result_from_output,
+)
 
 class OmniParserService:
     _instance = None
@@ -58,31 +60,7 @@ class OmniParserService:
             
             # Find the JSON part of the output (skip warnings/logs)
             output_str = result.stdout
-            # Search for the last { and } block
-            start_idx = output_str.rfind('{"elements":')
-            if start_idx == -1:
-                # Try generic {
-                start_idx = output_str.rfind('{')
-                
-            if start_idx != -1:
-                json_str = output_str[start_idx:]
-                data = json.loads(json_str)
-                
-                if "error" in data:
-                    raise Exception(f"OmniParser API Error: {data['error']}\nTraceback: {data.get('traceback', 'N/A')}")
-                
-                elements = data.get("elements", [])
-                labeled_image = data.get("labeled_image_base64", "")
-                
-                parsed_content_text = '\n'.join([f"Element {i}: {e.get('type')} at {e.get('bbox')} - Content: {e.get('content')}" for i, e in enumerate(elements)])
-                
-                return {
-                    "labeled_image": labeled_image,
-                    "parsed_content": parsed_content_text,
-                    "elements": elements
-                }
-            else:
-                raise Exception(f"Failed to find JSON in OmniParser output: {output_str}")
+            return _parsed_result_from_output(output_str)
                 
         except subprocess.CalledProcessError as e:
             raise Exception(f"OmniParser subprocess failed: {e.stderr}")

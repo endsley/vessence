@@ -5,7 +5,6 @@ import contextlib
 import logging
 import os
 import pty
-import re
 import shutil
 import signal
 import sys
@@ -31,6 +30,16 @@ from jane.config import (
 	TTS_VOICE,
 	VESSENCE_DATA_HOME,
 )
+from jane.session_wrapper_text import (
+	ANSI_ESCAPE_RE,
+	DEFAULT_PROMPT_PATTERNS,
+	NOISE_INDICATORS,
+	extract_prompt_split,
+	is_meaningful_text,
+	is_terminal_noise_input,
+	normalize_output,
+	wrapper_status_line,
+)
 from jane.tts import TTSEngine
 
 if TYPE_CHECKING:
@@ -46,27 +55,6 @@ logger = logging.getLogger("JaneWrapper")
 SKILLS_PATH = os.path.join(REPO_ROOT, 'agent_skills')
 if SKILLS_PATH not in sys.path:
 	sys.path.append(SKILLS_PATH)
-
-ANSI_ESCAPE_RE = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
-DEFAULT_PROMPT_PATTERNS = [
-	re.compile(r'Type your message or @path/to/file'),
-	re.compile(r'Press / for commands'),
-]
-NOISE_INDICATORS = [
-	"Waiting for auth...",
-	"Gemini CLI update available!",
-	"Automatic update failed",
-	"Ready (user)",
-	"Logged in with Google",
-	"screen reader-friendly view",
-	"YOLO mode",
-	"~ no sandbox",
-	"Logging in...",
-	"Logged in.",
-	"Updated successfully",
-	"update manually",
-]
-
 
 class JaneSessionWrapper:
 	def __init__(self, debug: bool = False, session_id: Optional[str] = None):
@@ -185,23 +173,13 @@ class JaneSessionWrapper:
 				buffer_bytes = 0
 
 	def _is_meaningful_text(self, text: str) -> bool:
-		stripped = text.strip()
-		if len(stripped) <= 5:
-			return False
-		for indicator in NOISE_INDICATORS:
-			if indicator in stripped and len(stripped) < len(indicator) + 20:
-				return False
-		return True
+		return is_meaningful_text(text)
 
 	def _extract_prompt_split(self, text: str):
-		for pattern in DEFAULT_PROMPT_PATTERNS:
-			match = pattern.search(text)
-			if match:
-				return text[:match.start()], text[match.end():], match.group(0)
-		return None, None, None
+		return extract_prompt_split(text)
 
 	def _normalize_output(self, text: str) -> str:
-		return ANSI_ESCAPE_RE.sub('', text).replace('\r\n', '\n').replace('\r', '\n').strip()
+		return normalize_output(text)
 
 	def _schedule_commit(self, role: str, content: str):
 		if self.exiting:
@@ -406,7 +384,7 @@ class JaneSessionWrapper:
 			if not text:
 				continue
 
-			if user_input.startswith('\x1b') or len(user_input) > 5000:
+			if is_terminal_noise_input(user_input):
 				if self.debug:
 					logger.debug(f"Ignoring likely terminal noise in input: {user_input[:80]}...")
 				continue
@@ -435,8 +413,11 @@ class JaneSessionWrapper:
 				continue
 
 			if text.lower() == '/status':
-				proc_state = "running" if self.process and self.process.returncode is None else "stopped"
-				print(f"process={proc_state} generation={self.process_generation} ready={self.ready_event.is_set()}")
+				print(wrapper_status_line(
+					process_running=bool(self.process and self.process.returncode is None),
+					generation=self.process_generation,
+					ready=self.ready_event.is_set(),
+				))
 				continue
 
 			if not self.process or self.process.returncode is not None:

@@ -5,13 +5,18 @@ import datetime
 import json
 import logging
 import os
-import re
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from jane.config import LOGS_DIR, VESSENCE_DATA_HOME
+from agent_skills.audit_report_helpers import (
+    audit_announcement_message as _audit_announcement_message,
+    audit_announcement_payload as _audit_announcement_payload,
+    audit_notification_state as _audit_notification_state,
+    extract_notification_brief as _extract_brief,
+)
 
 LOG_FILE = Path(LOGS_DIR) / "audit_result_notify.log"
 AUDIT_LOG_DIR = Path(LOGS_DIR) / "audits"
@@ -59,23 +64,13 @@ def _load_latest_audit() -> dict:
     }
 
 
-def _extract_brief(report: str) -> str:
-    text = re.sub(r"^#.*$", "", report, flags=re.MULTILINE).strip()
-    text = re.sub(r"\n{3,}", "\n\n", text)
-    if len(text) <= 2200:
-        return text
-    return text[:2197].rstrip() + "..."
-
-
 def _write_announcement(message: str, announcement_id: str) -> None:
     ANNOUNCEMENTS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    payload = {
-        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-        "type": "queue_progress",
-        "id": announcement_id,
-        "message": message,
-        "final": True,
-    }
+    payload = _audit_announcement_payload(
+        timestamp=datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        announcement_id=announcement_id,
+        message=message,
+    )
     with ANNOUNCEMENTS_PATH.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
 
@@ -107,18 +102,17 @@ def main() -> None:
 
     local_stamp = generated_dt.astimezone().strftime("%Y-%m-%d %I:%M %p")
     brief = _extract_brief(report)
-    message = (
-        f"**Morning audit summary**\n"
-        f"Latest audit run: {local_stamp}\n\n"
-        f"{brief}"
-    )
+    message = _audit_announcement_message(local_stamp=local_stamp, brief=brief)
     announcement_id = f"audit_result_{today}"
     _write_announcement(message, announcement_id)
-    _save_json(STATE_PATH, {
-        "last_notified_date": today,
-        "last_report_generated_at": generated_at,
-        "announcement_id": announcement_id,
-    })
+    _save_json(
+        STATE_PATH,
+        _audit_notification_state(
+            today=today,
+            generated_at=generated_at,
+            announcement_id=announcement_id,
+        ),
+    )
     logger.info("Posted audit announcement for %s", today)
 
 

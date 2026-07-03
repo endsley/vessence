@@ -21,6 +21,14 @@ import requests
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from agent_skills.ambient_task_research_rules import (
+    build_search_query,
+    extract_unchecked_tasks_from_text as _extract_unchecked_tasks_from_text,
+    is_cache_stale as _is_cache_stale,
+    openai_synthesis_messages as _openai_synthesis_messages,
+    task_cache_key,
+    task_research_discord_summary,
+)
 from agent_skills.web_search_utils import web_search as _web_search
 from jane.config import CONFIGS_DIR, JANE_BRIDGE_ENV, LOGS_DIR, OPENAI_API_URL
 
@@ -80,27 +88,10 @@ def extract_unchecked_tasks() -> list[dict]:
         logger.error(f"Could not read spec: {e}")
         return []
 
-    # Find the Progress Tracker section
-    tracker_start = content.find("## 9. Progress Tracker")
-    if tracker_start == -1:
-        logger.warning("Could not find '## 9. Progress Tracker' in spec.")
+    tasks = _extract_unchecked_tasks_from_text(content)
+    if not tasks:
+        logger.warning("Could not find unchecked tasks in the Progress Tracker.")
         return []
-
-    tracker_content = content[tracker_start:]
-
-    tasks = []
-    current_phase = "Unknown Phase"
-
-    for line in tracker_content.splitlines():
-        # Detect phase headings like "### Phase 1 — Core Chat (MVP)"
-        stripped = line.strip()
-        if stripped.startswith("###"):
-            current_phase = stripped.lstrip("#").strip()
-        # Collect unchecked tasks
-        elif stripped.startswith("- [ ]"):
-            task_text = stripped[6:].strip()
-            if task_text:
-                tasks.append({"phase": current_phase, "task": task_text})
 
     logger.info(f"Found {len(tasks)} unchecked tasks across all phases.")
     return tasks
@@ -122,56 +113,9 @@ def save_cache(cache: dict):
         json.dump(cache, f, indent=2)
 
 
-def task_cache_key(task: str) -> str:
-    """Stable cache key from task text (lowercased, spaces→underscores, truncated)."""
-    return task.lower().replace(" ", "_").replace("/", "_")[:80]
-
-
 def is_stale(cache: dict, key: str) -> bool:
     """Return True if the task hasn't been researched in CACHE_TTL_DAYS days."""
-    if key not in cache:
-        return True
-    try:
-        last = datetime.datetime.fromisoformat(cache[key]["last_researched"])
-        return (datetime.datetime.now() - last).days >= CACHE_TTL_DAYS
-    except Exception:
-        return True
-
-
-# ─── Search Query Generation ─────────────────────────────────────────────────────
-def build_search_query(phase: str, task: str) -> str:
-    """
-    Generate a targeted search query for how others have implemented this task.
-    Adds Flutter / cross-platform context where relevant.
-    """
-    task_lower = task.lower()
-
-    # Context hints based on the task content
-    context = "Flutter cross-platform"
-    if any(k in task_lower for k in ["sqlite", "sqflite", "database", "persistence", "history"]):
-        context = "Flutter SQLite"
-    elif any(k in task_lower for k in ["stream", "sse", "server-sent"]):
-        context = "Flutter SSE streaming ADK"
-    elif any(k in task_lower for k in ["markdown", "code block", "syntax highlight"]):
-        context = "Flutter markdown rendering"
-    elif any(k in task_lower for k in ["tts", "speech", "voice", "audio", "whisper", "vad"]):
-        context = "Python TTS voice assistant"
-    elif any(k in task_lower for k in ["tailscale", "remote", "vpn", "tunnel"]):
-        context = "Tailscale self-hosted remote access"
-    elif any(k in task_lower for k in ["wake word", "porcupine", "standby"]):
-        context = "Picovoice Porcupine wake word Python"
-    elif any(k in task_lower for k in ["android", "apk"]):
-        context = "Flutter Android"
-    elif any(k in task_lower for k in ["linux", "desktop"]):
-        context = "Flutter Linux desktop"
-    elif any(k in task_lower for k in ["notification", "push"]):
-        context = "Flutter push notifications"
-    elif any(k in task_lower for k in ["auth", "invite", "user", "register"]):
-        context = "FastAPI user authentication"
-    elif any(k in task_lower for k in ["theme", "dark", "color"]):
-        context = "Flutter dark theme ChatGPT UI"
-
-    return f"{context} {task} implementation tutorial 2024 2025"
+    return _is_cache_stale(cache, key, ttl_days=CACHE_TTL_DAYS)
 
 
 # ─── Web Search ──────────────────────────────────────────────────────────────────
@@ -190,33 +134,13 @@ def synthesize_with_openai(phase: str, task: str, web_data: str) -> str:
         logger.error("OPENAI_API_KEY not set — cannot synthesize.")
         return ""
 
-    system = (
-        "You are a Senior Software Engineer advising on 'Project Ambient' — "
-        "a cross-platform Flutter app (Linux, Windows, Android, macOS) that provides "
-        "a ChatGPT-like interface to a local Google ADK AI server (Amber, running at localhost:8000). "
-        "Your job: given a specific development task, explain how others have implemented this "
-        "and give a concrete, actionable approach for this project. "
-        "Be specific: include package names, versions, code patterns, and pitfalls to avoid. "
-        "Format in clean Markdown. Keep it under 400 words."
-    )
-
-    web_section = f"\n\nWeb search results:\n{web_data[:6000]}" if web_data else ""
-    user_msg = (
-        f"Phase: {phase}\n"
-        f"Task: {task}\n\n"
-        f"How have others implemented this? What's the best approach for our project?{web_section}"
-    )
-
     try:
         resp = requests.post(
             OPENAI_API_URL,
             headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
             json={
                 "model": MODEL,
-                "messages": [
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user_msg},
-                ],
+                "messages": _openai_synthesis_messages(phase, task, web_data),
                 "max_tokens": 800,
                 "temperature": 0.3,
             },
@@ -309,18 +233,14 @@ def main():
     # 5. Discord summary
     if researched:
         date_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-        lines = [f"🔬 **Ambient Task Research** ({date_str})"]
-        lines.append(f"Researched **{len(researched)}/{len(all_tasks)} tasks** remaining in the spec.\n")
-
-        for item in researched:
-            # Show phase + task + first 2 lines of the note as a teaser
-            note_preview = "\n".join(item["note"].splitlines()[:3])
-            lines.append(f"**[{item['phase']}]** `{item['task']}`")
-            lines.append(f"> {note_preview[:200]}")
-            lines.append("")
-
-        lines.append(f"_Full notes in `{RESEARCH_CACHE}`_")
-        send_discord("\n".join(lines))
+        send_discord(
+            task_research_discord_summary(
+                researched,
+                total_tasks=len(all_tasks),
+                generated_label=date_str,
+                cache_path=RESEARCH_CACHE,
+            )
+        )
     else:
         logger.info("No research completed this run.")
 

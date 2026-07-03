@@ -25,11 +25,31 @@ from __future__ import annotations
 
 import logging
 import os
-import re
 import sys
 from pathlib import Path
 
-import httpx
+from jane_web.jane_v2.ollama_client import post_local_llm_response as _post_local_llm_response
+
+from .extraction_prompt import (
+    EXTRACT_PROMPT as _EXTRACT_PROMPT,
+    build_extraction_prompt as _build_extraction_prompt,
+    extraction_request_payload as _extraction_request_payload,
+)
+from .parsing import (
+    WRONG_CLASS_SENTINEL as _WRONG_CLASS_SENTINEL,
+    has_direct_send_confidence as _has_direct_send_confidence,
+    is_coherent as _is_coherent,
+    parse_extraction as _parse_extraction,
+    parse_params_metadata as _parse_params_metadata,
+)
+from .responses import (
+    build_confirmation_response as _build_confirmation_response,
+    build_open_draft_cancel_response as _build_open_draft_cancel_response,
+    build_open_draft_send_response as _build_open_draft_send_response,
+    build_revision_request_response as _build_revision_request_response,
+    build_send_marker as _build_send_marker,
+    build_sent_response as _build_sent_response,
+)
 
 # Ensure sms_helpers is importable
 _SKILLS_DIR = Path(__file__).resolve().parents[4] / "agent_skills"
@@ -40,135 +60,6 @@ if str(_VAULT_WEB_DIR) not in sys.path:
     sys.path.insert(0, str(_VAULT_WEB_DIR))
 
 logger = logging.getLogger(__name__)
-
-from jane_web.jane_v2.models import LOCAL_LLM as MODEL, LOCAL_LLM_NUM_CTX, LOCAL_LLM_TIMEOUT, OLLAMA_URL  # noqa: E402
-
-_EXTRACT_PROMPT = """\
-The classifier thinks the user wants to SEND A TEXT MESSAGE to someone.
-First, confirm: is the user actually asking to send/text/tell someone a message?
-If NOT (e.g., they're discussing architecture, asking a question, or just mentioning \
-a person's name without a send intent), output ONLY: WRONG_CLASS
-
-If YES, extract the recipient and compose the message body AS IT SHOULD APPEAR IN THE TEXT.
-
-CRITICAL: The user is speaking TO YOU about a third person. You must rewrite the \
-body so it reads correctly FROM THE USER TO THE RECIPIENT. Convert perspective:
-- "tell my wife I love her" → RECIPIENT: wife / BODY: I love you
-- "tell my wife she is beautiful" → RECIPIENT: wife / BODY: You are beautiful
-- "let mom know I'm on my way" → RECIPIENT: mom / BODY: I'm on my way
-- "tell kathia I miss her today" → RECIPIENT: kathia / BODY: I miss you today
-- "text my wife I'll be home soon" → RECIPIENT: wife / BODY: I'll be home soon
-- "tell my dad happy birthday" → RECIPIENT: dad / BODY: Happy birthday!
-- "text romeo hey sorry for using you as a test subject" → RECIPIENT: romeo / BODY: Hey, sorry for using you as a test subject
-- "text john hey what's up" → RECIPIENT: john / BODY: Hey, what's up?
-- "text sarah thanks for dinner last night" → RECIPIENT: sarah / BODY: Thanks for dinner last night
-
-IMPORTANT: In "text [name] [message]", everything after the name IS the message body. \
-Do NOT output (none) if there are words after the recipient name.
-
-Output EXACTLY these 3 lines — nothing else:
-
-RECIPIENT: <who to text — keep relational names like "wife", "mom", "dad" as-is>
-BODY: <the actual text message to send, written from user to recipient>
-COHERENT: yes or no (no = garbled, cut off mid-sentence, or contains background noise like Alexa/Siri commands)
-
-If the user didn't include a message body (e.g., "text my wife"), output:
-BODY: (none)
-COHERENT: yes
-
-Use the recent conversation below to resolve pronouns ("him", "her", "that") \
-and to pick up an unspecified recipient from prior context.
-
-{context_block}User: {prompt}"""
-
-# ── Rule-based coherence check (faster and more reliable than LLM) ─────────
-
-# Words that signal a sentence was cut off mid-thought
-_DANGLING_ENDINGS = {
-    "the", "a", "an", "was", "is", "are", "were", "at", "on", "in",
-    "about", "with", "for", "to", "of", "from", "and", "but", "or",
-    "that", "which", "who", "when", "where", "how", "if", "so",
-    "because", "like", "just", "really", "yeah", "no",
-}
-
-# Filler / hesitation words
-_FILLER_WORDS = {"uh", "um", "uhh", "umm", "hmm", "hm"}
-
-# Background device commands
-_DEVICE_COMMANDS = ["alexa", "hey siri", "ok google", "hey google"]
-
-
-def _is_coherent(body: str) -> bool:
-    """Rule-based coherence check for voice-to-text SMS bodies."""
-    if not body or body == "(none)":
-        return True  # no body = user just said "text my wife" — coherent intent
-
-    words = body.lower().split()
-    if not words:
-        return False
-
-    # Check: ends with a dangling function word (cut off mid-sentence)
-    if words[-1].rstrip(".,!?") in _DANGLING_ENDINGS:
-        return False
-
-    # Check: contains filler/hesitation words
-    if _FILLER_WORDS & set(w.rstrip(".,!?") for w in words):
-        return False
-
-    # Check: contains background device commands. Use word-boundary matching
-    # so contact names like "Alexa" / "Alexander" / "Alexandra" don't trip this.
-    body_lower = body.lower()
-    for cmd in _DEVICE_COMMANDS:
-        if re.search(r"\b" + re.escape(cmd) + r"\b", body_lower):
-            return False
-
-    return True
-
-
-_WRONG_CLASS_SENTINEL = {"wrong_class": True}
-
-
-def _has_direct_send_confidence(confidence: object) -> bool:
-    return (
-        not isinstance(confidence, bool)
-        and isinstance(confidence, (int, float))
-        and confidence >= 0.80
-    )
-
-
-def _parse_extraction(raw: str) -> dict | None:
-    """Parse the LLM's structured output into a dict.
-    Returns _WRONG_CLASS_SENTINEL if LLM says WRONG_CLASS."""
-    if "WRONG_CLASS" in raw.upper():
-        return _WRONG_CLASS_SENTINEL
-    recipient = body = llm_coherent = None
-    for line in raw.strip().splitlines():
-        line = line.strip()
-        m = re.match(r"RECIPIENT:\s*(.+)", line, re.IGNORECASE)
-        if m:
-            recipient = m.group(1).strip()
-            continue
-        m = re.match(r"BODY:\s*(.+)", line, re.IGNORECASE)
-        if m:
-            body = m.group(1).strip()
-            continue
-        m = re.match(r"COHERENT:\s*(.+)", line, re.IGNORECASE)
-        if m:
-            llm_coherent = m.group(1).strip().lower()
-            continue
-
-    if not recipient:
-        return None
-    body = body or "(none)"
-    # LLM coherence with rule-based backup
-    llm_says_coherent = llm_coherent != "no"
-    rules_say_coherent = _is_coherent(body)
-    return {
-        "recipient": recipient,
-        "body": body,
-        "coherent": llm_says_coherent and rules_say_coherent,
-    }
-
 
 def _check_open_draft(prompt: str) -> dict | None:
     """If there's an open SMS draft in the FIFO, handle confirm/cancel/edit
@@ -199,45 +90,18 @@ def _check_open_draft(prompt: str) -> dict | None:
     if not pending or pending.get("type") != "SEND_MESSAGE_DRAFT_OPEN":
         return None
 
-    import json as _json
     data = pending.get("data") or {}
     draft_id = data.get("draft_id") or ""
     query = data.get("query") or data.get("display_name") or data.get("recipient") or "them"
     body = data.get("body") or ""
 
     if _is_confirm(prompt):
-        tool_args = _json.dumps({"draft_id": draft_id})
-        marker = f"[[CLIENT_TOOL:contacts.sms_send:{tool_args}]]"
         logger.info("send_message handler: draft confirm (stage2 safety net) draft_id=%s", draft_id[:12])
-        return {
-            "text": f"Sending to {query}. {marker}",
-            "structured": {
-                "intent": "send message",
-                "entities": {"recipient": query, "message_body": body, "draft_id": draft_id},
-                "pending_action": {
-                    "type": "SEND_MESSAGE_DRAFT_OPEN",
-                    "status": "resolved",
-                    "resolution": "sent",
-                },
-                "safety": {"side_effectful": True, "requires_confirmation": False},
-            },
-        }
+        return _build_open_draft_send_response(draft_id, query, body)
 
     if _is_cancel(prompt) and _normalize(prompt) in _STAGE3_CANCEL_STRONG:
-        tool_args = _json.dumps({"draft_id": draft_id})
-        marker = f"[[CLIENT_TOOL:contacts.sms_cancel:{tool_args}]]"
         logger.info("send_message handler: draft cancel (stage2 safety net) draft_id=%s", draft_id[:12])
-        return {
-            "text": f"Okay, cancelled the message to {query}. {marker}",
-            "structured": {
-                "intent": "send message",
-                "pending_action": {
-                    "type": "SEND_MESSAGE_DRAFT_OPEN",
-                    "status": "resolved",
-                    "resolution": "cancelled",
-                },
-            },
-        }
+        return _build_open_draft_cancel_response(draft_id, query)
 
     if _is_edit_intent(prompt):
         logger.info("send_message handler: draft edit detected (stage2 safety net) — escalating to Stage 3")
@@ -248,45 +112,27 @@ def _check_open_draft(prompt: str) -> dict | None:
 
 async def _extract_via_llm(prompt: str, context: str) -> dict | None:
     """Legacy fallback: ask qwen for {recipient, body, coherent}."""
-    context_block = ""
-    if context and context.strip():
-        context_block = f"Recent conversation:\n{context.strip()}\n\n"
-    extract_prompt = _EXTRACT_PROMPT.format(prompt=prompt.strip(), context_block=context_block)
-    body = {
-        "model": MODEL,
-        "prompt": extract_prompt,
-        "stream": False,
-        "think": False,
-        "options": {"temperature": 0.0, "num_predict": 100, "num_ctx": LOCAL_LLM_NUM_CTX},
-        "keep_alive": -1,
-    }
+    def payload_builder(prompt_text: str, *, model: str, num_ctx: int, keep_alive: str | int) -> dict:
+        return _extraction_request_payload(
+            model=model,
+            prompt=prompt_text,
+            context=context,
+            num_ctx=num_ctx,
+            keep_alive=keep_alive,
+        )
+
     try:
-        async with httpx.AsyncClient(timeout=LOCAL_LLM_TIMEOUT) as client:
-            r = await client.post(OLLAMA_URL, json=body)
-            r.raise_for_status()
-            try:
-                from jane_web.jane_v2.models import record_ollama_activity
-                record_ollama_activity()
-            except Exception:
-                pass
-            raw = (r.json().get("response") or "").strip()
+        raw = await _post_local_llm_response(prompt, payload_builder)
     except Exception as e:
         logger.warning("send_message handler: LLM extract failed: %s", e)
         return None
     return _parse_extraction(raw)
 
 
-def _build_send_marker(phone: str, body: str) -> str:
-    import json as _json
-    return f"[[CLIENT_TOOL:contacts.sms_send_direct:{_json.dumps({'phone_number': phone, 'body': body})}]]"
-
-
 async def _handle_resume(prompt: str, pending: dict) -> dict | None:
     """Resume a STAGE2_FOLLOWUP for send_message (confirm-or-revise loop)."""
     from agent_skills import end_phrase, confirmation
-    from agent_skills.private_handler_utils import (
-        end_conversation, pending_continuation,
-    )
+    from agent_skills.private_handler_utils import end_conversation
 
     data = pending.get("data") if isinstance(pending.get("data"), dict) else pending
     awaiting = (data or {}).get("awaiting") or pending.get("awaiting") or ""
@@ -306,35 +152,10 @@ async def _handle_resume(prompt: str, pending: dict) -> dict | None:
             if not phone or not body:
                 logger.warning("send_message handler: resume yes but draft incomplete → abandon")
                 return {"abandon_pending": True, "force_stage3": True}
-            marker = _build_send_marker(phone, body)
             logger.info("send_message handler: confirmed → send to %s", display)
-            return {
-                "text": f"Done. {marker}",
-                "conversation_end": True,
-                "structured": {
-                    "intent": "send message",
-                    "entities": {
-                        "recipient": display,
-                        "phone_number": phone,
-                        "message_body": body,
-                    },
-                    "safety": {"side_effectful": True, "requires_confirmation": False},
-                },
-            }
+            return _build_sent_response(phone, display, body, prefix="Done.")
         if confirmation.is_no(prompt):
-            ask = "Please give me the updated message."
-            return {
-                "text": ask,
-                "structured": {
-                    "intent": "send message",
-                    "pending_action": pending_continuation(
-                        handler_class="send message",
-                        awaiting="revised_body",
-                        question=ask,
-                        data={"draft": {"phone": phone, "display": display}},
-                    ),
-                },
-            }
+            return _build_revision_request_response(phone, display)
         if end_phrase.is_end(prompt):
             logger.info("send_message handler: resume — end phrase, cancelling draft to %s", display)
             return end_conversation("Ok.", structured={"intent": "send message"})
@@ -350,19 +171,7 @@ async def _handle_resume(prompt: str, pending: dict) -> dict | None:
         new_body = (prompt or "").strip()
         if not new_body:
             return {"abandon_pending": True, "force_stage3": True}
-        ask = f"Message to {display}: {new_body}. Should I send it?"
-        return {
-            "text": ask,
-            "structured": {
-                "intent": "send message",
-                "pending_action": pending_continuation(
-                    handler_class="send message",
-                    awaiting="send_confirmation",
-                    question=ask,
-                    data={"draft": {"phone": phone, "display": display, "body": new_body}},
-                ),
-            },
-        }
+        return _build_confirmation_response(phone, display, new_body)
 
     logger.warning("send_message handler: unknown awaiting %r → abandon", awaiting)
     return {"abandon_pending": True, "force_stage3": True}
@@ -397,23 +206,13 @@ async def handle(prompt: str, context: str = "", pending: dict | None = None,
     # Step 1: Build metadata from params, or fall back to LLM extraction.
     metadata: dict | None = None
     if params:
-        recipient = (params.get("recipient") or "").strip()
-        body_text = (params.get("body") or "").strip()
-        intent_kind = (params.get("intent_kind") or "").strip().lower()
-        # `ask` intent always wants a draft+confirm round-trip — escalate so
-        # Opus can phrase the question and read it back.
-        if intent_kind == "ask":
+        param_status, metadata = _parse_params_metadata(params)
+        if param_status == "ask":
             logger.info("send_message handler: intent_kind=ask — escalating to Opus draft path")
             return None
-        if not recipient:
+        if param_status == "missing_recipient":
             logger.info("send_message handler: params has no recipient — escalating")
             return None
-        metadata = {
-            "recipient": recipient,
-            "body": body_text or "(none)",
-            "coherent": _is_coherent(body_text or "(none)"),
-            "confidence": params.get("confidence"),
-        }
     else:
         metadata = await _extract_via_llm(prompt, context)
         if metadata is _WRONG_CLASS_SENTINEL:
@@ -486,25 +285,8 @@ async def handle(prompt: str, context: str = "", pending: dict | None = None,
     # Step 3: Coherence check. If qwen flagged the body as garbled / cut off,
     # don't blast it. Build a draft and ask the user to confirm or revise.
     if not metadata["coherent"]:
-        from agent_skills.private_handler_utils import pending_continuation
-        ask = f"Message to {display}: {metadata['body']}. Should I send it?"
         logger.info("send_message handler: coherence=no → confirm-or-revise for '%s'", display)
-        return {
-            "text": ask,
-            "structured": {
-                "intent": "send message",
-                "pending_action": pending_continuation(
-                    handler_class="send message",
-                    awaiting="send_confirmation",
-                    question=ask,
-                    data={"draft": {
-                        "phone": phone,
-                        "display": display,
-                        "body": metadata["body"],
-                    }},
-                ),
-            },
-        }
+        return _build_confirmation_response(phone, display, metadata["body"])
 
     if "confidence" in metadata and not _has_direct_send_confidence(metadata["confidence"]):
         logger.info(
@@ -515,18 +297,5 @@ async def handle(prompt: str, context: str = "", pending: dict | None = None,
 
     # Step 5: Fast-path send — embed CLIENT_TOOL marker in text and end the
     # conversation so the voice loop returns to wake-word mode.
-    marker = _build_send_marker(phone, metadata["body"])
     logger.info("send_message handler: fast-path → %s (%s)", display, phone)
-    return {
-        "text": f"Done, message sent. {marker}",
-        "conversation_end": True,
-        "structured": {
-            "intent": "send message",
-            "entities": {
-                "recipient": display,
-                "phone_number": phone,
-                "message_body": metadata["body"],
-            },
-            "safety": {"side_effectful": True, "requires_confirmation": False},
-        },
-    }
+    return _build_sent_response(phone, display, metadata["body"])

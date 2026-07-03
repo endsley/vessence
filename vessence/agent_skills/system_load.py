@@ -14,6 +14,14 @@ import datetime
 import logging
 import os
 import subprocess
+from agent_skills.system_load_policy import (
+    defer_reason_for_load as _defer_reason_for_load,
+    format_load_summary as _format_load_summary,
+    format_oneline as _format_oneline,
+    has_ample_resources_for_load as _has_ample_resources_for_load,
+    is_nighttime_hour as _is_nighttime_hour,
+    recommended_parallelism_for_load as _recommended_parallelism_for_load,
+)
 
 try:
     import psutil
@@ -36,11 +44,7 @@ NIGHT_END_HOUR = int(os.environ.get("JANE_NIGHT_END", "6"))       # 6 AM
 def _is_nighttime() -> bool:
     """Return True if current local time is in the nighttime window."""
     hour = datetime.datetime.now().hour
-    if NIGHT_START_HOUR > NIGHT_END_HOUR:
-        # Wraps midnight: e.g., 23-6
-        return hour >= NIGHT_START_HOUR or hour < NIGHT_END_HOUR
-    else:
-        return NIGHT_START_HOUR <= hour < NIGHT_END_HOUR
+    return _is_nighttime_hour(hour, NIGHT_START_HOUR, NIGHT_END_HOUR)
 
 
 def _query_gpu() -> dict:
@@ -132,30 +136,21 @@ def recommended_parallelism() -> int:
     mem_gb = load["memory_available_gb"]
     night = load["is_nighttime"]
 
-    # Hard constraint: not enough memory
+    level = _recommended_parallelism_for_load(
+        load,
+        max_parallel=MAX_PARALLEL,
+        mem_free_min_gb=MEM_FREE_MIN_GB,
+        cpu_threshold_high=CPU_THRESHOLD_HIGH,
+        cpu_threshold_med=CPU_THRESHOLD_MED,
+    )
+
     if mem_gb < MEM_FREE_MIN_GB:
         logger.info(f"Low memory ({mem_gb:.1f} GB free) → parallelism: 1")
-        return 1
-
-    if night:
-        # Nighttime: be more aggressive
-        if cpu > CPU_THRESHOLD_HIGH:
-            level = max(1, MAX_PARALLEL // 2)
-        else:
-            level = MAX_PARALLEL
     else:
-        # Daytime: be conservative
-        if cpu > CPU_THRESHOLD_HIGH:
-            level = 1
-        elif cpu > CPU_THRESHOLD_MED:
-            level = min(2, MAX_PARALLEL)
-        else:
-            level = min(3, MAX_PARALLEL)
-
-    logger.info(
-        f"Load: CPU={cpu:.0f}%, Mem={mem_gb:.1f}GB free, "
-        f"{'night' if night else 'day'} → parallelism: {level}"
-    )
+        logger.info(
+            f"Load: CPU={cpu:.0f}%, Mem={mem_gb:.1f}GB free, "
+            f"{'night' if night else 'day'} → parallelism: {level}"
+        )
     return level
 
 
@@ -165,30 +160,14 @@ def should_defer() -> bool:
     Used by cron jobs to skip runs when the system is stressed.
     """
     load = get_system_load()
-    cpu = load["cpu_percent"]
-    mem_gb = load["memory_available_gb"]
-    gpu = load.get("gpu_percent", 0)
-    gpu_mem_free = load.get("gpu_memory_free_mb", 9999)
-
-    if mem_gb < 1.0:
-        logger.info(f"Deferring: critically low memory ({mem_gb:.1f} GB)")
+    reason = _defer_reason_for_load(
+        load,
+        gpu_threshold_high=GPU_THRESHOLD_HIGH,
+        vram_free_min_mb=VRAM_FREE_MIN_MB,
+    )
+    if reason:
+        logger.info(reason)
         return True
-
-    # Daytime: defer if CPU > 60%
-    # Nighttime: defer if CPU > 80%
-    threshold = 80 if load["is_nighttime"] else 60
-    if cpu > threshold:
-        logger.info(f"Deferring: CPU at {cpu:.0f}% (threshold: {threshold}%)")
-        return True
-
-    if gpu > GPU_THRESHOLD_HIGH:
-        logger.info(f"Deferring: GPU at {gpu:.0f}% (threshold: {GPU_THRESHOLD_HIGH}%)")
-        return True
-
-    if gpu_mem_free < VRAM_FREE_MIN_MB:
-        logger.info(f"Deferring: VRAM free {gpu_mem_free:.0f} MB < {VRAM_FREE_MIN_MB:.0f} MB minimum")
-        return True
-
     return False
 
 
@@ -197,28 +176,7 @@ def has_ample_resources(threshold_pct: float = 60) -> bool:
 
     Default 60% — the system has genuine spare capacity for background work.
     """
-    load = get_system_load()
-    cpu = load["cpu_percent"]
-    mem_pct = load["memory_percent"]
-    gpu = load.get("gpu_percent", 0)
-    gpu_total = load.get("gpu_memory_total_mb", 0)
-    gpu_used = load.get("gpu_memory_used_mb", 0)
-
-    if cpu > threshold_pct:
-        logger.debug(f"CPU {cpu:.0f}% > {threshold_pct}% — not ample")
-        return False
-    if mem_pct > threshold_pct:
-        logger.debug(f"RAM {mem_pct:.0f}% > {threshold_pct}% — not ample")
-        return False
-    if gpu_total > 0:
-        vram_pct = (gpu_used / gpu_total) * 100
-        if gpu > threshold_pct:
-            logger.debug(f"GPU {gpu:.0f}% > {threshold_pct}% — not ample")
-            return False
-        if vram_pct > threshold_pct:
-            logger.debug(f"VRAM {vram_pct:.0f}% > {threshold_pct}% — not ample")
-            return False
-    return True
+    return _has_ample_resources_for_load(get_system_load(), threshold_pct)
 
 
 def wait_until_safe(max_wait_minutes: int = 15, check_interval_seconds: int = 240) -> bool:
@@ -255,22 +213,7 @@ def load_summary() -> str:
     """Human-readable one-line load summary."""
     load = get_system_load()
     parallelism = recommended_parallelism()
-    period = "night" if load["is_nighttime"] else "day"
-    gpu_part = ""
-    if load.get("gpu_percent", 0) > 0 or load.get("gpu_memory_total_mb", 0) > 0:
-        gpu_part = (
-            f"GPU: {load['gpu_percent']:.0f}% | "
-            f"VRAM: {load.get('gpu_memory_free_mb', 0):.0f}MB free / "
-            f"{load.get('gpu_memory_total_mb', 0):.0f}MB | "
-        )
-    return (
-        f"CPU: {load['cpu_percent']:.0f}% | "
-        f"Mem: {load['memory_available_gb']:.1f}GB free | "
-        f"{gpu_part}"
-        f"Load: {load['load_avg_1min']} | "
-        f"Period: {period} | "
-        f"Recommended parallelism: {parallelism}"
-    )
+    return _format_load_summary(load, parallelism)
 
 
 _CACHE_FILE = "/tmp/system_load_cache.json"
@@ -309,29 +252,7 @@ def oneline() -> str:
     load = get_system_load()
     parallelism = recommended_parallelism()
     defer = should_defer()
-    period = "night" if load["is_nighttime"] else "day"
-    cpu = load["cpu_percent"]
-    mem = load["memory_available_gb"]
-
-    gpu = load.get("gpu_percent", 0)
-    vram_free = load.get("gpu_memory_free_mb", 0)
-    gpu_part = ""
-    if gpu > 0 or load.get("gpu_memory_total_mb", 0) > 0:
-        gpu_part = f"GPU: {gpu:.0f}% | VRAM free: {vram_free:.0f}MB | "
-
-    if defer:
-        result = (
-            f"[LOAD WARNING] CPU: {cpu:.0f}% | Mem: {mem:.1f}GB free | "
-            f"{gpu_part}"
-            f"Parallel: {parallelism} | Defer: YES | Period: {period} "
-            f"— reduce concurrency, system is stressed"
-        )
-    else:
-        result = (
-            f"[LOAD OK] CPU: {cpu:.0f}% | Mem: {mem:.1f}GB free | "
-            f"{gpu_part}"
-            f"Parallel: {parallelism} | Defer: No | Period: {period}"
-        )
+    result = _format_oneline(load, parallelism, defer)
     _save_cache(result)
     return result
 

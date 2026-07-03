@@ -11,7 +11,6 @@ from __future__ import annotations
 import contextlib
 import datetime as dt
 import fcntl
-import hashlib
 import json
 import logging
 import os
@@ -20,6 +19,25 @@ import subprocess
 import traceback
 from pathlib import Path
 from typing import Any
+
+from agent_skills.self_healing_helpers import (
+    SENSITIVE_HEADER_NAMES,
+    auto_repair_launch_decision as _auto_repair_launch_decision,
+    build_self_heal_job_markdown as _build_self_heal_job_markdown,
+    env_flag_enabled as _env_flag_enabled,
+    fingerprint as _fingerprint,
+    first_stack_frame as _first_stack_frame,
+    incident_id as _incident_id,
+    incident_json_path as _incident_json_path,
+    incident_title_text as _incident_title_text,
+    jsonable as _jsonable,
+    incident_dedupe_result as _incident_dedupe_result,
+    new_incident_fingerprint_record as _new_incident_fingerprint_record,
+    redacted_request_headers as _redacted_request_headers,
+    self_heal_job_path as _self_heal_job_path,
+    should_auto_repair as _should_auto_repair_with_env,
+    slugify as _slugify,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -37,15 +55,6 @@ JOB_QUEUE_DIR = VESSENCE_HOME / "configs" / "job_queue"
 DEFAULT_RATE_LIMIT_SEC = int(os.environ.get("JANE_SELF_HEAL_RATE_LIMIT_SEC", "900"))
 DEFAULT_REPAIR_COOLDOWN_SEC = int(os.environ.get("JANE_SELF_HEAL_REPAIR_COOLDOWN_SEC", "1800"))
 DEFAULT_MAX_AUTO_REPAIRS_PER_DAY = int(os.environ.get("JANE_SELF_HEAL_MAX_AUTO_REPAIRS_PER_DAY", "3"))
-
-SENSITIVE_HEADER_NAMES = {
-    "authorization",
-    "cookie",
-    "x-csrf-token",
-    "x-jane-self-heal-token",
-    "x-api-key",
-}
-
 
 def capture_exception(
     *,
@@ -156,13 +165,7 @@ def request_info_from_request(request: Any | None) -> dict[str, Any]:
     if request is None:
         return {}
     try:
-        headers = {}
-        for key, value in getattr(request, "headers", {}).items():
-            lk = key.lower()
-            if lk in SENSITIVE_HEADER_NAMES:
-                headers[key] = "[redacted]"
-            elif lk.startswith("x-") or lk in {"host", "referer", "user-agent", "content-type"}:
-                headers[key] = str(value)[:500]
+        headers = _redacted_request_headers(getattr(request, "headers", {}))
         url = getattr(request, "url", None)
         client = getattr(request, "client", None)
         return {
@@ -186,25 +189,19 @@ def _record_incident(incident: dict[str, Any], *, auto_repair: bool | None) -> d
         fingerprints = state.setdefault("fingerprints", {})
         record = fingerprints.get(incident["fingerprint"], {})
         now_ts = dt.datetime.now(dt.timezone.utc).timestamp()
-        last_seen = float(record.get("last_seen_ts") or 0)
-        count = int(record.get("count") or 0) + 1
-        if last_seen and now_ts - last_seen < DEFAULT_RATE_LIMIT_SEC:
+        dedupe = _incident_dedupe_result(
+            record,
+            incident,
+            now_ts=now_ts,
+            rate_limit_sec=DEFAULT_RATE_LIMIT_SEC,
+        )
+        if dedupe["deduped"]:
             deduped = True
-            record.update({
-                "last_seen_at": incident["created_at"],
-                "last_seen_ts": now_ts,
-                "count": count,
-            })
-            fingerprints[incident["fingerprint"]] = record
-            incident.update({
-                "deduped": True,
-                "occurrence_count": count,
-                "incident_path": record.get("incident_path"),
-                "job_path": record.get("job_path"),
-            })
+            fingerprints[incident["fingerprint"]] = dedupe["record"]
+            incident.update(dedupe["incident_updates"])
         else:
-            incident["occurrence_count"] = count
-            incident_path = INCIDENT_DIR / f"{incident['created_at'].replace(':', '').replace('-', '')}_{incident['id']}.json"
+            incident["occurrence_count"] = dedupe["count"]
+            incident_path = _incident_json_path(INCIDENT_DIR, incident)
             job_path = _create_job_for_incident(incident, incident_path)
             incident.update({
                 "deduped": False,
@@ -212,17 +209,13 @@ def _record_incident(incident: dict[str, Any], *, auto_repair: bool | None) -> d
                 "job_path": str(job_path),
             })
             incident_path.write_text(json.dumps(incident, indent=2, sort_keys=True), encoding="utf-8")
-            record = {
-                "first_seen_at": record.get("first_seen_at") or incident["created_at"],
-                "last_seen_at": incident["created_at"],
-                "last_seen_ts": now_ts,
-                "count": count,
-                "incident_path": str(incident_path),
-                "job_path": str(job_path),
-                "source": incident["source"],
-                "category": incident["category"],
-            }
-            fingerprints[incident["fingerprint"]] = record
+            fingerprints[incident["fingerprint"]] = _new_incident_fingerprint_record(
+                record,
+                incident,
+                now_ts=now_ts,
+                incident_path=incident_path,
+                job_path=job_path,
+            )
 
     _append_jsonl(incident)
     if not deduped and _should_auto_repair(auto_repair):
@@ -232,54 +225,19 @@ def _record_incident(incident: dict[str, Any], *, auto_repair: bool | None) -> d
 
 def _create_job_for_incident(incident: dict[str, Any], incident_path: Path) -> Path:
     num = _next_job_number()
-    source = _slugify(str(incident.get("source", "unknown")), 28)
-    category = _slugify(str(incident.get("category", "incident")), 24)
-    job_path = JOB_QUEUE_DIR / f"job_{num:03d}_self_heal_{source}_{category}.md"
-    title = f"Self-heal {incident.get('source', 'unknown')}: {incident_title(incident)}"
-    project_root = incident.get("project_root") or str(VESSENCE_HOME)
-    body = f"""# Job: {title}
-Status: pending
-Priority: high
-Created: {dt.date.today().isoformat()}
-Auto-generated: true
-Source: jane_self_healing
-Incident: {incident_path}
-
-## Objective
-Jane should inspect the incident evidence, diagnose the root cause, and apply a
-minimal, verified fix if the evidence supports one.
-
-## Context
-- Source: `{incident.get("source", "")}`
-- Category: `{incident.get("category", "")}`
-- Project root: `{project_root}`
-- Fingerprint: `{incident.get("fingerprint", "")}`
-- Request path: `{incident.get("request", {}).get("path", "")}`
-
-## Steps
-1. Read the incident JSON at `{incident_path}` and the relevant service logs.
-2. Inspect source code before explaining the cause. Do not speculate from the stack trace alone.
-3. Reproduce with a focused test or command when feasible.
-4. If the root cause is clear, patch the smallest relevant surface.
-5. Do not revert unrelated dirty work. Preserve user changes.
-6. Run focused verification. Broaden tests only if the fix touches shared behavior.
-7. Record the outcome in the incident report and work log.
-
-## Verification
-- The failing route/action no longer throws the captured error.
-- A focused test, syntax check, or local smoke test covers the fixed path.
-- If no safe fix is possible, leave a clear report explaining the blocker and evidence checked.
-"""
+    job_path = _self_heal_job_path(JOB_QUEUE_DIR, num, incident)
+    body = _build_self_heal_job_markdown(
+        incident,
+        incident_path,
+        created_date=dt.date.today(),
+        default_project_root=VESSENCE_HOME,
+    )
     job_path.write_text(body, encoding="utf-8")
     return job_path
 
 
 def incident_title(incident: dict[str, Any]) -> str:
-    if incident.get("category") == "exception":
-        exc = incident.get("exception", {})
-        return f"{exc.get('type', 'Exception')} at {incident.get('request', {}).get('path', '') or exc.get('top_frame', '')}"
-    payload = incident.get("payload", {})
-    return str(payload.get("exception_class") or incident.get("message") or incident.get("category"))[:120]
+    return _incident_title_text(incident)
 
 
 def _maybe_launch_auto_repair(incident_path: Path) -> None:
@@ -287,23 +245,21 @@ def _maybe_launch_auto_repair(incident_path: Path) -> None:
         return
     with _locked_state() as state:
         now = dt.datetime.now(dt.timezone.utc)
-        today = now.date().isoformat()
-        day = state.setdefault("auto_repair_day", today)
-        if day != today:
-            state["auto_repair_day"] = today
-            state["auto_repair_count"] = 0
-        count = int(state.get("auto_repair_count") or 0)
-        if count >= DEFAULT_MAX_AUTO_REPAIRS_PER_DAY:
-            logger.warning("self-healing auto repair daily cap reached (%s)", count)
+        decision = _auto_repair_launch_decision(
+            state,
+            now=now,
+            max_per_day=DEFAULT_MAX_AUTO_REPAIRS_PER_DAY,
+            cooldown_sec=DEFAULT_REPAIR_COOLDOWN_SEC,
+        )
+        if decision == "daily_cap":
+            logger.warning(
+                "self-healing auto repair daily cap reached (%s)",
+                int(state.get("auto_repair_count") or 0),
+            )
             return
-        last = float(state.get("last_auto_repair_ts") or 0)
-        now_ts = now.timestamp()
-        if last and now_ts - last < DEFAULT_REPAIR_COOLDOWN_SEC:
+        if decision == "cooldown":
             logger.info("self-healing auto repair cooldown active")
             return
-        state["last_auto_repair_ts"] = now_ts
-        state["last_auto_repair_at"] = now.isoformat()
-        state["auto_repair_count"] = count + 1
 
     log_path = LOG_DIR / "self_healing_repair.log"
     env = {
@@ -324,13 +280,11 @@ def _maybe_launch_auto_repair(incident_path: Path) -> None:
 
 
 def _should_auto_repair(auto_repair: bool | None) -> bool:
-    if auto_repair is not None:
-        return auto_repair
-    return os.environ.get("JANE_SELF_HEAL_AUTO_REPAIR", "1").strip().lower() not in {"0", "false", "no", "off"}
+    return _should_auto_repair_with_env(auto_repair, os.environ)
 
 
 def _enabled() -> bool:
-    return os.environ.get("JANE_SELF_HEALING", "1").strip().lower() not in {"0", "false", "no", "off"}
+    return _env_flag_enabled(os.environ, "JANE_SELF_HEALING", "1")
 
 
 @contextlib.contextmanager
@@ -386,38 +340,8 @@ def _top_frame(exc: BaseException) -> str:
     return f"{frame.f_code.co_filename}:{last.tb_lineno}:{frame.f_code.co_name}"
 
 
-def _first_stack_frame(stack: str) -> str:
-    for line in stack.splitlines():
-        clean = line.strip()
-        if clean.startswith("at ") or clean.startswith("File "):
-            return clean[:240]
-    return ""
-
-
-def _fingerprint(*parts: str) -> str:
-    joined = "\n".join(str(part or "") for part in parts)
-    return hashlib.sha256(joined.encode("utf-8", errors="replace")).hexdigest()[:24]
-
-
-def _incident_id(source: str, fingerprint: str) -> str:
-    return f"{_slugify(source, 32)}_{fingerprint}"
-
-
-def _slugify(value: str, max_len: int = 60) -> str:
-    slug = re.sub(r"[^a-zA-Z0-9]+", "_", value.lower()).strip("_")
-    return (slug[:max_len] or "incident").strip("_") or "incident"
-
-
 def _now_iso() -> str:
     return dt.datetime.now(dt.timezone.utc).isoformat()
-
-
-def _jsonable(value: Any) -> Any:
-    try:
-        json.dumps(value)
-        return value
-    except TypeError:
-        return json.loads(json.dumps(value, default=str))
 
 
 if __name__ == "__main__":

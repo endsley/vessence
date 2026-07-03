@@ -10,6 +10,13 @@ import requests
 import datetime
 import subprocess
 
+from agent_skills.screen_dimmer_rules import (
+    brightness_plan as _brightness_plan,
+    connected_outputs_from_xrandr as _connected_outputs_from_xrandr,
+    sunset_time_from_api_response as _sunset_time_from_api_response,
+    target_outputs_for_brightness as _target_outputs_for_brightness,
+)
+
 # Medford, MA 02155 — fixed coordinates, no geocoding needed
 LAT = 42.4184
 LON = -71.1062
@@ -27,10 +34,9 @@ def get_sunset_time(lat, lon):
         )
         response.raise_for_status()
         data = response.json()
-        if data['status'] == 'OK':
-            sunset_utc_str = data['results']['sunset']
-            sunset_utc = datetime.datetime.fromisoformat(sunset_utc_str)
-            return sunset_utc.astimezone().time()
+        sunset = _sunset_time_from_api_response(data)
+        if sunset is not None:
+            return sunset
         print(f"API returned non-OK status: {data['status']}")
         return None
     except Exception as e:
@@ -42,11 +48,7 @@ def get_connected_outputs():
     """Return list of connected xrandr output names."""
     try:
         result = subprocess.run(['xrandr'], capture_output=True, text=True, check=True)
-        return [
-            line.split()[0]
-            for line in result.stdout.splitlines()
-            if ' connected' in line
-        ]
+        return _connected_outputs_from_xrandr(result.stdout)
     except Exception as e:
         print(f"Error querying xrandr outputs: {e}")
         return []
@@ -68,12 +70,13 @@ def set_screen_brightness(output, brightness):
 def apply_brightness(brightness, reason, outputs):
     print(reason)
 
-    if DISPLAY_OUTPUT in outputs:
+    targets = _target_outputs_for_brightness(outputs, DISPLAY_OUTPUT)
+    if targets == [DISPLAY_OUTPUT]:
         set_screen_brightness(DISPLAY_OUTPUT, brightness)
         return
 
     print(f"'{DISPLAY_OUTPUT}' not found. Connected outputs: {outputs}. Applying brightness to all.")
-    for out in outputs:
+    for out in targets:
         set_screen_brightness(out, brightness)
 
 
@@ -90,12 +93,15 @@ def main():
         print("No connected xrandr outputs found.")
         return
 
-    if current_time >= sunset_time:
-        apply_brightness(DIM_BRIGHTNESS, "After sunset — dimming screen.", outputs)
-        return
-
-    if current_time >= DAY_START_TIME:
-        apply_brightness(DAY_BRIGHTNESS, "After 07:00 AM and before sunset — brightening screen.", outputs)
+    plan = _brightness_plan(
+        current_time=current_time,
+        sunset_time=sunset_time,
+        day_start_time=DAY_START_TIME,
+        dim_brightness=DIM_BRIGHTNESS,
+        day_brightness=DAY_BRIGHTNESS,
+    )
+    if plan is not None:
+        apply_brightness(plan.brightness, plan.reason, outputs)
         return
 
     print("Before 07:00 AM and before sunset — no action taken.")

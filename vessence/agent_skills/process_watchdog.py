@@ -15,6 +15,13 @@ import subprocess
 import time
 import logging
 
+from agent_skills.process_watchdog_policy import (
+    command_is_protected as _command_is_protected,
+    docker_container_is_too_old as _docker_container_is_too_old,
+    parse_docker_ps_tts_line as _parse_docker_ps_tts_line,
+    parse_running_for_minutes as _parse_minutes,
+)
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [watchdog] %(message)s",
@@ -40,35 +47,19 @@ def kill_old_tts_containers():
             return
 
         for line in result.stdout.strip().split("\n"):
-            if not line.strip():
+            parsed = _parse_docker_ps_tts_line(line)
+            if parsed is None:
                 continue
-            parts = line.split()
-            container_id = parts[0]
-            running_for = " ".join(parts[1:-1])  # e.g. "15 minutes"
-            name = parts[-1] if len(parts) > 2 else ""
+            container_id, running_for, name = parsed
 
             # Parse duration — kill if >MAX_CONTAINER_AGE_MINUTES
-            if "hour" in running_for or _parse_minutes(running_for) > MAX_CONTAINER_AGE_MINUTES:
+            if _docker_container_is_too_old(running_for, MAX_CONTAINER_AGE_MINUTES):
                 log.warning(f"Killing old TTS container {container_id} ({name}, running {running_for})")
                 subprocess.run(["docker", "kill", container_id], capture_output=True, timeout=10)
                 subprocess.run(["docker", "rm", "-f", container_id], capture_output=True, timeout=10)
 
     except Exception as e:
         log.error(f"Docker cleanup failed: {e}")
-
-
-def _parse_minutes(duration_str: str) -> int:
-    """Parse Docker's 'RunningFor' string into minutes."""
-    try:
-        if "minute" in duration_str:
-            return int(duration_str.split()[0])
-        if "second" in duration_str:
-            return 0
-        if "hour" in duration_str:
-            return int(duration_str.split()[0]) * 60
-    except (ValueError, IndexError):
-        pass
-    return 0
 
 
 def kill_idle_build_daemons():
@@ -120,9 +111,7 @@ def kill_memory_hogs():
             if mem_pct < MAX_RAM_PERCENT:
                 break  # sorted by mem, so rest are lower
 
-            # Check if protected
-            cmd_lower = command.lower()
-            if any(name in cmd_lower for name in PROTECTED_NAMES):
+            if _command_is_protected(command, PROTECTED_NAMES):
                 continue
 
             log.warning(f"Killing memory hog: PID {pid} ({command[:60]}, {mem_pct}% RAM)")

@@ -22,6 +22,14 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from agent_skills.auto_commit_helpers import (
+    auto_commit_message as _auto_commit_message,
+    auto_commit_phase as _auto_commit_phase,
+    committable_status_lines as _committable_status_lines,
+)
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("auto_commit_wip")
 
@@ -48,8 +56,7 @@ def main() -> int:
 
     # Check if there's anything to commit
     status = _git("status", "--porcelain", check=False)
-    lines = [ln for ln in status.stdout.splitlines()
-             if ln.strip() and not ln[3:].strip().startswith(".git.backup")]
+    lines = _committable_status_lines(status.stdout)
 
     if not lines and not args.push:
         logger.info("Working tree is clean — nothing to commit.")
@@ -63,12 +70,8 @@ def main() -> int:
 
         # Build commit message
         ts = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
-        phase = "post-self-improve" if args.push else "pre-self-improve WIP"
-        msg = (
-            f"auto-commit: {phase} ({ts})\n\n"
-            f"{len(lines)} file(s) changed. Committed automatically by the\n"
-            f"nightly self-improvement orchestrator."
-        )
+        phase = _auto_commit_phase(args.push)
+        msg = _auto_commit_message(phase=phase, timestamp=ts, changed_count=len(lines))
 
         result = _git("commit", "-m", msg, "--no-verify", check=False)
         if result.returncode == 0:

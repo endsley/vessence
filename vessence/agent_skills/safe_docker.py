@@ -26,6 +26,14 @@ import os
 import subprocess
 import threading
 import uuid
+from agent_skills.safe_docker_command import (
+    docker_run_command as _docker_run_command,
+    safe_container_name as _safe_container_name,
+)
+from agent_skills.docker_safety import (
+    allowed_mount_bases as _allowed_mount_bases,
+    is_safe_mount as _is_safe_mount_path,
+)
 
 logger = logging.getLogger("safe_docker")
 
@@ -33,17 +41,12 @@ logger = logging.getLogger("safe_docker")
 _docker_lock = threading.Lock()
 
 # Allowed base paths for volume mounts
-_ALLOWED_MOUNT_BASES = [
-    os.path.realpath(os.environ.get("VESSENCE_HOME", os.path.expanduser("~/ambient/vessence"))),
-    os.path.realpath(os.environ.get("VESSENCE_DATA_HOME", os.path.expanduser("~/ambient/vessence-data"))),
-    os.path.realpath(os.environ.get("VAULT_HOME", os.path.expanduser("~/ambient/vault"))),
-]
+_ALLOWED_MOUNT_BASES = _allowed_mount_bases()
 
 
 def _is_safe_mount(host_path: str) -> bool:
     """Check that a host path is under an allowed base directory."""
-    real = os.path.realpath(host_path)
-    return any(real.startswith(base + os.sep) or real == base for base in _ALLOWED_MOUNT_BASES)
+    return _is_safe_mount_path(host_path, _ALLOWED_MOUNT_BASES)
 
 
 def run_docker(
@@ -61,32 +64,23 @@ def run_docker(
     Returns CompletedProcess on success, None on timeout/failure.
     Only one container runs at a time (global lock).
     """
-    container_name = f"safe_{uuid.uuid4().hex[:8]}"
-
-    cmd = [
-        "docker", "run", "--rm",
-        "--name", container_name,
-        f"--memory={memory}",
-        f"--cpus={cpus}",
-    ]
-
-    if gpu and os.path.exists("/usr/bin/nvidia-smi"):
-        cmd.extend(["--gpus", "all"])
-
-    if env:
-        for k, v in env.items():
-            cmd.extend(["-e", f"{k}={v}"])
+    container_name = _safe_container_name(uuid.uuid4().hex)
 
     if volumes:
         for host_path, container_path in volumes.items():
             if not _is_safe_mount(host_path):
                 logger.error(f"Rejected unsafe volume mount: {host_path}")
                 return None
-            cmd.extend(["-v", f"{host_path}:{container_path}"])
-
-    cmd.append(image)
-    if args:
-        cmd.extend(args)
+    cmd = _docker_run_command(
+        container_name=container_name,
+        image=image,
+        args=args,
+        volumes=volumes,
+        env=env,
+        memory=memory,
+        cpus=cpus,
+        gpu_enabled=gpu and os.path.exists("/usr/bin/nvidia-smi"),
+    )
 
     acquired = _docker_lock.acquire(timeout=timeout)
     if not acquired:

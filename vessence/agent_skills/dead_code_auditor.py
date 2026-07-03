@@ -32,6 +32,19 @@ import time
 from collections import defaultdict
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from agent_skills.dead_code_policy import (
+    auto_delete_eligibility as _auto_delete_eligibility,
+    in_hard_skip as _in_hard_skip,
+    is_pytest_discovery_file,
+)
+from agent_skills.dead_code_dynamic_imports import (
+    dynamic_import_prefixes_from_text as _dynamic_import_prefixes_from_text,
+    path_matches_dynamic_import_prefix as _path_matches_dynamic_import_prefix,
+)
+from agent_skills.dead_code_report import build_dead_code_report_markdown
+
 VESSENCE_HOME = Path(os.environ.get("VESSENCE_HOME", str(Path(__file__).resolve().parents[1])))
 HOME = Path(os.environ.get("HOME", str(Path.home())))
 REPORT_PATH = VESSENCE_HOME / "configs" / "dead_code_report.md"
@@ -79,13 +92,7 @@ def log(msg: str) -> None:
 
 
 def in_hard_skip(rel_path: str) -> bool:
-    return any(rel_path.startswith(p) for p in HARD_SKIP_PREFIXES)
-
-
-def is_pytest_discovery_file(rel_path: str) -> bool:
-    """Pytest discovers test_*.py by filename, not imports."""
-    path = Path(rel_path)
-    return path.parts[:1] == ("test_code",) and path.name.startswith("test_")
+    return _in_hard_skip(rel_path, HARD_SKIP_PREFIXES)
 
 
 def gather_python_files() -> list[Path]:
@@ -167,12 +174,6 @@ def _collect_dynamic_import_prefixes() -> set[str]:
         return _DYNAMIC_IMPORT_PREFIXES
 
     prefixes: set[str] = set()
-    patterns = [
-        # importlib.import_module(f"pkg.sub.{name}") or with . concat
-        re.compile(r"""import_module\(\s*f?['"]([a-zA-Z_][\w.]*?)\.\{"""),
-        re.compile(r"""import_module\(\s*['"]([a-zA-Z_][\w.]*?)\.['"]\s*\+"""),
-        re.compile(r"""__import__\(\s*f?['"]([a-zA-Z_][\w.]*?)\.\{"""),
-    ]
     # Only scan our own source tree — SCAN_DIRS. Otherwise rglob walks into
     # any .venv/site-packages that happens to live inside and returns junk
     # prefixes like scipy, torch, pip._vendor.
@@ -188,13 +189,11 @@ def _collect_dynamic_import_prefixes() -> set[str]:
                 text = py.read_text()
             except Exception:
                 continue
-            for pat in patterns:
-                for m in pat.finditer(text):
-                    prefix = m.group(1)
-                    # Only trust prefixes that correspond to a real dir in our tree.
-                    candidate = VESSENCE_HOME / prefix.replace(".", "/")
-                    if candidate.is_dir():
-                        prefixes.add(prefix)
+            for prefix in _dynamic_import_prefixes_from_text(text):
+                # Only trust prefixes that correspond to a real dir in our tree.
+                candidate = VESSENCE_HOME / prefix.replace(".", "/")
+                if candidate.is_dir():
+                    prefixes.add(prefix)
 
     _DYNAMIC_IMPORT_PREFIXES = prefixes
     log(f"Dynamic-import prefixes detected: {sorted(prefixes)}")
@@ -206,11 +205,7 @@ def is_dynamically_imported(f: Path) -> bool:
     importlib dynamic load. The classifier does this for v2/classes; other
     plugin-style paths will be picked up automatically."""
     rel = str(f.relative_to(VESSENCE_HOME))
-    dotted_dir = rel.replace("/", ".").rsplit(".", 1)[0].rsplit(".", 1)[0]
-    for prefix in _collect_dynamic_import_prefixes():
-        if dotted_dir == prefix or dotted_dir.startswith(prefix + "."):
-            return True
-    return False
+    return _path_matches_dynamic_import_prefix(rel, _collect_dynamic_import_prefixes())
 
 
 # ── Phase 1: dead files (zero references anywhere) ──────────────────────────
@@ -321,24 +316,25 @@ def can_auto_delete(f: Path) -> bool:
     # Skip anything that still has HTTP route side-effects or dynamic loading.
     # jane_web/ has Flask blueprint registrations that grep can't see; intent
     # classes are caught by is_dynamically_imported already.
-    if rel.startswith("jane_web/"):
-        return False
-    if f.name in HARD_KEEP:
-        return False
-    if is_dynamically_imported(f):
-        return False
     try:
-        if f.stat().st_size > MAX_AUTO_DELETE_LINES * 200:  # rough byte cap
-            return False
+        dynamically_imported = is_dynamically_imported(f)
+        stat = f.stat()
         line_count = sum(1 for _ in f.open())
-        if line_count > MAX_AUTO_DELETE_LINES:
-            return False
-        age_days = (time.time() - f.stat().st_mtime) / 86400
-        if age_days < AUTO_DELETE_AGE_DAYS:
-            return False
+        age_days = (time.time() - stat.st_mtime) / 86400
     except Exception:
         return False
-    return True
+    eligible, _reason = _auto_delete_eligibility(
+        rel_path=rel,
+        filename=f.name,
+        size_bytes=stat.st_size,
+        line_count=line_count,
+        age_days=age_days,
+        hard_keep=HARD_KEEP,
+        max_auto_delete_lines=MAX_AUTO_DELETE_LINES,
+        auto_delete_age_days=AUTO_DELETE_AGE_DAYS,
+        dynamically_imported=dynamically_imported,
+    )
+    return eligible
 
 
 def auto_delete_safe_files() -> None:
@@ -358,48 +354,16 @@ def auto_delete_safe_files() -> None:
 
 def write_report() -> None:
     REPORT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    ts = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
-    body = [f"# Dead Code Report — {ts}\n"]
-
-    if _auto_deleted:
-        body.append(f"## Auto-deleted ({len(_auto_deleted)} files)\n")
-        for f in _auto_deleted:
-            body.append(f"- `{f.relative_to(VESSENCE_HOME)}`")
-        body.append("")
-
-    if _dead_files:
-        body.append(f"## Dead files — review needed ({len(_dead_files)})\n")
-        body.append("(Candidates for deletion, but failed an auto-delete safety check —")
-        body.append(" usually means the file is too new, too large, or outside agent_skills/test_code.)\n")
-        for f in _dead_files:
-            body.append(f"- `{f.relative_to(VESSENCE_HOME)}`")
-        body.append("")
-
-    if _dead_functions:
-        body.append(f"## Possibly-dead functions ({len(_dead_functions)})\n")
-        body.append("(No references found via grep. May be false positives if called via")
-        body.append(" getattr, dynamic dispatch, or HTTP route registration.)\n")
-        for f, name in _dead_functions[:50]:
-            body.append(f"- `{f.relative_to(VESSENCE_HOME)}` :: `{name}()`")
-        if len(_dead_functions) > 50:
-            body.append(f"- … and {len(_dead_functions) - 50} more")
-        body.append("")
-
-    if _duplicate_groups:
-        body.append(f"## Duplicate function bodies ({len(_duplicate_groups)} groups)\n")
-        body.append("(Identical bodies — candidates for extraction into a shared helper.)\n")
-        for h, paths in _duplicate_groups[:20]:
-            body.append(f"- group `{h}`:")
-            for p in paths:
-                body.append(f"    - `{p.relative_to(VESSENCE_HOME)}`")
-        if len(_duplicate_groups) > 20:
-            body.append(f"- … and {len(_duplicate_groups) - 20} more groups")
-        body.append("")
-
-    if not (_auto_deleted or _dead_files or _dead_functions or _duplicate_groups):
-        body.append("Codebase clean — no dead code candidates found. ✅\n")
-
-    REPORT_PATH.write_text("\n".join(body) + "\n")
+    REPORT_PATH.write_text(
+        build_dead_code_report_markdown(
+            root=VESSENCE_HOME,
+            auto_deleted=_auto_deleted,
+            dead_files=_dead_files,
+            dead_functions=_dead_functions,
+            duplicate_groups=_duplicate_groups,
+            generated_at=dt.datetime.now(),
+        )
+    )
     log(f"Wrote {REPORT_PATH.relative_to(VESSENCE_HOME)}")
 
 

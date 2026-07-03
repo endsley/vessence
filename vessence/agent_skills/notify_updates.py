@@ -11,6 +11,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from jane.config import PENDING_UPDATES_PATH
 from agent_skills.cron_utils import load_cron_env
+from agent_skills.model_update_helpers import (
+    discord_bot_headers as _discord_bot_headers,
+    discord_channel_messages_url as _discord_channel_messages_url,
+    model_update_notification_message as _model_update_notification_message,
+)
 
 NOTIFY_FILE = PENDING_UPDATES_PATH
 _env = load_cron_env()
@@ -26,20 +31,11 @@ async def send_notification():
         with open(NOTIFY_FILE, "r") as f:
             data = json.load(f)
         
-        message = (
-            f"🚀 **New Model Upgrade Detected!**\n\n"
-            f"**Model:** {data['model_name']}\n"
-            f"**Improvements:**\n{data['key_improvements']}\n\n"
-            f"**Source:** {data['source_url']}\n\n"
-            f"Should we discuss upgrading our brains to this new model?"
-        )
+        message = _model_update_notification_message(data)
 
         # Simple Discord webhook-like POST using bot token
-        url = f"https://discord.com/api/v10/channels/{CHANNEL_ID}/messages"
-        headers = {
-            "Authorization": f"Bot {DISCORD_TOKEN}",
-            "Content-Type": "application/json"
-        }
+        url = _discord_channel_messages_url(CHANNEL_ID)
+        headers = _discord_bot_headers(DISCORD_TOKEN)
         
         async with httpx.AsyncClient() as client:
             resp = await client.post(url, headers=headers, json={"content": message})

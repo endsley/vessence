@@ -13,47 +13,25 @@ Returns JSON:
 
 import json
 import os
-import re
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from agent_skills.job_queue_docs import (
+    PRIORITY_MAP,
+    pending_job_summaries_from_dir as _pending_job_summaries_from_dir,
+    pending_job_summary as _pending_job_summary,
+    sort_pending_job_summaries as _sort_pending_job_summaries,
+)
 from jane.config import VESSENCE_HOME
 
 JOBS_DIR = os.path.join(VESSENCE_HOME, "configs", "job_queue")
-PRIORITY_MAP = {"high": 1, "1": 1, "medium": 2, "2": 2, "low": 3, "3": 3}
 
 
 def get_pending_jobs() -> list[dict]:
     """Returns list of pending jobs sorted by priority."""
-    if not os.path.isdir(JOBS_DIR):
-        return []
-    jobs = []
-    for fname in sorted(os.listdir(JOBS_DIR)):
-        if not fname.endswith(".md") or fname == "README.md":
-            continue
-        fpath = os.path.join(JOBS_DIR, fname)
-        if not os.path.isfile(fpath):
-            continue
-        try:
-            with open(fpath) as f:
-                content = f.read()
-            status_m = re.search(r"^Status:\s*(.+)", content, re.MULTILINE)
-            if not status_m or status_m.group(1).strip().split()[0].lower() != "pending":
-                continue
-            title_m = re.search(r"^# Job:\s*(.+)", content, re.MULTILINE)
-            priority_m = re.search(r"^Priority:\s*(.+)", content, re.MULTILINE)
-            title = title_m.group(1).strip() if title_m else fname
-            priority_raw = priority_m.group(1).strip().lower() if priority_m else "3"
-            priority = PRIORITY_MAP.get(priority_raw, 3)
-            num_m = re.match(r"^(\d+)", fname)
-            job_num = int(num_m.group(1)) if num_m else 999
-            jobs.append({"num": job_num, "title": title, "priority": priority, "file": fpath})
-        except Exception:
-            continue
-    jobs.sort(key=lambda j: (j["priority"], j["num"]))
-    return jobs
+    return _pending_job_summaries_from_dir(JOBS_DIR)
 
 
 def main():

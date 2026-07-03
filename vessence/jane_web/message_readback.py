@@ -2,33 +2,35 @@
 
 from __future__ import annotations
 
-import base64
 import json
 import logging
 import os
-import re
 import time
 from pathlib import Path
 from typing import Any, Iterable, Mapping
-from urllib.parse import urlparse
 
-from jane.sanitizers import strip_client_tool_markers
+from jane_web.message_readback_helpers import (
+    MAX_READBACK_CHARS as _MAX_READBACK_CHARS,
+    MUSIC_PLAY_MARKER_RE as _MUSIC_PLAY_MARKER_RE,
+    TALKINGPOINTS_URL_RE as _TALKINGPOINTS_URL_RE,
+    WRAPPER_BODY_RE as _WRAPPER_BODY_RE,
+    clean_text as _clean_text,
+    cache_entry_readback_value as _cache_entry_readback_value,
+    decode_urlsafe_base64 as _decode_urlsafe_base64,
+    extract_talkingpoints_message as _extract_talkingpoints_message,
+    find_talkingpoints_url as _find_talkingpoints_url,
+    looks_like_error_message as _looks_like_error_message,
+    looks_like_wrapper as _looks_like_wrapper,
+    sanitize_untrusted_text as _sanitize_untrusted_text,
+    talkingpoints_code_candidates_from_urls as _talkingpoints_code_candidates_from_urls,
+    truncate_readback as _truncate_readback,
+)
 
 logger = logging.getLogger(__name__)
 
-_TALKINGPOINTS_URL_RE = re.compile(
-    r"https?://(?:app|families)\.talkingpts\.org/(?:U|m)/[A-Za-z0-9_.$%-]+",
-    re.IGNORECASE,
-)
-_WRAPPER_BODY_RE = re.compile(
-    r"\b(?:has sent you a message|view the full message|full message here)\b",
-    re.IGNORECASE,
-)
-_MUSIC_PLAY_MARKER_RE = re.compile(r"\[MUSIC_PLAY:", re.IGNORECASE)
 _CACHE_TTL_SECONDS = 7 * 24 * 60 * 60
 _FAILED_CACHE_TTL_SECONDS = 60 * 60
 _REQUEST_TIMEOUT_SECONDS = 6
-_MAX_READBACK_CHARS = 1200
 _CACHE_MISS = object()
 
 
@@ -101,43 +103,8 @@ def resolve_talkingpoints_link(url: str) -> str | None:
     return resolved
 
 
-def _find_talkingpoints_url(text: str) -> str | None:
-    match = _TALKINGPOINTS_URL_RE.search(text or "")
-    return match.group(0) if match else None
-
-
-def _looks_like_wrapper(body: str) -> bool:
-    return bool(_WRAPPER_BODY_RE.search(body or ""))
-
-
-def _truncate_readback(text: str) -> str:
-    text = _sanitize_untrusted_text(text)
-    text = re.sub(r"\s+", " ", text or "").strip()
-    if len(text) <= _MAX_READBACK_CHARS:
-        return text
-    return text[:_MAX_READBACK_CHARS].rstrip() + "..."
-
-
-def _sanitize_untrusted_text(text: str) -> str:
-    text = strip_client_tool_markers(text or "") or ""
-    return _MUSIC_PLAY_MARKER_RE.sub("[MUSIC-PLAY-STRIPPED:", text)
-
-
 def _talkingpoints_code_candidates(url: str) -> list[str]:
-    candidates: list[str] = []
-
-    def add(value: str | None) -> None:
-        if not value:
-            return
-        value = value.strip().strip("/")
-        if value and value not in candidates:
-            candidates.append(value)
-
-    parsed = urlparse(url)
-    path_parts = [part for part in parsed.path.split("/") if part]
-    if len(path_parts) >= 2 and path_parts[0] in {"U", "m"}:
-        add(path_parts[1])
-
+    urls = [url]
     try:
         import requests
 
@@ -147,30 +114,11 @@ def _talkingpoints_code_candidates(url: str) -> list[str]:
             timeout=_REQUEST_TIMEOUT_SECONDS,
             allow_redirects=True,
         )
-        final = urlparse(response.url)
-        final_parts = [part for part in final.path.split("/") if part]
-        if len(final_parts) >= 2 and final_parts[0] in {"U", "m"}:
-            add(final_parts[1])
+        urls.append(response.url)
     except Exception:
         pass
 
-    for code in list(candidates):
-        decoded = _decode_urlsafe_base64(code)
-        if decoded:
-            add(decoded)
-
-    return candidates
-
-
-def _decode_urlsafe_base64(value: str) -> str | None:
-    try:
-        padding = "=" * ((4 - len(value) % 4) % 4)
-        decoded = base64.urlsafe_b64decode((value + padding).encode("ascii")).decode(
-            "utf-8"
-        )
-    except Exception:
-        return None
-    return decoded if "_$_" in decoded else None
+    return _talkingpoints_code_candidates_from_urls(urls)
 
 
 def _resolve_talkingpoints_code(code: str) -> str | None:
@@ -207,38 +155,6 @@ def _resolve_talkingpoints_code(code: str) -> str | None:
     return None
 
 
-def _extract_talkingpoints_message(data: Any) -> str | None:
-    if isinstance(data, dict):
-        teacher = _clean_text(data.get("teacherName") or data.get("teacher_name"))
-        message = _clean_text(data.get("message"))
-        if teacher and message and not _looks_like_error_message(message):
-            return f"{teacher}: {message}"
-
-        contact = data.get("contact")
-        if isinstance(contact, dict):
-            extracted = _extract_talkingpoints_message(contact)
-            if extracted:
-                return extracted
-
-        nested = data.get("data")
-        if isinstance(nested, (dict, list)):
-            extracted = _extract_talkingpoints_message(nested)
-            if extracted:
-                return extracted
-
-        for value in data.values():
-            if isinstance(value, (dict, list)):
-                extracted = _extract_talkingpoints_message(value)
-                if extracted:
-                    return extracted
-    elif isinstance(data, list):
-        for item in data:
-            extracted = _extract_talkingpoints_message(item)
-            if extracted:
-                return extracted
-    return None
-
-
 def _extract_static_page_text(url: str) -> str | None:
     try:
         import requests
@@ -266,26 +182,6 @@ def _extract_static_page_text(url: str) -> str | None:
     if _looks_like_error_message(text):
         return None
     return text
-
-
-def _clean_text(value: Any) -> str | None:
-    if not isinstance(value, str):
-        return None
-    text = re.sub(r"\s+", " ", value).strip()
-    return text or None
-
-
-def _looks_like_error_message(text: str) -> bool:
-    lowered = (text or "").lower()
-    return any(
-        phrase in lowered
-        for phrase in (
-            "oops, an error occurred",
-            "invalid",
-            "not found",
-            "expired",
-        )
-    )
 
 
 def _browser_headers() -> dict[str, str]:
@@ -340,15 +236,13 @@ def _save_cache(cache: Mapping[str, Any]) -> None:
 
 def _read_cache_entry(url: str) -> str | object | None:
     cache = _load_cache()
-    entry = cache.get(url)
-    if not isinstance(entry, dict):
-        return _CACHE_MISS
-    checked_at = float(entry.get("checked_at") or 0)
-    resolved = entry.get("resolved")
-    ttl = _CACHE_TTL_SECONDS if resolved else _FAILED_CACHE_TTL_SECONDS
-    if time.time() - checked_at > ttl:
-        return _CACHE_MISS
-    return resolved or None
+    return _cache_entry_readback_value(
+        cache.get(url),
+        now=time.time(),
+        success_ttl_seconds=_CACHE_TTL_SECONDS,
+        failed_ttl_seconds=_FAILED_CACHE_TTL_SECONDS,
+        cache_miss=_CACHE_MISS,
+    )
 
 
 def _write_cache_entry(url: str, resolved: str | None) -> None:

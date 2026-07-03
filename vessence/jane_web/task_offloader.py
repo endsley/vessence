@@ -1,6 +1,5 @@
 """Background task offloader — runs big tasks async and posts progress via announcements."""
 
-import json
 import logging
 import os
 import sys
@@ -14,6 +13,21 @@ CODE_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(CODE_ROOT))
 
 from jane.config import VESSENCE_HOME, VESSENCE_DATA_HOME
+from jane_web.task_offloader_announcements import (
+    append_task_progress_announcement as _append_task_progress_announcement,
+)
+from jane_web.task_offloader_context import (
+    automation_prompt_context as _automation_prompt_context,
+)
+from jane_web.task_offloader_messages import (
+    automation_error_announcement_message as _automation_error_announcement_message,
+    empty_response_retry_message as _empty_response_retry_message,
+    final_result_message as _final_result_message,
+    heartbeat_progress_message as _heartbeat_progress_message,
+    start_progress_message as _start_progress_message,
+    truncate_text as _truncate,
+    unexpected_error_announcement_message as _unexpected_error_announcement_message,
+)
 
 logger = logging.getLogger("jane.offloader")
 
@@ -22,15 +36,18 @@ ANNOUNCEMENTS_PATH = Path(VESSENCE_DATA_HOME) / "data" / "jane_announcements.jso
 _PROGRESS_INTERVAL = 10
 
 
-def _write_announcement(payload: dict) -> None:
-    """Append a single JSON line to the announcements file."""
-    ANNOUNCEMENTS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with ANNOUNCEMENTS_PATH.open("a", encoding="utf-8") as f:
-        f.write(json.dumps(payload, ensure_ascii=False) + "\n")
-
-
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _write_progress_announcement(task_id: str, message: str, *, final: bool = False) -> None:
+    _append_task_progress_announcement(
+        ANNOUNCEMENTS_PATH,
+        task_id,
+        message,
+        _now_iso(),
+        final=final,
+    )
 
 
 def offload_task(
@@ -68,12 +85,7 @@ def _run_task(
     from context_builder.v1.context_builder import build_jane_context
 
     # Announce start
-    _write_announcement({
-        "id": task_id,
-        "type": "queue_progress",
-        "message": f"⏳ Working on your request in the background…\n\n> {_truncate(message, 200)}",
-        "created_at": _now_iso(),
-    })
+    _write_progress_announcement(task_id, _start_progress_message(message))
 
     # Periodic progress heartbeat
     last_delta = ""
@@ -88,14 +100,9 @@ def _run_task(
     def heartbeat_loop() -> None:
         while not stop_heartbeat.wait(_PROGRESS_INTERVAL):
             with delta_lock:
-                snippet = last_delta[-300:] if last_delta else ""
-            if snippet:
-                _write_announcement({
-                    "id": task_id,
-                    "type": "queue_progress",
-                    "message": f"⏳ Still working… (latest output)\n\n```\n{snippet}\n```",
-                    "created_at": _now_iso(),
-                })
+                heartbeat_message = _heartbeat_progress_message(last_delta)
+            if heartbeat_message:
+                _write_progress_announcement(task_id, heartbeat_message)
 
     heartbeat_thread = threading.Thread(target=heartbeat_loop, daemon=True)
     heartbeat_thread.start()
@@ -122,13 +129,11 @@ def _run_task(
         prompt_text = message
         try:
             ctx = build_jane_context(message, history)
-            system_prompt = ctx.system_prompt or ""
             # Use the transcript (Recent Conversation + User: message) as the
             # prompt so the model sees Jane's previous turns. The offloader
             # previously passed just `message`, which made pronouns like "this"
             # or "it" have no antecedent.
-            if ctx.transcript:
-                prompt_text = ctx.transcript
+            prompt_text, system_prompt = _automation_prompt_context(message, ctx)
         except Exception:
             logger.warning("Context build failed for offloaded task %s, running without context", task_id)
 
@@ -152,25 +157,14 @@ def _run_task(
                     task_id, attempt, max_attempts, exc,
                 )
                 if attempt < max_attempts and is_empty_response:
-                    _write_announcement({
-                        "id": task_id,
-                        "type": "queue_progress",
-                        "message": "⏳ Got an empty response — retrying…",
-                        "created_at": _now_iso(),
-                    })
+                    _write_progress_announcement(task_id, _empty_response_retry_message())
                     time.sleep(2)
                     continue
                 raise
 
         # Post final result
         stop_heartbeat.set()
-        _write_announcement({
-            "id": task_id,
-            "type": "queue_progress",
-            "message": result or "_(task completed with no output)_",
-            "created_at": _now_iso(),
-            "final": True,
-        })
+        _write_progress_announcement(task_id, _final_result_message(result), final=True)
         logger.info("Offloaded task %s completed successfully", task_id)
 
     except AutomationError as exc:
@@ -180,38 +174,17 @@ def _run_task(
             "Offloaded task %s failed after %d attempt(s): %s",
             task_id, max_attempts, err_str,
         )
-        # Categorize the error for the user
-        if "timed out" in err_str.lower():
-            user_msg = "The request timed out — the AI took too long to respond. Try a simpler request or try again later."
-        elif "empty response" in err_str.lower():
-            user_msg = "The AI returned an empty response after retrying. This usually means the model is overloaded — please try again in a minute."
-        elif "not found" in err_str.lower():
-            user_msg = "The AI backend is not available right now. Please try again later."
-        elif "exit code" in err_str.lower():
-            user_msg = f"The AI backend encountered an error: {err_str[:300]}"
-        else:
-            user_msg = f"Background task failed: {err_str[:300]}"
-        _write_announcement({
-            "id": task_id,
-            "type": "queue_progress",
-            "message": f"⚠️ {user_msg}",
-            "created_at": _now_iso(),
-            "final": True,
-        })
+        _write_progress_announcement(
+            task_id,
+            _automation_error_announcement_message(err_str),
+            final=True,
+        )
 
     except Exception as exc:
         stop_heartbeat.set()
         logger.exception("Offloaded task %s failed with unexpected error", task_id)
-        _write_announcement({
-            "id": task_id,
-            "type": "queue_progress",
-            "message": f"⚠️ An unexpected error occurred: {type(exc).__name__}: {str(exc)[:200]}",
-            "created_at": _now_iso(),
-            "final": True,
-        })
-
-
-def _truncate(text: str, max_len: int) -> str:
-    if len(text) <= max_len:
-        return text
-    return text[:max_len - 1] + "…"
+        _write_progress_announcement(
+            task_id,
+            _unexpected_error_announcement_message(exc),
+            final=True,
+        )

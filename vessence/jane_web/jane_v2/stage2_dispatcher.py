@@ -23,6 +23,15 @@ import threading
 from typing import Any
 
 from . import classes as class_registry
+from jane_web.jane_v2.stage2_dispatcher_prompts import (
+    CLASS_DESCRIPTIONS as _CLASS_DESCRIPTIONS,
+    continuation_check_prompt as _continuation_check_prompt,
+    gate_check_prompt as _gate_check_prompt,
+)
+from jane_web.jane_v2.stage2_handler_invocation import (
+    build_handler_kwargs as _build_handler_kwargs,
+)
+from jane_web.jane_v2.ollama_client import post_ollama_response as _post_ollama_response
 
 logger = logging.getLogger(__name__)
 
@@ -73,22 +82,6 @@ def _self_correct_classification(prompt: str, wrong_class: str):
         logger.warning("self-correct failed: %s", e)
 
 
-_CLASS_DESCRIPTIONS = {
-    "send message":  "the user wants to text/SMS another person",
-    "read messages": "the user wants to read or check their text messages",
-    "sync messages": "the user wants to force-sync SMS from the phone",
-    "read email":    "the user wants to read or check their email inbox",
-    "read calendar": "the user wants to read or check events on their Google Calendar",
-    "shopping list": "the user wants to add/remove/view items on a shopping list",
-    "weather":       "the user wants the current/forecast weather",
-    "music play":    "the user wants to play/queue music",
-    "greeting":      "the user is just greeting (hi/hello/how are you)",
-    "get time":      "the user wants the current time",
-    "end conversation": "the user is ending the conversation (bye/cancel/stop/never mind)",
-    "todo list":     "the user wants to read/add/remove items on their personal TODO list",
-}
-
-
 async def _continuation_check(
     class_name: str,
     prompt: str,
@@ -114,7 +107,6 @@ async def _continuation_check(
     if word_count <= 5:
         return True
 
-    import httpx
     from jane_web.jane_v2.models import (
         LOCAL_LLM as model,
         LOCAL_LLM_NUM_CTX,
@@ -122,39 +114,12 @@ async def _continuation_check(
         OLLAMA_KEEP_ALIVE,
         OLLAMA_URL,
     )
-    ctx_block = f"Recent conversation:\n{context.strip()}\n\n" if context and context.strip() else ""
-
-    if pending_question and pending_question.strip():
-        # Preferred form — literal question yields sharp decisions.
-        check_prompt = (
-            f"Jane just asked the user this exact question:\n"
-            f"  \"{pending_question.strip()}\"\n\n"
-            f"Examples:\n"
-            f"  Q: \"Which category? Home, clinic, or students?\"\n"
-            f"    \"clinic\" → SAME\n"
-            f"    \"the clinic one\" → SAME\n"
-            f"    \"actually forget that, what's the weather\" → CHANGED\n"
-            f"    \"tell Sarah I'm running late\" → CHANGED\n"
-            f"    \"how does the pipeline route this?\" → CHANGED (meta question)\n"
-            f"  Q: \"What should I call this timer?\"\n"
-            f"    \"pasta\" → SAME\n"
-            f"    \"no label\" → SAME\n"
-            f"    \"play some music\" → CHANGED\n\n"
-            f"{ctx_block}User's reply: {prompt.strip()}\n\n"
-            f"Is the user's reply an ANSWER to Jane's question, or did they "
-            f"CHANGE the subject?\n"
-            f"Answer ONE word — SAME or CHANGED:"
-        )
-    else:
-        # Legacy fallback for handlers that don't yet populate `question`.
-        desc = _CLASS_DESCRIPTIONS.get(class_name, class_name)
-        check_prompt = (
-            f"Jane just asked the user a follow-up question about: {desc}\n\n"
-            f"{ctx_block}User's reply: {prompt.strip()}\n\n"
-            f"Is the user answering Jane's question or continuing the same topic? "
-            f"Or did they change the subject to something unrelated?\n"
-            f"Answer ONE word — SAME or CHANGED:"
-        )
+    check_prompt = _continuation_check_prompt(
+        class_name,
+        prompt,
+        context,
+        pending_question=pending_question,
+    )
     body = {
         "model": model,
         "prompt": check_prompt,
@@ -164,17 +129,21 @@ async def _continuation_check(
         "keep_alive": OLLAMA_KEEP_ALIVE,
     }
     try:
-        async with httpx.AsyncClient(timeout=LOCAL_LLM_TIMEOUT) as client:
-            r = await client.post(OLLAMA_URL, json=body)
-            r.raise_for_status()
-            ans = (r.json().get("response") or "").strip().upper()
-            is_same = not ans.startswith("CHANGED")
-            logger.info(
-                "dispatcher: continuation check for %r → %s (q=%r raw=%r)",
-                class_name, "SAME" if is_same else "CHANGED",
-                (pending_question or "")[:50], ans[:20],
+        ans = (
+            await _post_ollama_response(
+                OLLAMA_URL,
+                body,
+                timeout=LOCAL_LLM_TIMEOUT,
+                activity_recorder=lambda: None,
             )
-            return is_same
+        ).upper()
+        is_same = not ans.startswith("CHANGED")
+        logger.info(
+            "dispatcher: continuation check for %r → %s (q=%r raw=%r)",
+            class_name, "SAME" if is_same else "CHANGED",
+            (pending_question or "")[:50], ans[:20],
+        )
+        return is_same
     except Exception as e:
         logger.warning("dispatcher: continuation check failed (%s) — assuming same topic", e)
         return True
@@ -188,8 +157,8 @@ async def _gate_check(class_name: str, prompt: str, context: str) -> bool:
     get caught even by handlers that don't implement their own check.
     Uses qwen2.5:7b with a tiny prompt (~50 tokens) — adds ~300ms.
     """
-    desc = _CLASS_DESCRIPTIONS.get(class_name)
-    if not desc:
+    gate_prompt = _gate_check_prompt(class_name, prompt, context)
+    if not gate_prompt:
         return True  # unknown class → no gate (fail open)
 
     p_lower = prompt.lower()
@@ -200,31 +169,12 @@ async def _gate_check(class_name: str, prompt: str, context: str) -> bool:
                     "in your code", "in the codebase", "the way you handled",
                     "shouldn't", "doesn't sync", "keep failing")
 
-    import httpx
     from jane_web.jane_v2.models import (
         LOCAL_LLM as model,
         LOCAL_LLM_NUM_CTX,
         LOCAL_LLM_TIMEOUT,
         OLLAMA_KEEP_ALIVE,
         OLLAMA_URL,
-    )
-    ctx_block = f"Recent conversation:\n{context.strip()}\n\n" if context and context.strip() else ""
-    gate_prompt = (
-        f"The classifier predicted: {desc}\n\n"
-        f"Answer NO if ANY of these apply:\n"
-        f"- The prompt is a complaint or meta question about this feature\n"
-        f"- The prompt is a follow-up to a DIFFERENT topic in the conversation\n"
-        f"- The prompt doesn't actually request this specific action\n\n"
-        f"Examples:\n"
-        f"  \"what time is it\" → YES\n"
-        f"  \"the time you told me was wrong\" → NO (complaint)\n"
-        f"  \"how about tomorrow\" after weather conversation → NO (follow-up to weather, not this)\n"
-        f"  \"read my messages\" → YES\n"
-        f"  \"and next week?\" after weather conversation → NO (follow-up to weather)\n"
-        f"  \"hello jane\" → YES\n"
-        f"  \"how does the greeting handler work\" → NO (meta)\n\n"
-        f"{ctx_block}User prompt: {prompt.strip()}\n\n"
-        f"Is this a genuine request for {desc}? Answer ONE word — YES or NO:"
     )
     body = {
         "model": model,
@@ -235,16 +185,14 @@ async def _gate_check(class_name: str, prompt: str, context: str) -> bool:
         "keep_alive": OLLAMA_KEEP_ALIVE,
     }
     try:
-        async with httpx.AsyncClient(timeout=LOCAL_LLM_TIMEOUT) as client:
-            r = await client.post(OLLAMA_URL, json=body)
-            r.raise_for_status()
-            ans = (r.json().get("response") or "").strip().upper()
-            try:
-                from jane_web.jane_v2.models import record_ollama_activity
-                record_ollama_activity()
-            except Exception:
-                pass
-            return not ans.startswith("NO")
+        ans = (
+            await _post_ollama_response(
+                OLLAMA_URL,
+                body,
+                timeout=LOCAL_LLM_TIMEOUT,
+            )
+        ).upper()
+        return not ans.startswith("NO")
     except Exception as e:
         logger.warning("dispatcher gate check failed (%s) — failing open", e)
         return True
@@ -363,30 +311,12 @@ async def dispatch(
         logger.info("dispatcher: class %r has no handler (fallback class)", class_name)
         return None
 
-    # Introspect the handler to see which optional kwargs it accepts.
-    # Backward compatible — handlers declaring neither `context` nor
-    # `pending` are called with just the prompt like they were before.
-    try:
-        sig = inspect.signature(handler)
-        wants_context = "context" in sig.parameters
-        wants_pending = "pending" in sig.parameters
-        wants_params = "params" in sig.parameters
-    except (TypeError, ValueError):
-        wants_context = False
-        wants_pending = False
-        wants_params = False
-
-    kwargs: dict = {}
-    if wants_context:
-        kwargs["context"] = context
-    if wants_pending:
-        handler_pending = pending
-        if isinstance(handler_pending, dict) and "question" in handler_pending:
-            handler_pending = dict(handler_pending)
-            handler_pending.pop("question", None)
-        kwargs["pending"] = handler_pending
-    if wants_params:
-        kwargs["params"] = params
+    kwargs = _build_handler_kwargs(
+        handler,
+        context=context,
+        pending=pending,
+        params=params,
+    )
 
     try:
         if inspect.iscoroutinefunction(handler):

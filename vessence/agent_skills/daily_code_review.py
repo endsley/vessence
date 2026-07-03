@@ -17,6 +17,13 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from agent_skills.daily_code_review_helpers import (
+    build_review_question as _build_review_question,
+    build_review_report as _build_review_report,
+    is_reviewable_file as _is_reviewable_file,
+    truncate_file_diff as _truncate_file_diff,
+    truncated_files_notice as _truncated_files_notice,
+)
 from jane.config import VESSENCE_HOME, VESSENCE_DATA_HOME, LOGS_DIR
 
 # ── Setup ────────────────────────────────────────────────────────────────────
@@ -66,10 +73,7 @@ def get_changed_files(since_hours: int = 24) -> list[str]:
             line = line.strip()
             if not line:
                 continue
-            ext = Path(line).suffix
-            if ext not in REVIEW_EXTENSIONS:
-                continue
-            if any(skip in line for skip in SKIP_PATTERNS):
+            if not _is_reviewable_file(line, REVIEW_EXTENSIONS, SKIP_PATTERNS):
                 continue
             full_path = Path(VESSENCE_HOME) / line
             if full_path.exists():
@@ -96,7 +100,7 @@ def get_diff_summary(files: list[str]) -> str:
     total_chars = 0
     for f in files:
         if total_chars >= MAX_DIFF_CHARS:
-            diffs.append(f"\n... and {len(files) - len(diffs)} more files (truncated)")
+            diffs.append(_truncated_files_notice(len(files), len(diffs)))
             break
         try:
             result = subprocess.run(
@@ -106,8 +110,7 @@ def get_diff_summary(files: list[str]) -> str:
             diff = result.stdout.strip()
             if diff:
                 # Truncate individual file diffs
-                if len(diff) > 2000:
-                    diff = diff[:2000] + "\n... (truncated)"
+                diff = _truncate_file_diff(diff)
                 diffs.append(f"--- {f} ---\n{diff}")
                 total_chars += len(diff)
         except Exception:
@@ -120,19 +123,7 @@ def run_team_review(diff_summary: str, changed_files: list[str]) -> str:
     """Send changes to the AI team for review."""
     from agent_skills.consult_panel import consult_panel
 
-    question = (
-        f"Daily code review: {len(changed_files)} files changed in the last 24 hours. "
-        f"Files: {', '.join(changed_files[:20])}\n\n"
-        "Review the diffs below. Focus on:\n"
-        "1. Bugs and logic errors\n"
-        "2. Free speed wins — optimizations that are obviously faster with zero quality tradeoff (do NOT suggest changes that sacrifice correctness or readability for speed)\n"
-        "3. Code bloat — dead code, duplicate logic, unnecessary abstractions\n"
-        "4. Token waste — ONLY flag genuinely wasted tokens (duplicate data, unused context, redundant LLM calls). NEVER suggest reducing tokens if it would degrade memory quality, capability, or response speed\n"
-        "5. Security issues\n"
-        "6. Missing edge cases\n\n"
-        "Be concise. Only report actual problems, not style preferences. "
-        "NEVER suggest speed improvements that compromise quality or correctness."
-    )
+    question = _build_review_question(changed_files)
 
     return consult_panel(
         question=question,
@@ -164,13 +155,7 @@ def main():
 
     # Save review report
     report_path = REVIEW_DIR / f"code_review_{now.strftime('%Y-%m-%d')}.md"
-    report_content = (
-        f"# Daily Code Review — {now.strftime('%Y-%m-%d')}\n\n"
-        f"**Files reviewed:** {len(changed_files)}\n"
-        f"**Files:** {', '.join(changed_files)}\n\n"
-        f"---\n\n"
-        f"{review_result}\n"
-    )
+    report_content = _build_review_report(now, changed_files, review_result)
     report_path.write_text(report_content)
     logger.info("Review report saved to %s", report_path)
 

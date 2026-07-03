@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 """vault_tunnel_url.py — Report the current Cloudflare tunnel URL for the Vault website."""
 import os
-import re
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from agent_skills.vault_tunnel_helpers import (
+    select_vault_url as _select_vault_url,
+    trycloudflare_url_from_lines as _trycloudflare_url_from_lines,
+    vault_url_output as _vault_url_output,
+)
 from jane.config import VAULT_TUNNEL_LOG
 
 LOG_PATHS = [
@@ -21,22 +25,18 @@ FIXED_JANE_URL  = "https://jane.vessences.com"
 
 def get_tunnel_url() -> str:
     # Check env override first
-    env_url = os.environ.get("VAULT_URL")
-    if env_url:
-        return env_url
+    selected = _select_vault_url(os.environ.get("VAULT_URL"), FIXED_VAULT_URL)
+    if selected:
+        return selected
     # Fixed domain is configured — return it directly
-    if FIXED_VAULT_URL:
-        return FIXED_VAULT_URL
     # Fallback: scan log for legacy quick tunnel URL
     for log_path in LOG_PATHS:
         if os.path.exists(log_path):
             try:
                 with open(log_path, "r") as f:
-                    for line in reversed(f.readlines()):
-                        if "trycloudflare.com" in line:
-                            match = re.search(r'https://[\w\-]+\.trycloudflare\.com', line)
-                            if match:
-                                return match.group(0)
+                    found = _trycloudflare_url_from_lines(f.readlines())
+                    if found:
+                        return found
             except Exception:
                 pass
     return None
@@ -44,11 +44,7 @@ def get_tunnel_url() -> str:
 
 def main():
     url = get_tunnel_url()
-    if url:
-        print(f"Vault URL: {url}")
-        print(f"Jane URL:  {FIXED_JANE_URL}")
-    else:
-        print("Vault tunnel URL not available. Is the tunnel running?")
+    print(_vault_url_output(url, FIXED_JANE_URL))
 
 
 if __name__ == "__main__":

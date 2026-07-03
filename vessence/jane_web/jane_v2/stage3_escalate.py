@@ -19,88 +19,23 @@ from __future__ import annotations
 
 import json
 import logging
-import re
-from pathlib import Path
 from typing import AsyncIterator
 
 from fastapi import Request
 
-from jane_web.jane_proxy import ToolMarkerExtractor # New import
-
-logger = logging.getLogger(__name__)
-
-# Directory that holds class packs — each may contain a `protocol.md` whose
-# contents are injected into Opus's prompt when Stage 3 routes to that class.
-_CLASSES_DIR = (Path(__file__).parent / "classes").resolve()
-
-# Whitelist of legal class folder names. Stops a malicious-looking reason like
-# "../../etc:High" from ever being concatenated into a path.
-_CLASS_NAME_RE = re.compile(r"^[a-z0-9_]+$")
-
-# mtime-keyed protocol cache. lru_cache cannot be used here because it would
-# permanently cache "missing file" results — adding a protocol.md would never
-# load until a server restart, which is the exact rollout path we expect.
-# Keyed by class_name → (mtime_ns, text_or_None).
-_PROTOCOL_CACHE: dict[str, tuple[int, str | None]] = {}
-
-
-# Voice hint prepended to the user message when the request comes from a
-# voice client (wake-word daemon, Android mic). Tells Opus that its answer
-# will be spoken aloud via TTS, so it should stay short and drop markdown.
-# Injected as part of the user turn rather than touching v1's context
-# builder — keeps v1 untouched.
-_VOICE_HINT = (
-    "(voice request — your answer will be read aloud via text-to-speech. "
-    "Keep it to 1-2 short spoken sentences. Be conversational, like a "
-    "friend. No markdown, no lists, no bullets, no code blocks — just a "
-    "natural spoken reply.)\n\n"
+from jane_web.client_tool_markers import ToolMarkerExtractor
+from jane_web.jane_v2.stage3_body_injections import (
+    copy_body_with_message as _copy_body_with_message,
+    inject_class_protocol as _inject_class_protocol,
+    inject_extracted_params as _inject_extracted_params,
+    maybe_voice_wrap as _maybe_voice_wrap,
+)
+from jane_web.jane_v2.stage3_protocols import (
+    load_class_protocol as _load_class_protocol,
+    reason_to_class as _reason_to_class,
 )
 
-
-def _maybe_voice_wrap(body):
-    """Return a body copy with voice-hint prefixed to the message, or the
-    original body if the request is not from a voice client."""
-    if (getattr(body, "platform", None) or "").lower() != "voice":
-        return body
-    new_message = _VOICE_HINT + (body.message or "")
-    try:
-        return body.model_copy(update={"message": new_message})
-    except AttributeError:
-        return body.copy(update={"message": new_message})
-
-
-def _inject_extracted_params(body, params: dict | None):
-    """Prepend an EXTRACTED PARAMS block to the user message when Stage 1's
-    qwen extracted structured fields for the chosen class.
-
-    Stage 1 (v3 classifier) emits {class, confidence, params} where params
-    is keyed by the class's PARAMS_SCHEMA. For escalating handlers the
-    handler doesn't run, so without this injection Stage 3 (Opus) would
-    have to re-derive intent fields from the prose. Threading the
-    pre-extracted slot values saves Opus a parse and keeps slot
-    interpretation consistent with what Stage 1 already decided.
-
-    No-op when params is empty/None — keeps Stage 3 prompt clean for
-    classes that don't declare a schema.
-    """
-    if not params:
-        return body
-    try:
-        non_null = {k: v for k, v in params.items() if v not in (None, "", {}, [])}
-    except Exception:
-        return body
-    if not non_null:
-        return body
-    lines = ["[EXTRACTED PARAMS] (from Stage 1 classifier — already parsed from the user's prompt):"]
-    for k, v in non_null.items():
-        lines.append(f"- {k}: {v!r}")
-    block = "\n".join(lines)
-    new_message = block + "\n\n" + (body.message or "")
-    try:
-        return body.model_copy(update={"message": new_message})
-    except AttributeError:
-        return body.copy(update={"message": new_message})
-
+logger = logging.getLogger(__name__)
 
 def _inject_structured_state(body):
     """Prepend a rendered CURRENT CONVERSATION STATE block to the user's
@@ -127,166 +62,7 @@ def _inject_structured_state(body):
     # the last few FIFO turns is the simplest way to keep Opus oriented
     # across Stage 2 → Stage 3 transitions.
     new_message = block.strip() + "\n\n" + (body.message or "")
-    try:
-        return body.model_copy(update={"message": new_message})
-    except AttributeError:
-        return body.copy(update={"message": new_message})
-
-
-def _reason_to_class(reason: str) -> str | None:
-    """Map a Stage 3 escalation reason to a class folder name.
-
-    Reason format from `pipeline.py` is "<cls>:<conf>" (e.g. "send message:High",
-    "weather:High", "others"). We:
-      - drop the confidence suffix
-      - normalize spaces to underscores so "send message" → "send_message"
-      - strip handler-decline suffixes (`_fallback`, `_declined`) so a
-        weather handler that punted still gets the weather protocol
-      - return None for "others" (no class-specific protocol)
-    """
-    if not reason:
-        return None
-    base = reason.split(":", 1)[0].strip().lower().replace(" ", "_")
-    for suffix in ("_fallback", "_declined", "_decline"):
-        if base.endswith(suffix):
-            base = base[: -len(suffix)]
-    if not base or base == "others":
-        return None
-    if not _CLASS_NAME_RE.match(base):
-        # Reason came in with weird chars (path separators, dots, etc.).
-        # Refuse — protect _CLASSES_DIR from path traversal.
-        logger.warning("stage3_escalate: rejecting malformed class name %r", base)
-        return None
-    return base
-
-
-def _metadata_for_class_pkg(class_name: str) -> dict | None:
-    """Return registry metadata for a class package name, e.g. todo_list."""
-    try:
-        from . import classes as class_registry
-        reg = class_registry.get_registry()
-    except Exception as e:
-        logger.warning("stage3_escalate: class registry unavailable: %s", e)
-        return None
-    for meta in reg.values():
-        if meta.get("pkg_name") == class_name:
-            return meta
-    return None
-
-
-def _synthesize_class_protocol(class_name: str) -> str | None:
-    """Build Stage 3 protocol from the same metadata Stage 1/2 use.
-
-    This avoids duplicating every class's instructions in protocol.md.
-    protocol.md remains an optional extension for class-specific Stage 3
-    guidance that is not already represented in metadata.
-    """
-    meta = _metadata_for_class_pkg(class_name)
-    if not meta:
-        return None
-    try:
-        from . import classes as class_registry
-        desc = class_registry.describe(meta.get("name", ""))
-    except Exception:
-        raw_desc = meta.get("description", "")
-        desc = raw_desc() if callable(raw_desc) else str(raw_desc or "")
-
-    has_handler = bool(meta.get('handler'))
-    lines = [
-        "AUTHORITATIVE class contract (generated live from registry — supersedes any prior summary).",
-        f"- Class name: {meta.get('name', class_name)}",
-        f"- Package: {class_name}",
-        f"- Stage 2 handler: {'YES — handler exists and is registered' if has_handler else 'NO — no handler'}",
-    ]
-    if desc.strip():
-        lines.extend(["", "Stage 1/2 description:", desc.strip()])
-
-    escalation_context = meta.get("escalation_context")
-    if escalation_context:
-        ctx = escalation_context() if callable(escalation_context) else str(escalation_context)
-        if ctx and ctx.strip():
-            lines.extend(["", "Escalation context:", ctx.strip()])
-
-    few_shot = meta.get("few_shot") or []
-    if few_shot:
-        lines.append("")
-        lines.append("Classifier examples:")
-        for prompt, label in few_shot[:12]:
-            lines.append(f"- {prompt!r} -> {label}")
-
-    return "\n".join(lines).strip() or None
-
-
-def _load_protocol_extension(class_name: str) -> str | None:
-    """Read optional `classes/<class_name>/protocol.md`, cached by mtime."""
-    if not _CLASS_NAME_RE.match(class_name):
-        # Defense in depth — _reason_to_class already filters, but never
-        # trust callers when the result is a filesystem path.
-        return None
-    p = _CLASSES_DIR / class_name / "protocol.md"
-    # Confirm the resolved path stays inside _CLASSES_DIR (no traversal).
-    try:
-        resolved = p.resolve()
-    except Exception:
-        return None
-    if not str(resolved).startswith(str(_CLASSES_DIR) + "/"):
-        logger.warning("stage3_escalate: %s escapes classes dir, refusing", resolved)
-        return None
-    try:
-        mtime = p.stat().st_mtime_ns
-    except FileNotFoundError:
-        # Do not cache missing files. protocol.md can be added live and
-        # should be picked up without a server restart.
-        return None
-    cached = _PROTOCOL_CACHE.get(class_name)
-    if cached and cached[0] == mtime:
-        return cached[1]
-    try:
-        text = p.read_text(encoding="utf-8").strip() or None
-    except Exception as e:
-        logger.warning("stage3_escalate: failed to read %s: %s", p, e)
-        text = None
-    _PROTOCOL_CACHE[class_name] = (mtime, text)
-    return text
-
-
-def _load_class_protocol(class_name: str) -> str | None:
-    """Return generated metadata protocol plus optional protocol.md."""
-    generated = _synthesize_class_protocol(class_name)
-    extension = _load_protocol_extension(class_name)
-    parts = [p for p in (generated, extension) if p]
-    if not parts:
-        return None
-    return "\n\n".join(parts)
-
-
-def _inject_class_protocol(body, reason: str):
-    """Prepend the matching class protocol to `body.message`.
-
-    The base protocol is synthesized from the same class metadata Stage
-    1/2 use; optional protocol.md adds Stage 3-only detail.
-    """
-    class_name = _reason_to_class(reason)
-    if not class_name:
-        return body
-    protocol = _load_class_protocol(class_name)
-    if not protocol:
-        return body
-    # ASCII XML-ish marker with explicit priority language. Easier to grep
-    # for in logs than a Unicode em-dash, and tells Opus that this block
-    # outranks the embedded user text for this class of request.
-    new_message = (
-        f"<class_protocol name=\"{class_name}\">\n"
-        f"These are runtime instructions for handling a {class_name.replace('_', ' ')} "
-        f"request. Follow them over conflicting guidance in the user message below.\n\n"
-        f"{protocol}\n"
-        f"</class_protocol>\n\n"
-        + (body.message or "")
-    )
-    try:
-        return body.model_copy(update={"message": new_message})
-    except AttributeError:
-        return body.copy(update={"message": new_message})
+    return _copy_body_with_message(body, new_message)
 
 
 def _ndjson(event_type: str, data=None, **extra) -> str:

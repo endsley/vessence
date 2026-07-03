@@ -5,6 +5,9 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from jane_web.client_tool_markers import visible_text_and_client_tool_calls
+from jane_web.music_playlists import music_play_marker
+
 
 _STAGE2_MARKER_RE = re.compile(
     r"\[\[CLIENT_TOOL:|\[\[AWAITING:|\[MUSIC_PLAY:|\[TOOL_RESULT:"
@@ -16,7 +19,7 @@ def assemble_music_text(result: dict) -> str:
     text = result.get("text", "")
     playlist_id = result.get("playlist_id")
     if playlist_id and "[MUSIC_PLAY:" not in text:
-        text = text.rstrip() + f" [MUSIC_PLAY:{playlist_id}]"
+        text = text.rstrip() + f" {music_play_marker(playlist_id)}"
     return text
 
 
@@ -49,3 +52,8 @@ def stage2_response_parts(result: dict) -> tuple[str, dict[str, Any]]:
     if result.get("conversation_end"):
         extras["conversation_end"] = True
     return text, extras
+
+
+def stage2_visible_text_and_client_tool_calls(text: str) -> tuple[str, list[dict[str, Any]]]:
+    """Strip embedded client-tool markers and return structured tool calls."""
+    return visible_text_and_client_tool_calls(text)

@@ -16,11 +16,59 @@ from memory.v1.conversation_manager import ConversationManager
 from memory.v1.memory_retrieval import invalidate_memory_summary_cache
 from llm_brain.v1.brain_adapters import BrainAdapterError, ExecutionProfile, build_execution_profile, get_brain_adapter, resolve_timeout_seconds
 from context_builder.v1.context_builder import build_jane_context_async
-from jane.config import ENV_FILE_PATH, LOGS_DIR, PROVIDER_MODELS, normalize_frontier_provider
+from jane.config import ENV_FILE_PATH, LOGS_DIR
 from jane.sanitizers import strip_client_tool_markers as _strip_client_tool_markers
 from llm_brain.v1.persistent_gemini import get_gemini_persistent_manager
 from jane.session_summary import format_session_summary, load_session_summary, update_session_summary_async
 from jane_web.broadcast import StreamBroadcaster
+from jane_web.client_tool_markers import (
+    ToolMarkerExtractor,
+    visible_text_and_client_tool_calls as _visible_text_and_client_tool_calls,
+)
+from jane_web.file_context import resolve_file_context_value
+from jane_web.music_playlists import (
+    extract_fallback_music_play_marker as _extract_fallback_music_play_marker,
+    replace_music_play_marker as _replace_music_play_marker,
+)
+from jane_web.persistent_prompt import (
+    latest_user_prompt_from_transcript as _latest_user_prompt_from_transcript,
+    persistent_turn_prompt as _persistent_turn_prompt,
+)
+from jane_web.prefetch_cache import PrefetchMemoryCache
+from jane_web.proxy_ack import pick_ack as _pick_ack
+from jane_web.proxy_brain import (
+    brain_name as _resolve_brain_name,
+    session_log_id as _session_log_id,
+    use_gemini_api as _use_gemini_api,
+    use_persistent_claude as _use_persistent_claude,
+    use_persistent_codex as _use_persistent_codex,
+    use_persistent_gemini as _use_persistent_gemini,
+    use_standing_codex as _use_standing_codex,
+    web_chat_model as _get_web_chat_model,
+)
+from jane_web.proxy_logging import LOG_MAX_BYTES, ProxyRequestLogger
+from jane_web.proxy_sessions import (
+    global_idle_blocks_prune as _global_idle_blocks_prune,
+    oldest_session_key as _oldest_session_key,
+    read_global_idle_ts as _read_global_idle_ts_from_path,
+    session_composite_key as _session_composite_key,
+    split_session_composite_key as _split_session_composite_key,
+    stale_session_keys as _stale_session_keys,
+)
+from jane_web.proxy_text import (
+    message_for_persistence as _message_for_persistence,
+    prepare_phone_tool_message as _prepare_phone_tool_message,
+    progress_snapshot as _progress_snapshot,
+)
+from jane_web.server_email_tools import execute_email_tool_serverside as _execute_email_tool_serverside
+from jane_web.tts_contract import (
+    combine_tts_detail as _combine_tts_detail,
+    enforce_tts_output_contract as _enforce_tts_output_contract,
+    normalize_tts_text as _normalize_tts_text,
+    split_tts_sentences as _split_tts_sentences,
+    take_short_tts_spoken as _take_short_tts_spoken,
+    truncate_tts_spoken_text as _truncate_tts_spoken_text,
+)
 
 logger = logging.getLogger("jane.proxy")
 
@@ -48,297 +96,6 @@ JANE_RESPONSE_WAIT_SECONDS = int(os.environ.get("JANE_RESPONSE_WAIT_SECONDS", "7
 #     reveal the raw text than to execute an unvalidated tool call.
 
 import re as _re
-import uuid as _uuid
-
-
-class ToolMarkerExtractor:
-    """Streaming extractor for ``[[CLIENT_TOOL:name:json]]`` markers.
-
-    Create one per request. Feed delta chunks in via :meth:`feed`; receive
-    (sanitized_text, list_of_tool_calls). Call :meth:`flush` at stream end
-    to reveal any residual buffered text.
-    """
-
-    _OPEN = "[[CLIENT_TOOL:"
-    _CLOSE = "]]"
-    _MAX_HOLD = 4096  # bail out if we're mid-marker for more than this
-    _FENCE = "```"
-    _TOOL_NAME_RE = _re.compile(r"^[a-z][a-z0-9_.]*$")
-
-    def __init__(self) -> None:
-        self._buffer: str = ""          # unflushed tail (may contain partial marker)
-        self._in_fence: bool = False    # inside a ``` ... ``` code block
-
-    # ── public API ──────────────────────────────────────────────────────────
-    def feed(self, chunk: str) -> tuple[str, list[dict]]:
-        """Consume a delta chunk, return (safe_visible_text, tool_calls)."""
-        if not chunk:
-            return "", []
-        self._buffer += chunk
-        if len(self._buffer) > self._MAX_HOLD * 2:
-            # Runaway: flush and reset to avoid unbounded memory growth.
-            visible = self._buffer
-            self._buffer = ""
-            return visible, []
-        return self._drain()
-
-    def flush(self) -> tuple[str, list[dict]]:
-        """Called on stream end. Reveal any residual buffered text as visible.
-
-        If a marker was opened but never closed, the partial marker becomes
-        visible text (fail-open) — users see raw `[[CLIENT_TOOL:...` which is
-        a clear signal something went wrong server-side, not a silent miss.
-
-        Post-process: strip orphan trailing `]]` that has no matching `[[`
-        opener in what we're about to emit. Opus occasionally emits an extra
-        `]]` past the real marker close (seen 2026-04-20 08:48:02: response
-        was "Message sent. [[CLIENT_TOOL:...]]]]" — the real marker got
-        stripped cleanly, leaving a stray `]]` in visible text).
-        """
-        visible, calls = self._drain(final=True)
-        tail = self._buffer
-        self._buffer = ""
-        out = visible + tail
-        out = self._strip_orphan_close(out)
-        return out, calls
-
-    @classmethod
-    def _strip_orphan_close(cls, text: str) -> str:
-        """Remove trailing `]]` that is not paired with an earlier `[[`."""
-        stripped = text.rstrip()
-        while stripped.endswith(cls._CLOSE) and cls._OPEN not in stripped:
-            # Trim the trailing `]]` and any whitespace before it.
-            stripped = stripped[: -len(cls._CLOSE)].rstrip()
-        # Preserve original trailing whitespace behaviour — if the removed
-        # tail was the only change, don't accidentally trim legit content
-        # newlines. Simpler: return stripped + any trailing whitespace the
-        # original had after its last non-whitespace char except the `]]`.
-        if stripped == text.rstrip():
-            return text
-        return stripped
-
-    # ── internals ───────────────────────────────────────────────────────────
-    def _drain(self, final: bool = False) -> tuple[str, list[dict]]:
-        """Extract complete markers from ``self._buffer``.
-
-        Updates ``self._buffer`` in place (removing consumed text) and returns
-        the safe-to-forward prefix plus any complete tool calls. When not
-        ``final``, holds back any trailing chars that could be a partial
-        opener or an unclosed marker.
-        """
-        out_visible_parts: list[str] = []
-        out_calls: list[dict] = []
-
-        while True:
-            if self._in_fence:
-                # Inside a code fence — forward everything up to the next ``` (which closes it).
-                close_idx = self._buffer.find(self._FENCE)
-                if close_idx < 0:
-                    # Still inside; flush all but a possible partial fence tail.
-                    hold = self._partial_fence_suffix_len(self._buffer)
-                    if hold > 0:
-                        out_visible_parts.append(self._buffer[:-hold])
-                        self._buffer = self._buffer[-hold:]
-                    else:
-                        out_visible_parts.append(self._buffer)
-                        self._buffer = ""
-                    break
-                end = close_idx + len(self._FENCE)
-                out_visible_parts.append(self._buffer[:end])
-                self._buffer = self._buffer[end:]
-                self._in_fence = False
-                continue  # re-scan for more
-
-            # Not in fence — look for either an opener or a fence.
-            opener_idx = self._buffer.find(self._OPEN)
-            fence_idx = self._buffer.find(self._FENCE)
-
-            # Decide which comes first (if any).
-            next_opener = opener_idx if opener_idx >= 0 else len(self._buffer) + 1
-            next_fence = fence_idx if fence_idx >= 0 else len(self._buffer) + 1
-
-            if next_opener >= len(self._buffer) and next_fence >= len(self._buffer):
-                # Neither present in the buffer.
-                # Still hold back any suffix that could be the start of an opener OR a fence.
-                hold = max(
-                    self._partial_opener_suffix_len(self._buffer),
-                    self._partial_fence_suffix_len(self._buffer),
-                )
-                if hold > 0:
-                    out_visible_parts.append(self._buffer[:-hold])
-                    self._buffer = self._buffer[-hold:]
-                else:
-                    out_visible_parts.append(self._buffer)
-                    self._buffer = ""
-                break
-
-            if next_fence < next_opener:
-                # A fence comes first — forward text up to and including the fence, enter fence state.
-                end = next_fence + len(self._FENCE)
-                out_visible_parts.append(self._buffer[:end])
-                self._buffer = self._buffer[end:]
-                self._in_fence = True
-                continue
-
-            # An opener comes first (or they tied — opener wins).
-            # Flush anything before the opener.
-            if next_opener > 0:
-                out_visible_parts.append(self._buffer[:next_opener])
-                self._buffer = self._buffer[next_opener:]
-            # Now self._buffer starts with "[[CLIENT_TOOL:". Try to find the close.
-            close_end = self._find_marker_end(self._buffer)
-            if close_end is None:
-                # Incomplete marker. If we're at stream end, fail-open (flush as visible).
-                if final or len(self._buffer) > self._MAX_HOLD:
-                    out_visible_parts.append(self._buffer)
-                    self._buffer = ""
-                # else: hold entire buffer until next chunk arrives
-                break
-            # We have a complete marker from 0 to close_end.
-            marker_text = self._buffer[:close_end]
-            parsed = self._parse_marker(marker_text)
-            if parsed is not None:
-                out_calls.append(parsed)
-            else:
-                # Malformed — fail-open, reveal as visible text.
-                out_visible_parts.append(marker_text)
-            self._buffer = self._buffer[close_end:]
-            # Loop to look for more markers in the remainder.
-
-        return "".join(out_visible_parts), out_calls
-
-    @staticmethod
-    def _partial_opener_suffix_len(buf: str) -> int:
-        """Length of the longest suffix of buf that is a proper prefix of _OPEN."""
-        open_tok = ToolMarkerExtractor._OPEN
-        max_check = min(len(buf), len(open_tok) - 1)
-        for i in range(max_check, 0, -1):
-            if buf.endswith(open_tok[:i]):
-                return i
-        return 0
-
-    @staticmethod
-    def _partial_fence_suffix_len(buf: str) -> int:
-        """Length of longest suffix of buf that is a proper prefix of ```."""
-        fence = ToolMarkerExtractor._FENCE
-        max_check = min(len(buf), len(fence) - 1)
-        for i in range(max_check, 0, -1):
-            if buf.endswith(fence[:i]):
-                return i
-        return 0
-
-    @classmethod
-    def _find_marker_end(cls, buf: str) -> int | None:
-        """Given a buffer starting with ``[[CLIENT_TOOL:``, find the byte index
-        where the matching ``]]`` ends (exclusive). Returns None if the marker
-        is not yet complete.
-
-        Parses name (up to first `:` after opener), then scans the JSON object
-        with brace/string-escape tracking, then requires the literal ``]]``.
-
-        Hard cap: if we scan past _MAX_HOLD characters without finding the
-        closing ``]]``, return a pseudo-complete position so the caller
-        fail-opens the marker. Prevents a runaway model (or injected giant
-        JSON payload) from forcing the extractor into an unbounded single
-        marker scan.
-        """
-        assert buf.startswith(cls._OPEN)
-        if len(buf) > cls._MAX_HOLD:
-            # Overflow — try to find a nearby ']]' and fail-open the whole
-            # span as visible text. If we can't find one, consume everything
-            # up to _MAX_HOLD and fail-open.
-            close = buf.find(cls._CLOSE, len(cls._OPEN))
-            if 0 < close < cls._MAX_HOLD:
-                return close + len(cls._CLOSE)
-            return cls._MAX_HOLD  # fail-open visible
-        i = len(cls._OPEN)
-        # Scan the tool name until the next ':'
-        name_start = i
-        while i < len(buf) and buf[i] != ":":
-            i += 1
-        if i >= len(buf):
-            return None  # name not yet terminated
-        if i == name_start:
-            # Empty name — malformed. Return a "pseudo-complete" position so the
-            # caller can fail-open the marker by parsing (which will also fail).
-            # Find the next ]] so we consume it all.
-            close = buf.find(cls._CLOSE, i)
-            return close + len(cls._CLOSE) if close >= 0 else None
-        i += 1  # skip the ':'
-        # Now at the start of the JSON object. Scan with brace + string state.
-        if i >= len(buf):
-            return None
-        if buf[i] != "{":
-            # JSON must start with an object per the spec. Malformed — fail-open.
-            close = buf.find(cls._CLOSE, i)
-            return close + len(cls._CLOSE) if close >= 0 else None
-        depth = 0
-        in_str = False
-        escape = False
-        json_end: int | None = None
-        while i < len(buf):
-            ch = buf[i]
-            if in_str:
-                if escape:
-                    escape = False
-                elif ch == "\\":
-                    escape = True
-                elif ch == '"':
-                    in_str = False
-            else:
-                if ch == '"':
-                    in_str = True
-                elif ch == "{":
-                    depth += 1
-                elif ch == "}":
-                    depth -= 1
-                    if depth == 0:
-                        json_end = i + 1
-                        break
-            i += 1
-        if json_end is None:
-            return None  # JSON not yet complete
-        # Expect ']]' immediately after the JSON.
-        if buf.startswith(cls._CLOSE, json_end):
-            return json_end + len(cls._CLOSE)
-        # Tolerate a few whitespace chars between '}' and ']]'
-        j = json_end
-        while j < len(buf) and buf[j] in " \t\r\n":
-            j += 1
-        if j >= len(buf):
-            return None
-        if buf.startswith(cls._CLOSE, j):
-            return j + len(cls._CLOSE)
-        # Any other char → malformed. Find the next ]] and fail-open the whole span.
-        close = buf.find(cls._CLOSE, j)
-        return close + len(cls._CLOSE) if close >= 0 else None
-
-    @classmethod
-    def _parse_marker(cls, marker_text: str) -> dict | None:
-        """Parse ``[[CLIENT_TOOL:name:{json}]]`` into {tool, args, call_id}.
-        Returns None on malformed input (caller fails-open).
-        """
-        if not marker_text.startswith(cls._OPEN) or not marker_text.endswith(cls._CLOSE):
-            return None
-        inner = marker_text[len(cls._OPEN):-len(cls._CLOSE)].rstrip()
-        colon = inner.find(":")
-        if colon < 0:
-            return None
-        name = inner[:colon].strip()
-        if not cls._TOOL_NAME_RE.match(name):
-            return None
-        json_str = inner[colon + 1:].strip()
-        try:
-            args = json.loads(json_str)
-        except Exception:
-            return None
-        if not isinstance(args, dict):
-            return None
-        return {
-            "tool": name,
-            "args": args,
-            "call_id": str(_uuid.uuid4()),
-        }
 
 
 # SMS draft open detection moved to tools/phone/server/__init__.py — see
@@ -359,516 +116,6 @@ class _SkipRouterSignal(Exception):
     warning — used when an SMS draft is open and we must route the turn
     straight to Jane's mind.
     """
-
-
-_TOOL_RESULT_OPEN = "[TOOL_RESULT:"
-_TOOL_RESULT_CLOSE = "]"
-
-
-def _extract_tool_results(user_message: str) -> tuple[str, list[dict]]:
-    """Strip leading [TOOL_RESULT:{json}] markers from a user message.
-
-    Uses brace-counting + string-escape tracking (same technique as
-    ToolMarkerExtractor) instead of a non-greedy regex, so nested JSON
-    objects and string values containing ``}]`` are parsed correctly.
-
-    Returns (clean_message, list_of_parsed_results). Any malformed marker
-    stops the scan; the remaining text (with the bad marker intact) is
-    returned as the cleaned message so the user sees the raw failure
-    rather than a silent drop.
-    """
-    results: list[dict] = []
-    cleaned = user_message
-    while True:
-        # Skip leading whitespace between markers.
-        stripped = cleaned.lstrip()
-        if not stripped.startswith(_TOOL_RESULT_OPEN):
-            break
-        # Position of the '{' inside the marker.
-        json_start = len(cleaned) - len(stripped) + len(_TOOL_RESULT_OPEN)
-        # Skip optional whitespace after the "[TOOL_RESULT:" prefix.
-        while json_start < len(cleaned) and cleaned[json_start] in " \t":
-            json_start += 1
-        if json_start >= len(cleaned) or cleaned[json_start] != "{":
-            break
-        # Brace-count scan to find the matching closing '}'.
-        depth = 0
-        in_str = False
-        escape = False
-        i = json_start
-        json_end: int | None = None
-        while i < len(cleaned):
-            ch = cleaned[i]
-            if in_str:
-                if escape:
-                    escape = False
-                elif ch == "\\":
-                    escape = True
-                elif ch == '"':
-                    in_str = False
-            else:
-                if ch == '"':
-                    in_str = True
-                elif ch == "{":
-                    depth += 1
-                elif ch == "}":
-                    depth -= 1
-                    if depth == 0:
-                        json_end = i + 1
-                        break
-            i += 1
-        if json_end is None:
-            break  # incomplete JSON — leave marker in place
-        # Expect ']' immediately after the JSON (allow whitespace between).
-        j = json_end
-        while j < len(cleaned) and cleaned[j] in " \t":
-            j += 1
-        if j >= len(cleaned) or cleaned[j] != _TOOL_RESULT_CLOSE:
-            break
-        try:
-            payload = json.loads(cleaned[json_start:json_end])
-        except Exception:
-            break
-        if not isinstance(payload, dict):
-            break
-        results.append(payload)
-        # Consume the marker and any trailing whitespace.
-        cleaned = cleaned[j + 1:].lstrip()
-    return cleaned, results
-
-
-_DELIM_OPEN = (
-    "[PHONE TOOL RESULTS — results from tools that ran on the Android client since the last turn. "
-    "Use these as background context, but ALWAYS prioritize the user's current message below. "
-    "If the user has moved on to a new topic, respond to THEIR message first — "
-    "do not fixate on stale tool results. Only mention tool results if they are "
-    "directly relevant to what the user is asking NOW.]"
-)
-_DELIM_CLOSE = "[END PHONE TOOL RESULTS]"
-
-
-def _neutralize_delimiters(s: str) -> str:
-    """Defuse any substring that could be mistaken for the tool-result block
-    delimiter by an attacker-supplied message body or tool payload.
-
-    Strategy: replace newlines in the untrusted string with literal ``\\n``
-    escape sequences (so the tool result block stays single-line per entry
-    and can't inject newlines of its own) and replace the literal delimiter
-    strings with a zero-width-marked variant that cannot be mistaken for the
-    real delimiter by a downstream regex.
-    """
-    if not isinstance(s, str):
-        return str(s)
-    # Collapse newlines so tool content can't inject block boundaries.
-    s = s.replace("\r\n", " ").replace("\r", " ").replace("\n", " ")
-    # Neutralize anything that looks like our delimiter markers.
-    s = s.replace("[PHONE TOOL RESULTS", "[phone_tool_results")
-    s = s.replace("[END PHONE TOOL RESULTS", "[end_phone_tool_results")
-    # Cap length to prevent absurd strings blowing up the context.
-    if len(s) > 2000:
-        s = s[:2000] + "…(truncated)"
-    return s
-
-
-def _format_tool_results_for_brain(results: list[dict]) -> str:
-    """Format a list of parsed tool results as a context block that will be
-    prepended to the user message the standing brain sees.
-
-    All untrusted string fields (message, tool name, data values) are run
-    through ``_neutralize_delimiters`` before interpolation so that a
-    compromised tool payload or a malicious SMS body cannot forge the block
-    boundary and inject fake high-priority context into Jane's mind.
-    """
-    if not results:
-        return ""
-    lines = [_DELIM_OPEN]
-    for r in results:
-        tool = _neutralize_delimiters(r.get("tool", "?"))
-        status = _neutralize_delimiters(r.get("status", "?"))
-        message = _neutralize_delimiters(r.get("message", ""))
-        lines.append(f"- tool={tool} status={status} message={message!r}")
-        data = r.get("data")
-        if isinstance(data, dict) and data:
-            try:
-                # Serialize to compact JSON, then neutralize the resulting
-                # string. This preserves data structure for Jane while
-                # defending against delimiter injection inside JSON string
-                # values (e.g., a message body that contains the literal
-                # "[END PHONE TOOL RESULTS]" text).
-                json_str = _neutralize_delimiters(
-                    json.dumps(data, ensure_ascii=True)
-                )
-                lines.append(f"  data={json_str}")
-            except Exception:
-                pass
-        extra = r.get("extra")
-        if isinstance(extra, dict) and extra:
-            try:
-                lines.append(
-                    f"  extra={_neutralize_delimiters(json.dumps(extra, ensure_ascii=True))}"
-                )
-            except Exception:
-                pass
-    lines.append(_DELIM_CLOSE)
-    return "\n".join(lines)
-
-
-def _latest_user_prompt_from_transcript(transcript: str) -> str:
-    """Extract the newest user turn from a built Jane transcript."""
-    if not transcript:
-        return ""
-    _prefix, sep, tail = transcript.rpartition("User:")
-    prompt = tail if sep else transcript
-    for marker in ("\nJane:", "\nAssistant:"):
-        marker_idx = prompt.find(marker)
-        if marker_idx >= 0:
-            prompt = prompt[:marker_idx]
-            break
-    return prompt.strip().removesuffix("Jane:").strip()
-
-
-def _execute_email_tool_serverside(tc: dict) -> str:
-    """Execute an email.* tool call server-side and return a human-readable
-    result string. Called from the emit() function when the brain emits
-    [[CLIENT_TOOL:email.*:...]] markers — these are intercepted before reaching
-    the Android client because email is a server-side capability (Gmail API).
-
-    Returns a short status string (or empty string on failure) that gets
-    appended to the visible delta stream.
-    """
-    tool = tc.get("tool", "")
-    args = tc.get("args", {})
-    try:
-        if tool == "email.read_inbox":
-            from agent_skills.email_tools import read_inbox
-            limit = args.get("limit", 10)
-            query = args.get("query", "is:unread")
-            emails = read_inbox(limit=limit, query=query)
-            if not emails:
-                return "\n\nNo unread emails found."
-            lines = [f"\n\nFound {len(emails)} email(s):\n"]
-            for e in emails:
-                status = "NEW" if e.get("is_unread") else "read"
-                lines.append(f"- [{status}] From: {e['sender']} — {e['subject']}")
-                if e.get("snippet"):
-                    lines.append(f"  Preview: {e['snippet'][:150]}")
-            return "\n".join(lines)
-        elif tool == "email.read":
-            from agent_skills.email_tools import read_email
-            msg_id = args.get("message_id", "")
-            if not msg_id:
-                return "\n\nError: no message_id provided."
-            email_data = read_email(msg_id)
-            body = (email_data.get("body") or "")[:2000]
-            return (
-                f"\n\nEmail from {email_data.get('sender', '?')}:\n"
-                f"Subject: {email_data.get('subject', '?')}\n"
-                f"Date: {email_data.get('date', '?')}\n\n"
-                f"{body}"
-            )
-        elif tool == "email.search":
-            from agent_skills.email_tools import search_emails
-            query = args.get("query", "")
-            limit = args.get("limit", 10)
-            emails = search_emails(query=query, limit=limit)
-            if not emails:
-                return f"\n\nNo emails found for query: {query}"
-            lines = [f"\n\nSearch results ({len(emails)} emails):\n"]
-            for e in emails:
-                lines.append(f"- From: {e['sender']} — {e['subject']}")
-            return "\n".join(lines)
-        elif tool == "email.send":
-            # Opus is responsible for getting explicit user confirmation BEFORE
-            # emitting the marker — see CLAUDE.md "Email Protocols → Sending".
-            # By the time the marker reaches us, the user has already said yes,
-            # so just send.
-            from agent_skills.email_tools import send_email
-            to = (args.get("to") or "").strip()
-            subject = (args.get("subject") or "").strip()
-            body = (args.get("body") or "").strip()
-            from_email = (
-                args.get("from_email")
-                or args.get("from")
-                or args.get("sender")
-                or ""
-            ).strip() or None
-            if not to:
-                return "\n\nEmail not sent: no recipient address provided."
-            if not body:
-                return "\n\nEmail not sent: empty body."
-            result = send_email(
-                to=to,
-                subject=subject,
-                body=body,
-                from_email=from_email,
-            )
-            sender = result.get("from_email") or from_email or "default Gmail account"
-            logger.info(
-                "Email sent: id=%s from=%s to=%s",
-                result.get("message_id", "?"),
-                sender,
-                to,
-            )
-            return f"\n\n[Email sent from {sender} to {to}.]"
-        elif tool == "email.delete":
-            # Same contract as email.send — Opus confirms first, then emits.
-            from agent_skills.email_tools import delete_email
-            msg_id = (args.get("message_id") or "").strip()
-            if not msg_id:
-                return "\n\nEmail not deleted: no message_id provided."
-            delete_email(msg_id)
-            logger.info("Email trashed: id=%s", msg_id)
-            return f"\n\n[Email {msg_id} moved to trash.]"
-        else:
-            logger.warning("Unknown email tool: %s", tool)
-            return ""
-    except RuntimeError as e:
-        logger.warning("Email tool %s failed (no credentials): %s", tool, e)
-        return f"\n\nGmail is not set up yet. Please sign in with Google on the Vessence web UI to enable email."
-    except Exception as e:
-        logger.error("Email tool %s failed: %s", tool, e)
-        return f"\n\nEmail error: {e}"
-
-
-CODE_MAP_KEYWORDS = (
-    # Code navigation
-    "function", "class", "file", "route", "endpoint", "handler",
-    "module", "script", "config", "dockerfile",
-    # Actions on code
-    "refactor", "rewrite", "modify", "update", "change",
-    "create", "build", "remove", "delete",
-    # Debugging
-    "crash", "error", "log", "timeout", "broke", "broken", "fail",
-    "investigate", "trace", "inspect",
-    # Vessence components
-    "jane", "amber", "essence", "vault", "proxy", "brain",
-    "librarian", "archivist", "session", "context",
-    # Infrastructure
-    "docker", "install", "hook", "startup",
-    # Auto-evolved from daily conversations
-    "web",
-    # Auto-evolved from daily conversations
-    "text",
-    "believe",
-    "mode",
-    "speech",
-    # Auto-evolved from daily conversations
-    "guide",
-    "user",
-    "gemini",
-    "claude",
-    "system",
-    "tools",
-    # Auto-evolved from daily conversations
-    "google",
-    # Auto-evolved from daily conversations
-    "switch",
-    "msg",
-    "switching",
-    "switched",
-    "openai",
-    # Auto-evolved from daily conversations
-    "stop",
-    "accent",
-    # Auto-evolved from daily conversations
-    "briefing",
-    "send",
-    "daily",
-    "news",
-    "article",
-    "server",
-    "vessence",
-    "don",
-    "link",
-    "chrome",
-    # Auto-evolved from daily conversations
-    "message",
-    "wife",
-    "love",
-    "version",
-    # Auto-evolved from daily conversations
-    "currently",
-    "gemma",
-    "xtps",
-    "single",
-    "using",
-    "warmed",
-    "initial",
-    "sync",
-    "push",
-    "button",
-    # Auto-evolved from daily conversations
-    "play",
-    # Auto-evolved from daily conversations
-    "stars",
-    "full",
-    "sky",
-    "check",
-    # Auto-evolved from daily conversations
-    "online",
-    # Auto-evolved from daily conversations
-    "skill",
-    "stage",
-    # Auto-evolved from daily conversations
-    "deeply",
-    "resolve",
-    "android",
-    "phrase",
-    "responding",
-    "memory",
-    "phone_number",
-    "number",
-    "body",
-    "steps",
-    # Auto-evolved from daily conversations
-    "end",
-    "conversation",
-    "current",
-    "state",
-    "intent",
-    "question",
-    "answer",
-    "pending",
-    "stage3_followup",
-    "reply",
-    # Auto-evolved from daily conversations
-    "shared",
-    "name",
-    "present",
-    "request",
-    "code",
-    "examples",
-    "package",
-    "short",
-    "per",
-    "generated",
-    # Auto-evolved from daily conversations
-    "recent",
-    "clinic",
-    "list",
-    "category",
-    "others",
-    "add",
-    "item",
-    "runtime",
-    "multi",
-    "home",
-    # Auto-evolved from daily conversations
-    "entities",
-    "todo",
-    "calendar",
-    "contract",
-    "metadata",
-    "class_protocol",
-    "instructions",
-    "description",
-    "follow",
-    "guidance",
-    # Auto-evolved from daily conversations
-    "schedules",
-    "info",
-    "conflicting",
-    "handling",
-    "sms",
-    "needs",
-    "opus",
-    "side",
-    "wants",
-    "via",
-    # Auto-evolved from daily conversations
-    "schedule",
-    "data",
-    "solomon",
-    "patients",
-    "active",
-    "patient",
-    "melissa",
-    "apr",
-    "cancelled",
-    "names",
-    # Auto-evolved from daily conversations
-    "protocol",
-    "block",
-    "summary",
-    "flow",
-    "turn",
-    "source",
-    "includes",
-    "read_calendar",
-    "fetches",
-    "kathia",
-    # Auto-evolved from daily conversations
-    "items",
-    "urgent",
-    "students",
-    "wooden",
-    "mirrors",
-    "curtain",
-    "rods",
-    "door",
-    "min",
-    "todo_list_cache",
-    # Auto-evolved from daily conversations
-    "json",
-    "downstairs",
-    "finally",
-    "categories",
-    "laptop",
-    "gym",
-    "rebuild",
-    "truth",
-    "docs",
-    "bed",
-    # Auto-evolved from daily conversations
-    "requests",
-    "removal",
-    "summarization",
-    "extra",
-    "narrative",
-    "api",
-    "events",
-    "phrasings",
-    "standard",
-    "stages",
-    # Auto-evolved from daily conversations
-    "spoken",
-    "university",
-    "gmail",
-    "email",
-    "private",
-    "talking",
-    "asks",
-    "texting",
-    "due",
-    "credit",
-    # Auto-evolved from daily conversations
-    "timer",
-    # Auto-evolved from daily conversations
-    "term",
-    "working",
-    # Auto-evolved from daily conversations
-    "model",
-    "language",
-    # Auto-evolved from daily conversations
-    "project",
-    "codex",
-    "cold",
-    # Auto-evolved from daily conversations
-    "education",
-    "access",
-    "student",
-    "view",
-    "header",
-    # Auto-evolved from daily conversations
-    "yourself",
-    "image",
-    "restart",
-    # Auto-evolved from daily conversations
-    "waterlily",
-    # Auto-evolved from daily conversations
-    "auto",
-)
-
 
 def _maybe_prepend_code_map(message: str) -> tuple[str, bool]:
     """Disabled — the brain has tools (Grep/Read) to find symbols on demand,
@@ -909,19 +156,13 @@ def _read_global_idle_ts() -> float:
     written by jane_web on every API call, which would defer archival forever
     while Jane is in active use).
     """
-    try:
-        with open(_CC_ACTIVITY_PATH) as f:
-            ts = float(json.load(f).get("last_active_ts", 0))
-        # Clamp future timestamps (clock skew / corrupt write) to "now" so a
-        # bad write can't block archival forever.
-        return min(ts, time.time())
-    except Exception:
-        return 0.0
+    return _read_global_idle_ts_from_path(_CC_ACTIVITY_PATH, now_ts=time.time())
 
 # ── Prefetch cache ─────────────────────────────────────────────────────────────
-_prefetch_cache: dict[str, dict] = {}  # {session_id: {"result": str, "timestamp": float}}
-_PREFETCH_CACHE_MAX = 100  # hard cap on entries to prevent unbounded growth
-PREFETCH_TTL = 60  # seconds
+_prefetch_memory_cache = PrefetchMemoryCache()
+_prefetch_cache = _prefetch_memory_cache.entries  # {session_id: {"result": str, "timestamp": float}}
+_PREFETCH_CACHE_MAX = _prefetch_memory_cache.max_entries  # hard cap on entries to prevent unbounded growth
+PREFETCH_TTL = _prefetch_memory_cache.ttl_seconds  # seconds
 
 
 def run_prefetch_memory(session_id: str, user_id: str | None = None) -> None:
@@ -930,9 +171,7 @@ def run_prefetch_memory(session_id: str, user_id: str | None = None) -> None:
     Called from the /api/jane/prefetch-memory endpoint. Runs the query in a
     background thread so the HTTP response returns immediately.
     """
-    now = time.time()
-    cached = _prefetch_cache.get(session_id)
-    if cached and (now - cached["timestamp"]) < PREFETCH_TTL:
+    if _prefetch_memory_cache.is_fresh(session_id):
         logger.debug("[%s] Prefetch: still fresh, skipping", _session_log_id(session_id))
         return
 
@@ -949,13 +188,7 @@ def run_prefetch_memory(session_id: str, user_id: str | None = None) -> None:
             )
         except Exception:
             result = ""
-        _prefetch_cache[session_id] = {"result": result, "timestamp": time.time()}
-        # Prune expired entries to prevent unbounded growth
-        if len(_prefetch_cache) > _PREFETCH_CACHE_MAX:
-            now = time.time()
-            expired = [k for k, v in _prefetch_cache.items() if now - v["timestamp"] > PREFETCH_TTL]
-            for k in expired:
-                _prefetch_cache.pop(k, None)
+        _prefetch_memory_cache.store(session_id, result)
         elapsed_ms = int((time.perf_counter() - start) * 1000)
         logger.info("[%s] Prefetch memory cached in %dms (%d chars)", _session_log_id(session_id), elapsed_ms, len(result))
 
@@ -965,30 +198,11 @@ def run_prefetch_memory(session_id: str, user_id: str | None = None) -> None:
 
 def get_prefetch_result(session_id: str) -> str:
     """Return a cached prefetch memory result if it is still within TTL, else ''."""
-    cached = _prefetch_cache.get(session_id)
-    if cached and (time.time() - cached["timestamp"]) < PREFETCH_TTL:
-        return cached.get("result", "")
-    return ""
+    return _prefetch_memory_cache.get(session_id)
 
 
 def _get_brain_name() -> str:
-    env_path = Path(ENV_FILE_PATH) if ENV_FILE_PATH else None
-    if env_path and env_path.exists():
-        for raw_line in env_path.read_text(encoding="utf-8", errors="replace").splitlines():
-            line = raw_line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key, value = line.split("=", 1)
-            if key.strip() == "JANE_BRAIN":
-                provider = normalize_frontier_provider(value.strip())
-                if provider in {"claude", "gemini", "openai"}:
-                    os.environ["JANE_BRAIN"] = provider
-                    return provider
-    return normalize_frontier_provider(os.environ.get("JANE_BRAIN", "gemini"))
-
-
-def _session_log_id(session_id: str | None) -> str:
-    return session_id[:12] if session_id else "none"
+    return _resolve_brain_name(env_file_path=ENV_FILE_PATH, environ=os.environ)
 
 
 def _get_timeout_seconds(brain_name: str) -> int:
@@ -999,67 +213,26 @@ def _get_execution_profile(brain_name: str | None = None) -> ExecutionProfile:
     return build_execution_profile(brain_name or _get_brain_name())
 
 
-def _use_gemini_api(brain_name: str) -> bool:
-    """Use Gemini API brain instead of CLI-based persistent Gemini."""
-    return brain_name == "gemini" and os.environ.get("JANE_WEB_GEMINI_API", "1") != "0"
-
-def _use_persistent_gemini(brain_name: str) -> bool:
-    # Disabled by default — Gemini API brain is preferred
-    return brain_name == "gemini" and os.environ.get("JANE_WEB_PERSISTENT_GEMINI", "0") == "1"
-
-
-def _use_persistent_claude(brain_name: str) -> bool:
-    return brain_name == "claude" and os.environ.get("JANE_WEB_PERSISTENT_CLAUDE", "1") != "0"
-
-
-def _use_standing_codex(brain_name: str) -> bool:
-    return brain_name in {"openai", "codex"} and os.environ.get("JANE_WEB_STANDING_CODEX", "1") != "0"
-
-
-def _use_persistent_codex(brain_name: str) -> bool:
-    return (
-        brain_name in {"openai", "codex"}
-        and not _use_standing_codex(brain_name)
-        and os.environ.get("JANE_WEB_PERSISTENT_CODEX", "1") != "0"
-    )
-
-
-def _get_web_chat_model(brain_name: str) -> str:
-    env_vars = {
-        "claude": "JANE_MODEL_CLAUDE",
-        "gemini": "JANE_MODEL_GEMINI",
-        "openai": "JANE_MODEL_OPENAI",
-        "codex": "JANE_MODEL_OPENAI",
-    }
-    normalized = normalize_frontier_provider(brain_name)
-    env_var = env_vars.get(normalized)
-    if env_var:
-        configured = os.environ.get(env_var, "").strip()
-        if configured:
-            return configured
-    return PROVIDER_MODELS.get(normalized, PROVIDER_MODELS["claude"])["smart"]
-
-
 def _prune_stale_sessions(now: float | None = None) -> None:
     now_ts = time.time() if now is None else now
     # Global-idle gate: only archive when Chieh is also idle in Claude Code.
     # idle_state.json is updated by ~/.claude/hooks/idle_state_hook.sh on every
     # CC prompt, so an active CC session keeps Jane archival deferred.
     global_last = _read_global_idle_ts()
-    if global_last and now_ts - global_last <= SESSION_IDLE_TTL_SECONDS:
+    if _global_idle_blocks_prune(now_ts, global_last, SESSION_IDLE_TTL_SECONDS):
         return
-    expired_keys = [
-        composite_key
-        for composite_key, state in list(_sessions.items())
-        if now_ts - state.last_accessed_at > SESSION_IDLE_TTL_SECONDS
-    ]
+    expired_keys = _stale_session_keys(
+        _sessions,
+        now_ts=now_ts,
+        ttl_seconds=SESSION_IDLE_TTL_SECONDS,
+    )
     for composite_key in expired_keys:
         logger.info(
             "[%s] Expiring idle Jane web session after %ds",
             composite_key[:12],
             int(now_ts - _sessions[composite_key].last_accessed_at),
         )
-        user_id, _, session_id = composite_key.partition(":")
+        user_id, session_id = _split_session_composite_key(composite_key)
         if not session_id:
             # Malformed key — drop without calling end_session to avoid crash.
             _sessions.pop(composite_key, None)
@@ -1091,20 +264,14 @@ async def _execute_brain_sync(user_id: str, session_id: str, brain_name: str, ad
         profile = _get_execution_profile(brain_name)
         # First turn sends full context; subsequent turns only send the new message
         session = await manager.get(user_id, session_id)
-        if session.is_fresh():
-            prompt_text = f"{request_ctx.system_prompt}\n\n{request_ctx.transcript}".strip()
-        elif not request_ctx.system_prompt:
-            # Skip-context path: safety transcript (session summary + recent
-            # history) is already baked into request_ctx.transcript — send it
-            # whole so the brain sees conversation context after rotation.
-            prompt_text = request_ctx.transcript
-        else:
-            # Only send the latest user message — Claude remembers the rest
-            prompt_text = _latest_user_prompt_from_transcript(request_ctx.transcript)
-            # Inject code map on-demand for code-related follow-up messages
-            prompt_text, _cm = _maybe_prepend_code_map(prompt_text)
-            if _cm:
-                logger.info("[%s] Code map injected (persistent claude sync)", session_id[:12] if 'session_id' in dir() else "?")
+        prompt_text, _cm = _persistent_turn_prompt(
+            system_prompt=request_ctx.system_prompt,
+            transcript=request_ctx.transcript,
+            is_fresh=session.is_fresh(),
+            code_map_loader=_maybe_prepend_code_map,
+        )
+        if _cm:
+            logger.info("[%s] Code map injected (persistent claude sync)", session_id[:12])
         return await manager.run_turn(
             user_id,
             session_id,
@@ -1118,15 +285,14 @@ async def _execute_brain_sync(user_id: str, session_id: str, brain_name: str, ad
         manager = get_codex_app_server_manager()
         profile = _get_execution_profile(brain_name)
         session = await manager.get(user_id, session_id)
-        if session.is_fresh():
-            prompt_text = f"{request_ctx.system_prompt}\n\n{request_ctx.transcript}".strip()
-        elif not request_ctx.system_prompt:
-            prompt_text = request_ctx.transcript
-        else:
-            prompt_text = _latest_user_prompt_from_transcript(request_ctx.transcript)
-            prompt_text, _cm = _maybe_prepend_code_map(prompt_text)
-            if _cm:
-                logger.info("[%s] Code map injected (standing codex sync)", session_id[:12])
+        prompt_text, _cm = _persistent_turn_prompt(
+            system_prompt=request_ctx.system_prompt,
+            transcript=request_ctx.transcript,
+            is_fresh=session.is_fresh(),
+            code_map_loader=_maybe_prepend_code_map,
+        )
+        if _cm:
+            logger.info("[%s] Code map injected (standing codex sync)", session_id[:12])
         return await manager.run_turn(
             user_id,
             session_id,
@@ -1140,15 +306,14 @@ async def _execute_brain_sync(user_id: str, session_id: str, brain_name: str, ad
         manager = get_codex_persistent_manager()
         profile = _get_execution_profile(brain_name)
         session = await manager.get(user_id, session_id)
-        if session.is_fresh():
-            prompt_text = f"{request_ctx.system_prompt}\n\n{request_ctx.transcript}".strip()
-        elif not request_ctx.system_prompt:
-            prompt_text = request_ctx.transcript
-        else:
-            prompt_text = _latest_user_prompt_from_transcript(request_ctx.transcript)
-            prompt_text, _cm = _maybe_prepend_code_map(prompt_text)
-            if _cm:
-                logger.info("[%s] Code map injected (persistent codex sync)", session_id[:12])
+        prompt_text, _cm = _persistent_turn_prompt(
+            system_prompt=request_ctx.system_prompt,
+            transcript=request_ctx.transcript,
+            is_fresh=session.is_fresh(),
+            code_map_loader=_maybe_prepend_code_map,
+        )
+        if _cm:
+            logger.info("[%s] Code map injected (persistent codex sync)", session_id[:12])
         return await manager.run_turn(
             user_id,
             session_id,
@@ -1187,19 +352,15 @@ async def _execute_brain_stream(user_id: str, session_id: str, brain_name: str, 
         manager = get_claude_persistent_manager()
         profile = _get_execution_profile(brain_name)
         session = await manager.get(user_id, session_id)
-        if session.is_fresh():
-            prompt_text = f"{request_ctx.system_prompt}\n\n{request_ctx.transcript}".strip()
-        elif not request_ctx.system_prompt:
-            # Skip-context path: safety transcript already contains session
-            # summary + recent history — send whole so brain keeps context.
-            prompt_text = request_ctx.transcript
-        else:
-            prompt_text = _latest_user_prompt_from_transcript(request_ctx.transcript)
-            # Inject code map on-demand for code-related follow-up messages
-            prompt_text, _cm = _maybe_prepend_code_map(prompt_text)
-            if _cm:
-                emit("status", "Loading code map for code-related query...")
-                logger.info("[%s] Code map injected (persistent claude stream)", session_id[:12])
+        prompt_text, _cm = _persistent_turn_prompt(
+            system_prompt=request_ctx.system_prompt,
+            transcript=request_ctx.transcript,
+            is_fresh=session.is_fresh(),
+            code_map_loader=_maybe_prepend_code_map,
+        )
+        if _cm:
+            emit("status", "Loading code map for code-related query...")
+            logger.info("[%s] Code map injected (persistent claude stream)", session_id[:12])
         return await manager.run_turn(
             user_id,
             session_id,
@@ -1215,16 +376,15 @@ async def _execute_brain_stream(user_id: str, session_id: str, brain_name: str, 
         manager = get_codex_app_server_manager()
         profile = _get_execution_profile(brain_name)
         session = await manager.get(user_id, session_id)
-        if session.is_fresh():
-            prompt_text = f"{request_ctx.system_prompt}\n\n{request_ctx.transcript}".strip()
-        elif not request_ctx.system_prompt:
-            prompt_text = request_ctx.transcript
-        else:
-            prompt_text = _latest_user_prompt_from_transcript(request_ctx.transcript)
-            prompt_text, _cm = _maybe_prepend_code_map(prompt_text)
-            if _cm:
-                emit("status", "Loading code map for code-related query...")
-                logger.info("[%s] Code map injected (standing codex stream)", session_id[:12])
+        prompt_text, _cm = _persistent_turn_prompt(
+            system_prompt=request_ctx.system_prompt,
+            transcript=request_ctx.transcript,
+            is_fresh=session.is_fresh(),
+            code_map_loader=_maybe_prepend_code_map,
+        )
+        if _cm:
+            emit("status", "Loading code map for code-related query...")
+            logger.info("[%s] Code map injected (standing codex stream)", session_id[:12])
         return await manager.run_turn(
             user_id,
             session_id,
@@ -1243,16 +403,15 @@ async def _execute_brain_stream(user_id: str, session_id: str, brain_name: str, 
         manager = get_codex_persistent_manager()
         profile = _get_execution_profile(brain_name)
         session = await manager.get(user_id, session_id)
-        if session.is_fresh():
-            prompt_text = f"{request_ctx.system_prompt}\n\n{request_ctx.transcript}".strip()
-        elif not request_ctx.system_prompt:
-            prompt_text = request_ctx.transcript
-        else:
-            prompt_text = _latest_user_prompt_from_transcript(request_ctx.transcript)
-            prompt_text, _cm = _maybe_prepend_code_map(prompt_text)
-            if _cm:
-                emit("status", "Loading code map for code-related query...")
-                logger.info("[%s] Code map injected (persistent codex stream)", session_id[:12])
+        prompt_text, _cm = _persistent_turn_prompt(
+            system_prompt=request_ctx.system_prompt,
+            transcript=request_ctx.transcript,
+            is_fresh=session.is_fresh(),
+            code_map_loader=_maybe_prepend_code_map,
+        )
+        if _cm:
+            emit("status", "Loading code map for code-related query...")
+            logger.info("[%s] Code map injected (persistent codex stream)", session_id[:12])
         return await manager.run_turn(
             user_id,
             session_id,
@@ -1276,7 +435,7 @@ async def _execute_brain_stream(user_id: str, session_id: str, brain_name: str, 
 
 def _get_session(user_id: str, session_id: str) -> JaneSessionState:
     _prune_stale_sessions()
-    composite_key = f"{user_id}:{session_id}"
+    composite_key = _session_composite_key(user_id, session_id)
     state = _sessions.get(composite_key)
     if state is None:
         # Evict oldest session if at capacity. Route through end_session() so
@@ -1285,9 +444,9 @@ def _get_session(user_id: str, session_id: str) -> JaneSessionState:
         # especially likely now that the global-idle gate keeps sessions
         # in the table longer.
         if len(_sessions) >= _MAX_SESSIONS:
-            oldest_key = min(_sessions, key=lambda k: _sessions[k].last_accessed_at)
+            oldest_key = _oldest_session_key(_sessions)
             logger.info("[%s] Evicting oldest session to stay under %d cap", oldest_key[:12], _MAX_SESSIONS)
-            evict_user, _, evict_sid = oldest_key.partition(":")
+            evict_user, evict_sid = _split_session_composite_key(oldest_key)
             if evict_sid:
                 try:
                     end_session(evict_user, evict_sid)
@@ -1307,204 +466,18 @@ def _get_session(user_id: str, session_id: str) -> JaneSessionState:
     return state
 
 
-_FOLLOWUP_FILE_MARKERS = (
-    "delete it",
-    "remove it",
-    "rename it",
-    "move it",
-    "open it",
-    "show it",
-    "send it",
-    "that file",
-    "that image",
-    "that photo",
-    "that picture",
-    "the image",
-    "the photo",
-    "the picture",
-    "the file",
-    "this image",
-    "this photo",
-    "this picture",
-)
-
-
 def _resolve_file_context(state: JaneSessionState, message: str, file_context: str | None) -> str | None:
-    if file_context:
-        state.recent_file_context = file_context
-        logger.info("Resolved file context from request payload chars=%d", len(file_context or ""))
-        return file_context
-    lowered = (message or "").strip().lower()
-    if state.recent_file_context and any(marker in lowered for marker in _FOLLOWUP_FILE_MARKERS):
+    resolved, source = resolve_file_context_value(
+        message=message,
+        file_context=file_context,
+        recent_file_context=state.recent_file_context,
+    )
+    if source == "request":
+        state.recent_file_context = resolved or ""
+        logger.info("Resolved file context from request payload chars=%d", len(resolved or ""))
+    elif source == "recent":
         logger.info("Resolved file context from recent follow-up context chars=%d", len(state.recent_file_context or ""))
-        return state.recent_file_context
-    return file_context
-
-
-_STAGE3_CLASS_PROTOCOL_RE = _re.compile(
-    r'<class_protocol[^>]*>.*?</class_protocol>\s*', _re.DOTALL,
-)
-_STAGE3_EXTRACTED_PARAMS_RE = _re.compile(
-    r'\[EXTRACTED PARAMS\].*?(?=\n\n|\Z)', _re.DOTALL,
-)
-_STAGE3_CONV_STATE_RE = _re.compile(
-    r'\[CURRENT CONVERSATION STATE\].*?\[END CURRENT CONVERSATION STATE\]\s*',
-    _re.DOTALL,
-)
-_STAGE3_VOICE_HINT_RE = _re.compile(
-    r'\(voice request — .*?\)\s*', _re.DOTALL,
-)
-
-
-def _strip_stage3_injections(message: str) -> str:
-    """Remove stage3_escalate injection blocks from a user message.
-
-    stage3_escalate prepends class_protocol, EXTRACTED PARAMS, CURRENT
-    CONVERSATION STATE, and voice hints to the user message before passing
-    it to v1's stream_message/send_message. These are brain-only context
-    and must not leak into persistence (conversation history, thematic
-    memory, session summary, FIFO) — doing so causes summarizer LLMs to
-    produce confused output that snowballs across subsequent turns.
-    """
-    if not message:
-        return message
-    text = _STAGE3_CLASS_PROTOCOL_RE.sub('', message)
-    text = _STAGE3_EXTRACTED_PARAMS_RE.sub('', text)
-    text = _STAGE3_CONV_STATE_RE.sub('', text)
-    text = _STAGE3_VOICE_HINT_RE.sub('', text)
-    return text.strip()
-
-
-_TTS_SPOKEN_BLOCK_RE = _re.compile(
-    r"<spoken>(.*?)</spoken>",
-    _re.IGNORECASE | _re.DOTALL,
-)
-_TTS_SPOKEN_TAG_RE = _re.compile(r"</?(?:spoken|visual|think|thinking|artifact)>", _re.IGNORECASE)
-_TTS_CLIENT_TOOL_MARKER_RE = _re.compile(r"\[\[CLIENT_TOOL:[a-z][a-z0-9_.]*:\{[\s\S]*?\}\]\]", _re.IGNORECASE)
-_TTS_MUSIC_PLAY_RE = _re.compile(r"\[MUSIC_PLAY:[^\]]+\]")
-_TTS_SENTENCE_RE = _re.compile(r"[^.!?]+[.!?]?", _re.DOTALL)
-_TTS_ABBREVIATIONS = (
-    "Mr.",
-    "Mrs.",
-    "Ms.",
-    "Dr.",
-    "Prof.",
-    "St.",
-    "Jr.",
-    "Sr.",
-    "vs.",
-    "e.g.",
-    "i.e.",
-    "etc.",
-)
-_TTS_SPOKEN_SENTENCE_LIMIT = 2
-_TTS_SPOKEN_MAX_CHARS = 220
-_TTS_SPOKEN_MAX_WORDS = 28
-
-
-def _normalize_tts_text(raw: str) -> str:
-    if not raw:
-        return ""
-    text = _TTS_SPOKEN_TAG_RE.sub("", raw)
-    text = _TTS_CLIENT_TOOL_MARKER_RE.sub("", text)
-    text = _TTS_MUSIC_PLAY_RE.sub("", text)
-    return _re.sub(r"\s+", " ", text).strip(" \t\r\n-—–")
-
-
-def _split_tts_sentences(text: str) -> list[str]:
-    protected = text or ""
-    for abbr in _TTS_ABBREVIATIONS:
-        pattern = _re.compile(_re.escape(abbr), _re.IGNORECASE)
-        protected = pattern.sub(lambda m: m.group(0).replace(".", "<DOT>"), protected)
-    return [
-        sentence.replace("<DOT>", ".").strip()
-        for sentence in _TTS_SENTENCE_RE.findall(protected)
-        if sentence.strip()
-    ]
-
-
-def _take_short_tts_spoken(raw: str) -> tuple[str, str]:
-    compact = _normalize_tts_text(raw)
-    if not compact:
-        return "", ""
-    sentences = _split_tts_sentences(compact)
-    if not sentences:
-        return compact, ""
-    spoken_part = " ".join(sentences[:_TTS_SPOKEN_SENTENCE_LIMIT]).strip()
-    detail_part = " ".join(sentences[_TTS_SPOKEN_SENTENCE_LIMIT:]).strip()
-    spoken_part = _truncate_tts_spoken_text(spoken_part)
-    return spoken_part, detail_part
-
-
-def _truncate_tts_spoken_text(text: str) -> str:
-    text = _normalize_tts_text(text)
-    if not text:
-        return ""
-    words = text.split()
-    if len(words) > _TTS_SPOKEN_MAX_WORDS:
-        text = " ".join(words[:_TTS_SPOKEN_MAX_WORDS])
-    if len(text) <= _TTS_SPOKEN_MAX_CHARS:
-        return text
-    hard = text[: _TTS_SPOKEN_MAX_CHARS].rstrip()
-    cut = hard.rfind(" ")
-    if cut > 60:
-        hard = hard[:cut].rstrip()
-    if not hard:
-        hard = text[: _TTS_SPOKEN_MAX_CHARS].rstrip()
-    if not hard.endswith((".", "!", "?")):
-        hard = hard.rstrip(",;:") + "…"
-    if len(hard) > _TTS_SPOKEN_MAX_CHARS:
-        hard = hard[: _TTS_SPOKEN_MAX_CHARS]
-    return hard
-
-
-def _combine_tts_detail(*parts: str) -> str:
-    return "\n\n".join(p for p in parts if p).strip()
-
-
-def _enforce_tts_output_contract(response: str, session_id: str, source: str) -> str:
-    raw = (response or "").strip()
-    if not raw:
-        return raw
-
-    spoken_match = _TTS_SPOKEN_BLOCK_RE.search(raw)
-    if spoken_match:
-        spoken_source = spoken_match.group(1) or ""
-        preface = raw[:spoken_match.start()].strip()
-        trailing = raw[spoken_match.end():].strip()
-        if preface:
-            spoken_source = f"{preface} {spoken_source}"
-    else:
-        spoken_source = raw
-        trailing = ""
-
-    spoken_text, trailing_from_spoken = _take_short_tts_spoken(spoken_source)
-    trailing = _combine_tts_detail(trailing_from_spoken, trailing)
-    trailing = _normalize_tts_text(trailing)
-
-    if not spoken_text:
-        spoken_text = "Got it."
-
-    enforced = f"<spoken>{spoken_text}</spoken>"
-    if trailing:
-        enforced = f"{enforced}\n\n{trailing}"
-
-    if enforced != raw:
-        logger.warning(
-            "[%s] TTS contract enforcement (%s): normalized response. raw_len=%d enforced_len=%d",
-            session_id[:12],
-            source,
-            len(raw),
-            len(enforced),
-        )
-    return enforced
-
-
-def _message_for_persistence(message: str, file_context: str | None) -> str:
-    base = (message or "").strip()
-    if not file_context:
-        return base
-    return f"{base}\n\n{file_context}".strip()
+    return resolved
 
 
 def prewarm_session(session_id: str, user_id: str) -> None:
@@ -1672,94 +645,12 @@ def end_session(user_id: str, session_id: str) -> None:
         logger.info("[%s] end_session called with no active session state", _session_log_id(session_id))
 
 
-def _progress_snapshot(request_ctx, summary_text: str, file_context: str | None) -> str:
-    findings: list[str] = []
-    if summary_text:
-        findings.append("loaded prior conversation summary")
-    if "## Retrieved Memory\n" in request_ctx.system_prompt:
-        findings.append("found relevant memory")
-    if "## Current Task State\n" in request_ctx.system_prompt:
-        findings.append("loaded task state")
-    if "## Research Brief\n" in request_ctx.system_prompt:
-        findings.append("prepared research brief")
-    if file_context:
-        findings.append("attached file context")
-    if not findings:
-        return "Context is ready."
-    return "Context is ready: " + ", ".join(findings) + "."
-
-
-_LOG_MAX_BYTES = 5 * 1024 * 1024  # 5MB cap for rotating log files
-
-
-def _truncate_log_if_needed(log_path: Path) -> None:
-    """Truncate a log file to its last 2000 lines if it exceeds _LOG_MAX_BYTES."""
-    try:
-        if log_path.exists() and log_path.stat().st_size > _LOG_MAX_BYTES:
-            lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
-            log_path.write_text("\n".join(lines[-2000:]) + "\n", encoding="utf-8")
-    except Exception:
-        pass
-
-
-def _log_stage(session_id: str, stage: str, start_ts: float, **extra) -> None:
-    duration_ms = int((time.perf_counter() - start_ts) * 1000)
-    details = " ".join(f"{k}={v}" for k, v in extra.items())
-    REQUEST_TIMING_LOG.parent.mkdir(parents=True, exist_ok=True)
-    _truncate_log_if_needed(REQUEST_TIMING_LOG)
-    with REQUEST_TIMING_LOG.open("a", encoding="utf-8") as fh:
-        fh.write(
-            f"{time.strftime('%Y-%m-%d %H:%M:%S')} "
-            f"jane_request session={session_id} stage={stage} duration_ms={duration_ms}"
-            + (f" {details}" if details else "")
-            + "\n"
-        )
-
-
-def _log_start(session_id: str, mode: str, message: str, history_turns: int, brain_label: str, file_context: str | None) -> None:
-    REQUEST_TIMING_LOG.parent.mkdir(parents=True, exist_ok=True)
-    with REQUEST_TIMING_LOG.open("a", encoding="utf-8") as fh:
-        fh.write(
-            f"{time.strftime('%Y-%m-%d %H:%M:%S')} "
-            f"jane_request session={session_id} stage=start mode={mode}"
-            f" message_chars={len(message or '')} history_turns={history_turns}"
-            f" brain={brain_label} file_context={bool(file_context)}\n"
-        )
-
-
-def _dump_prompt(
-    session_id: str,
-    mode: str,
-    message: str,
-    summary_text: str,
-    request_ctx,
-    bootstrap_retrieval: bool,
-    bootstrap_summary: str,
-    file_context: str | None,
-) -> None:
-    PROMPT_DUMP_LOG.parent.mkdir(parents=True, exist_ok=True)
-    _truncate_log_if_needed(PROMPT_DUMP_LOG)
-    record = {
-        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "session_id": session_id,
-        "mode": mode,
-        "message": message,
-        "message_chars": len(message or ""),
-        "conversation_summary": summary_text,
-        "conversation_summary_chars": len(summary_text or ""),
-        "bootstrap_retrieval": bootstrap_retrieval,
-        "bootstrap_memory_summary": bootstrap_summary,
-        "bootstrap_memory_summary_chars": len(bootstrap_summary or ""),
-        "retrieved_memory_summary": request_ctx.retrieved_memory_summary or "",
-        "retrieved_memory_summary_chars": len(request_ctx.retrieved_memory_summary or ""),
-        "system_prompt": request_ctx.system_prompt or "",
-        "system_prompt_chars": len(request_ctx.system_prompt or ""),
-        "transcript": request_ctx.transcript or "",
-        "transcript_chars": len(request_ctx.transcript or ""),
-        "file_context": file_context or "",
-    }
-    with PROMPT_DUMP_LOG.open("a", encoding="utf-8") as fh:
-        fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+_LOG_MAX_BYTES = LOG_MAX_BYTES
+_proxy_request_logger = ProxyRequestLogger(REQUEST_TIMING_LOG, PROMPT_DUMP_LOG)
+_truncate_log_if_needed = _proxy_request_logger.truncate_log_if_needed
+_log_stage = _proxy_request_logger.log_stage
+_log_start = _proxy_request_logger.log_start
+_dump_prompt = _proxy_request_logger.dump_prompt
 
 
 def _persist_turns_async(
@@ -1943,19 +834,14 @@ async def _send_message_inner(
     # prepended. Same treatment as the stream path — strip from user-visible
     # bubble, prepend a [PHONE TOOL RESULTS] block onto the brain-visible
     # message so Jane knows what the last phone-tool invocation did.
-    _cleaned_message, _tool_results = _extract_tool_results(message or "")
+    _phone_tool_message = _prepare_phone_tool_message(message)
+    _cleaned_message = _phone_tool_message.cleaned_message
+    _tool_results = _phone_tool_message.tool_results
     if _tool_results:
         logger.info("[%s] (sync) received %d tool result(s) from client",
                     session_id[:12], len(_tool_results))
-    _user_visible_message = _strip_stage3_injections(_cleaned_message)
-    if _tool_results:
-        _result_block = _format_tool_results_for_brain(_tool_results)
-        if _result_block:
-            message = _result_block + "\n\n" + _cleaned_message
-        else:
-            message = _cleaned_message
-    else:
-        message = _cleaned_message
+    _user_visible_message = _phone_tool_message.user_visible_message
+    message = _phone_tool_message.brain_visible_message
     resolved_file_context = _resolve_file_context(state, _user_visible_message, file_context)
     persisted_user_message = _message_for_persistence(_user_visible_message, resolved_file_context)
     brain_name = _get_brain_name()
@@ -2073,11 +959,8 @@ async def _send_message_inner(
     # markers should not leak to the UI. Tool calls in sync mode are logged
     # for drift detection.
     if response and "[[CLIENT_TOOL:" in response:
-        _sync_extractor = ToolMarkerExtractor()
-        _visible, _sync_tool_calls = _sync_extractor.feed(response)
-        _tail, _sync_tail_calls = _sync_extractor.flush()
-        response = _visible + _tail
-        _total_sync_calls = len(_sync_tool_calls) + len(_sync_tail_calls)
+        response, _sync_tool_calls = _visible_text_and_client_tool_calls(response)
+        _total_sync_calls = len(_sync_tool_calls)
         if _total_sync_calls > 0:
             logger.warning(
                 "[%s] (sync) response contained %d client_tool_call marker(s) "
@@ -2097,275 +980,6 @@ async def _send_message_inner(
         pass
 
     return {"text": response, "files": []}
-
-
-def _pick_ack(user_message: str) -> str:
-    """Pick a context-appropriate quick ack based on the user's message.
-    Mix of professional, warm, casual, and occasionally humorous.
-    """
-    import random
-    msg = (user_message or "").lower().strip()
-
-    # Questions — informational / lookup
-    if any(msg.startswith(w) for w in ("is ", "are ", "was ", "were ", "do ", "does ", "did ",
-                                        "can ", "could ", "will ", "would ", "should ",
-                                        "how ", "what ", "where ", "when ", "why ", "who ",
-                                        "have you", "has ", "which ")):
-        return random.choice([
-            # Original
-            "Let me check.",
-            "Good question — looking into it.",
-            "Let me look into that.",
-            "Checking now.",
-            "Hmm, let me find out.",
-            "One sec, let me see.",
-            "Let me pull that up.",
-            "Give me a moment to check.",
-            "Interesting question — looking into it.",
-            "Let me think about that.",
-            "Let me take a look.",
-            "Digging into it now.",
-            "Hold on, checking.",
-            "Let me look that up.",
-            "Good one — let me see.",
-            # Warmer / casual
-            "Ooh, good question. Let me check.",
-            "One sec — I know this one... or I will in a moment.",
-            "Let me look into that real quick.",
-            "Give me a sec, I'll dig that up.",
-            "Let me poke around and find out.",
-            "That's a good one. Checking now.",
-            "Hold that thought — checking.",
-            "Curious about that too, actually. Let me check.",
-            "I should know this... let me verify.",
-            "Let me take a peek.",
-            "Hmm, good question. Digging in.",
-            "Fair question — checking now.",
-            "One moment while I track that down.",
-        ])
-
-    # Status/progress questions
-    if any(kw in msg for kw in ("status", "progress", "update", "how's it going",
-                                 "what's happening", "working on", "where are we",
-                                 "current state", "what happened")):
-        return random.choice([
-            # Original
-            "Let me check on that.",
-            "One sec, pulling up the status.",
-            "Checking the current state.",
-            "Let me see where things stand.",
-            "Pulling up the details now.",
-            "Let me get you caught up.",
-            "Checking what's happened.",
-            "Give me a sec to review.",
-            # Warmer
-            "One sec — pulling up the latest.",
-            "Let me see what's been going on.",
-            "Ah, good timing — let me review.",
-            "Hold on, let me see where we left off.",
-            "Let me take stock real quick.",
-        ])
-
-    # Requests to fix/debug
-    if any(kw in msg for kw in ("fix", "bug", "broken", "error", "crash", "wrong",
-                                 "doesn't work", "not working", "failed", "failing",
-                                 "issue", "problem")):
-        return random.choice([
-            # Original
-            "On it — let me investigate.",
-            "Looking into it now.",
-            "Let me dig into this.",
-            "I'll take a look at what's going on.",
-            "Let me trace through this.",
-            "Investigating now.",
-            "Let me figure out what happened.",
-            "On it — give me a moment.",
-            "Let me hunt this down.",
-            "Diving into the logs now.",
-            "I see — let me look into it.",
-            "Let me check what went wrong.",
-            # Warmer / humor
-            "Ugh, let me see what happened.",
-            "On it — detective mode activated.",
-            "Alright, let's figure this out.",
-            "Time to put on the debugging hat.",
-            "Let me take a look under the hood.",
-            "Hmm, that's not right. Let me investigate.",
-            "Ok, let's track this down.",
-            "I'll get to the bottom of this.",
-            "On the case. Give me a moment.",
-            "Something's off — let me look.",
-            "Alright, diving in.",
-        ])
-
-    # Opinions / thoughts / advice
-    if any(kw in msg for kw in ("think", "opinion", "suggest", "recommend", "advice",
-                                 "better", "prefer", "thoughts on", "feel about",
-                                 "makes sense", "good idea")):
-        return random.choice([
-            # Original
-            "Let me think about that.",
-            "Good question — let me consider the options.",
-            "Hmm, let me weigh in on that.",
-            "Let me think this through.",
-            "Interesting — give me a sec to think.",
-            "Let me consider that.",
-            # Warmer
-            "Hmm, let me think on that.",
-            "Let me chew on that for a moment.",
-            "Interesting angle. Let me consider...",
-            "Let me weigh the options real quick.",
-            "That's worth thinking about. One sec.",
-            "Hmm, I have thoughts. Let me organize them.",
-            "Good point — let me consider that.",
-            "Let me mull that over for a sec.",
-        ])
-
-    # Explanations / learning
-    if any(kw in msg for kw in ("explain", "tell me about", "what is", "what's a",
-                                 "how does", "why does", "meaning of", "difference between")):
-        return random.choice([
-            # Original
-            "Sure, let me explain.",
-            "Good question — here's the deal.",
-            "Let me break that down.",
-            "Here's how it works.",
-            "Let me walk you through it.",
-            "Alright, let me explain that.",
-            # Warmer
-            "Oh, this is a fun one. Let me explain.",
-            "Sure thing — here's the rundown.",
-            "Let me break that down for you.",
-            "Alright, storytime. Kind of.",
-            "So basically, here's what's going on.",
-            "Let me lay it out.",
-            "Happy to explain — here goes.",
-            "This is a good one to know. Let me explain.",
-        ])
-
-    # Greetings
-    if any(kw in msg for kw in ("hello", "hey", "hi ", "good morning", "good evening",
-                                 "good night", "what's up", "sup", "yo")):
-        return random.choice([
-            # Original
-            "Hey!",
-            "Hi there!",
-            "Hey, what's up?",
-            "Hey!",
-            "What's up?",
-            "Hi! What can I help with?",
-            "Hey! Good to hear from you.",
-            # Warmer
-            "Hey! What's on your mind?",
-            "Hi! Ready when you are.",
-            "Hey there! What are we working on?",
-            "Yo! What's the plan?",
-            "Hi! What's cooking?",
-            "Hey! Fire away.",
-        ])
-
-    # Thanks / appreciation
-    if any(kw in msg for kw in ("thank", "thanks", "appreciate", "nice work", "good job",
-                                 "well done", "awesome", "great job", "perfect")):
-        return random.choice([
-            # Original
-            "Glad to help!",
-            "Anytime!",
-            "Happy to help.",
-            "No problem!",
-            "Of course!",
-            "You got it.",
-            # Warmer
-            "Glad that worked out!",
-            "No sweat!",
-            "That's what I'm here for.",
-            "Teamwork!",
-            "We make a good team.",
-            "Appreciate you saying that!",
-            "Always happy to help.",
-        ])
-
-    # Show / list / display requests
-    if any(kw in msg for kw in ("show me", "list ", "display", "print", "give me",
-                                 "pull up", "let me see")):
-        return random.choice([
-            # Original
-            "Sure, pulling that up.",
-            "One moment.",
-            "Let me get that for you.",
-            "Coming right up.",
-            "Sure thing.",
-            "On it.",
-            "Grabbing that now.",
-            # Warmer
-            "Pulling it up now.",
-            "On it — here you go in a sec.",
-            "Sure thing, just a moment.",
-            "Let me fetch that.",
-            "Right away.",
-            "Give me a sec to pull that together.",
-        ])
-
-    # Build / deploy / create
-    if any(kw in msg for kw in ("build", "deploy", "create", "make", "set up",
-                                 "install", "add ", "implement", "write")):
-        return random.choice([
-            # Original
-            "On it.",
-            "Let me get that set up.",
-            "Building now.",
-            "Working on it.",
-            "Sure — putting that together.",
-            "Alright, let me build that out.",
-            "Let me handle that.",
-            "Starting on it now.",
-            "Sure, let me set that up.",
-            "Got it — getting started.",
-            # Warmer / humor
-            "On it!",
-            "Let's build this.",
-            "Rolling up my sleeves. Let's go.",
-            "Consider it started.",
-            "Building time. On it.",
-            "Sure — let me wire that up.",
-            "Alright, let's make it happen.",
-            "Let me cook something up.",
-            "Time to build. Let's go.",
-        ])
-
-    # Remove / delete / clean up
-    if any(kw in msg for kw in ("remove", "delete", "clean up", "get rid of", "drop")):
-        return random.choice([
-            # Original
-            "Got it — cleaning that up.",
-            "Removing it now.",
-            "On it.",
-            "Sure, taking care of that.",
-            "Let me handle that.",
-            # Warmer / humor
-            "Got it — cleaning house.",
-            "Gone in a sec.",
-            "Consider it gone.",
-            "Sweeping that away now.",
-            "On it — poof.",
-        ])
-
-    # Frustration / urgency
-    if any(kw in msg for kw in ("again", "still", "keeps", "annoying", "frustrated",
-                                 "seriously", "come on", "ugh", "wtf")):
-        return random.choice([
-            "I hear you. Let me take another look.",
-            "Sorry about that — let me fix this properly.",
-            "Understood. Let me dig deeper this time.",
-            "Fair. Let me get this right.",
-            "Yeah, that's not great. On it.",
-            "Let me approach this differently.",
-            "I got you — let me sort this out.",
-        ])
-
-    # Default — no obvious category match.
-    # Return None so Opus can generate a more nuanced, context-aware ack.
-    return None
 
 
 async def stream_message(
@@ -2406,7 +1020,9 @@ async def stream_message(
     # (via persisted_user_message) but prepend a formatted context block onto
     # the message the brain actually sees, so Jane knows what the last phone-
     # tool invocation did without the user seeing raw JSON in their chat.
-    _cleaned_message, _tool_results = _extract_tool_results(message or "")
+    _phone_tool_message = _prepare_phone_tool_message(message)
+    _cleaned_message = _phone_tool_message.cleaned_message
+    _tool_results = _phone_tool_message.tool_results
     if _tool_results:
         logger.info("[%s] received %d tool result(s) from client", session_id[:12], len(_tool_results))
         # Verbose diagnostic: dump each tool result so a failed/needs_user
@@ -2428,12 +1044,8 @@ async def stream_message(
                 "[%s]   tool_result[%d]: tool=%s status=%s msg=%r%s",
                 session_id[:12], _idx, _tr_tool, _tr_status, _tr_msg, _tr_data_str,
             )
-    _brain_visible_message = _cleaned_message  # what the brain will see
-    _user_visible_message = _strip_stage3_injections(_cleaned_message)  # what the user actually typed
-    if _tool_results:
-        _result_block = _format_tool_results_for_brain(_tool_results)
-        if _result_block:
-            _brain_visible_message = _result_block + "\n\n" + _cleaned_message
+    _brain_visible_message = _phone_tool_message.brain_visible_message  # what the brain will see
+    _user_visible_message = _phone_tool_message.user_visible_message  # what the user actually typed
     # From this point on, `message` is what the brain sees (includes tool
     # results context); `persisted_user_message` uses the user-visible text.
     message = _brain_visible_message
@@ -2543,30 +1155,22 @@ async def stream_message(
             # Gemma normally handles this via the MUSIC_PLAY short-circuit, but
             # if Gemma misclassified or was skipped, Opus writes the raw marker
             # and the Android client would 404 on /api/playlists/<track name>.
-            import re as _re_local
-            _music_re = _re_local.compile(r"\[MUSIC_PLAY:([^\]]+)\]")
-            _music_match = _music_re.search(payload or "")
-            if _music_match:
-                _music_query = _music_match.group(1).strip()
-                # UUIDs from Gemma's path are hex strings (16 chars). Non-UUID
-                # means Opus used a query string — create the playlist now.
-                if not _re_local.match(r"^[0-9a-f]{16}$", _music_query):
-                    logger.info("[%s] Opus music fallback: creating playlist for query '%s'",
-                                session_id[:12], _music_query[:60])
-                    try:
-                        from jane_web.main import create_music_playlist_from_query
-                        _fb_playlist = create_music_playlist_from_query(_music_query)
-                        if _fb_playlist:
-                            _old_marker = _music_match.group(0)
-                            _new_marker = f"[MUSIC_PLAY:{_fb_playlist['id']}]"
-                            payload = payload.replace(_old_marker, _new_marker)
-                            logger.info("[%s] Opus music fallback: replaced with playlist id=%s (%d tracks)",
-                                        session_id[:12], _fb_playlist['id'], len(_fb_playlist.get('tracks', [])))
-                        else:
-                            logger.info("[%s] Opus music fallback: no matches for '%s'",
-                                        session_id[:12], _music_query[:60])
-                    except Exception as _fb_err:
-                        logger.warning("[%s] Opus music fallback failed: %s", session_id[:12], _fb_err)
+            _music_marker = _extract_fallback_music_play_marker(payload)
+            if _music_marker:
+                logger.info("[%s] Opus music fallback: creating playlist for query '%s'",
+                            session_id[:12], _music_marker.query[:60])
+                try:
+                    from jane_web.main import create_music_playlist_from_query
+                    _fb_playlist = create_music_playlist_from_query(_music_marker.query)
+                    if _fb_playlist:
+                        payload = _replace_music_play_marker(payload or "", _music_marker, _fb_playlist["id"])
+                        logger.info("[%s] Opus music fallback: replaced with playlist id=%s (%d tracks)",
+                                    session_id[:12], _fb_playlist['id'], len(_fb_playlist.get('tracks', [])))
+                    else:
+                        logger.info("[%s] Opus music fallback: no matches for '%s'",
+                                    session_id[:12], _music_marker.query[:60])
+                except Exception as _fb_err:
+                    logger.warning("[%s] Opus music fallback failed: %s", session_id[:12], _fb_err)
 
         # If gemma router already emitted an ack, suppress Claude's [ACK] block.
         # If gemma didn't handle it (delegate/unknown), let Claude provide its own ack.
@@ -2576,10 +1180,7 @@ async def stream_message(
         # by _tool_extractor above, but the done event carries the full raw
         # response text — Android uses done.data for TTS when present.
         if event_type == "done" and payload and "[[CLIENT_TOOL:" in payload:
-            _done_extractor = ToolMarkerExtractor()
-            _done_visible, _ = _done_extractor.feed(payload)
-            _done_tail, _ = _done_extractor.flush()
-            payload = _done_visible + _done_tail
+            payload, _ = _visible_text_and_client_tool_calls(payload)
         # Always strip orphan trailing `]]` from the done payload — Opus
         # occasionally emits an extra `]]` past the real marker close.
         # (See 2026-04-20 08:48:02: "Message sent. ]]" landed in the ledger.)

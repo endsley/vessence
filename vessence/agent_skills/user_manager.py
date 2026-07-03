@@ -18,28 +18,22 @@ from jane.config import (
     VESSENCE_HOME,
     get_chroma_client,
 )
+from agent_skills.user_manager_helpers import (
+    AVAILABLE_CAPABILITIES,
+    DEFAULT_CAPABILITIES,
+    config_with_defaults as _config_with_defaults,
+    default_user_config as _default_user_config,
+    initial_seed_facts as _initial_seed_facts,
+    normalize_plain_user_id as _normalize_plain_user_id,
+    personality_description as _personality_description,
+    validate_capabilities as _validate_capabilities,
+)
 
 USERS_DIR = Path(VESSENCE_DATA_HOME) / "users"
 PERSONALITIES_DIR = Path(VESSENCE_HOME) / "configs" / "personalities"
 
 # Valid personality names (correspond to files in configs/personalities/)
 VALID_PERSONALITIES = {"default", "professional", "casual", "technical"}
-
-AVAILABLE_CAPABILITIES = [
-    {"id": "chat", "label": "Talk to Jane"},
-    {"id": "memory", "label": "Personal memory"},
-    {"id": "vault_read", "label": "Read vault files"},
-    {"id": "vault_write", "label": "Upload and edit vault files"},
-    {"id": "email", "label": "Email tools"},
-    {"id": "calendar", "label": "Calendar tools"},
-    {"id": "phone", "label": "Phone and SMS tools"},
-    {"id": "web_search", "label": "Web search"},
-    {"id": "code_assistant", "label": "Code assistant"},
-    {"id": "essences", "label": "Essences"},
-    {"id": "user_admin", "label": "Create users"},
-]
-DEFAULT_CAPABILITIES = ["chat", "memory", "vault_read", "vault_write"]
-
 
 def normalize_user_id(user_id: str) -> str:
     """Normalize session identifiers and emails into stable user directory IDs."""
@@ -49,7 +43,7 @@ def normalize_user_id(user_id: str) -> str:
     if "@" in value:
         from vault_web.auth import user_id_from_email
         return user_id_from_email(value)
-    return "_".join(value.replace("@", "_at_").replace(".", "_").split())
+    return _normalize_plain_user_id(value)
 
 
 def _config_path(user_id: str) -> Path:
@@ -91,30 +85,8 @@ def get_user_config(user_id: str) -> dict:
     config_path = _config_path(normalized_id)
     if config_path.exists():
         config = json.loads(config_path.read_text())
-        config.setdefault("user_id", normalized_id)
-        config.setdefault("personality", "default")
-        config.setdefault("memory_namespace", normalized_id)
-        config.setdefault("capabilities", list(DEFAULT_CAPABILITIES))
-        config.setdefault("vault_root_path", str(_vault_path(normalized_id)))
-        config.setdefault("managed", bool(config.get("memory_chromadb_path")))
-        return config
-    return {
-        "user_id": normalized_id,
-        "personality": "default",
-        "memory_namespace": normalized_id,
-        "capabilities": list(DEFAULT_CAPABILITIES),
-        "managed": False,
-    }
-
-
-def _validate_capabilities(capabilities: list[str] | None) -> list[str]:
-    valid = {cap["id"] for cap in AVAILABLE_CAPABILITIES}
-    requested = capabilities or DEFAULT_CAPABILITIES
-    cleaned = []
-    for cap in requested:
-        if cap in valid and cap not in cleaned:
-            cleaned.append(cap)
-    return cleaned or list(DEFAULT_CAPABILITIES)
+        return _config_with_defaults(config, normalized_id, str(_vault_path(normalized_id)))
+    return _default_user_config(normalized_id)
 
 
 def seed_user_memory(user_id: str, facts: list[str], *, author: str = "jane") -> int:
@@ -169,12 +141,7 @@ def create_user_space(
     if config_path.exists() and not overwrite:
         return get_user_config(normalized_id)
 
-    initial_seeds = [
-        f"The active user's display name is {display_name}.",
-        "This user has a private Jane memory space separate from other users.",
-        "Jane should learn this user's preferences, history, and working context independently.",
-    ]
-    initial_seeds.extend(seed_memories or [])
+    initial_seeds = _initial_seed_facts(display_name, seed_memories)
     seeded_count = seed_user_memory(normalized_id, initial_seeds)
 
     config = {
@@ -254,7 +221,7 @@ def list_personalities() -> list[dict]:
     for name in sorted(VALID_PERSONALITIES):
         content = get_personality_content(name)
         # First line is the description
-        desc = content.split("\n")[0] if content else ""
+        desc = _personality_description(content)
         result.append({"id": name, "description": desc})
     return result
 

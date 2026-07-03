@@ -6,11 +6,16 @@ import os
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from agent_skills.research_result_helpers import (
+    analyzer_error_result as _analyzer_error_result,
+    analyzer_missing_file_result as _analyzer_missing_file_result,
+    analyzer_result_from_model_content as _analyzer_result_from_model_content,
+)
 from jane.llm_config import LOCAL_LLM_MODEL, LOCAL_LLM_BASE_URL, LOCAL_LLM_MODEL_LITELLM
 
 def analyze_search_results(file_path):
     if not os.path.exists(file_path):
-        return {"confidence": "low", "cause": "File not found", "fix": "", "source": "", "found": False}
+        return _analyzer_missing_file_result()
 
     with open(file_path, 'r') as file:
         search_results = file.read()
@@ -37,14 +42,9 @@ def analyze_search_results(file_path):
         )
         
         content = response['message']['content'].strip()
-        if "NO_SOLUTION_FOUND" in content:
-            return {"confidence": "low", "cause": "No clear solution in data", "fix": "", "source": "", "found": False}
-            
-        result = json.loads(content)
-        result["found"] = True
-        return result
+        return _analyzer_result_from_model_content(content)
     except Exception as e:
-        return {"confidence": "low", "cause": f"Analysis Error: {e}", "fix": "", "source": "", "found": False}
+        return _analyzer_error_result(e)
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:

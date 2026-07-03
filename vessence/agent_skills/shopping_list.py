@@ -8,15 +8,24 @@ Lists are stored in VESSENCE_DATA_HOME/shopping_lists.json as:
 }
 """
 
+import inspect
 import json
 import os
-import inspect
 from pathlib import Path
+
+from agent_skills.shopping_list_data import (
+    CONFIDENCE_THRESHOLD as _CONFIDENCE_THRESHOLD,
+    add_item_to_lists,
+    clear_list_in_lists,
+    coerce_lists_data,
+    format_lists_for_context,
+    remove_item_from_lists,
+    require_confidence as _require_confidence,
+)
 
 VESSENCE_DATA_HOME = os.environ.get("VESSENCE_DATA_HOME",
     os.path.join(os.path.expanduser("~"), "ambient", "vessence-data"))
 LISTS_FILE = Path(VESSENCE_DATA_HOME) / "shopping_lists.json"
-_CONFIDENCE_THRESHOLD = 0.80
 
 
 def _load() -> dict[str, list[str]]:
@@ -25,33 +34,13 @@ def _load() -> dict[str, list[str]]:
             data = json.loads(LISTS_FILE.read_text())
         except (json.JSONDecodeError, OSError):
             return {}
-        if not isinstance(data, dict):
-            return {}
-        if not all(
-            isinstance(name, str)
-            and isinstance(items, list)
-            and all(isinstance(item, str) for item in items)
-            for name, items in data.items()
-        ):
-            return {}
-        return data
+        return coerce_lists_data(data)
     return {}
 
 
 def _save(data: dict[str, list[str]]):
     LISTS_FILE.parent.mkdir(parents=True, exist_ok=True)
     LISTS_FILE.write_text(json.dumps(data, indent=2) + "\n")
-
-
-def _require_confidence(confidence: float):
-    if (
-        confidence is None
-        or isinstance(confidence, bool)
-        or not isinstance(confidence, (int, float))
-    ):
-        raise TypeError("confidence must be numeric")
-    if not confidence >= _CONFIDENCE_THRESHOLD:
-        raise PermissionError("confidence is below the required threshold")
 
 
 def get_all_lists() -> dict[str, list[str]]:
@@ -64,58 +53,33 @@ def get_list(name: str = "default") -> list[str]:
 
 def add_item(item: str, list_name: str = "default") -> list[str]:
     data = _load()
-    key = list_name.lower()
-    if not key.strip():
-        raise ValueError("list_name is required")
-    if key not in data:
-        data[key] = []
-    item = item.strip()
-    if item and item.lower() not in [i.lower() for i in data[key]]:
-        data[key].append(item)
+    mutation = add_item_to_lists(data, item, list_name)
     _save(data)
-    return data[key]
+    return mutation.items
 
 
 def remove_item(
     item: str, list_name: str = "default", *, confidence: float
 ) -> list[str]:
     _require_confidence(confidence)
-    key = list_name.lower()
-    if not key.strip():
-        raise ValueError("list_name is required")
-    item = item.strip()
-    if not item:
-        raise ValueError("item is required")
     data = _load()
-    if key in data:
-        data[key] = [i for i in data[key] if i.lower() != item.lower()]
+    mutation = remove_item_from_lists(data, item, list_name)
+    if mutation.should_save:
         _save(data)
-    return data.get(key, [])
+    return mutation.items
 
 
 def clear_list(list_name: str = "default", *, confidence: float):
     _require_confidence(confidence)
-    key = list_name.lower()
-    if not key.strip():
-        raise ValueError("list_name is required")
     data = _load()
-    data[key] = []
+    clear_list_in_lists(data, list_name)
     _save(data)
 
 
 def format_for_context() -> str:
     """Format all shopping lists for injection into LLM context."""
     data = _load()
-    if not data:
-        return "No shopping lists exist yet. The user can ask you to create one."
-    parts = []
-    for name, items in data.items():
-        if items:
-            item_list = "\n".join(f"  - {i}" for i in items)
-            parts.append(f"**{name.title()} list:**\n{item_list}")
-        else:
-            parts.append(f"**{name.title()} list:** (empty)")
-    return "\n\n".join(parts)
+    return format_lists_for_context(data)
 
 
 remove_item.__signature__ = inspect.Signature(

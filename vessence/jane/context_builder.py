@@ -6,8 +6,11 @@ from context_builder.v1.context_builder import *  # noqa: F401,F403
 from context_builder.v1.context_builder import (  # noqa: F401
     _classify_prompt_profile,
     _is_task_related,
+    _assemble_context_parts,
+    _build_memory_summary_plan,
     _load_code_map,
     _load_personal_facts,
+    _platform_context_line,
     _select_user_background,
     _read_json_summary,
 )

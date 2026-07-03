@@ -23,6 +23,16 @@ import requests
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from agent_skills.ambient_heartbeat_rules import (
+    apply_research_note_to_spec as _apply_research_note_to_spec,
+    automation_synthesis_prompt as _automation_synthesis_prompt,
+    heartbeat_discord_summary,
+    implementation_prompt as _implementation_prompt,
+    implementation_ready_tasks_from_text as _implementation_ready_tasks_from_text,
+    is_cache_stale as _is_cache_stale,
+    phase1_unchecked_tasks as _phase1_unchecked_tasks,
+    unanswered_open_questions as _unanswered_open_questions,
+)
 from agent_skills.web_search_utils import web_search as _web_search
 from jane.config import (
     AMBIENT_HEARTBEAT_LOG,
@@ -154,10 +164,7 @@ def save_cache(cache: dict):
 
 def is_stale(cache: dict, topic_id: str, days: int = 7) -> bool:
     """Return True if the topic hasn't been researched in `days` days."""
-    if topic_id not in cache:
-        return True
-    last = datetime.datetime.fromisoformat(cache[topic_id]["last_researched"])
-    return (datetime.datetime.now() - last).days >= days
+    return _is_cache_stale(cache, topic_id, days=days)
 
 
 # ─── Web Search ───────────────────────────────────────────────────────────────
@@ -169,19 +176,8 @@ def web_search(query: str, max_results: int = 6) -> str:
 # ─── Automation Synthesis ─────────────────────────────────────────────────────
 def synthesize_with_automation(topic_prompt: str, web_data: str) -> str:
     """Use the shared automation runner to synthesize web search data into a research note."""
-    system = (
-        "You are a Senior Technical Researcher helping refine the spec for 'Project Ambient', "
-        "a cross-platform Flutter app (Linux, Windows, Android, macOS) that connects to a local "
-        "Google ADK AI server (Amber). Your job is to produce a concise, actionable technical note "
-        "with concrete recommendations, package names, version numbers, and code patterns where relevant. "
-        "Format your response in clean Markdown."
-    )
-
-    web_section = f"\n\nWeb Search Data:\n{web_data[:8000]}" if web_data else ""
-    full_prompt = f"{system}\n\n{topic_prompt}{web_section}"
-
     try:
-        return run_automation_prompt(full_prompt, timeout_seconds=120)
+        return run_automation_prompt(_automation_synthesis_prompt(topic_prompt, web_data), timeout_seconds=120)
     except AutomationError as e:
         logger.error(f"Automation synthesis failed: {e}")
         return ""
@@ -194,27 +190,23 @@ def append_research_to_spec(heading: str, topic_id: str, note: str):
         content = f.read()
 
     date_str = datetime.datetime.now().strftime("%Y-%m-%d")
-    block = (
-        f"\n\n> **🔬 Research Note ({date_str} — auto):**\n"
-        + "\n".join(f"> {line}" for line in note.splitlines())
+    updated, action = _apply_research_note_to_spec(
+        content,
+        heading=heading,
+        topic_id=topic_id,
+        note=note,
+        date_str=date_str,
     )
-
-    # Find the heading and inject after it (before the next same-level heading)
-    if heading in content:
-        insert_pos = content.index(heading) + len(heading)
-        # Avoid inserting duplicate notes for the same topic on the same day
-        marker = f"Research Note ({date_str} — auto)"
-        if marker not in content[insert_pos : insert_pos + 2000]:
-            content = content[:insert_pos] + block + content[insert_pos:]
-            with open(SPEC_PATH, "w") as f:
-                f.write(content)
-            logger.info(f"Injected research note for '{topic_id}' under '{heading[:60]}'")
-        else:
-            logger.info(f"Research note for '{topic_id}' already present today — skipping.")
+    if action == "inserted":
+        with open(SPEC_PATH, "w") as f:
+            f.write(updated)
+        logger.info(f"Injected research note for '{topic_id}' under '{heading[:60]}'")
+    elif action == "duplicate":
+        logger.info(f"Research note for '{topic_id}' already present today — skipping.")
     else:
         logger.warning(f"Heading not found in spec: '{heading[:60]}' — appending to end.")
-        with open(SPEC_PATH, "a") as f:
-            f.write(f"\n\n---\n\n### Research: {topic_id} ({date_str})\n{note}")
+        with open(SPEC_PATH, "w") as f:
+            f.write(updated)
 
 
 # ─── Implementation Readiness Check ──────────────────────────────────────────
@@ -227,35 +219,12 @@ def check_implementation_readiness() -> list[str]:
     with open(SPEC_PATH, "r") as f:
         content = f.read()
 
-    # Check if any open questions remain unanswered (contain "?" and not struck through)
-    questions_section = ""
-    if "## 8. Open Questions" in content:
-        questions_section = content.split("## 8. Open Questions")[1].split("\n## ")[0]
-
-    unanswered = [
-        line for line in questions_section.splitlines()
-        if line.strip().startswith(("1.", "2.", "3.", "4.", "5.", "6.", "7.", "8.", "9.", "10.",
-                                    "11.", "12.", "13.", "14.", "15.", "16.", "17.", "18."))
-        and "?" in line
-        and "~~" not in line  # not struck through
-    ]
-
+    unanswered = _unanswered_open_questions(content)
     if unanswered:
         logger.info(f"{len(unanswered)} open questions remain — implementation deferred.")
         return []
 
-    # Find unchecked Phase 1 tasks
-    ready = []
-    in_phase1 = False
-    for line in content.splitlines():
-        if "### Phase 1" in line:
-            in_phase1 = True
-        elif line.startswith("### Phase"):
-            in_phase1 = False
-        if in_phase1 and line.strip().startswith("- [ ]"):
-            task = line.strip()[6:].strip()
-            ready.append(task)
-
+    ready = _phase1_unchecked_tasks(content)
     logger.info(f"Implementation-ready Phase 1 tasks: {len(ready)}")
     return ready
 
@@ -272,18 +241,8 @@ def implement_task(task: str) -> str:
     except Exception:
         pass
 
-    prompt = (
-        f"You are implementing a task for 'Project Ambient', a cross-platform Flutter app "
-        f"(Linux, Windows, Android, macOS) that provides a ChatGPT-like UI for talking to the "
-        f"Amber AI agent (Google ADK server at localhost:8000).\n\n"
-        f"Task to implement: {task}\n\n"
-        f"Project spec context:\n{spec_excerpt}\n\n"
-        f"Implement this task now. Create or modify the necessary files. "
-        f"After completing, report what was done in 2-3 sentences."
-    )
-
     try:
-        output = run_automation_prompt(prompt, timeout_seconds=300)
+        output = run_automation_prompt(_implementation_prompt(task, spec_excerpt), timeout_seconds=300)
         logger.info(f"Implemented: '{task}'")
         return output
     except AutomationError as e:
@@ -379,17 +338,13 @@ def main():
     # 5. Discord summary
     date_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
     if research_done or implementations_done:
-        lines = [f"🔁 **Ambient Heartbeat** ({date_str})"]
-        if research_done:
-            lines.append(f"\n📚 **Researched {len(research_done)} topics:**")
-            for t in research_done:
-                lines.append(f"  • {t.replace('_', ' ')}")
-        if implementations_done:
-            lines.append(f"\n🔨 **Implemented:**")
-            for t in implementations_done:
-                lines.append(f"  {t}")
-        lines.append("\n_Spec updated. Check `ambient_app.md` for new research notes._")
-        send_discord("\n".join(lines))
+        send_discord(
+            heartbeat_discord_summary(
+                research_done=research_done,
+                implementations_done=implementations_done,
+                generated_label=date_str,
+            )
+        )
     else:
         logger.info("Nothing new to research or implement this run.")
 

@@ -59,7 +59,7 @@ import datetime as _dt
 
 
 def _expires_at(minutes: int = 2) -> str:
-    return (_dt.datetime.utcnow() + _dt.timedelta(minutes=minutes)).strftime(
+    return (_dt.datetime.now(_dt.timezone.utc) + _dt.timedelta(minutes=minutes)).strftime(
         "%Y-%m-%dT%H:%M:%SZ"
     )
 

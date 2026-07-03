@@ -18,6 +18,11 @@ from googleapiclient.discovery import build
 from google.oauth2.credentials import Credentials
 
 from agent_skills.email_oauth import list_gmail_token_users, refresh_token_if_needed
+from agent_skills.email_message_helpers import (
+    extract_attachments as _extract_attachments,
+    extract_plain_body as _extract_plain_body,
+    parse_headers as _parse_headers,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -61,64 +66,6 @@ def get_gmail_service(
 
 
 # ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def _parse_headers(headers: list[dict]) -> dict[str, str]:
-    """Extract common headers from a Gmail message header list."""
-    result: dict[str, str] = {}
-    for h in headers:
-        name = h.get("name", "").lower()
-        if name in ("from", "to", "cc", "bcc", "subject", "date"):
-            result[name] = h.get("value", "")
-    return result
-
-
-def _extract_plain_body(payload: dict) -> str:
-    """Recursively extract the plain-text body from a message payload."""
-    mime_type = payload.get("mimeType", "")
-
-    # Simple single-part message
-    if mime_type == "text/plain":
-        data = payload.get("body", {}).get("data", "")
-        if data:
-            return base64.urlsafe_b64decode(data).decode("utf-8", errors="replace")
-
-    # Multipart — recurse into parts
-    for part in payload.get("parts", []):
-        text = _extract_plain_body(part)
-        if text:
-            return text
-
-    # Fallback: if only HTML exists, return it stripped (better than nothing)
-    if mime_type == "text/html":
-        data = payload.get("body", {}).get("data", "")
-        if data:
-            html = base64.urlsafe_b64decode(data).decode("utf-8", errors="replace")
-            # Crude tag stripping — fine for LLM consumption
-            import re
-            return re.sub(r"<[^>]+>", "", html).strip()
-
-    return ""
-
-
-def _extract_attachments(payload: dict) -> list[dict]:
-    """List attachment metadata (name, size, mime type) without downloading."""
-    attachments = []
-    for part in payload.get("parts", []):
-        filename = part.get("filename")
-        if filename:
-            attachments.append({
-                "filename": filename,
-                "mime_type": part.get("mimeType", ""),
-                "size": part.get("body", {}).get("size", 0),
-                "attachment_id": part.get("body", {}).get("attachmentId", ""),
-            })
-        # Recurse into nested multipart
-        attachments.extend(_extract_attachments(part))
-    return attachments
-
-
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------

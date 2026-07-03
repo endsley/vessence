@@ -11,6 +11,11 @@ import shutil
 import logging
 from pathlib import Path
 
+from agent_skills.job_queue_utils_helpers import (
+    completed_jobs_to_archive as _completed_jobs_to_archive,
+    parse_job_listing as _parse_job_listing,
+)
+
 logger = logging.getLogger("job_queue")
 
 JOBS_DIR = os.path.join(
@@ -30,22 +35,9 @@ def list_jobs() -> list[dict]:
         fpath = os.path.join(JOBS_DIR, fname)
         if not os.path.isfile(fpath):
             continue
-        status = "unknown"
-        title = fname
-        priority = 5
         with open(fpath, "r") as f:
-            for line in f:
-                line = line.strip()
-                if line.startswith("# Job:"):
-                    title = line[7:].strip()
-                elif line.startswith("Status:"):
-                    status = line[7:].strip().split()[0].lower()
-                elif line.startswith("Priority:"):
-                    try:
-                        priority = int(line[9:].strip().split()[0])
-                    except ValueError:
-                        pass
-        jobs.append({"file": fname, "path": fpath, "title": title, "status": status, "priority": priority})
+            content = f.read()
+        jobs.append(_parse_job_listing(content, fname, fpath))
     return jobs
 
 
@@ -55,9 +47,8 @@ def archive_completed(threshold: int = ARCHIVE_THRESHOLD) -> int:
     Returns the number of jobs archived.
     """
     jobs = list_jobs()
-    completed = [j for j in jobs if j["status"].startswith("complete")]
-
-    if len(completed) <= threshold:
+    completed = _completed_jobs_to_archive(jobs, threshold)
+    if not completed:
         return 0
 
     os.makedirs(COMPLETED_DIR, exist_ok=True)

@@ -7,6 +7,15 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from agent_skills.janitor_system_rules import (
+    LOG_ACTION_REMOVE,
+    LOG_ACTION_TRUNCATE,
+    is_stale_mtime as _is_stale_mtime,
+    log_cleanup_action as _log_cleanup_action,
+    should_rotate_log as _should_rotate_log,
+    trim_tail_to_line_boundary as _trim_tail_to_line_boundary,
+    truncated_log_payload as _truncated_log_payload,
+)
 from jane.config import LOGS_DIR, VAULT_DIR, VESSENCE_DATA_HOME
 
 # Paths to clean
@@ -41,7 +50,7 @@ def rotate_logs():
     for pattern in LOG_PATTERNS:
         log_files.extend(glob.glob(os.path.join(LOGS_DIR, "**", pattern), recursive=True))
     for log_f in log_files:
-        if os.path.getsize(log_f) > (MAX_LOG_SIZE_MB * 1024 * 1024):
+        if _should_rotate_log(os.path.getsize(log_f), MAX_LOG_SIZE_MB):
             try:
                 # Simple rotation: just clear if too big, or could implement proper rotation
                 with open(log_f, 'w') as f:
@@ -59,12 +68,18 @@ def prune_old_logs():
             if not path.is_file():
                 continue
             try:
-                if path.stat().st_mtime < cutoff_ts:
+                st = path.stat()
+                action = _log_cleanup_action(
+                    mtime=st.st_mtime,
+                    size_bytes=st.st_size,
+                    cutoff_ts=cutoff_ts,
+                )
+                if action == LOG_ACTION_REMOVE:
                     # Stale file — delete entirely
                     path.unlink()
                     removed += 1
                     print(f"Removed old log: {path}")
-                elif path.stat().st_size > 1024 * 1024:
+                elif action == LOG_ACTION_TRUNCATE:
                     # Active but large (>1MB) — keep only last 200KB
                     _truncate_log_tail(path, keep_bytes=200 * 1024)
                     truncated += 1
@@ -82,14 +97,10 @@ def _truncate_log_tail(path: Path, keep_bytes: int = 200 * 1024):
         with open(path, 'rb') as f:
             f.seek(size - keep_bytes)
             tail = f.read()
-        # Find first newline to avoid partial line
-        nl = tail.find(b'\n')
-        if nl != -1:
-            tail = tail[nl + 1:]
+        trimmed_tail = _trim_tail_to_line_boundary(tail)
         with open(path, 'wb') as f:
-            f.write(f"--- Truncated at {time.ctime()} (kept last {keep_bytes // 1024}KB) ---\n".encode())
-            f.write(tail)
-        print(f"Truncated active log: {path} ({size // 1024}KB → {len(tail) // 1024}KB)")
+            f.write(_truncated_log_payload(tail, keep_bytes=keep_bytes, ctime_text=time.ctime()))
+        print(f"Truncated active log: {path} ({size // 1024}KB → {len(trimmed_tail) // 1024}KB)")
     except Exception as e:
         print(f"Failed to truncate {path}: {e}")
 
@@ -112,7 +123,7 @@ def prune_old_transcripts():
                 continue
             try:
                 st = path.stat()
-                if st.st_mtime < cutoff_ts:
+                if _is_stale_mtime(st.st_mtime, cutoff_ts):
                     bytes_freed += st.st_size
                     path.unlink()
                     removed += 1

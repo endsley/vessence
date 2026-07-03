@@ -30,6 +30,13 @@ import logging
 import os
 from pathlib import Path
 
+from agent_skills.self_improve_log_helpers import (
+    SEVERITIES as _SEVERITIES,
+    TIMESTAMP_FORMAT as _TIMESTAMP_FORMAT,
+    build_vocal_summary_record as _build_vocal_summary_record,
+    recent_summaries_from_lines as _recent_summaries_from_lines,
+)
+
 logger = logging.getLogger(__name__)
 
 _VESSENCE_DATA_HOME = Path(os.environ.get(
@@ -37,8 +44,6 @@ _VESSENCE_DATA_HOME = Path(os.environ.get(
     str(Path.home() / "ambient" / "vessence-data"),
 ))
 VOCAL_LOG_PATH = _VESSENCE_DATA_HOME / "self_improve_vocal_log.jsonl"
-
-_SEVERITIES = {"critical", "medium", "low", "info"}
 
 
 def log_vocal_summary(
@@ -66,42 +71,25 @@ def log_vocal_summary(
         what_was_done: One-sentence plain description of the fix.
         severity: "critical" | "medium" | "low" | "info".
     """
-    sev = severity.lower() if severity else "info"
-    if sev not in _SEVERITIES:
-        sev = "info"
-
-    if summary is None:
-        parts = []
-        if what_was_wrong:
-            parts.append(what_was_wrong.rstrip(".") + ".")
-        if why_it_mattered:
-            parts.append(why_it_mattered.rstrip(".") + ".")
-        if what_was_done:
-            parts.append(what_was_done.rstrip(".") + ".")
-        summary = " ".join(parts).strip()
-
-    if not summary:
+    timestamp = dt.datetime.utcnow().strftime(_TIMESTAMP_FORMAT)
+    record = _build_vocal_summary_record(
+        job,
+        timestamp=timestamp,
+        summary=summary,
+        what_was_wrong=what_was_wrong,
+        why_it_mattered=why_it_mattered,
+        what_was_done=what_was_done,
+        severity=severity,
+    )
+    if record is None:
         logger.warning("log_vocal_summary: empty summary for job=%r — skipping", job)
         return
-
-    record = {
-        "timestamp": dt.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "job": job,
-        "severity": sev,
-        "summary": summary,
-    }
-    if what_was_wrong:
-        record["what_was_wrong"] = what_was_wrong
-    if why_it_mattered:
-        record["why_it_mattered"] = why_it_mattered
-    if what_was_done:
-        record["what_was_done"] = what_was_done
 
     VOCAL_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
     with VOCAL_LOG_PATH.open("a", encoding="utf-8") as f:
         f.write(json.dumps(record, ensure_ascii=False) + "\n")
     logger.info("self_improve_log: recorded [%s] %s — %s",
-                sev, job, summary[:100])
+                record["severity"], job, record["summary"][:100])
 
 
 def read_recent_summaries(
@@ -119,25 +107,5 @@ def read_recent_summaries(
     if not VOCAL_LOG_PATH.exists():
         return []
     cutoff = dt.datetime.utcnow() - dt.timedelta(days=days)
-    entries: list[dict] = []
     with VOCAL_LOG_PATH.open(encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                rec = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            ts_str = rec.get("timestamp", "")
-            try:
-                ts = dt.datetime.strptime(ts_str, "%Y-%m-%dT%H:%M:%SZ")
-            except ValueError:
-                continue
-            if ts < cutoff:
-                continue
-            entries.append(rec)
-    entries.reverse()  # newest-first
-    if limit:
-        entries = entries[:limit]
-    return entries
+        return _recent_summaries_from_lines(f, cutoff=cutoff, limit=limit)

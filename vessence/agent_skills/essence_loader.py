@@ -23,6 +23,15 @@ from typing import Any, Optional
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from agent_skills.validate_essence import validate_essence
+from agent_skills.essence_loader_helpers import (
+    available_essence_record as _available_essence_record,
+    available_essence_sort_key as _available_essence_sort_key,
+    essence_search_dirs as _essence_search_dirs,
+    manifest_item_type as _manifest_item_type,
+    resolve_essences_dir as _resolve_essences_dir,
+    resolve_tools_dir as _resolve_tools_dir,
+    should_include_essence_type as _should_include_essence_type,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -59,18 +68,12 @@ def _log_to_work_log(description: str, category: str = "general") -> None:
 
 def _get_tools_dir() -> str:
     """Resolve the tools directory path (formerly essences/)."""
-    home = str(Path.home())
-    ambient_base = os.environ.get("AMBIENT_BASE", os.path.join(home, "ambient"))
-    return os.environ.get("TOOLS_DIR",
-                          os.environ.get("ESSENCES_DIR",
-                                         os.path.join(ambient_base, "skills")))
+    return _resolve_tools_dir(os.environ, str(Path.home()))
 
 
 def _get_essences_dir() -> str:
     """Resolve the essences directory path (true AI agents)."""
-    home = str(Path.home())
-    ambient_base = os.environ.get("AMBIENT_BASE", os.path.join(home, "ambient"))
-    return os.path.join(ambient_base, "essences")
+    return _resolve_essences_dir(os.environ, str(Path.home()))
 
 
 # ---------------------------------------------------------------------------
@@ -172,7 +175,7 @@ def delete_essence(essence_name: str, port_memory: bool = False) -> None:
     Removes the essence folder from disk.
     """
     # Search both tools/ and essences/ directories
-    search_dirs = [_get_tools_dir(), _get_essences_dir()]
+    search_dirs = _essence_search_dirs(_get_tools_dir(), _get_essences_dir())
 
     # Find the essence folder
     essence_path = None
@@ -227,7 +230,7 @@ def list_available_essences(type_filter: str = "all") -> list[dict[str, Any]]:
     type, has_brain, path.
     """
     # Scan both tools/ (type=tool) and essences/ (type=essence) directories
-    scan_dirs = [_get_tools_dir(), _get_essences_dir()]
+    scan_dirs = _essence_search_dirs(_get_tools_dir(), _get_essences_dir())
     results: list[dict[str, Any]] = []
 
     for scan_dir in scan_dirs:
@@ -244,36 +247,18 @@ def list_available_essences(type_filter: str = "all") -> list[dict[str, Any]]:
                 with open(manifest_path) as f:
                     m = json.load(f)
 
-                item_type = m.get("type", "tool")  # default to "tool" if missing
-                has_brain = m.get("has_brain", False)
+                item_type = _manifest_item_type(m)
 
                 # Apply filter
-                if type_filter != "all" and item_type != type_filter:
+                if not _should_include_essence_type(item_type, type_filter):
                     continue
 
-                results.append({
-                    "name": m.get("essence_name", entry),
-                    "role_title": m.get("role_title", ""),
-                    "version": m.get("version", ""),
-                    "description": m.get("description", ""),
-                    "type": item_type,
-                    "has_brain": has_brain,
-                    "path": candidate,
-                })
+                results.append(_available_essence_record(entry, m, candidate))
             except (json.JSONDecodeError, OSError):
                 continue
 
     # Sort: Jane first, Work Log last, everything else alphabetically between
-    def _sort_key(e: dict) -> tuple:
-        name = e.get("name", "").lower()
-        if name == "jane":
-            return (0, "")
-        elif name == "work log":
-            return (2, "")
-        else:
-            return (1, name)
-
-    results.sort(key=_sort_key)
+    results.sort(key=_available_essence_sort_key)
     return results
 
 

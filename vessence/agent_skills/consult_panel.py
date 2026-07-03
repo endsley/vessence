@@ -16,14 +16,20 @@ The tool auto-detects which CLIs are installed, skips the caller's own CLI,
 skips non-frontier models (e.g., Ollama), and queries peers in parallel.
 """
 
-import json
 import os
 import shutil
 import subprocess
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from pathlib import Path
+
+from agent_skills.consult_panel_helpers import (
+    build_consult_prompt as _build_consult_prompt,
+    cli_invocation as _cli_invocation,
+    prompt_with_context as _prompt_with_context,
+    should_consider_cli as _should_consider_cli,
+    synthesize_results as _synthesize_results,
+)
 
 # Frontier CLIs to consider (name → binary)
 FRONTIER_CLIS = {
@@ -44,9 +50,7 @@ def detect_available_clis(caller: str = "") -> list[dict]:
     available = []
     caller_lower = caller.lower().strip()
     for name, binary in FRONTIER_CLIS.items():
-        if name == caller_lower:
-            continue
-        if name in SKIP_CLIS:
+        if not _should_consider_cli(name, caller_lower, SKIP_CLIS):
             continue
         path = shutil.which(binary)
         if path:
@@ -60,50 +64,21 @@ def query_cli(cli: dict, prompt: str, context: str = "") -> dict:
     binary = cli["binary"]
     start = time.time()
 
-    full_prompt = prompt
-    if context:
-        full_prompt = f"{prompt}\n\n---\nContext:\n{context}"
+    full_prompt = _prompt_with_context(prompt, context)
 
     try:
         env = {**os.environ, "TERM": "dumb"}
-        # Use stdin for large prompts to avoid ARG_MAX limits
-        use_stdin = len(full_prompt) > 4000
-
-        if name == "gemini":
-            if use_stdin:
-                result = subprocess.run(
-                    [binary], input=full_prompt,
-                    capture_output=True, text=True, timeout=CLI_TIMEOUT, env=env,
-                )
-            else:
-                result = subprocess.run(
-                    [binary, "-p", full_prompt],
-                    capture_output=True, text=True, timeout=CLI_TIMEOUT, env=env,
-                )
-        elif name == "codex":
-            if use_stdin:
-                result = subprocess.run(
-                    [binary, "exec", "-"], input=full_prompt,
-                    capture_output=True, text=True, timeout=CLI_TIMEOUT, env=env,
-                )
-            else:
-                result = subprocess.run(
-                    [binary, "exec", full_prompt],
-                    capture_output=True, text=True, timeout=CLI_TIMEOUT, env=env,
-                )
-        elif name == "claude":
-            if use_stdin:
-                result = subprocess.run(
-                    [binary, "-p", "-", "--output-format", "text"], input=full_prompt,
-                    capture_output=True, text=True, timeout=CLI_TIMEOUT, env=env,
-                )
-            else:
-                result = subprocess.run(
-                    [binary, "-p", full_prompt, "--output-format", "text"],
-                    capture_output=True, text=True, timeout=CLI_TIMEOUT, env=env,
-                )
-        else:
+        invocation = _cli_invocation(name, binary, full_prompt)
+        if invocation is None:
             return {"name": name, "error": f"Unknown CLI: {name}", "elapsed": 0}
+        result = subprocess.run(
+            invocation.argv,
+            input=invocation.input_text,
+            capture_output=True,
+            text=True,
+            timeout=CLI_TIMEOUT,
+            env=env,
+        )
 
         elapsed = round(time.time() - start, 1)
         output = result.stdout.strip()
@@ -121,34 +96,7 @@ def query_cli(cli: dict, prompt: str, context: str = "") -> dict:
 
 def synthesize(results: list[dict], caller: str) -> str:
     """Synthesize responses from multiple models into a summary."""
-    successful = [r for r in results if "response" in r]
-    failed = [r for r in results if "error" in r]
-
-    if not successful:
-        return "No peer models responded. Proceeding with own judgment."
-
-    lines = []
-    lines.append(f"## AI Panel Consultation (called by {caller})")
-    lines.append("")
-
-    for r in successful:
-        lines.append(f"### {r['name'].title()} ({r['elapsed']}s)")
-        lines.append(r["response"])
-        lines.append("")
-
-    if failed:
-        lines.append("### Unavailable")
-        for r in failed:
-            lines.append(f"- {r['name']}: {r['error']}")
-        lines.append("")
-
-    # Agreement analysis
-    if len(successful) >= 2:
-        lines.append("### Synthesis")
-        lines.append(f"Received {len(successful)} peer opinion(s). Review agreements and disagreements above.")
-        lines.append("")
-
-    return "\n".join(lines)
+    return _synthesize_results(results, caller)
 
 
 def consult_panel(
@@ -171,15 +119,7 @@ def consult_panel(
     if not available:
         return "No peer frontier CLIs detected on this machine. Proceeding solo."
 
-    # Build the prompt based on mode
-    mode_prefix = {
-        "review": "You are reviewing code written by another AI. Be critical and thorough. Point out bugs, edge cases, missing features, and security issues. Also check: 1) Are all external files/downloads verified as real (not HTML error pages or truncated)? 2) What could fail silently — working app but broken feature? 3) Review the full pipeline, not just logic. 4) Who else calls this code? Trace all callers — a class created in one place may also be created elsewhere. 5) What happens on rapid toggle/restart? Check teardown ordering — threads must be joined before closing resources they use. 6) Test the happy path mentally: if a user does X, does the code actually work end-to-end? Be concise.",
-        "architecture": "You are reviewing an architecture decision. Evaluate the tradeoffs, suggest alternatives if better ones exist, and flag risks. Be concise.",
-        "debug": "Another AI is stuck debugging this issue. Provide fresh analysis and suggest what they might be missing. Be concise.",
-        "test": "Write tests for the following code. Focus on edge cases, error conditions, and scenarios the author might have missed. Be concise.",
-    }.get(mode, "")
-
-    full_question = f"{mode_prefix}\n\n{question}" if mode_prefix else question
+    full_question = _build_consult_prompt(question, mode)
 
     # Query all peers in parallel
     results = []

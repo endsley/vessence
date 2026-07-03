@@ -14,81 +14,14 @@ import json
 import os
 import sys
 
-
-REQUIRED_MANIFEST_FIELDS = [
-    "essence_name",
-    "role_title",
-    "version",
-    "author",
-    "description",
-    "preferred_model",
-    "permissions",
-    "capabilities",
-    "ui",
-    "shared_skills",
-]
-
-REQUIRED_MODEL_FIELDS = ["model_id", "reasoning"]
-REQUIRED_CAPABILITIES_FIELDS = ["provides", "consumes"]
-REQUIRED_UI_FIELDS = ["type"]
-
-REQUIRED_PATHS = [
-    ("personality.md", "file"),
-    ("knowledge", "dir"),
-    ("functions", "dir"),
-    ("ui", "dir"),
-]
-
-
-def validate_manifest(manifest: dict) -> list[str]:
-    """Validate manifest.json content. Returns a list of error strings."""
-    errors: list[str] = []
-
-    # Check top-level required fields
-    for field in REQUIRED_MANIFEST_FIELDS:
-        if field not in manifest:
-            errors.append(f"Missing required field: '{field}'")
-
-    # Validate preferred_model sub-fields
-    model = manifest.get("preferred_model")
-    if isinstance(model, dict):
-        for field in REQUIRED_MODEL_FIELDS:
-            if field not in model:
-                errors.append(f"preferred_model missing field: '{field}'")
-    elif model is not None:
-        errors.append("'preferred_model' must be an object")
-
-    # Validate capabilities sub-fields
-    caps = manifest.get("capabilities")
-    if isinstance(caps, dict):
-        for field in REQUIRED_CAPABILITIES_FIELDS:
-            if field not in caps:
-                errors.append(f"capabilities missing field: '{field}'")
-            elif not isinstance(caps[field], list):
-                errors.append(f"capabilities.{field} must be an array")
-    elif caps is not None:
-        errors.append("'capabilities' must be an object")
-
-    # Validate ui sub-fields
-    ui = manifest.get("ui")
-    if isinstance(ui, dict):
-        for field in REQUIRED_UI_FIELDS:
-            if field not in ui:
-                errors.append(f"ui missing field: '{field}'")
-    elif ui is not None:
-        errors.append("'ui' must be an object")
-
-    # Validate permissions is a list
-    perms = manifest.get("permissions")
-    if perms is not None and not isinstance(perms, list):
-        errors.append("'permissions' must be an array")
-
-    # Validate shared_skills is a list
-    skills = manifest.get("shared_skills")
-    if skills is not None and not isinstance(skills, list):
-        errors.append("'shared_skills' must be an array")
-
-    return errors
+from agent_skills.essence_validation import (
+    REQUIRED_CAPABILITIES_FIELDS,
+    REQUIRED_MANIFEST_FIELDS,
+    REQUIRED_MODEL_FIELDS,
+    REQUIRED_PATHS,
+    REQUIRED_UI_FIELDS,
+    validate_manifest,
+)
 
 
 def validate_folder_structure(essence_path: str) -> list[str]:

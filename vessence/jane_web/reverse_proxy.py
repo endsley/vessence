@@ -33,6 +33,14 @@ from time import monotonic as _monotonic
 import aiohttp
 from aiohttp import web
 
+from jane_web.reverse_proxy_helpers import (
+    HOP_BY_HOP,
+    filtered_proxy_headers as _filtered_proxy_headers,
+    forwarded_request_headers as _forwarded_request_headers,
+    is_streaming_response as _is_streaming_response,
+    is_websocket_upgrade as _is_websocket_upgrade,
+)
+
 logger = logging.getLogger("jane.reverse_proxy")
 
 
@@ -215,14 +223,6 @@ async def handle_status(request: web.Request) -> web.Response:
 # Timeout for connecting to upstream — fail fast if upstream is down
 CONNECT_TIMEOUT = aiohttp.ClientTimeout(total=None, connect=5)
 
-# Headers that must not be forwarded
-HOP_BY_HOP = frozenset({
-    "connection", "keep-alive", "proxy-authenticate",
-    "proxy-authorization", "te", "trailers",
-    "transfer-encoding", "upgrade",
-})
-
-
 async def proxy_handler(request: web.Request) -> web.StreamResponse:
     """Forward every request to the active upstream."""
     # ── Global rate limiting (per IP) ─────────────────────────────────────
@@ -243,19 +243,15 @@ async def proxy_handler(request: web.Request) -> web.StreamResponse:
     target_url = f"{upstream}{request.path_qs}"
 
     # Build forwarded headers
-    headers = {
-        k: v for k, v in request.headers.items()
-        if k.lower() not in HOP_BY_HOP
-    }
-    headers["X-Forwarded-For"] = client_ip
-    headers["X-Forwarded-Proto"] = request.scheme
+    headers = _forwarded_request_headers(
+        request.headers,
+        client_ip=client_ip,
+        scheme=request.scheme,
+    )
 
     try:
         # Check for WebSocket upgrade
-        if (
-            request.headers.get("Upgrade", "").lower() == "websocket"
-            or request.headers.get("Connection", "").lower() == "upgrade"
-        ):
+        if _is_websocket_upgrade(request.headers):
             return await _proxy_websocket(request, target_url, headers)
 
         # Check if this is a streaming response (SSE / chunked)
@@ -269,18 +265,12 @@ async def proxy_handler(request: web.Request) -> web.StreamResponse:
             allow_redirects=False,
         ) as upstream_resp:
             # If upstream sends chunked / streaming, stream it through
-            is_streaming = (
-                upstream_resp.headers.get("Transfer-Encoding", "").lower() == "chunked"
-                or "text/event-stream" in upstream_resp.headers.get("Content-Type", "")
-            )
+            is_streaming = _is_streaming_response(upstream_resp.headers)
 
             if is_streaming:
                 response = web.StreamResponse(
                     status=upstream_resp.status,
-                    headers={
-                        k: v for k, v in upstream_resp.headers.items()
-                        if k.lower() not in HOP_BY_HOP
-                    },
+                    headers=_filtered_proxy_headers(upstream_resp.headers),
                 )
                 await response.prepare(request)
                 async for chunk in upstream_resp.content.iter_any():
@@ -291,10 +281,7 @@ async def proxy_handler(request: web.Request) -> web.StreamResponse:
                 body = await upstream_resp.read()
                 return web.Response(
                     status=upstream_resp.status,
-                    headers={
-                        k: v for k, v in upstream_resp.headers.items()
-                        if k.lower() not in HOP_BY_HOP
-                    },
+                    headers=_filtered_proxy_headers(upstream_resp.headers),
                     body=body,
                 )
     except aiohttp.ClientConnectorError as exc:

@@ -27,10 +27,10 @@ import subprocess
 import sys
 import urllib.parse
 import urllib.request
-from dataclasses import asdict, dataclass
+from dataclasses import asdict
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 from agent_skills.web_automation.browser_session import (
     BrowserSessionManager,
@@ -46,6 +46,28 @@ from agent_skills.web_automation.profiles import (
     storage_state_path,
     touch_last_used,
 )
+from agent_skills.google_cloud_receipt_utils import (
+    BillingAccount,
+    DownloadedReceipt,
+    ReceiptCandidate,
+    billing_account_from_gcloud_row,
+    build_receipt_filename,
+    document_candidate_from_row,
+    downloaded_receipt_from_candidate,
+    downloaded_receipts_json,
+    filter_receipt_candidates_by_date,
+    final_download_path as _final_download_path,
+    manifest_path as _manifest_path,
+    parse_iso_date,
+    parse_receipt_amount,
+    parse_receipt_date,
+    receipt_candidate_from_control,
+    sanitize_filename_piece,
+    select_open_billing_accounts,
+    sort_receipt_candidates,
+    unique_dest_path as _unique_dest_path,
+    validate_receipt_request,
+)
 
 
 GOOGLE_CLOUD_DOMAIN = "console.cloud.google.com"
@@ -57,145 +79,6 @@ DOCUMENTS_URL_TMPL = "https://console.cloud.google.com/billing/{account_id}/invo
 PROVIDER_FILENAME_PREFIX = "google"
 
 _RECEIPT_RE = re.compile(r"\breceipt\b", re.IGNORECASE)
-_DOCUMENT_RE = re.compile(r"\b(statement|invoice|receipt)\b", re.IGNORECASE)
-_AMOUNT_PATTERNS = (
-    re.compile(r"\$\s*([0-9]+(?:,[0-9]{3})*(?:\.[0-9]{2}))"),
-    re.compile(r"\bUSD\s*([0-9]+(?:,[0-9]{3})*(?:\.[0-9]{2}))\b", re.IGNORECASE),
-    re.compile(r"\b([0-9]+(?:,[0-9]{3})*\.[0-9]{2})\b"),
-)
-_DATE_PATTERNS = (
-    ("%B %d, %Y", re.compile(r"\b([A-Z][a-z]+ \d{1,2}, \d{4})\b")),
-    ("%b %d, %Y", re.compile(r"\b([A-Z][a-z]{2} \d{1,2}, \d{4})\b")),
-    ("%Y-%m-%d", re.compile(r"\b(\d{4}-\d{2}-\d{2})\b")),
-    ("%m/%d/%Y", re.compile(r"\b(\d{1,2}/\d{1,2}/\d{4})\b")),
-)
-
-
-@dataclass(frozen=True)
-class BillingAccount:
-    account_id: str
-    name: str
-    open: bool
-
-
-@dataclass(frozen=True)
-class ReceiptCandidate:
-    account_id: str
-    account_name: str
-    source_kind: str
-    source_index: int
-    source_name: str
-    row_text: str
-    discovered_at: int
-    receipt_date: str | None = None
-    amount: str | None = None
-    href: str | None = None
-    document_token: str | None = None
-
-
-@dataclass(frozen=True)
-class DownloadedReceipt:
-    account_id: str
-    account_name: str
-    receipt_date: str | None
-    amount: str | None
-    source_name: str
-    row_text: str
-    path: str
-
-
-def parse_receipt_date(text: str) -> date | None:
-    for fmt, pat in _DATE_PATTERNS:
-        m = pat.search(text or "")
-        if not m:
-            continue
-        try:
-            return datetime.strptime(m.group(1), fmt).date()
-        except ValueError:
-            continue
-    return None
-
-
-def parse_receipt_amount(text: str) -> str | None:
-    for pat in _AMOUNT_PATTERNS:
-        m = pat.search(text or "")
-        if not m:
-            continue
-        return m.group(1).replace(",", "")
-    return None
-
-
-def sanitize_filename_piece(text: str, *, fallback: str = "receipt") -> str:
-    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", (text or "").strip())
-    cleaned = cleaned.strip("._-")
-    return cleaned[:80] or fallback
-
-
-def build_receipt_filename(
-    *,
-    provider: str,
-    receipt_date: date | None,
-    amount: str | None,
-    fallback: str = "receipt",
-) -> str:
-    pieces = [sanitize_filename_piece(provider, fallback=provider)]
-    if receipt_date is not None:
-        pieces.extend([
-            str(receipt_date.month),
-            str(receipt_date.day),
-            str(receipt_date.year),
-        ])
-    else:
-        pieces.append("undated")
-    pieces.append(sanitize_filename_piece(amount or "unknown_amount", fallback="unknown_amount"))
-    return "_".join(pieces) + ".pdf"
-
-
-def parse_iso_date(text: str) -> date:
-    try:
-        return date.fromisoformat(text)
-    except ValueError as e:
-        raise ValueError(f"Invalid date {text!r}. Expected YYYY-MM-DD.") from e
-
-
-def candidate_date(candidate: ReceiptCandidate) -> date | None:
-    if candidate.receipt_date:
-        try:
-            return date.fromisoformat(candidate.receipt_date)
-        except ValueError:
-            pass
-    return parse_receipt_date(candidate.row_text)
-
-
-def sort_receipt_candidates(candidates: Iterable[ReceiptCandidate]) -> list[ReceiptCandidate]:
-    def _key(candidate: ReceiptCandidate) -> tuple[date, int]:
-        parsed = candidate_date(candidate) or date.min
-        return (parsed, -candidate.discovered_at)
-
-    return sorted(list(candidates), key=_key, reverse=True)
-
-
-def filter_receipt_candidates_by_date(
-    candidates: Iterable[ReceiptCandidate],
-    *,
-    start_date: date | None = None,
-    end_date: date | None = None,
-) -> list[ReceiptCandidate]:
-    out: list[ReceiptCandidate] = []
-    for candidate in candidates:
-        parsed = candidate_date(candidate)
-        if parsed is None:
-            continue
-        if start_date is not None and parsed < start_date:
-            continue
-        if end_date is not None and parsed > end_date:
-            continue
-        out.append(candidate)
-    return out
-
-
-def _manifest_path(out_dir: Path) -> Path:
-    return out_dir / "manifest.json"
 
 
 def _default_out_dir() -> Path:
@@ -223,16 +106,9 @@ def list_billing_accounts() -> list[BillingAccount]:
     data = _run_json(["gcloud", "billing", "accounts", "list", "--format=json"])
     out: list[BillingAccount] = []
     for row in data:
-        account_id = str(row.get("name") or "").strip()
-        if account_id.startswith("billingAccounts/"):
-            account_id = account_id.split("/", 1)[1]
-        if not account_id:
-            continue
-        out.append(BillingAccount(
-            account_id=account_id,
-            name=str(row.get("displayName") or account_id),
-            open=bool(row.get("open", False)),
-        ))
+        account = billing_account_from_gcloud_row(row)
+        if account is not None:
+            out.append(account)
     return out
 
 
@@ -316,12 +192,7 @@ async def _wait_for_billing_console_ready(page: Any, *, timeout_s: int) -> None:
 
 
 def _select_accounts(billing_account_ids: list[str] | None) -> list[BillingAccount]:
-    accounts = [a for a in list_billing_accounts() if a.open]
-    if not billing_account_ids:
-        return accounts
-    wanted = {x.strip() for x in billing_account_ids if x.strip()}
-    filtered = [a for a in accounts if a.account_id in wanted]
-    missing = wanted.difference({a.account_id for a in filtered})
+    filtered, missing = select_open_billing_accounts(list_billing_accounts(), billing_account_ids)
     if missing:
         raise RuntimeError(f"Billing account(s) not found or not open: {', '.join(sorted(missing))}")
     return filtered
@@ -406,23 +277,15 @@ async def _discover_receipt_candidates(page: Any, account: BillingAccount) -> li
                 except Exception:
                     href = None
             discovered_at += 1
-            parsed_date = parse_receipt_date(row_text or source_name)
-            amount = parse_receipt_amount(row_text)
-            candidates.append(
-                ReceiptCandidate(
-                    account_id=account.account_id,
-                    account_name=account.name,
-                    source_kind=source_kind,
-                    source_index=idx,
-                    source_name=source_name,
-                    row_text=row_text,
-                    discovered_at=discovered_at,
-                    receipt_date=parsed_date.isoformat() if parsed_date else None,
-                    amount=amount,
-                    href=href,
-                    document_token=None,
-                )
-            )
+            candidates.append(receipt_candidate_from_control(
+                account,
+                source_kind=source_kind,
+                source_index=idx,
+                source_name=source_name,
+                row_text=row_text,
+                discovered_at=discovered_at,
+                href=href,
+            ))
     return candidates
 
 
@@ -452,55 +315,19 @@ async def _discover_document_candidates(page: Any, account: BillingAccount) -> l
             text = ((await row.inner_text()) or "").strip()
         except Exception:
             continue
-        if not text or not _DOCUMENT_RE.search(text):
-            continue
-        parsed_date = parse_receipt_date(text)
-        amount = parse_receipt_amount(text)
         token = await row.get_attribute("data-data-token")
-        if not token:
+        candidate = document_candidate_from_row(
+            account,
+            source_index=idx,
+            row_text=text,
+            discovered_at=discovered_at + 1,
+            document_token=token,
+        )
+        if candidate is None:
             continue
         discovered_at += 1
-        match = _DOCUMENT_RE.search(text)
-        source_name = match.group(1).title() if match else "Document"
-        candidates.append(
-            ReceiptCandidate(
-                account_id=account.account_id,
-                account_name=account.name,
-                source_kind="document_row",
-                source_index=idx,
-                source_name=source_name,
-                row_text=text,
-                discovered_at=discovered_at,
-                receipt_date=parsed_date.isoformat() if parsed_date else None,
-                amount=amount,
-                href=None,
-                document_token=token,
-            )
-        )
+        candidates.append(candidate)
     return candidates
-
-
-def _unique_dest_path(out_dir: Path, filename: str) -> Path:
-    base = out_dir / filename
-    if not base.exists():
-        return base
-    stem = base.stem
-    suffix = base.suffix
-    i = 2
-    while True:
-        candidate = out_dir / f"{stem}_{i}{suffix}"
-        if not candidate.exists():
-            return candidate
-        i += 1
-
-
-def _final_download_path(dest: Path, suggested_filename: str | None) -> Path:
-    suffix = dest.suffix
-    if suggested_filename:
-        sfx = Path(suggested_filename).suffix.lower()
-        if sfx:
-            suffix = sfx
-    return dest.with_suffix(suffix)
 
 
 async def _try_direct_cookie_download(context: Any, url: str, dest: Path) -> Path | None:
@@ -713,15 +540,7 @@ async def _download_candidate(
     if candidate.source_kind == "document_row":
         await _open_documents_page(page, candidate.account_id, profile_id)
         saved = await _download_document_candidate(page, candidate, dest)
-        return DownloadedReceipt(
-            account_id=candidate.account_id,
-            account_name=candidate.account_name,
-            receipt_date=parsed_date.isoformat() if parsed_date else None,
-            amount=candidate.amount,
-            source_name=candidate.source_name,
-            row_text=candidate.row_text,
-            path=str(saved),
-        )
+        return downloaded_receipt_from_candidate(candidate, saved, receipt_date=parsed_date)
 
     await _open_history_page(page, candidate.account_id, profile_id)
     await _maybe_expand_date_range(page)
@@ -730,27 +549,11 @@ async def _download_candidate(
         href = urllib.parse.urljoin(page.url, candidate.href)
         saved = await _save_receipt_page(page.context, href, dest)
         if saved:
-            return DownloadedReceipt(
-                account_id=candidate.account_id,
-                account_name=candidate.account_name,
-                receipt_date=parsed_date.isoformat() if parsed_date else None,
-                amount=candidate.amount,
-                source_name=candidate.source_name,
-                row_text=candidate.row_text,
-                path=str(saved),
-            )
+            return downloaded_receipt_from_candidate(candidate, saved, receipt_date=parsed_date)
 
     locator = await _resolve_candidate_locator(page, candidate)
     saved = await _click_for_download(page, locator, dest)
-    return DownloadedReceipt(
-        account_id=candidate.account_id,
-        account_name=candidate.account_name,
-        receipt_date=parsed_date.isoformat() if parsed_date else None,
-        amount=candidate.amount,
-        source_name=candidate.source_name,
-        row_text=candidate.row_text,
-        path=str(saved),
-    )
+    return downloaded_receipt_from_candidate(candidate, saved, receipt_date=parsed_date)
 
 
 async def download_recent_receipts(
@@ -762,12 +565,7 @@ async def download_recent_receipts(
     start_date: date | None = None,
     end_date: date | None = None,
 ) -> list[DownloadedReceipt]:
-    if count is not None and count < 1:
-        raise ValueError("count must be >= 1")
-    if count is None and start_date is None and end_date is None:
-        raise ValueError("Provide either count or a date range.")
-    if start_date is not None and end_date is not None and start_date > end_date:
-        raise ValueError("start_date must be <= end_date")
+    validate_receipt_request(count=count, start_date=start_date, end_date=end_date)
     meta = require_captured_google_profile(profile_id)
     touch_last_used(meta.profile_id)
 
@@ -824,7 +622,7 @@ async def download_recent_receipts(
             )
 
     _manifest_path(out_root).write_text(
-        json.dumps([asdict(d) for d in downloads], indent=2),
+        downloaded_receipts_json(downloads),
         encoding="utf-8",
     )
     return downloads
@@ -883,7 +681,7 @@ async def _run(args: argparse.Namespace) -> int:
             start_date=start_date,
             end_date=end_date,
         )
-        print(json.dumps([asdict(d) for d in downloads], indent=2))
+        print(downloaded_receipts_json(downloads))
         return 0
 
     raise RuntimeError(f"Unknown command: {args.cmd}")

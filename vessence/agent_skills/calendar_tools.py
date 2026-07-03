@@ -18,13 +18,19 @@ from __future__ import annotations
 
 import logging
 import os
-from datetime import datetime, time as dtime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any
 
 from googleapiclient.discovery import build
 from google.oauth2.credentials import Credentials
 
 from agent_skills.email_oauth import refresh_token_if_needed
+from agent_skills.calendar_time_helpers import (
+    dt_to_iso_utc as _dt_to_iso_utc,
+    reminder_overrides_body as _reminder_overrides_body,
+    resolve_range_for_now as _resolve_range_for_now,
+    to_local_naive_iso as _to_local_naive_iso,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -72,86 +78,7 @@ def resolve_range(range_hint: str | None) -> tuple[datetime, datetime]:
     1-6 days), YYYY-MM-DD. Unknown hints fall back to today.
     """
     tz = _local_tz()
-    now = datetime.now(tz)
-    today = now.date()
-    hint = (range_hint or "today").strip().lower().replace(" ", "_")
-
-    # Half-open ranges: [local midnight, next local midnight) avoids both
-    # 23:59:59.999999 boundary bugs and DST corner cases.
-    def _day(d):
-        start = datetime.combine(d, dtime.min, tzinfo=tz)
-        end = datetime.combine(d + timedelta(days=1), dtime.min, tzinfo=tz)
-        return start, end
-
-    if hint == "today":
-        return _day(today)
-    if hint == "tomorrow":
-        return _day(today + timedelta(days=1))
-    if hint == "weekend":
-        days_to_sat = (5 - today.weekday()) % 7
-        sat = today + timedelta(days=days_to_sat)
-        mon = sat + timedelta(days=2)
-        return (
-            datetime.combine(sat, dtime.min, tzinfo=tz),
-            datetime.combine(mon, dtime.min, tzinfo=tz),
-        )
-    if hint == "this_week":
-        # Full visible week: Monday 00:00 through next Monday 00:00 (exclusive).
-        monday = today - timedelta(days=today.weekday())
-        next_monday = monday + timedelta(days=7)
-        return (
-            datetime.combine(monday, dtime.min, tzinfo=tz),
-            datetime.combine(next_monday, dtime.min, tzinfo=tz),
-        )
-    if hint == "next_week":
-        monday = today + timedelta(days=(7 - today.weekday()))
-        next_monday = monday + timedelta(days=7)
-        return (
-            datetime.combine(monday, dtime.min, tzinfo=tz),
-            datetime.combine(next_monday, dtime.min, tzinfo=tz),
-        )
-    if hint == "next":
-        return now, now + timedelta(days=7)
-    if hint in ("next_30_days", "next_30"):
-        return now, now + timedelta(days=30)
-    if hint in ("next_60_days", "next_60"):
-        return now, now + timedelta(days=60)
-    if hint in ("next_90_days", "next_90"):
-        return now, now + timedelta(days=90)
-    _weekdays = {
-        "monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,
-        "friday": 4, "saturday": 5, "sunday": 6,
-    }
-    if hint in _weekdays:
-        days_ahead = (_weekdays[hint] - today.weekday()) % 7
-        return _day(today + timedelta(days=days_ahead))
-    try:
-        d = datetime.strptime(hint, "%Y-%m-%d").date()
-        return _day(d)
-    except ValueError:
-        return _day(today)
-
-
-def _dt_to_iso_utc(dt: datetime) -> str:
-    """Serialize to RFC-3339 UTC string accepted by the Calendar API."""
-    return dt.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
-
-
-def _to_local_naive_iso(value: str) -> str:
-    """Normalize any caller-supplied ISO datetime to a local-tz naive ISO.
-
-    Treats the wall-clock digits as local wall time and strips any offset. Users
-    say "10 AM" meaning their local 10 AM; the brain that relays that should not
-    be trusted to pick the correct UTC offset (it has gotten DST vs. standard
-    time wrong in the past). Paired with `timeZone: _LOCAL_TZ_NAME` in the
-    event body so Google interprets the digits in the user's local zone.
-    """
-    s = value.strip()
-    try:
-        dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
-    except ValueError:
-        return s
-    return dt.replace(tzinfo=None).isoformat(timespec="seconds")
+    return _resolve_range_for_now(range_hint, datetime.now(tz))
 
 
 def list_events_in_range(
@@ -240,19 +167,7 @@ def create_event(
         "end": {"dateTime": _to_local_naive_iso(end_iso), "timeZone": _LOCAL_TZ_NAME},
     }
     if reminders_minutes is not None:
-        if len(reminders_minutes) > 5:
-            raise ValueError("Google Calendar allows at most 5 reminder overrides.")
-        for m in reminders_minutes:
-            if not isinstance(m, int) or m < 0 or m > 40320:
-                raise ValueError(
-                    f"Reminder minutes must be int in [0, 40320]; got {m!r}."
-                )
-        body["reminders"] = {
-            "useDefault": False,
-            "overrides": [
-                {"method": "popup", "minutes": m} for m in reminders_minutes
-            ],
-        }
+        body["reminders"] = _reminder_overrides_body(reminders_minutes)
     event = svc.events().insert(calendarId=_PRIMARY, body=body).execute()
     _logger.info("Created calendar event %s: %s", event.get("id"), summary)
     return _slim(event)

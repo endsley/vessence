@@ -37,10 +37,19 @@ import datetime as dt
 import json
 import logging
 import os
-import re
 import sys
 import urllib.request
 from pathlib import Path
+
+from agent_skills.todo_doc_helpers import (
+    LOGIN_WALL_MARKERS as _LOGIN_WALL_MARKERS,
+    build_todo_cache_payload as _build_todo_cache_payload,
+    decode_doc_body as _decode_doc_body,
+    export_url as _export_url,
+    is_login_wall_body as _is_login_wall_body,
+    parse_categories,
+    todo_item_count as _todo_item_count,
+)
 
 logger = logging.getLogger("fetch_todo_list")
 logging.basicConfig(
@@ -66,20 +75,6 @@ def _doc_id() -> str:
     return os.environ.get("TODO_DOC_ID", _DEFAULT_DOC_ID)
 
 
-def _export_url(doc_id: str) -> str:
-    return f"https://docs.google.com/document/d/{doc_id}/export?format=txt"
-
-
-# Headers indicating the response is a login wall rather than doc text.
-_LOGIN_WALL_MARKERS = (
-    "<html",
-    "<!DOCTYPE html",
-    "Sign in - Google Accounts",
-    "google.com/accounts",
-    "ServiceLogin",
-)
-
-
 def fetch_doc_text(doc_id: str | None = None, timeout: int = 30) -> str:
     """Download the plain-text export. Raises RuntimeError on failure.
 
@@ -100,14 +95,10 @@ def fetch_doc_text(doc_id: str | None = None, timeout: int = 30) -> str:
         if resp.status != 200:
             raise RuntimeError(f"HTTP {resp.status} fetching {url}")
         body_bytes = resp.read()
-    try:
-        body = body_bytes.decode("utf-8")
-    except UnicodeDecodeError:
-        body = body_bytes.decode("utf-8", errors="replace")
+    body = _decode_doc_body(body_bytes)
 
     # Detect login-wall HTML — common when the doc isn't publicly shared.
-    body_lower = body[:2000].lower()
-    if any(m.lower() in body_lower for m in _LOGIN_WALL_MARKERS):
+    if _is_login_wall_body(body, _LOGIN_WALL_MARKERS):
         raise RuntimeError(
             "Received HTML login page instead of doc text. "
             "Verify the doc is shared as 'Anyone with the link — Viewer'."
@@ -118,78 +109,6 @@ def fetch_doc_text(doc_id: str | None = None, timeout: int = 30) -> str:
     return body
 
 
-# ── Parser ───────────────────────────────────────────────────────────────────
-#
-# Doc structure is simple: single-line category headers (no markdown)
-# followed by numbered list items, with blank lines between categories.
-# Example:
-#
-#     Do it Immediately
-#     1. Deal with some important email.
-#
-#
-#     For my students
-#     1. Write the recommendation letter
-#
-# A line is treated as a category header when it:
-#   - is non-empty
-#   - doesn't start with a list marker (number., -, *, •, tab)
-#   - the following non-blank line starts with a list marker
-#
-# List items are extracted as the text after the marker. Items span only
-# a single line (this matches the current doc style; if Chieh starts
-# using multi-line items later, extend the parser).
-
-_LIST_MARKER_RE = re.compile(r"^\s*(?:\d+[.)]|\-|\*|•)\s+")
-
-
-def parse_categories(text: str) -> list[dict]:
-    # Strip UTF-8 BOM that Google's export sometimes prepends.
-    if text.startswith("\ufeff"):
-        text = text[1:]
-    lines = text.splitlines()
-    result: list[dict] = []
-    i = 0
-    n = len(lines)
-
-    while i < n:
-        raw = lines[i]
-        line = raw.strip()
-        if not line:
-            i += 1
-            continue
-
-        # Skip the doc title "TODO list" on its own line if present at top.
-        if i == 0 and line.lower() in ("todo list", "todos", "to do list"):
-            i += 1
-            continue
-
-        if _LIST_MARKER_RE.match(raw):
-            # List item without a preceding header — attach to last category
-            # or synthesize an "Uncategorized" bucket.
-            if not result:
-                result.append({"name": "Uncategorized", "items": []})
-            result[-1]["items"].append(_LIST_MARKER_RE.sub("", raw).strip())
-            i += 1
-            continue
-
-        # Potential header: only confirm if the NEXT non-blank line is a
-        # list marker. This guards against free prose being treated as a
-        # new category.
-        j = i + 1
-        while j < n and not lines[j].strip():
-            j += 1
-        if j < n and _LIST_MARKER_RE.match(lines[j]):
-            result.append({"name": line, "items": []})
-            i = j
-            continue
-
-        # Line isn't a header — drop it (keeps prose + footer noise out).
-        i += 1
-
-    return result
-
-
 def write_cache(
     categories: list[dict],
     raw_text: str,
@@ -198,13 +117,12 @@ def write_cache(
 ) -> Path:
     path = path or _cache_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    payload = {
-        "fetched_at": dt.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "doc_id": doc_id,
-        "source_url": _export_url(doc_id),
-        "categories": categories,
-        "raw_text": raw_text,
-    }
+    payload = _build_todo_cache_payload(
+        categories,
+        raw_text,
+        doc_id,
+        fetched_at=dt.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+    )
     # Atomic write: temp file + os.replace. Protects the handler from
     # reading a half-written cache if the fetcher is killed mid-write.
     tmp = path.with_suffix(path.suffix + ".tmp")
@@ -221,7 +139,7 @@ def main() -> int:
         doc_id = _doc_id()
         text = fetch_doc_text(doc_id)
         cats = parse_categories(text)
-        total_items = sum(len(c["items"]) for c in cats)
+        total_items = _todo_item_count(cats)
         if not cats or total_items == 0:
             logger.warning(
                 "Parsed 0 categories/items — cache left unchanged. "

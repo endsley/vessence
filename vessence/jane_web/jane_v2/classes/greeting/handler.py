@@ -10,86 +10,21 @@ the greeting contains a follow-up question or task.
 from __future__ import annotations
 
 import logging
-import random
-import re
 
-import httpx
+from jane_web.jane_v2.ollama_client import post_local_llm_response as _post_local_llm_response
 
-from jane_web.jane_v2.models import LOCAL_LLM as MODEL, LOCAL_LLM_NUM_CTX, LOCAL_LLM_TIMEOUT, OLLAMA_URL
+from .canned import (
+    CANNED_PATTERNS as _CANNED_PATTERNS,
+    CANNED_REPLIES as _CANNED_REPLIES,
+    PROMPT_TEMPLATE as _PROMPT_TEMPLATE,
+    build_greeting_prompt as _build_greeting_prompt,
+    canned_reply as _canned_reply,
+    clean_greeting_text as _clean_greeting_text,
+    greeting_llm_payload as _greeting_llm_payload,
+    is_wrong_class as _is_wrong_class,
+)
 
 logger = logging.getLogger(__name__)
-
-# Deterministic canned replies for the most common greetings — saves a
-# 7s Ollama round-trip on qwen2.5:7b cold load. Falls through to the
-# LLM for anything less templated.
-_CANNED_REPLIES = {
-    "check_in": [
-        "Going well, thanks for asking; what's up?",
-        "All good here; what's on your mind?",
-        "Doing fine; what's up?",
-    ],
-    "hello": [
-        "Hey, what's up?",
-        "Hi, what's up?",
-        "Hey there, what do you need?",
-    ],
-    "morning": [
-        "Morning, what's up?",
-        "Good morning, what's on the agenda?",
-    ],
-    "afternoon": [
-        "Afternoon, what's up?",
-        "Good afternoon, what's up?",
-    ],
-    "evening": [
-        "Evening, what do you need?",
-        "Good evening, what's up?",
-    ],
-    "thanks": [
-        "Anytime.",
-        "You're welcome.",
-        "Sure thing.",
-    ],
-}
-
-_CANNED_PATTERNS = [
-    # "how's it going", "how are you", "how you doing", "what's up"
-    (re.compile(r"^(how'?s? (it going|things|you|everything)|"
-                r"how are you|how you (doing|holding up)|"
-                r"what'?s up|what'?s new|sup|you good|you there)\??$"),
-     "check_in"),
-    # bare hellos
-    (re.compile(r"^(hi+|hey+|hello+|yo|howdy|heya|hiya)\b[.!? ]*$"), "hello"),
-    # time-of-day
-    (re.compile(r"^good morning\b[.!? ]*$"), "morning"),
-    (re.compile(r"^good afternoon\b[.!? ]*$"), "afternoon"),
-    (re.compile(r"^good evening\b[.!? ]*$"), "evening"),
-    # thanks
-    (re.compile(r"^(thanks|thank you|thx|ty|appreciate (it|you))\b[.!? ]*$"),
-     "thanks"),
-]
-
-
-def _canned_reply(prompt: str) -> str | None:
-    """Return a deterministic greeting reply, or None if we should use the LLM."""
-    p = (prompt or "").strip().lower().rstrip(".!?,")
-    for pattern, bucket in _CANNED_PATTERNS:
-        if pattern.match(p):
-            choices = _CANNED_REPLIES[bucket]
-            return random.choice(choices)
-    return None
-
-_PROMPT_TEMPLATE = """\
-The classifier thinks the user is greeting you (saying hi, checking in, etc.).
-First, confirm: is this actually a greeting or casual check-in?
-If NOT (e.g., they're asking a question, giving a command, or continuing a prior topic), \
-output ONLY: WRONG_CLASS
-
-If YES, you are Jane, a personal AI assistant. Respond naturally in 1 short sentence — \
-warm, casual, like a friend. No markdown. No lists. No filler questions like "how can I help you?"
-
-{context_block}User: {prompt}
-Jane:"""
 
 
 async def handle(prompt: str, context: str = "") -> dict | None:
@@ -105,34 +40,10 @@ async def handle(prompt: str, context: str = "") -> dict | None:
         logger.info("greeting handler: canned → %r", canned[:60])
         return {"text": canned}
 
-    context_block = ""
-    if context and context.strip():
-        context_block = f"Recent conversation:\n{context.strip()}\n\n"
-
-    full_prompt = _PROMPT_TEMPLATE.format(
-        prompt=prompt.strip(),
-        context_block=context_block,
-    )
-
-    body = {
-        "model": MODEL,
-        "prompt": full_prompt,
-        "stream": False,
-        "think": False,
-        "options": {"temperature": 0.7, "num_predict": 60, "num_ctx": LOCAL_LLM_NUM_CTX},
-        "keep_alive": -1,
-    }
+    full_prompt = _build_greeting_prompt(prompt, context)
 
     try:
-        async with httpx.AsyncClient(timeout=LOCAL_LLM_TIMEOUT) as client:
-            r = await client.post(OLLAMA_URL, json=body)
-            r.raise_for_status()
-            try:
-                from jane_web.jane_v2.models import record_ollama_activity
-                record_ollama_activity()
-            except Exception:
-                pass
-            text = (r.json().get("response") or "").strip()
+        text = await _post_local_llm_response(full_prompt, _greeting_llm_payload)
     except Exception as e:
         logger.warning("greeting handler: LLM call failed: %s", e)
         return None
@@ -141,14 +52,11 @@ async def handle(prompt: str, context: str = "") -> dict | None:
         return None
 
     # Classification confirmation: if LLM says WRONG_CLASS, defer to Stage 3
-    if "WRONG_CLASS" in text.upper():
+    if _is_wrong_class(text):
         logger.info("greeting handler: LLM says WRONG_CLASS — escalating to Stage 3")
         return None
 
-    # Clean up common LLM artifacts
-    # Remove any self-attribution like "Jane:" at the start
-    if text.lower().startswith("jane:"):
-        text = text[5:].strip()
+    text = _clean_greeting_text(text)
 
     logger.info("greeting handler: %r → %r", prompt[:40], text[:80])
     return {"text": text}

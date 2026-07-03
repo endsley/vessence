@@ -29,7 +29,6 @@ os.environ.setdefault(
 )
 
 import sys
-import secrets
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -44,7 +43,6 @@ import asyncio
 import aiofiles
 import base64
 import hashlib
-import hmac
 import json
 import logging
 import re
@@ -95,46 +93,10 @@ JANE_RESPONSE_WAIT_SECONDS = int(os.environ.get("JANE_RESPONSE_WAIT_SECONDS", "7
 # uvicorn's own bind-or-fail behavior is sufficient beyond those two hooks.
 
 
-from collections import defaultdict
-from time import monotonic
-
 from dotenv import load_dotenv
-from jane.config import ENV_FILE_PATH, VAULT_DIR, TOOLS_DIR, ESSENCES_DIR, VESSENCE_DATA_HOME, ADD_FACT_SCRIPT, ADK_VENV_PYTHON, LOGS_DIR, PROMPT_LIST_PATH, PROVIDER_MODELS, get_chroma_client, normalize_frontier_provider, VAULT_ENC_PATH, CHALLENGE_PATH
+from jane.config import ENV_FILE_PATH, VAULT_DIR, TOOLS_DIR, ESSENCES_DIR, VESSENCE_DATA_HOME, ADD_FACT_SCRIPT, ADK_VENV_PYTHON, LOGS_DIR, PROMPT_LIST_PATH, get_chroma_client, normalize_frontier_provider, VAULT_ENC_PATH, CHALLENGE_PATH
 from agent_skills.secret_store import SecretStore
 
-
-# ── Rate Limiting ────────────────────────────────────────────────────────────
-
-class RateLimiter:
-    """Simple in-memory sliding-window rate limiter."""
-
-    def __init__(self):
-        self._hits: dict[str, list[float]] = defaultdict(list)
-        self._last_cleanup: float = monotonic()
-
-    def check(self, key: str, max_requests: int, window_seconds: float) -> bool:
-        now = monotonic()
-        # Periodic cleanup of stale keys (every 60s)
-        if now - self._last_cleanup > 60:
-            self._cleanup(now)
-        cutoff = now - window_seconds
-        timestamps = [t for t in self._hits[key] if t > cutoff]
-        if len(timestamps) >= max_requests:
-            self._hits[key] = timestamps
-            return False
-        timestamps.append(now)
-        self._hits[key] = timestamps
-        return True
-
-    def _cleanup(self, now: float):
-        """Remove keys with no recent activity to prevent memory growth."""
-        stale_keys = [k for k, v in self._hits.items() if not v or v[-1] < now - 120]
-        for k in stale_keys:
-            del self._hits[k]
-        self._last_cleanup = now
-
-
-_rate_limiter = RateLimiter()
 
 load_dotenv(ENV_FILE_PATH)
 
@@ -146,8 +108,6 @@ from vault_web.auth import (
     get_session_user, verify_otp,
     get_trusted_devices, revoke_device,
     device_fingerprint_from_request,
-    default_user_id as auth_default_user_id,
-    user_id_from_email,
 )
 from vault_web.oauth import oauth, allowed_email, build_external_url, google_oauth_configured
 from vault_web.files import (
@@ -158,99 +118,436 @@ from vault_web.files import (
 from vault_web.share import create_share, validate_share, list_shares, revoke_share
 from vault_web.playlists import list_playlists, get_playlist, create_playlist, update_playlist, delete_playlist
 try:
+    from .announcements import AnnouncementsLog
+    from .app_settings import JsonSettingsStore
+    from .auth_cookies import auth_cookie_specs
+    from .auth_devices import trusted_device_id_for_fingerprint
+    from .cache_control import cache_control_header
+    from .canonical_docs import (
+        CANONICAL_DOCS_WHITELIST as _DOCS_WHITELIST,
+        read_doc_body as _read_doc_body,
+        read_doc_meta as _read_doc_meta,
+    )
+    from .briefing_articles import build_briefing_articles_response
+    from .briefing_media import (
+        briefing_archive_path,
+        briefing_image_candidates,
+        daily_briefing_audio_dir,
+        daily_briefing_image_dir,
+        is_archive_date,
+        is_briefing_identifier,
+        select_briefing_audio,
+    )
+    from .briefing_requests import (
+        briefing_submit_values,
+        briefing_text_summary_values,
+        briefing_url_value,
+        is_http_url,
+    )
+    from .briefing_saved import (
+        daily_briefing_article_path,
+        saved_article_list,
+        saved_article_record,
+        saved_articles_index_path,
+        saved_category_names,
+        vault_saved_article_path,
+    )
+    from .cli_login_helpers import (
+        clean_cli_output as _clean_cli_output,
+        cli_output_lines as _cli_output_lines,
+        cli_binary_for_provider as _cli_binary_for_provider,
+        cli_login_candidates as _cli_login_candidates,
+        cli_login_debug_payload as _cli_login_debug_payload,
+        append_status_stderr_tail as _append_status_stderr_tail,
+        extract_claude_auth_url as _extract_claude_auth_url,
+        extract_device_code as _extract_device_code,
+        extract_first_auth_url as _extract_first_auth_url,
+        extract_oauth_state as _extract_oauth_state,
+        mask_email as _mask_email,
+        provider_auth_status_base as _provider_auth_status_base,
+        provider_auth_status_command as _provider_auth_status_command,
+        provider_auth_status_error as _provider_auth_status_error,
+        parse_provider_auth_status_output as _parse_provider_auth_status_output,
+        read_cli_transcript_lines as _read_cli_transcript_lines,
+        unsupported_provider_auth_status as _unsupported_provider_auth_status,
+    )
+    from .conversation_keys import build_conversation_key_payload, conversation_device_id
+    from .contact_search import aggregate_contact_rows
+    from .device_commands import DeviceCommandQueue
+    from .device_diagnostics import DeviceDiagnosticsLog
+    from .env_settings import EnvFileSettings
+    from .essence_helpers import (
+        essence_list_item,
+        essence_search_dirs,
+        essence_tool_command,
+        essence_tool_error_payload,
+        essence_tool_success_payload,
+        find_essence_by_name,
+        find_essence_match,
+        find_essence_page_target,
+        find_essence_tools_path,
+        read_active_essences,
+        read_essence_detail_manifest,
+        read_essence_manifest_summary,
+        loaded_essence_payload,
+        remove_active_essence,
+        write_active_essences,
+    )
+    from .file_browser_helpers import (
+        FILE_TYPE_EXTENSIONS as _FILE_TYPE_EXTENSIONS,
+        MIME_TO_SUBDIR as _MIME_TO_SUBDIR,
+        detect_file_type as _detect_file_type,
+        paginate_listing as _paginate_listing,
+        range_response as _range_response,
+        route_subdir as _route_subdir,
+    )
+    from .file_search_helpers import (
+        filename_search_results as _filename_search_results,
+        merge_index_search_results as _merge_index_search_results,
+    )
+    from .instant_commands import commands_markdown, cron_jobs_markdown, instant_command_kind
+    from .chat_stream_dedupe import (
+        begin_turn_dedupe,
+        finalize_turn_dedupe,
+        iter_replay_ndjson,
+    )
+    from .chat_stream_limits import mark_stream_closed, mark_stream_open, stream_limit_exceeded
+    from .marketplace_helpers import (
+        is_safe_listing_key,
+        is_safe_marketplace_name,
+        is_safe_photo_name,
+        marketplace_create_search_payload,
+    )
+    from .permission_helpers import (
+        permission_pending_entry,
+        permission_request_args,
+        permission_response_args,
+        permission_wait_payload,
+    )
+    from .model_settings import (
+        build_model_settings_payload,
+        current_provider_payload,
+        model_save_target,
+    )
+    from .music_playlists import (
+        find_matching_playlist,
+        normalize_music_query,
+        playlist_name_for_query,
+        playlist_tracks,
+        real_user_playlists,
+        select_music_files,
+        should_delete_temporary_playlist,
+    )
+    from .user_access import (
+        is_user_admin as _resolve_is_user_admin,
+        public_user_config as _public_user_config,
+        request_vault_root as _resolve_request_vault_root,
+        require_capability as _resolve_require_capability,
+        user_memory_path as _resolve_user_memory_path,
+        user_vault_context as _resolve_user_vault_context,
+    )
+    from .user_identity import (
+        configured_admin_variants as _configured_admin_variants,
+        default_user_id as _default_user_id,
+        identity_variants as _identity_variants,
+    )
     from .jane_proxy import send_message, stream_message, get_tunnel_url, prewarm_session, end_session, run_prefetch_memory
+    from .ra_reports import RA_REPORT_GRANT_SECONDS, RA_REPORT_ID_RE, RA_REPORT_TOKEN_SECONDS, RaReportAccess
+    from .rate_limit import (
+        RATE_LIMIT_AUTH_PATHS as _RATE_LIMIT_AUTH_PATHS,
+        RATE_LIMIT_CHAT_PATHS as _RATE_LIMIT_CHAT_PATHS,
+        RATE_LIMIT_EXEMPT_PATHS as _RATE_LIMIT_EXEMPT_PATHS,
+        RATE_LIMIT_UPLOAD_PATHS as _RATE_LIMIT_UPLOAD_PATHS,
+        RateLimiter,
+        rate_limit_category as _rate_limit_category,
+    )
+    from .release_downloads import ReleaseDownloads
+    from .request_helpers import (
+        client_ip as _client_ip,
+        cookie_secure_flag as _cookie_secure_flag,
+        is_android_webview_request,
+        is_local_browser_access as _is_local_browser_access,
+        is_local_request as _is_local_request,
+        is_single_user_no_auth_mode as _is_single_user_no_auth_mode,
+        session_log_id as _session_log_id,
+    )
+    from .request_logging import (
+        is_polling_path as _is_polling_path,
+        request_error_context as _request_error_context,
+        should_touch_idle_state as _should_touch_idle_state,
+    )
+    from .self_healing_reports import (
+        normalize_self_healing_report,
+        self_healing_report_authorized,
+    )
+    from .sms_classification import classify_synced_message
+    from .sync_payloads import contact_alias_values, contact_insert_values, message_insert_values
+    from .tax_helpers import (
+        is_safe_tax_form_name,
+        latest_tax_form_file,
+        tax_interview_answer_args,
+        tax_output_dir,
+        tax_result_path,
+        tax_upload_document_args,
+        tax_upload_path,
+        tax_uploads_dir,
+    )
+    from .tts_chunks import split_tts_chunks
+    from .tts_generation import (
+        tts_cache_paths,
+        tts_chunk_wav_path,
+        tts_combined_wav_path,
+        tts_docker_command,
+        tts_ffmpeg_command,
+        tts_gpu_flags,
+    )
+    from .upload_helpers import (
+        duplicate_upload_result,
+        hash_index_entry,
+        next_available_path,
+        parse_upload_descriptions,
+        upload_description,
+        upload_memory_fact_command,
+        upload_memory_fact_text,
+        upload_safe_name,
+        upload_subdir,
+        upload_success_result,
+    )
+    from .web_automation_helpers import (
+        automation_result_payload,
+        web_plan_headless,
+        web_plan_label,
+        web_plan_profile_id,
+        web_plan_raw_steps,
+        web_plan_record_trace,
+        web_plan_step_specs,
+        web_profile_capture_values,
+        web_profile_create_values,
+        web_secret_create_values,
+        web_secret_public_entry,
+    )
 except ImportError:
+    from announcements import AnnouncementsLog
+    from app_settings import JsonSettingsStore
+    from auth_cookies import auth_cookie_specs
+    from auth_devices import trusted_device_id_for_fingerprint
+    from cache_control import cache_control_header
+    from canonical_docs import (
+        CANONICAL_DOCS_WHITELIST as _DOCS_WHITELIST,
+        read_doc_body as _read_doc_body,
+        read_doc_meta as _read_doc_meta,
+    )
+    from briefing_articles import build_briefing_articles_response
+    from briefing_media import (
+        briefing_archive_path,
+        briefing_image_candidates,
+        daily_briefing_audio_dir,
+        daily_briefing_image_dir,
+        is_archive_date,
+        is_briefing_identifier,
+        select_briefing_audio,
+    )
+    from briefing_requests import (
+        briefing_submit_values,
+        briefing_text_summary_values,
+        briefing_url_value,
+        is_http_url,
+    )
+    from briefing_saved import (
+        daily_briefing_article_path,
+        saved_article_list,
+        saved_article_record,
+        saved_articles_index_path,
+        saved_category_names,
+        vault_saved_article_path,
+    )
+    from cli_login_helpers import (
+        clean_cli_output as _clean_cli_output,
+        cli_output_lines as _cli_output_lines,
+        cli_binary_for_provider as _cli_binary_for_provider,
+        cli_login_candidates as _cli_login_candidates,
+        cli_login_debug_payload as _cli_login_debug_payload,
+        append_status_stderr_tail as _append_status_stderr_tail,
+        extract_claude_auth_url as _extract_claude_auth_url,
+        extract_device_code as _extract_device_code,
+        extract_first_auth_url as _extract_first_auth_url,
+        extract_oauth_state as _extract_oauth_state,
+        mask_email as _mask_email,
+        provider_auth_status_base as _provider_auth_status_base,
+        provider_auth_status_command as _provider_auth_status_command,
+        provider_auth_status_error as _provider_auth_status_error,
+        parse_provider_auth_status_output as _parse_provider_auth_status_output,
+        read_cli_transcript_lines as _read_cli_transcript_lines,
+        unsupported_provider_auth_status as _unsupported_provider_auth_status,
+    )
+    from conversation_keys import build_conversation_key_payload, conversation_device_id
+    from contact_search import aggregate_contact_rows
+    from device_commands import DeviceCommandQueue
+    from device_diagnostics import DeviceDiagnosticsLog
+    from env_settings import EnvFileSettings
+    from essence_helpers import (
+        essence_list_item,
+        essence_search_dirs,
+        essence_tool_command,
+        essence_tool_error_payload,
+        essence_tool_success_payload,
+        find_essence_by_name,
+        find_essence_match,
+        find_essence_page_target,
+        find_essence_tools_path,
+        read_active_essences,
+        read_essence_detail_manifest,
+        read_essence_manifest_summary,
+        loaded_essence_payload,
+        remove_active_essence,
+        write_active_essences,
+    )
+    from file_browser_helpers import (
+        FILE_TYPE_EXTENSIONS as _FILE_TYPE_EXTENSIONS,
+        MIME_TO_SUBDIR as _MIME_TO_SUBDIR,
+        detect_file_type as _detect_file_type,
+        paginate_listing as _paginate_listing,
+        range_response as _range_response,
+        route_subdir as _route_subdir,
+    )
+    from file_search_helpers import (
+        filename_search_results as _filename_search_results,
+        merge_index_search_results as _merge_index_search_results,
+    )
+    from instant_commands import commands_markdown, cron_jobs_markdown, instant_command_kind
+    from chat_stream_dedupe import (
+        begin_turn_dedupe,
+        finalize_turn_dedupe,
+        iter_replay_ndjson,
+    )
+    from chat_stream_limits import mark_stream_closed, mark_stream_open, stream_limit_exceeded
+    from marketplace_helpers import (
+        is_safe_listing_key,
+        is_safe_marketplace_name,
+        is_safe_photo_name,
+        marketplace_create_search_payload,
+    )
+    from permission_helpers import (
+        permission_pending_entry,
+        permission_request_args,
+        permission_response_args,
+        permission_wait_payload,
+    )
+    from model_settings import (
+        build_model_settings_payload,
+        current_provider_payload,
+        model_save_target,
+    )
+    from music_playlists import (
+        find_matching_playlist,
+        normalize_music_query,
+        playlist_name_for_query,
+        playlist_tracks,
+        real_user_playlists,
+        select_music_files,
+        should_delete_temporary_playlist,
+    )
+    from user_access import (
+        is_user_admin as _resolve_is_user_admin,
+        public_user_config as _public_user_config,
+        request_vault_root as _resolve_request_vault_root,
+        require_capability as _resolve_require_capability,
+        user_memory_path as _resolve_user_memory_path,
+        user_vault_context as _resolve_user_vault_context,
+    )
+    from user_identity import (
+        configured_admin_variants as _configured_admin_variants,
+        default_user_id as _default_user_id,
+        identity_variants as _identity_variants,
+    )
     from jane_proxy import send_message, stream_message, get_tunnel_url, prewarm_session, end_session, run_prefetch_memory
+    from ra_reports import RA_REPORT_GRANT_SECONDS, RA_REPORT_ID_RE, RA_REPORT_TOKEN_SECONDS, RaReportAccess
+    from rate_limit import (
+        RATE_LIMIT_AUTH_PATHS as _RATE_LIMIT_AUTH_PATHS,
+        RATE_LIMIT_CHAT_PATHS as _RATE_LIMIT_CHAT_PATHS,
+        RATE_LIMIT_EXEMPT_PATHS as _RATE_LIMIT_EXEMPT_PATHS,
+        RATE_LIMIT_UPLOAD_PATHS as _RATE_LIMIT_UPLOAD_PATHS,
+        RateLimiter,
+        rate_limit_category as _rate_limit_category,
+    )
+    from release_downloads import ReleaseDownloads
+    from request_helpers import (
+        client_ip as _client_ip,
+        cookie_secure_flag as _cookie_secure_flag,
+        is_android_webview_request,
+        is_local_browser_access as _is_local_browser_access,
+        is_local_request as _is_local_request,
+        is_single_user_no_auth_mode as _is_single_user_no_auth_mode,
+        session_log_id as _session_log_id,
+    )
+    from request_logging import (
+        is_polling_path as _is_polling_path,
+        request_error_context as _request_error_context,
+        should_touch_idle_state as _should_touch_idle_state,
+    )
+    from self_healing_reports import (
+        normalize_self_healing_report,
+        self_healing_report_authorized,
+    )
+    from sms_classification import classify_synced_message
+    from sync_payloads import contact_alias_values, contact_insert_values, message_insert_values
+    from tax_helpers import (
+        is_safe_tax_form_name,
+        latest_tax_form_file,
+        tax_interview_answer_args,
+        tax_output_dir,
+        tax_result_path,
+        tax_upload_document_args,
+        tax_upload_path,
+        tax_uploads_dir,
+    )
+    from tts_chunks import split_tts_chunks
+    from tts_generation import (
+        tts_cache_paths,
+        tts_chunk_wav_path,
+        tts_combined_wav_path,
+        tts_docker_command,
+        tts_ffmpeg_command,
+        tts_gpu_flags,
+    )
+    from upload_helpers import (
+        duplicate_upload_result,
+        hash_index_entry,
+        next_available_path,
+        parse_upload_descriptions,
+        upload_description,
+        upload_memory_fact_command,
+        upload_memory_fact_text,
+        upload_safe_name,
+        upload_subdir,
+        upload_success_result,
+    )
+    from web_automation_helpers import (
+        automation_result_payload,
+        web_plan_headless,
+        web_plan_label,
+        web_plan_profile_id,
+        web_plan_raw_steps,
+        web_plan_record_trace,
+        web_plan_step_specs,
+        web_profile_capture_values,
+        web_profile_create_values,
+        web_secret_create_values,
+        web_secret_public_entry,
+    )
 
 # ── Shared UI: point directly at vault_web's static + templates ──────────────
 VAULT_WEB_DIR = CODE_ROOT / "vault_web"
 BASE_DIR = Path(__file__).parent
-MARKETING_DIR = CODE_ROOT / "marketing_site"
-MARKETING_DOWNLOADS_DIR = MARKETING_DIR / "downloads"
-import json as _json
-try:
-    _version_data = _json.loads((CODE_ROOT / "version.json").read_text())
-    ANDROID_VERSION = _version_data["version_name"]
-    _ANDROID_VERSION_CODE = _version_data["version_code"]
-except FileNotFoundError:
-    ANDROID_VERSION = "0.2.99"
-    _ANDROID_VERSION_CODE = 330
-
-# Startup validation: ensure the APK for the advertised version actually exists
-_expected_apk = MARKETING_DOWNLOADS_DIR / f"vessences-android-v{ANDROID_VERSION}.apk"
-if not _expected_apk.exists():
-    import logging as _logging
-    _logging.getLogger("jane.web").critical(
-        "APK MISSING: version.json says v%s but %s does not exist! "
-        "Run startup_code/bump_android_version.py to build it.",
-        ANDROID_VERSION, _expected_apk,
-    )
-elif _expected_apk.stat().st_size < 1_000_000:  # < 1MB = likely corrupt
-    import logging as _logging
-    _logging.getLogger("jane.web").critical(
-        "APK CORRUPT: %s is only %d bytes — likely not a valid APK. Rebuild with bump_android_version.py.",
-        _expected_apk, _expected_apk.stat().st_size,
-    )
-
-def _find_latest(pattern: str) -> Optional[Path]:
-    """Return the newest file matching a glob pattern in MARKETING_DOWNLOADS_DIR, or None."""
-    matches = sorted(MARKETING_DOWNLOADS_DIR.glob(pattern), key=lambda p: p.stat().st_mtime, reverse=True)
-    return matches[0] if matches else None
-
-PUBLIC_RELEASE_DOWNLOADS = {
-    # Raw compose file for advanced users
-    "docker-compose.yml": MARKETING_DIR / "docker-compose.yml",
-    # Docker image tarball
-    "vessence-docker-0.0.43.tar.gz": MARKETING_DOWNLOADS_DIR / "vessence-docker-0.0.43.tar.gz",
-    # Universal Installer (bundled source + scripts)
-    "vessence-installer-0.0.42.zip": MARKETING_DOWNLOADS_DIR / "vessence-installer-0.0.42.zip",
-    # NOTE: Android APK entries are resolved DYNAMICALLY at request time via
-    # _resolve_android_apk_path() — they are intentionally NOT in this static
-    # dict, because the version bumps between jane-web restarts and we don't
-    # want to force a restart on every APK deploy. See downloads handler.
-    "vessences-android-package.zip": MARKETING_DOWNLOADS_DIR / "vessences-android-package.zip",
-    # Legacy (keep for existing links)
-    "vessence-installer-0.0.41.zip": MARKETING_DOWNLOADS_DIR / "vessence-installer-0.0.41.zip",
-}
-
-
-def _resolve_android_apk_path(filename: str) -> "Path | None":
-    """Resolve an Android APK download filename to a real path at request time.
-
-    Matches two shapes:
-      - "vessences-android.apk"            → latest via version.json lookup
-      - "vessences-android-v<X.Y.Z>.apk"   → specific version if the file exists
-
-    Returns None if the filename doesn't match the APK pattern or the file is
-    missing. Called from the /downloads/{filename} route handler.
-    """
-    if filename == "vessences-android.apk":
-        # Unversioned alias — always points at the current version from version.json.
-        try:
-            vdata = _json.loads((CODE_ROOT / "version.json").read_text())
-            current_version = vdata.get("version_name")
-            if current_version:
-                versioned = MARKETING_DOWNLOADS_DIR / f"vessences-android-v{current_version}.apk"
-                if versioned.exists():
-                    return versioned
-        except Exception:
-            pass
-        # Fallback: the deploy script writes a second copy at this unversioned path.
-        alias = MARKETING_DOWNLOADS_DIR / "vessences-android.apk"
-        return alias if alias.exists() else None
-    # Versioned pattern.
-    if filename.startswith("vessences-android-v") and filename.endswith(".apk"):
-        path = MARKETING_DOWNLOADS_DIR / filename
-        return path if path.exists() else None
-    return None
-
-# Unversioned aliases that resolve to the latest versioned installer at request time
-_INSTALLER_GLOBS = {
-    "vessence-windows-installer.zip": "vessence-windows-installer-v*.zip",
-    "vessence-windows-installer.exe": "vessence-windows-installer-v*.exe",
-    "vessence-mac-installer.zip": "vessence-mac-installer-v*.zip",
-    "vessence-linux-installer.zip": "vessence-linux-installer-v*.zip",
-}
+_release_downloads = ReleaseDownloads(CODE_ROOT)
+MARKETING_DIR = _release_downloads.marketing_dir
+MARKETING_DOWNLOADS_DIR = _release_downloads.downloads_dir
+ANDROID_VERSION, _ANDROID_VERSION_CODE = _release_downloads.read_android_version()
+_release_downloads.log_startup_apk_status(_logger)
+_find_latest = _release_downloads.find_latest
+PUBLIC_RELEASE_DOWNLOADS = _release_downloads.public_release_downloads
+_INSTALLER_GLOBS = _release_downloads.installer_globs
+_resolve_android_apk_path = _release_downloads.resolve_android_apk_path
 
 app = FastAPI(title="Jane")
 _session_secret = os.getenv("SESSION_SECRET_KEY", "")
@@ -261,6 +558,7 @@ if not _session_secret or _session_secret in ("changeme", "changeme-generate-a-r
 app.add_middleware(SessionMiddleware, secret_key=_session_secret)
 app.mount("/static", StaticFiles(directory=VAULT_WEB_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=VAULT_WEB_DIR / "templates")
+_rate_limiter = RateLimiter()
 
 
 # ── Request logging middleware ────────────────────────────────────────────────
@@ -279,40 +577,6 @@ def _touch_idle_state():
 # ── Rate-limiting middleware ──────────────────────────────────────────────────
 # Applied per-IP with different limits depending on the endpoint category.
 # Localhost (prompt queue runner, internal tools) is always exempt.
-
-_RATE_LIMIT_CHAT_PATHS = frozenset({"/api/jane/chat/stream", "/api/jane/chat"})
-_RATE_LIMIT_AUTH_PATHS = frozenset({
-    "/auth/google", "/auth/google/callback",
-    "/api/auth/google-token", "/api/auth/verify-otp",
-    "/api/auth/verify-share", "/api/auth/check",
-    "/api/auth/is-new-device", "/api/cli-login",
-    "/api/cli-login/code",
-})
-_RATE_LIMIT_UPLOAD_PATHS = frozenset({"/api/files/upload", "/api/tax/upload"})
-# Internal telemetry — phone's DiagnosticReporter bursts up to 50 queued
-# events after a network blip, which trips the 60/min generic bucket. Not
-# an abuse vector (no brain work, write-only), so exempt outright.
-_RATE_LIMIT_EXEMPT_PATHS = frozenset({
-    "/api/device-diagnostics",
-    "/api/crash-report",
-    "/api/self-healing/report",
-})
-
-
-def _rate_limit_category(path: str) -> tuple[str, int, float]:
-    """Return (category_suffix, max_requests, window_seconds) for a path."""
-    if path in _RATE_LIMIT_EXEMPT_PATHS:
-        return ("", 0, 0)
-    if path in _RATE_LIMIT_CHAT_PATHS:
-        return ("chat", 30, 60)
-    if path in _RATE_LIMIT_AUTH_PATHS:
-        return ("auth", 10, 60)
-    if path in _RATE_LIMIT_UPLOAD_PATHS:
-        return ("upload", 20, 60)
-    if path.startswith("/api/"):
-        return ("api", 60, 60)
-    # HTML pages and static assets are not rate-limited
-    return ("", 0, 0)
 
 
 @app.middleware("http")
@@ -337,19 +601,7 @@ async def rate_limit_middleware(request: Request, call_next):
 @app.middleware("http")
 async def cache_control_middleware(request: Request, call_next):
     response = await call_next(request)
-    path = request.url.path
-    if path.startswith("/static/"):
-        # Static assets: CSS, JS, images, fonts — cache at Cloudflare edge for 1 day
-        response.headers["Cache-Control"] = "public, max-age=86400"
-    elif path.startswith("/api/briefing/image/"):
-        # Briefing images: cache for 1 hour (refreshed daily)
-        response.headers["Cache-Control"] = "public, max-age=3600"
-    elif path.startswith("/api/"):
-        # API responses: never cache (dynamic data)
-        response.headers["Cache-Control"] = "no-store"
-    else:
-        # HTML pages: always revalidate (but allow conditional GET)
-        response.headers["Cache-Control"] = "no-cache"
+    response.headers["Cache-Control"] = cache_control_header(request.url.path)
     return response
 
 
@@ -359,8 +611,8 @@ async def request_logging_middleware(request: Request, call_next):
     path = request.url.path
     method = request.method
     # Update idle state for non-polling requests (so queue runner knows user is active)
-    is_poll = path in ("/api/jane/announcements", "/health", "/api/files/changes", "/api/jane/live")
-    if not is_poll and method in ("POST", "GET") and "/api/" in path:
+    is_poll = _is_polling_path(path)
+    if _should_touch_idle_state(path, method):
         _touch_idle_state()
     try:
         response = await call_next(request)
@@ -375,11 +627,7 @@ async def request_logging_middleware(request: Request, call_next):
             source="jane_web",
             exc=exc,
             request=request,
-            context={
-                "elapsed_ms": elapsed_ms,
-                "method": method,
-                "path": path,
-            },
+            context=_request_error_context(elapsed_ms=elapsed_ms, method=method, path=path),
         )
         raise
 
@@ -443,24 +691,13 @@ STATIC_DIR = VAULT_WEB_DIR / "static"
 ANNOUNCEMENTS_PATH = Path(ENV_FILE_PATH).parent / "data" / "jane_announcements.jsonl"
 RA_REPORTS_ROOT = Path(VAULT_DIR) / "research" / "rheumatoid_arthritis_remission" / "reports"
 RA_HTML_REPORTS_DIR = RA_REPORTS_ROOT / "html"
-RA_REPORT_ID_RE = re.compile(r"^\d{8}_\d{6}$")
-RA_REPORT_GRANT_SECONDS = 45 * 60
-RA_REPORT_TOKEN_SECONDS = 7 * 24 * 60 * 60
-_ra_report_recent_grants: dict[tuple[str, str], float] = {}
-
-
-def _session_log_id(session_id: Optional[str]) -> str:
-    return session_id[:12] if session_id else "none"
-
-
-def _client_ip(request: Request) -> str:
-    """Get the real client IP, respecting Cloudflare and reverse proxy headers."""
-    return (
-        request.headers.get("CF-Connecting-IP")
-        or request.headers.get("X-Real-IP")
-        or (request.client.host if request.client else None)
-        or "unknown"
-    )
+_device_diagnostics_log = DeviceDiagnosticsLog(Path(LOGS_DIR) / "android_diagnostics.jsonl")
+_announcements_log = AnnouncementsLog(ANNOUNCEMENTS_PATH)
+_read_announcements = _announcements_log.read
+_env_settings = EnvFileSettings(ENV_FILE_PATH)
+_write_env_var = _env_settings.write_var
+_add_allowed_google_email = _env_settings.add_allowed_google_email
+_remove_allowed_google_email = _env_settings.remove_allowed_google_email
 
 
 def _login_context(request: Request, **extra):
@@ -474,163 +711,6 @@ def _login_context(request: Request, **extra):
     }
     ctx.update(extra)
     return ctx
-
-
-def _read_announcements(since: Optional[str]) -> list[dict]:
-    if not ANNOUNCEMENTS_PATH.exists():
-        return []
-    # Truncate announcements file if it exceeds 1MB to prevent unbounded growth
-    try:
-        if ANNOUNCEMENTS_PATH.stat().st_size > 1 * 1024 * 1024:
-            lines = ANNOUNCEMENTS_PATH.read_text(encoding="utf-8", errors="replace").splitlines()
-            ANNOUNCEMENTS_PATH.write_text("\n".join(lines[-200:]) + "\n", encoding="utf-8")
-    except Exception:
-        pass
-    try:
-        since_dt = datetime.fromisoformat(since) if since else None
-    except ValueError:
-        since_dt = None
-    rows: list[dict] = []
-    with ANNOUNCEMENTS_PATH.open("r", encoding="utf-8") as handle:
-        for raw in handle:
-            raw = raw.strip()
-            if not raw:
-                continue
-            try:
-                payload = json.loads(raw)
-            except json.JSONDecodeError:
-                continue
-            created_at = payload.get("created_at") or payload.get("timestamp")
-            if since_dt and created_at:
-                try:
-                    created_dt = datetime.fromisoformat(created_at)
-                except ValueError:
-                    created_dt = None
-                if created_dt and created_dt <= since_dt:
-                    continue
-            rows.append(payload)
-    return rows
-
-
-def _ra_report_html_path(report_id: str) -> Path:
-    if not RA_REPORT_ID_RE.match(report_id):
-        raise HTTPException(status_code=404, detail="Report not found")
-    path = RA_HTML_REPORTS_DIR / f"ra_research_run_{report_id}.html"
-    if not path.exists() or not path.is_file():
-        raise HTTPException(status_code=404, detail="Report not found")
-    return path
-
-
-def _latest_ra_report_html_path() -> Path:
-    if not RA_HTML_REPORTS_DIR.exists():
-        raise HTTPException(status_code=404, detail="No RA reports found")
-    reports = [
-        path
-        for path in RA_HTML_REPORTS_DIR.glob("ra_research_run_*.html")
-        if path.is_file() and report_id_from_ra_html_path(path)
-    ]
-    if not reports:
-        raise HTTPException(status_code=404, detail="No RA reports found")
-    return max(reports, key=lambda path: path.stat().st_mtime)
-
-
-def report_id_from_ra_html_path(path: Path) -> str:
-    report_id = path.stem.removeprefix("ra_research_run_")
-    return report_id if RA_REPORT_ID_RE.match(report_id) else ""
-
-
-def _prune_ra_report_grants() -> None:
-    now = time.time()
-    stale = [key for key, expires_at in _ra_report_recent_grants.items() if expires_at <= now]
-    for key in stale:
-        _ra_report_recent_grants.pop(key, None)
-
-
-def _grant_ra_report_access(request: Request, report_id: str) -> None:
-    _prune_ra_report_grants()
-    _ra_report_recent_grants[(_client_ip(request), report_id)] = time.time() + RA_REPORT_GRANT_SECONDS
-
-
-def _has_recent_ra_report_grant(request: Request, report_id: str) -> bool:
-    _prune_ra_report_grants()
-    return _ra_report_recent_grants.get((_client_ip(request), report_id), 0) > time.time()
-
-
-def _sign_ra_report_token(report_id: str, expires_at: int) -> str:
-    secret = _session_secret or os.getenv("SESSION_SECRET_KEY", "")
-    message = f"{report_id}:{expires_at}".encode("utf-8")
-    return hmac.new(secret.encode("utf-8"), message, hashlib.sha256).hexdigest()
-
-
-def _issue_ra_report_token(report_id: str) -> str:
-    expires_at = int(time.time() + RA_REPORT_TOKEN_SECONDS)
-    return f"{expires_at}.{_sign_ra_report_token(report_id, expires_at)}"
-
-
-def _valid_ra_report_token(report_id: str, token: Optional[str]) -> bool:
-    if not token or "." not in token:
-        return False
-    expires_raw, _, supplied = token.partition(".")
-    try:
-        expires_at = int(expires_raw)
-    except ValueError:
-        return False
-    if expires_at <= time.time():
-        return False
-    expected = _sign_ra_report_token(report_id, expires_at)
-    return hmac.compare_digest(supplied, expected)
-
-
-def _require_ra_report_access(request: Request, report_id: str, token: Optional[str]) -> str:
-    try:
-        session_id = require_auth(request)
-        _grant_ra_report_access(request, report_id)
-        return session_id
-    except HTTPException as exc:
-        if exc.status_code != 401:
-            raise
-        if _valid_ra_report_token(report_id, token) or _has_recent_ra_report_grant(request, report_id):
-            return "temporary_report_access"
-        raise
-
-
-def _tokenize_ra_report_item(item: dict, request: Request) -> dict:
-    if item.get("type") != "report_ready":
-        return item
-    report_id = str(item.get("report_id") or "").strip()
-    if not RA_REPORT_ID_RE.match(report_id):
-        return item
-    _grant_ra_report_access(request, report_id)
-    token = _issue_ra_report_token(report_id)
-    updated = dict(item)
-    updated["id"] = f"ra_report_{report_id}_signed"
-    updated["report_url"] = f"/api/research/ra/reports/{report_id}.html?rt={token}"
-    updated["access_expires_in_seconds"] = RA_REPORT_TOKEN_SECONDS
-    return updated
-
-
-def _ra_report_metadata(path: Path, request: Request | None = None) -> dict:
-    report_id = report_id_from_ra_html_path(path)
-    if not report_id:
-        raise HTTPException(status_code=404, detail="Report not found")
-    created = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc).isoformat()
-    report_url = f"/api/research/ra/reports/{report_id}.html"
-    if request is not None:
-        _grant_ra_report_access(request, report_id)
-        report_url = f"{report_url}?rt={_issue_ra_report_token(report_id)}"
-    return {
-        "id": f"ra_report_{report_id}_signed",
-        "type": "report_ready",
-        "report_kind": "ra_research",
-        "report_id": report_id,
-        "title": "RA research update ready",
-        "message": "Tap to read the latest RA research HTML report.",
-        "created_at": created,
-        "timestamp": created,
-        "report_url": report_url,
-        "web_url": f"/research/ra/reports/{report_id}",
-        "access_expires_in_seconds": RA_REPORT_TOKEN_SECONDS,
-    }
 
 
 # ─── Init ─────────────────────────────────────────────────────────────────────
@@ -1194,52 +1274,7 @@ def get_session_id(request: Request) -> Optional[str]:
     return request.cookies.get(SESSION_COOKIE)
 
 
-def _is_local_browser_access(request: Request) -> bool:
-    """Check if request is truly local (not proxied through Cloudflare)."""
-    # If CF-Connecting-IP is present, traffic came through Cloudflare — not local
-    if request.headers.get("cf-connecting-ip"):
-        return False
-    client_host = request.client.host if request.client else ""
-    return client_host in ("127.0.0.1", "::1")
-
-
-def _cookie_secure_flag(request: Request) -> bool:
-    """Return True only if the request came over HTTPS (or via HTTPS proxy).
-
-    Browsers refuse to store Secure cookies over plain HTTP, which breaks
-    localhost development. This detects HTTPS via the request scheme or the
-    X-Forwarded-Proto header set by reverse proxies.
-    """
-    scheme = request.url.scheme
-    if scheme == "https":
-        return True
-    forwarded_proto = (request.headers.get("x-forwarded-proto") or "").split(",")[0].strip().lower()
-    if forwarded_proto == "https":
-        return True
-    return False
-
-
 _trusted_device_session_cache: dict[str, str] = {}  # trusted_device_id → session_id
-
-def _is_single_user_no_auth_mode() -> bool:
-    """Returns True if Google OAuth is not configured — single-user fresh install mode.
-
-    IMPORTANT: This only allows LOCAL access (no Cloudflare tunnel header).
-    External traffic still requires real auth even in single-user mode, so a
-    fresh install with a tunnel can't be accessed by random people.
-    """
-    return not os.getenv("GOOGLE_CLIENT_ID", "").strip()
-
-
-def _is_local_request(request: Request) -> bool:
-    """True if the request is from localhost (no external proxy header)."""
-    if request.headers.get("cf-connecting-ip"):
-        return False  # came through Cloudflare = external
-    if request.headers.get("x-forwarded-for"):
-        return False  # came through some other proxy = external
-    client_host = request.client.host if request.client else ""
-    return client_host in ("127.0.0.1", "::1", "localhost")
-
 
 def require_auth(request: Request):
     # Single-user fresh install mode: only allow LOCAL requests without auth.
@@ -1276,52 +1311,33 @@ def require_auth(request: Request):
     raise HTTPException(status_code=401, detail="Not authenticated")
 
 
-def _default_user_id() -> str:
-    allowed = [e.strip() for e in os.getenv("ALLOWED_GOOGLE_EMAILS", "").split(",") if e.strip()]
-    if allowed:
-        return allowed[0]
-    user_name = os.getenv("USER_NAME", "").strip().lower()
-    return "_".join(user_name.split()) if user_name else "user"
-
-
-def _identity_variants(identifier: str | None) -> set[str]:
-    value = (identifier or "").strip().lower()
-    if not value:
-        return set()
-    variants = {value, "_".join(value.replace("@", "_at_").replace(".", "_").split())}
-    if "@" in value:
-        variants.add(user_id_from_email(value))
-    return variants
-
-
-def _configured_admin_variants() -> set[str]:
-    configured = []
-    for env_name in ("VESSENCE_ADMIN_USERS", "ADMIN_EMAILS"):
-        configured.extend([v.strip() for v in os.getenv(env_name, "").split(",") if v.strip()])
-    allowed = [e.strip() for e in os.getenv("ALLOWED_GOOGLE_EMAILS", "").split(",") if e.strip()]
-    if not configured and allowed:
-        configured.append(allowed[0])
-    if not configured:
-        configured.append(auth_default_user_id())
-
-    variants: set[str] = set()
-    for item in configured:
-        variants.update(_identity_variants(item))
-    return variants
+_ra_reports = RaReportAccess(
+    html_reports_dir=RA_HTML_REPORTS_DIR,
+    session_secret_provider=lambda: _session_secret or os.getenv("SESSION_SECRET_KEY", ""),
+    client_ip=_client_ip,
+    require_auth=require_auth,
+)
+_ra_report_html_path = _ra_reports.html_path
+_latest_ra_report_html_path = _ra_reports.latest_html_path
+report_id_from_ra_html_path = _ra_reports.report_id_from_html_path
+_prune_ra_report_grants = _ra_reports.prune_grants
+_grant_ra_report_access = _ra_reports.grant_access
+_has_recent_ra_report_grant = _ra_reports.has_recent_grant
+_sign_ra_report_token = _ra_reports.sign_token
+_issue_ra_report_token = _ra_reports.issue_token
+_valid_ra_report_token = _ra_reports.valid_token
+_require_ra_report_access = _ra_reports.require_access
+_tokenize_ra_report_item = _ra_reports.tokenize_report_item
+_ra_report_metadata = _ra_reports.metadata
 
 
 def _is_user_admin(user_id: str | None) -> bool:
-    variants = _identity_variants(user_id)
-    if variants & _configured_admin_variants():
-        return True
-    try:
-        from agent_skills.user_manager import get_user_config, user_config_exists
-        if user_config_exists(user_id or ""):
-            config = get_user_config(user_id or "")
-            return "user_admin" in (config.get("capabilities") or [])
-    except Exception:
-        _logger.exception("Failed checking user_admin capability for %s", user_id)
-    return False
+    return _resolve_is_user_admin(
+        user_id,
+        identity_variants_fn=_identity_variants,
+        configured_admin_variants_fn=_configured_admin_variants,
+        logger=_logger,
+    )
 
 
 def _require_admin_session(session_id: str) -> str:
@@ -1329,37 +1345,6 @@ def _require_admin_session(session_id: str) -> str:
     if not _is_user_admin(user_id):
         raise HTTPException(status_code=403, detail="User administration is not enabled for this account.")
     return user_id
-
-
-def _write_env_var(key: str, value: str) -> None:
-    env_path = Path(ENV_FILE_PATH)
-    lines = env_path.read_text().splitlines() if env_path.exists() else []
-    found = False
-    updated = []
-    for line in lines:
-        stripped = line.strip()
-        if stripped and not stripped.startswith("#") and "=" in stripped:
-            existing_key = stripped.split("=", 1)[0].strip()
-            if existing_key == key:
-                updated.append(f"{key}={value}")
-                found = True
-                continue
-        updated.append(line)
-    if not found:
-        updated.append(f"{key}={value}")
-    env_path.parent.mkdir(parents=True, exist_ok=True)
-    env_path.write_text("\n".join(updated) + "\n")
-    os.environ[key] = value
-
-
-def _add_allowed_google_email(email: str) -> bool:
-    normalized = (email or "").strip().lower()
-    current = [e.strip().lower() for e in os.getenv("ALLOWED_GOOGLE_EMAILS", "").split(",") if e.strip()]
-    if normalized in current:
-        return False
-    current.append(normalized)
-    _write_env_var("ALLOWED_GOOGLE_EMAILS", ",".join(current))
-    return True
 
 
 def _scoped_conversation_session_id(user_id: str | None, session_id: str | None) -> str:
@@ -1380,18 +1365,12 @@ def _scoped_conversation_session_id(user_id: str | None, session_id: str | None)
 
 def _user_vault_context(session_id: str | None) -> tuple[str, list[str], bool, str]:
     """Return (vault_root, capabilities, is_managed, user_id) for a session."""
-    user_id = (get_session_user(session_id) if session_id else None) or _default_user_id()
-    try:
-        from agent_skills.user_manager import AVAILABLE_CAPABILITIES, get_user_config, is_managed_user
-    except Exception:
-        return str(VAULT_DIR), [], False, user_id
-    all_caps = [c["id"] for c in AVAILABLE_CAPABILITIES]
-    if not is_managed_user(user_id):
-        return str(VAULT_DIR), all_caps, False, user_id
-    config = get_user_config(user_id)
-    vault_root = config.get("vault_root_path") or str(VAULT_DIR)
-    caps = list(config.get("capabilities") or [])
-    return vault_root, caps, True, user_id
+    return _resolve_user_vault_context(
+        session_id,
+        vault_dir=VAULT_DIR,
+        get_session_user_fn=get_session_user,
+        default_user_id_fn=_default_user_id,
+    )
 
 
 def _require_capability(session_id: str | None, cap: str) -> tuple[str, list[str], bool, str]:
@@ -1400,10 +1379,7 @@ def _require_capability(session_id: str | None, cap: str) -> tuple[str, list[str
     Unmanaged accounts are not gated — they have implicit full access.
     Managed accounts must list `cap` in their config.json capabilities.
     """
-    vault_root, caps, is_managed, user_id = _user_vault_context(session_id)
-    if is_managed and cap not in caps:
-        raise HTTPException(status_code=403, detail=f"Missing capability: {cap}")
-    return vault_root, caps, is_managed, user_id
+    return _resolve_require_capability(session_id, cap, context_resolver=_user_vault_context)
 
 
 def _request_vault_root(request: Request) -> str:
@@ -1413,12 +1389,12 @@ def _request_vault_root(request: Request) -> str:
     For host/unmanaged or share-code requests, returns the global VAULT_DIR.
     Never raises — suitable for handlers that have already auth-checked.
     """
-    try:
-        session_id = get_session_id(request)
-        vault_root, _caps, _managed, _uid = _user_vault_context(session_id)
-        return vault_root
-    except Exception:
-        return str(VAULT_DIR)
+    return _resolve_request_vault_root(
+        request,
+        vault_dir=VAULT_DIR,
+        get_session_id_fn=get_session_id,
+        context_resolver=_user_vault_context,
+    )
 
 
 def _user_memory_path(user_id: str | None) -> str:
@@ -1427,16 +1403,7 @@ def _user_memory_path(user_id: str | None) -> str:
     Returns an empty string for unmanaged accounts so add_fact.py falls
     through to the global shared path (legacy behavior).
     """
-    if not user_id:
-        return ""
-    try:
-        from agent_skills.user_manager import get_user_config, is_managed_user
-        if not is_managed_user(user_id):
-            return ""
-        config = get_user_config(user_id)
-        return config.get("memory_chromadb_path") or ""
-    except Exception:
-        return ""
+    return _resolve_user_memory_path(user_id)
 
 
 def resolve_conversation_key(request: Request, body) -> dict:
@@ -1475,34 +1442,51 @@ def resolve_conversation_key(request: Request, body) -> dict:
         trusted_cookie = get_trusted_device_cookie_id(request)
     except Exception:
         trusted_cookie = None
-    # Trusted-device cookie is a stable per-install token — use it when header absent.
-    device_id = header_device_id or (trusted_cookie or "")[:32]
-    if not device_id:
+    fingerprint = ""
+    if not header_device_id and not trusted_cookie:
         try:
-            device_id = device_fingerprint_from_request(request)[:16]
+            fingerprint = device_fingerprint_from_request(request)
         except Exception:
-            device_id = "nodevice"
-
-    client_session_id = raw_client_sid or auth_session_id or "default"
-
-    if managed:
-        conversation_key = f"{sanitized_user_id}__{device_id}__{client_session_id}"
-    else:
-        # Legacy Chieh sessions keep their raw client session to avoid churn.
-        conversation_key = raw_client_sid or auth_session_id or "default"
-
-    return {
-        "user_id": user_id,
-        "sanitized_user_id": sanitized_user_id,
-        "device_id": device_id,
-        "client_session_id": client_session_id,
-        "conversation_key": conversation_key,
-        "managed": managed,
-    }
+            fingerprint = ""
+    # Trusted-device cookie is a stable per-install token — use it when header absent.
+    device_id = conversation_device_id(header_device_id, trusted_cookie, fingerprint)
+    return build_conversation_key_payload(
+        raw_client_sid=raw_client_sid,
+        auth_session_id=auth_session_id,
+        user_id=user_id,
+        sanitized_user_id=sanitized_user_id,
+        managed=managed,
+        device_id=device_id,
+    )
 
 
 def get_trusted_device_cookie_id(request: Request) -> Optional[str]:
     return request.cookies.get(TRUSTED_DEVICE_COOKIE)
+
+
+def _attach_auth_cookies(
+    response: Response,
+    request: Request,
+    session_id: Optional[str],
+    trusted_device_id: Optional[str],
+) -> Response:
+    for spec in auth_cookie_specs(
+        existing_session_id=get_session_id(request),
+        session_id=session_id,
+        existing_trusted_device_id=get_trusted_device_cookie_id(request),
+        trusted_device_id=trusted_device_id,
+        session_cookie_name=SESSION_COOKIE,
+        trusted_device_cookie_name=TRUSTED_DEVICE_COOKIE,
+    ):
+        response.set_cookie(
+            spec.name,
+            spec.value,
+            httponly=spec.httponly,
+            secure=_cookie_secure_flag(request),
+            samesite=spec.samesite,
+            max_age=spec.max_age,
+        )
+    return response
 
 
 def get_or_bootstrap_session(request: Request) -> tuple[Optional[str], Optional[str]]:
@@ -1601,11 +1585,6 @@ def check_share_or_auth(request: Request, path: str):
     raise HTTPException(status_code=401, detail="Not authenticated")
 
 
-def is_android_webview_request(request: Request) -> bool:
-    user_agent = request.headers.get("user-agent", "")
-    return "VessencesAndroid/" in user_agent
-
-
 # ─── Pages ────────────────────────────────────────────────────────────────────
 
 @app.get("/", response_class=HTMLResponse)
@@ -1630,12 +1609,7 @@ async def index(request: Request):
                 "initial_session_id": session_id,
             },
         )
-        if get_session_id(request) != session_id:
-            response.set_cookie(SESSION_COOKIE, session_id, httponly=True, secure=_cookie_secure_flag(request), samesite="lax",
-                                max_age=60 * 60 * 24 * 30)
-        if trusted_device_id and get_trusted_device_cookie_id(request) != trusted_device_id:
-            response.set_cookie(TRUSTED_DEVICE_COOKIE, trusted_device_id, httponly=True, secure=_cookie_secure_flag(request), samesite="lax",
-                                max_age=60 * 60 * 24 * 30)
+        _attach_auth_cookies(response, request, session_id, trusted_device_id)
         return response
     return templates.TemplateResponse("login.html", _login_context(request))
 
@@ -1658,12 +1632,7 @@ async def vault_page(request: Request):
                 "android_webview": is_android_webview_request(request),
             },
         )
-        if get_session_id(request) != session_id:
-            response.set_cookie(SESSION_COOKIE, session_id, httponly=True, secure=_cookie_secure_flag(request), samesite="lax",
-                                max_age=60 * 60 * 24 * 30)
-        if trusted_device_id and get_trusted_device_cookie_id(request) != trusted_device_id:
-            response.set_cookie(TRUSTED_DEVICE_COOKIE, trusted_device_id, httponly=True, secure=_cookie_secure_flag(request), samesite="lax",
-                                max_age=60 * 60 * 24 * 30)
+        _attach_auth_cookies(response, request, session_id, trusted_device_id)
         return response
     return templates.TemplateResponse("login.html", _login_context(request))
 
@@ -1693,12 +1662,7 @@ async def chat_page(request: Request):
                 "android_webview": is_android_webview_request(request),
             },
         )
-        if get_session_id(request) != session_id:
-            response.set_cookie(SESSION_COOKIE, session_id, httponly=True, secure=_cookie_secure_flag(request), samesite="lax",
-                                max_age=60 * 60 * 24 * 30)
-        if trusted_device_id and get_trusted_device_cookie_id(request) != trusted_device_id:
-            response.set_cookie(TRUSTED_DEVICE_COOKIE, trusted_device_id, httponly=True, secure=_cookie_secure_flag(request), samesite="lax",
-                                max_age=60 * 60 * 24 * 30)
+        _attach_auth_cookies(response, request, session_id, trusted_device_id)
         return response
     return templates.TemplateResponse("login.html", _login_context(request))
 
@@ -1764,11 +1728,11 @@ async def receive_crash_report(request: Request):
 
 def _self_healing_report_authorized(request: Request) -> bool:
     """Authorize external project error reports that can trigger repair work."""
-    if _is_local_request(request):
-        return True
-    expected = os.environ.get("JANE_SELF_HEAL_TOKEN", "").strip()
-    provided = request.headers.get("x-jane-self-heal-token", "").strip()
-    return bool(expected and provided and secrets.compare_digest(expected, provided))
+    return self_healing_report_authorized(
+        request,
+        expected_token=os.environ.get("JANE_SELF_HEAL_TOKEN", ""),
+        is_local_request_fn=_is_local_request,
+    )
 
 
 @app.post("/api/self-healing/report")
@@ -1783,20 +1747,15 @@ async def receive_self_healing_report(request: Request):
     if not isinstance(body, dict):
         return JSONResponse({"error": "expected object"}, status_code=400)
 
-    source = str(body.get("source") or "external_app")
-    category = str(body.get("category") or "error")
-    message = str(body.get("message") or "")[:2000]
-    project_root = str(body.get("project_root") or CODE_ROOT)
-    tags = body.get("tags") if isinstance(body.get("tags"), list) else ["external"]
-    payload = body.get("payload") if isinstance(body.get("payload"), dict) else body
+    report = normalize_self_healing_report(body, default_project_root=str(CODE_ROOT))
     _dispatch_self_healing_report(
-        source=source,
-        category=category,
-        message=message,
-        payload=payload,
+        source=report["source"],
+        category=report["category"],
+        message=report["message"],
+        payload=report["payload"],
         request=request,
-        project_root=project_root,
-        tags=tags,
+        project_root=report["project_root"],
+        tags=report["tags"],
     )
     return {"status": "received"}
 
@@ -1819,19 +1778,15 @@ async def sync_contacts(request: Request, session_id: str = Depends(require_auth
         # Full replace — delete all existing, insert fresh
         conn.execute("DELETE FROM contacts")
         for c in contacts:
-            display_name = (c.get("display_name") or "").strip()
-            if not display_name:
+            values = contact_insert_values(c, now)
+            if values is None:
                 continue
-            phone_number = (c.get("phone_number") or "").strip() or None
-            email = (c.get("email") or "").strip() or None
-            is_primary = 1 if c.get("is_primary") else 0
-            contact_id = str(c.get("contact_id", "")).strip() or None
             try:
                 conn.execute(
                     """INSERT OR IGNORE INTO contacts
                        (display_name, phone_number, email, is_primary, contact_id, synced_at)
                        VALUES (?, ?, ?, ?, ?, ?)""",
-                    (display_name, phone_number, email, is_primary, contact_id, now),
+                    values,
                 )
             except Exception as e:
                 _logger.warning("contacts sync row error: %s", e)
@@ -1852,17 +1807,7 @@ async def search_contacts(q: str = "", session_id: str = Depends(require_auth)):
             "SELECT display_name, phone_number, email, is_primary, contact_id FROM contacts WHERE display_name LIKE ? ORDER BY display_name, is_primary DESC LIMIT 100",
             (query,),
         ).fetchall()
-    # Aggregate by person (contact_id or display_name)
-    people: dict[str, dict] = {}
-    for r in rows:
-        key = r["contact_id"] or r["display_name"]
-        if key not in people:
-            people[key] = {"display_name": r["display_name"], "phones": [], "emails": []}
-        if r["phone_number"] and r["phone_number"] not in people[key]["phones"]:
-            people[key]["phones"].append(r["phone_number"])
-        if r["email"] and r["email"] not in people[key]["emails"]:
-            people[key]["emails"].append(r["email"])
-    return list(people.values())
+    return aggregate_contact_rows(rows)
 
 
 @app.get("/api/contacts")
@@ -1891,12 +1836,12 @@ async def add_contact_alias(request: Request, session_id: str = Depends(require_
         body = await request.json()
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid JSON")
-    alias = (body.get("alias") or "").strip()
-    phone = (body.get("phone_number") or "").strip()
-    if not alias or not phone:
+    values = contact_alias_values(body)
+    if values is None:
         raise HTTPException(status_code=400, detail="alias and phone_number are required")
+    alias, phone, display_name = values
     from agent_skills.sms_helpers import add_alias
-    ok = add_alias(alias=alias, phone_number=phone, display_name=body.get("display_name"))
+    ok = add_alias(alias=alias, phone_number=phone, display_name=display_name)
     return {"ok": ok}
 
 
@@ -1929,33 +1874,23 @@ async def sync_messages(request: Request, session_id: str = Depends(require_auth
         conn.execute("DELETE FROM synced_messages WHERE timestamp_ms < ?", (fourteen_days_ago_ms,))
 
         for m in messages:
-            sender = (m.get("sender") or "").strip()
-            body = (m.get("body") or "").strip()
-            timestamp_ms = m.get("timestamp_ms")
-            if not sender or not timestamp_ms:
+            values = message_insert_values(
+                m,
+                now,
+                classify_message=lambda body, is_contact: classify_synced_message(
+                    body,
+                    is_contact=is_contact,
+                ),
+            )
+            if values is None:
                 continue
-            is_read = 1 if m.get("is_read", True) else 0
-            is_contact = 1 if m.get("is_contact", False) else 0
-
-            # Classify message type
-            body_lower = body.lower()
-            if is_contact:
-                msg_type = "personal"
-            elif any(kw in body_lower for kw in ("reminder", "appointment", "scheduled", "alert", "expir", "renew", "due", "payment")):
-                msg_type = "reminder"
-            elif any(kw in body_lower for kw in ("off", "deal", "sale", "promo", "free", "win", "click", "subscribe", "unsubscribe", "opt out", "reply stop")):
-                msg_type = "spam"
-            elif any(kw in body_lower for kw in ("shipped", "deliver", "tracking", "order", "package")):
-                msg_type = "notification"
-            else:
-                msg_type = "unknown"
 
             try:
                 cur = conn.execute(
                     """INSERT OR IGNORE INTO synced_messages
                        (sender, body, timestamp_ms, is_read, is_contact, msg_type, synced_at)
                        VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                    (sender, body, timestamp_ms, is_read, is_contact, msg_type, now),
+                    values,
                 )
                 attempted += 1
                 # cursor.rowcount is 1 when the row was newly inserted, 0 when
@@ -2028,11 +1963,8 @@ async def receive_device_diagnostics(request: Request):
     into configs/job_queue/ so the next `run job queue:` reviews the
     code path that crashed (agent_skills/chat_error_audit.py).
     """
-    import json as _json
     body = await request.json()
-    diag_file = Path(LOGS_DIR) / "android_diagnostics.jsonl"
-    with open(diag_file, "a") as f:
-        f.write(_json.dumps(body) + "\n")
+    _device_diagnostics_log.append(body)
     category = body.get("category", "unknown")
     message = body.get("message", "")
     _logger.info("Android diagnostic [%s]: %s", category, message[:200])
@@ -2055,20 +1987,7 @@ async def receive_device_diagnostics(request: Request):
 @app.get("/api/device-diagnostics")
 async def get_device_diagnostics(request: Request, _=Depends(require_auth), lines: int = 50):
     """Read recent diagnostics (most recent first)."""
-    diag_file = Path(LOGS_DIR) / "android_diagnostics.jsonl"
-    if not diag_file.exists():
-        return {"diagnostics": []}
-    import json as _json
-    all_lines = diag_file.read_text().strip().split("\n")
-    recent = all_lines[-lines:]
-    recent.reverse()
-    entries = []
-    for line in recent:
-        try:
-            entries.append(_json.loads(line))
-        except _json.JSONDecodeError:
-            pass
-    return {"diagnostics": entries}
+    return {"diagnostics": _device_diagnostics_log.read_recent(lines)}
 
 
 @app.get("/settings/devices", response_class=HTMLResponse)
@@ -2080,35 +1999,12 @@ async def devices_page(request: Request, _=Depends(require_auth)):
 @app.get("/downloads/{filename}")
 async def download_release_artifact(filename: str):
     """Serve public release downloads (APK, docker packages, etc.)."""
-    target = PUBLIC_RELEASE_DOWNLOADS.get(filename)
-    # If not a static entry, check if it matches an installer glob pattern
-    if not target or not target.exists() or not target.is_file():
-        glob_pattern = _INSTALLER_GLOBS.get(filename)
-        if glob_pattern:
-            target = _find_latest(glob_pattern)
-    # Dynamic APK resolution — versioned and unversioned APK filenames are
-    # resolved at request time (reading version.json fresh) so a bump_android_version
-    # deploy does not require a jane-web restart to serve the new file.
-    if not target or not target.exists() or not target.is_file():
-        apk_target = _resolve_android_apk_path(filename)
-        if apk_target is not None:
-            target = apk_target
-    # Legacy generic APK fallback (any .apk filename sitting in the downloads dir).
-    if (not target or not target.exists() or not target.is_file()) and filename.endswith(".apk"):
-        candidate = MARKETING_DOWNLOADS_DIR / filename
-        if candidate.exists() and candidate.is_file():
-            target = candidate
+    target = _release_downloads.resolve_download(filename)
     if not target or not target.exists() or not target.is_file():
         raise HTTPException(status_code=404)
-    suffix = target.suffix.lower()
-    media_type = {
-        ".apk": "application/vnd.android.package-archive",
-        ".zip": "application/zip",
-        ".yml": "application/octet-stream",
-    }.get(suffix, "application/octet-stream")
     return FileResponse(
         str(target),
-        media_type=media_type,
+        media_type=_release_downloads.media_type(target),
         filename=filename,
         headers={
             "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
@@ -2123,51 +2019,14 @@ async def download_release_artifact(filename: str):
 # ─── App Settings API (synced between server and Android) ────────────────────
 
 _APP_SETTINGS_PATH = os.path.join(VESSENCE_DATA_HOME, "data", "app_settings.json")
-
-
-def _load_app_settings() -> dict:
-    try:
-        with open(_APP_SETTINGS_PATH) as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {}
-
-
-def _save_app_settings(settings: dict):
-    os.makedirs(os.path.dirname(_APP_SETTINGS_PATH), exist_ok=True)
-    with open(_APP_SETTINGS_PATH, "w") as f:
-        json.dump(settings, f, indent=2)
+_app_settings_store = JsonSettingsStore(_APP_SETTINGS_PATH)
+_load_app_settings = _app_settings_store.load
+_save_app_settings = _app_settings_store.save
 
 
 # ─── Chat TTS API — XTTS-v2 audio for Jane's chat responses ─────────────────
 
-def _split_tts_chunks(text: str, max_chars: int = 150) -> list[str]:
-    """Split text into sentence-level chunks for XTTS-v2 (~20s max per chunk)."""
-    import re
-    sentences = re.split(r'(?<=[.!?])\s+', text.strip())
-    chunks, current = [], ""
-    for s in sentences:
-        s = s.strip()
-        if not s:
-            continue
-        if current and len(current) + len(s) + 1 <= max_chars:
-            current += " " + s
-        else:
-            if current:
-                chunks.append(current)
-            if len(s) > max_chars:
-                for part in re.split(r',\s*', s):
-                    if current and len(current) + len(part) + 2 <= max_chars:
-                        current += ", " + part
-                    else:
-                        if current:
-                            chunks.append(current)
-                        current = part
-            else:
-                current = s
-    if current:
-        chunks.append(current)
-    return chunks or [text[:max_chars]]
+_split_tts_chunks = split_tts_chunks
 
 
 # ─── XTTS-v2 TTS proxy — forwards to standalone tts_server on port 8095 ───────
@@ -2214,39 +2073,31 @@ async def generate_tts(request: Request, _=Depends(require_auth)):
     if not text:
         raise HTTPException(status_code=422, detail="text is required")
 
-    import hashlib, wave, tempfile, shutil
-    text_hash = hashlib.md5(text.encode()).hexdigest()[:12]
-    cache_dir = os.path.join(VESSENCE_DATA_HOME, "cache", "tts")
-    os.makedirs(cache_dir, exist_ok=True)
-    ogg_path = os.path.join(cache_dir, f"{text_hash}.ogg")
+    import wave, tempfile, shutil
+    cache_paths = tts_cache_paths(VESSENCE_DATA_HOME, text)
+    os.makedirs(cache_paths.cache_dir, exist_ok=True)
 
     # Check cache (both ogg and legacy wav)
-    if os.path.exists(ogg_path):
-        return FileResponse(ogg_path, media_type="audio/ogg")
-    legacy_wav = os.path.join(cache_dir, f"{text_hash}.wav")
-    if os.path.exists(legacy_wav):
-        return FileResponse(legacy_wav, media_type="audio/wav")
+    if os.path.exists(cache_paths.ogg_path):
+        return FileResponse(cache_paths.ogg_path, media_type="audio/ogg")
+    if os.path.exists(cache_paths.legacy_wav_path):
+        return FileResponse(cache_paths.legacy_wav_path, media_type="audio/wav")
 
-    gpu_flag = ["--gpus", "all"] if os.path.exists("/usr/bin/nvidia-smi") else []
+    gpu_flag = tts_gpu_flags()
     chunks = _split_tts_chunks(text[:1000])
     tmp_dir = tempfile.mkdtemp(prefix="tts_web_")
 
     try:
         chunk_wavs = []
         for i, chunk in enumerate(chunks):
-            chunk_wav = os.path.join(tmp_dir, f"chunk_{i:03d}.wav")
-            cmd = [
-                "docker", "run", "--rm", *gpu_flag,
-                "--memory=4g", "--cpus=2",
-                "-e", "COQUI_TOS_AGREED=1",
-                "-v", f"{tmp_dir}:/output",
-                "ghcr.io/coqui-ai/tts:latest",
-                "--text", chunk,
-                "--model_name", "tts_models/multilingual/multi-dataset/xtts_v2",
-                "--speaker_idx", speaker,
-                "--language_idx", "en",
-                "--out_path", f"/output/chunk_{i:03d}.wav",
-            ]
+            chunk_wav = tts_chunk_wav_path(tmp_dir, i)
+            cmd = tts_docker_command(
+                tmp_dir=tmp_dir,
+                chunk=chunk,
+                speaker=speaker,
+                index=i,
+                gpu_flags=gpu_flag,
+            )
             async with _tts_semaphore:
                 result = await asyncio.to_thread(
                     subprocess.run, cmd,
@@ -2259,7 +2110,7 @@ async def generate_tts(request: Request, _=Depends(require_auth)):
             raise HTTPException(status_code=500, detail="TTS generation failed")
 
         # Concatenate WAV chunks
-        combined_wav = os.path.join(tmp_dir, "combined.wav")
+        combined_wav = tts_combined_wav_path(tmp_dir)
         with wave.open(chunk_wavs[0], 'rb') as first:
             params = first.getparams()
         with wave.open(combined_wav, 'wb') as out:
@@ -2271,15 +2122,15 @@ async def generate_tts(request: Request, _=Depends(require_auth)):
         # Compress to Opus/OGG
         compress_result = await asyncio.to_thread(
             subprocess.run,
-            ["ffmpeg", "-y", "-i", combined_wav, "-c:a", "libopus", "-b:a", "48k", ogg_path],
+            tts_ffmpeg_command(combined_wav, cache_paths.ogg_path),
             capture_output=True, text=True, timeout=60,
         )
-        if compress_result.returncode == 0 and os.path.exists(ogg_path):
-            return FileResponse(ogg_path, media_type="audio/ogg")
+        if compress_result.returncode == 0 and os.path.exists(cache_paths.ogg_path):
+            return FileResponse(cache_paths.ogg_path, media_type="audio/ogg")
 
         # Fall back to serving uncompressed WAV if ffmpeg fails
-        shutil.copy2(combined_wav, legacy_wav)
-        return FileResponse(legacy_wav, media_type="audio/wav")
+        shutil.copy2(combined_wav, cache_paths.legacy_wav_path)
+        return FileResponse(cache_paths.legacy_wav_path, media_type="audio/wav")
 
     except subprocess.TimeoutExpired:
         raise HTTPException(status_code=504, detail="TTS generation timed out")
@@ -2319,31 +2170,8 @@ async def report_app_installed(request: Request, _=Depends(require_auth)):
 async def latest_app_version(response: Response):
     # Allow marketing site (vessences.com) to fetch this cross-origin
     response.headers["Access-Control-Allow-Origin"] = "*"
-    # Read version.json fresh each time so builds are picked up without server restart
-    vdata = _json.loads((CODE_ROOT / "version.json").read_text())
-    version_name = vdata["version_name"]
-    version_code = vdata["version_code"]
-    apk_path = MARKETING_DOWNLOADS_DIR / f"vessences-android-v{version_name}.apk"
-    # Guard: don't advertise a version whose APK hasn't been deployed yet.
-    # If the file is missing, walk back to the newest APK that actually exists.
-    if not apk_path.exists():
-        existing = sorted(
-            MARKETING_DOWNLOADS_DIR.glob("vessences-android-v*.apk"),
-            key=lambda p: p.stat().st_mtime,
-            reverse=True,
-        )
-        if existing:
-            version_name = existing[0].stem[len("vessences-android-v"):]
-            # version_code from version.json may be ahead — use file-based name only
-        else:
-            # No APK at all; return version info without a usable download URL
-            return {"version_code": version_code, "version_name": version_name, "download_url": None, "changelog": ""}
-    return {
-        "version_code": version_code,
-        "version_name": version_name,
-        "download_url": f"/downloads/vessences-android-v{version_name}.apk",
-        "changelog": "",
-    }
+    # Read version.json fresh each time so builds are picked up without server restart.
+    return _release_downloads.latest_version_payload()
 
 
 # ─── Auth API ─────────────────────────────────────────────────────────────────
@@ -2416,11 +2244,13 @@ async def auth_google_callback(request: Request):
     if not allowed_email(email):
         raise HTTPException(status_code=403, detail=f"Account {email} is not authorized.")
     fp = device_fingerprint_from_request(request)
-    if not is_device_trusted(fp):
-        trusted_device_id = register_trusted_device(fp, email)
-    else:
-        trusted_row = get_trusted_device_by_fingerprint(fp)
-        trusted_device_id = trusted_row["id"] if trusted_row else register_trusted_device(fp, email)
+    trusted_device_id = trusted_device_id_for_fingerprint(
+        fp,
+        email,
+        register_trusted_device=register_trusted_device,
+        get_trusted_device_by_fingerprint=get_trusted_device_by_fingerprint,
+        is_device_trusted=is_device_trusted,
+    )
     # Store Gmail OAuth token for email skill
     try:
         from agent_skills.email_oauth import store_gmail_token
@@ -2440,10 +2270,7 @@ async def auth_google_callback(request: Request):
     session_id = create_session(fp, trusted=True, user_id=email)
     prewarm_session(session_id, email)
     resp = RedirectResponse(url="/")
-    resp.set_cookie(SESSION_COOKIE, session_id, httponly=True, secure=_cookie_secure_flag(request), samesite="lax",
-                    max_age=60 * 60 * 24 * 30)  # 30 days
-    resp.set_cookie(TRUSTED_DEVICE_COOKIE, trusted_device_id, httponly=True, secure=_cookie_secure_flag(request), samesite="lax",
-                    max_age=60 * 60 * 24 * 30)
+    _attach_auth_cookies(resp, request, session_id, trusted_device_id)
     return resp
 
 
@@ -2470,18 +2297,17 @@ async def auth_google_token(request: Request):
     if not allowed_email(email):
         raise HTTPException(status_code=403, detail=f"Account {email} is not authorized.")
     fp = device_fingerprint_from_request(request)
-    if not is_device_trusted(fp):
-        trusted_device_id = register_trusted_device(fp, email)
-    else:
-        trusted_row = get_trusted_device_by_fingerprint(fp)
-        trusted_device_id = trusted_row["id"] if trusted_row else register_trusted_device(fp, email)
+    trusted_device_id = trusted_device_id_for_fingerprint(
+        fp,
+        email,
+        register_trusted_device=register_trusted_device,
+        get_trusted_device_by_fingerprint=get_trusted_device_by_fingerprint,
+        is_device_trusted=is_device_trusted,
+    )
     session_id = create_session(fp, trusted=True, user_id=email)
     prewarm_session(session_id, email)
     resp = JSONResponse({"ok": True, "session_id": session_id, "trusted_device_id": trusted_device_id})
-    resp.set_cookie(SESSION_COOKIE, session_id, httponly=True, secure=_cookie_secure_flag(request), samesite="lax",
-                    max_age=60 * 60 * 24 * 30)
-    resp.set_cookie(TRUSTED_DEVICE_COOKIE, trusted_device_id, httponly=True, secure=_cookie_secure_flag(request), samesite="lax",
-                    max_age=60 * 60 * 24 * 30)
+    _attach_auth_cookies(resp, request, session_id, trusted_device_id)
     return resp
 
 
@@ -2507,16 +2333,17 @@ async def verify_totp_login(request: Request, body: dict):
 
     fp = device_fingerprint_from_request(request)
     user_id = _default_user_id()
-    trusted_row = get_trusted_device_by_fingerprint(fp)
-    trusted_device_id = trusted_row["id"] if trusted_row else register_trusted_device(fp, user_id)
+    trusted_device_id = trusted_device_id_for_fingerprint(
+        fp,
+        user_id,
+        register_trusted_device=register_trusted_device,
+        get_trusted_device_by_fingerprint=get_trusted_device_by_fingerprint,
+    )
     session_id = create_session(fp, trusted=True, user_id=user_id)
     prewarm_session(session_id, user_id)
 
     response = JSONResponse({"ok": True})
-    response.set_cookie(SESSION_COOKIE, session_id, httponly=True, secure=_cookie_secure_flag(request), samesite="lax",
-                        max_age=60 * 60 * 24 * 30)
-    response.set_cookie(TRUSTED_DEVICE_COOKIE, trusted_device_id, httponly=True, secure=_cookie_secure_flag(request), samesite="lax",
-                        max_age=60 * 60 * 24 * 30)
+    _attach_auth_cookies(response, request, session_id, trusted_device_id)
     return response
 
 
@@ -2547,12 +2374,7 @@ async def delete_device(device_id: str, _=Depends(require_auth)):
 async def check_auth(request: Request):
     session_id, trusted_device_id = get_or_bootstrap_session(request)
     response = JSONResponse({"authenticated": bool(session_id)})
-    if session_id and get_session_id(request) != session_id:
-        response.set_cookie(SESSION_COOKIE, session_id, httponly=True, secure=_cookie_secure_flag(request), samesite="lax",
-                            max_age=60 * 60 * 24 * 30)
-    if trusted_device_id and get_trusted_device_cookie_id(request) != trusted_device_id:
-        response.set_cookie(TRUSTED_DEVICE_COOKIE, trusted_device_id, httponly=True, secure=_cookie_secure_flag(request), samesite="lax",
-                            max_age=60 * 60 * 24 * 30)
+    _attach_auth_cookies(response, request, session_id, trusted_device_id)
     return response
 
 
@@ -2603,22 +2425,11 @@ async def ra_report_page(report_id: str, request: Request, rt: Optional[str] = N
 # Simple in-memory queue. Commands are drained on each announcement poll.
 # Used for server-initiated actions like "sync your SMS now".
 
-_pending_device_commands: list[dict] = []
-_pending_lock = __import__("threading").Lock()
-
-
-def queue_device_command(command: str, **kwargs):
-    """Queue a command for the Android device to pick up on next poll."""
-    with _pending_lock:
-        _pending_device_commands.append({"command": command, **kwargs})
-
-
-def _drain_pending_commands() -> list[dict]:
-    """Return and clear all pending commands."""
-    with _pending_lock:
-        cmds = list(_pending_device_commands)
-        _pending_device_commands.clear()
-    return cmds
+_device_command_queue = DeviceCommandQueue()
+_pending_device_commands = _device_command_queue.commands
+_pending_lock = _device_command_queue.lock
+queue_device_command = _device_command_queue.queue
+_drain_pending_commands = _device_command_queue.drain
 
 
 @app.post("/api/device/sync-sms")
@@ -2636,21 +2447,6 @@ class CreateManagedUserRequest(BaseModel):
     display_name: Optional[str] = None
     capabilities: Optional[list[str]] = None
     seed_memories: Optional[list[str]] = None
-
-
-def _public_user_config(config: dict) -> dict:
-    return {
-        "user_id": config.get("user_id"),
-        "email": config.get("email", ""),
-        "display_name": config.get("display_name", ""),
-        "personality": config.get("personality", "default"),
-        "memory_namespace": config.get("memory_namespace", config.get("user_id", "")),
-        "memory_chromadb_path": config.get("memory_chromadb_path", ""),
-        "vault_root_path": config.get("vault_root_path", ""),
-        "capabilities": config.get("capabilities", []),
-        "created_at": config.get("created_at", ""),
-        "seeded_memory_count": config.get("seeded_memory_count", 0),
-    }
 
 
 @app.get("/api/admin/users")
@@ -2732,14 +2528,7 @@ async def delete_managed_user(user_id: str, session_id: str = Depends(require_au
             detail=f"Could not delete user: {result.get('reason', 'unknown')}",
         )
 
-    allowlist_updated = False
-    if email:
-        current = [e.strip().lower() for e in os.getenv("ALLOWED_GOOGLE_EMAILS", "").split(",") if e.strip()]
-        if email in current:
-            current.remove(email)
-            _write_env_var("ALLOWED_GOOGLE_EMAILS", ",".join(current))
-            os.environ["ALLOWED_GOOGLE_EMAILS"] = ",".join(current)
-            allowlist_updated = True
+    allowlist_updated = _remove_allowed_google_email(email) if email else False
 
     _logger.info(
         "Managed user deleted by %s: user_id=%s email=%s allowlist_updated=%s",
@@ -2750,94 +2539,22 @@ async def delete_managed_user(user_id: str, session_id: str = Depends(require_au
 
 # ─── Brain Model Settings ────────────────────────────────────────────────────
 
-_AVAILABLE_MODELS = {
-    "claude": ["claude-haiku-4-5-20251001", "claude-sonnet-4-6", "claude-opus-4-6"],
-    "gemini": ["gemini-2.5-flash", "gemini-2.5-pro"],
-    "openai": ["gpt-5.4-mini", "gpt-5.4", "gpt-4.1-mini", "gpt-4.1", "o3"],
-}
-
-_DEFAULT_MODEL = {
-    provider: cfg["smart"]
-    for provider, cfg in PROVIDER_MODELS.items()
-}
-
-_ENV_VAR_FOR_MODEL = {
-    "claude": "JANE_MODEL_CLAUDE",
-    "gemini": "JANE_MODEL_GEMINI",
-    "openai": "JANE_MODEL_OPENAI",
-}
-
 
 @app.get("/api/settings/models")
 async def get_model_settings(_=Depends(require_auth)):
     """Return current model config, available options, and 3-tier architecture."""
-    provider = normalize_frontier_provider(os.environ.get("JANE_BRAIN", "claude"))
-    default = _DEFAULT_MODEL.get(provider, _DEFAULT_MODEL["claude"])
-    env_var = _ENV_VAR_FOR_MODEL.get(provider, _ENV_VAR_FOR_MODEL["claude"])
-    legacy_var = f"BRAIN_HEAVY_{provider.upper()}"
-    current = os.environ.get(env_var) or os.environ.get(legacy_var) or default
-
-    # 4-Tier Architecture Information
-    from jane.config import SMART_MODEL, CHEAP_MODEL, LOCAL_LLM_MODEL
-    
-    # Heuristic for the new tiers based on existing config
-    # Orchestrator = current (the one you switch)
-    # Agent = SMART_MODEL (the specialized one)
-    # Utility = CHEAP_MODEL (the background one)
-    # Local = LOCAL_LLM_MODEL (Ollama)
-    
-    tiers = [
-        {"tier": "Orchestrator", "role": "The Primary Brain (Reasoning, Code)", "model": current},
-        {"tier": "Agent", "role": "The Specialist (Research, Memory)", "model": SMART_MODEL},
-        {"tier": "Utility", "role": "The Worker (Archival, Triage)", "model": CHEAP_MODEL},
-        {"tier": "Local", "role": "Privacy & Speed (Local Processing)", "model": LOCAL_LLM_MODEL},
-    ]
-
-    return {
-        "provider": provider,
-        "model": {"current": current, "default": default, "env_var": env_var},
-        "available_models": _AVAILABLE_MODELS,
-        "tiers": tiers,
-    }
+    return build_model_settings_payload(os.environ)
 
 
 @app.post("/api/settings/models")
 async def save_model_settings(request: Request, _=Depends(require_auth)):
     """Save model selection to .env and restart the standing brain."""
     body = await request.json()
-    provider = normalize_frontier_provider(os.environ.get("JANE_BRAIN", "claude"))
-    env_var = _ENV_VAR_FOR_MODEL.get(provider, _ENV_VAR_FOR_MODEL["claude"])
+    env_var, model, error = model_save_target(body, os.environ)
+    if error:
+        return error
 
-    model = body.get("model")
-    if not model:
-        return {"ok": False, "error": "No model specified"}
-
-    # Update in-process env
-    os.environ[env_var] = model
-
-    # Write to .env file
-    env_path = ENV_FILE_PATH
-    lines = []
-    if os.path.exists(env_path):
-        async with aiofiles.open(env_path, "r") as f:
-            lines = (await f.read()).splitlines()
-
-    found = False
-    new_lines = []
-    for line in lines:
-        stripped = line.strip()
-        if stripped and not stripped.startswith("#") and "=" in stripped:
-            key = stripped.split("=", 1)[0].strip()
-            if key == env_var:
-                new_lines.append(f"{env_var}={model}")
-                found = True
-                continue
-        new_lines.append(line)
-    if not found:
-        new_lines.append(f"{env_var}={model}")
-
-    async with aiofiles.open(env_path, "w") as f:
-        await f.write("\n".join(new_lines) + "\n")
+    _write_env_var(env_var, model)
 
     # Restart the standing brain so it picks up the new model
     try:
@@ -2906,19 +2623,6 @@ async def prefetch_memory(request: Request):
 
 # ─── Files API (shared vault) ─────────────────────────────────────────────────
 
-_MIME_TO_SUBDIR = {
-    "image": "images",
-    "audio": "audio",
-    "video": "video",
-}
-
-
-def _route_subdir(mime: str) -> str:
-    if mime == "application/pdf":
-        return "pdf"
-    top = mime.split("/")[0]
-    return _MIME_TO_SUBDIR.get(top, "documents")
-
 @app.get("/api/files")
 async def list_root(
     request: Request,
@@ -2940,25 +2644,6 @@ async def list_path(
 ):
     vault_root, _caps, _managed, _uid = _require_capability(session_id, "vault_read")
     return _paginate_listing(list_directory(path, root_dir=vault_root), offset, limit)
-
-
-def _paginate_listing(listing: dict, offset: int, limit: int) -> dict:
-    """Apply optional offset/limit pagination to a directory listing.
-    When limit <= 0, return the full listing (backwards compatible).
-    Pagination applies to files only; folders are always returned in full.
-    """
-    if limit <= 0:
-        return listing
-    if "error" in listing:
-        return listing
-    files = listing.get("files", [])
-    total_files = len(files)
-    paginated_files = files[offset:offset + limit]
-    listing["files"] = paginated_files
-    listing["total_files"] = total_files
-    listing["offset"] = offset
-    listing["limit"] = limit
-    return listing
 
 
 @app.get("/api/files/meta/{path:path}")
@@ -3004,36 +2689,6 @@ async def serve_file(path: str, request: Request):
     return FileResponse(str(target), media_type=mime, headers=headers)
 
 
-def _range_response(path: Path, mime: str, range_header: str):
-    size = path.stat().st_size
-    start, end = 0, size - 1
-    try:
-        ranges = range_header.replace("bytes=", "").split("-")
-        start = int(ranges[0]) if ranges[0] else 0
-        end = int(ranges[1]) if ranges[1] else size - 1
-    except Exception:
-        pass
-    end = min(end, size - 1)
-    length = end - start + 1
-
-    def iter_file():
-        with open(path, "rb") as f:
-            f.seek(start)
-            remaining = length
-            while remaining:
-                chunk = f.read(min(65536, remaining))
-                if not chunk:
-                    break
-                remaining -= len(chunk)
-                yield chunk
-
-    return StreamingResponse(iter_file(), status_code=206, media_type=mime, headers={
-        "Content-Range": f"bytes {start}-{end}/{size}",
-        "Accept-Ranges": "bytes",
-        "Content-Length": str(length),
-    })
-
-
 @app.get("/api/files/changes")
 async def file_changes(_=Depends(require_auth)):
     return {"last_change": get_last_change_timestamp()}
@@ -3050,22 +2705,6 @@ async def find_file(name: str, session_id: str = Depends(require_auth)):
     raise HTTPException(status_code=404, detail="File not found in vault")
 
 
-# ── File type extension map ──────────────────────────────────────────────────
-_FILE_TYPE_EXTENSIONS = {
-    "audio": {".mp3", ".wav", ".flac", ".ogg", ".m4a", ".aac", ".wma"},
-    "image": {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg"},
-    "video": {".mp4", ".mkv", ".avi", ".mov", ".webm"},
-    "document": {".pdf", ".doc", ".docx", ".txt", ".md"},
-}
-
-def _detect_file_type(filename: str) -> str:
-    ext = os.path.splitext(filename)[1].lower()
-    for ftype, exts in _FILE_TYPE_EXTENSIONS.items():
-        if ext in exts:
-            return ftype
-    return "other"
-
-
 @app.get("/api/files/search")
 async def search_files(q: str, type: Optional[str] = None, session_id: str = Depends(require_auth)):
     """Search vault files by name and ChromaDB description."""
@@ -3074,27 +2713,13 @@ async def search_files(q: str, type: Optional[str] = None, session_id: str = Dep
 
     vault_root, _caps, _managed, _uid = _require_capability(session_id, "vault_read")
     query = q.strip().lower()
-    results_map: dict[str, dict] = {}  # keyed by relative path
-
-    # 1. Walk vault and match filenames
     type_exts = _FILE_TYPE_EXTENSIONS.get(type) if type else None
-    for root, _dirs, files in os.walk(vault_root):
-        for fname in files:
-            if fname.startswith("."):
-                continue
-            if query in fname.lower():
-                ext = os.path.splitext(fname)[1].lower()
-                if type_exts and ext not in type_exts:
-                    continue
-                rel = os.path.relpath(os.path.join(root, fname), vault_root)
-                ftype = _detect_file_type(fname)
-                results_map[rel] = {
-                    "name": fname,
-                    "path": rel,
-                    "type": ftype,
-                    "description": "",
-                    "serve_url": f"/api/files/serve/{rel}",
-                }
+    results_map: dict[str, dict] = _filename_search_results(
+        vault_root=vault_root,
+        query=query,
+        type_exts=type_exts,
+        detect_file_type=_detect_file_type,
+    )
 
     # 2. Query ChromaDB for file descriptions
     try:
@@ -3115,48 +2740,15 @@ async def search_files(q: str, type: Optional[str] = None, session_id: str = Dep
         for collection_name in ("vault_files", "facts"):
             try:
                 docs, metas, _dists = _query_collection(vector_db, collection_name, q, 20)
-                for doc, meta in zip(docs, metas):
-                    meta = meta or {}
-                    # Scope check: managed user may only see rows tagged with
-                    # their id (or legacy untagged rows in their own vault).
-                    row_scope = (meta.get("user_id") or "").strip()
-                    if allowed_scope and row_scope and row_scope != allowed_scope:
-                        continue
-                    # Try to extract a path from metadata
-                    fpath = meta.get("path", "") or meta.get("file", "") or ""
-                    if not fpath:
-                        continue
-                    # Make relative to this user's vault
-                    if os.path.isabs(fpath):
-                        try:
-                            fpath = os.path.relpath(fpath, vault_root)
-                        except ValueError:
-                            continue
-                    # Exclude any path that walks outside the user's vault
-                    if fpath.startswith(".."):
-                        continue
-                    fname = os.path.basename(fpath)
-                    ftype = _detect_file_type(fname)
-                    if type_exts:
-                        ext = os.path.splitext(fname)[1].lower()
-                        if ext not in type_exts:
-                            continue
-                    if fpath not in results_map:
-                        # Verify the file actually exists in the user's vault
-                        full = os.path.join(vault_root, fpath)
-                        if not os.path.isfile(full):
-                            continue
-                        results_map[fpath] = {
-                            "name": fname,
-                            "path": fpath,
-                            "type": ftype,
-                            "description": (doc or "")[:200],
-                            "serve_url": f"/api/files/serve/{fpath}",
-                        }
-                    else:
-                        # Enrich existing result with description
-                        if doc and not results_map[fpath]["description"]:
-                            results_map[fpath]["description"] = (doc or "")[:200]
+                _merge_index_search_results(
+                    results_map,
+                    docs,
+                    metas,
+                    vault_root=vault_root,
+                    type_exts=type_exts,
+                    allowed_scope=allowed_scope,
+                    detect_file_type=_detect_file_type,
+                )
                 break  # If first collection worked, don't try fallback
             except Exception:
                 continue
@@ -3246,10 +2838,7 @@ async def upload_files(
     vault_root_str, _caps, _managed, upload_user_id = _require_capability(session_id, "vault_write")
     vault_root = Path(vault_root_str)
     hash_index_path = vault_root / ".hash_index.json"
-    try:
-        descriptions = json.loads(descriptions_json or "[]")
-    except json.JSONDecodeError:
-        descriptions = []
+    descriptions = parse_upload_descriptions(descriptions_json)
 
     try:
         with open(hash_index_path) as f:
@@ -3264,21 +2853,12 @@ async def upload_files(
 
         if file_hash in hash_index:
             existing = hash_index[file_hash]
-            results.append({
-                "name": upload.filename,
-                "status": "duplicate",
-                "existing_path": existing.get("path", ""),
-            })
+            results.append(duplicate_upload_result(upload.filename, existing))
             continue
 
         mime = upload.content_type or get_mime(upload.filename or "")
-        if destination:
-            subdir = destination.strip("/")
-        else:
-            subdir = _route_subdir(mime)
-        description = ""
-        if index < len(descriptions):
-            description = str(descriptions[index] or "").strip()
+        subdir = upload_subdir(destination, mime, _route_subdir)
+        description = upload_description(descriptions, index)
         is_image_upload = mime.startswith("image/")
         if is_image_upload and not description:
             raise HTTPException(status_code=400, detail="Image uploads require a description.")
@@ -3286,27 +2866,20 @@ async def upload_files(
         dest_dir = vault_root / subdir
         dest_dir.mkdir(parents=True, exist_ok=True)
 
-        if is_image_upload and not destination:
-            safe_name = make_descriptive_filename(upload.filename or "upload", description)
-        else:
-            safe_name = Path(upload.filename or "upload").name
-        dest_path = dest_dir / safe_name
-        if dest_path.exists():
-            stem, suffix = dest_path.stem, dest_path.suffix
-            counter = 1
-            while dest_path.exists():
-                dest_path = dest_dir / f"{stem}_{counter}{suffix}"
-                counter += 1
+        safe_name = upload_safe_name(
+            upload.filename,
+            description,
+            is_image_upload=is_image_upload,
+            destination=destination,
+            descriptive_filename=make_descriptive_filename,
+        )
+        dest_path = next_available_path(dest_dir, safe_name)
 
         with open(dest_path, "wb") as f:
             f.write(data)
 
         rel_path = str(dest_path.relative_to(vault_root))
-        hash_index[file_hash] = {
-            "filename": dest_path.name,
-            "path": rel_path,
-            "description": description,
-        }
+        hash_index[file_hash] = hash_index_entry(dest_path, rel_path, description)
         upsert_file_index_entry(
             rel_path,
             description,
@@ -3317,28 +2890,18 @@ async def upload_files(
         )
 
         try:
-            _add_fact_cmd = [
-                ADK_VENV_PYTHON,
-                ADD_FACT_SCRIPT,
-                f"File uploaded via web UI: {dest_path.name} saved to vault/{subdir}/",
-                "--topic", "vault", "--subtopic", "upload",
-                "--user-id", upload_user_id,
-            ]
-            _memory_path = _user_memory_path(upload_user_id)
-            if _memory_path:
-                _add_fact_cmd += ["--memory-path", _memory_path]
+            _add_fact_cmd = upload_memory_fact_command(
+                python_bin=ADK_VENV_PYTHON,
+                add_fact_script=ADD_FACT_SCRIPT,
+                fact_text=upload_memory_fact_text("via web UI", dest_path.name, subdir),
+                user_id=upload_user_id,
+                memory_path=_user_memory_path(upload_user_id),
+            )
             subprocess.run(_add_fact_cmd, timeout=10, capture_output=True)
         except Exception:
             pass
 
-        results.append({
-            "name": upload.filename,
-            "saved_name": dest_path.name,
-            "status": "ok",
-            "path": rel_path,
-            "subdir": subdir,
-            "description": description,
-        })
+        results.append(upload_success_result(upload.filename, dest_path, rel_path, subdir, description))
 
     try:
         with open(hash_index_path, "w") as f:
@@ -3375,13 +2938,7 @@ async def upload_single_file(
     dest_dir.mkdir(parents=True, exist_ok=True)
 
     safe_name = Path(file.filename or "upload").name
-    dest_path = dest_dir / safe_name
-    if dest_path.exists():
-        stem, suffix = dest_path.stem, dest_path.suffix
-        counter = 1
-        while dest_path.exists():
-            dest_path = dest_dir / f"{stem}_{counter}{suffix}"
-            counter += 1
+    dest_path = next_available_path(dest_dir, safe_name)
 
     with open(dest_path, "wb") as f:
         f.write(data)
@@ -3405,16 +2962,13 @@ async def upload_single_file(
     # Save to memory
     try:
         import subprocess as _sp
-        _add_fact_cmd = [
-            sys.executable,
-            str(Path(__file__).resolve().parents[1] / "agent_skills" / "add_fact.py"),
-            f"File uploaded from Android: {dest_path.name} saved to vault/{subdir}/",
-            "--topic", "vault", "--subtopic", "upload",
-            "--user-id", upload_user_id,
-        ]
-        _memory_path = _user_memory_path(upload_user_id)
-        if _memory_path:
-            _add_fact_cmd += ["--memory-path", _memory_path]
+        _add_fact_cmd = upload_memory_fact_command(
+            python_bin=sys.executable,
+            add_fact_script=str(Path(__file__).resolve().parents[1] / "agent_skills" / "add_fact.py"),
+            fact_text=upload_memory_fact_text("from Android", dest_path.name, subdir),
+            user_id=upload_user_id,
+            memory_path=_user_memory_path(upload_user_id),
+        )
         _sp.run(_add_fact_cmd, timeout=10, capture_output=True)
     except Exception:
         pass
@@ -3425,12 +2979,7 @@ async def upload_single_file(
         "path": rel_path,
         "mime": mime,
     })
-    if get_session_id(request) != session_id:
-        response.set_cookie(SESSION_COOKIE, session_id, httponly=True, secure=_cookie_secure_flag(request), samesite="lax",
-                            max_age=60 * 60 * 24 * 30)
-    if trusted_device_id and get_trusted_device_cookie_id(request) != trusted_device_id:
-        response.set_cookie(TRUSTED_DEVICE_COOKIE, trusted_device_id, httponly=True, secure=_cookie_secure_flag(request), samesite="lax",
-                            max_age=60 * 60 * 24 * 30)
+    _attach_auth_cookies(response, request, session_id, trusted_device_id)
     return response
 
 
@@ -3502,9 +3051,7 @@ def _cleanup_temporary_playlists():
         from vault_web.playlists import list_playlists, delete_playlist as _del
         cutoff = (_dt.datetime.now() - _dt.timedelta(minutes=5)).strftime("%Y-%m-%d %H:%M:%S")
         for p in list_playlists():
-            name = p.get("name", "")
-            created = p.get("created_at", "")
-            if (name == "Random Mix" or name.startswith("Playing:")) and created < cutoff:
+            if should_delete_temporary_playlist(p, cutoff):
                 _del(p["id"])
     except Exception as e:
         _logger.warning("temporary playlist cleanup failed: %s", e)
@@ -3524,65 +3071,19 @@ def create_music_playlist_from_query(query: str) -> dict | None:
                 builds a new ephemeral playlist from the matched files.
     """
     import glob as _glob, random as _random
-    import re as _re_inner
 
     _cleanup_temporary_playlists()
-    q = (query or "").strip().lower()
-    q_norm = _re_inner.sub(r"\s+", " ", q)
-    # Strip common wrappers so "my coldplay playlist" matches a playlist
-    # named "coldplay" — same extraction the v2 music handler uses.
-    _q_core = _re_inner.sub(
-        r"^(play|put on|start|queue up|shuffle|resume|i want to (listen to|hear)|"
-        r"i'?d like to (listen to|hear))\s+",
-        "",
-        q_norm,
-    )
-    _q_core = _re_inner.sub(r"^(some |the |my |a |an )+", "", _q_core)
-    _q_core = _re_inner.sub(r"\s+(playlist|folder|music|songs?)$", "", _q_core).strip()
+    query_parts = normalize_music_query(query)
 
     # ── Tier 0: match an existing named user playlist ─────────────────────
     # Skip for generic "random" queries which should build a fresh random mix.
-    _is_random = q_norm in ("random", "anything", "something", "a song", "music",
-                            "random song", "some music", "something random")
-    if _q_core and not _is_random:
+    if query_parts.q_core and not query_parts.is_random:
         try:
             existing = list_playlists()
         except Exception:
             existing = []
         # Ignore prior ephemeral playlists — user meant a real named one.
-        _real = [p for p in existing if not (
-            (p.get("name", "") == "Random Mix")
-            or p.get("name", "").startswith("Playing:")
-        )]
-        _hit = None
-        # A. exact name match
-        for p in _real:
-            if _re_inner.sub(r"\s+", " ", p.get("name", "").lower()) == _q_core:
-                _hit = p
-                break
-        # B. substring match either way
-        if _hit is None:
-            for p in _real:
-                name_norm = _re_inner.sub(r"\s+", " ", p.get("name", "").lower())
-                if not name_norm:
-                    continue
-                if _q_core in name_norm or name_norm in _q_core:
-                    _hit = p
-                    break
-        # C. fuzzy match (rapidfuzz)
-        if _hit is None:
-            try:
-                from rapidfuzz import fuzz as _fz
-                _scored = [
-                    (_fz.token_set_ratio(_q_core, _re_inner.sub(r"\s+", " ", p.get("name", "").lower())), p)
-                    for p in _real
-                    if p.get("name", "")
-                ]
-                _scored.sort(key=lambda x: x[0], reverse=True)
-                if _scored and _scored[0][0] >= 80:
-                    _hit = _scored[0][1]
-            except ImportError:
-                pass
+        _hit = find_matching_playlist(query_parts.q_core, real_user_playlists(existing))
         if _hit is not None:
             full = get_playlist(_hit["id"])
             if full:
@@ -3601,57 +3102,15 @@ def create_music_playlist_from_query(query: str) -> dict | None:
     if not all_files:
         return None
 
-    if _is_random:
+    if query_parts.is_random:
         selected = _random.sample(all_files, min(10, len(all_files)))
-        playlist_name = "Random Mix"
     else:
-        # Tier 1: full query as substring of filename
-        selected = [f for f in all_files if q in f.lower().split("/")[-1].lower()]
-        if not selected:
-            # Tier 2: word match — but filter out stopwords that match everything.
-            # "songs by foo fighter" should match on "foo" and "fighter", NOT "by" or "songs".
-            _stopwords = {"a", "an", "the", "by", "of", "in", "on", "to", "for", "and", "or",
-                          "is", "it", "my", "me", "we", "do", "have", "any", "some", "from",
-                          "song", "songs", "music", "play", "playing", "listen", "track", "tracks",
-                          "album", "artist", "something", "anything", "like", "want", "hear"}
-            words = [w for w in q.split() if w not in _stopwords and len(w) > 1]
-            if words:
-                # Require ALL remaining words to match (AND logic), not ANY (OR logic).
-                # "foo fighter" → file must contain both "foo" AND "fighter".
-                selected = [f for f in all_files
-                            if all(w in f.lower().split("/")[-1].lower() for w in words)]
-            if not selected and words:
-                # Tier 3: OR logic as last resort, but only with content words
-                selected = [f for f in all_files
-                            if any(w in f.lower().split("/")[-1].lower() for w in words)]
-        if not selected:
-            # Tier 4: fuzzy matching — handles misspellings and voice transcription errors
-            # e.g., "skyfall of stars" → "A Sky Full Of Stars"
-            try:
-                from rapidfuzz import fuzz
-                _scored = []
-                for f in all_files:
-                    fname = Path(f).stem.lower()
-                    # Use token_set_ratio: order-independent, handles partial overlap
-                    score = fuzz.token_set_ratio(q, fname)
-                    if score >= 60:
-                        _scored.append((score, f))
-                _scored.sort(key=lambda x: x[0], reverse=True)
-                selected = [f for _, f in _scored[:10]]
-            except ImportError:
-                pass
+        selected = select_music_files(query_parts.q, all_files)
         if not selected:
             return None
-        playlist_name = f"Playing: {q.title()}"
 
-    tracks = []
-    for filepath in selected:
-        # rel_path is relative to VAULT_DIR (e.g., "Music/Coldplay/Clocks.mp3")
-        # so that /api/files/serve/{rel_path} resolves correctly server-side.
-        rel_path = str(Path(filepath).relative_to(vault_music.parent))
-        filename = Path(filepath).stem
-        tracks.append({"path": rel_path, "title": filename})
-
+    playlist_name = playlist_name_for_query(query_parts)
+    tracks = playlist_tracks(selected, vault_parent=vault_music.parent)
     playlist = create_playlist(playlist_name, tracks)
     playlist["temporary"] = True
     return playlist
@@ -3705,12 +3164,7 @@ async def _handle_jane_chat(body: ChatMessage, request: Request):
     )
     result = await send_message(user_id, session_id, body.message, body.file_context, platform=body.platform, tts_enabled=body.tts_enabled or False)
     response = JSONResponse({"response": result.get("text", ""), "files": result.get("files", [])})
-    if get_session_id(request) != session_id:
-        response.set_cookie(SESSION_COOKIE, session_id, httponly=True, secure=_cookie_secure_flag(request), samesite="lax",
-                            max_age=60 * 60 * 24 * 30)
-    if trusted_device_id and get_trusted_device_cookie_id(request) != trusted_device_id:
-        response.set_cookie(TRUSTED_DEVICE_COOKIE, trusted_device_id, httponly=True, secure=_cookie_secure_flag(request), samesite="lax",
-                            max_age=60 * 60 * 24 * 30)
+    _attach_auth_cookies(response, request, session_id, trusted_device_id)
     return response
 
 
@@ -3765,12 +3219,7 @@ async def jane_end_session(body: SessionControl, request: Request):
     user_id = get_session_user(session_id) or _default_user_id()
     end_session(user_id, session_id)
     response = JSONResponse({"ok": True})
-    if get_session_id(request) != session_id:
-        response.set_cookie(SESSION_COOKIE, session_id, httponly=True, secure=_cookie_secure_flag(request), samesite="lax",
-                            max_age=60 * 60 * 24 * 30)
-    if trusted_device_id and get_trusted_device_cookie_id(request) != trusted_device_id:
-        response.set_cookie(TRUSTED_DEVICE_COOKIE, trusted_device_id, httponly=True, secure=_cookie_secure_flag(request), samesite="lax",
-                            max_age=60 * 60 * 24 * 30)
+    _attach_auth_cookies(response, request, session_id, trusted_device_id)
     return response
 
 
@@ -3809,20 +3258,10 @@ async def switch_provider(body: SwitchProviderRequest, request: Request):
 @app.get("/api/jane/current-provider")
 async def current_provider(_=Depends(require_auth)):
     """Return the currently active provider, model, and all available providers."""
-    import shutil
     from llm_brain.v1.standing_brain import get_standing_brain_manager, _PROVIDER
     manager = get_standing_brain_manager()
     health = await manager.health_check()
-    available = []
-    for prov, cli_name in [("claude", "claude"), ("gemini", "gemini"), ("openai", "codex")]:
-        installed = shutil.which(cli_name) is not None
-        available.append({"provider": prov, "installed": installed, "active": prov == _PROVIDER})
-    return JSONResponse({
-        "provider": _PROVIDER,
-        "model": health.get("model", "unknown"),
-        "alive": health.get("alive", False),
-        "available": available,
-    })
+    return JSONResponse(current_provider_payload(_PROVIDER, health))
 
 
 # ─── Generic Essence Tool API ─────────────────────────────────────────────────
@@ -3833,32 +3272,10 @@ async def current_provider(_=Depends(require_auth)):
 async def call_essence_tool(essence_name: str, tool_name: str, request: Request, _=Depends(require_auth)):
     """Generic endpoint to invoke any essence tool by name."""
     ambient_base = os.environ.get("AMBIENT_BASE", os.path.expanduser("~/ambient"))
-    search_dirs = [
-        os.environ.get("TOOLS_DIR", os.path.join(ambient_base, "skills")),
-        os.path.join(ambient_base, "essences"),
-    ]
-    tools_path = os.path.join(search_dirs[0], essence_name.lower().replace(" ", "_"), "functions", "custom_tools.py")
+    search_dirs = essence_search_dirs(ambient_base, os.environ.get("TOOLS_DIR"))
+    tools_path = find_essence_tools_path(essence_name, search_dirs)
 
-    # Try common folder name patterns across both dirs
-    if not os.path.isfile(tools_path):
-        for search_dir in search_dirs:
-            if not os.path.isdir(search_dir):
-                continue
-            for entry in os.listdir(search_dir):
-                manifest = os.path.join(search_dir, entry, "manifest.json")
-                if os.path.isfile(manifest):
-                    try:
-                        with open(manifest) as f:
-                            m = json.load(f)
-                        if m.get("essence_name", "").lower() == essence_name.lower():
-                            tools_path = os.path.join(search_dir, entry, "functions", "custom_tools.py")
-                            break
-                    except Exception:
-                        continue
-            if os.path.isfile(tools_path):
-                break
-
-    if not os.path.isfile(tools_path):
+    if not tools_path:
         raise HTTPException(status_code=404, detail=f"Essence '{essence_name}' not found or has no tools")
 
     body = {}
@@ -3868,19 +3285,14 @@ async def call_essence_tool(essence_name: str, tool_name: str, request: Request,
         pass
 
     python_bin = os.environ.get("PYTHON_BIN", sys.executable)
-    args_json = json.dumps(body) if body else ""
-    cmd = [python_bin, tools_path, tool_name]
-    if args_json:
-        cmd.append(args_json)
+    cmd = essence_tool_command(python_bin, tools_path, tool_name, body)
 
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=120,
                                 cwd=os.path.dirname(tools_path))
         if result.returncode != 0:
-            return JSONResponse({"status": "error", "message": result.stderr[:300]}, status_code=500)
-        return JSONResponse(json.loads(result.stdout))
-    except json.JSONDecodeError:
-        return JSONResponse({"status": "ok", "output": result.stdout.strip()})
+            return JSONResponse(essence_tool_error_payload(result.stderr), status_code=500)
+        return JSONResponse(essence_tool_success_payload(result.stdout))
     except subprocess.TimeoutExpired:
         raise HTTPException(status_code=504, detail="Tool execution timed out")
     except Exception as e:
@@ -3892,34 +3304,11 @@ async def call_essence_tool(essence_name: str, tool_name: str, request: Request,
 async def serve_essence_page(essence_name: str, request: Request, _=Depends(require_auth)):
     """Serve an essence's UI — or redirect to Jane's chat for essence-type items."""
     ambient_base = os.environ.get("AMBIENT_BASE", os.path.expanduser("~/ambient"))
-    search_dirs = [
-        os.environ.get("TOOLS_DIR", os.path.join(ambient_base, "skills")),
-        os.path.join(ambient_base, "essences"),
-    ]
-    # Find the essence folder across both directories
-    template_path = None
-    essence_folder_name = None
-    essence_type = "tool"
-    for search_dir in search_dirs:
-        if not os.path.isdir(search_dir):
-            continue
-        for entry in os.listdir(search_dir):
-            manifest = os.path.join(search_dir, entry, "manifest.json")
-            if os.path.isfile(manifest):
-                try:
-                    with open(manifest) as f:
-                        m = json.load(f)
-                    if m.get("essence_name", "").lower() == essence_name.lower():
-                        essence_type = m.get("type", "tool")
-                        essence_folder_name = entry
-                        candidate = os.path.join(search_dir, entry, "ui", "template.html")
-                        if os.path.isfile(candidate):
-                            template_path = candidate
-                        break
-                except Exception:
-                    continue
-        if essence_folder_name:
-            break
+    search_dirs = essence_search_dirs(ambient_base, os.environ.get("TOOLS_DIR"))
+    page_target = find_essence_page_target(essence_name, search_dirs)
+    essence_type = page_target["essence_type"]
+    essence_folder_name = page_target["folder_name"]
+    template_path = page_target["template_path"]
 
     # Essence-type items redirect to Jane's chat with the essence activated
     if essence_type == "essence" and essence_folder_name:
@@ -3944,54 +3333,28 @@ def _check_instant_command(message: str, platform: str = "web") -> str | None:
     happen to contain the keyword.
     """
     import subprocess as _sp
-    msg = message.lower().strip().rstrip(":").strip()
-    python_bin = sys.executable
-
-    # Only match short commands (under 40 chars) to avoid catching questions
-    if len(msg) > 40:
-        return None
-
-    _JOB_QUEUE_PHRASES = {
-        "show job queue", "job queue", "show me the job queue",
-        "show jobs", "list jobs", "pending jobs", "/jobs",
-    }
-    if msg in _JOB_QUEUE_PHRASES:
+    kind = instant_command_kind(message)
+    if kind == "job_queue":
         try:
             from agent_skills.show_job_queue import format_markdown_table, get_job_queue_data
             return format_markdown_table(get_job_queue_data()) or "Job queue is empty."
         except Exception:
             return "Could not load job queue."
 
-    _COMPLETED_JOBS_PHRASES = {
-        "show completed jobs", "completed jobs", "show me completed jobs",
-        "finished jobs", "done jobs", "completed job queue",
-    }
-    if msg in _COMPLETED_JOBS_PHRASES:
+    if kind == "completed_jobs":
         try:
             from agent_skills.show_job_queue import format_markdown_table, get_completed_jobs_data
             return format_markdown_table(get_completed_jobs_data()) or "No completed jobs."
         except Exception:
             return "Could not load completed jobs."
 
-    _COMMANDS_PHRASES = {"my commands", "commands", "show commands", "show me my commands", "list commands"}
-    if msg in _COMMANDS_PHRASES:
-        return (
-            "| Command | What it does |\n"
-            "|---|---|\n"
-            "| `add job:` | Creates a job spec from conversation |\n"
-            "| `show job queue:` | Shows jobs table |\n"
-            "| `run job queue:` | Executes highest-priority job |\n"
-            "| `build essence:` | Starts essence builder interview |\n"
-            "| `my commands:` | Shows this reference |"
-        )
+    if kind == "commands":
+        return commands_markdown()
 
-    if msg in ("show cron jobs", "cron jobs", "cron"):
+    if kind == "cron":
         try:
             r = _sp.run(["crontab", "-l"], capture_output=True, text=True, timeout=5)
-            lines = [l for l in r.stdout.strip().split("\n") if l.strip() and not l.startswith("#")]
-            if not lines:
-                return "No active cron jobs."
-            return "```\n" + "\n".join(lines) + "\n```"
+            return cron_jobs_markdown(r.stdout)
         except Exception:
             return "Could not load cron jobs."
 
@@ -4002,7 +3365,7 @@ def _check_instant_command(message: str, platform: str = "web") -> str | None:
 
 # Per-IP concurrent SSE stream limit — prevents a single IP from consuming
 # all available CLI brain slots.
-_active_streams: dict[str, int] = defaultdict(int)
+_active_streams: dict[str, int] = {}
 _MAX_STREAMS_PER_IP = 3
 
 
@@ -4028,48 +3391,23 @@ async def _handle_jane_chat_stream(body: ChatMessage, request: Request):
     # brain, or side-effecting tools (SMS, calendar write) fire twice.
     turn_id = request.headers.get("X-Request-ID", "").strip()
     if turn_id:
-        from jane_web import turn_dedupe
-        existing = turn_dedupe.lookup(turn_id)
-        if existing is not None:
-            if existing.status == "completed" and existing.response_json:
+        dedupe_start = await begin_turn_dedupe(turn_id, session_id)
+        if dedupe_start.pending_join_waited:
+            _logger.info(
+                "[%s] turn_dedupe PENDING join-wait turn_id=%s",
+                _session_log_id(session_id), turn_id[:8],
+            )
+        if dedupe_start.replay_response_json is not None:
+            if dedupe_start.replay_reason == "completed":
                 _logger.info(
                     "[%s] turn_dedupe COMPLETED replay turn_id=%s",
                     _session_log_id(session_id), turn_id[:8],
                 )
-                async def _replay():
-                    for line in (existing.response_json or "").splitlines():
-                        if line.strip():
-                            yield line + "\n"
-                return StreamingResponse(_replay(), media_type="application/x-ndjson")
-            if existing.status == "pending":
-                _logger.info(
-                    "[%s] turn_dedupe PENDING join-wait turn_id=%s",
-                    _session_log_id(session_id), turn_id[:8],
-                )
-                # Block in a thread until the original completes (or fails/timeout).
-                cached = await asyncio.to_thread(
-                    turn_dedupe.wait_for_completion, turn_id,
-                )
-                if cached:
-                    async def _joined():
-                        for line in cached.splitlines():
-                            if line.strip():
-                                yield line + "\n"
-                    return StreamingResponse(_joined(), media_type="application/x-ndjson")
-                # Timeout / failed → fall through and try_begin will overwrite.
-        begun = turn_dedupe.try_begin(turn_id, session_id)
-        if not begun:
-            # Race: another retry took ownership between lookup and begin.
-            # Re-read and either replay or fall through.
-            row2 = turn_dedupe.lookup(turn_id)
-            if row2 and row2.status == "completed" and row2.response_json:
-                async def _replay2():
-                    for line in (row2.response_json or "").splitlines():
-                        if line.strip():
-                            yield line + "\n"
-                return StreamingResponse(_replay2(), media_type="application/x-ndjson")
-            # Give up on dedupe; proceed without it for this request.
-            turn_id = ""
+            return StreamingResponse(
+                iter_replay_ndjson(dedupe_start.replay_response_json),
+                media_type="application/x-ndjson",
+            )
+        turn_id = dedupe_start.active_turn_id
     # ── End idempotency dedupe ──────────────────────────────────────────────
     _logger.info(
         "Accepted jane stream request session=%s msg_len=%d file_ctx=%s body_session=%s ip=%s",
@@ -4082,13 +3420,12 @@ async def _handle_jane_chat_stream(body: ChatMessage, request: Request):
 
     # ── Concurrent stream limit per IP ──────────────────────────────────────
     stream_ip = _client_ip(request)
-    if stream_ip not in ("127.0.0.1", "::1", "localhost"):
-        if _active_streams[stream_ip] >= _MAX_STREAMS_PER_IP:
-            _logger.warning("Concurrent stream limit hit for %s (%d active)", stream_ip, _active_streams[stream_ip])
-            return JSONResponse(
-                {"error": "Too many concurrent streams. Please close a tab and try again."},
-                status_code=429,
-            )
+    if stream_limit_exceeded(_active_streams, stream_ip, _MAX_STREAMS_PER_IP):
+        _logger.warning("Concurrent stream limit hit for %s (%d active)", stream_ip, _active_streams.get(stream_ip, 0))
+        return JSONResponse(
+            {"error": "Too many concurrent streams. Please close a tab and try again."},
+            status_code=429,
+        )
 
     # ── Instant commands: bypass all LLM processing for pure data lookups ──
     raw_message = (body.message or "").strip()
@@ -4126,12 +3463,7 @@ async def _handle_jane_chat_stream(body: ChatMessage, request: Request):
             media_type="application/x-ndjson",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
-        if get_session_id(request) != session_id:
-            response.set_cookie(SESSION_COOKIE, session_id, httponly=True, secure=_cookie_secure_flag(request), samesite="lax",
-                                max_age=60 * 60 * 24 * 30)
-        if trusted_device_id and get_trusted_device_cookie_id(request) != trusted_device_id:
-            response.set_cookie(TRUSTED_DEVICE_COOKIE, trusted_device_id, httponly=True, secure=_cookie_secure_flag(request), samesite="lax",
-                                max_age=60 * 60 * 24 * 30)
+        _attach_auth_cookies(response, request, session_id, trusted_device_id)
         return response
 
     # ── Normal streaming flow ─────────────────────────────────────────────
@@ -4142,8 +3474,8 @@ async def _handle_jane_chat_stream(body: ChatMessage, request: Request):
     requested_conversation_session_id = body.session_id or session_id
     async def event_stream():
         # Track concurrent streams per IP
-        _active_streams[stream_ip] = _active_streams.get(stream_ip, 0) + 1
-        _logger.debug("Stream opened for %s (now %d active)", stream_ip, _active_streams[stream_ip])
+        open_count = mark_stream_open(_active_streams, stream_ip)
+        _logger.debug("Stream opened for %s (now %d active)", stream_ip, open_count)
         user_id = get_session_user(session_id) or _default_user_id()
         conversation_session_id = _scoped_conversation_session_id(user_id, requested_conversation_session_id)
         _logger.info(
@@ -4179,18 +3511,12 @@ async def _handle_jane_chat_stream(body: ChatMessage, request: Request):
             yield json.dumps({"type": "error", "data": f"⚠️ Could not reach Jane: {exc}"}) + "\n"
             return
         finally:
-            _active_streams[stream_ip] = max(0, _active_streams.get(stream_ip, 1) - 1)
-            if _active_streams.get(stream_ip, 0) == 0:
-                _active_streams.pop(stream_ip, None)
-            _logger.debug("Stream closed for %s (now %d active)", stream_ip, _active_streams.get(stream_ip, 0))
+            close_count = mark_stream_closed(_active_streams, stream_ip)
+            _logger.debug("Stream closed for %s (now %d active)", stream_ip, close_count)
             _logger.info("Jane stream generator closed session=%s", _session_log_id(session_id))
             if turn_id:
-                from jane_web import turn_dedupe
                 try:
-                    if _had_error:
-                        turn_dedupe.mark_failed(turn_id)
-                    else:
-                        turn_dedupe.mark_completed(turn_id, "".join(_captured))
+                    finalize_turn_dedupe(turn_id, _captured, had_error=_had_error)
                 except Exception as _e:
                     _logger.warning("turn_dedupe finalize failed: %s", _e)
 
@@ -4202,12 +3528,7 @@ async def _handle_jane_chat_stream(body: ChatMessage, request: Request):
             "X-Accel-Buffering": "no",
         },
     )
-    if get_session_id(request) != session_id:
-        response.set_cookie(SESSION_COOKIE, session_id, httponly=True, secure=_cookie_secure_flag(request), samesite="lax",
-                            max_age=60 * 60 * 24 * 30)
-    if trusted_device_id and get_trusted_device_cookie_id(request) != trusted_device_id:
-        response.set_cookie(TRUSTED_DEVICE_COOKIE, trusted_device_id, httponly=True, secure=_cookie_secure_flag(request), samesite="lax",
-                            max_age=60 * 60 * 24 * 30)
+    _attach_auth_cookies(response, request, session_id, trusted_device_id)
     return response
 
 
@@ -4219,14 +3540,9 @@ async def permission_request_endpoint(request: Request):
     from jane_web.permission_broker import get_permission_broker
     body = await request.json()
     broker = get_permission_broker()
-    req = await broker.create_request(
-        request_id=body["request_id"],
-        tool_name=body["tool_name"],
-        tool_input=body.get("tool_input", {}),
-        session_id=body.get("session_id", ""),
-    )
+    req = await broker.create_request(**permission_request_args(body))
     approved = await broker.wait_for_response(req)
-    return JSONResponse({"approved": approved, "reason": req.reason})
+    return JSONResponse(permission_wait_payload(approved, req))
 
 
 @app.post("/api/jane/permission/respond")
@@ -4235,11 +3551,7 @@ async def permission_respond_endpoint(request: Request, _=Depends(require_auth))
     from jane_web.permission_broker import get_permission_broker
     body = await request.json()
     broker = get_permission_broker()
-    success = broker.resolve(
-        request_id=body["request_id"],
-        approved=body.get("approved", False),
-        reason=body.get("reason", ""),
-    )
+    success = broker.resolve(**permission_response_args(body))
     return JSONResponse({"ok": success})
 
 
@@ -4249,15 +3561,7 @@ async def permission_pending_endpoint(request: Request, _=Depends(require_auth))
     from jane_web.permission_broker import get_permission_broker
     broker = get_permission_broker()
     pending = broker.get_all_pending()
-    return JSONResponse({"requests": [
-        {
-            "request_id": r.request_id,
-            "tool_name": r.tool_name,
-            "tool_input": r.tool_input,
-            "created_at": r.created_at,
-        }
-        for r in pending
-    ]})
+    return JSONResponse({"requests": [permission_pending_entry(r) for r in pending]})
 
 
 @app.post("/api/jane/chat/stream")
@@ -4383,19 +3687,12 @@ _ACTIVE_ESSENCE_PATH = os.path.join(VESSENCE_DATA_HOME, "data", "active_essence.
 
 def _read_active_essences() -> list[str]:
     """Read the active essence list from disk."""
-    try:
-        with open(_ACTIVE_ESSENCE_PATH) as f:
-            data = json.load(f)
-        return data.get("active", [])
-    except (FileNotFoundError, json.JSONDecodeError, OSError):
-        return []
+    return read_active_essences(_ACTIVE_ESSENCE_PATH)
 
 
 def _write_active_essences(active: list[str]) -> None:
     """Write the active essence list to disk."""
-    os.makedirs(os.path.dirname(_ACTIVE_ESSENCE_PATH), exist_ok=True)
-    with open(_ACTIVE_ESSENCE_PATH, "w") as f:
-        json.dump({"active": active}, f, indent=2)
+    write_active_essences(_ACTIVE_ESSENCE_PATH, active)
 
 
 @app.get("/api/essences")
@@ -4406,25 +3703,13 @@ async def list_essences(type: str = "all", _=Depends(require_auth)):
     results = []
     for e in available:
         manifest_path = os.path.join(e["path"], "manifest.json")
-        capabilities = {}
-        preferred_model = {}
-        try:
-            with open(manifest_path) as f:
-                manifest = json.load(f)
-            capabilities = manifest.get("capabilities", {})
-            preferred_model = manifest.get("preferred_model", {})
-        except (json.JSONDecodeError, OSError):
-            pass
-        results.append({
-            "name": e["name"],
-            "role_title": e.get("role_title", ""),
-            "description": e.get("description", ""),
-            "type": e.get("type", "tool"),
-            "has_brain": e.get("has_brain", False),
-            "loaded": e["name"] in loaded_names,
-            "capabilities": capabilities,
-            "preferred_model": preferred_model,
-        })
+        capabilities, preferred_model = read_essence_manifest_summary(manifest_path)
+        results.append(essence_list_item(
+            e,
+            capabilities=capabilities,
+            preferred_model=preferred_model,
+            loaded_names=loaded_names,
+        ))
     return results
 
 
@@ -4457,33 +3742,21 @@ async def get_capabilities_map_route(_=Depends(require_auth)):
 async def get_essence_detail(essence_name: str, _=Depends(require_auth)):
     """Get details of a specific essence."""
     available = list_available_essences()
-    match = None
-    for e in available:
-        if e["name"] == essence_name:
-            match = e
-            break
+    match = find_essence_by_name(available, essence_name)
     if not match:
         raise HTTPException(status_code=404, detail=f"Essence '{essence_name}' not found")
     manifest_path = os.path.join(match["path"], "manifest.json")
     try:
-        with open(manifest_path) as f:
-            manifest = json.load(f)
+        return read_essence_detail_manifest(manifest_path, essence_name, list_loaded_essences())
     except (json.JSONDecodeError, OSError) as exc:
         raise HTTPException(status_code=500, detail=f"Failed to read manifest: {exc}")
-    loaded_names = list_loaded_essences()
-    manifest["loaded"] = essence_name in loaded_names
-    return manifest
 
 
 @app.post("/api/essences/{essence_name}/load")
 async def load_essence_endpoint(essence_name: str, _=Depends(require_auth)):
     """Load an essence by name."""
     available = list_available_essences()
-    match = None
-    for e in available:
-        if e["name"] == essence_name:
-            match = e
-            break
+    match = find_essence_by_name(available, essence_name)
     if not match:
         raise HTTPException(status_code=404, detail=f"Essence '{essence_name}' not found")
     try:
@@ -4494,11 +3767,7 @@ async def load_essence_endpoint(essence_name: str, _=Depends(require_auth)):
             caps = state.capabilities.get("provides", [])
             if caps:
                 _capability_registry.register(essence_name, caps)
-        return {
-            "status": "loaded",
-            "role_title": state.role_title,
-            "permissions": state.manifest.get("permissions", []),
-        }
+        return loaded_essence_payload(state)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     except ValueError as exc:
@@ -4515,8 +3784,8 @@ async def unload_essence_endpoint(essence_name: str, _=Depends(require_auth)):
         if _capability_registry:
             _capability_registry.unregister(essence_name)
         active = _read_active_essences()
-        if essence_name in active:
-            active.remove(essence_name)
+        active, changed = remove_active_essence(active, essence_name)
+        if changed:
             _write_active_essences(active)
         return {"status": "unloaded"}
     except KeyError:
@@ -4530,8 +3799,8 @@ async def delete_essence_endpoint(essence_name: str, port_memory: bool = False, 
         delete_essence(essence_name, port_memory=port_memory)
         _essence_states.pop(essence_name, None)
         active = _read_active_essences()
-        if essence_name in active:
-            active.remove(essence_name)
+        active, changed = remove_active_essence(active, essence_name)
+        if changed:
             _write_active_essences(active)
         return {"status": "deleted", "memory_ported": port_memory}
     except FileNotFoundError as exc:
@@ -4542,14 +3811,7 @@ async def delete_essence_endpoint(essence_name: str, port_memory: bool = False, 
 async def activate_essence(essence_name: str, _=Depends(require_auth)):
     """Set an essence as the active one. Accepts display name or folder name."""
     available = list_available_essences()
-    # First try exact match by display name
-    match = next((e for e in available if e["name"] == essence_name), None)
-    # If not found, try matching by folder name (e.g. "tax_accountant_2025")
-    if not match:
-        match = next(
-            (e for e in available if os.path.basename(e["path"]) == essence_name),
-            None,
-        )
+    match = find_essence_match(available, essence_name)
     if not match:
         raise HTTPException(status_code=404, detail=f"Essence '{essence_name}' not found")
     _write_active_essences([match["name"]])
@@ -4630,54 +3892,16 @@ async def get_briefing_articles(
     if result.get("status") != "ok":
         return result
     cards = result["cards"]
-    for c in cards:
-        if not c.get("categories"):
-            c["categories"] = c.get("tags", []) or ([c["topic"]] if c.get("topic") else [])
-        if c.get("image_path") and not c.get("image_url"):
-            c["image_url"] = f"/api/briefing/image/{c['id']}"
-    if view == "saved":
-        cards = [c for c in cards if c.get("state") == "saved"]
-    elif topic:
-        cards = [c for c in cards if c.get("topic", "").lower() == topic.lower()]
-    cat_set: set[str] = set()
-    for c in cards:
-        cat_set.update(c.get("categories", []))
-    categories = sorted(cat_set)
-
-    total = len(cards)
-    if limit is not None:
-        try:
-            limit_i = max(0, int(limit))
-            offset_i = max(0, int(offset))
-        except (TypeError, ValueError):
-            raise HTTPException(status_code=400, detail="limit/offset must be integers")
-        page = cards[offset_i:offset_i + limit_i]
-        has_more = offset_i + limit_i < total
-    else:
-        page = cards
-        has_more = False
-        limit_i = total
-        offset_i = 0
-
-    for c in page:
-        c.pop("full_summary", None)
-
-    return {
-        "status": "ok",
-        "cards": page,
-        "card_count": len(page),
-        "total": total,
-        "offset": offset_i,
-        "limit": limit_i,
-        "has_more": has_more,
-        "categories": categories,
-    }
+    try:
+        return build_briefing_articles_response(cards, topic=topic, view=view, limit=limit, offset=offset)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="limit/offset must be integers")
 
 
 @app.get("/api/briefing/article/{article_id}")
 async def get_briefing_article_detail(article_id: str, _=Depends(require_auth)):
     """Get full article detail with comprehensive summary."""
-    if not re.match(r'^[a-zA-Z0-9_-]+$', article_id):
+    if not is_briefing_identifier(article_id):
         raise HTTPException(status_code=400, detail="Invalid article_id")
     bt = _briefing_tools()
     result = bt.get_article_detail(article_id)
@@ -4690,9 +3914,9 @@ async def get_briefing_article_detail(article_id: str, _=Depends(require_auth)):
 async def briefing_audio(article_id: str, summary_type: str = "brief", _=Depends(require_auth)):
     """Serve pre-generated TTS audio for a briefing article (Opus/OGG preferred, WAV fallback).
     Returns 503 if system load is too high (protects TTS/CPU-heavy workloads)."""
-    if not re.match(r'^[a-zA-Z0-9_-]+$', article_id):
+    if not is_briefing_identifier(article_id):
         raise HTTPException(status_code=400, detail="Invalid article_id")
-    if not re.match(r'^[a-zA-Z0-9_-]+$', summary_type):
+    if not is_briefing_identifier(summary_type):
         raise HTTPException(status_code=400, detail="Invalid summary_type")
     # Gate on system load — reject bulk downloads when the machine is busy
     try:
@@ -4707,18 +3931,16 @@ async def briefing_audio(article_id: str, summary_type: str = "brief", _=Depends
     except OSError:
         pass  # getloadavg not available on this platform
 
-    audio_dir = os.path.join(
-        os.environ.get("TOOLS_DIR",
-                       os.path.join(os.environ.get("AMBIENT_BASE", os.path.expanduser("~/ambient")), "skills")),
-        "daily_briefing", "essence_data", "audio"
+    tools_dir = os.environ.get(
+        "TOOLS_DIR",
+        os.path.join(os.environ.get("AMBIENT_BASE", os.path.expanduser("~/ambient")), "skills"),
     )
+    audio_dir = daily_briefing_audio_dir(tools_dir)
     # Prefer Opus/OGG, fall back to legacy WAV
-    ogg_path = os.path.join(audio_dir, f"{article_id}_{summary_type}.ogg")
-    wav_path = os.path.join(audio_dir, f"{article_id}_{summary_type}.wav")
-    if os.path.isfile(ogg_path):
-        return FileResponse(ogg_path, media_type="audio/ogg")
-    if os.path.isfile(wav_path):
-        return FileResponse(wav_path, media_type="audio/wav")
+    audio = select_briefing_audio(audio_dir, article_id, summary_type)
+    if audio:
+        path, media_type = audio
+        return FileResponse(path, media_type=media_type)
     raise HTTPException(status_code=404, detail="Audio not available for this article")
 
 
@@ -4835,12 +4057,9 @@ def _spawn_shared_article_processor():
 @app.post("/api/briefing/articles/submit")
 async def submit_briefing_article(request: Request, _=Depends(require_auth)):
     body = await request.json()
-    url = body.get("url", "").strip()
-    if not url or not re.match(r'^https?://', url):
+    url, title, text, save_category = briefing_submit_values(body)
+    if not url or not is_http_url(url):
         raise HTTPException(status_code=400, detail="A valid URL starting with http(s):// is required")
-    title = (body.get("title") or "").strip()
-    text = (body.get("text") or "").strip()
-    save_category = (body.get("save_category") or body.get("category") or "").strip()
     bt = _briefing_tools()
     result = bt.submit_article(url, title=title, text=text, save_category=save_category)
 
@@ -4858,8 +4077,8 @@ async def summarize_article_now(request: Request, _=Depends(require_auth)):
     Returns {"status": "ok", "title": "...", "summary": "..."} or {"status": "error", "message": "..."}.
     """
     body = await request.json()
-    url = body.get("url", "").strip()
-    if not url or not re.match(r'^https?://', url):
+    url = briefing_url_value(body)
+    if not url or not is_http_url(url):
         raise HTTPException(status_code=400, detail="A valid URL starting with http(s):// is required")
 
     if _BRIEFING_FUNCTIONS_DIR not in sys.path:
@@ -4903,8 +4122,7 @@ async def summarize_article_text(request: Request, _=Depends(require_auth)):
     Returns: {"status": "ok", "title": "...", "summary": "..."}
     """
     body = await request.json()
-    title = (body.get("title") or "").strip()
-    text = (body.get("text") or "").strip()
+    title, text = briefing_text_summary_values(body)
 
     if not text:
         raise HTTPException(status_code=400, detail="Article text is required")
@@ -4931,70 +4149,6 @@ async def summarize_article_text(request: Request, _=Depends(require_auth)):
 # see CLAUDE.md "Update Rules". The whitelist keeps the endpoint scoped so
 # arbitrary files under configs/ cannot be leaked.
 
-_DOCS_WHITELIST: dict[str, dict[str, str]] = {
-    "architecture":    {"file": "Jane_architecture.md",           "title": "Jane Architecture"},
-    "memory":          {"file": "memory_manage_architecture.md",  "title": "Memory System"},
-    "skills":          {"file": "SKILLS_REGISTRY.md",             "title": "Skills Registry"},
-    "todos":           {"file": "TODO_PROJECTS.md",               "title": "TODO / Projects"},
-    "accomplishments": {"file": "PROJECT_ACCOMPLISHMENTS.md",     "title": "Accomplishments"},
-    "cron":            {"file": "CRON_JOBS.md",                   "title": "Cron Jobs"},
-}
-
-
-def _configs_dir() -> Path:
-    base = os.environ.get("VESSENCE_HOME", os.path.expanduser("~/ambient/vessence"))
-    return Path(base) / "configs"
-
-
-def _read_doc_meta(slug: str) -> dict | None:
-    """Summary-only: stat the file, do not read the body.
-
-    Called by the list endpoint so /api/docs stays O(N_files_to_stat),
-    independent of file size.
-    """
-    meta = _DOCS_WHITELIST.get(slug)
-    if not meta:
-        return None
-    path = _configs_dir() / meta["file"]
-    try:
-        st = path.stat()
-    except FileNotFoundError:
-        return None
-    except Exception as e:
-        _logger.warning("docs: failed to stat %s: %s", path, e)
-        return None
-    return {
-        "slug": slug,
-        "title": meta["title"],
-        "file": meta["file"],
-        "bytes": int(st.st_size),
-        "last_modified": int(st.st_mtime),
-    }
-
-
-def _read_doc_body(slug: str) -> dict | None:
-    meta = _DOCS_WHITELIST.get(slug)
-    if not meta:
-        return None
-    path = _configs_dir() / meta["file"]
-    try:
-        st = path.stat()
-        content = path.read_text(encoding="utf-8")
-    except FileNotFoundError:
-        return None
-    except Exception as e:
-        _logger.warning("docs: failed to read %s: %s", path, e)
-        return None
-    return {
-        "slug": slug,
-        "title": meta["title"],
-        "file": meta["file"],
-        "content": content,
-        "bytes": int(st.st_size),
-        "last_modified": int(st.st_mtime),
-    }
-
-
 @app.get("/api/docs")
 async def list_canonical_docs(_=Depends(require_auth)):
     """List the canonical docs the Android app can pull.
@@ -5007,7 +4161,7 @@ async def list_canonical_docs(_=Depends(require_auth)):
     """
     docs = []
     for slug in _DOCS_WHITELIST:
-        d = _read_doc_meta(slug)
+        d = _read_doc_meta(slug, logger=_logger)
         if d is None:
             continue
         docs.append(d)
@@ -5020,7 +4174,7 @@ async def get_canonical_doc(slug: str, _=Depends(require_auth)):
 
     Response: {"slug", "title", "file", "content", "last_modified", "bytes"}
     """
-    d = _read_doc_body(slug)
+    d = _read_doc_body(slug, logger=_logger)
     if d is None:
         raise HTTPException(status_code=404, detail=f"Unknown or missing doc: {slug}")
     return d
@@ -5059,9 +4213,10 @@ async def web_automation_plan(request: Request, _=Depends(require_auth)):
         body = await request.json()
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid JSON body")
-    raw_steps = body.get("steps") or []
-    if not isinstance(raw_steps, list) or not raw_steps:
-        raise HTTPException(status_code=400, detail="'steps' must be a non-empty array")
+    try:
+        raw_steps = web_plan_raw_steps(body)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
     try:
         from agent_skills.web_automation.skill import TaskStep, run_task
@@ -5072,25 +4227,16 @@ async def web_automation_plan(request: Request, _=Depends(require_auth)):
             detail=f"Web automation module unavailable: {e}",
         )
 
-    steps: list = []
-    for i, s in enumerate(raw_steps):
-        if not isinstance(s, dict) or "action" not in s:
-            raise HTTPException(
-                status_code=400,
-                detail=f"step {i} malformed — need dict with 'action'",
-            )
-        steps.append(TaskStep(
-            action=str(s["action"]),
-            args=s.get("args") or {},
-            confirm=bool(s.get("confirm", False)),
-        ))
+    try:
+        step_specs = web_plan_step_specs(raw_steps)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    steps = [TaskStep(**spec) for spec in step_specs]
 
-    label = str(body.get("label") or "adhoc")[:40]
-    headless = body.get("headless")
-    record_trace = bool(body.get("record_trace", False))
-    profile_id = body.get("profile_id")
+    label = web_plan_label(body)
+    profile_id = web_plan_profile_id(body)
     storage_state = None
-    if isinstance(profile_id, str) and profile_id.strip():
+    if profile_id:
         try:
             from agent_skills.web_automation import profiles as _profiles
             # Domain guard: EVERY navigate step in the plan must target
@@ -5105,18 +4251,13 @@ async def web_automation_plan(request: Request, _=Depends(require_auth)):
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Profile load failed: {e}")
     opts = SessionOptions(
-        headless=headless if isinstance(headless, bool) else None,
-        record_trace=record_trace,
+        headless=web_plan_headless(body),
+        record_trace=web_plan_record_trace(body),
         storage_state_path=storage_state,
     )
 
     result = await run_task(steps, label=label, options=opts)
-    return {
-        "ok": result.ok,
-        "run_id": result.run_id,
-        "summary": result.summary,
-        "data": result.data,
-    }
+    return automation_result_payload(result)
 
 
 # Profile management — named persistent browser auth contexts (spec 9.5).
@@ -5130,8 +4271,7 @@ async def list_web_profiles(_=Depends(require_auth)):
 @app.post("/api/web_automation/profiles")
 async def create_web_profile(request: Request, _=Depends(require_auth)):
     body = await request.json()
-    name = (body.get("display_name") or "").strip()
-    domain = (body.get("domain") or "").strip()
+    name, domain = web_profile_create_values(body)
     if not name or not domain:
         raise HTTPException(
             status_code=400,
@@ -5165,9 +4305,7 @@ async def capture_web_profile(profile_id: str, request: Request, _=Depends(requi
         }
     """
     body = await request.json()
-    login_url = (body.get("login_url") or "").strip()
-    success_pat = (body.get("success_url_pattern") or "").strip()
-    timeout_s = int(body.get("timeout_s") or 300)
+    login_url, success_pat, timeout_s = web_profile_capture_values(body)
     if not login_url or not success_pat:
         raise HTTPException(
             status_code=400,
@@ -5203,26 +4341,13 @@ async def capture_web_profile(profile_id: str, request: Request, _=Depends(requi
 @app.get("/api/web_automation/secrets")
 async def list_web_secrets(_=Depends(require_auth)):
     from agent_skills.web_automation import secrets as _secrets
-    return {"secrets": [
-        {
-            "secret_id": e.secret_id,
-            "domain": e.domain,
-            "label": e.label,
-            "created_at": e.created_at,
-            "last_used": e.last_used,
-        }
-        for e in _secrets.list_secrets()
-    ]}
+    return {"secrets": [web_secret_public_entry(e) for e in _secrets.list_secrets()]}
 
 
 @app.post("/api/web_automation/secrets")
 async def create_web_secret(request: Request, _=Depends(require_auth)):
     body = await request.json()
-    domain = (body.get("domain") or "").strip()
-    label = (body.get("label") or "").strip()
-    username = body.get("username") or ""
-    password = body.get("password") or ""
-    notes = body.get("notes") or ""
+    domain, label, username, password, notes = web_secret_create_values(body)
     if not domain or not label or not password:
         raise HTTPException(
             status_code=400,
@@ -5295,12 +4420,7 @@ async def run_web_workflow(name_or_id: str, _=Depends(require_auth)):
         result = await _wf.run(name_or_id)
     except _wf.WorkflowNotFound:
         raise HTTPException(status_code=404, detail=f"Workflow not found: {name_or_id}")
-    return {
-        "ok": result.ok,
-        "run_id": result.run_id,
-        "summary": result.summary,
-        "data": result.data,
-    }
+    return automation_result_payload(result)
 
 
 @app.post("/api/briefing/processor-status")
@@ -5341,7 +4461,7 @@ async def trigger_briefing_fetch(_=Depends(require_auth)):
 
 @app.post("/api/briefing/article/{article_id}/dismiss")
 async def dismiss_briefing_article(article_id: str, _=Depends(require_auth)):
-    if not re.match(r'^[a-zA-Z0-9_-]+$', article_id):
+    if not is_briefing_identifier(article_id):
         raise HTTPException(status_code=400, detail="Invalid article_id")
     """Mark an article as dismissed ('heard it')."""
     bt = _briefing_tools()
@@ -5350,7 +4470,7 @@ async def dismiss_briefing_article(article_id: str, _=Depends(require_auth)):
 
 @app.delete("/api/briefing/article/{article_id}/dismiss")
 async def undismiss_briefing_article(article_id: str, _=Depends(require_auth)):
-    if not re.match(r'^[a-zA-Z0-9_-]+$', article_id):
+    if not is_briefing_identifier(article_id):
         raise HTTPException(status_code=400, detail="Invalid article_id")
     """Un-dismiss an article."""
     bt = _briefing_tools()
@@ -5371,7 +4491,7 @@ async def save_briefing_article(request: Request, _=Depends(require_auth)):
         raise HTTPException(status_code=400, detail="article_id required")
 
     _SAVED_ARTICLES_DIR.mkdir(parents=True, exist_ok=True)
-    saved_file = _SAVED_ARTICLES_DIR / "saved.json"
+    saved_file = saved_articles_index_path(_SAVED_ARTICLES_DIR)
 
     saved = {}
     if saved_file.exists():
@@ -5380,28 +4500,27 @@ async def save_briefing_article(request: Request, _=Depends(require_auth)):
 
     # Find article data from current briefing articles cache
     article_data = None
-    articles_dir = Path(os.environ.get("TOOLS_DIR",
-                        os.path.join(os.path.expanduser("~"), "ambient", "skills"))) / "daily_briefing" / "essence_data" / "articles"
-    article_file = articles_dir / f"{article_id}.json"
+    tools_dir = os.environ.get("TOOLS_DIR", os.path.join(os.path.expanduser("~"), "ambient", "skills"))
+    article_file = daily_briefing_article_path(tools_dir, article_id)
     if article_file.exists():
         async with aiofiles.open(article_file, "r") as f:
             article_data = json.loads(await f.read())
 
     # Store: keyed by article_id, includes category and saved timestamp
-    saved[article_id] = {
-        "article_id": article_id,
-        "category": category,
-        "saved_at": datetime.now(timezone.utc).isoformat(),
-        "article": article_data,
-    }
+    saved[article_id] = saved_article_record(
+        article_id,
+        category,
+        datetime.now(timezone.utc).isoformat(),
+        article_data,
+    )
 
     async with aiofiles.open(saved_file, "w") as f:
         await f.write(json.dumps(saved, indent=2))
 
     # Also save to vault as file: vault/saved_articles/<group>/<article_id>.json
-    vault_group_dir = _VAULT_SAVED_ARTICLES / category
+    vault_article_file = vault_saved_article_path(_VAULT_SAVED_ARTICLES, category, article_id)
+    vault_group_dir = vault_article_file.parent
     vault_group_dir.mkdir(parents=True, exist_ok=True)
-    vault_article_file = vault_group_dir / f"{article_id}.json"
     async with aiofiles.open(vault_article_file, "w") as f:
         await f.write(json.dumps(saved[article_id], indent=2))
     _logger.info("Saved article %s to vault group '%s'", article_id, category)
@@ -5412,42 +4531,38 @@ async def save_briefing_article(request: Request, _=Depends(require_auth)):
 @app.get("/api/briefing/saved/categories")
 async def list_saved_categories(_=Depends(require_auth)):
     """List all categories that have saved articles (from vault folders)."""
-    cats = set()
+    cats = []
     # Scan vault folders — these are the source of truth for group names
     if _VAULT_SAVED_ARTICLES.exists():
         for d in _VAULT_SAVED_ARTICLES.iterdir():
             if d.is_dir() and any(d.glob("*.json")):
-                cats.add(d.name)
+                cats.append(d.name)
     # Also check JSON index for anything not yet in vault
-    saved_file = _SAVED_ARTICLES_DIR / "saved.json"
+    saved_file = saved_articles_index_path(_SAVED_ARTICLES_DIR)
+    saved = {}
     if saved_file.exists():
         async with aiofiles.open(saved_file, "r") as f:
             saved = json.loads(await f.read())
-        cats.update(v.get("category", "Uncategorized") for v in saved.values())
-    return {"categories": sorted(cats)}
+    return {"categories": saved_category_names(cats, saved)}
 
 
 @app.get("/api/briefing/saved")
 async def list_saved_articles(category: str = None, _=Depends(require_auth)):
     """List saved articles, optionally filtered by category."""
-    saved_file = _SAVED_ARTICLES_DIR / "saved.json"
+    saved_file = saved_articles_index_path(_SAVED_ARTICLES_DIR)
     if not saved_file.exists():
         return {"articles": []}
     async with aiofiles.open(saved_file, "r") as f:
         saved = json.loads(await f.read())
-    items = list(saved.values())
-    if category:
-        items = [i for i in items if i.get("category") == category]
-    items.sort(key=lambda x: x.get("saved_at", ""), reverse=True)
-    return {"articles": items}
+    return {"articles": saved_article_list(saved, category)}
 
 
 @app.delete("/api/briefing/saved/{article_id}")
 async def unsave_briefing_article(article_id: str, _=Depends(require_auth)):
-    if not re.match(r'^[a-zA-Z0-9_-]+$', article_id):
+    if not is_briefing_identifier(article_id):
         raise HTTPException(status_code=400, detail="Invalid article_id")
     """Remove an article from saved collection."""
-    saved_file = _SAVED_ARTICLES_DIR / "saved.json"
+    saved_file = saved_articles_index_path(_SAVED_ARTICLES_DIR)
     if not saved_file.exists():
         raise HTTPException(status_code=404, detail="No saved articles")
     async with aiofiles.open(saved_file, "r") as f:
@@ -5460,7 +4575,7 @@ async def unsave_briefing_article(article_id: str, _=Depends(require_auth)):
         await f.write(json.dumps(saved, indent=2))
     # Remove from vault too
     if category:
-        vault_file = _VAULT_SAVED_ARTICLES / category / f"{article_id}.json"
+        vault_file = vault_saved_article_path(_VAULT_SAVED_ARTICLES, category, article_id)
         if vault_file.exists():
             vault_file.unlink()
             # Remove empty group folder
@@ -5483,13 +4598,12 @@ async def search_briefing_articles(q: str, _=Depends(require_auth)):
 @app.get("/api/briefing/image/{article_id}")
 async def get_briefing_image(article_id: str):
     """Serve a cached article image."""
-    if not re.match(r'^[a-zA-Z0-9_-]+$', article_id):
+    if not is_briefing_identifier(article_id):
         raise HTTPException(status_code=400, detail="Invalid article_id")
-    images_dir = Path(os.environ.get("TOOLS_DIR",
-                      os.path.join(os.path.expanduser("~"), "ambient", "skills"))) / "daily_briefing" / "essence_data" / "images"
+    tools_dir = os.environ.get("TOOLS_DIR", os.path.join(os.path.expanduser("~"), "ambient", "skills"))
+    images_dir = daily_briefing_image_dir(tools_dir)
     # Try common extensions
-    for ext in (".jpg", ".jpeg", ".png", ".webp", ".gif"):
-        img_path = images_dir / f"{article_id}{ext}"
+    for img_path in briefing_image_candidates(images_dir, article_id):
         if img_path.exists():
             return FileResponse(str(img_path))
     raise HTTPException(status_code=404, detail="Image not found")
@@ -5509,10 +4623,10 @@ async def list_briefing_archive(_=Depends(require_auth)):
 @app.get("/api/briefing/archive/{date}")
 async def get_archived_briefing(date: str, _=Depends(require_auth)):
     """Get a specific archived briefing by date."""
-    if not re.match(r'^\d{4}-\d{2}-\d{2}$', date):
+    if not is_archive_date(date):
         raise HTTPException(status_code=400, detail="Invalid date format")
     archive_dir = Path(os.path.expanduser("~/ambient/vessence-data/briefings"))
-    file_path = archive_dir / f"{date}.json"
+    file_path = briefing_archive_path(archive_dir, date)
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="Archive not found")
 
@@ -5545,11 +4659,8 @@ def _mk_refresh():
     return mk_refresh
 
 
-_SAFE_MK_NAME = re.compile(r"^[a-z0-9_-]{1,40}$")
-
-
 def _ensure_safe_mk_name(name: str) -> None:
-    if not _SAFE_MK_NAME.match(name):
+    if not is_safe_marketplace_name(name):
         raise HTTPException(status_code=400, detail="invalid search name")
 
 
@@ -5578,18 +4689,18 @@ async def marketplace_searches(_=Depends(require_auth)):
 async def marketplace_create_search(request: Request, _=Depends(require_auth)):
     body = await request.json()
     cfg, _h = _mk_mods()
-    name = (body.get("name") or "").strip()
+    payload = marketplace_create_search_payload(body, cfg.DEFAULT_LOCATION_ID)
+    name = payload["name"]
     _ensure_safe_mk_name(name)
-    queries = body.get("queries") or []
-    if not isinstance(queries, list) or not queries:
+    if not payload["raw_queries_valid"]:
         raise HTTPException(status_code=400, detail="queries required")
     try:
         saved = cfg.save_search(
             name,
-            label=body.get("label") or name,
-            queries=[str(q).strip() for q in queries if str(q).strip()],
-            filters=body.get("filters"),
-            location_id=body.get("location_id") or cfg.DEFAULT_LOCATION_ID,
+            label=payload["label"],
+            queries=payload["queries"],
+            filters=payload["filters"],
+            location_id=payload["location_id"],
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -5628,7 +4739,7 @@ async def marketplace_delete_search(name: str, _=Depends(require_auth)):
 async def marketplace_listing_detail(name: str, slug: str, listing_id: str,
                                      _=Depends(require_auth)):
     _ensure_safe_mk_name(name)
-    if not re.match(r"^[a-z0-9_-]{1,60}$", slug) or not re.match(r"^[0-9]{4,25}$", listing_id):
+    if not is_safe_listing_key(slug, listing_id):
         raise HTTPException(status_code=400, detail="invalid slug or id")
     _cfg, harv = _mk_mods()
     d = harv.listing_detail(name, slug, listing_id)
@@ -5695,9 +4806,9 @@ async def marketplace_refresh_now(name: str, _=Depends(require_auth)):
 async def marketplace_image(name: str, slug: str, listing_id: str,
                             photo_name: str, _=Depends(require_auth)):
     _ensure_safe_mk_name(name)
-    if not re.match(r"^[a-z0-9_-]{1,60}$", slug) or not re.match(r"^[0-9]{4,25}$", listing_id):
+    if not is_safe_listing_key(slug, listing_id):
         raise HTTPException(status_code=400, detail="invalid slug or id")
-    if not re.match(r"^photo_\d{2,3}\.(jpg|jpeg|png|webp)$", photo_name):
+    if not is_safe_photo_name(photo_name):
         raise HTTPException(status_code=400, detail="invalid photo name")
     _cfg, harv = _mk_mods()
     p = harv.photo_path(name, slug, listing_id, photo_name)
@@ -5744,12 +4855,7 @@ async def tax_interview_start(_=Depends(require_auth)):
 async def tax_interview_answer(request: Request, _=Depends(require_auth)):
     """Submit an answer to the current interview step."""
     body = await request.json()
-    step_id = body.get("step_id", "filing_status")
-    user_response = body.get("response", {})
-    return JSONResponse(_run_tax_tool("interview_step", {
-        "step_id": step_id,
-        "user_response": user_response
-    }))
+    return JSONResponse(_run_tax_tool("interview_step", tax_interview_answer_args(body)))
 
 
 @app.get("/api/tax/interview/state")
@@ -5767,22 +4873,21 @@ async def tax_calculate(_=Depends(require_auth)):
 @app.get("/api/tax/forms/{form_name}")
 async def tax_get_form(form_name: str, _=Depends(require_auth)):
     """Get a generated tax form."""
-    if not re.match(r'^[a-zA-Z0-9_-]+$', form_name):
+    if not is_safe_tax_form_name(form_name):
         raise HTTPException(status_code=400, detail="Invalid form name")
-    output_dir = os.path.join(_TAX_ESSENCE_DIR, "working_files", "output")
+    output_dir = tax_output_dir(_TAX_ESSENCE_DIR)
     # Find the most recent file matching form_name
-    if os.path.isdir(output_dir):
-        matches = sorted([f for f in os.listdir(output_dir) if f.startswith(form_name)], reverse=True)
-        if matches:
-            file_path = os.path.join(output_dir, matches[0])
-            return FileResponse(file_path, filename=matches[0])
+    match = latest_tax_form_file(output_dir, form_name)
+    if match:
+        file_path, filename = match
+        return FileResponse(file_path, filename=filename)
     raise HTTPException(status_code=404, detail=f"Form '{form_name}' not found")
 
 
 @app.get("/api/tax/summary")
 async def tax_summary(_=Depends(require_auth)):
     """Get the most recent tax calculation summary."""
-    result_path = os.path.join(_TAX_ESSENCE_DIR, "working_files", "calculations", "tax_result.json")
+    result_path = tax_result_path(_TAX_ESSENCE_DIR)
     if not os.path.exists(result_path):
         return JSONResponse({"status": "error", "message": "No calculation found. Run calculate first."})
     with open(result_path) as f:
@@ -5792,17 +4897,13 @@ async def tax_summary(_=Depends(require_auth)):
 @app.post("/api/tax/upload")
 async def tax_upload_document(file: UploadFile = File(...), doc_type: str = Form(""), _=Depends(require_auth)):
     """Upload a tax document for processing."""
-    uploads_dir = os.path.join(_TAX_ESSENCE_DIR, "user_data", "uploads")
+    uploads_dir = tax_uploads_dir(_TAX_ESSENCE_DIR)
     os.makedirs(uploads_dir, exist_ok=True)
-    safe_name = os.path.basename(file.filename or "upload")
-    file_path = os.path.join(uploads_dir, safe_name)
+    file_path = tax_upload_path(uploads_dir, file.filename)
     async with aiofiles.open(file_path, 'wb') as out_file:
         content = await file.read()
         await out_file.write(content)
-    return JSONResponse(_run_tax_tool("upload_document", {
-        "file_path": file_path,
-        "doc_type": doc_type
-    }))
+    return JSONResponse(_run_tax_tool("upload_document", tax_upload_document_args(file_path, doc_type)))
 
 
 @app.post("/api/tax/reset")
@@ -5941,32 +5042,6 @@ def _attempt_claude_token_refresh() -> bool:
     return False
 
 
-def _cli_login_candidates(provider: str) -> list[list[str]]:
-    provider = normalize_frontier_provider(provider)
-    if provider == "claude":
-        # Claude: self-managed OAuth (bypass CLI, handled in /api/cli-login)
-        return [["claude", "auth", "login"]]
-    if provider == "gemini":
-        return [["gemini", "auth", "login"]]
-    if provider == "openai":
-        # Codex: device-auth flow works in Docker (no localhost callback needed)
-        return [["codex", "login", "--device-auth"]]
-    return []
-
-
-def _cli_binary_for_provider(provider: str) -> str | None:
-    candidates = _cli_login_candidates(provider)
-    return candidates[0][0] if candidates else None
-
-
-def _mask_email(value: str) -> str:
-    if "@" not in value:
-        return value[:3] + "..." if value else ""
-    local, domain = value.split("@", 1)
-    local_masked = (local[:2] + "***") if local else "***"
-    return f"{local_masked}@{domain}"
-
-
 def _provider_auth_status_details(provider: str) -> dict:
     provider = normalize_frontier_provider(provider)
     now = time.time()
@@ -5975,31 +5050,16 @@ def _provider_auth_status_details(provider: str) -> dict:
         if now - ts < 5:  # 5 second cache
             return details
 
-    status_cmds = {
-        "claude": ["claude", "auth", "status"],
-    }
-    cmd = status_cmds.get(provider)
+    cmd = _provider_auth_status_command(provider)
     if not cmd:
-        return {"provider": provider, "supported": False, "logged_in": False}
+        return _unsupported_provider_auth_status(provider)
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
     except Exception as exc:
-        return {
-            "provider": provider,
-            "supported": True,
-            "logged_in": False,
-            "status_error": str(exc),
-        }
-    details = {
-        "provider": provider,
-        "supported": True,
-        "status_returncode": result.returncode,
-        "logged_in": False,
-    }
+        return _provider_auth_status_error(provider, exc)
+    details = _provider_auth_status_base(provider, result.returncode)
     if result.returncode != 0:
-        stderr = (result.stderr or "").strip()
-        if stderr:
-            details["status_stderr_tail"] = stderr.splitlines()[-1][:200]
+        _append_status_stderr_tail(details, result.stderr or "")
         # No cache for failed status check
         return details
     output = (result.stdout or "").strip()
@@ -6007,26 +5067,7 @@ def _provider_auth_status_details(provider: str) -> dict:
         # No cache for empty output
         return details
 
-    def parse_output(out_str: str) -> bool:
-        try:
-            parsed = json.loads(out_str)
-            if isinstance(parsed, dict):
-                details["logged_in"] = bool(parsed.get("loggedIn"))
-                if parsed.get("authMethod"):
-                    details["auth_method"] = parsed.get("authMethod")
-                if parsed.get("email"):
-                    details["email_hint"] = _mask_email(str(parsed.get("email")))
-                if parsed.get("subscriptionType"):
-                    details["subscription_type"] = parsed.get("subscriptionType")
-                return True
-        except Exception:
-            pass
-        lowered = out_str.lower()
-        details["logged_in"] = "logged in" in lowered and "not logged in" not in lowered
-        details["status_stdout_tail"] = out_str.splitlines()[-1][:200]
-        return True
-
-    parse_output(output)
+    _parse_provider_auth_status_output(details, output)
 
     # Automatic refresh for Claude if not logged in
     if not details.get("logged_in") and provider == "claude":
@@ -6036,7 +5077,7 @@ def _provider_auth_status_details(provider: str) -> dict:
                 result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
                 if result.returncode == 0:
                     output = (result.stdout or "").strip()
-                    parse_output(output)
+                    _parse_provider_auth_status_output(details, output)
             except Exception:
                 pass
 
@@ -6049,22 +5090,14 @@ def _provider_auth_status(provider: str) -> bool:
 
 
 def _cli_login_debug_snapshot(provider: str) -> dict:
-    process_state = "missing"
-    returncode = None
-    if _cli_login_process is not None:
-        polled = _cli_login_process.poll()
-        process_state = "running" if polled is None else "exited"
-        returncode = _cli_login_process.returncode
-
     transcript_lines = _read_cli_transcript_lines(_cli_login_transcript_path)
-    return {
-        "provider": provider,
-        "process_state": process_state,
-        "process_returncode": returncode,
-        "cli_login_authenticated_flag": _cli_login_authenticated,
-        "transcript_tail": transcript_lines[-3:],
-        "auth_status": _provider_auth_status_details(provider),
-    }
+    return _cli_login_debug_payload(
+        provider=provider,
+        process=_cli_login_process,
+        authenticated=_cli_login_authenticated,
+        transcript_lines=transcript_lines,
+        auth_status=_provider_auth_status_details(provider),
+    )
 
 
 def _terminate_cli_login_process() -> None:
@@ -6223,29 +5256,6 @@ def _discover_cli_login_port() -> int | None:
     return None
 
 
-def _extract_oauth_state(auth_url: str) -> str | None:
-    """Extract the state parameter from an OAuth URL."""
-    if not auth_url:
-        return None
-    try:
-        from urllib.parse import urlparse, parse_qs
-        parsed = urlparse(auth_url)
-        params = parse_qs(parsed.query)
-        states = params.get("state", [])
-        return states[0] if states else None
-    except Exception:
-        return None
-
-
-def _read_cli_transcript_lines(path: str | None) -> list[str]:
-    if not path:
-        return []
-    transcript = Path(path)
-    if not transcript.exists():
-        return []
-    return [line.strip() for line in transcript.read_text(encoding="utf-8", errors="replace").splitlines() if line.strip()]
-
-
 def _attempt_claude_login_via_transcript(cmd: list[str]) -> tuple[str | None, list[str]]:
     """Start Claude CLI login using a PTY so the Ink TUI works.
 
@@ -6281,7 +5291,6 @@ def _attempt_claude_login_via_transcript(cmd: list[str]) -> tuple[str | None, li
     auth_url = None
     raw_output = b""
     output_lines: list[str] = []
-    url_pattern = re.compile(r"https?://\S+")
     deadline = time.time() + 30
 
     while time.time() < deadline:
@@ -6293,24 +5302,13 @@ def _attempt_claude_login_via_transcript(cmd: list[str]) -> tuple[str | None, li
             except OSError:
                 break
 
-        # Strip ANSI codes and extract text
-        clean = re.sub(rb'\x1b\[[0-9;]*[a-zA-Z]', b'', raw_output)
-        clean = re.sub(rb'\x1b\][^\x07]*\x07', b'', clean)
-        clean = re.sub(rb'\x1b\]8;[^\x1b]*\x1b\\\\?', b'', clean)
-        text = clean.decode("utf-8", errors="replace")
-        output_lines = [l.strip() for l in text.splitlines() if l.strip()]
+        text = _clean_cli_output(raw_output)
+        output_lines = _cli_output_lines(text)
 
         # Write transcript for debugging
         transcript_path.write_text(text, encoding="utf-8")
 
-        # Look for URL
-        for line in output_lines:
-            match = url_pattern.search(line)
-            if match:
-                candidate = match.group(0).rstrip(")").rstrip("\\")
-                if "claude.com" in candidate or "anthropic.com" in candidate:
-                    auth_url = candidate
-                    break
+        auth_url = _extract_claude_auth_url(output_lines)
         if auth_url:
             break
         if _cli_login_process.poll() is not None:
@@ -6352,15 +5350,12 @@ def _attempt_cli_login_command(cmd: list[str]) -> tuple[str | None, list[str]]:
             output_lines.append(stripped)
         # Extract URL
         if not auth_url:
-            for word in line.split():
-                if word.startswith("http://") or word.startswith("https://"):
-                    auth_url = word.strip().rstrip(")")
-                    break
+            auth_url = _extract_first_auth_url(line)
         # Extract device code (e.g. "MMVV-CSOZV" — uppercase with dash)
         if auth_url and not _cli_login_device_code:
-            device_match = re.search(r"\b([A-Z0-9]{4}-[A-Z0-9]{4,6})\b", stripped)
-            if device_match:
-                _cli_login_device_code = device_match.group(1)
+            device_code = _extract_device_code(stripped)
+            if device_code:
+                _cli_login_device_code = device_code
         # Stop once we have both URL and device code (or just URL for non-device flows)
         if auth_url and (_cli_login_device_code or time.time() > deadline - 25):
             # Read a bit more to catch the device code if it comes shortly after
@@ -6374,9 +5369,9 @@ def _attempt_cli_login_command(cmd: list[str]) -> tuple[str | None, list[str]]:
                             stripped2 = line2.strip()
                             if stripped2:
                                 output_lines.append(stripped2)
-                            dm = re.search(r"\b([A-Z0-9]{4}-[A-Z0-9]{4,6})\b", stripped2)
-                            if dm:
-                                _cli_login_device_code = dm.group(1)
+                            device_code = _extract_device_code(stripped2)
+                            if device_code:
+                                _cli_login_device_code = device_code
                                 break
             break
     return auth_url, output_lines

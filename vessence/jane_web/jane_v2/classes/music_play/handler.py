@@ -15,15 +15,14 @@ playback without any new fields.
 from __future__ import annotations
 
 import logging
-import re
+from .matching import (
+    ACTIONABLE_KINDS as _ACTIONABLE_KINDS,
+    format_play_response as _format_play_response,
+    normalize as _normalize,
+    select_playlist_candidate as _select_playlist_candidate,
+)
 
 logger = logging.getLogger(__name__)
-
-_ACTIONABLE_KINDS = {"shuffle", "song", "artist", "playlist", "genre", "mood"}
-
-
-def _normalize(s: str) -> str:
-    return re.sub(r"\s+", " ", (s or "").lower().strip())
 
 
 def _match_existing_playlist(query: str) -> dict | None:
@@ -34,43 +33,19 @@ def _match_existing_playlist(query: str) -> dict | None:
         logger.warning("music handler: vault_web.playlists import failed: %s", e)
         return None
 
-    q = _normalize(query)
-    if not q:
-        return None
-
     candidates = list_playlists()
     if not candidates:
         return None
 
-    for p in candidates:
-        if _normalize(p.get("name", "")) == q:
-            return get_playlist(p["id"])
-
-    for p in candidates:
-        name = _normalize(p.get("name", ""))
-        if not name:
-            continue
-        if q in name or name in q:
-            return get_playlist(p["id"])
-
+    score_func = None
     try:
         from rapidfuzz import fuzz
-
-        scored = []
-        for p in candidates:
-            name = _normalize(p.get("name", ""))
-            if not name:
-                continue
-            score = fuzz.token_set_ratio(q, name)
-            if score >= 80:
-                scored.append((score, p))
-        if scored:
-            scored.sort(key=lambda x: x[0], reverse=True)
-            return get_playlist(scored[0][1]["id"])
+        score_func = fuzz.token_set_ratio
     except ImportError:
         pass
 
-    return None
+    match = _select_playlist_candidate(query, candidates, score_func=score_func)
+    return get_playlist(match["id"]) if match else None
 
 
 def _ephemeral_from_library(query: str) -> dict | None:
@@ -80,16 +55,6 @@ def _ephemeral_from_library(query: str) -> dict | None:
         logger.warning("music handler: could not import v1 resolver: %s", e)
         return None
     return create_music_playlist_from_query(query or "")
-
-
-def _format_play_response(playlist: dict) -> dict:
-    name = playlist.get("name", "that playlist")
-    tracks = playlist.get("tracks", []) or []
-    pid = playlist.get("id")
-    text = f"Playing {name} ({len(tracks)} tracks)."
-    if pid:
-        text = text.rstrip() + f" [MUSIC_PLAY:{pid}]"
-    return {"text": text, "playlist_id": pid, "playlist_name": name}
 
 
 def handle(prompt: str, params: dict | None = None) -> dict | None:

@@ -10,6 +10,11 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from agent_skills.model_update_helpers import (
+    MODEL_UPDATE_SEARCH_QUERY,
+    model_update_prompt as _model_update_prompt,
+    should_persist_model_update as _should_persist_model_update,
+)
 from jane.config import ENV_FILE_PATH, PENDING_UPDATES_PATH
 
 NOTIFY_FILE = PENDING_UPDATES_PATH
@@ -24,26 +29,11 @@ CURRENT_MODEL = "gemini-2.5-pro"
 def check_for_new_models():
     genai_client = Client(api_key=os.getenv('GOOGLE_API_KEY'))
     
-    search_query = "latest Google Gemini model announcement news for developers coding"
+    search_query = MODEL_UPDATE_SEARCH_QUERY
     logger.info(f"Searching for: {search_query}")
     
     # We use Gemini to perform the search and analysis in one go
-    prompt = f"""
-    Search the internet for the latest Google Gemini AI models. 
-    Our current highest-tier model is {CURRENT_MODEL}.
-    
-    Is there a newer or more capable version available (e.g., Gemini 3.0, or a new ultra/pro variant with better coding capabilities)?
-    
-    Return a JSON object:
-    {{
-      "new_model_found": true/false,
-      "model_name": "name of the new model",
-      "key_improvements": "bullet points of key features",
-      "source_url": "link to news"
-    }}
-    
-    Only set new_model_found to true if the model is genuinely newer or significantly upgraded compared to {CURRENT_MODEL}.
-    """
+    prompt = _model_update_prompt(CURRENT_MODEL)
 
     try:
         # Use AFC to get search results and analyze
@@ -55,7 +45,7 @@ def check_for_new_models():
         
         data = json.loads(response.text)
         
-        if data.get("new_model_found"):
+        if _should_persist_model_update(data):
             logger.info(f"New model detected: {data['model_name']}")
             os.makedirs(os.path.dirname(NOTIFY_FILE), exist_ok=True)
             with open(NOTIFY_FILE, "w") as f:

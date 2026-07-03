@@ -4,15 +4,17 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 
+from jane_web.jane_v2.sms_tool_markers import (
+    SMS_DRAFT_MARKER_RE as _SMS_DRAFT_MARKER_RE,
+    sms_draft_cancel_marker as _sms_draft_cancel_marker,
+    sms_draft_send_marker as _sms_draft_send_marker,
+    sms_draft_update_marker as _sms_draft_update_marker,
+    sms_send_direct_marker as _sms_send_direct_marker,
+)
+from jane_web.jane_v2.ollama_client import post_local_llm_response as _post_local_llm_response
 
 logger = logging.getLogger(__name__)
-
-_SMS_DRAFT_MARKER_RE = re.compile(
-    r"\[\[CLIENT_TOOL:contacts\.(sms_draft|sms_draft_update|sms_send|sms_cancel):"
-    r"(\{[^\n]*?\})\]\]"
-)
 
 
 def pending_consumed_marker(
@@ -40,8 +42,7 @@ def resolve_pending_sms_confirmation(pending: dict) -> dict:
     phone = data.get("phone_number") or ""
     body = data.get("body") or data.get("message_body") or ""
     display = data.get("display_name") or data.get("recipient") or "them"
-    tool_args = json.dumps({"phone_number": phone, "body": body})
-    marker = f"[[CLIENT_TOOL:contacts.sms_send_direct:{tool_args}]]"
+    marker = _sms_send_direct_marker(phone, body)
     return {
         "text": f"Sending to {display}. {marker}",
         "structured": {
@@ -119,8 +120,7 @@ def resolve_pending_sms_draft_send(pending: dict) -> dict:
     draft_id = data.get("draft_id") or ""
     query = data.get("query") or data.get("display_name") or data.get("recipient") or "them"
     body = data.get("body") or ""
-    tool_args = json.dumps({"draft_id": draft_id})
-    marker = f"[[CLIENT_TOOL:contacts.sms_send:{tool_args}]]"
+    marker = _sms_draft_send_marker(draft_id)
     return {
         "text": f"Sending to {query}. {marker}",
         "structured": {
@@ -145,8 +145,7 @@ def cancel_pending_sms_draft(pending: dict) -> dict:
     data = pending.get("data") or {}
     draft_id = data.get("draft_id") or ""
     query = data.get("query") or data.get("display_name") or data.get("recipient") or "them"
-    tool_args = json.dumps({"draft_id": draft_id})
-    marker = f"[[CLIENT_TOOL:contacts.sms_cancel:{tool_args}]]"
+    marker = _sms_draft_cancel_marker(draft_id)
     return {
         "text": f"Okay, cancelled the message to {query}. {marker}",
         "structured": {
@@ -177,39 +176,32 @@ async def resolve_pending_sms_draft_edit(pending: dict, edit_text: str) -> dict:
         "NEW BODY:"
     )
     try:
-        import httpx
-        from jane_web.jane_v2.models import (
-            LOCAL_LLM as _model,
-            LOCAL_LLM_NUM_CTX as _num_ctx,
-            LOCAL_LLM_TIMEOUT as _timeout,
-            OLLAMA_URL as _url,
-        )
-        async with httpx.AsyncClient(timeout=_timeout) as client:
-            response = await client.post(_url, json={
-                "model": _model,
-                "prompt": compose_prompt,
+        def payload_builder(prompt_text: str, *, model: str, num_ctx: int, keep_alive: str | int) -> dict:
+            return {
+                "model": model,
+                "prompt": prompt_text,
                 "stream": False,
                 "think": False,
                 "options": {
                     "temperature": 0.2,
                     "num_predict": 80,
-                    "num_ctx": _num_ctx,
+                    "num_ctx": num_ctx,
                 },
-                "keep_alive": -1,
-            })
-            response.raise_for_status()
-            composed = (response.json().get("response") or "").strip()
-            composed = composed.strip('"').strip("'").strip()
-            if composed.lower().startswith("new body:"):
-                composed = composed[len("new body:"):].strip()
-            if composed:
-                new_body = composed
+                "keep_alive": keep_alive,
+            }
+
+        composed = await _post_local_llm_response(compose_prompt, payload_builder)
+        composed = composed.strip()
+        composed = composed.strip('"').strip("'").strip()
+        if composed.lower().startswith("new body:"):
+            composed = composed[len("new body:"):].strip()
+        if composed:
+            new_body = composed
     except Exception as exc:
         logger.warning("draft-edit compose failed (%s) - using fallback concat", exc)
         new_body = f"{old_body}. {edit_text}".strip()
 
-    tool_args = json.dumps({"draft_id": draft_id, "body": new_body})
-    marker = f"[[CLIENT_TOOL:contacts.sms_draft_update:{tool_args}]]"
+    marker = _sms_draft_update_marker(draft_id, new_body)
     return {
         "text": f"Updated. To {query}: {new_body}. {marker}",
         "structured": {

@@ -25,58 +25,38 @@ boundary.
 
 from __future__ import annotations
 
-import datetime as _dt
-import json
 import logging
 import os
 import sqlite3
-from datetime import date, datetime, timedelta
 from pathlib import Path
 
-import httpx
+from jane_web.jane_v2.ollama_client import post_local_llm_response as _post_local_llm_response
 
-from jane_web.jane_v2.models import (
-    LOCAL_LLM as MODEL,
-    LOCAL_LLM_NUM_CTX,
-    LOCAL_LLM_TIMEOUT,
-    OLLAMA_KEEP_ALIVE,
-    OLLAMA_URL,
+from .schedule_helpers import (
+    WEEK_DAYS as _WEEK_DAYS,
+    active_patient_briefs as _active_patient_briefs,
+    compute_next_patient as _compute_next_patient,
+    fmt_time as _fmt_time,
+    normalize_day as _normalize_day,
+    normalize_params as _normalize_params,
+    now_meta as _now_meta,
+    parse_time as _parse_time,
+    split_active_cancelled as _split_active_cancelled,
+)
+from .prompting import (
+    SYSTEM_PROMPT as _SYSTEM_PROMPT,
+    conversation_context_block as _conversation_context_block,
+    phrase_prompt as _phrase_prompt,
+    phrase_request_payload as _phrase_request_payload,
+)
+from .responses import (
+    build_clinic_pending as _pending,
+    build_clinic_response as _build_clinic_response,
 )
 
 logger = logging.getLogger(__name__)
 
 DB_PATH = Path(os.environ.get("VESSENCE_DATA_HOME", "/home/chieh/ambient/vessence-data")) / "schedule.db"
-
-_WEEK_DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
-_LATE_BUFFER_MINUTES = 15
-
-_VALID_LOADERS = {
-    "today_overview", "day", "cancellations",
-    "next_patient", "patient_detail", "weekly",
-}
-
-
-def _expires_at(minutes: int = 2) -> str:
-    return (_dt.datetime.utcnow() + _dt.timedelta(minutes=minutes)).strftime(
-        "%Y-%m-%dT%H:%M:%SZ"
-    )
-
-
-def _parse_time(t: str) -> datetime:
-    t = (t or "").strip().lower().replace("a", " AM").replace("p", " PM")
-    try:
-        return datetime.strptime(t, "%I:%M %p")
-    except ValueError:
-        return datetime.min
-
-
-def _fmt_time(t: str) -> str:
-    s = (t or "").strip().lower()
-    if s.endswith("a"):
-        return s[:-1] + "am"
-    if s.endswith("p"):
-        return s[:-1] + "pm"
-    return s
 
 
 def _db_conn():
@@ -96,30 +76,6 @@ def _current_week_start() -> str | None:
         return row[0] if row else None
     finally:
         conn.close()
-
-
-def _normalize_day(day: str | None) -> str | None:
-    """Map 'today'/'tomorrow'/weekday names to a canonical weekday name."""
-    if not day:
-        return None
-    d = day.strip().lower()
-    if d == "today":
-        return datetime.now().strftime("%A")
-    if d == "tomorrow":
-        return (datetime.now() + timedelta(days=1)).strftime("%A")
-    for wd in _WEEK_DAYS:
-        if d == wd.lower():
-            return wd
-    return None
-
-
-def _now_meta() -> dict:
-    now = datetime.now()
-    return {
-        "today": now.strftime("%A"),
-        "current_time": now.strftime("%I:%M %p").lstrip("0"),
-    }
-
 
 # ─── Per-loader fact builders ───────────────────────────────────────────
 
@@ -153,23 +109,6 @@ def _fetch_day_rows(week_start: str, day: str) -> list[dict]:
     return parsed
 
 
-def _split_active_cancelled(rows: list[dict]) -> tuple[list[dict], list[dict]]:
-    active, cancelled = [], []
-    for entry in rows:
-        if entry["status"] == "cancelled-out":
-            cancelled.append({"name": entry["name"], "time": entry["time"]})
-        else:
-            active.append({
-                "index": len(active) + 1,
-                "name": entry["name"],
-                "time": entry["time"],
-                "health_concerns": entry["health_concerns"],
-                "recommendations": entry["recommendations"],
-                "visit_summary": entry["visit_summary"],
-            })
-    return active, cancelled
-
-
 def _facts_today_overview(week_start: str) -> dict:
     meta = _now_meta()
     rows = _fetch_day_rows(week_start, meta["today"])
@@ -178,7 +117,7 @@ def _facts_today_overview(week_start: str) -> dict:
         **meta,
         "loader": "today_overview",
         "active_count": len(active),
-        "active_patients": [{"index": p["index"], "name": p["name"], "time": p["time"]} for p in active],
+        "active_patients": _active_patient_briefs(active),
         "cancelled": cancelled,
         "next_patient": _compute_next_patient(active),
     }
@@ -194,7 +133,7 @@ def _facts_day(week_start: str, day: str | None) -> dict:
         "loader": "day",
         "day": target,
         "active_count": len(active),
-        "active_patients": [{"index": p["index"], "name": p["name"], "time": p["time"]} for p in active],
+        "active_patients": _active_patient_briefs(active),
         "cancelled": cancelled,
     }
 
@@ -213,29 +152,6 @@ def _facts_cancellations(week_start: str, day: str | None) -> dict:
     }
 
 
-def _compute_next_patient(active: list[dict]) -> dict | None:
-    now = datetime.now()
-    cutoff = now - timedelta(minutes=_LATE_BUFFER_MINUTES)
-    today_date = now.date()
-    upcoming = []
-    for p in active:
-        parsed = _parse_time(p["time"])
-        if parsed == datetime.min:
-            continue
-        appt_dt = datetime.combine(today_date, parsed.time())
-        if appt_dt >= cutoff:
-            upcoming.append((appt_dt, p))
-    upcoming.sort(key=lambda r: r[0])
-    if not upcoming:
-        return None
-    dt, p = upcoming[0]
-    return {
-        "name": p["name"],
-        "time": p["time"],
-        "minutes_from_now": int((dt - now).total_seconds() // 60),
-    }
-
-
 def _facts_next_patient(week_start: str) -> dict:
     meta = _now_meta()
     rows = _fetch_day_rows(week_start, meta["today"])
@@ -244,10 +160,7 @@ def _facts_next_patient(week_start: str) -> dict:
         **meta,
         "loader": "next_patient",
         "next_patient": _compute_next_patient(active),
-        "remaining_today": [
-            {"index": p["index"], "name": p["name"], "time": p["time"]}
-            for p in active
-        ],
+        "remaining_today": _active_patient_briefs(active),
     }
 
 
@@ -320,27 +233,8 @@ def _facts_patient_detail(
     active, _ = _split_active_cancelled(rows)
     out["patient"] = None
     out["day"] = target_day
-    out["active_today"] = [
-        {"index": p["index"], "name": p["name"], "time": p["time"]} for p in active
-    ]
+    out["active_today"] = _active_patient_briefs(active)
     return out
-
-
-def _normalize_params(params: dict | None) -> dict:
-    """Repair common classifier extraction mistakes before loading facts.
-
-    Ordinal or named patient references are more specific than generic
-    schedule loaders, so they must resolve to patient_detail even if qwen
-    emitted next_patient/day/today_overview.
-    """
-    normalized = dict(params or {})
-    loader = normalized.get("loader")
-    if loader not in _VALID_LOADERS:
-        loader = "today_overview"
-    if normalized.get("patient_name") or normalized.get("patient_index") is not None:
-        loader = "patient_detail"
-    normalized["loader"] = loader
-    return normalized
 
 
 def _facts_weekly(week_start: str) -> dict:
@@ -391,118 +285,22 @@ def _build_facts(params: dict) -> dict:
     return _facts_today_overview(week_start)
 
 
-# ─── Pending-action markers (routing only — no question text needed) ────
-
-def _pending(awaiting: str, **data) -> dict:
-    payload = {"awaiting": awaiting}
-    payload.update(data)
-    return {
-        "type": "STAGE2_FOLLOWUP",
-        "handler_class": "clinic schedules info",
-        "status": "awaiting_user",
-        "awaiting": awaiting,
-        "data": payload,
-        "question": f"(awaiting:{awaiting})",
-        "expires_at": _expires_at(),
-    }
-
-
 # ─── Stage 2 LLM call ────────────────────────────────────────────────────
-
-_SYSTEM_PROMPT = """You are Jane, a personal AI assistant. You're answering \
-questions about Chieh's wife Kathia's acupuncture clinic schedule.
-
-ABSOLUTE RULES:
-1. THE FACTS ARE AUTHORITATIVE. Never invent patients, times, days, \
-cancellations, or events. If something is not in `facts`, do not mention \
-it. The week shown is the only week you know about.
-2. Address Chieh directly. Speak naturally and conversationally.
-3. Output spoken text only. No <spoken> tags. No [[...]] markers. No \
-markdown code blocks.
-
-THE FACTS:
-- `facts.loader` tells you which slice of the schedule was loaded. The \
-shape of `facts` reflects that loader — answer from the fields present.
-- `facts.today` is the current weekday. `facts.current_time` is the wall clock.
-- `active_patients` entries carry `index`, `name`, `time`. `patient` (singular) \
-includes clinical detail (`health_concerns`, `recommendations`, `visit_summary`).
-- `cancelled` entries carry `name` and `time` only.
-- `next_patient` is the next not-yet-seen patient today, or null.
-
-ANSWERING:
-- For lists of patients: order by time, include the time next to each name. \
-Use numbers (1., 2., 3.) when there are 3+ patients.
-- For counts: state the number; offer to list names if helpful.
-- For cancellations: name the cancelled patients with times. If `cancelled` \
-is empty, say so plainly. Do NOT pivot to active patients.
-- For weekly overview: summarize per_day_counts; highlight the busiest day. \
-Offer to drill into one.
-- For patient detail: quote the relevant clinical field VERBATIM \
-(visit_summary by default; health_concerns or recommendations if those words \
-were used).
-- For next patient: use `facts.next_patient`. If null, say there are no more \
-patients today.
-- If `pending_state` is present, the user is replying to a question Jane \
-asked previously — use it to interpret short replies.
-- If `facts.patient` is null and `lookup_name` or `lookup_index` is set, \
-say honestly that you couldn't find that patient.
-- If `facts.error` is "schedule_db_unavailable", say the schedule data isn't \
-available right now.
-
-LENGTH:
-- 1-2 sentences for counts, single-fact answers, and acknowledgments.
-- A list is fine when explicitly asked for names — keep each line short.
-- Patient detail can be longer because the clinical value is quoted."""
-
 
 async def _phrase_reply(structured_context: dict, conversation_context: str = "") -> str:
     """Call qwen with the focused facts and return the phrased reply."""
-    ctx_block = ""
-    if conversation_context and conversation_context.strip():
-        ctx_block = f"Recent conversation:\n{conversation_context.strip()}\n\n"
-
-    user_said = structured_context.get("user_said", "")
-    facts = structured_context.get("facts", {})
-    pending_state = structured_context.get("pending_state")
-
-    parts = [
-        _SYSTEM_PROMPT,
-        "",
-        ctx_block + f"The user just said: \"{user_said}\"",
-        "",
-        f"Facts (JSON):\n{json.dumps(facts, indent=2, default=str)}",
-    ]
-    if pending_state:
-        parts.append(
-            f"\nPending state from prior turn:\n{json.dumps(pending_state, indent=2, default=str)}"
+    def payload_builder(_prompt_text: str, *, model: str, num_ctx: int, keep_alive: str | int) -> dict:
+        return _phrase_request_payload(
+            structured_context,
+            conversation_context,
+            model=model,
+            num_ctx=num_ctx,
+            keep_alive=keep_alive,
         )
-    parts.append("\nReply (spoken text only):")
 
-    full_prompt = "\n".join(parts)
-
-    body = {
-        "model": MODEL,
-        "prompt": full_prompt,
-        "stream": False,
-        "think": False,
-        "options": {
-            "temperature": 0.2,
-            "num_predict": 600,
-            "num_ctx": LOCAL_LLM_NUM_CTX,
-        },
-        "keep_alive": OLLAMA_KEEP_ALIVE,
-    }
     try:
-        async with httpx.AsyncClient(timeout=LOCAL_LLM_TIMEOUT) as client:
-            r = await client.post(OLLAMA_URL, json=body)
-            r.raise_for_status()
-            try:
-                from jane_web.jane_v2.models import record_ollama_activity
-                record_ollama_activity()
-            except Exception:
-                pass
-            text = (r.json().get("response") or "").strip()
-            return text or "I couldn't put together a reply just now."
+        text = await _post_local_llm_response("", payload_builder)
+        return text or "I couldn't put together a reply just now."
     except Exception as e:
         logger.warning("clinic: stage 2 LLM call failed: %s", e)
         return "I'm having trouble reaching the schedule right now."
@@ -540,11 +338,5 @@ async def handle(
 
     reply = await _phrase_reply(structured, context)
 
-    out: dict = {
-        "text": reply,
-        "structured": {
-            "intent": "clinic schedules info",
-            "pending_action": _pending("clinic_followup"),
-        },
-    }
-    return out
+    # _build_clinic_response returns the documented {"text": ..., "structured": ...} shape.
+    return _build_clinic_response(reply)

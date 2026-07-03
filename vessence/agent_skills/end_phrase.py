@@ -12,7 +12,11 @@ accidentally end a flow when the user types "no" as a revise trigger
 
 from __future__ import annotations
 
-import re
+from agent_skills.phrase_matcher import (
+    PUNCT_RE as _PUNCT_RE,
+    normalize_phrase as _normalize,
+    phrase_in_set as _phrase_in_set,
+)
 
 # Phrases that unambiguously mean "I'm done with this flow."
 # Lowercased + punctuation-stripped before matching.
@@ -49,15 +53,6 @@ _END_PHRASES = frozenset({
     "goodbye",
 })
 
-_PUNCT_RE = re.compile(r"[^\w\s']")
-
-
-def _normalize(text: str) -> str:
-    return _PUNCT_RE.sub("", text.strip().lower())
-
-
 def is_end(text: str | None) -> bool:
     """True if the user's reply is an unambiguous end-of-conversation phrase."""
-    if not text:
-        return False
-    return _normalize(text) in _END_PHRASES
+    return _phrase_in_set(text, _END_PHRASES)

@@ -13,10 +13,16 @@ Pollen data requires a free Tomorrow.io API key:
 import json
 import logging
 import os
-from datetime import datetime, date as _date
+from datetime import datetime
 from pathlib import Path
 
 import requests
+
+from agent_skills.weather_payload_helpers import (
+    POLLEN_LABELS as _POLLEN_LABELS,
+    pollen_payload,
+    weather_cache_payload,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -45,9 +51,6 @@ WMO_CODES = {
 }
 
 
-_POLLEN_LABELS = {0: "None", 1: "Very Low", 2: "Low", 3: "Medium", 4: "High", 5: "Very High"}
-
-
 def fetch_pollen() -> dict:
     """Fetch tree/grass/weed pollen index from Tomorrow.io.
 
@@ -69,17 +72,7 @@ def fetch_pollen() -> dict:
         )
         r.raise_for_status()
         vals = r.json().get("data", {}).get("values", {})
-        tree_idx = vals.get("treeIndex") or 0
-        grass_idx = vals.get("grassIndex") or 0
-        weed_idx = vals.get("weedIndex") or 0
-        return {
-            "tree": _POLLEN_LABELS.get(int(tree_idx), "Unknown"),
-            "grass": _POLLEN_LABELS.get(int(grass_idx), "Unknown"),
-            "weed": _POLLEN_LABELS.get(int(weed_idx), "Unknown"),
-            "tree_index": int(tree_idx),
-            "grass_index": int(grass_idx),
-            "weed_index": int(weed_idx),
-        }
+        return pollen_payload(vals)
     except Exception as e:
         logger.warning("pollen fetch failed: %s", e)
         return {}
@@ -116,43 +109,14 @@ def fetch_weather() -> dict:
 
     pollen = fetch_pollen()
 
-    result = {
-        "location": LOCATION,
-        "fetched": datetime.now().strftime("%Y-%m-%d %H:%M"),
-        "current": {
-            "temperature": f"{weather['current']['temperature_2m']}°F",
-            "feels_like": f"{weather['current']['apparent_temperature']}°F",
-            "humidity": f"{weather['current']['relative_humidity_2m']}%",
-            "wind": f"{weather['current']['wind_speed_10m']} mph",
-            "condition": WMO_CODES.get(weather["current"]["weather_code"], "Unknown"),
-        },
-        "air_quality": {
-            "us_aqi": aqi["current"]["us_aqi"],
-            "pm2_5": f"{aqi['current']['pm2_5']} µg/m³",
-            "pm10": f"{aqi['current']['pm10']} µg/m³",
-            "ozone": f"{aqi['current']['ozone']} µg/m³",
-        },
-        "forecast": [],
-    }
-
-    if pollen:
-        result["pollen"] = pollen
-
-    for i, date in enumerate(weather["daily"]["time"]):
-        weekday = _date.fromisoformat(date).strftime("%A")
-        result["forecast"].append({
-            "date": date,
-            "weekday": weekday,
-            "high": f"{weather['daily']['temperature_2m_max'][i]}°F",
-            "low": f"{weather['daily']['temperature_2m_min'][i]}°F",
-            "condition": WMO_CODES.get(weather["daily"]["weathercode"][i], "Unknown"),
-            "precipitation": f"{weather['daily']['precipitation_sum'][i]} in",
-            "humidity": f"{weather['daily']['relative_humidity_2m_min'][i]}-{weather['daily']['relative_humidity_2m_max'][i]}%",
-            "wind": f"{weather['daily']['wind_speed_10m_max'][i]} mph",
-            "uv_index": weather["daily"]["uv_index_max"][i],
-        })
-
-    return result
+    return weather_cache_payload(
+        weather,
+        aqi,
+        pollen,
+        location=LOCATION,
+        fetched=datetime.now().strftime("%Y-%m-%d %H:%M"),
+        wmo_codes=WMO_CODES,
+    )
 
 
 def main():

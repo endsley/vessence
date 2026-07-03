@@ -24,13 +24,28 @@ import datetime
 import json
 import logging
 import os
-import re
 import shutil
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from jane.config import VESSENCE_HOME, VESSENCE_DATA_HOME, LOGS_DIR
+from agent_skills.audit_auto_fix_prompt import (
+    AUDIT_FIX_ANALYSIS_PROMPT_TEMPLATE,
+    build_audit_fix_analysis_prompt,
+)
+from agent_skills.audit_auto_fix_helpers import (
+    FORBIDDEN_PATTERNS,
+    SAFE_EXTENSIONS,
+    extract_json_array_text as _extract_json_array_text,
+    fix_issue_preflight_result as _fix_issue_preflight_result,
+    generate_fix_report_markdown as _generate_fix_report_markdown,
+    initial_fix_result as _initial_fix_result,
+    is_safe_auto_fix_path as _is_safe_auto_fix_path,
+    latest_audit_report as _latest_audit_report,
+    result_status_counts as _result_status_counts,
+    todays_audit_report as _todays_audit_report,
+)
 
 # ── Constants ────────────────────────────────────────────────────────────────
 AUDIT_DIR = Path(VESSENCE_DATA_HOME) / "logs" / "audits"
@@ -50,61 +65,21 @@ logging.basicConfig(
 )
 logger = logging.getLogger("audit_auto_fixer")
 
-# Categories of files that are SAFE to auto-fix
-SAFE_EXTENSIONS = {".md", ".txt", ".py", ".json", ".yaml", ".yml", ".toml", ".cfg", ".ini"}
-
-# Files/patterns that must NEVER be touched
-FORBIDDEN_PATTERNS = [
-    "crontab", ".env", "credentials", "secret", "password", "token",
-    ".ssh/", ".gnupg/", ".git/",
-]
-
-
 # ── Find latest audit report ────────────────────────────────────────────────
 def find_latest_audit_report() -> Path | None:
     """Find the most recent audit report file."""
-    if not AUDIT_DIR.exists():
-        return None
-
-    # Match both audit_YYYY-MM-DD.md and audit_YYYY-MM-DD_HHMM.md
-    reports = sorted(AUDIT_DIR.glob("audit_*.md"), reverse=True)
-    # Filter out auto_fix reports
-    reports = [r for r in reports if not r.name.startswith("auto_fix_")]
-    return reports[0] if reports else None
+    return _latest_audit_report(AUDIT_DIR)
 
 
 def find_todays_audit_report() -> Path | None:
     """Find today's audit report specifically."""
-    today = datetime.date.today().isoformat()
-    if not AUDIT_DIR.exists():
-        return None
-
-    # Look for any audit report from today (any timestamp format)
-    candidates = sorted(AUDIT_DIR.glob(f"audit_{today}*.md"), reverse=True)
-    candidates = [r for r in candidates if not r.name.startswith("auto_fix_")]
-    return candidates[0] if candidates else None
+    return _todays_audit_report(AUDIT_DIR, datetime.date.today())
 
 
 # ── Safety checks ────────────────────────────────────────────────────────────
 def is_safe_to_modify(filepath: str) -> bool:
     """Check if a file is safe to auto-modify."""
-    fp_lower = filepath.lower()
-
-    # Check forbidden patterns
-    for pattern in FORBIDDEN_PATTERNS:
-        if pattern in fp_lower:
-            return False
-
-    # Must have a safe extension
-    ext = Path(filepath).suffix.lower()
-    if ext not in SAFE_EXTENSIONS:
-        return False
-
-    # Must exist
-    if not Path(filepath).exists():
-        return False
-
-    return True
+    return _is_safe_auto_fix_path(filepath, exists=Path(filepath).exists())
 
 
 def create_backup(filepath: str) -> str | None:
@@ -159,42 +134,7 @@ def analyze_audit_report(report_text: str) -> list[dict]:
     """
     from agent_skills.claude_cli_llm import completion
 
-    prompt = f"""You are a code maintenance assistant. Analyze this audit report and produce a JSON array of issues that can be SAFELY auto-fixed.
-
-RULES:
-- Only include issues where you can specify an EXACT file path, search text, and replacement text
-- The file path must be absolute (starting with {VESSENCE_HOME}/)
-- NEVER include crontab modifications
-- NEVER include file deletions
-- Focus on: wrong paths in docs, stale descriptions, missing imports, wrong variable names
-- Category must be one of: "doc_update", "code_fix", "skip"
-- Use "skip" for anything risky, ambiguous, or requiring human judgment
-- For "skip" items, omit search_text and replacement_text
-- Keep it conservative — better to skip than to break something
-
-Output ONLY a JSON array. No markdown fences, no explanation.
-
-Example format:
-[
-  {{
-    "issue": "CRON_JOBS.md uses wrong path prefix",
-    "category": "doc_update",
-    "file": "{VESSENCE_HOME}/configs/CRON_JOBS.md",
-    "fix_description": "Replace old path prefix with correct one",
-    "search_text": "old/wrong/path/",
-    "replacement_text": "correct/path/"
-  }},
-  {{
-    "issue": "Architecture change requires human review",
-    "category": "skip",
-    "file": "{VESSENCE_HOME}/jane/config.py",
-    "fix_description": "Needs human review — changes user-facing behavior"
-  }}
-]
-
-AUDIT REPORT:
-{report_text}
-"""
+    prompt = build_audit_fix_analysis_prompt(report_text, VESSENCE_HOME)
 
     try:
         raw = completion(prompt, max_tokens=4096, timeout=120)
@@ -203,19 +143,7 @@ AUDIT REPORT:
         return []
 
     # Extract JSON from the response — handle markdown fences and preamble text
-    text = raw.strip()
-
-    # Strategy 1: If wrapped in code fences, extract the fenced content
-    fence_match = re.search(r"```(?:json)?\s*\n(.*?)```", text, re.DOTALL)
-    if fence_match:
-        text = fence_match.group(1).strip()
-
-    # Strategy 2: Find the first '[' and last ']' to extract the JSON array
-    if not text.startswith("["):
-        start = text.find("[")
-        end = text.rfind("]")
-        if start != -1 and end != -1 and end > start:
-            text = text[start:end + 1]
+    text = _extract_json_array_text(raw)
 
     try:
         issues = json.loads(text)
@@ -231,38 +159,16 @@ AUDIT REPORT:
 # ── Apply fixes ──────────────────────────────────────────────────────────────
 def apply_fix(issue: dict, dry_run: bool = False) -> dict:
     """Apply a single fix. Returns a result dict with status and details."""
-    result = {
-        "issue": issue.get("issue", "Unknown"),
-        "file": issue.get("file", "Unknown"),
-        "category": issue.get("category", "unknown"),
-        "status": "skipped",
-        "reason": "",
-    }
+    result = _initial_fix_result(issue)
 
-    category = issue.get("category", "skip")
-
-    # Skip items marked as skip
-    if category == "skip":
-        result["reason"] = issue.get("fix_description", "Marked as skip by LLM")
+    preflight = _fix_issue_preflight_result(issue, safe_to_modify=is_safe_to_modify)
+    if preflight is not None:
+        result.update(preflight)
         return result
 
     filepath = issue.get("file", "")
     search_text = issue.get("search_text", "")
     replacement_text = issue.get("replacement_text", "")
-
-    # Validate required fields
-    if not filepath or not search_text or not replacement_text:
-        result["reason"] = "Missing file, search_text, or replacement_text"
-        return result
-
-    if search_text == replacement_text:
-        result["reason"] = "search_text and replacement_text are identical"
-        return result
-
-    # Safety check
-    if not is_safe_to_modify(filepath):
-        result["reason"] = f"File not safe to modify: {filepath}"
-        return result
 
     # Read the file
     try:
@@ -319,61 +225,12 @@ def generate_fix_report(
 ) -> str:
     """Generate a markdown fix report."""
     now = datetime.datetime.now()
-    mode = "DRY RUN" if dry_run else "LIVE"
-
-    lines = [
-        f"# Auto-Fix Report — {now.strftime('%Y-%m-%d %H:%M')} ({mode})",
-        "",
-        f"**Source audit:** `{audit_report_path}`",
-        f"**Total issues analyzed:** {len(results)}",
-        "",
-    ]
-
-    # Partition results
-    fixed = [r for r in results if r["status"] in ("fixed", "would_fix")]
-    skipped = [r for r in results if r["status"] == "skipped"]
-    not_applicable = [r for r in results if r["status"] == "not_applicable"]
-    reverted = [r for r in results if r["status"] == "reverted"]
-
-    # Fixed issues table
-    if fixed:
-        verb = "Would Fix" if dry_run else "Fixed"
-        lines.append(f"## {verb} ({len(fixed)})")
-        lines.append("")
-        lines.append("| Issue | File | Fix Applied |")
-        lines.append("|-------|------|-------------|")
-        for r in fixed:
-            fname = Path(r["file"]).name if r["file"] != "Unknown" else "?"
-            lines.append(f"| {r['issue'][:80]} | `{fname}` | {r['reason'][:80]} |")
-        lines.append("")
-
-    # Skipped issues
-    if skipped:
-        lines.append(f"## Skipped ({len(skipped)})")
-        lines.append("")
-        lines.append("| Issue | Reason |")
-        lines.append("|-------|--------|")
-        for r in skipped:
-            lines.append(f"| {r['issue'][:80]} | {r['reason'][:80]} |")
-        lines.append("")
-
-    # Not applicable (already fixed)
-    if not_applicable:
-        lines.append(f"## Already Fixed / Not Applicable ({len(not_applicable)})")
-        lines.append("")
-        for r in not_applicable:
-            lines.append(f"- {r['issue'][:100]}")
-        lines.append("")
-
-    # Reverted
-    if reverted:
-        lines.append(f"## Reverted ({len(reverted)})")
-        lines.append("")
-        for r in reverted:
-            lines.append(f"- **{r['issue'][:80]}** — {r['reason']}")
-        lines.append("")
-
-    return "\n".join(lines)
+    return _generate_fix_report_markdown(
+        audit_report_path,
+        results,
+        dry_run,
+        generated_at=now,
+    )
 
 
 # ── Main ─────────────────────────────────────────────────────────────────────
@@ -483,14 +340,11 @@ def main():
     logger.info("Fix report saved to %s", report_out)
 
     # Summary
-    fixed_count = sum(1 for r in results if r["status"] in ("fixed", "would_fix"))
-    skipped_count = sum(1 for r in results if r["status"] == "skipped")
-    na_count = sum(1 for r in results if r["status"] == "not_applicable")
-    reverted_count = sum(1 for r in results if r["status"] == "reverted")
+    counts = _result_status_counts(results)
 
     logger.info(
         "Summary: %d fixed, %d skipped, %d not applicable, %d reverted",
-        fixed_count, skipped_count, na_count, reverted_count,
+        counts["fixed"], counts["skipped"], counts["not_applicable"], counts["reverted"],
     )
 
 

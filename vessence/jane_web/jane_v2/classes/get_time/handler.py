@@ -22,133 +22,27 @@ Version B architecture (2026-04-18):
 from __future__ import annotations
 
 import logging
-import re
 import time
-from datetime import datetime
+from jane_web.jane_v2.ollama_client import post_local_llm_response as _post_local_llm_response
+
+from .time_helpers import (
+    FAST_DATE_RE as _FAST_DATE_RE,
+    FAST_TIME_RE as _FAST_TIME_RE,
+    build_prompt as _build_prompt,
+    fast_time_reply as _fast_time_reply,
+    format_time_info as _format_time_info,
+    parse_llm_response as _parse_llm_response,
+    time_llm_payload as _time_llm_payload,
+)
 
 logger = logging.getLogger(__name__)
-
-
-# Canonical "just tell me the time / date / day" phrasings. When the user's
-# prompt matches one of these we skip the LLM round-trip and return a direct
-# spoken answer from the local clock — sub-10ms instead of ~3s.
-# Covers: "what time is it", "what's the time", "tell me the time", "the
-# time please", "current time", "what day is it", "what's today's date",
-# "what's the date", "what day of the week", etc.
-# See transcript review 2026-04-18 Issue 11.
-# Accept any common plain-time phrasing. The old regex missed the single
-# most-common form "what time is it" because it required "'s" or " is "
-# immediately after "what" — transcript 2026-04-18 Issue 11 caught 3+ s
-# stalls on exactly that utterance.
-_FAST_TIME_RE = re.compile(
-    r"^\s*"
-    r"(?:hey\s+jane[,\s]+)?"
-    r"(?:please\s+|can\s+you\s+|could\s+you\s+|would\s+you\s+)?"
-    r"(?:just\s+)?"
-    r"(?:tell\s+me\s+|give\s+me\s+|say\s+)?"
-    r"(?:"
-    # what time / what time is it / what time now
-    r"what\s+time(?:\s+is\s+it|\s+now)?"
-    # what's the time / what is the (current) time / clock
-    r"|what(?:'?s|\s+is)\s+(?:the\s+)?(?:current\s+)?(?:time|clock)(?:\s+is\s+it|\s+now)?"
-    # (the) (current) time / clock
-    r"|(?:the\s+)?(?:current\s+)?(?:time|clock)"
-    r")"
-    r"(?:\s+please)?"
-    r"[\s?.!]*$",
-    re.IGNORECASE,
-)
-_FAST_DATE_RE = re.compile(
-    r"^\s*(?:"
-    r"(?:hey\s+jane,?\s+)?"
-    r"(?:please\s+|can\s+you\s+|could\s+you\s+)?"
-    r"(?:what(?:'?s|\s+is)\s+(?:the\s+)?(?:current\s+|today'?s\s+)?)?"
-    r"(?:date|day(?:\s+of\s+the\s+week)?|today)"
-    r"(?:\s+is\s+it|\s+today)?"
-    r"[\s?.!]*$"
-    r")",
-    re.IGNORECASE,
-)
-
-
-def _fast_time_reply(prompt: str) -> str | None:
-    """Return a locally-generated spoken answer when the prompt is a plain
-    time/date query, else None (the LLM path will handle contextual cases
-    like 'is it late?')."""
-    p = (prompt or "").strip()
-    if not p:
-        return None
-    now = datetime.now().astimezone()
-    if _FAST_TIME_RE.match(p):
-        return f"It's {now.strftime('%-I:%M %p')}."
-    if _FAST_DATE_RE.match(p):
-        return f"It's {now.strftime('%A, %B %-d')}."
-    return None
-
-
-def _format_time_info() -> str:
-    """Return a human-readable block of date/time info suitable for LLM
-    consumption: day of week, month + day, time with AM/PM, timezone."""
-    now = datetime.now().astimezone()
-    return (
-        f"Current local time: {now.strftime('%-I:%M %p')} on "
-        f"{now.strftime('%A, %B %-d, %Y')} "
-        f"(timezone: {now.tzname()})."
-    )
-
-
-def _build_prompt(user_prompt: str, fifo_block: str, time_info: str) -> str:
-    fifo_section = (
-        f"Recent conversation (oldest first):\n{fifo_block}\n"
-        if fifo_block else
-        "Recent conversation: (empty)\n"
-    )
-    return f"""You are Jane, a voice assistant. The intent classifier decided the user is asking about time, date, or day. The current time has been fetched for you — use it below together with the recent conversation to craft a short natural reply tailored to what the user actually asked.
-
-{time_info}
-
-{fifo_section}
-User: "{user_prompt.strip()}"
-
-Think briefly, then answer. Format your response as exactly TWO fields:
-
-THOUGHT: <one short line: what did the user actually want — the time, the day, a date, or something contextual like "is it late"? Any FIFO context I should weave in?>
-REPLY: <the one-sentence spoken answer. Natural conversational English for TTS. No markdown, no lists, no emoji. Do not say "according to my clock" or "based on the info" — just answer.>"""
 
 
 async def _call_local_llm(prompt_text: str) -> str:
     """Reuse the v3 classifier's warm Ollama runner for Stage 2 generation.
     num_ctx is pinned via LOCAL_LLM_NUM_CTX so we never evict/reload
     (see preference_registry.json::unified_local_llm_num_ctx)."""
-    import httpx
-    from jane_web.jane_v2.models import (
-        LOCAL_LLM,
-        LOCAL_LLM_NUM_CTX,
-        LOCAL_LLM_TIMEOUT,
-        OLLAMA_KEEP_ALIVE,
-        OLLAMA_URL,
-    )
-    body = {
-        "model": LOCAL_LLM,
-        "prompt": prompt_text,
-        "stream": False,
-        "think": False,
-        "options": {
-            "temperature": 0.3,  # small amount of variety for natural replies
-            "num_predict": 80,
-            "num_ctx": LOCAL_LLM_NUM_CTX,
-        },
-        "keep_alive": OLLAMA_KEEP_ALIVE,
-    }
-    async with httpx.AsyncClient(timeout=LOCAL_LLM_TIMEOUT) as client:
-        r = await client.post(OLLAMA_URL, json=body)
-        r.raise_for_status()
-        try:
-            from jane_web.jane_v2.models import record_ollama_activity
-            record_ollama_activity()
-        except Exception:
-            pass
-        return (r.json().get("response") or "").strip()
+    return await _post_local_llm_response(prompt_text, _time_llm_payload)
 
 
 async def handle(prompt: str, context: str = "") -> dict:
@@ -179,19 +73,7 @@ async def handle(prompt: str, context: str = "") -> dict:
         raw = f"THOUGHT: LLM unavailable, falling back.\nREPLY: {time_info}"
     latency_ms = int((time.perf_counter() - t0) * 1000)
 
-    # Parse THOUGHT / REPLY blocks. Fall back to the whole response if
-    # the model didn't follow the format.
-    thought = ""
-    reply = raw.strip()
-    for line in raw.splitlines():
-        s = line.strip()
-        if s.upper().startswith("THOUGHT:"):
-            thought = s.split(":", 1)[1].strip()
-        elif s.upper().startswith("REPLY:"):
-            reply = s.split(":", 1)[1].strip()
-    reply = reply.strip().strip('"').strip("'").strip()
-    if not reply:
-        reply = time_info
+    thought, reply = _parse_llm_response(raw, fallback=time_info)
 
     logger.info(
         "get_time: LLM %dms — thought=%r reply=%r",

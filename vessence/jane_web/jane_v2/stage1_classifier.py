@@ -14,69 +14,9 @@ import re
 
 logger = logging.getLogger(__name__)
 
-# Strip phone-tool result markers and other system prefixes before
-# classification. Android prepends [TOOL_RESULT:{json}] to follow-up
-# messages so Jane can see what happened on the phone — but the JSON
-# blob contains words like "tool", "send", "message" that pollute
-# the classifier's signal. The user's actual question comes after.
-#
-# Earlier this used a regex `\[TOOL_RESULT:\{[^}]*\}\]` which silently
-# failed on any payload containing a nested object (e.g. `"data":{...}`),
-# leaving the entire JSON blob in the prompt. Use the brace-counting
-# parser in tool_result_parser.py instead.
-from jane_web.jane_v2.tool_result_parser import strip_tool_result_prefix
-# Non-greedy match through nested [[CLIENT_TOOL:...]] up to the [END ...] sentinel.
-_SYS_PREFIX_RE = re.compile(
-    r"\[(SMS SEND REQUEST|PHONE TOOL RESULTS)[^\]]*\].*?\[END\s+[^\]]+\]\s*",
-    re.DOTALL | re.IGNORECASE,
+from jane_web.jane_v2.stage1_prompt_cleaning import (
+    strip_stage1_system_markers as _strip_system_markers,
 )
-# Fallback: SMS SEND REQUEST that got truncated without a closing [END...]
-_SYS_TAIL_RE = re.compile(
-    r"\n*\[(SMS SEND REQUEST|PHONE TOOL RESULTS)[\s\S]*$",
-    re.IGNORECASE,
-)
-
-# Subject-change prefixes. "change the subject to weather" leaks the verb
-# "change" and the filler "subject" into the embedding — the weather signal
-# can then lose to sibling classes. Strip the preamble so the classifier
-# sees only the new topic ("weather").
-_SUBJECT_CHANGE_RE = re.compile(
-    r"^\s*(?:"
-    r"(?:i(?:'| a)?d\s+like\s+to\s+"
-    r"|i\s+would\s+like\s+to\s+"
-    r"|i\s+want\s+to\s+"
-    r"|i\s+wanna\s+"
-    r"|(?:let(?:'| a)?s|lets)\s+"
-    r"|can\s+we\s+"
-    r"|can\s+you\s+"
-    r"|please\s+)?"
-    r"(?:change|switch|shift|move|go)\s+(?:the\s+)?(?:subject|topic|conversation)\s+to\s+"
-    r"|"
-    r"(?:let(?:'| a)?s|lets)\s+(?:talk\s+about|discuss)\s+"
-    r"|"
-    r"(?:switching|changing)\s+(?:the\s+)?(?:subject|topic)(?:\s+to)?\s+"
-    r")",
-    re.IGNORECASE,
-)
-
-# Common singular/plural normalization to help the classifier recognize the
-# canonical class term ("weathers" → "weather"). Only the classes where a
-# trailing-s confusion actually hurt Stage 1 in production.
-_PLURAL_FIXUPS = {
-    r"\bweathers\b": "weather",
-}
-
-
-def _strip_system_markers(prompt: str) -> str:
-    """Strip TOOL_RESULT and SMS SEND REQUEST markers so the classifier
-    sees only the user's actual words."""
-    cleaned = strip_tool_result_prefix(prompt)
-    cleaned = _SYS_PREFIX_RE.sub("", cleaned)
-    cleaned = _SYS_TAIL_RE.sub("", cleaned)  # truncated leftovers
-    cleaned = _SUBJECT_CHANGE_RE.sub("", cleaned, count=1)
-    for pat, repl in _PLURAL_FIXUPS.items():
-        cleaned = re.sub(pat, repl, cleaned, flags=re.IGNORECASE)
-    return cleaned.strip() or prompt
 
 # Maturity-based gate thresholds. Precision-first for new classes.
 #

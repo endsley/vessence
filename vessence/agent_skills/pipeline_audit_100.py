@@ -28,12 +28,19 @@ import datetime
 import json
 import logging
 import os
-import re
 import sys
 from collections import Counter, defaultdict
 from pathlib import Path
 
 import httpx
+from agent_skills.pipeline_audit_helpers import (
+    build_judge_prompt as _build_judge_prompt,
+    build_pipeline_audit_report_markdown as _build_pipeline_audit_report_markdown,
+    parse_judge_response as _parse_judge_response,
+    recent_prompt_rows_from_jsonl as _recent_prompt_rows_from_jsonl,
+    strip_system_context as _strip_system_context,
+    summarize_pipeline_events as _summarize_pipeline_events,
+)
 
 VESSENCE_HOME = Path(os.environ.get("VESSENCE_HOME", str(Path(__file__).resolve().parents[1])))
 VESSENCE_DATA_HOME = Path(os.environ.get("VESSENCE_DATA_HOME", str(Path.home() / "ambient/vessence-data")))
@@ -65,25 +72,6 @@ KNOWN_CLASSES = [
     "get time", "others",
 ]
 
-# Stage 3 escalation prepends system context (<jane_architecture>, <class_protocol>,
-# <memory_verify>, [CURRENT CONVERSATION STATE]) to the message before it reaches
-# the prompt dump. Strip these so the audit replays the user's actual words.
-_SYSTEM_XML_RE = re.compile(
-    r"<(?:jane_architecture|class_protocol|memory_verify|verify_first|standing_brain_context)"
-    r"[^>]*>[\s\S]*?</(?:jane_architecture|class_protocol|memory_verify|verify_first|standing_brain_context)>\s*",
-)
-_CONV_STATE_RE = re.compile(
-    r"\[CURRENT CONVERSATION STATE\][\s\S]*?\[END CURRENT CONVERSATION STATE\]\s*",
-)
-
-
-def _strip_system_context(msg: str) -> str:
-    """Remove system context markers injected by Stage 3 escalation."""
-    cleaned = _SYSTEM_XML_RE.sub("", msg)
-    cleaned = _CONV_STATE_RE.sub("", cleaned)
-    return cleaned.strip()
-
-
 # ── Data collection ─────────────────────────────────────────────────────────
 
 
@@ -91,32 +79,8 @@ def load_recent_prompts(n: int = 100) -> list[dict]:
     """Pull the last n meaningful user prompts from the dump."""
     if not PROMPT_DUMP.exists():
         return []
-    rows = []
     with PROMPT_DUMP.open() as f:
-        for line in f:
-            try:
-                d = json.loads(line)
-                msg = (d.get("message") or "").strip()
-                if not msg:
-                    continue
-                msg = _strip_system_context(msg)
-                if len(msg) < 3:
-                    continue
-                # Skip system prefixes that remain after stripping
-                if msg.startswith("[") or msg.startswith("("):
-                    continue
-                rows.append({"prompt": msg, "ts": d.get("timestamp", "")})
-            except Exception:
-                continue
-    # Dedupe consecutive duplicates
-    seen = set()
-    unique = []
-    for r in rows:
-        if r["prompt"] in seen:
-            continue
-        seen.add(r["prompt"])
-        unique.append(r)
-    return unique[-n:]
+        return _recent_prompt_rows_from_jsonl(f, n)
 
 
 # ── Live pipeline runner ────────────────────────────────────────────────────
@@ -154,48 +118,7 @@ async def run_through_pipeline(prompt: str, session_id: str) -> dict:
     except Exception as e:
         return {"error": str(e), "events": events}
 
-    # Summarize
-    classification = None
-    stage = None
-    response_text = ""
-    ack_text = None
-    tool_calls = []
-    for ev in events:
-        t = ev.get("type")
-        d = ev.get("data")
-        if t == "ack":
-            ack_text = d
-        elif t == "client_tool_call":
-            try:
-                tc = json.loads(d) if isinstance(d, str) else d
-                tool_calls.append(tc.get("tool", "?"))
-            except Exception:
-                pass
-        elif t == "delta":
-            response_text = d if isinstance(d, str) else response_text
-        elif t == "done":
-            response_text = d if isinstance(d, str) else response_text
-        # Pull classification + stage from the response object if available
-        if "classification" in ev:
-            classification = ev["classification"]
-        if "stage" in ev:
-            stage = ev["stage"]
-
-    # Heuristic stage detection if not in events
-    if not stage:
-        if any(ev.get("type") == "start" for ev in events):
-            stage = "stage3"
-        elif tool_calls or response_text:
-            stage = "stage2"
-
-    return {
-        "classification": classification,
-        "stage": stage,
-        "response": response_text[:500],
-        "ack": ack_text,
-        "tool_calls": tool_calls,
-        "events": events,
-    }
+    return _summarize_pipeline_events(events)
 
 
 # ── LLM judge ───────────────────────────────────────────────────────────────
@@ -203,27 +126,7 @@ async def run_through_pipeline(prompt: str, session_id: str) -> dict:
 
 async def judge(prompt: str, result: dict) -> dict:
     """Ask qwen to evaluate the pipeline output. Returns a verdict dict."""
-    judge_prompt = f"""You are auditing Jane's 3-stage pipeline. Decide if the pipeline handled this prompt correctly.
-
-USER PROMPT: {prompt}
-
-PIPELINE OUTPUT:
-- Classification: {result.get("classification", "?")}
-- Stage: {result.get("stage", "?")}
-- Ack to user: {result.get("ack") or "(none)"}
-- Tool calls: {result.get("tool_calls") or "(none)"}
-- Response text: {result.get("response", "")[:300]}
-
-Evaluate:
-1. Was the Stage 1 classification correct? Pick the ideal class from:
-   {", ".join(KNOWN_CLASSES)}
-2. Did Stage 2/3 produce a useful response that actually answers the prompt?
-
-Output EXACTLY this format (3 lines, nothing else):
-CORRECT_CLASS: <one of the classes above>
-CLASSIFICATION_OK: yes | no
-RESPONSE_OK: yes | no
-"""
+    judge_prompt = _build_judge_prompt(prompt, result, KNOWN_CLASSES)
     # MUST match every other local-LLM caller's num_ctx. Divergent num_ctx
     # forces Ollama to evict/reload the runner on each caller swap.
     try:
@@ -246,18 +149,7 @@ RESPONSE_OK: yes | no
     except Exception as e:
         return {"error": str(e)}
 
-    out = {"raw": raw}
-    for line in raw.splitlines():
-        m = re.match(r"CORRECT_CLASS:\s*(.+)", line, re.IGNORECASE)
-        if m:
-            out["correct_class"] = m.group(1).strip().lower()
-        m = re.match(r"CLASSIFICATION_OK:\s*(yes|no)", line, re.IGNORECASE)
-        if m:
-            out["classification_ok"] = m.group(1).lower() == "yes"
-        m = re.match(r"RESPONSE_OK:\s*(yes|no)", line, re.IGNORECASE)
-        if m:
-            out["response_ok"] = m.group(1).lower() == "yes"
-    return out
+    return _parse_judge_response(raw)
 
 
 # ── Self-correct: add prompt to correct class in ChromaDB ───────────────────
@@ -386,46 +278,19 @@ async def main(n: int = 100, apply_fixes: bool = False) -> int:
 
     # Write report
     elapsed = (datetime.datetime.now() - started).total_seconds()
-    report_lines = [
-        f"# Pipeline Audit Report — {started.strftime('%Y-%m-%d %H:%M')}",
-        f"",
-        f"- Prompts audited: **{len(prompts)}**",
-        f"- Elapsed: {elapsed:.0f}s",
-        f"- Classification failures: **{len(classification_failures)}**",
-        f"- Response failures: **{len(response_failures)}**",
-        f"- Auto-fixes applied (exemplars added): **{fixes_applied}**",
-        f"",
-        f"## Stage breakdown",
-    ]
-    for stage, count in stage_counts.most_common():
-        report_lines.append(f"- {stage}: {count}")
-    report_lines.append("")
-    report_lines.append("## Classification breakdown")
-    for cls, count in class_counts.most_common():
-        report_lines.append(f"- {cls}: {count}")
-    report_lines.append("")
-    if fixes_by_class:
-        report_lines.append("## Self-correct fixes by class")
-        for cls, count in fixes_by_class.most_common():
-            report_lines.append(f"- {cls}: +{count} exemplars")
-        report_lines.append("")
-    if classification_failures:
-        report_lines.append("## Classification failures (top 30)")
-        report_lines.append("| Prompt | Got | Should be |")
-        report_lines.append("|---|---|---|")
-        for f in classification_failures[:30]:
-            p = f["prompt"][:80].replace("|", "\\|")
-            report_lines.append(f"| {p} | {f['got']} | {f['should_be']} |")
-        report_lines.append("")
-    if response_failures:
-        report_lines.append("## Response failures (top 20) — usually need code changes")
-        for f in response_failures[:20]:
-            p = f["prompt"][:80].replace("|", "\\|")
-            report_lines.append(f"- **{p}** ({f['classification']}/{f['stage']}): {f['response'][:150]}")
-        report_lines.append("")
-
+    report_markdown = _build_pipeline_audit_report_markdown(
+        started=started,
+        prompt_count=len(prompts),
+        elapsed_seconds=elapsed,
+        stage_counts=stage_counts,
+        class_counts=class_counts,
+        classification_failures=classification_failures,
+        response_failures=response_failures,
+        fixes_applied=fixes_applied,
+        fixes_by_class=fixes_by_class,
+    )
     REPORT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    REPORT_PATH.write_text("\n".join(report_lines))
+    REPORT_PATH.write_text(report_markdown)
     logger.info("Report written to %s", REPORT_PATH)
     return 0
 

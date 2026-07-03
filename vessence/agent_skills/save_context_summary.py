@@ -17,6 +17,14 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from agent_skills.context_summary_helpers import (
+    clean_qwen_summary as _clean_qwen_summary,
+    context_snapshot_fact as _context_snapshot_fact,
+    last_summary_record as _last_summary_record,
+    parse_hook_payload as _parse_hook_payload,
+    response_text_from_payload as _response_text_from_payload,
+    should_summarize_response as _should_summarize_response,
+)
 from jane.config import (
     ADK_VENV_PYTHON,
     ADD_MEMORY_SCRIPT,
@@ -43,25 +51,19 @@ def ask_qwen_summarize(text: str) -> str:
             capture_output=True, text=True, timeout=45
         )
         # Strip the Qwen header line
-        lines = result.stdout.strip().splitlines()
-        lines = [l for l in lines if not l.startswith("---")]
-        return " ".join(lines).strip()
+        return _clean_qwen_summary(result.stdout)
     except Exception as e:
         return f"[summary unavailable: {e}]"
 
 
 def main():
     raw = sys.stdin.read().strip()
-    data = {}
-    try:
-        data = json.loads(raw) if raw else {}
-    except Exception:
-        pass
+    data = _parse_hook_payload(raw)
 
     # Extract response text — Stop hook provides it in "message" field
-    response_text = data.get("message", "")
+    response_text = _response_text_from_payload(data)
 
-    if not response_text or len(response_text.strip()) < 50:
+    if not _should_summarize_response(response_text):
         # Nothing meaningful to summarize
         sys.exit(0)
 
@@ -70,7 +72,7 @@ def main():
         sys.exit(0)
 
     now = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
-    fact = f"[Context snapshot {now}] {summary}"
+    fact = _context_snapshot_fact(now, summary)
 
     try:
         subprocess.run(
@@ -80,7 +82,7 @@ def main():
         # Save last summary for debugging
         os.makedirs(os.path.dirname(CONTEXT_LOG), exist_ok=True)
         with open(CONTEXT_LOG, "w") as f:
-            json.dump({"timestamp": now, "summary": summary}, f, indent=2)
+            json.dump(_last_summary_record(now, summary), f, indent=2)
     except Exception as e:
         sys.stderr.write(f"save_context_summary error: {e}\n")
 

@@ -12,6 +12,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from agent_skills.cron_notification_helpers import (
+    cron_env_payload as _cron_env_payload,
+    discord_webhook_payload as _discord_webhook_payload,
+    work_log_notification_text as _work_log_notification_text,
+)
 from jane.config import ENV_FILE_PATH, VESSENCE_HOME, VESSENCE_DATA_HOME, LOGS_DIR
 
 
@@ -27,7 +32,7 @@ def send_discord(message: str, webhook_url: str | None = None):
             import requests
             resp = requests.post(
                 webhook_url,
-                json={"content": message[:2000]},
+                json=_discord_webhook_payload(message),
                 timeout=10,
             )
             if resp.ok:
@@ -37,9 +42,9 @@ def send_discord(message: str, webhook_url: str | None = None):
 
     try:
         from agent_skills.work_log_tools import log_activity
-        clean = message.replace("**", "").replace("```", "").strip()
+        clean = _work_log_notification_text(message)
         if clean:
-            log_activity(clean[:300], category="notification")
+            log_activity(clean, category="notification")
     except Exception:
         pass
 
@@ -56,10 +61,9 @@ def load_cron_env() -> dict:
     except Exception:
         pass
 
-    return {
-        "DISCORD_TOKEN": os.getenv("DISCORD_TOKEN", ""),
-        "DISCORD_CHANNEL_ID": os.getenv("DISCORD_CHANNEL_ID", ""),
-        "VESSENCE_HOME": VESSENCE_HOME,
-        "VESSENCE_DATA_HOME": VESSENCE_DATA_HOME,
-        "LOGS_DIR": LOGS_DIR,
-    }
+    return _cron_env_payload(
+        os.environ,
+        vessence_home=VESSENCE_HOME,
+        vessence_data_home=VESSENCE_DATA_HOME,
+        logs_dir=LOGS_DIR,
+    )

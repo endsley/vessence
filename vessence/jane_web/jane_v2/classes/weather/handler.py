@@ -16,13 +16,30 @@ from __future__ import annotations
 
 import json
 import logging
-import re
-from datetime import date, timedelta
 from pathlib import Path
 
-import httpx
+from jane_web.jane_v2.ollama_client import post_local_llm_response as _post_local_llm_response
 
-from jane_web.jane_v2.models import LOCAL_LLM as MODEL, LOCAL_LLM_NUM_CTX, LOCAL_LLM_TIMEOUT, OLLAMA_URL
+from .slices import (
+    DAY_PHRASE_MAP as _DAY_PHRASE_MAP,
+    NEUTRAL_DAY_REFS as _NEUTRAL_DAY_REFS,
+    VALID_TOPICS as _VALID_TOPICS,
+    WEEKDAYS as _WEEKDAYS,
+    day_from_followup as _day_from_followup,
+    day_reference as _day_reference,
+    ensure_day_reference as _ensure_day_reference,
+    normalize_day as _normalize_day,
+    slice_for as _slice_for,
+    without_debug_fields as _without_debug_fields,
+)
+from .phrasing import (
+    ANSWER_TEMPLATE as _ANSWER_TEMPLATE,
+    weather_answer_prompt as _weather_answer_prompt,
+    weather_phrase_payload as _weather_phrase_payload,
+)
+from .responses import (
+    build_weather_followup_response as _wrap_with_followup,
+)
 
 logger = logging.getLogger(__name__)
 WEATHER_PATH = Path("/home/chieh/ambient/vessence-data/cache/weather.json")
@@ -37,295 +54,26 @@ _FORCE_ESCALATE_PHRASES = (
     "news about", "latest on",
 )
 
-_VALID_TOPICS = {"current", "forecast", "precipitation", "wind",
-                 "air_quality", "pollen", "overview"}
-
-_WEEKDAYS = ["monday", "tuesday", "wednesday", "thursday", "friday",
-             "saturday", "sunday"]
-
-# Phrases the resume branch maps to a day spec when the user replies after
-# "Want the weather for another day?". Order matters — match longest first.
-_DAY_PHRASE_MAP = [
-    ("day after tomorrow", None),  # special: today + 2
-    ("tomorrow", "tomorrow"),
-    ("today", "today"),
-    ("tonight", "today"),
-    ("this week", "this_week"),
-    ("the week", "this_week"),
-    ("weekend", "weekend"),
-    ("monday", "monday"), ("tuesday", "tuesday"), ("wednesday", "wednesday"),
-    ("thursday", "thursday"), ("friday", "friday"), ("saturday", "saturday"),
-    ("sunday", "sunday"),
-]
-
-
-def _day_from_followup(prompt: str) -> str | None:
-    """Map a follow-up reply ('and tomorrow?', 'monday') to a day spec.
-    Returns None when no day is detected — caller treats as a pivot."""
-    p = (prompt or "").lower()
-    if not p.strip():
-        return None
-    for phrase, mapped in _DAY_PHRASE_MAP:
-        if phrase in p:
-            if phrase == "day after tomorrow":
-                from datetime import date, timedelta
-                return (date.today() + timedelta(days=2)).isoformat()
-            return mapped
-    return None
-
-
-def _normalize_day(day: str | None, forecast: list[dict]) -> dict | None:
-    """Return the forecast entry matching `day`, or None if not found.
-
-    Accepts: today, tomorrow, weekday name, or 'this_week'/'weekend' (None).
-    'weekend' / 'this_week' return None — caller treats as multi-day.
-    """
-    if not day or not forecast:
-        return None
-    d = day.strip().lower()
-    if d in ("this_week", "weekend", "week"):
-        return None  # multi-day — caller handles
-    today = date.today()
-    if d == "today":
-        target = today
-    elif d == "tomorrow":
-        target = today + timedelta(days=1)
-    elif d in _WEEKDAYS:
-        target_idx = _WEEKDAYS.index(d)
-        days_ahead = (target_idx - today.weekday()) % 7
-        target = today + timedelta(days=days_ahead)
-    else:
-        # Try ISO date
-        m = re.match(r"\d{4}-\d{2}-\d{2}", d)
-        if m:
-            try:
-                target = date.fromisoformat(m.group(0))
-            except ValueError:
-                return None
-        else:
-            return None
-    target_iso = target.isoformat()
-    for entry in forecast:
-        if entry.get("date") == target_iso:
-            return entry
-    return None
-
-
-def _without_debug_fields(entry: dict) -> dict:
-    return {k: v for k, v in entry.items() if not k.startswith("debug_")}
-
-
-def _slice_for(topic: str, day: str | None, data: dict) -> dict | None:
-    """Build the smallest dict that answers the topic/day combo. Returns
-    None when the slice can't be assembled (escalate)."""
-    forecast = data.get("forecast") or []
-    current = data.get("current") or {}
-    air = data.get("air_quality") or {}
-    pollen = data.get("pollen")
-
-    day_entry = _normalize_day(day, forecast)
-    multi_day = day and day.lower() in ("this_week", "weekend", "week")
-
-    if topic == "pollen":
-        if not pollen:
-            return None  # cache doesn't have pollen → escalate
-        return {"topic": "pollen", "pollen": pollen}
-
-    if topic == "air_quality":
-        return {"topic": "air_quality", "air_quality": air}
-
-    if topic == "wind":
-        if day_entry:
-            return {"topic": "wind", "day": day_entry.get("weekday"),
-                    "wind": day_entry.get("wind")}
-        return {"topic": "wind", "current_wind": current.get("wind")}
-
-    if topic == "precipitation":
-        if multi_day:
-            days = forecast[:7]
-        elif day_entry:
-            days = [day_entry]
-        else:
-            days = forecast[:3]  # default: today + next 2
-        slim = [{"weekday": d.get("weekday"), "date": d.get("date"),
-                 "precipitation": d.get("precipitation"),
-                 "condition": d.get("condition")} for d in days]
-        return {"topic": "precipitation", "days": slim}
-
-    if topic == "forecast":
-        if multi_day:
-            days = forecast[:7]
-            slim = [{"weekday": d.get("weekday"), "high": d.get("high"),
-                     "low": d.get("low"), "condition": d.get("condition")}
-                    for d in days]
-            return {"topic": "weekly_forecast", "days": slim}
-        if day_entry:
-            return {"topic": "day_forecast", "day": _without_debug_fields(day_entry)}
-        # default: today
-        return {"topic": "day_forecast",
-                "day": _without_debug_fields(forecast[0]) if forecast else {}}
-
-    if topic == "current":
-        return {"topic": "current", "current": _without_debug_fields(current),
-                "today": _without_debug_fields(forecast[0]) if forecast else {}}
-
-    # overview = "how's the weather": current + today's forecast
-    return {"topic": "overview", "current": _without_debug_fields(current),
-            "today": _without_debug_fields(forecast[0]) if forecast else {},
-            "air_quality_aqi": air.get("us_aqi") or air.get("aqi")}
-
-
-_ANSWER_TEMPLATE = """You are Jane answering a voice weather question.
-
-Use ONLY the data slice below to answer. Speak in ONE sentence (two at \
-absolute most). Be casual, like a friend — no preamble, no formal phrasing.
-
-Style rules:
-- Round numbers ("51" not "51.1"). Say "degrees" not "°F".
-- Drop the location and ISO date unless directly asked.
-- Skip lists; say it as prose.
-- The data slice is for {day_ref}. When {day_ref} is anything other than \
-"today", the day reference MUST appear in your answer. Never say "today" \
-unless {day_ref} is "today".
-
-Examples of the desired tone (do NOT copy verbatim — adapt to the data):
-- "It's 51 and feels like 41, pretty clear out."           (day_ref = today)
-- "Around 47 with light drizzle tomorrow."                 (day_ref = tomorrow)
-- "High around 73 on Wednesday, partly cloudy."           (day_ref = Wednesday)
-- "Air quality's good — AQI is 35."                        (no day reference)
-- "Looks like rain Saturday, high near 62."                (day_ref = Saturday)
-
-Data slice (refer to this day as "{day_ref}"):
-{slice}
-
-User question: {prompt}
-
-Your 1-sentence spoken answer:"""
-
-
-def _day_reference(slice_obj: dict) -> str:
-    """Human-readable day reference for the prompt template.
-
-    For single-day slices, derive 'today'/'tomorrow'/'<weekday>' from the
-    slice's date. For multi-day slices or facets without a day (overview,
-    air_quality, pollen, current), return a neutral phrase that lets the
-    LLM keep its "no specific day" behavior.
-    """
-    today = date.today()
-    candidates = []
-    if isinstance(slice_obj, dict):
-        if isinstance(slice_obj.get("day"), dict):
-            candidates.append(slice_obj["day"])
-        if isinstance(slice_obj.get("today"), dict):
-            candidates.append(slice_obj["today"])
-        if isinstance(slice_obj.get("days"), list) and len(slice_obj["days"]) == 1:
-            d = slice_obj["days"][0]
-            if isinstance(d, dict):
-                candidates.append(d)
-    for entry in candidates:
-        iso = entry.get("date")
-        weekday = entry.get("weekday")
-        if not iso:
-            continue
-        try:
-            d = date.fromisoformat(iso)
-        except ValueError:
-            continue
-        delta = (d - today).days
-        if delta == 0:
-            return "today"
-        if delta == 1:
-            return "tomorrow"
-        if 2 <= delta <= 6:
-            return weekday or d.strftime("%A")
-        return weekday or iso
-    if isinstance(slice_obj, dict) and isinstance(slice_obj.get("days"), list):
-        return "the next several days"
-    return "today"
-
-
-_NEUTRAL_DAY_REFS = ("today", "the next several days")
-
-
-def _ensure_day_reference(text: str, day_ref: str) -> str:
-    """Safety net: qwen2.5:7b sometimes drops the day from the answer
-    (e.g. "It's around 58 with overcast skies" when the slice is for
-    tomorrow). Without this, the user hears today/tomorrow ambiguously.
-
-    If day_ref is non-trivial and absent from the answer (case-insensitive,
-    word-boundary), prepend it.
-    """
-    if not text or not day_ref or day_ref in _NEUTRAL_DAY_REFS:
-        return text
-    if re.search(rf"\b{re.escape(day_ref)}\b", text, flags=re.IGNORECASE):
-        return text
-    # Lowercase first letter of original so the prepended day reads naturally.
-    rest = text[0].lower() + text[1:] if text and text[0].isupper() else text
-    return f"{day_ref.capitalize()}: {rest}"
-
-
 async def _phrase(slice_obj: dict, prompt: str) -> str | None:
     day_ref = _day_reference(slice_obj)
-    body = {
-        "model": MODEL,
-        "prompt": _ANSWER_TEMPLATE.format(
-            slice=json.dumps(slice_obj, indent=2),
-            prompt=prompt,
-            day_ref=day_ref,
-        ),
-        "stream": False,
-        "think": False,
-        "options": {"temperature": 0.2, "num_predict": 60, "num_ctx": LOCAL_LLM_NUM_CTX},
-        "keep_alive": -1,
-    }
+
+    def payload_builder(prompt_text: str, *, model: str, num_ctx: int, keep_alive: str | int) -> dict:
+        return _weather_phrase_payload(
+            slice_obj,
+            prompt_text,
+            model=model,
+            num_ctx=num_ctx,
+            keep_alive=keep_alive,
+        )
+
     try:
-        async with httpx.AsyncClient(timeout=LOCAL_LLM_TIMEOUT) as client:
-            r = await client.post(OLLAMA_URL, json=body)
-            r.raise_for_status()
-            try:
-                from jane_web.jane_v2.models import record_ollama_activity
-                record_ollama_activity()
-            except Exception:
-                pass
-            text = (r.json().get("response") or "").strip()
+        text = await _post_local_llm_response(prompt, payload_builder)
     except Exception as e:
         logger.warning("weather handler: ollama call failed: %s", e)
         return None
     if not text:
         return None
     return _ensure_day_reference(text, day_ref)
-
-
-def _expires_at(minutes: int = 2) -> str:
-    import datetime as _dt
-    return (_dt.datetime.utcnow() + _dt.timedelta(minutes=minutes)).strftime(
-        "%Y-%m-%dT%H:%M:%SZ"
-    )
-
-
-def _wrap_with_followup(spoken: str, topic: str, location: str | None) -> dict:
-    """Append 'Want another day?' and a STAGE2_FOLLOWUP pending."""
-    follow = "Want the weather for another day?"
-    text = f"{spoken} {follow}"
-    return {
-        "text": text,
-        "structured": {
-            "intent": "weather",
-            "pending_action": {
-                "type": "STAGE2_FOLLOWUP",
-                "handler_class": "weather",
-                "status": "awaiting_user",
-                "awaiting": "another_day_or_stop",
-                "data": {
-                    "awaiting": "another_day_or_stop",
-                    "topic": topic,
-                    "location": location or "",
-                },
-                "question": follow,
-                "expires_at": _expires_at(),
-            },
-        },
-    }
 
 
 async def _answer_for(prompt: str, topic: str, day, location: str | None) -> dict | None:

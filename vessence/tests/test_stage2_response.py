@@ -1,6 +1,7 @@
 from jane_web.jane_v2.stage2_response import (
     assemble_music_text,
     stage2_response_parts,
+    stage2_visible_text_and_client_tool_calls,
     wrap_spoken,
 )
 
@@ -41,3 +42,15 @@ def test_stage2_response_parts_keeps_print_block_unspoken_and_returns_extras():
         "client_tools": [{"name": "tool", "args": {"x": 1}}],
         "conversation_end": True,
     }
+
+
+def test_stage2_visible_text_and_client_tool_calls_strips_embedded_markers():
+    visible, calls = stage2_visible_text_and_client_tool_calls(
+        'Sending. [[CLIENT_TOOL:contacts.sms_send:{"draft_id":"d1"}]] Done.'
+    )
+
+    assert visible == "Sending.  Done."
+    assert len(calls) == 1
+    assert calls[0]["tool"] == "contacts.sms_send"
+    assert calls[0]["args"] == {"draft_id": "d1"}
+    assert calls[0]["call_id"]

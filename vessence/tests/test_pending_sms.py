@@ -1,3 +1,6 @@
+import asyncio
+
+from jane_web.jane_v2 import pending_sms
 from jane_web.jane_v2.pending_sms import (
     cancel_pending_sms_draft,
     extract_sms_draft_state,
@@ -82,3 +85,35 @@ def test_sms_draft_send_and_cancel_use_existing_draft_id():
     assert send["structured"]["pending_action"]["resolution"] == "sent"
     assert '[[CLIENT_TOOL:contacts.sms_cancel:{"draft_id": "draft-1"}]]' in cancel["text"]
     assert cancel["structured"]["pending_action"]["resolution"] == "cancelled"
+
+
+def test_sms_draft_edit_uses_shared_ollama_client(monkeypatch):
+    captured = {}
+
+    async def fake_post(prompt_text, payload_builder):
+        captured["prompt"] = prompt_text
+        captured["payload"] = payload_builder(
+            prompt_text,
+            model="qwen",
+            num_ctx=4096,
+            keep_alive="5m",
+        )
+        return "New body"
+
+    monkeypatch.setattr(pending_sms, "_post_local_llm_response", fake_post)
+
+    result = asyncio.run(
+        pending_sms.resolve_pending_sms_draft_edit(
+            {"data": {"draft_id": "draft-1", "query": "Mia", "body": "Old body"}},
+            "make it shorter",
+        )
+    )
+
+    assert captured["prompt"].endswith("NEW BODY:")
+    assert captured["payload"]["prompt"].endswith("NEW BODY:")
+    assert captured["payload"]["options"]["num_predict"] == 80
+    assert captured["payload"]["keep_alive"] == "5m"
+    assert '[[CLIENT_TOOL:contacts.sms_draft_update:{"draft_id": "draft-1", "body": "New body"}]]' in (
+        result["text"]
+    )
+    assert result["structured"]["entities"]["message_body"] == "New body"

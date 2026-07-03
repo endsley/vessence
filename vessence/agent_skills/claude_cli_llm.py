@@ -14,6 +14,13 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from agent_skills.cli_llm_policy import (
+    extract_json_text as _extract_json_text,
+    fallback_provider_sequence as _fallback_provider_sequence,
+    model_for_tier as _model_for_tier,
+    should_try_fallback as _should_try_fallback,
+    truncate_prompt_for_cli as _truncate_prompt_for_cli,
+)
 from jane.config import PROVIDER_CLI, CHEAP_MODEL, SMART_MODEL, FRONTIER_MODEL, _PROVIDER, PROVIDER_MODELS
 
 # Tiered Model Mapping (as of 2026-03-27)
@@ -74,8 +81,7 @@ def completion(prompt: str, *, model: str | None = None,
     """
     # Safety truncation to avoid "Argument list too long" errors
     # 32,000 characters is a safe limit for most CLI arguments.
-    if len(prompt) > 32000:
-        prompt = prompt[:1000] + "\n... [TRUNCATED] ...\n" + prompt[-31000:]
+    prompt = _truncate_prompt_for_cli(prompt)
         
     model = model or CHEAP_MODEL
     cmd = _build_command(prompt, model, max_tokens, cli=cli, cwd=cwd)
@@ -117,18 +123,13 @@ def completion_with_fallback(prompt: str, *, tier: str = "utility",
         err_msg = str(e)
         # If it's a hard error like "CLI not found" AND not a limit error, raise it.
         # But if it's a limit, quota, timeout, or general failure, try fallback.
-        is_limit = "limit" in err_msg.lower() or "quota" in err_msg.lower()
-        is_timeout = "timed out" in err_msg.lower()
-        
-        if not (is_limit or is_timeout or "failed" in err_msg.lower()):
+        if not _should_try_fallback(err_msg):
             raise e
         
         logger.warning(f"Primary LLM failed: {err_msg[:100]}... Attempting fallback.")
 
     # 2. Try Fallbacks (Codex then Gemini)
-    fallback_sequence = ["openai", "gemini", "claude"]
-    # Filter out current provider
-    fallbacks = [p for p in fallback_sequence if p != _PROVIDER]
+    fallbacks = _fallback_provider_sequence(_PROVIDER)
     
     last_err = None
     for provider in fallbacks:
@@ -138,10 +139,7 @@ def completion_with_fallback(prompt: str, *, tier: str = "utility",
             
         cli = config["cli"]
         # Map tier to provider-specific model (though _build_command may ignore it for codex)
-        if tier == "orchestrator" or tier == "agent":
-            model = config["smart"]
-        else:
-            model = config["cheap"]
+        model = _model_for_tier(config, tier)
             
         try:
             logger.info(f"Fallback: trying {provider} ({cli})...")
@@ -208,10 +206,4 @@ def completion_json(prompt: str, *, tier: str = "utility", timeout: int = 300) -
     else:
         text = completion_utility(prompt, max_tokens=4096, timeout=timeout)
     
-    # Strip markdown code fences if present
-    if "```json" in text:
-        text = text.split("```json")[1].split("```")[0].strip()
-    elif "```" in text:
-        text = text.split("```")[1].split("```")[0].strip()
-    
-    return json.loads(text)
+    return json.loads(_extract_json_text(text))

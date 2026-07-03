@@ -8,9 +8,19 @@ Token storage path: $VESSENCE_DATA_HOME/credentials/gmail_token.json
 import json
 import logging
 import os
-import re
 import time
 from pathlib import Path
+
+from agent_skills.email_oauth_helpers import (
+    TOKEN_FILE_PREFIX,
+    account_token_file,
+    apply_refresh_response,
+    build_token_payload,
+    normalized_user_id as _normalized_user_id,
+    should_refresh_token,
+    should_write_legacy_token,
+    token_slug as _token_slug,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -20,25 +30,16 @@ _VESSENCE_DATA_HOME = os.environ.get(
 )
 _CREDS_DIR = os.path.join(_VESSENCE_DATA_HOME, "credentials")
 _TOKEN_FILE = os.path.join(_CREDS_DIR, "gmail_token.json")
-_TOKEN_FILE_PREFIX = "gmail_token_"
+_TOKEN_FILE_PREFIX = TOKEN_FILE_PREFIX
 _BOOTSTRAPPED_GOOGLE_OAUTH_ENV = False
 
 
-def _normalized_user_id(user_id: str | None) -> str:
-    return (user_id or "").strip().lower()
-
-
-def _token_slug(user_id: str) -> str:
-    normalized = _normalized_user_id(user_id)
-    slug = normalized.replace("@", "_at_").replace(".", "_")
-    return re.sub(r"[^a-z0-9_-]+", "_", slug).strip("_")
-
-
 def _account_token_file(user_id: str) -> str:
-    slug = _token_slug(user_id)
-    if not slug:
-        raise ValueError("Gmail user_id is required for account-specific token storage")
-    return os.path.join(_CREDS_DIR, f"{_TOKEN_FILE_PREFIX}{slug}.json")
+    return account_token_file(
+        _CREDS_DIR,
+        user_id,
+        token_file_prefix=_TOKEN_FILE_PREFIX,
+    )
 
 
 def _ensure_creds_dir() -> None:
@@ -57,17 +58,7 @@ def store_gmail_token(user_id: str, token_data: dict) -> str:
     """
     _ensure_creds_dir()
     normalized_user = _normalized_user_id(user_id)
-    if not normalized_user:
-        raise ValueError("Gmail user_id is required")
-    payload = {
-        "user_id": normalized_user,
-        "access_token": token_data.get("access_token", ""),
-        "refresh_token": token_data.get("refresh_token", ""),
-        "token_type": token_data.get("token_type", "Bearer"),
-        "expires_at": token_data.get("expires_at", 0),
-        "scope": token_data.get("scope", ""),
-        "stored_at": time.time(),
-    }
+    payload = build_token_payload(user_id, token_data, stored_at=time.time())
 
     account_file = _account_token_file(normalized_user)
     with open(account_file, "w") as f:
@@ -85,7 +76,7 @@ def store_gmail_token(user_id: str, token_data: dict) -> str:
                 legacy_user = _normalized_user_id(json.load(f).get("user_id"))
         except Exception:
             legacy_user = ""
-    if not legacy_user or legacy_user == normalized_user:
+    if should_write_legacy_token(legacy_user, normalized_user):
         with open(_TOKEN_FILE, "w") as f:
             json.dump(payload, f, indent=2)
         os.chmod(_TOKEN_FILE, 0o600)
@@ -213,7 +204,7 @@ def refresh_token_if_needed(user_id: str | None = None) -> dict | None:
 
     expires_at = token_data.get("expires_at", 0)
     # Refresh if token expires within the next 5 minutes
-    if time.time() < (expires_at - 300):
+    if not should_refresh_token(expires_at, now=time.time()):
         return token_data
 
     refresh_token = token_data.get("refresh_token")
@@ -246,10 +237,7 @@ def refresh_token_if_needed(user_id: str | None = None) -> dict | None:
         _logger.error("Failed to refresh Gmail token: %s", exc)
         return None
 
-    token_data["access_token"] = new_tokens["access_token"]
-    token_data["expires_at"] = time.time() + new_tokens.get("expires_in", 3600)
-    if "refresh_token" in new_tokens:
-        token_data["refresh_token"] = new_tokens["refresh_token"]
+    apply_refresh_response(token_data, new_tokens, now=time.time())
 
     stored_user = token_data.get("user_id", user_id or "")
     store_gmail_token(stored_user, token_data)

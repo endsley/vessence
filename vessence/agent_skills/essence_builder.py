@@ -19,6 +19,35 @@ import shutil
 from dataclasses import dataclass, field, asdict
 from typing import Optional
 
+from agent_skills.essence_builder_parsing import (
+    credentials_from_answer as _credentials_from_answer,
+    extract_list_from_answer as _extract_list_from_answer,
+    extract_model_id as _extract_model_id,
+    extract_quoted_strings as _extract_quoted_strings,
+    extract_role_title as _extract_role_title,
+    extract_section_fragment as _extract_section_fragment,
+    sanitize_essence_folder_name as _sanitize_essence_folder_name,
+    select_permissions as _select_permissions,
+    select_shared_skills as _select_shared_skills,
+    select_ui_type as _select_ui_type,
+    trigger_list_from_answer as _trigger_list_from_answer,
+)
+from agent_skills.essence_builder_interview import (
+    extract_essence_name as _extract_essence_name_helper,
+    format_questions as _format_questions_from_config,
+    progress_summary as _progress_summary,
+    section_display_name as _section_display_name_helper,
+    section_intro as _section_intro_from_config,
+    spec_document as _spec_document,
+)
+from agent_skills.essence_builder_manifest import manifest_from_answers as _manifest_from_answers
+from agent_skills.essence_builder_outputs import (
+    custom_tools_stub as _custom_tools_stub,
+    essence_layout_payload as _essence_layout_payload,
+    onboarding_payload as _onboarding_payload,
+    should_write_custom_functions as _should_write_custom_functions,
+)
+
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
@@ -298,44 +327,17 @@ def clear_state() -> None:
 
 def _section_display_name(index: int) -> str:
     """Human-readable name for a section index."""
-    names = [
-        "Identity & Personality",
-        "Knowledge Base",
-        "Custom Functions",
-        "Shared Skills",
-        "UI Paradigm",
-        "Interaction Patterns",
-        "Triggers & Automations",
-        "Capabilities Declaration",
-        "Preferred Model",
-        "Permissions & Credentials",
-        "User Data Layer",
-        "Review & Approve",
-    ]
-    return names[index] if 0 <= index < len(names) else f"Section {index}"
+    return _section_display_name_helper(index)
 
 
 def _format_questions(section_index: int, include_optional: bool = False) -> str:
     """Format the questions for a section into a numbered list."""
-    q = INTERVIEW_QUESTIONS[section_index]
-    lines = []
-    for i, question in enumerate(q["required_questions"], 1):
-        lines.append(f"{i}. {question}")
-    if include_optional and q["optional_questions"]:
-        lines.append("\nOptional — answer these if relevant:")
-        for i, question in enumerate(q["optional_questions"], len(q["required_questions"]) + 1):
-            lines.append(f"{i}. {question}")
-    return "\n".join(lines)
+    return _format_questions_from_config(INTERVIEW_QUESTIONS, section_index, include_optional)
 
 
 def _section_intro(section_index: int) -> str:
     """Opening message for a section."""
-    name = _section_display_name(section_index)
-    total = len(SECTION_NAMES)
-    return (
-        f"--- **Section {section_index + 1}/{total}: {name}** ---\n\n"
-        f"{_format_questions(section_index, include_optional=True)}"
-    )
+    return _section_intro_from_config(SECTION_NAMES, INTERVIEW_QUESTIONS, section_index)
 
 
 # ---------------------------------------------------------------------------
@@ -431,21 +433,7 @@ def process_answer(
 
 def _extract_essence_name(answer: str) -> str:
     """Best-effort extraction of the essence name from the identity answer."""
-    # Look for a quoted name or the first capitalized phrase
-    for line in answer.split("\n"):
-        lower = line.lower()
-        if "name" in lower or "called" in lower or "essence" in lower:
-            # Try to grab a quoted string
-            for quote in ('"', "'"):
-                if quote in line:
-                    parts = line.split(quote)
-                    if len(parts) >= 3:
-                        return parts[1].strip()
-            # Fallback: use the part after the colon
-            if ":" in line:
-                return line.split(":", 1)[1].strip()
-    # Final fallback: first 60 chars
-    return answer[:60].strip()
+    return _extract_essence_name_helper(answer)
 
 
 def get_progress(state: EssenceInterviewState) -> str:
@@ -454,16 +442,7 @@ def get_progress(state: EssenceInterviewState) -> str:
 
     Example: "Sections completed: 3/12 — Identity ✓, Knowledge ✓, Functions ✓, next: Shared Skills"
     """
-    total = len(SECTION_NAMES)
-    done = len(state.completed_sections)
-    parts = []
-    for i in range(total):
-        name = _section_display_name(i)
-        if i in state.completed_sections:
-            parts.append(f"{name} done")
-    next_name = _section_display_name(state.current_section) if state.current_section < total else "None"
-    done_str = ", ".join(parts) if parts else "None yet"
-    return f"Sections completed: {done}/{total} — {done_str}, next: {next_name}"
+    return _progress_summary(SECTION_NAMES, state.completed_sections, state.current_section)
 
 
 # ---------------------------------------------------------------------------
@@ -473,20 +452,7 @@ def get_progress(state: EssenceInterviewState) -> str:
 
 def generate_spec_document(state: EssenceInterviewState) -> str:
     """Compile all interview answers into a human-readable markdown spec."""
-    lines = [
-        f"# Essence Spec: {state.essence_name}",
-        "",
-    ]
-    for i, section_name in enumerate(SECTION_NAMES):
-        if section_name == "review_approve":
-            continue
-        display = _section_display_name(i)
-        answer = state.answers.get(section_name, "_Not yet answered._")
-        lines.append(f"## {i + 1}. {display}")
-        lines.append("")
-        lines.append(answer)
-        lines.append("")
-    return "\n".join(lines)
+    return _spec_document(SECTION_NAMES, state.answers, state.essence_name)
 
 
 def generate_manifest(state: EssenceInterviewState) -> dict:
@@ -496,101 +462,7 @@ def generate_manifest(state: EssenceInterviewState) -> dict:
     Extracts structured data from free-text answers where possible,
     falling back to sensible defaults.
     """
-    answers = state.answers
-
-    # Parse shared skills
-    skills_answer = answers.get("shared_skills", "")
-    known_skills = [
-        "memory_read_write", "file_handling", "tts",
-        "web_search", "screen_control", "microphone", "clipboard",
-    ]
-    selected_skills = [s for s in known_skills if s in skills_answer.lower().replace(" ", "_")]
-
-    # Parse UI type
-    ui_answer = answers.get("ui_paradigm", "").lower()
-    ui_type = "chat"
-    for candidate in ("hybrid", "dashboard", "form_wizard", "card_grid", "chat"):
-        if candidate.replace("_", " ") in ui_answer or candidate in ui_answer:
-            ui_type = candidate
-            break
-
-    # Parse permissions
-    perms_answer = answers.get("permissions_credentials", "").lower()
-    known_perms = ["internet", "file_system", "clipboard", "microphone", "camera", "screen_control"]
-    permissions = [p for p in known_perms if p.replace("_", " ") in perms_answer or p in perms_answer]
-
-    # Parse capabilities
-    caps_answer = answers.get("capabilities_declaration", "")
-    provides = _extract_list_from_answer(caps_answer, "provide")
-    consumes = _extract_list_from_answer(caps_answer, "consume")
-
-    # Parse model
-    model_answer = answers.get("preferred_model", "")
-    model_id = "claude-sonnet-4-6"  # sensible default
-    model_reasoning = model_answer
-    for known_model in [
-        "claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku",
-        "gpt-4o", "gpt-4", "gemini-flash", "gemini-pro",
-    ]:
-        if known_model in model_answer.lower().replace(" ", "-"):
-            model_id = known_model
-            break
-
-    # Parse conversation starters
-    interaction_answer = answers.get("interaction_patterns", "")
-    starters = _extract_quoted_strings(interaction_answer)
-
-    # Parse triggers
-    triggers_answer = answers.get("triggers_automations", "")
-    trigger_list = []
-    if triggers_answer.strip() and triggers_answer.strip().lower() not in ("none", "n/a", "no"):
-        trigger_list.append({
-            "condition": "custom",
-            "description": triggers_answer.strip(),
-        })
-
-    # Parse credentials
-    creds_answer = answers.get("permissions_credentials", "")
-    credentials = []
-    if "api" in creds_answer.lower() or "key" in creds_answer.lower() or "credential" in creds_answer.lower():
-        credentials.append({
-            "name": "CUSTOM_API_KEY",
-            "description": creds_answer.strip(),
-            "required": "required" in creds_answer.lower(),
-        })
-
-    # Identity fields
-    identity_answer = answers.get("identity_personality", "")
-    role_title = _extract_role_title(identity_answer)
-    description = answers.get("knowledge_base", state.essence_name)
-
-    manifest = {
-        "essence_name": state.essence_name,
-        "role_title": role_title,
-        "version": "1.0",
-        "author": "user",
-        "description": description[:200] if len(description) > 200 else description,
-        "preferred_model": {
-            "model_id": model_id,
-            "reasoning": model_reasoning[:300] if len(model_reasoning) > 300 else model_reasoning,
-        },
-        "permissions": permissions,
-        "external_credentials": credentials,
-        "capabilities": {
-            "provides": provides,
-            "consumes": consumes,
-        },
-        "ui": {
-            "type": ui_type,
-            "entry_layout": "ui/layout.json",
-        },
-        "shared_skills": selected_skills,
-        "interaction_patterns": {
-            "conversation_starters": starters,
-            "proactive_triggers": trigger_list,
-        },
-    }
-    return manifest
+    return _manifest_from_answers(state.essence_name, state.answers)
 
 
 def generate_personality_md(state: EssenceInterviewState) -> str:
@@ -649,18 +521,7 @@ def build_essence_from_spec(
     if not state.spec_approved:
         raise ValueError("Spec must be approved before building. Complete the review section first.")
 
-    # Sanitize folder name
-    folder_name = (
-        state.essence_name
-        .lower()
-        .replace(" ", "_")
-        .replace("-", "_")
-    )
-    # Remove non-alphanumeric chars except underscores
-    folder_name = "".join(c for c in folder_name if c.isalnum() or c == "_")
-    if not folder_name:
-        folder_name = "new_essence"
-
+    folder_name = _sanitize_essence_folder_name(state.essence_name)
     essence_path = os.path.join(essences_dir, folder_name)
 
     # Copy from template if available, otherwise create from scratch
@@ -686,32 +547,18 @@ def build_essence_from_spec(
 
     # Write custom functions stub if custom functions were described
     custom_funcs = state.answers.get("custom_functions", "")
-    if custom_funcs.strip() and custom_funcs.strip().lower() not in ("none", "n/a", "no"):
+    if _should_write_custom_functions(custom_funcs):
         funcs_path = os.path.join(essence_path, "functions", "custom_tools.py")
         os.makedirs(os.path.dirname(funcs_path), exist_ok=True)
         with open(funcs_path, "w") as f:
-            f.write(
-                f'"""\nCustom tools for {state.essence_name}\n\n'
-                f"Based on spec:\n{custom_funcs}\n\n"
-                f'TODO: Implement the functions described above.\n"""\n'
-            )
+            f.write(_custom_tools_stub(state.essence_name, custom_funcs))
 
     # Write UI layout stub
     ui_answer = state.answers.get("ui_paradigm", "")
     ui_type = generate_manifest(state)["ui"]["type"]
     layout_path = os.path.join(essence_path, "ui", "layout.json")
     os.makedirs(os.path.dirname(layout_path), exist_ok=True)
-    layout = {
-        "type": ui_type,
-        "components": [
-            {
-                "id": "main",
-                "type": f"{ui_type}_panel",
-                "position": "main",
-            }
-        ],
-        "notes": ui_answer[:500] if len(ui_answer) > 500 else ui_answer,
-    }
+    layout = _essence_layout_payload(ui_type, ui_answer)
     with open(layout_path, "w") as f:
         json.dump(layout, f, indent=2)
 
@@ -720,13 +567,7 @@ def build_essence_from_spec(
     starters = generate_manifest(state)["interaction_patterns"]["conversation_starters"]
     workflows_path = os.path.join(essence_path, "workflows", "onboarding.json")
     os.makedirs(os.path.dirname(workflows_path), exist_ok=True)
-    onboarding = {
-        "onboarding": {
-            "conversation_starters": starters,
-            "steps": [],
-            "notes": interaction_answer[:500] if len(interaction_answer) > 500 else interaction_answer,
-        }
-    }
+    onboarding = _onboarding_payload(starters, interaction_answer)
     with open(workflows_path, "w") as f:
         json.dump(onboarding, f, indent=2)
 
@@ -760,78 +601,8 @@ def _create_folder_structure(essence_path: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Text extraction helpers
-# ---------------------------------------------------------------------------
-
-
-def _extract_role_title(text: str) -> str:
-    """Try to extract a role title like 'the accountant' from free-text."""
-    lower = text.lower()
-    # Look for "the <role>" pattern
-    for marker in ("role title:", "role:", "title:"):
-        if marker in lower:
-            idx = lower.index(marker) + len(marker)
-            fragment = text[idx:].strip().split("\n")[0].strip().rstrip(".")
-            if fragment:
-                frag = fragment.strip("'\"")
-                if not frag.lower().startswith("the "):
-                    frag = f"the {frag}"
-                return frag
-    # Look for "the <word>" pattern
-    import re
-    match = re.search(r"\bthe\s+(\w+)", lower)
-    if match:
-        return f"the {match.group(1)}"
-    return "the specialist"
-
-
-def _extract_list_from_answer(text: str, keyword: str) -> list[str]:
-    """Extract a comma-separated or bullet list of items near a keyword."""
-    items = []
-    for line in text.split("\n"):
-        lower = line.lower()
-        if keyword in lower:
-            # Try comma-separated
-            after = line.split(":", 1)[-1] if ":" in line else line
-            parts = [p.strip().strip("-•*").strip() for p in after.split(",")]
-            items.extend(p for p in parts if p and len(p) < 80)
-    # Also grab bullet items
-    for line in text.split("\n"):
-        stripped = line.strip()
-        if stripped.startswith(("-", "*", "•")):
-            item = stripped.lstrip("-*• ").strip()
-            if item and len(item) < 80 and item not in items:
-                items.append(item)
-    return items if items else []
-
-
-def _extract_quoted_strings(text: str) -> list[str]:
-    """Extract strings enclosed in quotes, or bullet items."""
-    import re
-    # Quoted strings
-    quoted = re.findall(r'["\']([^"\']{5,})["\']', text)
-    if quoted:
-        return quoted[:6]
-    # Bullet items
-    items = []
-    for line in text.split("\n"):
-        stripped = line.strip()
-        if stripped.startswith(("-", "*", "•", "1", "2", "3", "4")):
-            item = stripped.lstrip("-*•0123456789. ").strip()
-            if item and len(item) > 4:
-                items.append(item)
-    return items[:6] if items else []
-
-
-def _extract_section_fragment(text: str, keyword: str) -> str:
-    """Extract lines from text that relate to a keyword."""
-    lines = []
-    for line in text.split("\n"):
-        if keyword in line.lower():
-            lines.append(f"- {line.strip()}")
-    if lines:
-        return "\n".join(lines)
-    return "- (To be refined based on interview answers)"
+# Text extraction helpers live in `essence_builder_parsing.py` and are imported
+# above under their legacy private names for compatibility.
 
 
 # ---------------------------------------------------------------------------

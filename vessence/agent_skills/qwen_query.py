@@ -6,6 +6,12 @@ import requests
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from agent_skills.qwen_query_helpers import (
+    LOCAL_QWEN_HEADER,
+    OLLAMA_UNREACHABLE_MESSAGE,
+    qwen_system_instruction as _qwen_system_instruction,
+    usage_message as _usage_message,
+)
 from jane.llm_config import LOCAL_LLM_MODEL, LOCAL_LLM_BASE_URL, LOCAL_LLM_MODEL_LITELLM
 
 def check_ollama():
@@ -18,14 +24,10 @@ def check_ollama():
 
 def query_qwen(prompt):
     if not check_ollama():
-        print("CRITICAL ERROR: Local Ollama service is UNREACHABLE. Refusing to fall back to Gemini.")
+        print(OLLAMA_UNREACHABLE_MESSAGE)
         sys.exit(1)
 
-    system_instr = (
-        f"You are Jane, {os.environ.get('USER_NAME', 'the user')}'s technical expert and friend. "
-        "You are acting as the local Qwen specialist. "
-        "Provide expert technical assistance using your local knowledge."
-    )
+    system_instr = _qwen_system_instruction(os.environ.get("USER_NAME", "the user"))
     try:
         response = ollama.chat(
             model=LOCAL_LLM_MODEL,
@@ -35,7 +37,7 @@ def query_qwen(prompt):
             ]
         )
         # Explicit header for transparency
-        print("--- LOCAL QWEN RESPONSE (OLLAMA) ---")
+        print(LOCAL_QWEN_HEADER)
         print(response['message']['content'])
     except Exception as e:
         print(f"Ollama Execution Error: {e}")
@@ -43,7 +45,7 @@ def query_qwen(prompt):
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: qwen_query.py <prompt>")
+        print(_usage_message())
         sys.exit(1)
     
     prompt = " ".join(sys.argv[1:])

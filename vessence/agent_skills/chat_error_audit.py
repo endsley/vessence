@@ -22,17 +22,19 @@ import logging
 import os
 import re
 from pathlib import Path
+from typing import Any
+
+from agent_skills.chat_error_audit_helpers import (
+    chat_error_job_filename as _chat_error_job_filename,
+    chat_error_job_markdown as _chat_error_job_markdown,
+    first_android_frame as _parse_first_android_frame,
+    slugify_chat_error as _slugify_chat_error,
+)
 
 logger = logging.getLogger(__name__)
 
 VESSENCE_HOME = Path(os.environ.get("VESSENCE_HOME", str(Path(__file__).resolve().parents[1])))
 JOB_QUEUE_DIR = VESSENCE_HOME / "configs" / "job_queue"
-
-# Match the first com.vessences.android.* frame in a Java/Kotlin stack trace.
-_FRAME_RE = re.compile(
-    r"\s*at\s+(com\.vessences\.android\.[\w\.\$]+)"
-    r"\s*\(([^:)]+)(?::(\d+))?\)"
-)
 
 
 def _next_job_number() -> int:
@@ -52,26 +54,15 @@ def _next_job_number() -> int:
 
 
 def _slugify(s: str, max_len: int = 40) -> str:
-    s = re.sub(r"[^a-zA-Z0-9]+", "_", (s or "").lower()).strip("_")
-    return s[:max_len] or "chat_error"
+    return _slugify_chat_error(s, max_len=max_len)
 
 
-def _first_android_frame(stack_trace: str) -> dict | None:
+def _first_android_frame(stack_trace: str) -> dict[str, Any] | None:
     """Parse the stack trace and return the topmost com.vessences.android.* frame.
 
     Returns {"class_method": str, "file": str, "line": int|None} or None.
     """
-    if not stack_trace:
-        return None
-    for line in stack_trace.splitlines():
-        m = _FRAME_RE.search(line)
-        if m:
-            return {
-                "class_method": m.group(1),
-                "file": m.group(2),
-                "line": int(m.group(3)) if m.group(3) else None,
-            }
-    return None
+    return _parse_first_android_frame(stack_trace)
 
 
 def _find_source_path(kt_file: str) -> str | None:
@@ -102,86 +93,23 @@ def create_audit_job(payload: dict) -> Path | None:
         JOB_QUEUE_DIR.mkdir(parents=True, exist_ok=True)
 
         exc_class = payload.get("exception_class", "") or "UnknownException"
-        exc_short = exc_class.rsplit(".", 1)[-1]
-        msg = payload.get("message", "") or ""
         stack = payload.get("stack_trace", "") or ""
         ts = payload.get("timestamp", "") or dt.datetime.utcnow().strftime(
             "%Y-%m-%dT%H:%M:%S.%fZ"
         )
-        app_ver = payload.get("app_version", "") or "?"
-        ver_code = payload.get("version_code", "") or "?"
-        from_voice = payload.get("from_voice", "") or ""
 
         frame = _first_android_frame(stack) or {}
         src_hint = _find_source_path(frame.get("file", "")) or frame.get("file", "")
-        line_hint = frame.get("line")
-        loc = f"{src_hint}:{line_hint}" if src_hint and line_hint else (src_hint or "unknown")
 
         num = _next_job_number()
-        slug = _slugify(f"chat_error_{exc_short}")
-        job_path = JOB_QUEUE_DIR / f"job_{num:03d}_{slug}.md"
-
-        title = f"Audit Android chat_error: {exc_short}"
-
-        body = f"""---
-Title: {title}
-Priority: 2
-Status: pending
-Created: {dt.datetime.utcnow().strftime("%Y-%m-%d")}
-Auto-generated: true
-Source: android_chat_error_hook
----
-
-## Problem
-An Android `chat_error` diagnostic landed on the server. Jane's streaming
-chat caught an exception and surfaced a broken reply to the user. Every
-occurrence opens an audit job per Chieh's directive.
-
-## Incident
-
-- **Timestamp:** {ts}
-- **Exception:** `{exc_class}`
-- **Message:** `{msg[:400]}`
-- **APK:** v{app_ver} (code {ver_code})
-- **From voice:** {from_voice}
-- **First app frame:** `{frame.get("class_method", "?")}` at `{loc}`
-
-## Stack trace
-
-```
-{stack[:1800]}
-```
-
-## Scope
-1. Open the source file identified above (fallback: search the stack trace for
-   the first `com.vessences.android.*` frame and navigate to that line).
-2. Read the surrounding code and determine whether the exception is:
-   - a transient network condition (SocketException, IOException, EOFException)
-   - a logic bug (NullPointer, ClassCast, IllegalState)
-   - a protocol/contract violation between app and server
-3. For transient network conditions: confirm the catch block handles it
-   gracefully (user sees a friendly message, state is recoverable, stream
-   resumes cleanly). If not, add handling.
-4. For logic bugs: fix the root cause. Do NOT add a blanket try/catch unless
-   there is no safer alternative.
-5. For contract violations: fix both sides (app + server) so the incident
-   cannot recur.
-6. Write a small test reproducing the failure mode when feasible.
-7. Log the outcome via `work_log_tools.log_activity(..., category="chat_error_audit")`.
-
-## Verification
-- Build APK, install, verify the specific scenario no longer surfaces the
-  same exception class + frame.
-- If a fix is non-trivial, document the trade-offs in the incident commit.
-
-## Notes
-- If this is the 5th+ time the same `exception_class` + first frame has
-  opened a job, escalate priority and consider a broader redesign rather
-  than another point fix.
-- Consider whether the Android client should retry instead of surfacing
-  the error — but ONLY for reads/idempotent requests. NEVER auto-retry
-  `send_message` turns; they may double-send.
-"""
+        job_path = JOB_QUEUE_DIR / _chat_error_job_filename(num, exc_class)
+        body = _chat_error_job_markdown(
+            payload,
+            frame=frame,
+            source_hint=src_hint,
+            created_date=dt.datetime.utcnow().strftime("%Y-%m-%d"),
+            timestamp=ts,
+        )
         job_path.write_text(body)
         logger.info("chat_error_audit: created %s", job_path.name)
         return job_path

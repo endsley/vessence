@@ -386,3 +386,25 @@ def test_old_unread_cleanup_requires_unread_label_and_age():
     assert service.trashed == ["old-unread"]
     assert "is:unread" in monitor.build_unread_cleanup_query(21, include_trash=False)
     assert "older_than:21d" in monitor.build_unread_cleanup_query(21, include_trash=False)
+
+
+def test_unread_cleanup_count_uses_message_policy_for_dry_run():
+    now = dt.datetime(2026, 6, 29, 12, 0, tzinfo=NY)
+    service = _Service({
+        "old-unread": _message(now - dt.timedelta(days=30), "Sender <a@example.com>", "Old unread", labels=["UNREAD"]),
+        "old-read": _message(now - dt.timedelta(days=30), "Sender <a@example.com>", "Old read", labels=[]),
+        "young-unread": _message(now - dt.timedelta(days=5), "Sender <a@example.com>", "Young unread", labels=["UNREAD"]),
+    })
+
+    assert monitor.count_unread_cleanup_messages(
+        service,
+        ["old-unread", "old-read", "young-unread"],
+        older_than_days=21,
+        dry_run=True,
+        now=now,
+    ) == {
+        "old_unread_would_trash": 1,
+        "old_unread_skipped_read": 1,
+        "old_unread_too_recent": 1,
+    }
+    assert service.trashed == []

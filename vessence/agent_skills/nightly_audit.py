@@ -25,6 +25,15 @@ from jane.config import (
     JANE_BRIDGE_ENV, LOGS_DIR, ADK_VENV_PYTHON, VESSENCE_HOME,
 )
 from jane.automation_runner import AutomationError, run_automation_prompt
+from agent_skills.audit_report_helpers import (
+    extract_health_summary as _extract_health_summary,
+)
+from agent_skills.nightly_audit_helpers import (
+    first_script_lines as _first_script_lines,
+    is_sleep_window_hour as _is_sleep_window_hour,
+    latest_audit_summary_payload as _latest_audit_summary_payload,
+    truncate_text as _truncate_text,
+)
 
 # ─── Paths ─────────────────────────────────────────────────────────────────────
 ENV_FILE         = JANE_BRIDGE_ENV
@@ -53,9 +62,7 @@ logger = logging.getLogger("nightly_audit")
 def read_file(path, max_chars=3000):
     try:
         text = Path(path).read_text()
-        if len(text) > max_chars:
-            return text[:max_chars] + f"\n... [truncated at {max_chars} chars]"
-        return text
+        return _truncate_text(text, max_chars)
     except Exception as e:
         return f"[Error reading {path}: {e}]"
 
@@ -63,8 +70,7 @@ def read_file(path, max_chars=3000):
 def read_script_body(path, max_lines=200):
     """Read the first max_lines of a script file for audit analysis."""
     try:
-        lines = Path(path).read_text().splitlines()[:max_lines]
-        return "\n".join(lines)
+        return _first_script_lines(Path(path).read_text(), max_lines)
     except Exception as e:
         return f"[Error reading {path}: {e}]"
 
@@ -152,30 +158,13 @@ def _run_cmd(cmd, fallback='(unavailable)'):
         return fallback
 
 
-def _extract_health_summary(report: str) -> str:
-    lines = [line.strip() for line in report.splitlines() if line.strip()]
-    for idx, line in enumerate(lines):
-        lowered = line.lower().strip("*# :")
-        if lowered == "health summary":
-            summary_lines: list[str] = []
-            for next_line in lines[idx + 1:]:
-                if next_line.startswith("**") or next_line.startswith("#"):
-                    break
-                summary_lines.append(next_line)
-                if len(" ".join(summary_lines)) >= 280:
-                    break
-            if summary_lines:
-                return " ".join(summary_lines)[:280]
-    return (lines[0] if lines else "").replace("#", "").strip()[:280]
-
-
 def _write_latest_summary(now: datetime.datetime, report: str, report_path: Path) -> None:
-    payload = {
-        "generated_at": now.isoformat(),
-        "report_path": str(report_path),
-        "health_summary": _extract_health_summary(report),
-        "report": report.strip(),
-    }
+    payload = _latest_audit_summary_payload(
+        now,
+        report,
+        report_path,
+        _extract_health_summary(report),
+    )
     tmp_path = LATEST_AUDIT_SUMMARY.with_suffix(".tmp")
     tmp_path.write_text(json.dumps(payload, indent=2))
     tmp_path.replace(LATEST_AUDIT_SUMMARY)
@@ -276,7 +265,7 @@ def main():
     # Idle gate: skip if user is active (bypassed during sleep hours 2-6 AM)
     import datetime as _dt
     _now_hour = _dt.datetime.now().hour
-    _is_sleep_window = 1 <= _now_hour < 7
+    _is_sleep_window = _is_sleep_window_hour(_now_hour)
     if not is_user_idle() and not _is_sleep_window:
         logger.info("User is active — skipping audit this cycle.")
         return

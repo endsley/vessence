@@ -15,9 +15,7 @@ Usage:
 
 import os
 import sys
-import json
 import time
-import re
 import argparse
 import datetime
 import logging
@@ -38,6 +36,39 @@ from jane.config import (
     JOB_QUEUE_LOG, LOGS_DIR,
     QUEUE_PAUSE_BETWEEN_SECS,
 )
+from agent_skills.job_queue_docs import (
+    PRIORITY_MAP,
+    SELF_CONTINUATION_INSTRUCTION,
+    build_prompt as _build_prompt_doc,
+    parse_job_content as _parse_job_content,
+    set_status_content as _set_status_content,
+)
+from agent_skills.job_queue_creation import (
+    build_job_creation_draft as _build_job_creation_draft,
+    job_safe_name as _job_safe_name,
+    minimal_job_content as _minimal_job_content,
+    next_job_number as _next_job_number,
+)
+from agent_skills.queue_progress_announcements import (
+    append_queue_progress_announcement as _append_queue_progress_announcement,
+    queue_announcements_path as _queue_announcements_path,
+    queue_progress_id as _queue_progress_id,
+    queue_progress_json_line as _queue_progress_json_line,
+)
+from agent_skills.queue_jane_api import (
+    parse_queue_stream_lines as _parse_queue_stream_lines,
+    queue_chat_payload as _queue_chat_payload,
+    run_queue_chat_request as _run_queue_chat_request,
+)
+from agent_skills.job_queue_memory import (
+    job_completion_fact as _job_completion_fact,
+    job_number_from_file as _job_number_from_file,
+)
+from agent_skills.prompt_queue_idle import (
+    is_idle_from_timestamp as _is_idle_from_timestamp,
+    most_recent_activity_timestamp_any as _most_recent_activity_timestamp_any,
+    read_activity_timestamp_any as _read_activity_timestamp_any,
+)
 
 JOBS_DIR = os.path.join(VESSENCE_HOME, "configs", "job_queue")
 COMPLETED_DIR = os.path.join(JOBS_DIR, "completed")
@@ -53,40 +84,26 @@ logger = logging.getLogger("job_queue_runner")
 # ── Idle check ─────────────────────────────────────────────────────────────────
 def is_idle() -> bool:
     now = time.time()
-    most_recent_ts = 0
-
-    for path in [USER_STATE_PATH, IDLE_STATE_PATH]:
-        try:
-            with open(path) as f:
-                state = json.load(f)
-            ts = state.get("last_message_ts", 0) or state.get("last_active_ts", 0)
-            if ts > most_recent_ts:
-                most_recent_ts = ts
-        except (FileNotFoundError, json.JSONDecodeError):
-            pass
+    most_recent_ts = _most_recent_activity_timestamp_any(
+        (
+            (USER_STATE_PATH, ("last_message_ts", "last_active_ts")),
+            (IDLE_STATE_PATH, ("last_message_ts", "last_active_ts")),
+        ),
+        logger=logger,
+    )
 
     if most_recent_ts == 0:
         return True
     idle_secs = now - most_recent_ts
     logger.info(f"Idle check: {idle_secs:.0f}s since last activity (threshold: {IDLE_THRESHOLD}s)")
-    return idle_secs >= IDLE_THRESHOLD
+    return _is_idle_from_timestamp(now, most_recent_ts, IDLE_THRESHOLD)
 
 
 # ── Job file parsing ────────────────────────────────────────────────────────────
-PRIORITY_MAP = {"high": 1, "1": 1, "medium": 2, "2": 2, "low": 3, "3": 3}
-
-
 def _parse_job(fpath: str) -> dict:
     with open(fpath) as f:
         content = f.read()
-    title_m = re.search(r"^# Job:\s*(.+)", content, re.MULTILINE)
-    status_m = re.search(r"^Status:\s*(.+)", content, re.MULTILINE)
-    priority_m = re.search(r"^Priority:\s*(.+)", content, re.MULTILINE)
-    title = title_m.group(1).strip() if title_m else Path(fpath).stem
-    status = status_m.group(1).strip().split()[0].lower() if status_m else "unknown"
-    priority_raw = priority_m.group(1).strip().lower() if priority_m else "3"
-    priority = PRIORITY_MAP.get(priority_raw, 3)
-    return {"file": fpath, "title": title, "status": status, "priority": priority, "content": content}
+    return _parse_job_content(content, fpath)
 
 
 def load_pending_jobs() -> list[dict]:
@@ -119,12 +136,7 @@ def get_next_pending_job() -> dict | None:
 def _set_status(fpath: str, new_status: str, result_summary: str = ""):
     with open(fpath) as f:
         content = f.read()
-    content = re.sub(r"^Status:\s*.+", f"Status: {new_status}", content, count=1, flags=re.MULTILINE)
-    if result_summary:
-        if "## Result" in content:
-            content = re.sub(r"## Result\s*\n.*", f"## Result\n{result_summary}", content, count=1, flags=re.DOTALL)
-        else:
-            content = content.rstrip() + f"\n\n## Result\n{result_summary}\n"
+    content = _set_status_content(content, new_status, result_summary)
     with open(fpath, "w") as f:
         f.write(content)
 
@@ -146,36 +158,8 @@ def mark_job_incomplete(job: dict, result_summary: str = ""):
 
 
 # ── Build prompt from job content ────────────────────────────────────────────────
-SELF_CONTINUATION_INSTRUCTION = (
-    "\n\n## Self-Continuation\n"
-    "At the end of EVERY response, run:\n"
-    "```bash\n"
-    "/home/chieh/google-adk-env/adk-venv/bin/python "
-    "$VESSENCE_HOME/agent_skills/check_continuation.py\n"
-    "```\n"
-    "If `should_continue` is true: display "
-    "`**[Auto-continuing → Job #N]:** [text]` and execute `run job queue:`. "
-    "Repeat until false. If false, stop silently."
-)
-
-
 def build_prompt(job: dict) -> str:
-    content = job["content"]
-    # Extract key sections: Objective, Context, Steps
-    sections = ["Objective", "Context", "Steps", "Verification", "Files Involved", "Notes"]
-    prompt_parts = [f"# Task: {job['title']}", ""]
-    for section in sections:
-        m = re.search(rf"^## {section}\s*\n(.*?)(?=^## |\Z)", content, re.MULTILINE | re.DOTALL)
-        if m:
-            body = m.group(1).strip()
-            if body:
-                prompt_parts.append(f"## {section}")
-                prompt_parts.append(body)
-                prompt_parts.append("")
-    prompt_text = "\n".join(prompt_parts).strip()
-    # Inject self-continuation so the CLI automation agent can chain jobs
-    prompt_text += SELF_CONTINUATION_INSTRUCTION
-    return prompt_text
+    return _build_prompt_doc(job)
 
 
 # ── Run via Jane web API ─────────────────────────────────────────────────────────
@@ -183,23 +167,20 @@ def run_job(job: dict) -> tuple[str, bool]:
     prompt_text = build_prompt(job)
     short_desc = job["title"]
 
-    _announcements_path = os.path.join(
+    _announcements_path = _queue_announcements_path(
         os.environ.get("VESSENCE_DATA_HOME", os.path.expanduser("~/ambient/vessence-data")),
-        "data", "jane_announcements.jsonl"
     )
-    _progress_id = f"job_{int(time.time()*1000)}"
+    _progress_id = _queue_progress_id("job", int(time.time()*1000))
 
     def _push_announcement(msg_text: str, is_final: bool = False):
         try:
-            entry = json.dumps({
-                "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-                "type": "queue_progress",
-                "id": _progress_id,
-                "message": msg_text,
-                "final": is_final,
-            })
-            with open(_announcements_path, "a") as f:
-                f.write(entry + "\n")
+            _append_queue_progress_announcement(
+                _announcements_path,
+                _progress_id,
+                msg_text,
+                is_final,
+                datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            )
         except Exception:
             pass
 
@@ -207,66 +188,29 @@ def run_job(job: dict) -> tuple[str, bool]:
     logger.info(f"Running job: {short_desc}")
 
     jane_url = os.environ.get("JANE_WEB_URL", "http://localhost:8081")
-    api_url = f"{jane_url}/api/jane/chat/stream"
 
     try:
-        resp = requests.post(
-            api_url,
-            json={
-                "message": prompt_text,
-                "session_id": "job_queue_session",
-                "platform": "queue",
-            },
-            stream=True,
-            timeout=(10, None),
+        stream_result = _run_queue_chat_request(
+            jane_url,
+            prompt_text,
+            "job_queue_session",
+            post=requests.post,
         )
-        if resp.status_code == 401:
-            resp = requests.post(
-                f"{jane_url}/api/jane/chat",
-                json={
-                    "message": prompt_text,
-                    "session_id": "job_queue_session",
-                    "platform": "queue",
-                },
-                timeout=(10, 600),
-            )
-            if resp.ok:
-                data = resp.json()
-                result = data.get("text", "")
-                _push_announcement(f"**Completed job:** {short_desc}", is_final=True)
-                return result, bool(result)
-            else:
-                _push_announcement(f"**Failed:** HTTP {resp.status_code}", is_final=True)
-                return f"Error: HTTP {resp.status_code}", False
+        if stream_result.error:
+            _push_announcement(f"**Failed:** {stream_result.error[:100]}", is_final=True)
+            return stream_result.text, False
+        response_text = stream_result.text
 
-        response_text = ""
-        for line in resp.iter_lines(decode_unicode=True):
-            if not line:
-                continue
+        if stream_result.source == "stream":
             try:
-                event = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if event.get("type") == "delta":
-                response_text += event.get("data", "")
-            elif event.get("type") == "done":
-                if not response_text:
-                    response_text = event.get("data", "")
-                break
-            elif event.get("type") == "error":
-                err = event.get("data", "Unknown error")
-                _push_announcement(f"**Failed:** {err[:100]}", is_final=True)
-                return f"Error: {err}", False
-
-        try:
-            from agent_skills.work_log_tools import log_activity
-            snippet = (response_text or "")[:150].replace("\n", " ").strip()
-            log_activity(f"Job completed: {short_desc} → {snippet}", category="job_completed")
-        except Exception:
-            pass
+                from agent_skills.work_log_tools import log_activity
+                snippet = (response_text or "")[:150].replace("\n", " ").strip()
+                log_activity(f"Job completed: {short_desc} → {snippet}", category="job_completed")
+            except Exception:
+                pass
 
         _push_announcement(f"**Completed job:** {short_desc}", is_final=True)
-        return response_text, bool(response_text.strip())
+        return response_text, stream_result.success
 
     except requests.ConnectionError:
         msg = "Jane web is not running — skipping"
@@ -284,12 +228,8 @@ def log_to_memory(job: dict, result: str, success: bool):
         return
     import subprocess
     date_str = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
-    job_num = Path(job["file"]).stem.split("_")[0]
-    fact = (
-        f"Job #{job_num} completed autonomously on {date_str}. "
-        f"Title: {job['title']}. "
-        f"Result: {result[:300]}{'...' if len(result) > 300 else ''}"
-    )
+    job_num = _job_number_from_file(job["file"])
+    fact = _job_completion_fact(job_num, job["title"], result, date_str)
     try:
         subprocess.run(
             [sys.executable, ADD_FACT, fact, "--topic", "job_queue",
@@ -303,47 +243,16 @@ def log_to_memory(job: dict, result: str, success: bool):
 # ── Add job from text (replaces prompt: command) ────────────────────────────────
 def add_job_from_text(text: str) -> str:
     """Create a minimal job file from plain text. Returns the job filename."""
-    text = text.strip()
-    # Use first line (up to 60 chars) as the short name
-    first_line = text.splitlines()[0][:60].strip()
-    safe_name = re.sub(r"[^a-zA-Z0-9_-]", "_", first_line.lower())[:40].strip("_")
-    if not safe_name:
-        safe_name = "task"
-
-    # Find next job number
     existing = [f for f in os.listdir(JOBS_DIR) if f.endswith(".md") and f != "README.md" and not os.path.isdir(os.path.join(JOBS_DIR, f))]
-    nums = []
-    for f in existing:
-        m = re.match(r"^(\d+)", f)
-        if m:
-            nums.append(int(m.group(1)))
-    next_num = max(nums, default=0) + 1
-
-    fname = f"{next_num:02d}_{safe_name}.md"
+    draft = _build_job_creation_draft(text, existing)
+    fname = draft.filename
     fpath = os.path.join(JOBS_DIR, fname)
     today = datetime.date.today().isoformat()
-
-    content = f"""# Job: {first_line}
-Status: pending
-Priority: medium
-Created: {today}
-
-## Objective
-{text}
-
-## Context
-Added via `prompt:` / `add job:` command.
-
-## Steps
-1. Complete the task described in the Objective.
-
-## Verification
-Verify the objective is met.
-"""
+    content = _minimal_job_content(draft.first_line, draft.text, today)
     with open(fpath, "w") as f:
         f.write(content)
     logger.info(f"Created job: {fname}")
-    print(f"Added to job queue as #{next_num}: {first_line[:60]}{'...' if len(first_line) > 60 else ''}")
+    print(f"Added to job queue as #{draft.number}: {draft.first_line[:60]}{'...' if len(draft.first_line) > 60 else ''}")
     return fname
 
 

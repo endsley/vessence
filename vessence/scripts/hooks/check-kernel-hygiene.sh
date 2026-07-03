@@ -33,9 +33,7 @@ cd "$REPO_ROOT"
 EXIT=0
 
 # ── Rule 1: kernel Python must not hardcode tool names ─────────────────
-# Allowlist: jane/tool_loader.py (legitimately knows tool concepts),
-#            jane_web/jane_proxy.py fallback block (transitional — will be
-#            removed once Phase 8 retires the legacy _has_open_sms_draft path).
+# Allowlist: jane/tool_loader.py legitimately knows tool concepts.
 
 BANNED_PY_PATTERNS=(
     "contacts\\.sms_draft"
@@ -49,7 +47,6 @@ BANNED_PY_PATTERNS=(
 
 ALLOWLIST_PY=(
     "jane/tool_loader.py"
-    "jane/context_builder.py"       # still holds PHONE_TOOLS_PROTOCOL fallback constant — Phase 7e removes it
 )
 
 is_allowlisted_py() {

@@ -12,6 +12,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from dotenv import load_dotenv
+from agent_skills.web_search_format import (
+    format_ddg_results as _format_ddg_results,
+    format_tavily_results as _format_tavily_results,
+    is_tavily_quota_status as _is_tavily_quota_status,
+    tavily_request_payload as _tavily_request_payload,
+)
 from jane.config import ENV_FILE_PATH, TAVILY_API_KEY
 
 load_dotenv(ENV_FILE_PATH)
@@ -39,29 +45,15 @@ def _tavily_search(query: str, max_results: int) -> str | None:
         import requests
         resp = requests.post(
             "https://api.tavily.com/search",
-            json={
-                "api_key": TAVILY_API_KEY,
-                "query": query,
-                "max_results": max_results,
-                "search_depth": "basic",
-            },
+            json=_tavily_request_payload(TAVILY_API_KEY, query, max_results),
             timeout=15,
         )
-        if resp.status_code in (402, 429):
+        if _is_tavily_quota_status(resp.status_code):
             logger.warning(f"Tavily quota exhausted (HTTP {resp.status_code})")
             return None
         resp.raise_for_status()
         data = resp.json()
-        results = data.get("results", [])
-        if not results:
-            return ""
-        parts = []
-        for r in results:
-            title = r.get("title", "")
-            url = r.get("url", "")
-            content = r.get("content", "")
-            parts.append(f"[{title}]({url})\n{content}")
-        return "\n\n".join(parts)
+        return _format_tavily_results(data.get("results", []))
     except Exception as e:
         logger.warning(f"Tavily error: {e}")
         return None
@@ -73,15 +65,7 @@ def _ddg_search(query: str, max_results: int) -> str:
         from duckduckgo_search import DDGS
         with DDGS() as ddgs:
             results = list(ddgs.text(query, max_results=max_results))
-        if not results:
-            return ""
-        parts = []
-        for r in results:
-            title = r.get("title", "")
-            href = r.get("href", "")
-            body = r.get("body", "")
-            parts.append(f"[{title}]({href})\n{body}")
-        return "\n\n".join(parts)
+        return _format_ddg_results(results)
     except Exception as e:
         logger.warning(f"DuckDuckGo error: {e}")
         return ""

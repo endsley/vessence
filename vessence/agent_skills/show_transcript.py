@@ -40,6 +40,12 @@ import sqlite3
 import sys
 from pathlib import Path
 
+from agent_skills.transcript_display_helpers import (
+    first_user_preview_text as _first_user_preview_text,
+    parse_turns_flag_args as _parse_turns_flag_args,
+    speaker_label as _speaker_label,
+)
+
 AMBIENT_BASE = os.environ.get("AMBIENT_BASE", os.path.expanduser("~/ambient"))
 VAULT_HOME = os.environ.get("VAULT_HOME", os.path.join(AMBIENT_BASE, "vault"))
 LEDGER_DB = Path(VAULT_HOME) / "conversation_history_ledger.db"
@@ -87,7 +93,7 @@ def _print_session(con: sqlite3.Connection, session_id: str, max_turns: int | No
     print(f"Range  : {meta['s']} → {meta['e']}  |  total turns: {meta['c']}  |  shown: {len(rows)}")
     print("=" * 72)
     for r in rows:
-        label = "YOU" if r["role"] == "user" else "JANE"
+        label = _speaker_label(r["role"])
         print(f"\n[{r['timestamp']}] {label}:")
         print(r["content"])
     print("\n" + "=" * 72)
@@ -124,15 +130,7 @@ def _first_user_preview(con: sqlite3.Connection, session_id: str, max_len: int =
     ).fetchone()
     if not row:
         return "(no user turns)"
-    text = " ".join(str(row["content"]).split())
-    for prefix in ("[CURRENT CONVERSATION STATE]", "[Recent exchanges]",
-                   "[WEB CHAT", "[ANDROID"):
-        if text.startswith(prefix):
-            tail = text.find("]")
-            if tail != -1 and len(text) > tail + 2:
-                text = text[tail + 1:].strip()
-            break
-    return (text[:max_len] + "…") if len(text) > max_len else text
+    return _first_user_preview_text(row["content"], max_len=max_len)
 
 
 def search_sessions(con: sqlite3.Connection, keyword: str, android_only: bool = False,
@@ -156,18 +154,11 @@ def search_sessions(con: sqlite3.Connection, keyword: str, android_only: bool = 
 
 
 def _parse_turns_flag(args: list[str]) -> tuple[int | None, list[str]]:
-    if "--turns" not in args:
-        return None, args
-    i = args.index("--turns")
-    if i + 1 >= len(args):
-        print("--turns requires a number", file=sys.stderr)
+    max_turns, remaining_args, error = _parse_turns_flag_args(args)
+    if error:
+        print(error, file=sys.stderr)
         sys.exit(1)
-    try:
-        n = int(args[i + 1])
-    except ValueError:
-        print(f"--turns: not an integer: {args[i + 1]}", file=sys.stderr)
-        sys.exit(1)
-    return n, args[:i] + args[i + 2:]
+    return max_turns, remaining_args
 
 
 def _resolve_session(con: sqlite3.Connection, name: str) -> str | None:

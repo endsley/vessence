@@ -14,10 +14,18 @@ import datetime as dt
 import fcntl
 import json
 import os
-import re
 import subprocess
 import sys
 from pathlib import Path
+
+from agent_skills.iterative_refactor_helpers import (
+    default_scheduler_state as _default_scheduler_state,
+    disabled_cron_text as _disabled_cron_text,
+    extract_job_number as _extract_job_number,
+    job_filename as _job_filename,
+    next_job_number as _next_job_number,
+    normalize_scheduler_state as _normalize_scheduler_state,
+)
 
 
 VESSENCE_HOME = Path(os.environ.get("VESSENCE_HOME", "/home/chieh/ambient/vessence"))
@@ -76,27 +84,22 @@ def log(message: str) -> None:
 
 def load_state() -> dict:
     if not STATE_PATH.exists():
-        return {
-            "version": 1,
-            "created_at": utc_now(),
-            "max_iterations": MAX_ITERATIONS,
-            "iterations_enqueued": 0,
-            "projects": {project["slug"]: {"jobs": []} for project in PROJECTS},
-        }
+        return _default_scheduler_state(
+            now=utc_now(),
+            max_iterations=MAX_ITERATIONS,
+            projects=PROJECTS,
+        )
     try:
         with STATE_PATH.open(encoding="utf-8") as fh:
             state = json.load(fh)
     except (OSError, json.JSONDecodeError):
         state = {}
-    state.setdefault("version", 1)
-    state.setdefault("created_at", utc_now())
-    state.setdefault("max_iterations", MAX_ITERATIONS)
-    state.setdefault("iterations_enqueued", 0)
-    projects = state.setdefault("projects", {})
-    for project in PROJECTS:
-        projects.setdefault(project["slug"], {"jobs": []})
-        projects[project["slug"]].setdefault("jobs", [])
-    return state
+    return _normalize_scheduler_state(
+        state,
+        now=utc_now(),
+        max_iterations=MAX_ITERATIONS,
+        projects=PROJECTS,
+    )
 
 
 def save_state(state: dict) -> None:
@@ -114,18 +117,14 @@ def existing_job_numbers() -> set[int]:
         if not directory.exists():
             continue
         for path in directory.glob("*.md"):
-            match = re.match(r"(?:job_)?(\d+)", path.name)
-            if match:
-                numbers.add(int(match.group(1)))
+            number = _extract_job_number(path.name)
+            if number is not None:
+                numbers.add(number)
     return numbers
 
 
 def next_job_number(used: set[int]) -> int:
-    value = max(used, default=0) + 1
-    while value in used:
-        value += 1
-    used.add(value)
-    return value
+    return _next_job_number(used)
 
 
 def job_content(project: dict, iteration: int, job_number: int) -> str:
@@ -179,7 +178,7 @@ This is iteration {iteration} of {MAX_ITERATIONS} for `{project["slug"]}`. The g
 
 def write_job(project: dict, iteration: int, job_number: int) -> Path:
     JOBS_DIR.mkdir(parents=True, exist_ok=True)
-    filename = f"job_{job_number:03d}_{project['slug']}_refactor_iter_{iteration:02d}.md"
+    filename = _job_filename(project["slug"], iteration, job_number)
     path = JOBS_DIR / filename
     tmp = path.with_suffix(".tmp")
     with tmp.open("w", encoding="utf-8") as fh:
@@ -203,21 +202,11 @@ def disable_own_cron() -> bool:
         log(f"Could not read crontab for self-disable: exit {current.returncode}")
         return False
 
-    changed = False
     today = dt.date.today().isoformat()
-    new_lines: list[str] = []
-    for line in current.stdout.splitlines():
-        stripped = line.lstrip()
-        if CRON_MARKER in line and not stripped.startswith("#"):
-            new_lines.append(f"# COMPLETED {today}: {line}")
-            changed = True
-        else:
-            new_lines.append(line)
-
+    installed, changed = _disabled_cron_text(current.stdout, marker=CRON_MARKER, today=today)
     if not changed:
         return False
 
-    installed = "\n".join(new_lines).rstrip() + "\n"
     result = subprocess.run(["crontab", "-"], input=installed, text=True, check=False)
     if result.returncode == 0:
         log("Disabled iterative refactor scheduler cron entry after final enqueue.")
@@ -242,7 +231,7 @@ def enqueue_iteration(state: dict, dry_run: bool = False) -> dict:
     for project in PROJECTS:
         job_number = next_job_number(used_numbers)
         if dry_run:
-            path = JOBS_DIR / f"job_{job_number:03d}_{project['slug']}_refactor_iter_{iteration:02d}.md"
+            path = JOBS_DIR / _job_filename(project["slug"], iteration, job_number)
         else:
             path = write_job(project, iteration, job_number)
         created_jobs.append({

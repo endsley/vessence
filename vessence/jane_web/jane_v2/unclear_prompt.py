@@ -18,7 +18,7 @@ from __future__ import annotations
 import logging
 from typing import Final
 
-import httpx
+from jane_web.jane_v2.ollama_client import post_ollama_response as _post_ollama_response
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +73,6 @@ async def is_unclear(prompt: str, *, timeout_s: float | None = None) -> bool:
             LOCAL_LLM_TIMEOUT,
             OLLAMA_KEEP_ALIVE,
             OLLAMA_URL,
-            record_ollama_activity,
         )
     except Exception as e:
         logger.warning("unclear_prompt: models import failed: %s", e)
@@ -92,14 +91,13 @@ async def is_unclear(prompt: str, *, timeout_s: float | None = None) -> bool:
         "keep_alive": OLLAMA_KEEP_ALIVE,
     }
     try:
-        async with httpx.AsyncClient(timeout=timeout_s or LOCAL_LLM_TIMEOUT) as client:
-            r = await client.post(OLLAMA_URL, json=body)
-            r.raise_for_status()
-            raw = (r.json().get("response") or "").strip().upper()
-            try:
-                record_ollama_activity()
-            except Exception:
-                pass
+        raw = (
+            await _post_ollama_response(
+                OLLAMA_URL,
+                body,
+                timeout=timeout_s or LOCAL_LLM_TIMEOUT,
+            )
+        ).strip().upper()
     except Exception as e:
         logger.warning("unclear_prompt: qwen call failed (%s) — failing open (treating as clear)", e)
         return False

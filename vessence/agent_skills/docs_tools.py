@@ -14,12 +14,21 @@ from __future__ import annotations
 
 import logging
 import os
-import re
 from typing import Any
 
 from googleapiclient.discovery import build
 from google.oauth2.credentials import Credentials
 
+from agent_skills.docs_editing_helpers import (
+    build_insert_text_request,
+    build_replace_all_text_request,
+    build_todo_category_section,
+    extract_text as _extract_text,
+    find_end_of_section as _find_end_of_section,
+    plan_todo_add_item,
+    plan_todo_remove_item,
+    todo_category_exists,
+)
 from agent_skills.email_oauth import refresh_token_if_needed
 
 _logger = logging.getLogger(__name__)
@@ -63,49 +72,6 @@ def read_doc(doc_id: str | None = None, user_id: str | None = None) -> dict[str,
     return {"title": title, "text": text, "doc_id": doc_id}
 
 
-def _extract_text(body: dict) -> str:
-    """Walk the Docs body JSON and extract plain text."""
-    parts = []
-    for elem in body.get("content", []):
-        para = elem.get("paragraph")
-        if not para:
-            continue
-        for pe in para.get("elements", []):
-            tr = pe.get("textRun")
-            if tr:
-                parts.append(tr.get("content", ""))
-    return "".join(parts)
-
-
-def _find_end_of_section(text: str, section_name: str) -> int | None:
-    """Find the character index at the end of a section (before the next
-    section header or end of doc). Used for appending items."""
-    lines = text.split("\n")
-    in_section = False
-    char_offset = 0
-    last_content_end = None
-
-    for line in lines:
-        line_len = len(line) + 1  # +1 for newline
-        stripped = line.strip()
-        if stripped.lower() == section_name.lower():
-            in_section = True
-            char_offset += line_len
-            continue
-        if in_section:
-            if stripped and not re.match(r"^\s*(?:\d+[.)]|\-|\*|•)\s+", line) and stripped:
-                is_header = True
-                # Check if next non-blank line is a list item
-                # If so, this is a new section header — stop
-                if is_header and last_content_end is not None:
-                    return last_content_end
-            if stripped:
-                last_content_end = char_offset + line_len
-        char_offset += line_len
-
-    return last_content_end or char_offset
-
-
 def append_text(
     doc_id: str,
     text: str,
@@ -123,14 +89,7 @@ def append_text(
         else:
             index = 1
 
-    requests = [
-        {
-            "insertText": {
-                "location": {"index": index},
-                "text": text,
-            }
-        }
-    ]
+    requests = [build_insert_text_request(index, text)]
     svc.documents().batchUpdate(
         documentId=doc_id, body={"requests": requests}
     ).execute()
@@ -145,17 +104,7 @@ def replace_text(
 ) -> bool:
     """Find and replace text in a Google Doc."""
     svc = _service(user_id)
-    requests = [
-        {
-            "replaceAllText": {
-                "containsText": {
-                    "text": old_text,
-                    "matchCase": True,
-                },
-                "replaceText": new_text,
-            }
-        }
-    ]
+    requests = [build_replace_all_text_request(old_text, new_text)]
     result = svc.documents().batchUpdate(
         documentId=doc_id, body={"requests": requests}
     ).execute()
@@ -192,54 +141,20 @@ def todo_add_item(
     doc_data = read_doc(doc_id, user_id)
     full_text = doc_data["text"]
 
-    lines = full_text.split("\n")
-    in_section = False
-    found_section = False
-    last_item_num = 0
-    numbered_insert_line = None
-    insert_after_line = None
-    section_has_items = False
-
-    for line in lines:
-        stripped = line.strip()
-        if stripped.lower() == category.lower():
-            in_section = True
-            found_section = True
-            insert_after_line = line
-            continue
-        if in_section:
-            if not stripped:
-                if section_has_items:
-                    break
-                continue
-            m = re.match(r"^\s*(\d+)[.)]\s+", line)
-            if m:
-                last_item_num = int(m.group(1))
-                numbered_insert_line = line
-            insert_after_line = line
-            section_has_items = True
-
-    if not found_section:
+    plan = plan_todo_add_item(full_text, item_text, category)
+    if plan is None:
         return f"Could not find category '{category}' in the doc."
-
-    if numbered_insert_line is not None:
-        insert_after_line = numbered_insert_line
-        new_item = f"\n{last_item_num + 1}. {item_text}"
-        confirmation = f"Added item #{last_item_num + 1} to {category}: {item_text}"
-    else:
-        new_item = f"\n{item_text}"
-        confirmation = f"Added item to {category}: {item_text}"
 
     success = replace_text(
         doc_id,
-        insert_after_line,
-        insert_after_line + new_item,
+        plan.old_text,
+        plan.new_text,
         user_id,
     )
 
     if success:
-        return confirmation
-    return f"Failed to add item to {category}."
+        return plan.success_message
+    return plan.failure_message
 
 
 def todo_remove_item(
@@ -257,28 +172,12 @@ def todo_remove_item(
     doc_data = read_doc(doc_id, user_id)
     full_text = doc_data["text"]
 
-    target = item_text.lower().strip()
-    in_section = category is None
-    section_has_items = False
-
-    for line in full_text.split("\n"):
-        stripped = line.strip()
-        if category is not None and stripped.lower() == category.lower():
-            in_section = True
-            continue
-        if not in_section:
-            continue
-        if not stripped:
-            if category is not None and section_has_items:
-                break
-            continue
-        section_has_items = True
-        item_body = re.sub(r"^\s*(?:\d+[.)]|\-|\*|•)\s+", "", line).strip()
-        if target in item_body.lower():
-            success = delete_text(doc_id, line + "\n", user_id)
-            if success:
-                return f"Removed: {item_body}"
-            return f"Found the item but failed to delete it."
+    plan = plan_todo_remove_item(full_text, item_text, category)
+    if plan is not None:
+        success = replace_text(doc_id, plan.old_text, plan.new_text, user_id)
+        if success:
+            return plan.success_message
+        return plan.failure_message
 
     return f"Could not find an item matching '{item_text}' in the doc."
 
@@ -297,11 +196,10 @@ def todo_add_category(
     doc_data = read_doc(doc_id, user_id)
     full_text = doc_data["text"]
 
-    for line in full_text.split("\n"):
-        if line.strip().lower() == category_name.strip().lower():
-            return f"Category '{category_name}' already exists."
+    if todo_category_exists(full_text, category_name):
+        return f"Category '{category_name}' already exists."
 
-    new_section = f"\n\n{category_name}\n1. Nothing\n"
+    new_section = build_todo_category_section(category_name)
     success = append_text(doc_id, new_section, user_id=user_id)
     if success:
         return f"Added new category: {category_name}"

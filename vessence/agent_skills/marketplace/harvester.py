@@ -24,67 +24,25 @@ from pathlib import Path
 from typing import Any
 
 from . import config as _cfg
+from .listing_rules import (
+    BAD_TITLE_KEYWORDS as _BAD_TITLE_KEYWORDS,
+    CURRENT_YEAR,
+    MILES_PATTERNS as _MILES_PATTERNS,
+    is_suspicious as _is_suspicious,
+    parse_miles as _parse_miles,
+    parse_year as _parse_year,
+    slugify as _slugify,
+    title_filter_result as _title_filter_result,
+)
 
 logger = logging.getLogger(__name__)
 
-CURRENT_YEAR = 2026
 _PROFILE_ID = os.environ.get("FB_PROFILE", "facebook_julius")
 
 _UA = (
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 )
-
-
-def _slugify(s: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "_", s.lower()).strip("_") or "query"
-
-
-def _parse_year(s: str | None) -> int | None:
-    if not s:
-        return None
-    m = re.search(r"\b(19\d{2}|20[0-2]\d)\b", s)
-    return int(m.group()) if m else None
-
-
-_MILES_PATTERNS = (
-    re.compile(r"(\d{1,3}(?:,\d{3})+)\s*(?:mi(?:les)?\b|\.)", re.I),
-    re.compile(r"(\d{2,3})\s*[kK]\s*(?:mi(?:les)?\b|\.)", re.I),
-    re.compile(r"\b(\d{4,6})\s*mi(?:les)?\b", re.I),
-    re.compile(r"\bmileage[^\d]{0,15}(\d{1,3}(?:,\d{3})+|\d{4,6})", re.I),
-    re.compile(r"\bdriven\s+(\d{1,3}(?:,\d{3})+|\d{4,6})", re.I),
-)
-
-
-def _parse_miles(text: str | None) -> int | None:
-    if not text:
-        return None
-    for pat in _MILES_PATTERNS:
-        m = pat.search(text)
-        if not m:
-            continue
-        raw = m.group(1).replace(",", "")
-        try:
-            n = int(raw)
-        except ValueError:
-            continue
-        if pat.pattern.startswith("(\\d{2,3})\\s*[kK]"):
-            n *= 1000
-        if 100 <= n <= 600_000:
-            return n
-    return None
-
-
-def _is_suspicious(year: int | None, miles: int) -> tuple[bool, str]:
-    if year is None or not miles:
-        return False, ""
-    age = CURRENT_YEAR - year
-    if age <= 5:
-        return False, ""
-    avg = miles / max(age, 1)
-    if avg < 3000:
-        return True, f"implausibly low miles: {miles}mi / {age}yr = {avg:.0f}/yr"
-    return False, ""
 
 
 def _download(url: str, dest: Path) -> bool:
@@ -224,18 +182,15 @@ async def _run_query(page, query: str, filters: dict, location_id: str,
             if sus:
                 logger.info("skip %s suspicious: %s", listing_id, reason)
                 continue
-        lower = desc.lower()
-        bad_keywords = ("salvage title","rebuilt title","reconstructed title",
-                        "branded title","lemon title","rebuilt/salvage")
-        has_clean = "clean title" in lower
-        has_bad = any(k in lower for k in bad_keywords)
-        if filters.get("require_clean_title", True):
-            if not has_clean or has_bad:
-                logger.info("skip %s title check (clean=%s bad=%s)",
-                            listing_id, has_clean, has_bad)
-                continue
-        elif has_bad:
-            logger.info("skip %s bad title flag", listing_id)
+        title_ok, has_clean, has_bad = _title_filter_result(
+            desc,
+            require_clean_title=filters.get("require_clean_title", True),
+        )
+        if not title_ok:
+            if filters.get("require_clean_title", True):
+                logger.info("skip %s title check (clean=%s bad=%s)", listing_id, has_clean, has_bad)
+            else:
+                logger.info("skip %s bad title flag", listing_id)
             continue
 
         ldir = out_dir / listing_id

@@ -26,230 +26,52 @@ State machine (SET flow):
 
 from __future__ import annotations
 
-import json
 import logging
-import re
+
+from .parsing import (
+    extract_delete_target as _extract_delete_target,
+    extract_label as _extract_label,
+    label_from_reply as _label_from_reply,
+    looks_like_new_timer as _looks_like_new_timer,
+    parse_delete_phrase as _parse_delete_phrase,
+    parse_duration_ms as _parse_duration_ms,
+    parse_followup_duration_ms as _parse_followup_duration_ms,
+)
+from .intent_rules import (
+    CANCEL_WORDS as _CANCEL_WORDS,
+    COUNT_PHRASES as _COUNT_PHRASES,
+    CREATE_TIMER_WORDS as _CREATE_TIMER_WORDS,
+    CREATE_VERBS as _CREATE_VERBS,
+    LIST_WORDS as _LIST_WORDS,
+    SET_TRIGGERS as _SET_TRIGGERS,
+    STRICT_LIST_PHRASES as _STRICT_LIST_PHRASES,
+    TIMER_NOUNS as _TIMER_NOUNS,
+    has_timer_set_trigger as _has_timer_set_trigger,
+    is_cancel_query as _is_cancel_query,
+    is_count_query as _is_count_query,
+    is_list_query as _is_list_query,
+    wants_timer_creation as _wants_timer_creation,
+)
+from .responses import (
+    build_ask_duration_response as _ask_duration,
+    build_ask_label_response as _ask_label,
+    build_cancel_response as _build_cancel_response,
+    build_count_response as _build_count_response,
+    build_delete_response as _build_delete_response,
+    build_duration_retry_response as _build_duration_retry_response,
+    build_list_response as _build_list_response,
+    build_set_response as _build_set_response,
+)
 
 logger = logging.getLogger(__name__)
 
-# ── action detection ─────────────────────────────────────────────────────────
-_CANCEL_WORDS = ("cancel", "stop", "kill", "turn off", "clear", "never mind",
-                 "nevermind", "forget the timer", "abort")
-_LIST_WORDS = ("what timers", "list", "show my timer", "show me my timer",
-               "any timers", "how much time", "how long", "time remaining",
-               "time left", "what's on my timer", "do i have any timer",
-               "check my timer")
-
-# ── duration parsing ─────────────────────────────────────────────────────────
-_NUM_WORDS = {
-    "a": 1, "an": 1, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
-    "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10, "eleven": 11,
-    "twelve": 12, "fifteen": 15, "twenty": 20, "thirty": 30, "forty": 40,
-    "forty-five": 45, "fifty": 50, "sixty": 60, "ninety": 90, "half": 0.5,
-}
-
-_HALF_HOUR_RE = re.compile(r"\bhalf\s+(?:an?\s+)?hour\b", re.I)
-_AND_HALF_RE = re.compile(r"(\d+(?:\.\d+)?)\s*(?:and\s*a\s*half|\.5)\s*(hour|hr)s?\b", re.I)
-_NUM_UNIT_RE = re.compile(
-    r"(\d+(?:\.\d+)?|\b(?:a|an|one|two|three|four|five|six|seven|eight|nine|"
-    r"ten|eleven|twelve|fifteen|twenty|thirty|forty|forty-five|fifty|sixty|"
-    r"ninety|half)\b)\s*(hours?|hrs?|minutes?|mins?|seconds?|secs?|h|m|s)\b",
-    re.I,
-)
-
-
-def _unit_to_ms(value: float, unit: str) -> int:
-    u = unit.lower().rstrip("s")
-    if u in ("hour", "hr", "h"):
-        return int(value * 3600 * 1000)
-    if u in ("minute", "min", "m"):
-        return int(value * 60 * 1000)
-    if u in ("second", "sec", "s"):
-        return int(value * 1000)
-    return 0
-
-
-def _parse_duration_ms(text: str) -> int:
-    """Best-effort duration parser. Returns 0 if nothing parses."""
-    t = text.lower()
-
-    # "half an hour" / "half hour"
-    if _HALF_HOUR_RE.search(t):
-        return 30 * 60 * 1000
-
-    # "2 and a half hours" / "1.5 hours"
-    m = _AND_HALF_RE.search(t)
-    if m:
-        return int((float(m.group(1)) + 0.5) * 3600 * 1000)
-
-    # First <num> <unit> match; also sum multiple (e.g. "1 hour 30 minutes")
-    total = 0
-    for num_s, unit in _NUM_UNIT_RE.findall(t):
-        try:
-            num = float(num_s)
-        except ValueError:
-            num = float(_NUM_WORDS.get(num_s.lower(), 0))
-        total += _unit_to_ms(num, unit)
-    if total > 0:
-        return total
-
-    # Bare "an hour" / "a minute"
-    if re.search(r"\ban?\s+hour\b", t):
-        return 3600 * 1000
-    if re.search(r"\ban?\s+minute\b", t):
-        return 60 * 1000
-
-    return 0
-
-
-def _extract_label(prompt: str) -> str:
-    """Grab a short label like 'pasta', 'oven', 'eggs' if mentioned.
-
-    Heuristic: phrases after "for the", "for my", or "to <verb>" are labels.
-    """
-    p = prompt.strip()
-    m = re.search(r"\bfor\s+(?:the|my)\s+([a-z][a-z\s]{0,30}?)(?:\s+timer\b|[.!?,]|$)",
-                  p, re.I)
-    if m:
-        return m.group(1).strip()[:40]
-    m = re.search(r"\bto\s+([a-z][a-z\s]{0,40}?)(?:[.!?,]|$)", p, re.I)
-    if m:
-        return m.group(1).strip()[:40]
-    # "5 minute pizza timer" / "20 minute pasta timer"
-    m = re.search(r"\b\d+\s*(?:hour|hr|minute|min|second|sec)s?\s+([a-z]+)\s+timer\b",
-                  p, re.I)
-    if m:
-        return m.group(1).strip()[:40]
-    return ""
-
-
-def _pretty_duration(ms: int) -> str:
-    s = ms // 1000
-    if s < 60:
-        return f"{s} second{'s' if s != 1 else ''}"
-    m, sec = divmod(s, 60)
-    if m < 60:
-        base = f"{m} minute{'s' if m != 1 else ''}"
-        return base if sec == 0 else f"{base} {sec} sec"
-    h, mm = divmod(m, 60)
-    if mm == 0:
-        return f"{h} hour{'s' if h != 1 else ''}"
-    return f"{h} hour{'s' if h != 1 else ''} {mm} minute{'s' if mm != 1 else ''}"
-
-
-def _extract_delete_target(p_lower: str) -> dict | None:
-    """Detect delete-specific intent and extract which timer to delete.
-
-    Returns {"id": N} or {"index": N} or {"label": "pasta"} or None.
-    Only fires for ONE specific timer — plural/all falls through to CANCEL.
-    """
-    if "timer" not in p_lower:
-        return None
-    verbs = ("delete", "remove", "drop", "get rid of", "scrap")
-    if not any(v in p_lower for v in verbs):
-        return None
-    # "all my timers" / "every timer" → let CANCEL-ALL handle it
-    if any(w in p_lower for w in ("all my timers", "all the timers", "every timer",
-                                   "all timers")):
-        return None
-    # "delete the 3rd timer" / "delete timer 3" / "delete the third timer"
-    ordinals = {"first": 1, "second": 2, "third": 3, "fourth": 4, "fifth": 5,
-                "sixth": 6, "seventh": 7, "eighth": 8, "ninth": 9, "tenth": 10}
-    m = re.search(r"\b(?:the\s+)?(\d+)(?:st|nd|rd|th)?\s*timer\b", p_lower)
-    if m:
-        return {"index": int(m.group(1))}
-    m = re.search(r"\btimer\s+(?:number\s+|#)?(\d+)\b", p_lower)
-    if m:
-        return {"id": int(m.group(1))}
-    for word, n in ordinals.items():
-        if re.search(rf"\b(?:the\s+)?{word}\s+timer\b", p_lower):
-            return {"index": n}
-    # "delete the pasta timer" / "delete my oven timer"
-    m = re.search(r"\b(?:delete|remove|drop|scrap)\s+(?:the\s+|my\s+)?([a-z][a-z\s]{1,30}?)\s+timer\b",
-                  p_lower)
-    if m:
-        label = m.group(1).strip()
-        if label and label not in ("a", "an", "that", "this", "my", "the"):
-            return {"label": label}
-    return None
-
-
-_COUNT_PHRASES = (
-    "how many timers", "how many timer",
-    "number of timers", "count my timers", "count of timers",
-)
-
-
-def _parse_delete_phrase(phrase: str) -> dict | None:
-    """Parse a `delete_target` phrase from params into the CLIENT_TOOL arg."""
-    if not phrase:
-        return None
-    p = phrase.lower().strip()
-    ordinals = {"first": 1, "second": 2, "third": 3, "fourth": 4, "fifth": 5,
-                "sixth": 6, "seventh": 7, "eighth": 8, "ninth": 9, "tenth": 10}
-    m = re.search(r"\btimer\s+(?:number\s+|#)?(\d+)\b", p)
-    if m:
-        return {"id": int(m.group(1))}
-    m = re.search(r"\b(?:the\s+)?(\d+)(?:st|nd|rd|th)?\s*timer\b", p)
-    if m:
-        return {"index": int(m.group(1))}
-    for word, n in ordinals.items():
-        if re.search(rf"\b(?:the\s+)?{word}(?:\s+timer)?\b", p):
-            return {"index": n}
-    m = re.search(
-        r"\b(?:the\s+|my\s+)?([a-z][a-z\s]{1,30}?)(?:\s+timer)?$",
-        p,
-    )
-    if m:
-        label = m.group(1).strip()
-        if label and label not in ("a", "an", "that", "this", "my", "the", "timer"):
-            return {"label": label}
-    return None
-
-
 # ── Follow-up helpers ─────────────────────────────────────────────────────
-
-# The "no label" reply vocabulary — user explicitly opts out of labeling.
-_NO_LABEL_REPLIES = {
-    "no", "no label", "none", "skip", "nothing", "nope", "nah",
-    "no thanks", "no thank you", "don't", "dont", "without a label",
-    "without label", "i don't want one", "i don't want a label",
-    "just set it", "leave it", "blank",
-}
 
 # Pivot detection moved out of this handler on 2026-04-17. The brittle
 # _PIVOT_PREFIXES list (which leaked every new pivot phrase) has been
 # replaced by the LLM-backed check in
 # stage2_dispatcher._continuation_check, keyed off the literal question
-# we stored in pending["question"]. See `_pending()` below.
-
-
-def _label_from_reply(prompt: str) -> str:
-    """Extract a clean label from a follow-up reply. '' means 'no label'."""
-    p = prompt.strip()
-    if p.lower().strip(".!?,") in _NO_LABEL_REPLIES:
-        return ""
-    # Strip common polite wrappers: "call it X", "the label is X", "X please"
-    for pattern in (
-        r"^(?:call\s+it|label\s+it|name\s+it|its\s+called|it's\s+called|the\s+label\s+(?:is|should\s+be)|label:)\s+",
-        r"^(?:let's\s+call\s+it\s+|i'd\s+call\s+it\s+|how\s+about\s+)",
-    ):
-        p = re.sub(pattern, "", p, flags=re.IGNORECASE).strip()
-    # Trim trailing politeness
-    p = re.sub(r"\s+(?:please|thanks|thank\s+you)\s*[.!?]?\s*$", "", p, flags=re.IGNORECASE).strip()
-    p = p.rstrip(".!?,").strip()
-    return p[:60]  # cap length
-
-
-def _looks_like_new_timer(prompt: str) -> bool:
-    """True if the prompt looks like a brand-new timer request rather than
-    an answer to a follow-up question (e.g. 'set a 5 minute timer')."""
-    p = prompt.lower()
-    if _parse_duration_ms(prompt) > 0:
-        new_timer_signals = ("set ", "start ", "another timer", "new timer",
-                             "timer for ", "create ", "make ")
-        return any(s in p for s in new_timer_signals)
-    return False
+# we stored in pending["question"].
 
 
 # `_looks_like_pivot` removed — pivot detection is dispatcher-level now.
@@ -259,93 +81,9 @@ def _looks_like_new_timer(prompt: str) -> bool:
 # class, same handler), so keep it.
 
 
-def _expires_at(minutes: int = 2) -> str:
-    import datetime as _dt
-    return (_dt.datetime.utcnow() + _dt.timedelta(minutes=minutes)).strftime(
-        "%Y-%m-%dT%H:%M:%SZ"
-    )
-
-
-def _pending(awaiting: str, data: dict, question: str = "") -> dict:
-    """Build a STAGE2_FOLLOWUP pending_action for the timer handler.
-
-    `question` is the literal text Jane just asked. The dispatcher reads
-    this on the next turn to decide (via LLM) whether the user's reply
-    answered the question or pivoted elsewhere.
-    """
-    return {
-        "type": "STAGE2_FOLLOWUP",
-        "handler_class": "timer",
-        "status": "awaiting_user",
-        "awaiting": awaiting,
-        "data": {**data, "awaiting": awaiting},
-        "question": question,
-        "expires_at": _expires_at(),
-    }
-
-
-def _ask_duration(data: dict) -> dict:
-    ask = "Sure — how long should the timer run?"
-    return {
-        "text": ask,
-        "structured": {
-            "intent": "timer",
-            "entities": {"action": "set", "stage": "await_duration"},
-            "pending_action": _pending("duration", data, question=ask),
-        },
-    }
-
-
-def _ask_label(data: dict) -> dict:
-    pretty = _pretty_duration(data.get("duration_ms", 0))
-    ask = f"Got it, {pretty}. What should I call this timer? Or say 'no label'."
-    return {
-        "text": ask,
-        "structured": {
-            "intent": "timer",
-            "entities": {"action": "set", "stage": "await_label",
-                         "duration_ms": data.get("duration_ms")},
-            "pending_action": _pending("label", data, question=ask),
-        },
-    }
-
-
 def _fire_set(duration_ms: int, label: str, *, from_followup: bool = False) -> dict:
-    args = {"duration_ms": duration_ms, "label": label}
-    marker = f"[[CLIENT_TOOL:timer.set:{json.dumps(args, separators=(',', ':'))}]]"
-    pretty = _pretty_duration(duration_ms)
-    if label:
-        # If the label is already a complete sentence-end ("pasta is
-        # ready", "bread is done", "time's up"), don't re-append
-        # " is ready" — the user already said it.
-        ll = label.lower()
-        already_terminal = any(ll.endswith(w) for w in
-                               ("ready", "done", "up", "finished", "out"))
-        if already_terminal:
-            spoken = f"Timer set — I'll tell you in {pretty} when {label}."
-        else:
-            spoken = f"Timer set — I'll let you know when the {label} is ready in {pretty}."
-    else:
-        spoken = f"Timer set for {pretty}."
     logger.info("timer handler: fire duration_ms=%d label=%r", duration_ms, label)
-    structured: dict = {
-        "intent": "timer",
-        "entities": {"action": "set", "duration_ms": duration_ms,
-                     "label": label or ""},
-    }
-    if from_followup:
-        structured["pending_action"] = {
-            "type": "STAGE2_FOLLOWUP",
-            "handler_class": "timer",
-            "status": "resolved",
-        }
-    # Setting a timer is a one-shot action — close the voice loop after the
-    # confirmation so the phone returns to wake-word mode.
-    return {
-        "text": f"{spoken} {marker}",
-        "conversation_end": True,
-        "structured": structured,
-    }
+    return _build_set_response(duration_ms, label, from_followup=from_followup)
 
 
 def _handle_resume(prompt: str, pending: dict) -> dict | None:
@@ -378,29 +116,10 @@ def _handle_resume(prompt: str, pending: dict) -> dict | None:
     awaiting = data.pop("awaiting", None)
 
     if awaiting == "duration":
-        dur = _parse_duration_ms(prompt)
-        # Also try "five" / "one" → 5 / 1 with an implicit minutes unit,
-        # since follow-up replies often drop the unit word.
-        if dur <= 0:
-            m = re.fullmatch(r"\s*(\d+(?:\.\d+)?|\w+)\s*", prompt.strip().lower())
-            if m:
-                tok = m.group(1)
-                try:
-                    n = float(tok)
-                except ValueError:
-                    n = float(_NUM_WORDS.get(tok, 0))
-                if n > 0:
-                    dur = int(n * 60 * 1000)  # assume minutes
+        dur = _parse_followup_duration_ms(prompt)
         if dur <= 0:
             # Re-ask once.
-            ask = "I didn't catch that. How long should the timer run? Like '5 minutes'."
-            return {
-                "text": ask,
-                "structured": {
-                    "intent": "timer",
-                    "pending_action": _pending("duration", data, question=ask),
-                },
-            }
+            return _build_duration_retry_response(data)
         data["duration_ms"] = dur
         # If we already have a label from earlier, fire; otherwise ask.
         if data.get("label"):
@@ -438,46 +157,24 @@ def handle(prompt: str, pending: dict | None = None, params: dict | None = None)
 
     # ── Params-driven dispatch ────────────────────────────────────────
     if action == "count":
-        marker = "[[CLIENT_TOOL:timer.list:{}]]"
         logger.info("timer handler: count query (params)")
-        return {
-            "text": f"Let me check. {marker}",
-            "structured": {"intent": "timer", "entities": {"action": "count"}},
-        }
+        return _build_count_response()
 
     if action == "list":
-        marker = "[[CLIENT_TOOL:timer.list:{}]]"
         logger.info("timer handler: list (params)")
-        return {
-            "text": f"Checking your timers. {marker}",
-            "structured": {"intent": "timer", "entities": {"action": "list"}},
-        }
+        return _build_list_response()
 
     if action == "cancel":
-        marker = "[[CLIENT_TOOL:timer.cancel:{}]]"
         logger.info("timer handler: cancel (params)")
-        return {
-            "text": f"Cancelling your timer. {marker}",
-            "structured": {"intent": "timer", "entities": {"action": "cancel"}},
-        }
+        return _build_cancel_response()
 
     if action == "delete":
         target = _parse_delete_phrase(param_delete_target or "") or _extract_delete_target(p_lower)
         if target is None:
             logger.info("timer handler: delete with no resolvable target — escalating")
             return None
-        tool_args = json.dumps(target, separators=(',', ':'))
-        marker = f"[[CLIENT_TOOL:timer.delete:{tool_args}]]"
-        descr = (
-            f"timer #{target['id']}" if "id" in target
-            else f"the {target['label']} timer" if "label" in target
-            else f"the #{target['index']} timer"
-        )
         logger.info("timer handler: delete %s (params)", target)
-        return {
-            "text": f"Deleting {descr}. {marker}",
-            "structured": {"intent": "timer", "entities": {"action": "delete", **target}},
-        }
+        return _build_delete_response(target)
 
     if action == "set":
         duration_ms = 0
@@ -498,56 +195,25 @@ def handle(prompt: str, pending: dict | None = None, params: dict | None = None)
     # ── Legacy regex path (no params, e.g. v2 pipeline) ────────────────
     # COUNT / QUERY — "how many timers do I have"
     # timer.list already returns a count-friendly summary on Android.
-    if any(p in p_lower for p in _COUNT_PHRASES):
-        marker = "[[CLIENT_TOOL:timer.list:{}]]"
+    if _is_count_query(p_lower):
         logger.info("timer handler: count query")
-        return {
-            "text": f"Let me check. {marker}",
-            "structured": {"intent": "timer",
-                           "entities": {"action": "count"}},
-        }
+        return _build_count_response()
 
     # DELETE specific timer (by id / index / label)
     target = _extract_delete_target(p_lower)
     if target is not None:
-        tool_args = json.dumps(target, separators=(',', ':'))
-        marker = f"[[CLIENT_TOOL:timer.delete:{tool_args}]]"
-        descr = (
-            f"timer #{target['id']}" if "id" in target
-            else f"the {target['label']} timer" if "label" in target
-            else f"the #{target['index']} timer"
-        )
         logger.info("timer handler: delete %s", target)
-        return {
-            "text": f"Deleting {descr}. {marker}",
-            "structured": {"intent": "timer",
-                           "entities": {"action": "delete", **target}},
-        }
+        return _build_delete_response(target)
 
     # CANCEL (all timers)
-    if any(w in p_lower for w in _CANCEL_WORDS) and "timer" in p_lower:
-        marker = "[[CLIENT_TOOL:timer.cancel:{}]]"
+    if _is_cancel_query(p_lower):
         logger.info("timer handler: cancel")
-        return {
-            "text": f"Cancelling your timer. {marker}",
-            "structured": {"intent": "timer",
-                           "entities": {"action": "cancel"}},
-        }
+        return _build_cancel_response()
 
     # LIST — must mention timer/countdown OR use a timer-specific list phrase
-    _TIMER_NOUNS = ("timer", "countdown", "ticking")
-    _STRICT_LIST = ("what timers", "any timers", "do i have any timer",
-                    "check my timer", "show my timer", "show me my timer")
-    if (any(w in p_lower for w in _LIST_WORDS)
-            and (any(n in p_lower for n in _TIMER_NOUNS)
-                 or any(s in p_lower for s in _STRICT_LIST))):
-        marker = "[[CLIENT_TOOL:timer.list:{}]]"
+    if _is_list_query(p_lower):
         logger.info("timer handler: list")
-        return {
-            "text": f"Checking your timers. {marker}",
-            "structured": {"intent": "timer",
-                           "entities": {"action": "list"}},
-        }
+        return _build_list_response()
 
     # SET
     duration_ms = _parse_duration_ms(prompt)
@@ -557,17 +223,11 @@ def handle(prompt: str, pending: dict | None = None, params: dict | None = None)
     # "Wants a timer, no duration yet" — conversational creation.
     # ("hey Jane I want to create a timer" / "start a timer for me" /
     #  "can you set a timer for")
-    _CREATE_TIMER_WORDS = ("timer", "alarm", "countdown")
-    _CREATE_VERBS = ("create", "make", "start", "begin", "set up", "set a",
-                     "set the", "set my", "start a", "make me a", "give me a",
-                     "need a", "need another")
-    wants_timer = any(w in p_lower for w in _CREATE_TIMER_WORDS)
-    wants_create = any(v in p_lower for v in _CREATE_VERBS)
     if duration_ms <= 0:
         # Stage 1 already classified this as `timer:High`, so an empty
         # duration is almost always a cut-off sentence like "set a timer
         # for ...". Ask rather than escalating to Opus.
-        if wants_timer or wants_create or p_lower.startswith("i ") or "i want" in p_lower:
+        if _wants_timer_creation(p_lower) or p_lower.startswith("i ") or "i want" in p_lower:
             logger.info("timer handler: timer intent with no duration → ask")
             return _ask_duration({})
         logger.info("timer handler: couldn't parse duration — escalating")
@@ -576,12 +236,7 @@ def handle(prompt: str, pending: dict | None = None, params: dict | None = None)
     # Guard: conversational phrases containing a duration are NOT timer commands
     # ("let me rest for 10 minutes", "I need 5 minutes to think").
     # Require at least one timer-ish trigger word OR a very short utterance.
-    _SET_TRIGGERS = ("timer", "alarm", "countdown", "remind", "wake", "buzz",
-                     "nudge", "ping", "tell me when", "let me know", "set",
-                     "start", "give me", "gimme", "hit me", "time me")
-    is_short = len(prompt.split()) <= 4  # "ten minutes", "5 min"
-    has_trigger = any(t in p_lower for t in _SET_TRIGGERS)
-    if not is_short and not has_trigger:
+    if not _has_timer_set_trigger(prompt, p_lower):
         logger.info("timer handler: duration found but no timer trigger — escalating")
         return None
 

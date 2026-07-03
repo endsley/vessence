@@ -34,11 +34,35 @@ from __future__ import annotations
 
 import datetime as dt
 import os
-import re
 import subprocess
 import sys
 import time
 from pathlib import Path
+
+from agent_skills.nightly_log_reader import (
+    read_job_log as _read_job_log,
+    read_text as _read_text,
+)
+from agent_skills.nightly_report_rendering import (
+    executive_summary_lines as _executive_summary_lines,
+    stage_detail_lines as _stage_detail_lines,
+    status_counts as _status_counts,
+    summary_log_lines as _summary_log_lines,
+    summary_log_preamble as _summary_log_preamble,
+    tldr_stage_lines as _tldr_stage_lines,
+    top_followups as _top_followups,
+    unique_archive_path as _unique_archive_path,
+)
+from agent_skills.nightly_report_summaries import (
+    bullet as _bullet,
+    condense_tldr_items as _condense_tldr_items,
+    extract_field as _extract_field,
+    summarize_dead_code as _summarize_dead_code,
+    summarize_doc_drift as _summarize_doc_drift,
+    summarize_generic_log as _summarize_generic_log,
+    summarize_pipeline as _summarize_pipeline,
+    summarize_transcript_review as _summarize_transcript_review,
+)
 
 VESSENCE_HOME = Path(os.environ.get("VESSENCE_HOME", str(Path(__file__).resolve().parents[1])))
 VESSENCE_DATA_HOME = Path(os.environ.get("VESSENCE_DATA_HOME", str(Path.home() / "ambient/vessence-data")))
@@ -223,196 +247,10 @@ def write_summary(results: list[dict], started: dt.datetime) -> None:
     """Append a summary row to configs/self_improve_log.md"""
     SUMMARY_LOG.parent.mkdir(parents=True, exist_ok=True)
     if not SUMMARY_LOG.exists():
-        SUMMARY_LOG.write_text(
-            "# Nightly Self-Improvement Log\n\n"
-            "Each row is one orchestrator run. Columns: job → status → duration.\n\n"
-        )
-    lines = [f"\n## {started.strftime('%Y-%m-%d %H:%M')}\n"]
-    for r in results:
-        emoji = {"ok": "✅", "timeout": "⏱️"}.get(r["status"], "❌")
-        lines.append(f"- {emoji} **{r['name']}** — {r['status']} ({r['elapsed_s']}s) → `{Path(r['log']).name}`")
+        SUMMARY_LOG.write_text(_summary_log_preamble())
+    lines = _summary_log_lines(results, started)
     with SUMMARY_LOG.open("a") as f:
         f.write("\n".join(lines) + "\n")
-
-
-def _read_text(path: Path, *, tail_chars: int | None = None) -> str:
-    try:
-        text = path.read_text(encoding="utf-8", errors="replace")
-    except FileNotFoundError:
-        return ""
-    except Exception:
-        return ""
-    if tail_chars and len(text) > tail_chars:
-        return text[-tail_chars:]
-    return text
-
-
-def _read_job_log(result: dict, *, tail_chars: int = 12000) -> str:
-    raw_log_path = str(result.get("log") or "").strip()
-    if not raw_log_path:
-        return ""
-    log_path = Path(raw_log_path)
-    text = _read_text(log_path)
-    started_iso = str(result.get("started_iso") or "")
-    if started_iso:
-        try:
-            started_at = dt.datetime.fromisoformat(started_iso)
-            ended_at = started_at + dt.timedelta(seconds=int(result.get("elapsed_s") or 0) + 5)
-            ts_re = re.compile(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})(?:,\d+)?")
-            start_offset: int | None = None
-            end_offset: int | None = None
-            offset = 0
-            for line in text.splitlines(keepends=True):
-                m = ts_re.match(line)
-                if m:
-                    ts = dt.datetime.strptime(m.group(1), "%Y-%m-%d %H:%M:%S")
-                    if start_offset is None and started_at <= ts <= ended_at:
-                        start_offset = offset
-                    elif start_offset is not None and ts > ended_at:
-                        end_offset = offset
-                        break
-                offset += len(line)
-            if start_offset is not None:
-                text = text[start_offset:end_offset]
-                if len(text) > tail_chars:
-                    return text[-tail_chars:]
-                return text
-        except Exception:
-            pass
-    if started_iso:
-        marker = f"===== Run {started_iso}"
-        idx = text.rfind(marker)
-        if idx == -1:
-            marker = f"===== Run {started_iso[:19]}"
-            idx = text.rfind(marker)
-        if idx != -1:
-            text = text[idx:]
-            next_idx = text.find("\n\n===== Run ", len(marker))
-            if next_idx != -1:
-                text = text[:next_idx]
-    if len(text) > tail_chars:
-        return text[-tail_chars:]
-    return text
-
-
-def _bullet(line: str) -> str:
-    clean = re.sub(r"\s+", " ", line.strip())
-    return f"- {clean}"
-
-
-def _first_matching_lines(text: str, patterns: tuple[str, ...], limit: int = 5) -> list[str]:
-    matches: list[str] = []
-    for raw in text.splitlines():
-        line = raw.strip()
-        if not line:
-            continue
-        if any(re.search(pattern, line, re.IGNORECASE) for pattern in patterns):
-            matches.append(_bullet(line))
-        if len(matches) >= limit:
-            break
-    return matches
-
-
-def _extract_markdown_bullets(text: str, after_heading: str, limit: int = 5) -> list[str]:
-    match = re.search(rf"^{re.escape(after_heading)}.*$", text, flags=re.MULTILINE)
-    if not match:
-        return []
-    out: list[str] = []
-    for raw in text[match.end():].splitlines():
-        line = raw.strip()
-        if line.startswith("## "):
-            break
-        if line.startswith("- "):
-            out.append(_bullet(line[2:]))
-        if len(out) >= limit:
-            break
-    return out
-
-
-def _extract_field(text: str, field_name: str, limit: int = 4) -> list[str]:
-    pattern = re.compile(rf"^\*\*{re.escape(field_name)}:\*\*\s*(.+)$", re.MULTILINE)
-    return [_bullet(m.group(1)) for m in pattern.finditer(text)][:limit]
-
-
-def _summarize_dead_code(report: str, log_tail: str) -> tuple[list[str], list[str]]:
-    problems: list[str] = []
-    improvements: list[str] = []
-    for heading in (
-        "Dead files — review needed",
-        "Possibly-dead functions",
-        "Duplicate function bodies",
-    ):
-        m = re.search(rf"## {re.escape(heading)} \(([^)]+)\)", report)
-        if m:
-            problems.append(_bullet(f"{heading}: {m.group(1)}."))
-    improvements.extend(_first_matching_lines(
-        log_tail,
-        (r"auto-deleted", r"Done —"),
-        limit=2,
-    ))
-    return problems, improvements
-
-
-def _summarize_pipeline(report: str, log_tail: str) -> tuple[list[str], list[str]]:
-    problems: list[str] = []
-    improvements: list[str] = []
-    for label in (
-        "Prompts audited",
-        "Classification failures",
-        "Response failures",
-        "Auto-fixes applied",
-    ):
-        m = re.search(rf"- {re.escape(label)}:\s*\*\*([^*]+)\*\*", report)
-        if m:
-            target = improvements if label == "Auto-fixes applied" else problems
-            target.append(_bullet(f"{label}: {m.group(1)}."))
-    problems.extend(_extract_markdown_bullets(report, "## Response failures", limit=4))
-    improvements.extend(_first_matching_lines(log_tail, (r"AUTO-FIX:", r"Added exemplar:"), limit=5))
-    return problems, improvements
-
-
-def _summarize_doc_drift(report: str, log_tail: str) -> tuple[list[str], list[str]]:
-    problems = _extract_markdown_bullets(report, "## Needs human review", limit=8)
-    improvements = _first_matching_lines(
-        log_tail,
-        (r"auto-fix", r"updated", r"wrote", r"fixed"),
-        limit=5,
-    )
-    return problems, improvements
-
-
-def _summarize_transcript_review(report: str, log_tail: str) -> tuple[list[str], list[str]]:
-    problems: list[str] = []
-    improvements: list[str] = []
-    severities = [
-        sev.upper()
-        for sev in re.findall(r"^## Issue \d+ \[([A-Z]+)\]", report, flags=re.MULTILINE | re.IGNORECASE)
-    ]
-    if severities:
-        counts = {sev: severities.count(sev) for sev in sorted(set(severities))}
-        summary = ", ".join(f"{count} {sev.lower()}" for sev, count in counts.items())
-        problems.append(_bullet(f"Transcript review found {len(severities)} issues: {summary}."))
-    problems.extend(_extract_field(report, "Problem", limit=4))
-    improvements.extend(_first_matching_lines(
-        log_tail,
-        (r"Report written", r"self_improve_log: recorded"),
-        limit=3,
-    ))
-    return problems, improvements
-
-
-def _summarize_generic_log(log_tail: str) -> tuple[list[str], list[str]]:
-    problems = _first_matching_lines(
-        log_tail,
-        (r"\bERROR\b", r"\bWARNING\b", r"failed", r"timeout", r"crash"),
-        limit=5,
-    )
-    improvements = _first_matching_lines(
-        log_tail,
-        (r"\bDone\b", r"\bCommitted\b", r"\bPushed\b", r"\bWrote\b", r"\brecorded\b", r"\bcleaned\b"),
-        limit=5,
-    )
-    return problems, improvements
 
 
 def _job_details(result: dict) -> dict:
@@ -452,28 +290,11 @@ def _job_details(result: dict) -> dict:
     # Compact lists for the TL;DR block at the top of the report — the user
     # wants "list of problems you found and the fix you applied" as the
     # minimum info, so we emit up to 3 of each per stage, truncated.
-    def _condense(items: list[str], skip_prefixes: tuple[str, ...] = ()) -> list[str]:
-        out: list[str] = []
-        for it in items:
-            text = it.lstrip("- ").strip()
-            if not text:
-                continue
-            if skip_prefixes and text.startswith(skip_prefixes):
-                continue
-            # Collapse whitespace so multi-line bullets render as one line.
-            text = " ".join(text.split())
-            if len(text) > 160:
-                text = text[:157].rstrip() + "..."
-            out.append(text)
-            if len(out) >= 3:
-                break
-        return out
-
-    problems_tldr_list = _condense(
+    problems_tldr_list = _condense_tldr_items(
         problems,
         skip_prefixes=("Job ended with status",),
     )
-    fixes_tldr_list = _condense(
+    fixes_tldr_list = _condense_tldr_items(
         improvements,
         skip_prefixes=("No concrete improvement",),
     )
@@ -498,54 +319,15 @@ def write_readable_report(results: list[dict], started: dt.datetime, total_s: fl
     LATEST_READABLE_REPORT.parent.mkdir(parents=True, exist_ok=True)
     details = [_job_details(r) for r in results]
 
-    ok = sum(1 for r in results if r["status"] == "ok")
-    timeout = sum(1 for r in results if r["status"] == "timeout")
-    failed = len(results) - ok - timeout
-    archive_path = READABLE_REPORT_DIR / f"self_improvement_{started.strftime('%Y%m%d_%H%M%S')}.md"
-    if archive_path.exists():
-        base = archive_path.with_suffix("")
-        suffix = archive_path.suffix
-        counter = 2
-        while True:
-            candidate = Path(f"{base}_{counter}{suffix}")
-            if not candidate.exists():
-                archive_path = candidate
-                break
-            counter += 1
+    ok, timeout, failed = _status_counts(results)
+    archive_path = _unique_archive_path(READABLE_REPORT_DIR, started)
 
     # TL;DR block — designed so anyone (or an assistant) can read the first
     # ~40 lines and give a full-picture answer without scanning the whole
     # report. Per stage: header line, then indented "Problems:" and "Fixes:"
     # sub-lists (each capped at 3 items, truncated to ~160 chars).
-    status_emoji = {"ok": "✓", "timeout": "⏱", }
-    tldr_stage_lines = []
-    for idx, (r, d) in enumerate(zip(results, details), 1):
-        mark = status_emoji.get(r["status"], "✗")
-        minutes = d["elapsed_s"] / 60
-        tldr_stage_lines.append(
-            f"- {idx}. {mark} {d['name']} ({minutes:.1f}m)"
-        )
-        problems_tldr_list = d.get("problems_tldr_list") or []
-        fixes_tldr_list = d.get("fixes_tldr_list") or []
-        if problems_tldr_list:
-            tldr_stage_lines.append("  - Problems:")
-            for p in problems_tldr_list:
-                tldr_stage_lines.append(f"    - {p}")
-        if fixes_tldr_list:
-            tldr_stage_lines.append("  - Fixes:")
-            for f in fixes_tldr_list:
-                tldr_stage_lines.append(f"    - {f}")
-        if not problems_tldr_list and not fixes_tldr_list:
-            tldr_stage_lines.append("  - Problems: none detected")
-            tldr_stage_lines.append("  - Fixes: none applied")
-
-    top_followups = []
-    for d in details:
-        for f in (d.get("followups") or [])[:2]:
-            # Strip leading "- " so we can re-indent under TL;DR bullet
-            top_followups.append(f.lstrip("- ").strip())
-        if len(top_followups) >= 3:
-            break
+    tldr_stage_lines = _tldr_stage_lines(results, details)
+    top_followups = _top_followups(details)
 
     lines = [
         "# Most Recent Nightly Self-Improvement",
@@ -573,60 +355,10 @@ def write_readable_report(results: list[dict], started: dt.datetime, total_s: fl
         "## Executive Summary",
         "",
     ])
-
-    if failed or timeout:
-        lines.append(_bullet(f"{timeout + failed} stage(s) need attention because they timed out or exited non-zero."))
-    else:
-        lines.append(_bullet("All stages exited cleanly."))
-
-    concrete_improvements = [
-        item
-        for detail in details
-        for item in detail["improvements"]
-        if "No concrete improvement" not in item
-    ]
-    if concrete_improvements:
-        lines.append(_bullet(f"{len(concrete_improvements)} concrete improvement/fix signals were found in logs or reports."))
-    else:
-        lines.append(_bullet("No concrete fix signals were found; this run mainly produced audits/reports."))
+    lines.extend(_executive_summary_lines(timeout, failed, details))
 
     for idx, detail in enumerate(details, 1):
-        minutes = detail["elapsed_s"] / 60
-        lines.extend([
-            "",
-            f"## Stage {idx}: {detail['name']}",
-            "",
-            f"- Status: `{detail['status']}`",
-            f"- Duration: {detail['elapsed_s']}s ({minutes:.1f} min)",
-            "",
-            "### What It Did",
-            "",
-            _bullet(detail["purpose"]),
-            "",
-            "### Problems It Found",
-            "",
-            *detail["problems"],
-            "",
-            "### Improvements It Made",
-            "",
-            *detail["improvements"],
-            "",
-        ])
-        if detail.get("followups"):
-            lines.extend([
-                "### Follow-Up Fixes Recommended",
-                "",
-                *detail["followups"],
-                "",
-            ])
-        lines.extend([
-            "### Evidence Files",
-            "",
-        ])
-        if detail["artifacts"]:
-            lines.extend(_bullet(path) for path in detail["artifacts"])
-        else:
-            lines.append(_bullet("No artifact path was recorded."))
+        lines.extend(_stage_detail_lines(idx, detail))
 
     report = "\n".join(lines).rstrip() + "\n"
     latest_tmp = LATEST_READABLE_REPORT.with_suffix(LATEST_READABLE_REPORT.suffix + ".tmp")
