@@ -20,6 +20,10 @@ class DeviceDiagnosticsLog:
         if not self.path.exists():
             return []
         all_lines = self.path.read_text().strip().split("\n")
+        return self._decode_recent_lines(all_lines, lines)
+
+    @staticmethod
+    def _decode_recent_lines(all_lines: list[str], lines: int) -> list[dict]:
         recent = all_lines[-lines:]
         recent.reverse()
         entries = []

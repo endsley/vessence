@@ -19,6 +19,20 @@ class TodoReplacementPlan:
     failure_message: str
 
 
+@dataclass(frozen=True)
+class TodoAddSectionScan:
+    found_section: bool
+    insert_after_line: str | None
+    numbered_insert_line: str | None
+    last_item_num: int
+
+
+@dataclass(frozen=True)
+class TodoRemoveItemScan:
+    line: str
+    item_body: str
+
+
 def extract_text(body: dict[str, Any]) -> str:
     """Walk the Docs body JSON and extract plain text."""
     parts = []
@@ -84,6 +98,28 @@ def plan_todo_add_item(
     item_text: str,
     category: str,
 ) -> TodoReplacementPlan | None:
+    scan = scan_todo_add_section(full_text, category)
+    if not scan.found_section or scan.insert_after_line is None:
+        return None
+
+    insert_after_line = scan.insert_after_line
+    if scan.numbered_insert_line is not None:
+        insert_after_line = scan.numbered_insert_line
+        new_item = f"\n{scan.last_item_num + 1}. {item_text}"
+        confirmation = f"Added item #{scan.last_item_num + 1} to {category}: {item_text}"
+    else:
+        new_item = f"\n{item_text}"
+        confirmation = f"Added item to {category}: {item_text}"
+
+    return TodoReplacementPlan(
+        old_text=insert_after_line,
+        new_text=insert_after_line + new_item,
+        success_message=confirmation,
+        failure_message=f"Failed to add item to {category}.",
+    )
+
+
+def scan_todo_add_section(full_text: str, category: str) -> TodoAddSectionScan:
     lines = full_text.split("\n")
     in_section = False
     found_section = False
@@ -111,22 +147,11 @@ def plan_todo_add_item(
             insert_after_line = line
             section_has_items = True
 
-    if not found_section or insert_after_line is None:
-        return None
-
-    if numbered_insert_line is not None:
-        insert_after_line = numbered_insert_line
-        new_item = f"\n{last_item_num + 1}. {item_text}"
-        confirmation = f"Added item #{last_item_num + 1} to {category}: {item_text}"
-    else:
-        new_item = f"\n{item_text}"
-        confirmation = f"Added item to {category}: {item_text}"
-
-    return TodoReplacementPlan(
-        old_text=insert_after_line,
-        new_text=insert_after_line + new_item,
-        success_message=confirmation,
-        failure_message=f"Failed to add item to {category}.",
+    return TodoAddSectionScan(
+        found_section=found_section,
+        insert_after_line=insert_after_line,
+        numbered_insert_line=numbered_insert_line,
+        last_item_num=last_item_num,
     )
 
 
@@ -135,6 +160,22 @@ def plan_todo_remove_item(
     item_text: str,
     category: str | None = None,
 ) -> TodoReplacementPlan | None:
+    scan = scan_todo_remove_item(full_text, item_text, category)
+    if scan is None:
+        return None
+    return TodoReplacementPlan(
+        old_text=scan.line + "\n",
+        new_text="",
+        success_message=f"Removed: {scan.item_body}",
+        failure_message="Found the item but failed to delete it.",
+    )
+
+
+def scan_todo_remove_item(
+    full_text: str,
+    item_text: str,
+    category: str | None = None,
+) -> TodoRemoveItemScan | None:
     target = item_text.lower().strip()
     in_section = category is None
     section_has_items = False
@@ -153,12 +194,7 @@ def plan_todo_remove_item(
         section_has_items = True
         item_body = LIST_ITEM_RE.sub("", line).strip()
         if target in item_body.lower():
-            return TodoReplacementPlan(
-                old_text=line + "\n",
-                new_text="",
-                success_message=f"Removed: {item_body}",
-                failure_message="Found the item but failed to delete it.",
-            )
+            return TodoRemoveItemScan(line=line, item_body=item_body)
 
     return None
 

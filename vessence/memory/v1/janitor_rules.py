@@ -174,6 +174,88 @@ def is_low_value_classes_deploy_snapshot(topic: str, subtopic: str, text: str) -
     return contains_any(text, LOW_VALUE_CLASSES_DEPLOY_PHRASES)
 
 
+def _classify_user_memory_junk(
+    text: str,
+    low: str,
+    topic: str,
+    topic_low: str,
+    subtopic_low: str,
+    *,
+    codex_skill_exists: Callable[[str], bool],
+    vessence_docker_compose_missing: Callable[[], bool],
+) -> str | None:
+    if topic in KNOWN_JUNK_TOPICS:
+        return f"Known junk topic `{topic}`"
+    if any(text.startswith(prefix) for prefix in KNOWN_JUNK_PREFIXES):
+        return "Known queue/prompt transcript artifact"
+    if is_known_junk_phrase(text, topic):
+        return "Known test or queue execution artifact"
+    if topic == "system" and (
+        low.startswith("refactor test")
+        or low.startswith("shim cli test")
+        or low.startswith("e2e test")
+    ):
+        return "System test artifact"
+    if "the ai assistant's name is amber" in low:
+        return "Outdated Amber identity memory"
+    if topic == "ds3000_lecture_notes":
+        return "Superseded DS3000 lecture-note anchor; ds3000_lecture_notes_bge is canonical"
+    if is_stale_amber_runtime_memory(low):
+        return "Outdated Amber-era runtime memory"
+    if is_stale_discord_memory(low):
+        return "Outdated Discord bridge/status memory"
+    if is_stale_vessence_docker_memory(
+        low,
+        topic_low,
+        vessence_docker_compose_missing=vessence_docker_compose_missing,
+    ):
+        return "Outdated Vessence Docker/Traefik memory"
+    if is_stale_waterlily_nationalgrid_memory(
+        topic_low,
+        subtopic_low,
+        low,
+        codex_skill_exists=codex_skill_exists,
+    ):
+        return "Superseded Waterlily National Grid implementation gap"
+    if is_superseded_acubliss_planning_memory(
+        topic_low,
+        subtopic_low,
+        low,
+        codex_skill_exists=codex_skill_exists,
+    ):
+        return "Superseded AcuBliss extraction planning memory"
+    if is_low_value_classes_deploy_snapshot(topic_low, subtopic_low, low):
+        return "Low-value classes.chiehwu.com deploy revision snapshot"
+    return None
+
+
+def _classify_long_term_junk(
+    low: str,
+    meta: dict,
+    topic_low: str,
+    subtopic_low: str,
+    *,
+    vessence_docker_compose_missing: Callable[[], bool],
+) -> str | None:
+    if not meta.get("topic"):
+        return "Untyped archived transcript fragment with no topic metadata"
+    if low.startswith("theme: article-sharing workflow") and "deferred follow-up feature request" in low:
+        return "Deferred feature-request snapshot"
+    if is_stale_amber_runtime_memory(low):
+        return "Outdated Amber-era runtime memory"
+    if is_stale_discord_memory(low):
+        return "Outdated Discord bridge/status memory"
+    if is_stale_vessence_docker_memory(
+        low,
+        topic_low,
+        vessence_docker_compose_missing=vessence_docker_compose_missing,
+    ):
+        return "Outdated Vessence Docker/Traefik memory"
+    if is_low_value_classes_deploy_snapshot(topic_low, subtopic_low, low):
+        return "Low-value classes.chiehwu.com deploy revision snapshot"
+    return None
+
+
 def classify_known_junk(
     collection_name: str,
     doc: str,
@@ -193,67 +275,23 @@ def classify_known_junk(
     subtopic_low = meta_label(meta, "subtopic")
 
     if collection_name == user_collection_name:
-        if topic in KNOWN_JUNK_TOPICS:
-            return f"Known junk topic `{topic}`"
-        if any(text.startswith(prefix) for prefix in KNOWN_JUNK_PREFIXES):
-            return "Known queue/prompt transcript artifact"
-        if is_known_junk_phrase(text, topic):
-            return "Known test or queue execution artifact"
-        if topic == "system" and (
-            low.startswith("refactor test")
-            or low.startswith("shim cli test")
-            or low.startswith("e2e test")
-        ):
-            return "System test artifact"
-        if "the ai assistant's name is amber" in low:
-            return "Outdated Amber identity memory"
-        if topic == "ds3000_lecture_notes":
-            return "Superseded DS3000 lecture-note anchor; ds3000_lecture_notes_bge is canonical"
-        if is_stale_amber_runtime_memory(low):
-            return "Outdated Amber-era runtime memory"
-        if is_stale_discord_memory(low):
-            return "Outdated Discord bridge/status memory"
-        if is_stale_vessence_docker_memory(
+        return _classify_user_memory_junk(
+            text,
             low,
+            topic,
             topic_low,
+            subtopic_low,
+            codex_skill_exists=codex_skill_exists,
             vessence_docker_compose_missing=vessence_docker_compose_missing,
-        ):
-            return "Outdated Vessence Docker/Traefik memory"
-        if is_stale_waterlily_nationalgrid_memory(
-            topic_low,
-            subtopic_low,
-            low,
-            codex_skill_exists=codex_skill_exists,
-        ):
-            return "Superseded Waterlily National Grid implementation gap"
-        if is_superseded_acubliss_planning_memory(
-            topic_low,
-            subtopic_low,
-            low,
-            codex_skill_exists=codex_skill_exists,
-        ):
-            return "Superseded AcuBliss extraction planning memory"
-        if is_low_value_classes_deploy_snapshot(topic_low, subtopic_low, low):
-            return "Low-value classes.chiehwu.com deploy revision snapshot"
-        return None
+        )
 
     if collection_name == long_term_collection_name:
-        if not meta.get("topic"):
-            return "Untyped archived transcript fragment with no topic metadata"
-        if low.startswith("theme: article-sharing workflow") and "deferred follow-up feature request" in low:
-            return "Deferred feature-request snapshot"
-        if is_stale_amber_runtime_memory(low):
-            return "Outdated Amber-era runtime memory"
-        if is_stale_discord_memory(low):
-            return "Outdated Discord bridge/status memory"
-        if is_stale_vessence_docker_memory(
+        return _classify_long_term_junk(
             low,
+            meta,
             topic_low,
+            subtopic_low,
             vessence_docker_compose_missing=vessence_docker_compose_missing,
-        ):
-            return "Outdated Vessence Docker/Traefik memory"
-        if is_low_value_classes_deploy_snapshot(topic_low, subtopic_low, low):
-            return "Low-value classes.chiehwu.com deploy revision snapshot"
-        return None
+        )
 
     return None

@@ -67,6 +67,13 @@ def condense_tldr_items(
     return out
 
 
+def pipeline_metric_bullet(report: str, label: str) -> str | None:
+    match = re.search(rf"- {re.escape(label)}:\s*\*\*([^*]+)\*\*", report)
+    if not match:
+        return None
+    return bullet(f"{label}: {match.group(1)}.")
+
+
 def summarize_dead_code(report: str, log_tail: str) -> tuple[list[str], list[str]]:
     problems: list[str] = []
     improvements: list[str] = []
@@ -95,10 +102,10 @@ def summarize_pipeline(report: str, log_tail: str) -> tuple[list[str], list[str]
         "Response failures",
         "Auto-fixes applied",
     ):
-        m = re.search(rf"- {re.escape(label)}:\s*\*\*([^*]+)\*\*", report)
-        if m:
+        metric = pipeline_metric_bullet(report, label)
+        if metric:
             target = improvements if label == "Auto-fixes applied" else problems
-            target.append(bullet(f"{label}: {m.group(1)}."))
+            target.append(metric)
     problems.extend(extract_markdown_bullets(report, "## Response failures", limit=4))
     improvements.extend(first_matching_lines(log_tail, (r"AUTO-FIX:", r"Added exemplar:"), limit=5))
     return problems, improvements

@@ -8,6 +8,16 @@ from typing import Any
 NORMALIZED_STYLE_V2 = "long_term_normalized_v2"
 
 
+def empty_normalization_result() -> dict[str, int]:
+    return {
+        "reviewed": 0,
+        "rewritten": 0,
+        "split": 0,
+        "deleted_originals": 0,
+        "unchanged": 0,
+    }
+
+
 def long_term_normalization_candidates(
     rows: list[dict[str, Any]],
     *,
@@ -46,6 +56,19 @@ def split_normalization_prompt(row: dict[str, Any], doc: str) -> str:
         f"Topic: {(row.get('meta') or {}).get('topic')}\n"
         f"Memory:\n{doc}"
     )
+
+
+def split_plan_memories(
+    plan: dict[str, Any],
+    *,
+    max_chars: int,
+    max_items: int,
+) -> list[str]:
+    return [
+        str(item).strip()[:max_chars]
+        for item in (plan.get("memories") or [])
+        if str(item).strip()
+    ][:max_items]
 
 
 def rewrite_normalization_prompt(row: dict[str, Any], doc: str, *, max_chars: int) -> str:

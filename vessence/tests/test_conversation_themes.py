@@ -6,10 +6,13 @@ from memory.v1.conversation_themes import (
     identity_signal_count,
     initial_theme_title_prompt,
     normalize_theme_title,
+    oldest_theme_by_last_update,
     parse_theme_classification_response,
+    short_term_theme_metadata,
     theme_classification_prompt,
     theme_entries_from_results,
     theme_summary_prompt,
+    updated_short_term_theme_metadata,
 )
 
 
@@ -132,6 +135,85 @@ def test_theme_entries_from_results_sorts_by_theme_index_and_defaults_metadata()
         {"id": "early", "document": "early doc", "metadata": {"theme_index": 1, "theme_title": "Early"}},
         {"id": "late", "document": "late doc", "metadata": {"theme_index": 5, "theme_title": "Late"}},
     ]
+
+
+def test_short_term_theme_metadata_preserves_conversation_manager_shape():
+    assert short_term_theme_metadata(
+        session_id="session-1",
+        theme_title="Project Vessence",
+        theme_index=3,
+        now_iso="2026-07-03T12:00:00",
+        expires_iso="2026-08-02T12:00:00",
+    ) == {
+        "session_id": "session-1",
+        "theme_title": "Project Vessence",
+        "theme_index": 3,
+        "turn_count": 1,
+        "first_turn_at": "2026-07-03T12:00:00",
+        "last_updated_at": "2026-07-03T12:00:00",
+        "memory_type": "short_term_theme",
+        "expires_at": "2026-08-02T12:00:00",
+    }
+    assert short_term_theme_metadata(
+        session_id="session-1",
+        theme_title="Project Vessence",
+        theme_index=3,
+        now_iso="2026-07-03T12:00:00",
+        expires_iso="2026-08-02T12:00:00",
+        turn_count=4,
+        first_turn_at="2026-07-01T09:00:00",
+    )["first_turn_at"] == "2026-07-01T09:00:00"
+
+
+def test_updated_short_term_theme_metadata_preserves_existing_theme_update_shape():
+    assert updated_short_term_theme_metadata(
+        {
+            "theme_title": "Project Vessence",
+            "theme_index": 2,
+            "turn_count": 4,
+            "first_turn_at": "2026-07-01T09:00:00",
+            "last_updated_at": "old",
+            "expires_at": "old-expiry",
+        },
+        now_iso="2026-07-03T12:00:00",
+        expires_iso="2026-08-02T12:00:00",
+    ) == {
+        "theme_title": "Project Vessence",
+        "theme_index": 2,
+        "turn_count": 5,
+        "first_turn_at": "2026-07-01T09:00:00",
+        "last_updated_at": "2026-07-03T12:00:00",
+        "expires_at": "2026-08-02T12:00:00",
+    }
+    assert updated_short_term_theme_metadata(
+        {"theme_title": "Untitled"},
+        now_iso="now",
+        expires_iso="later",
+    )["turn_count"] == 2
+
+
+def test_oldest_theme_by_last_update_preserves_eviction_ordering():
+    missing_timestamp = {
+        "id": "missing",
+        "metadata": {"theme_title": "Missing timestamp"},
+    }
+    early = {
+        "id": "early",
+        "metadata": {
+            "theme_title": "Early",
+            "last_updated_at": "2026-07-01T09:00:00",
+        },
+    }
+    late = {
+        "id": "late",
+        "metadata": {
+            "theme_title": "Late",
+            "last_updated_at": "2026-07-03T09:00:00",
+        },
+    }
+
+    assert oldest_theme_by_last_update([late, early]) is early
+    assert oldest_theme_by_last_update([late, missing_timestamp, early]) is missing_timestamp
 
 
 def test_archivist_prompt_includes_registry_topics_schema_and_transcript_tail():

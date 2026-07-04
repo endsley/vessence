@@ -16,7 +16,15 @@ injection so Stage 3 always has a calendar block to work from.
 import datetime
 import logging
 
+from jane_web.jane_v2.classes.context_footers import fetched_at_footer
+
 _logger = logging.getLogger(__name__)
+
+CALENDAR_BUCKETS = (
+    ("[CALENDAR — today]", "today", 25),
+    ("[CALENDAR — tomorrow]", "tomorrow", 25),
+    ("[CALENDAR — next 90 days]", "next_90_days", 200),
+)
 
 
 def _format_event_line(i: int, ev: dict) -> str:
@@ -57,6 +65,39 @@ def _format_calendar_block(label: str, events: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def _calendar_setup_error_block(error: Exception) -> str:
+    return (
+        "[CALENDAR ERROR]\n"
+        f"Google Calendar not set up: {error}\n"
+        "Tell the user they need to sign in with Google on the "
+        "Vessence web UI to enable calendar access.\n[END]"
+    )
+
+
+def _calendar_fetch_failed_block(label: str, error: Exception) -> str:
+    return f"{label}\nFetch failed: {error}\n[END]"
+
+
+def _calendar_bucket_block(
+    list_events_in_range_fn,
+    *,
+    label: str,
+    range_hint: str,
+    max_results: int,
+) -> tuple[str, bool]:
+    try:
+        events = list_events_in_range_fn(range_hint, max_results=max_results)
+        return _format_calendar_block(label, events), False
+    except RuntimeError as e:
+        return _calendar_setup_error_block(e), True
+    except Exception as e:
+        _logger.warning(
+            "read_calendar escalation: fetch failed for %s: %s",
+            range_hint, e,
+        )
+        return _calendar_fetch_failed_block(label, e), False
+
+
 def _escalation_context() -> str:
     """Inject today + tomorrow + the next 90 days so Opus can answer both
     focused queries ("what's on my calendar today") and forward-looking
@@ -86,39 +127,26 @@ def _escalation_context() -> str:
     parts = []
     creds_failed = False
 
-    for label, range_hint, max_results in (
-        ("[CALENDAR — today]", "today", 25),
-        ("[CALENDAR — tomorrow]", "tomorrow", 25),
-        ("[CALENDAR — next 90 days]", "next_90_days", 200),
-    ):
+    for label, range_hint, max_results in CALENDAR_BUCKETS:
         if creds_failed:
             break
-        try:
-            events = list_events_in_range(range_hint, max_results=max_results)
-            parts.append(_format_calendar_block(label, events))
-        except RuntimeError as e:
-            creds_failed = True
-            parts.append(
-                "[CALENDAR ERROR]\n"
-                f"Google Calendar not set up: {e}\n"
-                "Tell the user they need to sign in with Google on the "
-                "Vessence web UI to enable calendar access.\n[END]"
-            )
-        except Exception as e:
-            _logger.warning(
-                "read_calendar escalation: fetch failed for %s: %s",
-                range_hint, e,
-            )
-            parts.append(f"{label}\nFetch failed: {e}\n[END]")
+        block, creds_failed = _calendar_bucket_block(
+            list_events_in_range,
+            label=label,
+            range_hint=range_hint,
+            max_results=max_results,
+        )
+        parts.append(block)
 
     if not creds_failed:
         parts.append(
-            f"(Fetched at {datetime.datetime.utcnow().isoformat()}Z. "
-            "Answer the user from the most relevant bucket. The 90-day "
-            "bucket is for forward-looking semantic queries (next "
-            "appointment with X, anything coming up, what's in May). "
-            "Quote event names and times. Skip events that already "
-            "ended unless the user asked about them.)"
+            fetched_at_footer(
+                "Answer the user from the most relevant bucket. The 90-day "
+                "bucket is for forward-looking semantic queries (next "
+                "appointment with X, anything coming up, what's in May). "
+                "Quote event names and times. Skip events that already "
+                "ended unless the user asked about them."
+            )
         )
 
     return "\n\n".join(parts)

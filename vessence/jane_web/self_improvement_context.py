@@ -11,6 +11,28 @@ DEFAULT_TECH_LOGS = "$VESSENCE_DATA_HOME/logs/self_improve_*.log"
 DEFAULT_LATEST_REPORT = "$VESSENCE_HOME/configs/self_improvement_latest.md"
 
 
+def _context_header_lines(*, log_path: str, tech_logs: str, latest_report: str) -> list[str]:
+    return [
+        "\n\n[SELF IMPROVEMENT CONTEXT]",
+        f"Readable latest report: {latest_report}",
+        f"Vocal summary log file: {log_path}",
+        f"Technical job logs: {tech_logs}",
+    ]
+
+
+def _job_category_summary(entries: Sequence[dict]) -> str:
+    by_job = Counter(entry.get("job", "?") for entry in entries)
+    return ", ".join(f"{job} ({count})" for job, count in by_job.most_common())
+
+
+def _entry_reference_line(index: int, entry: dict) -> str:
+    ts = entry.get("timestamp", "?")
+    job = entry.get("job", "?")
+    severity = entry.get("severity", "info")
+    summary = entry.get("summary", "").strip()
+    return f"{index}. [{ts} | {job} | {severity}] {summary}"
+
+
 def build_self_improvement_context_block(
     entries: Sequence[dict],
     *,
@@ -19,22 +41,24 @@ def build_self_improvement_context_block(
     latest_report: str = DEFAULT_LATEST_REPORT,
 ) -> str:
     if not entries:
-        return (
-            "\n\n[SELF IMPROVEMENT CONTEXT]\n"
-            f"Readable latest report: {latest_report}\n"
-            f"Vocal summary log file: {log_path}\n"
-            f"Technical job logs: {tech_logs}\n"
+        lines = _context_header_lines(
+            log_path=log_path,
+            tech_logs=tech_logs,
+            latest_report=latest_report,
+        )
+        lines.append(
             "No recent self-improvement entries found (empty log or "
             "older than 14 days). Tell the user nothing's been logged "
-            "yet and the nightly job may not have run recently.\n"
-            "[END SELF IMPROVEMENT CONTEXT]"
+            "yet and the nightly job may not have run recently."
         )
+        lines.append("[END SELF IMPROVEMENT CONTEXT]")
+        return "\n".join(lines)
 
-    by_job = Counter(entry.get("job", "?") for entry in entries)
-    lines = ["\n\n[SELF IMPROVEMENT CONTEXT]"]
-    lines.append(f"Readable latest report: {latest_report}")
-    lines.append(f"Vocal summary log file: {log_path}")
-    lines.append(f"Technical job logs: {tech_logs}")
+    lines = _context_header_lines(
+        log_path=log_path,
+        tech_logs=tech_logs,
+        latest_report=latest_report,
+    )
     lines.append(
         "RESPONSE STYLE — CRITICAL. The user is on voice and doesn't "
         "want a long recital. Your reply should be CONVERSATIONAL:\n"
@@ -59,16 +83,12 @@ def build_self_improvement_context_block(
         "the same short-headline-plus-offer pattern.\n\n"
         f"Total entries in context window: {len(entries)} "
         f"(most recent first). Job categories: "
-        + ", ".join(f"{job} ({count})" for job, count in by_job.most_common())
+        + _job_category_summary(entries)
         + "."
     )
     lines.append("")
     lines.append("Entries (numbered for drill-down reference):")
     for index, entry in enumerate(entries, 1):
-        ts = entry.get("timestamp", "?")
-        job = entry.get("job", "?")
-        severity = entry.get("severity", "info")
-        summary = entry.get("summary", "").strip()
-        lines.append(f"{index}. [{ts} | {job} | {severity}] {summary}")
+        lines.append(_entry_reference_line(index, entry))
     lines.append("[END SELF IMPROVEMENT CONTEXT]")
     return "\n".join(lines)

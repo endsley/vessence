@@ -19,14 +19,19 @@ class PrefetchMemoryCache:
         self.time_fn = time_fn
         self.entries: dict[str, dict] = {}
 
-    def is_fresh(self, session_id: str) -> bool:
+    def _fresh_entry(self, session_id: str) -> dict | None:
         cached = self.entries.get(session_id)
-        return bool(cached and (self.time_fn() - cached["timestamp"]) < self.ttl_seconds)
+        if cached and (self.time_fn() - cached["timestamp"]) < self.ttl_seconds:
+            return cached
+        return None
+
+    def is_fresh(self, session_id: str) -> bool:
+        return self._fresh_entry(session_id) is not None
 
     def get(self, session_id: str) -> str:
         """Return a cached prefetch memory result if it is still within TTL, else ''."""
-        cached = self.entries.get(session_id)
-        if cached and (self.time_fn() - cached["timestamp"]) < self.ttl_seconds:
+        cached = self._fresh_entry(session_id)
+        if cached:
             return cached.get("result", "")
         return ""
 

@@ -22,6 +22,8 @@ from memory.v1.query_intent import is_file_index_record
 NearestCandidate = tuple[int, float, str, str, str]
 
 _QUERY_TERM_STOPWORDS = {"what", "when", "about", "with", "from", "that", "this", "were", "have"}
+RECENT_SHORT_TERM_PROMOTION_DAYS = 14
+RECENT_SHORT_TERM_MIN_OVERLAP = 0.35
 
 
 def nearest_query_terms(normalized_query: str) -> set[str]:
@@ -41,6 +43,24 @@ def lexical_overlap(doc: str, query_terms: Iterable[str]) -> float:
     return hits / len(terms)
 
 
+def _candidate_distance(distance: float | None) -> float | None:
+    if distance is None:
+        return None
+    try:
+        return float(distance)
+    except (TypeError, ValueError):
+        return None
+
+
+def _promotes_recent_short_term(source: str, age: float | None, overlap: float) -> bool:
+    return (
+        source == "short_term"
+        and age is not None
+        and age <= RECENT_SHORT_TERM_PROMOTION_DAYS
+        and overlap >= RECENT_SHORT_TERM_MIN_OVERLAP
+    )
+
+
 def nearest_memory_candidate(
     source: str,
     doc: str,
@@ -51,11 +71,8 @@ def nearest_memory_candidate(
     max_distance: float,
     min_lexical_overlap: float,
 ) -> NearestCandidate | None:
-    if distance is None:
-        return None
-    try:
-        dist = float(distance)
-    except (TypeError, ValueError):
+    dist = _candidate_distance(distance)
+    if dist is None:
         return None
 
     meta = dict(meta or {})
@@ -64,12 +81,7 @@ def nearest_memory_candidate(
 
     age = age_days(meta)
     overlap = lexical_overlap(doc, query_terms)
-    promoted_recent_short_term = (
-        source == "short_term"
-        and age is not None
-        and age <= 14
-        and overlap >= 0.35
-    )
+    promoted_recent_short_term = _promotes_recent_short_term(source, age, overlap)
     if dist > max_distance and not promoted_recent_short_term:
         return None
     if not promoted_recent_short_term and query_terms and overlap < min_lexical_overlap:

@@ -23,6 +23,7 @@ Editing:
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import logging
 import os
 
@@ -60,6 +61,32 @@ from .responses import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+_EDIT_RESUME_AWAITING = {
+    "add_category",
+    "add_category_then_item",
+    "add_item_for_category",
+    "add_item",
+    "remove_item",
+}
+
+
+@dataclass(frozen=True)
+class _TodoActionParams:
+    action: str | None = None
+    item: str | None = None
+    category: str | None = None
+
+
+def _todo_action_params(params: dict | None) -> _TodoActionParams:
+    if not params:
+        return _TodoActionParams()
+    return _TodoActionParams(
+        action=(params.get("action") or "").strip().lower() or None,
+        item=(params.get("item") or "").strip() or None,
+        category=(params.get("category") or "").strip() or None,
+    )
 
 
 def _refresh_cache() -> None:
@@ -139,6 +166,194 @@ async def _handle_edit(
     return None
 
 
+def _todo_pending_data(pending: dict) -> dict:
+    # The pipeline passes pending.data for Stage 2 follow-ups. Some tests and
+    # older callers still pass the full pending_action wrapper, so accept both.
+    if isinstance(pending.get("data"), dict):
+        return pending["data"]
+    return pending if isinstance(pending, dict) else {}
+
+
+def _todo_pending_awaiting(pending: dict, pending_data: dict) -> str:
+    return pending_data.get("awaiting", "") or pending.get("awaiting", "")
+
+
+async def _resume_add_category(prompt: str, pending_data: dict, categories: list[dict]) -> dict | None:
+    item_text = pending_data.get("item_text", "")
+    cat = _match_category(prompt, categories)
+    if cat is None:
+        logger.info("todo_list: no category match for add -> abandon")
+        return {"abandon_pending": True}
+    try:
+        from agent_skills.docs_tools import todo_add_item
+        result = todo_add_item(item_text, cat["name"])
+        _refresh_cache()
+        return _done_response(result, entities={"action": "add", "category": cat["name"]})
+    except Exception as e:
+        logger.error("todo_list: add (resume) failed: %s", e)
+        return _simple_todo_response(f"I couldn't add that. Error: {e}")
+
+
+async def _resume_add_category_then_item(prompt: str, categories: list[dict]) -> dict | None:
+    cat = _match_category(prompt, categories)
+    if cat is None:
+        logger.info("todo_list: no category match for add slot -> abandon")
+        return {"abandon_pending": True}
+    return _ask_item_for_category_response(cat["name"])
+
+
+async def _resume_add_item_for_category(
+    prompt: str,
+    pending_data: dict,
+    categories: list[dict],
+) -> dict | None:
+    item_text = prompt.strip()
+    category_name = pending_data.get("category", "")
+    if not item_text or _is_placeholder_item_text(item_text):
+        return _ask_item_for_category_response(category_name)
+    cat = next((c for c in categories if c.get("name") == category_name), None)
+    if cat is None:
+        logger.info("todo_list: saved add category missing -> abandon")
+        return {"abandon_pending": True}
+    try:
+        from agent_skills.docs_tools import todo_add_item
+        result = todo_add_item(item_text, cat["name"])
+        _refresh_cache()
+        return _done_response(
+            result,
+            entities={
+                "action": "add",
+                "category": cat["name"],
+                "item_text": item_text,
+            },
+        )
+    except Exception as e:
+        logger.error("todo_list: add item for category failed: %s", e)
+        return _simple_todo_response(f"Couldn't add that. Error: {e}")
+
+
+async def _resume_add_item(prompt: str, categories: list[dict]) -> dict | None:
+    item_text = prompt.strip()
+    if _is_placeholder_item_text(item_text):
+        return _ask_add_item_response()
+    cat = _match_category(prompt, categories)
+    if cat and (prompt.strip().lower() in {
+        cat.get("name", "").strip().lower(),
+        _friendly_category_name(cat.get("name", "")).strip().lower(),
+        "urgent",
+        "urgent stuff",
+    }):
+        return _ask_item_for_category_response(cat["name"])
+    if not cat:
+        return _confirm_item_then_ask_category_response(item_text)
+    try:
+        from agent_skills.docs_tools import todo_add_item
+        result = todo_add_item(item_text, cat["name"])
+        _refresh_cache()
+        return _done_response(result)
+    except Exception as e:
+        return _simple_todo_response(f"Couldn't add that. Error: {e}")
+
+
+async def _resume_remove_item(prompt: str) -> dict | None:
+    try:
+        from agent_skills.docs_tools import todo_remove_item
+        result = todo_remove_item(prompt.strip())
+        _refresh_cache()
+        return _done_response(result)
+    except Exception as e:
+        return _simple_todo_response(f"Couldn't remove that. Error: {e}")
+
+
+async def _handle_resume_edit(
+    prompt: str,
+    pending_data: dict,
+    awaiting: str,
+    categories: list[dict],
+) -> tuple[bool, dict | None]:
+    if awaiting not in _EDIT_RESUME_AWAITING:
+        return False, None
+    if awaiting == "add_category":
+        return True, await _resume_add_category(prompt, pending_data, categories)
+    if awaiting == "add_category_then_item":
+        return True, await _resume_add_category_then_item(prompt, categories)
+    if awaiting == "add_item_for_category":
+        return True, await _resume_add_item_for_category(prompt, pending_data, categories)
+    if awaiting == "add_item":
+        return True, await _resume_add_item(prompt, categories)
+    return True, await _resume_remove_item(prompt)
+
+
+async def _handle_params_edit(
+    prompt: str,
+    categories: list[dict],
+    parsed: _TodoActionParams,
+) -> tuple[bool, dict | None]:
+    if parsed.action not in {"add", "remove"}:
+        return False, None
+
+    logger.info("todo_list: params-driven edit → %s", parsed.action)
+    return True, await _handle_edit(
+        prompt,
+        parsed.action,
+        categories,
+        item_text=parsed.item,
+        category_name=parsed.category,
+        from_params=True,
+    )
+
+
+def _should_decline_ambient_project(prompt: str) -> bool:
+    p_lower = (prompt or "").lower()
+    return "ambient" in p_lower and "project" in p_lower
+
+
+def _shopping_list_params(params: dict | None) -> dict | None:
+    if not params or params.get("action") not in {"add", "remove", "view", "clear", "check"}:
+        return None
+    action = params.get("action")
+    return {
+        "action": "add" if action == "add" else "remove" if action == "remove" else "view",
+        "items": params.get("item"),
+    }
+
+
+async def _maybe_delegate_shopping_list(prompt: str, params: dict | None) -> tuple[bool, dict | None]:
+    if "shopping" not in (prompt or "").lower():
+        return False, None
+    try:
+        from jane_web.jane_v2.classes.shopping_list import handler as _shop
+    except Exception as e:
+        logger.warning("todo_list: shopping_list import failed: %s", e)
+        return False, None
+
+    logger.info("todo_list: shopping-list prompt detected -> delegate")
+    return True, await _shop.handle(prompt, params=_shopping_list_params(params))
+
+
+def _first_turn_read_response(
+    prompt: str,
+    categories: list[dict],
+    parsed_params: _TodoActionParams,
+) -> dict:
+    if not categories:
+        return _empty_list_response()
+
+    if parsed_params.category:
+        cat = _category_by_name_or_alias(parsed_params.category, _visible_categories(categories))
+        if cat is not None:
+            logger.info("todo_list: params category hit -> %s", cat.get("name"))
+            return _read_and_ask_another(cat, categories)
+
+    direct = _direct_category_query(prompt, categories)
+    if direct is not None:
+        logger.info("todo_list: direct hit -> %s", direct.get("name"))
+        return _read_and_ask_another(direct, categories)
+
+    logger.info("todo_list: asking which category (%d available)", len(categories))
+    return _ask_category_response(categories)
+
+
 # Pivot detection REMOVED 2026-04-17. Prefix/substring heuristics were
 # brittle (new pivot phrases always leaked through) and duplicated across
 # every handler. Detection is now centralized in
@@ -159,89 +374,17 @@ async def _handle_resume(prompt: str, pending: dict) -> dict | None:
 
     categories = cache.get("categories") or []
 
-    # The pipeline passes pending.data for Stage 2 follow-ups. Some tests and
-    # older callers still pass the full pending_action wrapper, so accept both.
-    pending_data = pending.get("data") if isinstance(pending.get("data"), dict) else pending
-    awaiting = pending_data.get("awaiting", "") or pending.get("awaiting", "")
+    pending_data = _todo_pending_data(pending)
+    awaiting = _todo_pending_awaiting(pending, pending_data)
 
-    if awaiting == "add_category":
-        item_text = pending_data.get("item_text", "")
-        cat = _match_category(prompt, categories)
-        if cat is None:
-            logger.info("todo_list: no category match for add → abandon")
-            return {"abandon_pending": True}
-        try:
-            from agent_skills.docs_tools import todo_add_item
-            result = todo_add_item(item_text, cat["name"])
-            _refresh_cache()
-            return _done_response(result, entities={"action": "add", "category": cat["name"]})
-        except Exception as e:
-            logger.error("todo_list: add (resume) failed: %s", e)
-            return _simple_todo_response(f"I couldn't add that. Error: {e}")
-
-    if awaiting == "add_category_then_item":
-        cat = _match_category(prompt, categories)
-        if cat is None:
-            logger.info("todo_list: no category match for add slot → abandon")
-            return {"abandon_pending": True}
-        return _ask_item_for_category_response(cat["name"])
-
-    if awaiting == "add_item_for_category":
-        item_text = prompt.strip()
-        if not item_text or _is_placeholder_item_text(item_text):
-            category_name = pending_data.get("category", "")
-            return _ask_item_for_category_response(category_name)
-        category_name = pending_data.get("category", "")
-        cat = next((c for c in categories if c.get("name") == category_name), None)
-        if cat is None:
-            logger.info("todo_list: saved add category missing → abandon")
-            return {"abandon_pending": True}
-        try:
-            from agent_skills.docs_tools import todo_add_item
-            result = todo_add_item(item_text, cat["name"])
-            _refresh_cache()
-            return _done_response(
-                result,
-                entities={
-                    "action": "add",
-                    "category": cat["name"],
-                    "item_text": item_text,
-                },
-            )
-        except Exception as e:
-            logger.error("todo_list: add item for category failed: %s", e)
-            return _simple_todo_response(f"Couldn't add that. Error: {e}")
-
-    if awaiting == "add_item":
-        item_text = prompt.strip()
-        if _is_placeholder_item_text(item_text):
-            return _ask_add_item_response()
-        cat = _match_category(prompt, categories)
-        if cat and (prompt.strip().lower() in {
-            cat.get("name", "").strip().lower(),
-            _friendly_category_name(cat.get("name", "")).strip().lower(),
-            "urgent",
-            "urgent stuff",
-        }):
-            return _ask_item_for_category_response(cat["name"])
-        if not cat:
-            return _confirm_item_then_ask_category_response(item_text)
-        try:
-            from agent_skills.docs_tools import todo_add_item
-            result = todo_add_item(item_text, cat["name"])
-            _refresh_cache()
-            return _done_response(result)
-        except Exception as e:
-            return _simple_todo_response(f"Couldn't add that. Error: {e}")
-
-    if awaiting == "remove_item":
-        try:
-            from agent_skills.docs_tools import todo_remove_item
-            result = todo_remove_item(prompt.strip())
-            _refresh_cache()
-            return _done_response(result)
-        except Exception as e:
-            return _simple_todo_response(f"Couldn't remove that. Error: {e}")
+    handled_edit, edit_response = await _handle_resume_edit(
+        prompt,
+        pending_data,
+        awaiting,
+        categories,
+    )
+    if handled_edit:
+        return edit_response
 
     # End-of-conversation phrase: user is done with the list.
     from agent_skills import end_phrase
@@ -283,30 +426,17 @@ async def handle(
     # prompt to this handler (rare but possible on borderline phrasings),
     # decline so the pipeline escalates to Stage 3 instead of asking
     # "which category?" from the remaining visible categories.
-    p_lower = (prompt or "").lower()
-    if "ambient" in p_lower and "project" in p_lower:
-        logger.info("todo_list: ambient-project prompt detected → escalate")
+    if _should_decline_ambient_project(prompt):
+        logger.info("todo_list: ambient-project prompt detected -> escalate")
         return None
 
     # Stage 1 sometimes mis-embeds "shopping list" queries as todo_list
     # because both share the word "list". Hand off to the shopping_list
     # handler directly so the user gets a fast answer instead of a
     # "which todo category?" prompt.
-    if "shopping" in p_lower:
-        try:
-            from jane_web.jane_v2.classes.shopping_list import handler as _shop
-        except Exception as e:
-            logger.warning("todo_list: shopping_list import failed: %s", e)
-        else:
-            logger.info("todo_list: shopping-list prompt detected → delegate")
-            shop_params = None
-            if params and params.get("action") in {"add", "remove", "view", "clear", "check"}:
-                shop_params = {
-                    "action": "add" if params.get("action") == "add" else
-                              "remove" if params.get("action") == "remove" else "view",
-                    "items": params.get("item"),
-                }
-            return await _shop.handle(prompt, params=shop_params)
+    delegated, shopping_response = await _maybe_delegate_shopping_list(prompt, params)
+    if delegated:
+        return shopping_response
 
     cache = _load_cache()
     if cache is None:
@@ -316,45 +446,19 @@ async def handle(
 
     # Resolve action / item / category from params first, then fall back
     # to regex extraction so the v2 (no-params) path keeps working.
-    action = None
-    param_item: str | None = None
-    param_category: str | None = None
-    if params:
-        action = (params.get("action") or "").strip().lower() or None
-        param_item = (params.get("item") or "").strip() or None
-        param_category = (params.get("category") or "").strip() or None
+    parsed_params = _todo_action_params(params)
+    params_handled, params_response = await _handle_params_edit(
+        prompt,
+        categories,
+        parsed_params,
+    )
+    if params_handled:
+        return params_response
 
-    if action in {"add", "remove"}:
-        logger.info("todo_list: params-driven edit → %s", action)
-        return await _handle_edit(
-            prompt, action, categories,
-            item_text=param_item,
-            category_name=param_category,
-            from_params=True,
-        )
-
-    if action is None:
+    if parsed_params.action is None:
         edit_type = _detect_edit_intent(prompt)
         if edit_type:
             logger.info("todo_list: edit intent (regex) → %s", edit_type)
             return await _handle_edit(prompt, edit_type, categories)
 
-    if not categories:
-        return _empty_list_response()
-
-    # Read flow: try params.category first, then prompt match.
-    if param_category:
-        cat = _category_by_name_or_alias(param_category, _visible_categories(categories))
-        if cat is not None:
-            logger.info("todo_list: params category hit → %s", cat.get("name"))
-            return _read_and_ask_another(cat, categories)
-
-    # Shortcut: user already named a specific category in their opener.
-    direct = _direct_category_query(prompt, categories)
-    if direct is not None:
-        logger.info("todo_list: direct hit → %s", direct.get("name"))
-        return _read_and_ask_another(direct, categories)
-
-    # Ask which category.
-    logger.info("todo_list: asking which category (%d available)", len(categories))
-    return _ask_category_response(categories)
+    return _first_turn_read_response(prompt, categories, parsed_params)

@@ -20,6 +20,10 @@ def test_self_improve_log_uses_extracted_helpers():
     assert self_improve_log._recent_summaries_from_lines is recent_summaries_from_lines
 
 
+def test_self_improve_log_utcnow_helper_preserves_naive_shape():
+    assert self_improve_log._utcnow().tzinfo is None
+
+
 def test_normalize_severity_preserves_allowed_values_and_info_fallback():
     assert normalize_severity("CRITICAL") == "critical"
     assert normalize_severity("medium") == "medium"

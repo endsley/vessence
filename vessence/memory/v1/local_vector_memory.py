@@ -31,7 +31,6 @@ with silence_stderr_fd():
     import chromadb
 import uuid
 import logging
-import datetime
 import ollama
 from pathlib import Path
 
@@ -47,6 +46,9 @@ from memory.v1.local_vector_memory_helpers import (
     librarian_system_instruction as _librarian_system_instruction,
     librarian_user_prompt as _librarian_user_prompt,
     memory_tier_sections as _memory_tier_sections,
+    forgettable_expiry_iso as _forgettable_expiry_iso,
+    owned_memory_ids as _owned_memory_ids,
+    utcnow_iso as _utcnow_iso,
 )
 
 logger = logging.getLogger('discord_agent.memory.local_vector')
@@ -98,15 +100,11 @@ class LocalVectorMemoryService(BaseMemoryService):
                 "user_id": user_id,
                 "app_name": app_name,
                 "author": entry.author or "user",
-                "timestamp": entry.timestamp or datetime.datetime.utcnow().isoformat(),
+                "timestamp": entry.timestamp or _utcnow_iso(),
                 "memory_type": memory_type,
             }
             if memory_type == "forgettable":
-                expires_at = (
-                    datetime.datetime.utcnow() +
-                    datetime.timedelta(days=FORGETTABLE_TTL_DAYS)
-                ).isoformat()
-                metadata["expires_at"] = expires_at
+                metadata["expires_at"] = _forgettable_expiry_iso(FORGETTABLE_TTL_DAYS)
             if custom_metadata:
                 metadata.update(custom_metadata)
 
@@ -143,7 +141,7 @@ class LocalVectorMemoryService(BaseMemoryService):
             return SearchMemoryResponse(memories=[])
 
         # 2. Bucket results into tiers, filtering expired forgettable entries
-        now_iso = datetime.datetime.utcnow().isoformat()
+        now_iso = _utcnow_iso()
         permanent_facts, long_term_facts, forgettable_facts = _bucket_memory_facts(
             results["documents"][0],
             results["metadatas"][0],
@@ -198,10 +196,7 @@ class LocalVectorMemoryService(BaseMemoryService):
         
         # Verify ownership before deleting
         results = self._collection.get(ids=list(memory_ids))
-        valid_ids = []
-        for i, meta in enumerate(results["metadatas"]):
-            if meta.get("user_id") == user_id:
-                valid_ids.append(results["ids"][i])
+        valid_ids = _owned_memory_ids(results, user_id)
         
         if valid_ids:
             self._collection.delete(ids=valid_ids)

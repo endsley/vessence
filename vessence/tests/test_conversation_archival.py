@@ -21,6 +21,11 @@ def test_conversation_manager_uses_archival_helpers():
     assert conversation_manager.should_wait_for_smart_archival is should_wait_for_smart_archival
 
 
+def test_conversation_manager_utc_helpers_preserve_naive_iso_shape():
+    assert conversation_manager._utcnow().tzinfo is None
+    assert "T" in conversation_manager._utcnow_iso()
+
+
 def test_triage_prefilter_discards_known_noise_case_insensitively():
     assert triage_prefilter_decision("  Gemini CLI update available: 1.2.3  ") == "Discard"
     assert triage_prefilter_decision("Jane/refactor status ping") == "Discard"

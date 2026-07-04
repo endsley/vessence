@@ -44,13 +44,18 @@ def is_placeholder_item_text(text: str | None) -> bool:
     return bool(_PLACEHOLDER_ITEM_RE.match(cleaned))
 
 
+def quoted_item_text(text: str) -> str | None:
+    match = re.search(r"""['"\u2018\u2019\u201c\u201d](.+?)['"\u2018\u2019\u201c\u201d]""", text)
+    return match.group(1).strip() if match else None
+
+
 def extract_item_text(prompt: str, edit_type: str) -> str | None:
     """Try to extract the item text from an add/remove request."""
     cleaned = prompt.strip()
     if edit_type == "add":
-        match = re.search(r"""['"\u2018\u2019\u201c\u201d](.+?)['"\u2018\u2019\u201c\u201d]""", cleaned)
-        if match:
-            return match.group(1).strip()
+        quoted = quoted_item_text(cleaned)
+        if quoted:
+            return quoted
         match = re.search(
             r"\b(?:the\s+)?(?:item|task|thing)\s+(?:is|should\s+be|would\s+be)\s+(.+)$",
             cleaned, re.I,
@@ -71,9 +76,9 @@ def extract_item_text(prompt: str, edit_type: str) -> str | None:
             text = re.sub(r"\s+(?:to|on|under|for)\s+(?:my|the)\s+.*$", "", text, flags=re.I)
             return text if text and not is_placeholder_item_text(text) else None
     elif edit_type == "remove":
-        match = re.search(r"""['"\u2018\u2019\u201c\u201d](.+?)['"\u2018\u2019\u201c\u201d]""", cleaned)
-        if match:
-            return match.group(1).strip()
+        quoted = quoted_item_text(cleaned)
+        if quoted:
+            return quoted
         match = re.search(
             r"\b(?:remove|delete|cross off|check off|scratch)\s+(?:the\s+)?(.+?)(?:\s+(?:item|from|off)\b|$)",
             cleaned,

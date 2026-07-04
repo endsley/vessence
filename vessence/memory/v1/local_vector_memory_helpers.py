@@ -2,12 +2,29 @@
 
 from __future__ import annotations
 
+import datetime
 from collections.abc import Sequence
 
 
 RECENT_FORGETTABLE_HEADING = (
     "## Recent/Forgettable Memory  ← highest recency, treat as most current"
 )
+
+
+def utcnow_naive() -> datetime.datetime:
+    return datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+
+
+def utcnow_iso() -> str:
+    return utcnow_naive().isoformat()
+
+
+def forgettable_expiry_iso(
+    days: int,
+    *,
+    now_fn=utcnow_naive,
+) -> str:
+    return (now_fn() + datetime.timedelta(days=days)).isoformat()
 
 
 def is_forgettable_expired(meta: dict, now_iso: str) -> bool:
@@ -50,6 +67,18 @@ def bucket_memory_facts(
             long_term_facts.append(format_memory_fact(doc, meta))
 
     return permanent_facts, long_term_facts, forgettable_facts
+
+
+def owned_memory_ids(results: dict, user_id: str) -> list[str]:
+    ids = results.get("ids", [])
+    metadatas = results.get("metadatas", [])
+    valid_ids: list[str] = []
+    for index, meta in enumerate(metadatas):
+        if index >= len(ids) or not isinstance(meta, dict):
+            continue
+        if meta.get("user_id") == user_id:
+            valid_ids.append(ids[index])
+    return valid_ids
 
 
 def memory_tier_sections(

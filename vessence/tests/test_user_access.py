@@ -4,7 +4,10 @@ import pytest
 from fastapi import HTTPException
 
 from jane_web.user_access import (
+    clean_seed_memories,
     is_user_admin,
+    managed_user_display_name,
+    normalize_managed_user_email,
     public_user_config,
     request_vault_root,
     require_capability,
@@ -139,6 +142,24 @@ def test_public_user_config_filters_and_defaults_user_config_fields():
         "created_at": "",
         "seeded_memory_count": 0,
     }
+
+
+def test_managed_user_create_helpers_normalize_route_inputs():
+    assert normalize_managed_user_email(" Child@Example.COM ") == "child@example.com"
+    assert managed_user_display_name(" Child User ", "child@example.com") == "Child User"
+    assert managed_user_display_name("", "child@example.com") == "child"
+    assert clean_seed_memories([" remember this ", "", None, " second "]) == [
+        "remember this",
+        "second",
+    ]
+
+
+def test_normalize_managed_user_email_rejects_invalid_values():
+    with pytest.raises(HTTPException) as exc:
+        normalize_managed_user_email("missing-at")
+
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "A valid email address is required."
 
 
 def test_is_user_admin_accepts_configured_admin_variant_without_user_manager():

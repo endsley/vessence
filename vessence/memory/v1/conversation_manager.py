@@ -81,10 +81,13 @@ from memory.v1.conversation_themes import (
     identity_signal_count,
     initial_theme_title_prompt,
     normalize_theme_title,
+    oldest_theme_by_last_update,
     parse_theme_classification_response,
+    short_term_theme_metadata,
     theme_classification_prompt,
     theme_entries_from_results,
     theme_summary_prompt,
+    updated_short_term_theme_metadata,
 )
 from memory.v1.conversation_windows import (
     build_session_transcript,
@@ -121,6 +124,14 @@ except Exception:
 def get_token_count(text: str) -> int:
     """Calculates the number of tokens in a given string."""
     return len(encoding.encode(text))
+
+
+def _utcnow() -> datetime.datetime:
+    return datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+
+
+def _utcnow_iso() -> str:
+    return _utcnow().isoformat()
 
 
 def _append_writeback_log(line: str) -> None:
@@ -576,7 +587,7 @@ class ConversationManager:
                 last = self._get_archival_state("last_window_archival")
                 if last:
                     ts = self._parse_ledger_ts(last)
-                    if ts and (datetime.datetime.utcnow() - ts).total_seconds() < min_interval_minutes * 60:
+                    if ts and (_utcnow() - ts).total_seconds() < min_interval_minutes * 60:
                         return {"status": "throttled"}
             watermark = self._get_archival_watermark()
             with self._db_lock:
@@ -588,7 +599,7 @@ class ConversationManager:
                     (watermark,),
                 )
                 rows = cur.fetchall()
-            now_iso = datetime.datetime.utcnow().isoformat()
+            now_iso = _utcnow_iso()
             if not rows:
                 self._set_archival_state("last_window_archival", now_iso)
                 return {"status": "nothing-new", "watermark": watermark}
@@ -599,7 +610,7 @@ class ConversationManager:
                 idle_gap_minutes=idle_gap_minutes,
                 max_turns=self.WINDOW_MAX_TURNS,
             )
-            cutoff = datetime.datetime.utcnow() - gap
+            cutoff = _utcnow() - gap
             archived = skipped = 0
             new_watermark = watermark
             for window in windows:
@@ -759,7 +770,7 @@ class ConversationManager:
                 # Special rule: raw turns never go to long-term if thematic is active
                 # but we keep them in short-term for 14 days if they aren't noise.
                 if verdict == "Keep" or verdict == "Forgettable":
-                    now = datetime.datetime.utcnow()
+                    now = _utcnow()
                     expires_at = (now + datetime.timedelta(days=SHORT_TERM_TTL_DAYS)).isoformat()
                     updated_meta = {**meta, "expires_at": expires_at, "memory_type": "short_term"}
                     self.short_term_collection.update(ids=[id_], metadatas=[updated_meta])
@@ -877,7 +888,7 @@ class ConversationManager:
         if not self.db_conn:
             return
         try:
-            now_iso = datetime.datetime.utcnow().isoformat()
+            now_iso = _utcnow_iso()
             with self._db_lock:
                 cur = self.db_conn.cursor()
                 cur.execute("SELECT COUNT(*) FROM theme_registry")
@@ -917,7 +928,7 @@ class ConversationManager:
                 "built_in": 0,
             }
         try:
-            now_iso = datetime.datetime.utcnow().isoformat()
+            now_iso = _utcnow_iso()
             with self._db_lock:
                 cur = self.db_conn.cursor()
                 cur.execute(
@@ -1002,7 +1013,7 @@ class ConversationManager:
             themes = self._fetch_session_themes()
             if not themes:
                 return
-            archived_at = datetime.datetime.utcnow().isoformat()
+            archived_at = _utcnow_iso()
             ids = []
             metadatas = []
             for theme in themes:
@@ -1056,7 +1067,7 @@ class ConversationManager:
                     merge_meta = archivist_memory_metadata(
                         session_id=self.session_id,
                         category=category,
-                        timestamp=datetime.datetime.utcnow().isoformat(),
+                        timestamp=_utcnow_iso(),
                         is_user_memory=is_user_memory,
                         user_name=os.environ.get("USER_NAME", "user"),
                         status="updated_thematic",
@@ -1072,7 +1083,7 @@ class ConversationManager:
             new_meta = archivist_memory_metadata(
                 session_id=self.session_id,
                 category=category,
-                timestamp=datetime.datetime.utcnow().isoformat(),
+                timestamp=_utcnow_iso(),
                 is_user_memory=is_user_memory,
                 user_name=os.environ.get("USER_NAME", "user"),
             )
@@ -1266,7 +1277,7 @@ class ConversationManager:
                     "VALUES (?, ?, ?, ?)",
                     (
                         self.session_id,
-                        datetime.datetime.utcnow().isoformat(),
+                        _utcnow_iso(),
                         int(arc_count),
                         1 if transcript_too_short else 0,
                     ),
@@ -1407,9 +1418,9 @@ class ConversationManager:
             )
             return
 
-        now_iso = datetime.datetime.utcnow().isoformat()
+        now_iso = _utcnow_iso()
         expires_iso = (
-            datetime.datetime.utcnow()
+            _utcnow()
             + datetime.timedelta(days=SHORT_TERM_TTL_DAYS)
         ).isoformat()
         doc_id = str(uuid.uuid4())
@@ -1461,9 +1472,9 @@ class ConversationManager:
                 f"session={self.session_id} stage=thematic_update skipped=metadata_only"
             )
             return
-        now_iso = datetime.datetime.utcnow().isoformat()
+        now_iso = _utcnow_iso()
         expires_iso = (
-            datetime.datetime.utcnow()
+            _utcnow()
             + datetime.timedelta(days=SHORT_TERM_TTL_DAYS)
         ).isoformat()
 
@@ -1490,12 +1501,11 @@ class ConversationManager:
             self.short_term_collection.update(
                 ids=[theme["id"]],
                 documents=[updated_summary],
-                metadatas=[{
-                    **theme["metadata"],
-                    "turn_count": theme["metadata"].get("turn_count", 1) + 1,
-                    "last_updated_at": now_iso,
-                    "expires_at": expires_iso,
-                }],
+                metadatas=[updated_short_term_theme_metadata(
+                    theme["metadata"],
+                    now_iso=now_iso,
+                    expires_iso=expires_iso,
+                )],
             )
             _append_writeback_log(
                 f"session={self.session_id} stage=theme_update "
@@ -1518,39 +1528,30 @@ class ConversationManager:
                 self.short_term_collection.add(
                     ids=[new_id],
                     documents=[new_summary],
-                    metadatas=[{
-                        "session_id": self.session_id,
-                        "theme_title": new_title,
-                        "theme_index": new_index,
-                        "turn_count": 1,
-                        "first_turn_at": now_iso,
-                        "last_updated_at": now_iso,
-                        "memory_type": "short_term_theme",
-                        "expires_at": expires_iso,
-                    }],
+                    metadatas=[short_term_theme_metadata(
+                        session_id=self.session_id,
+                        theme_title=new_title,
+                        theme_index=new_index,
+                        now_iso=now_iso,
+                        expires_iso=expires_iso,
+                    )],
                 )
                 _append_writeback_log(
                     f"session={self.session_id} stage=theme_create "
                     f"theme_index={new_index} title={new_title}"
                 )
             else:
-                oldest = min(
-                    themes,
-                    key=lambda t: t["metadata"].get("last_updated_at", ""),
-                )
+                oldest = oldest_theme_by_last_update(themes)
                 self.short_term_collection.update(
                     ids=[oldest["id"]],
                     documents=[new_summary],
-                    metadatas=[{
-                        "session_id": self.session_id,
-                        "theme_title": new_title,
-                        "theme_index": oldest["metadata"]["theme_index"],
-                        "turn_count": 1,
-                        "first_turn_at": now_iso,
-                        "last_updated_at": now_iso,
-                        "memory_type": "short_term_theme",
-                        "expires_at": expires_iso,
-                    }],
+                    metadatas=[short_term_theme_metadata(
+                        session_id=self.session_id,
+                        theme_title=new_title,
+                        theme_index=oldest["metadata"]["theme_index"],
+                        now_iso=now_iso,
+                        expires_iso=expires_iso,
+                    )],
                 )
                 _append_writeback_log(
                     f"session={self.session_id} stage=theme_evict_and_create "
@@ -1656,9 +1657,9 @@ class ConversationManager:
         if not raw_text:
             return
         themes = self._fetch_session_themes()
-        now_iso = datetime.datetime.utcnow().isoformat()
+        now_iso = _utcnow_iso()
         expires_iso = (
-            datetime.datetime.utcnow()
+            _utcnow()
             + datetime.timedelta(days=SHORT_TERM_TTL_DAYS)
         ).isoformat()
         raw_text = raw_text[:400]
@@ -1684,16 +1685,13 @@ class ConversationManager:
             self.short_term_collection.add(
                 ids=[new_id],
                 documents=[raw_text],
-                metadatas=[{
-                    "session_id": self.session_id,
-                    "theme_title": "General discussion",
-                    "theme_index": 0,
-                    "turn_count": 1,
-                    "first_turn_at": now_iso,
-                    "last_updated_at": now_iso,
-                    "memory_type": "short_term_theme",
-                    "expires_at": expires_iso,
-                }],
+                metadatas=[short_term_theme_metadata(
+                    session_id=self.session_id,
+                    theme_title="General discussion",
+                    theme_index=0,
+                    now_iso=now_iso,
+                    expires_iso=expires_iso,
+                )],
             )
 
     # ─── Legacy short-term helpers (kept for backward compat during migration) ──

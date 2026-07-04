@@ -38,9 +38,14 @@ from memory.v1.janitor_consolidation import (
     group_consolidation_topics,
 )
 from memory.v1.janitor_code_verification import (
+    code_memory_records_from_collection,
+    code_memory_verification_sort_key,
+    code_verification_report_markdown,
     code_verification_prompt,
+    code_verification_result,
     frontier_fix_prompt,
     is_code_memory as _is_code_memory,
+    split_reverification_candidates,
 )
 from memory.v1.janitor_duplicates import (
     duplicate_deletion_groups,
@@ -53,9 +58,11 @@ from memory.v1.janitor_log_retention import (
     should_delete_self_improve_report,
 )
 from memory.v1.janitor_normalization import (
+    empty_normalization_result,
     long_term_normalization_candidates,
     rewrite_normalization_prompt,
     rewritten_normalized_metadata,
+    split_plan_memories,
     split_normalization_prompt,
     split_normalized_metadatas,
 )
@@ -112,8 +119,12 @@ THEME_TOPICS = frozenset({
     "Aesthetic Preferences",
 })
 
+def _utcnow() -> datetime.datetime:
+    return datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+
+
 def _utcnow_iso() -> str:
-    return datetime.datetime.utcnow().isoformat()
+    return _utcnow().isoformat()
 
 
 def _codex_skill_exists(skill_name: str) -> bool:
@@ -233,24 +244,35 @@ def _classify_known_junk(collection_name: str, doc: str, meta: dict | None) -> s
     )
 
 
+def _quarantine_entries_for_rows(
+    collection_name: str,
+    rows: list[dict],
+    reason: str,
+    *,
+    deleted_at: str,
+) -> list[dict]:
+    return [
+        {
+            "deleted_at": deleted_at,
+            "collection": collection_name,
+            "reason": reason,
+            "id": row["id"],
+            "doc": row["doc"],
+            "meta": row["meta"],
+        }
+        for row in rows
+    ]
+
+
 def _delete_rows_with_quarantine(collection, collection_name: str, rows: list[dict], reason: str) -> int:
     """Back up rows to quarantine, then delete them from Chroma."""
     if not rows:
         return 0
     now = _utcnow_iso()
     ids = [r["id"] for r in rows]
-    quarantine_entries = [
-        {
-            "deleted_at": now,
-            "collection": collection_name,
-            "reason": reason,
-            "id": r["id"],
-            "doc": r["doc"],
-            "meta": r["meta"],
-        }
-        for r in rows
-    ]
-    _append_quarantine_entries(quarantine_entries)
+    _append_quarantine_entries(
+        _quarantine_entries_for_rows(collection_name, rows, reason, deleted_at=now)
+    )
     collection.delete(ids=ids)
     logger.info("Deleted %d rows from %s: %s", len(ids), collection_name, reason)
     return len(ids)
@@ -298,13 +320,7 @@ def _normalize_long_term_memory_rows(collection, rows: list[dict]) -> dict:
         ),
     )
 
-    result = {
-        "reviewed": 0,
-        "rewritten": 0,
-        "split": 0,
-        "deleted_originals": 0,
-        "unchanged": 0,
-    }
+    result = empty_normalization_result()
 
     for row in candidates:
         try:
@@ -316,11 +332,11 @@ def _normalize_long_term_memory_rows(collection, rows: list[dict]) -> dict:
             if len(doc) > LONG_TERM_SPLIT_THRESHOLD:
                 prompt = split_normalization_prompt(row, doc)
                 plan = _llm_json(prompt)
-                memories = [
-                    str(item).strip()[:MAX_REWRITTEN_CHARS]
-                    for item in (plan.get("memories") or [])
-                    if str(item).strip()
-                ][:MAX_SPLIT_ITEMS]
+                memories = split_plan_memories(
+                    plan,
+                    max_chars=MAX_REWRITTEN_CHARS,
+                    max_items=MAX_SPLIT_ITEMS,
+                )
                 if len(memories) >= 2:
                     new_ids = [str(uuid.uuid4()) for _ in memories]
                     new_metas = split_normalized_metadatas(
@@ -517,7 +533,7 @@ def purge_old_forgettable_memories(max_age_days: int = 14) -> int:
         st_client = get_chroma_client(path=SHORT_TERM_DB_PATH)
         st_collection = st_client.get_collection(name="short_term_memory")
         st_all = st_collection.get(include=["metadatas"])
-        cutoff = datetime.datetime.utcnow() - datetime.timedelta(days=max_age_days)
+        cutoff = _utcnow() - datetime.timedelta(days=max_age_days)
         old_ids = old_ids_from_metadata(st_all.get("ids", []), st_all.get("metadatas", []), cutoff=cutoff)
         if old_ids:
             st_collection.delete(ids=old_ids)
@@ -668,7 +684,7 @@ def refresh_dynamic_query_markers() -> dict:
         long_term_labels=_extract_labels(VECTOR_DB_LONG_TERM, CHROMA_COLLECTION_LONG_TERM),
         short_term_labels=_extract_labels(VECTOR_DB_SHORT_TERM, CHROMA_COLLECTION_SHORT_TERM),
         file_labels=_extract_labels(VECTOR_DB_FILE_INDEX, CHROMA_COLLECTION_FILE_INDEX),
-        updated_at=datetime.datetime.utcnow().isoformat(),
+        updated_at=_utcnow_iso(),
     )
 
     try:
@@ -677,7 +693,9 @@ def refresh_dynamic_query_markers() -> dict:
             json.dump(markers, f, indent=2)
         logger.info(
             "Dynamic query markers refreshed: %d personal, %d project, %d file.",
-            len(personal), len(project), len(file),
+            len(markers.get("personal_markers", [])),
+            len(markers.get("project_markers", [])),
+            len(markers.get("file_markers", [])),
         )
     except Exception as e:
         logger.warning(f"Could not write dynamic query markers: {e}")
@@ -749,13 +767,7 @@ def run_janitor(max_sessions: int = 2, max_topics: int = 3):
         CHROMA_COLLECTION_USER_MEMORIES: {"deleted": 0, "groups": 0},
         CHROMA_COLLECTION_LONG_TERM: {"deleted": 0, "groups": 0},
     }
-    normalization_result = {
-        "reviewed": 0,
-        "rewritten": 0,
-        "split": 0,
-        "deleted_originals": 0,
-        "unchanged": 0,
-    }
+    normalization_result = empty_normalization_result()
 
     if user_collection is not None:
         user_rows = _collect_collection_rows(user_collection)
@@ -903,7 +915,7 @@ def _memory_needs_reverification(
     if verified_dt is None:
         return True
     if now_utc is None:
-        now_utc = datetime.datetime.utcnow()
+        now_utc = _utcnow()
     return (now_utc - verified_dt) >= datetime.timedelta(days=CODE_MEMORY_REVERIFY_DAYS)
 
 
@@ -1062,37 +1074,25 @@ def verify_code_memories(
         return {"checked": 0, "stale": 0, "fixed": 0}
 
     all_data = col.get(include=["documents", "metadatas"])
-    code_mems = []
-    for doc_id, doc, meta in zip(
-        all_data["ids"], all_data["documents"], all_data["metadatas"]
-    ):
-        if doc and _is_code_memory(doc):
-            code_mems.append({
-                "id": doc_id,
-                "text": doc[:500],
-                "topic": (meta or {}).get("topic", ""),
-                "metadata": dict(meta or {}),
-            })
+    code_mems = code_memory_records_from_collection(all_data, is_code_memory_fn=_is_code_memory)
     if not code_mems:
         logger.info("verify_code_memories: no code-referencing memories found")
         return {"checked": 0, "stale": 0, "fixed": 0, "skipped_recent": 0}
 
-    now_utc = datetime.datetime.utcnow()
-    skipped_recent = 0
-    eligible_mems = []
-    for mem in code_mems:
-        if _memory_needs_reverification(mem.get("metadata"), now_utc=now_utc):
-            eligible_mems.append(mem)
-        else:
-            skipped_recent += 1
-
+    now_utc = _utcnow()
+    code_mems, skipped_recent = split_reverification_candidates(
+        code_mems,
+        needs_reverification_fn=lambda meta: _memory_needs_reverification(
+            meta,
+            now_utc=now_utc,
+        ),
+    )
     if skipped_recent:
         logger.info(
             "verify_code_memories: skipped %d recently verified memories (%d-day window)",
             skipped_recent,
             CODE_MEMORY_REVERIFY_DAYS,
         )
-    code_mems = eligible_mems
     if not code_mems:
         logger.info("verify_code_memories: all code memories were recently verified")
         return {
@@ -1105,13 +1105,9 @@ def verify_code_memories(
             "details": [],
         }
 
-    # Sort by verification date (oldest first). Memories never verified 
+    # Sort by verification date (oldest first). Memories never verified
     # (None) come before those with a timestamp.
-    def _sort_key(m):
-        val = (m.get("metadata") or {}).get("code_verified_at")
-        return val if val is not None else ""
-
-    code_mems.sort(key=_sort_key)
+    code_mems.sort(key=code_memory_verification_sort_key)
 
     total_candidates = len(code_mems)
     if max_memories_per_run is not None and total_candidates > max_memories_per_run:
@@ -1211,28 +1207,21 @@ def verify_code_memories(
     except Exception as e:
         logger.warning("verify_code_memories: vocal summary failed: %s", e)
 
-    result = {
-        "checked": checked,
-        "stale": stale_count,
-        "fixed": fixed,
-        "deleted": deleted,
-        "errors": errors,
-        "skipped_recent": skipped_recent,
-        "details": details,
-    }
+    result = code_verification_result(
+        checked=checked,
+        stale=stale_count,
+        fixed=fixed,
+        deleted=deleted,
+        errors=errors,
+        skipped_recent=skipped_recent,
+        details=details,
+    )
 
     report_path = os.path.join(_VESSENCE_HOME, "configs", "memory_verification_report.md")
     try:
         ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-        lines = [f"# Memory Verification Report — {ts}\n"]
-        lines.append(f"Checked: {checked} | Stale: {stale_count} "
-                      f"| Fixed: {fixed} | Deleted: {deleted} | Errors: {errors} "
-                      f"| Skipped recent: {skipped_recent}\n")
-        for d in details:
-            if d["action"] != "accurate":
-                lines.append(f"- **{d['action'].upper()}** `{d['id'][:12]}` — {d['reason']}")
         with open(report_path, "w") as f:
-            f.write("\n".join(lines) + "\n")
+            f.write(code_verification_report_markdown(timestamp=ts, result=result))
     except Exception as e:
         logger.warning("verify_code_memories: report write failed: %s", e)
 
@@ -1249,7 +1238,7 @@ def purge_old_log_files(max_age_days: int = LOG_MAX_AGE_DAYS) -> int:
         logger.info(f"Logs directory does not exist: {LOGS_DIR}")
         return 0
 
-    now_ts = datetime.datetime.utcnow().timestamp()
+    now_ts = _utcnow().timestamp()
     deleted = 0
 
     for dirpath, _dirnames, filenames in os.walk(LOGS_DIR):
@@ -1291,7 +1280,7 @@ def purge_old_self_improve_reports(
     if not os.path.isdir(reports_dir):
         return 0
 
-    now_ts = datetime.datetime.utcnow().timestamp()
+    now_ts = _utcnow().timestamp()
     deleted = 0
     for fname in os.listdir(reports_dir):
         fpath = os.path.join(reports_dir, fname)

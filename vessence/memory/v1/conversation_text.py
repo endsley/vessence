@@ -27,6 +27,10 @@ BAD_THEMATIC_PROTOCOL_PATTERNS = (
 )
 
 
+def compact_whitespace(text: object) -> str:
+    return re.sub(r"\s+", " ", str(text or "")).strip()
+
+
 def strip_injected_metadata(content: str) -> str:
     content = re.sub(
         r'<class_protocol[^>]*>.*?</class_protocol>',
@@ -67,7 +71,7 @@ def strip_injected_metadata(content: str) -> str:
 
 
 def looks_like_bad_thematic_output(text: str) -> bool:
-    normalized = re.sub(r"\s+", " ", str(text or "")).strip()
+    normalized = compact_whitespace(text)
     if not normalized:
         return False
     protocol_hit = any(
@@ -93,8 +97,8 @@ def looks_like_bad_thematic_output(text: str) -> bool:
 
 
 def prepare_thematic_turn(user_msg: str, assistant_msg: str) -> str:
-    cleaned_user = re.sub(r"\s+", " ", strip_injected_metadata(user_msg or "")).strip()
-    cleaned_assistant = re.sub(r"\s+", " ", strip_injected_metadata(assistant_msg or "")).strip()
+    cleaned_user = compact_whitespace(strip_injected_metadata(user_msg or ""))
+    cleaned_assistant = compact_whitespace(strip_injected_metadata(assistant_msg or ""))
 
     if looks_like_bad_thematic_output(cleaned_user):
         cleaned_user = ""
@@ -113,7 +117,7 @@ def prepare_thematic_turn(user_msg: str, assistant_msg: str) -> str:
 
 
 def should_store_short_term_turn(role: str, content: str) -> bool:
-    text = re.sub(r"\s+", " ", str(content or "")).strip().lower()
+    text = compact_whitespace(content).lower()
     if not text:
         return False
     low_value_exact = {
@@ -192,8 +196,39 @@ class ShortTermSummaryPlan:
     preserve_bullets: bool
 
 
+def _code_change_summary_prompt(role: str, clean_turn: str) -> str:
+    return (
+        "Summarize this assistant turn as a compact code-change memory note for later retrieval.\n"
+        "Rules:\n"
+        "- Do NOT restate the full diff or prose explanation.\n"
+        "- Extract only: files changed, core behavior change, key functions/classes, and any open risk or next step.\n"
+        "- Prefer 2 to 4 very short bullets in plain text.\n"
+        "- Start each bullet with '- '.\n"
+        "- Keep file paths when they matter.\n"
+        "- Omit filler, acknowledgements, and formatting chatter.\n"
+        "- If no durable code-change context exists, return exactly: No durable context.\n\n"
+        f"Role: {role}\n"
+        f"Turn: {clean_turn}"
+    )
+
+
+def _generic_turn_summary_prompt(role: str, clean_turn: str) -> str:
+    return (
+        "Compress this single conversation turn into the shortest and most concise memory note "
+        "that will maximally help later context retrieval.\n"
+        "Rules:\n"
+        "- Keep only concrete facts, decisions, requests, constraints, file paths, errors, or open loops.\n"
+        "- Remove filler, politeness, repetition, style words, and nonessential explanation.\n"
+        "- Prefer one compact sentence or two very short bullets in plain text.\n"
+        "- Do not add analysis or speculation.\n"
+        "- If the turn contains no durable or useful context, return exactly: No durable context.\n\n"
+        f"Role: {role}\n"
+        f"Turn: {clean_turn}"
+    )
+
+
 def build_short_term_summary_plan(role: str, content: str) -> ShortTermSummaryPlan:
-    clean = re.sub(r"\s+", " ", str(content or "")).strip()
+    clean = compact_whitespace(content)
     summary_style = "concise_turn_memory_v1"
     if not clean:
         return ShortTermSummaryPlan(
@@ -205,23 +240,10 @@ def build_short_term_summary_plan(role: str, content: str) -> ShortTermSummaryPl
 
     if role == "assistant" and looks_like_code_edit(content):
         summary_style = "code_change_turn_memory_v1"
-        prompt = (
-            "Summarize this assistant turn as a compact code-change memory note for later retrieval.\n"
-            "Rules:\n"
-            "- Do NOT restate the full diff or prose explanation.\n"
-            "- Extract only: files changed, core behavior change, key functions/classes, and any open risk or next step.\n"
-            "- Prefer 2 to 4 very short bullets in plain text.\n"
-            "- Start each bullet with '- '.\n"
-            "- Keep file paths when they matter.\n"
-            "- Omit filler, acknowledgements, and formatting chatter.\n"
-            "- If no durable code-change context exists, return exactly: No durable context.\n\n"
-            f"Role: {role}\n"
-            f"Turn: {clean}"
-        )
         return ShortTermSummaryPlan(
             immediate_summary=None,
             summary_style=summary_style,
-            prompt=prompt,
+            prompt=_code_change_summary_prompt(role, clean),
             preserve_bullets=True,
         )
 
@@ -233,22 +255,10 @@ def build_short_term_summary_plan(role: str, content: str) -> ShortTermSummaryPl
             preserve_bullets=False,
         )
 
-    prompt = (
-        "Compress this single conversation turn into the shortest and most concise memory note "
-        "that will maximally help later context retrieval.\n"
-        "Rules:\n"
-        "- Keep only concrete facts, decisions, requests, constraints, file paths, errors, or open loops.\n"
-        "- Remove filler, politeness, repetition, style words, and nonessential explanation.\n"
-        "- Prefer one compact sentence or two very short bullets in plain text.\n"
-        "- Do not add analysis or speculation.\n"
-        "- If the turn contains no durable or useful context, return exactly: No durable context.\n\n"
-        f"Role: {role}\n"
-        f"Turn: {clean}"
-    )
     return ShortTermSummaryPlan(
         immediate_summary=None,
         summary_style=summary_style,
-        prompt=prompt,
+        prompt=_generic_turn_summary_prompt(role, clean),
         preserve_bullets=False,
     )
 
@@ -258,11 +268,11 @@ def normalize_short_term_summary(text: str, preserve_bullets: bool) -> str:
     if not text:
         return ""
     if not preserve_bullets:
-        return re.sub(r"\s+", " ", text).strip()
+        return compact_whitespace(text)
 
     lines = []
     for raw_line in text.splitlines():
-        line = re.sub(r"\s+", " ", raw_line).strip()
+        line = compact_whitespace(raw_line)
         if not line:
             continue
         if re.match(r"^[-*]\s+", line):

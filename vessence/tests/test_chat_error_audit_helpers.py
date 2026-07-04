@@ -1,7 +1,9 @@
 from agent_skills import chat_error_audit
 from agent_skills.chat_error_audit_helpers import (
+    chat_error_incident_fields,
     chat_error_job_filename,
     chat_error_job_markdown,
+    chat_error_source_location,
     first_android_frame,
     slugify_chat_error,
 )
@@ -12,6 +14,10 @@ def test_chat_error_audit_uses_extracted_helpers():
     assert chat_error_audit._parse_first_android_frame is first_android_frame
     assert chat_error_audit._chat_error_job_filename is chat_error_job_filename
     assert chat_error_audit._chat_error_job_markdown is chat_error_job_markdown
+
+
+def test_chat_error_audit_utcnow_helper_preserves_naive_shape():
+    assert chat_error_audit._utcnow().tzinfo is None
 
 
 def test_first_android_frame_parses_topmost_vessences_frame():
@@ -35,6 +41,32 @@ def test_chat_error_slug_and_filename_preserve_existing_shape():
     assert slugify_chat_error("!!!") == "chat_error"
     assert chat_error_job_filename(7, "java.net.SocketException") == "job_007_chat_error_socketexception.md"
     assert chat_error_job_filename(8, "") == "job_008_chat_error_unknownexception.md"
+
+
+def test_chat_error_incident_helpers_preserve_location_and_defaults():
+    frame = {
+        "class_method": "com.vessences.android.chat.StreamClient.read",
+        "line": 42,
+    }
+
+    assert chat_error_source_location(frame, "StreamClient.kt") == "StreamClient.kt:42"
+    assert chat_error_source_location({"line": 42}, "") == "unknown"
+    assert chat_error_incident_fields({}, frame=None, source_hint="") == {
+        "exc_class": "UnknownException",
+        "exc_short": "UnknownException",
+        "message": "",
+        "stack": "",
+        "app_version": "?",
+        "version_code": "?",
+        "from_voice": "",
+        "class_method": "?",
+        "location": "unknown",
+    }
+    assert chat_error_incident_fields(
+        {"exception_class": "java.net.SocketException", "from_voice": False},
+        frame=frame,
+        source_hint="StreamClient.kt",
+    )["location"] == "StreamClient.kt:42"
 
 
 def test_chat_error_job_markdown_renders_metadata_and_truncates_payload():

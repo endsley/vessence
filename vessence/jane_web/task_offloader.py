@@ -36,6 +36,46 @@ ANNOUNCEMENTS_PATH = Path(VESSENCE_DATA_HOME) / "data" / "jane_announcements.jso
 _PROGRESS_INTERVAL = 10
 
 
+class _TaskProgressHeartbeat:
+    def __init__(
+        self,
+        task_id: str,
+        *,
+        interval: float = _PROGRESS_INTERVAL,
+        write_progress_fn=None,
+        heartbeat_message_fn=_heartbeat_progress_message,
+        thread_factory=threading.Thread,
+    ) -> None:
+        self._task_id = task_id
+        self._interval = interval
+        self._write_progress_fn = write_progress_fn or _write_progress_announcement
+        self._heartbeat_message_fn = heartbeat_message_fn
+        self._last_delta = ""
+        self._delta_lock = threading.Lock()
+        self._stop_event = threading.Event()
+        self._thread = thread_factory(target=self._loop, daemon=True)
+
+    def on_progress(self, chunk: str) -> None:
+        with self._delta_lock:
+            self._last_delta = chunk
+
+    def start(self) -> None:
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop_event.set()
+
+    def _latest_message(self) -> str | None:
+        with self._delta_lock:
+            return self._heartbeat_message_fn(self._last_delta)
+
+    def _loop(self) -> None:
+        while not self._stop_event.wait(self._interval):
+            heartbeat_message = self._latest_message()
+            if heartbeat_message:
+                self._write_progress_fn(self._task_id, heartbeat_message)
+
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -73,6 +113,74 @@ def offload_task(
     return task_id
 
 
+def _load_offload_history(session_id: str, task_id: str) -> list[dict]:
+    try:
+        from jane_web.jane_proxy import _get_session
+        from vault_web.auth import get_session_user
+        from jane_web.main import _default_user_id
+        offload_user_id = get_session_user(session_id) or _default_user_id()
+        state = _get_session(offload_user_id, session_id)
+        return list(state.history) if state and state.history else []
+    except Exception as exc:
+        logger.warning("Could not load session history for offloaded task %s: %s", task_id, exc)
+        return []
+
+
+def _task_prompt_context(
+    message: str,
+    history: list[dict],
+    task_id: str,
+    *,
+    build_context_fn,
+) -> tuple[str, str]:
+    system_prompt = ""
+    prompt_text = message
+    try:
+        ctx = build_context_fn(message, history)
+        # Use the transcript (Recent Conversation + User: message) as the
+        # prompt so the model sees Jane's previous turns. The offloader
+        # previously passed just `message`, which made pronouns like "this"
+        # or "it" have no antecedent.
+        prompt_text, system_prompt = _automation_prompt_context(message, ctx)
+    except Exception:
+        logger.warning("Context build failed for offloaded task %s, running without context", task_id)
+    return prompt_text, system_prompt
+
+
+def _run_automation_with_retries(
+    task_id: str,
+    prompt_text: str,
+    system_prompt: str,
+    on_progress,
+    *,
+    runner,
+    automation_error_cls,
+    max_attempts: int = 2,
+    sleep_fn=time.sleep,
+    write_progress_fn=_write_progress_announcement,
+) -> str:
+    for attempt in range(1, max_attempts + 1):
+        try:
+            return runner(
+                prompt_text,
+                system_prompt=system_prompt,
+                workdir=VESSENCE_HOME,
+                on_progress=on_progress,
+            )
+        except automation_error_cls as exc:
+            is_empty_response = "empty response" in str(exc).lower()
+            logger.warning(
+                "Offloaded task %s attempt %d/%d failed: %s",
+                task_id, attempt, max_attempts, exc,
+            )
+            if attempt < max_attempts and is_empty_response:
+                write_progress_fn(task_id, _empty_response_retry_message())
+                sleep_fn(2)
+                continue
+            raise
+    return ""
+
+
 def _run_task(
     task_id: str,
     message: str,
@@ -87,25 +195,8 @@ def _run_task(
     # Announce start
     _write_progress_announcement(task_id, _start_progress_message(message))
 
-    # Periodic progress heartbeat
-    last_delta = ""
-    delta_lock = threading.Lock()
-    stop_heartbeat = threading.Event()
-
-    def on_progress(chunk: str) -> None:
-        nonlocal last_delta
-        with delta_lock:
-            last_delta = chunk
-
-    def heartbeat_loop() -> None:
-        while not stop_heartbeat.wait(_PROGRESS_INTERVAL):
-            with delta_lock:
-                heartbeat_message = _heartbeat_progress_message(last_delta)
-            if heartbeat_message:
-                _write_progress_announcement(task_id, heartbeat_message)
-
-    heartbeat_thread = threading.Thread(target=heartbeat_loop, daemon=True)
-    heartbeat_thread.start()
+    heartbeat = _TaskProgressHeartbeat(task_id)
+    heartbeat.start()
 
     max_attempts = 2
     try:
@@ -114,61 +205,31 @@ def _run_task(
         # resolve pronouns like "this", "it", "that" back to Jane's previous
         # turns. Without this, messages like "please implement this" have
         # no antecedent and Jane responds "I don't know what you're referring to".
-        history: list[dict] = []
-        try:
-            from jane_web.jane_proxy import _get_session
-            from vault_web.auth import get_session_user
-            from jane_web.main import _default_user_id
-            _offload_user_id = get_session_user(session_id) or _default_user_id()
-            state = _get_session(_offload_user_id, session_id)
-            history = list(state.history) if state and state.history else []
-        except Exception as exc:
-            logger.warning("Could not load session history for offloaded task %s: %s", task_id, exc)
+        history = _load_offload_history(session_id, task_id)
+        prompt_text, system_prompt = _task_prompt_context(
+            message,
+            history,
+            task_id,
+            build_context_fn=build_jane_context,
+        )
 
-        system_prompt = ""
-        prompt_text = message
-        try:
-            ctx = build_jane_context(message, history)
-            # Use the transcript (Recent Conversation + User: message) as the
-            # prompt so the model sees Jane's previous turns. The offloader
-            # previously passed just `message`, which made pronouns like "this"
-            # or "it" have no antecedent.
-            prompt_text, system_prompt = _automation_prompt_context(message, ctx)
-        except Exception:
-            logger.warning("Context build failed for offloaded task %s, running without context", task_id)
-
-        result = None
-        last_error = None
-        for attempt in range(1, max_attempts + 1):
-            try:
-                result = run_automation_prompt(
-                    prompt_text,
-                    system_prompt=system_prompt,
-                    workdir=VESSENCE_HOME,
-                    on_progress=on_progress,
-                )
-                last_error = None
-                break
-            except AutomationError as exc:
-                last_error = exc
-                is_empty_response = "empty response" in str(exc).lower()
-                logger.warning(
-                    "Offloaded task %s attempt %d/%d failed: %s",
-                    task_id, attempt, max_attempts, exc,
-                )
-                if attempt < max_attempts and is_empty_response:
-                    _write_progress_announcement(task_id, _empty_response_retry_message())
-                    time.sleep(2)
-                    continue
-                raise
+        result = _run_automation_with_retries(
+            task_id,
+            prompt_text,
+            system_prompt,
+            heartbeat.on_progress,
+            runner=run_automation_prompt,
+            automation_error_cls=AutomationError,
+            max_attempts=max_attempts,
+        )
 
         # Post final result
-        stop_heartbeat.set()
+        heartbeat.stop()
         _write_progress_announcement(task_id, _final_result_message(result), final=True)
         logger.info("Offloaded task %s completed successfully", task_id)
 
     except AutomationError as exc:
-        stop_heartbeat.set()
+        heartbeat.stop()
         err_str = str(exc)
         logger.error(
             "Offloaded task %s failed after %d attempt(s): %s",
@@ -181,7 +242,7 @@ def _run_task(
         )
 
     except Exception as exc:
-        stop_heartbeat.set()
+        heartbeat.stop()
         logger.exception("Offloaded task %s failed with unexpected error", task_id)
         _write_progress_announcement(
             task_id,

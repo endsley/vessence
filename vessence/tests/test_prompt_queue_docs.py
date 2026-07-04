@@ -1,7 +1,11 @@
 from agent_skills import prompt_queue_runner
 from agent_skills.prompt_queue_docs import (
     delete_prompt_entry,
+    parse_prompt_chunk,
+    parse_status_prefix,
     parse_prompt_list,
+    prompt_body_lines,
+    prompt_entry_chunks,
     prompt_summary,
     remove_completed_prompt_entries,
     render_prompt_status_update,
@@ -12,6 +16,26 @@ from agent_skills.prompt_queue_docs import (
 
 def test_prompt_queue_runner_reexports_prompt_summary_helper():
     assert prompt_queue_runner.prompt_summary is prompt_summary
+
+
+def test_prompt_entry_parser_helpers_preserve_status_and_body_boundaries():
+    content = "# Queue\n\n1. [new]\nFirst\n\n   - note\n\n2. [completed] Done\n---\n"
+
+    assert prompt_entry_chunks(content) == [
+        "# Queue",
+        "1. [new]\nFirst\n\n   - note",
+        "2. [completed] Done\n---",
+    ]
+    assert parse_status_prefix("[COMPLETE] Done") == ("complete", "Done")
+    assert parse_status_prefix("No tag") == ("pending", "No tag")
+    assert prompt_body_lines("Inline", ["body", "   - old note", "ignored"]) == ["Inline", "body"]
+    assert prompt_body_lines("", ["body", "---", "ignored"]) == ["body"]
+    assert parse_prompt_chunk("bad chunk") is None
+    assert parse_prompt_chunk("2. [incomplete]\nRetry this\n") == {
+        "index": 2,
+        "text": "Retry this",
+        "status": "incomplete",
+    }
 
 
 def test_parse_prompt_list_preserves_multiline_text_and_statuses():

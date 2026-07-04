@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 SESSION_COOKIE = "jane_session"
 TRUSTED_DEVICE_COOKIE = "jane_trusted_device"
@@ -34,3 +35,14 @@ def auth_cookie_specs(
     if trusted_device_id and existing_trusted_device_id != trusted_device_id:
         specs.append(AuthCookieSpec(trusted_device_cookie_name, trusted_device_id, max_age=max_age))
     return specs
+
+
+def apply_auth_cookie_spec(response: Any, spec: AuthCookieSpec, *, secure: bool) -> None:
+    response.set_cookie(
+        spec.name,
+        spec.value,
+        httponly=spec.httponly,
+        secure=secure,
+        samesite=spec.samesite,
+        max_age=spec.max_age,
+    )

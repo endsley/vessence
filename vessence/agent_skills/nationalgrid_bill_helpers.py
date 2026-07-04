@@ -226,6 +226,44 @@ def inferred_current_bill_entry(
     }
 
 
+def discovered_current_rows(discovered_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        row for row in discovered_rows
+        if row.get("is_current") and row.get("amount")
+    ]
+
+
+def current_bill_source_bills(record: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        bill for bill in (record.get("bills") or [])
+        if str(bill.get("match_type") or "").endswith("_from_current")
+    ]
+
+
+def month_entries_by_month(
+    record: dict[str, Any],
+    target_months: list[str],
+) -> dict[str, dict[str, Any]]:
+    by_month: dict[str, dict[str, Any]] = {}
+    for bill in record.get("bills") or []:
+        entry = downloaded_month_entry(bill)
+        if entry is not None:
+            by_month[entry["month"]] = entry
+
+    discovered_rows = record.get("discovered_rows") or []
+    discovered_current = discovered_current_rows(discovered_rows)
+    for bill in current_bill_source_bills(record):
+        entry = current_bill_downloaded_entry(bill, discovered_current)
+        if entry is not None:
+            by_month[entry["month"]] = entry
+
+    inferred_entry = inferred_current_bill_entry(discovered_rows, discovered_current, target_months, by_month)
+    if inferred_entry is not None:
+        by_month[inferred_entry["month"]] = inferred_entry
+
+    return by_month
+
+
 def monthly_amounts_for_targets(
     target_months: list[str],
     by_month: dict[str, dict[str, Any]],
@@ -243,30 +281,7 @@ def total_from_monthly_amounts(monthly_amounts: list[dict[str, Any]]) -> Decimal
 
 
 def summarize_account(account: Any, record: dict[str, Any], target_months: list[str]) -> dict[str, Any]:
-    by_month: dict[str, dict[str, Any]] = {}
-    for bill in record.get("bills") or []:
-        entry = downloaded_month_entry(bill)
-        if entry is not None:
-            by_month[entry["month"]] = entry
-
-    discovered_rows = record.get("discovered_rows") or []
-    discovered_current = [
-        row for row in discovered_rows
-        if row.get("is_current") and row.get("amount")
-    ]
-    current_bills = [
-        bill for bill in (record.get("bills") or [])
-        if str(bill.get("match_type") or "").endswith("_from_current")
-    ]
-    for bill in current_bills:
-        entry = current_bill_downloaded_entry(bill, discovered_current)
-        if entry is not None:
-            by_month[entry["month"]] = entry
-
-    inferred_entry = inferred_current_bill_entry(discovered_rows, discovered_current, target_months, by_month)
-    if inferred_entry is not None:
-        by_month[inferred_entry["month"]] = inferred_entry
-
+    by_month = month_entries_by_month(record, target_months)
     monthly_amounts = monthly_amounts_for_targets(target_months, by_month)
     total = total_from_monthly_amounts(monthly_amounts)
 

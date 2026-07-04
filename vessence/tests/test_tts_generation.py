@@ -1,4 +1,6 @@
 from jane_web.tts_generation import (
+    concatenate_wav_chunks,
+    tts_cached_media,
     tts_cache_key,
     tts_cache_paths,
     tts_chunk_wav_path,
@@ -16,6 +18,20 @@ def test_tts_cache_paths_preserve_existing_md5_layout():
     assert paths.cache_dir == "/data/cache/tts"
     assert paths.ogg_path == "/data/cache/tts/5d41402abc4b.ogg"
     assert paths.legacy_wav_path == "/data/cache/tts/5d41402abc4b.wav"
+
+
+def test_tts_cached_media_prefers_ogg_then_legacy_wav():
+    paths = tts_cache_paths("/data", "hello")
+
+    assert tts_cached_media(paths, exists_fn=lambda path: path == paths.ogg_path) == (
+        paths.ogg_path,
+        "audio/ogg",
+    )
+    assert tts_cached_media(paths, exists_fn=lambda path: path == paths.legacy_wav_path) == (
+        paths.legacy_wav_path,
+        "audio/wav",
+    )
+    assert tts_cached_media(paths, exists_fn=lambda path: False) is None
 
 
 def test_tts_chunk_and_combined_wav_paths_preserve_names():
@@ -76,3 +92,28 @@ def test_tts_ffmpeg_command_preserves_opus_arguments():
         "48k",
         "/data/cache/tts/out.ogg",
     ]
+
+
+def test_concatenate_wav_chunks_preserves_params_and_appends_frames(tmp_path):
+    import wave
+
+    def write_wav(path, frames):
+        with wave.open(str(path), "wb") as wav:
+            wav.setnchannels(1)
+            wav.setsampwidth(1)
+            wav.setframerate(8000)
+            wav.writeframes(frames)
+
+    first = tmp_path / "first.wav"
+    second = tmp_path / "second.wav"
+    combined = tmp_path / "combined.wav"
+    write_wav(first, b"abc")
+    write_wav(second, b"de")
+
+    concatenate_wav_chunks([str(first), str(second)], str(combined))
+
+    with wave.open(str(combined), "rb") as wav:
+        assert wav.getnchannels() == 1
+        assert wav.getsampwidth() == 1
+        assert wav.getframerate() == 8000
+        assert wav.readframes(wav.getnframes()) == b"abcde"

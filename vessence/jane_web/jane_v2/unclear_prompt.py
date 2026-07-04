@@ -57,6 +57,31 @@ User prompt: {prompt}
 Answer ONE word — CLEAR or UNCLEAR:"""
 
 
+def _unclear_prompt_payload(
+    prompt: str,
+    *,
+    model: str,
+    num_ctx: int,
+    keep_alive: str,
+) -> dict:
+    return {
+        "model": model,
+        "prompt": _PROMPT_TEMPLATE.format(prompt=prompt.strip()),
+        "stream": False,
+        "think": False,
+        "options": {
+            "temperature": 0.0,
+            "num_predict": 5,
+            "num_ctx": num_ctx,
+        },
+        "keep_alive": keep_alive,
+    }
+
+
+def _is_unclear_response(raw: str) -> bool:
+    return raw.strip().upper().startswith("UNCLEAR")
+
+
 async def is_unclear(prompt: str, *, timeout_s: float | None = None) -> bool:
     """Return True when the prompt looks like STT noise and should be re-requested.
 
@@ -78,18 +103,12 @@ async def is_unclear(prompt: str, *, timeout_s: float | None = None) -> bool:
         logger.warning("unclear_prompt: models import failed: %s", e)
         return False
 
-    body = {
-        "model": model,
-        "prompt": _PROMPT_TEMPLATE.format(prompt=prompt.strip()),
-        "stream": False,
-        "think": False,
-        "options": {
-            "temperature": 0.0,
-            "num_predict": 5,
-            "num_ctx": LOCAL_LLM_NUM_CTX,
-        },
-        "keep_alive": OLLAMA_KEEP_ALIVE,
-    }
+    body = _unclear_prompt_payload(
+        prompt,
+        model=model,
+        num_ctx=LOCAL_LLM_NUM_CTX,
+        keep_alive=OLLAMA_KEEP_ALIVE,
+    )
     try:
         raw = (
             await _post_ollama_response(
@@ -102,7 +121,7 @@ async def is_unclear(prompt: str, *, timeout_s: float | None = None) -> bool:
         logger.warning("unclear_prompt: qwen call failed (%s) — failing open (treating as clear)", e)
         return False
 
-    unclear = raw.startswith("UNCLEAR")
+    unclear = _is_unclear_response(raw)
     logger.info(
         "unclear_prompt: %s for %r (raw=%r)",
         "UNCLEAR" if unclear else "CLEAR", prompt[:80], raw[:20],

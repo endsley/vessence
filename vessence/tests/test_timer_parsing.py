@@ -19,6 +19,7 @@ from jane_web.jane_v2.classes.timer.parsing import (
     extract_label,
     label_from_reply,
     looks_like_new_timer,
+    ordinal_timer_index,
     parse_delete_phrase,
     parse_duration_ms,
     parse_followup_duration_ms,
@@ -77,6 +78,57 @@ def test_timer_legacy_intent_rules_preserve_inline_phrase_checks() -> None:
     assert handler._ask_label is build_ask_label_response
 
 
+def test_timer_params_normalization_preserves_empty_label_opt_out() -> None:
+    assert handler._timer_action_params(None) == handler._TimerActionParams()
+    assert handler._timer_action_params({
+        "action": " SET ",
+        "duration_text": "five minutes",
+        "label": "",
+        "delete_target": "third",
+    }) == handler._TimerActionParams(
+        action="set",
+        duration_text="five minutes",
+        label="",
+        label_provided=True,
+        delete_target="third",
+    )
+    assert not handler._timer_action_params({"label": None}).label_provided
+
+
+def test_timer_params_dispatch_preserves_set_and_delete_branches() -> None:
+    handled, response = handler._handle_params_action(
+        "set a timer",
+        "set a timer",
+        handler._TimerActionParams(
+            action="set",
+            duration_text="five minutes",
+            label="",
+            label_provided=True,
+        ),
+    )
+
+    assert handled is True
+    assert response == build_set_response(5 * 60 * 1000, "")
+    assert handler.handle(
+        "delete timer",
+        params={"action": "delete", "delete_target": "third"},
+    ) == build_delete_response({"index": 3})
+
+
+def test_timer_params_dispatch_falls_back_to_legacy_for_unknown_action() -> None:
+    handled, response = handler._handle_params_action(
+        "set a 5 minute pasta timer",
+        "set a 5 minute pasta timer",
+        handler._TimerActionParams(action="unknown"),
+    )
+
+    assert handled is False
+    assert response is None
+    assert handler.handle("set a 5 minute pasta timer", params={"action": "unknown"}) == (
+        build_set_response(5 * 60 * 1000, "pasta")
+    )
+
+
 def test_parse_duration_ms_handles_common_timer_phrases():
     assert parse_duration_ms("half an hour") == 30 * 60 * 1000
     assert parse_duration_ms("2 and a half hours") == int(2.5 * 3600 * 1000)
@@ -102,6 +154,10 @@ def test_extract_label_and_pretty_duration():
 
 
 def test_delete_target_parsers_handle_id_index_label_and_all():
+    assert ordinal_timer_index("delete the third timer", timer_required=True) == 3
+    assert ordinal_timer_index("third", timer_required=True) is None
+    assert ordinal_timer_index("third", timer_required=False) == 3
+
     assert extract_delete_target("delete timer 3") == {"id": 3}
     assert extract_delete_target("delete the third timer") == {"index": 3}
     assert extract_delete_target("delete the pasta timer") == {"label": "pasta"}

@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 
 from jane_web.announcements import AnnouncementsLog
 
@@ -47,6 +48,15 @@ def test_invalid_since_value_disables_date_filter(tmp_path):
     log = AnnouncementsLog(path)
 
     assert [row["id"] for row in log.read("bad-date")] == ["old", "new"]
+
+
+def test_announcement_since_filter_uses_created_at_then_timestamp_and_inclusive_cutoff():
+    since_dt = datetime.fromisoformat("2026-01-01T10:00:00")
+
+    assert not AnnouncementsLog._is_after_since({"created_at": "2026-01-01T10:00:00"}, since_dt)
+    assert AnnouncementsLog._is_after_since({"timestamp": "2026-01-01T10:00:01"}, since_dt)
+    assert AnnouncementsLog._is_after_since({"created_at": "not-a-date"}, since_dt)
+    assert AnnouncementsLog._created_at_value({"timestamp": "fallback"}) == "fallback"
 
 
 def test_large_log_is_truncated_to_recent_lines_before_reading(tmp_path):

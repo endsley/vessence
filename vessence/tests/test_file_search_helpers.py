@@ -3,6 +3,7 @@ from jane_web.file_search_helpers import (
     file_matches_type,
     file_search_result,
     filename_search_results,
+    index_path_from_meta,
     merge_index_search_results,
     normalize_index_path,
     row_scope_allowed,
@@ -21,6 +22,12 @@ def test_normalize_index_path_handles_empty_absolute_and_escape_paths():
     assert normalize_index_path("../outside.md", "/vault") is None
     assert normalize_index_path("..outside.md", "/vault") is None
     assert normalize_index_path("docs/a.md", "/vault") == "docs/a.md"
+
+
+def test_index_path_from_meta_prefers_path_then_file_and_normalizes():
+    assert index_path_from_meta({"path": "docs/a.md", "file": "docs/b.md"}, "/vault") == "docs/a.md"
+    assert index_path_from_meta({"file": "/vault/docs/b.md"}, "/vault") == "docs/b.md"
+    assert index_path_from_meta({"path": "../outside.md"}, "/vault") is None
 
 
 def test_row_scope_allowed_preserves_managed_user_scope_rules():

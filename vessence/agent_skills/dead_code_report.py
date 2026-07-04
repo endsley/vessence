@@ -5,6 +5,30 @@ import datetime as dt
 from pathlib import Path
 
 
+def _relative_path_item(root: Path, path: Path, *, indent: str = "") -> str:
+    return f"{indent}- `{path.relative_to(root)}`"
+
+
+def _dead_function_item(root: Path, path: Path, name: str) -> str:
+    return f"- `{path.relative_to(root)}` :: `{name}()`"
+
+
+def _duplicate_group_lines(
+    root: Path,
+    duplicate_groups: list[tuple[str, list[Path]]],
+    *,
+    limit: int = 20,
+) -> list[str]:
+    lines: list[str] = []
+    for hash_value, paths in duplicate_groups[:limit]:
+        lines.append(f"- group `{hash_value}`:")
+        for path in paths:
+            lines.append(_relative_path_item(root, path, indent="    "))
+    if len(duplicate_groups) > limit:
+        lines.append(f"- … and {len(duplicate_groups) - limit} more groups")
+    return lines
+
+
 def build_dead_code_report_markdown(
     *,
     root: Path,
@@ -20,7 +44,7 @@ def build_dead_code_report_markdown(
     if auto_deleted:
         body.append(f"## Auto-deleted ({len(auto_deleted)} files)\n")
         for path in auto_deleted:
-            body.append(f"- `{path.relative_to(root)}`")
+            body.append(_relative_path_item(root, path))
         body.append("")
 
     if dead_files:
@@ -28,7 +52,7 @@ def build_dead_code_report_markdown(
         body.append("(Candidates for deletion, but failed an auto-delete safety check —")
         body.append(" usually means the file is too new, too large, or outside agent_skills/test_code.)\n")
         for path in dead_files:
-            body.append(f"- `{path.relative_to(root)}`")
+            body.append(_relative_path_item(root, path))
         body.append("")
 
     if dead_functions:
@@ -36,7 +60,7 @@ def build_dead_code_report_markdown(
         body.append("(No references found via grep. May be false positives if called via")
         body.append(" getattr, dynamic dispatch, or HTTP route registration.)\n")
         for path, name in dead_functions[:50]:
-            body.append(f"- `{path.relative_to(root)}` :: `{name}()`")
+            body.append(_dead_function_item(root, path, name))
         if len(dead_functions) > 50:
             body.append(f"- … and {len(dead_functions) - 50} more")
         body.append("")
@@ -44,12 +68,7 @@ def build_dead_code_report_markdown(
     if duplicate_groups:
         body.append(f"## Duplicate function bodies ({len(duplicate_groups)} groups)\n")
         body.append("(Identical bodies — candidates for extraction into a shared helper.)\n")
-        for hash_value, paths in duplicate_groups[:20]:
-            body.append(f"- group `{hash_value}`:")
-            for path in paths:
-                body.append(f"    - `{path.relative_to(root)}`")
-        if len(duplicate_groups) > 20:
-            body.append(f"- … and {len(duplicate_groups) - 20} more groups")
+        body.extend(_duplicate_group_lines(root, duplicate_groups))
         body.append("")
 
     if not (auto_deleted or dead_files or dead_functions or duplicate_groups):

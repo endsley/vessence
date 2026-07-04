@@ -143,6 +143,51 @@ def _most_common_items(counts: Any) -> list[tuple[str, int]]:
     return sorted(counts.items(), key=lambda item: item[1], reverse=True)
 
 
+def count_section_lines(title: str, counts: Any, *, line_formatter=None) -> list[str]:
+    formatter = line_formatter or (lambda key, count: f"- {key}: {count}")
+    lines = [f"## {title}"]
+    for key, count in _most_common_items(counts):
+        lines.append(formatter(key, count))
+    lines.append("")
+    return lines
+
+
+def classification_failure_table_lines(
+    classification_failures: list[dict[str, Any]],
+    *,
+    limit: int = 30,
+) -> list[str]:
+    if not classification_failures:
+        return []
+    lines = [
+        "## Classification failures (top 30)",
+        "| Prompt | Got | Should be |",
+        "|---|---|---|",
+    ]
+    for failure in classification_failures[:limit]:
+        prompt = failure["prompt"][:80].replace("|", "\\|")
+        lines.append(f"| {prompt} | {failure['got']} | {failure['should_be']} |")
+    lines.append("")
+    return lines
+
+
+def response_failure_lines(
+    response_failures: list[dict[str, Any]],
+    *,
+    limit: int = 20,
+) -> list[str]:
+    if not response_failures:
+        return []
+    lines = ["## Response failures (top 20) — usually need code changes"]
+    for failure in response_failures[:limit]:
+        prompt = failure["prompt"][:80].replace("|", "\\|")
+        lines.append(
+            f"- **{prompt}** ({failure['classification']}/{failure['stage']}): {failure['response'][:150]}"
+        )
+    lines.append("")
+    return lines
+
+
 def build_pipeline_audit_report_markdown(
     *,
     started: Any,
@@ -164,35 +209,18 @@ def build_pipeline_audit_report_markdown(
         f"- Response failures: **{len(response_failures)}**",
         f"- Auto-fixes applied (exemplars added): **{fixes_applied}**",
         "",
-        "## Stage breakdown",
     ]
-    for stage, count in _most_common_items(stage_counts):
-        report_lines.append(f"- {stage}: {count}")
-    report_lines.append("")
-    report_lines.append("## Classification breakdown")
-    for cls, count in _most_common_items(class_counts):
-        report_lines.append(f"- {cls}: {count}")
-    report_lines.append("")
+    report_lines.extend(count_section_lines("Stage breakdown", stage_counts))
+    report_lines.extend(count_section_lines("Classification breakdown", class_counts))
     if fixes_by_class:
-        report_lines.append("## Self-correct fixes by class")
-        for cls, count in _most_common_items(fixes_by_class):
-            report_lines.append(f"- {cls}: +{count} exemplars")
-        report_lines.append("")
-    if classification_failures:
-        report_lines.append("## Classification failures (top 30)")
-        report_lines.append("| Prompt | Got | Should be |")
-        report_lines.append("|---|---|---|")
-        for failure in classification_failures[:30]:
-            prompt = failure["prompt"][:80].replace("|", "\\|")
-            report_lines.append(f"| {prompt} | {failure['got']} | {failure['should_be']} |")
-        report_lines.append("")
-    if response_failures:
-        report_lines.append("## Response failures (top 20) — usually need code changes")
-        for failure in response_failures[:20]:
-            prompt = failure["prompt"][:80].replace("|", "\\|")
-            report_lines.append(
-                f"- **{prompt}** ({failure['classification']}/{failure['stage']}): {failure['response'][:150]}"
+        report_lines.extend(
+            count_section_lines(
+                "Self-correct fixes by class",
+                fixes_by_class,
+                line_formatter=lambda cls, count: f"- {cls}: +{count} exemplars",
             )
-        report_lines.append("")
+        )
+    report_lines.extend(classification_failure_table_lines(classification_failures))
+    report_lines.extend(response_failure_lines(response_failures))
 
     return "\n".join(report_lines)

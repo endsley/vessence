@@ -25,6 +25,7 @@ DAY_PHRASE_MAP = [
 ]
 
 NEUTRAL_DAY_REFS = ("today", "the next several days")
+MULTI_DAY_SPECS = frozenset({"this_week", "weekend", "week"})
 
 
 def day_from_followup(prompt: str, today: date | None = None) -> str | None:
@@ -81,6 +82,36 @@ def without_debug_fields(entry: dict) -> dict:
     return {key: value for key, value in entry.items() if not key.startswith("debug_")}
 
 
+def is_multi_day_spec(day: str | None) -> bool:
+    return bool(day and day.lower() in MULTI_DAY_SPECS)
+
+
+def precipitation_day_payload(entry: dict) -> dict:
+    return {
+        "weekday": entry.get("weekday"),
+        "date": entry.get("date"),
+        "precipitation": entry.get("precipitation"),
+        "condition": entry.get("condition"),
+    }
+
+
+def weekly_forecast_day_payload(entry: dict) -> dict:
+    return {
+        "weekday": entry.get("weekday"),
+        "high": entry.get("high"),
+        "low": entry.get("low"),
+        "condition": entry.get("condition"),
+    }
+
+
+def precipitation_entries(day_entry: dict | None, forecast: list[dict], *, multi_day: bool) -> list[dict]:
+    if multi_day:
+        return forecast[:7]
+    if day_entry:
+        return [day_entry]
+    return forecast[:3]
+
+
 def slice_for(topic: str, day: str | None, data: dict) -> dict | None:
     """Build the smallest dict that answers the topic/day combo."""
     forecast = data.get("forecast") or []
@@ -89,7 +120,7 @@ def slice_for(topic: str, day: str | None, data: dict) -> dict | None:
     pollen = data.get("pollen")
 
     day_entry = normalize_day(day, forecast)
-    multi_day = day and day.lower() in ("this_week", "weekend", "week")
+    multi_day = is_multi_day_spec(day)
 
     if topic == "pollen":
         if not pollen:
@@ -109,35 +140,14 @@ def slice_for(topic: str, day: str | None, data: dict) -> dict | None:
         return {"topic": "wind", "current_wind": current.get("wind")}
 
     if topic == "precipitation":
-        if multi_day:
-            days = forecast[:7]
-        elif day_entry:
-            days = [day_entry]
-        else:
-            days = forecast[:3]
-        slim = [
-            {
-                "weekday": entry.get("weekday"),
-                "date": entry.get("date"),
-                "precipitation": entry.get("precipitation"),
-                "condition": entry.get("condition"),
-            }
-            for entry in days
-        ]
+        days = precipitation_entries(day_entry, forecast, multi_day=multi_day)
+        slim = [precipitation_day_payload(entry) for entry in days]
         return {"topic": "precipitation", "days": slim}
 
     if topic == "forecast":
         if multi_day:
             days = forecast[:7]
-            slim = [
-                {
-                    "weekday": entry.get("weekday"),
-                    "high": entry.get("high"),
-                    "low": entry.get("low"),
-                    "condition": entry.get("condition"),
-                }
-                for entry in days
-            ]
+            slim = [weekly_forecast_day_payload(entry) for entry in days]
             return {"topic": "weekly_forecast", "days": slim}
         if day_entry:
             return {"topic": "day_forecast", "day": without_debug_fields(day_entry)}

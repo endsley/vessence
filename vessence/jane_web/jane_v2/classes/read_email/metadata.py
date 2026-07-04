@@ -15,28 +15,48 @@ closes that gap by owning the fetch alongside the class metadata, mirroring
 how `delete_messages` and `read_messages` handle their own data injection.
 """
 
-import datetime
 import logging
+
+from jane_web.jane_v2.classes.context_footers import fetched_at_footer
+from jane_web.jane_v2.classes.email_metadata_helpers import (
+    email_fetch_failed_block as _shared_email_fetch_failed_block,
+    fetch_email_bucket as _shared_fetch_email_bucket,
+    format_email_block as _shared_format_email_block,
+    gmail_setup_error_block as _shared_gmail_setup_error_block,
+)
 
 _logger = logging.getLogger(__name__)
 
 
 def _format_email_block(label: str, emails: list[dict]) -> str:
-    if not emails:
-        return f"{label}\nNone.\n[END]"
-    lines = [label]
-    for i, e in enumerate(emails, 1):
-        sender = (e.get("sender") or "Unknown")[:80]
-        subject = (e.get("subject") or "(no subject)")[:120]
-        snippet = (e.get("snippet") or "").strip()[:200]
-        when = (e.get("date") or "").strip()[:40]
-        unread_tag = " (unread)" if e.get("is_unread") else ""
-        lines.append(f"{i}. [{when}] {sender}{unread_tag}")
-        lines.append(f"   Subject: {subject}")
-        if snippet:
-            lines.append(f"   Snippet: {snippet}")
-    lines.append("[END]")
-    return "\n".join(lines)
+    return _shared_format_email_block(label, emails)
+
+
+def _gmail_setup_error_block(error: Exception) -> str:
+    return _shared_gmail_setup_error_block(error)
+
+
+def _email_fetch_failed_block(label: str, error: Exception) -> str:
+    return _shared_email_fetch_failed_block(label, error)
+
+
+def _read_email_bucket(
+    read_inbox_fn,
+    *,
+    label: str,
+    limit: int,
+    query: str,
+    warning_context: str,
+) -> tuple[str, bool]:
+    return _shared_fetch_email_bucket(
+        read_inbox_fn,
+        label=label,
+        limit=limit,
+        query=query,
+        warning_context=warning_context,
+        logger=_logger,
+        log_prefix="read_email",
+    )
 
 
 def _escalation_context() -> str:
@@ -56,35 +76,32 @@ def _escalation_context() -> str:
     parts = []
     creds_failed = False
 
-    try:
-        unread = read_inbox(limit=10, query="is:unread")
-        parts.append(_format_email_block("[EMAIL INBOX — unread]", unread))
-    except RuntimeError as e:
-        creds_failed = True
-        parts.append(
-            "[EMAIL ERROR]\n"
-            f"Gmail not set up: {e}\n"
-            "Tell the user they need to sign in with Google on the Vessence "
-            "web UI to enable email access.\n[END]"
-        )
-    except Exception as e:
-        _logger.warning("read_email escalation: inbox fetch failed: %s", e)
-        parts.append(f"[EMAIL INBOX — unread]\nFetch failed: {e}\n[END]")
+    block, creds_failed = _read_email_bucket(
+        read_inbox,
+        label="[EMAIL INBOX — unread]",
+        limit=10,
+        query="is:unread",
+        warning_context="inbox",
+    )
+    parts.append(block)
 
     if not creds_failed:
-        try:
-            spam = read_inbox(limit=10, query="in:spam")
-            parts.append(_format_email_block("[EMAIL SPAM — recent]", spam))
-        except Exception as e:
-            _logger.warning("read_email escalation: spam fetch failed: %s", e)
-            parts.append(f"[EMAIL SPAM — recent]\nFetch failed: {e}\n[END]")
+        block, _ = _read_email_bucket(
+            read_inbox,
+            label="[EMAIL SPAM — recent]",
+            limit=10,
+            query="in:spam",
+            warning_context="spam",
+        )
+        parts.append(block)
 
         parts.append(
-            f"(Fetched at {datetime.datetime.utcnow().isoformat()}Z. "
-            "Triage: personal/important emails first; skip obvious "
-            "promo/marketing UNLESS the user asked about junk / spam / "
-            "promotions — then summarize from the SPAM bucket. Quote sender "
-            "and subject. Honor any specific sender or count the user named.)"
+            fetched_at_footer(
+                "Triage: personal/important emails first; skip obvious "
+                "promo/marketing UNLESS the user asked about junk / spam / "
+                "promotions — then summarize from the SPAM bucket. Quote sender "
+                "and subject. Honor any specific sender or count the user named."
+            )
         )
 
     return "\n\n".join(parts)

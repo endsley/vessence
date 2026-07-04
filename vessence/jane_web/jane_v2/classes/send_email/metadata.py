@@ -16,41 +16,37 @@ Until 2026-04-26 a Stage-2 handler did the draft/confirm flow locally; that
 handler was removed when the user asked for all email to skip Stage 2.
 """
 
-import datetime
 import logging
+
+from jane_web.jane_v2.classes.context_footers import fetched_at_footer
+from jane_web.jane_v2.classes.email_metadata_helpers import (
+    email_fetch_failed_block as _shared_email_fetch_failed_block,
+    format_email_block as _shared_format_email_block,
+    gmail_setup_error_block as _shared_gmail_setup_error_block,
+)
 
 _logger = logging.getLogger(__name__)
 
 
 def _format_email_block(label: str, emails: list[dict]) -> str:
-    if not emails:
-        return f"{label}\nNone.\n[END]"
-    lines = [label]
-    for i, e in enumerate(emails, 1):
-        sender = (e.get("sender") or "Unknown")[:80]
-        subject = (e.get("subject") or "(no subject)")[:120]
-        when = (e.get("date") or "").strip()[:40]
-        lines.append(f"{i}. [{when}] {sender}")
-        lines.append(f"   Subject: {subject}")
-    lines.append("[END]")
-    return "\n".join(lines)
+    return _shared_format_email_block(
+        label,
+        emails,
+        include_snippet=False,
+        include_unread_tag=False,
+    )
 
 
-def _escalation_context() -> str:
-    """Inject recent inbox so Opus has context for replies / threading,
-    plus the rules of engagement for sending."""
-    try:
-        from agent_skills.email_oauth import list_gmail_token_users
-        accounts = list_gmail_token_users()
-    except Exception:
-        accounts = []
-    account_line = (
+def _sender_account_line(accounts: list[str]) -> str:
+    return (
         ", ".join(accounts)
         if accounts
         else "no stored Gmail sender tokens yet"
     )
 
-    rules = (
+
+def _send_email_rules(account_line: str) -> str:
+    return (
         "[send email escalation context]\n"
         "\n"
         'Tool: [[CLIENT_TOOL:email.send:{"from_email":"<sender>","to":"<addr>","subject":"<subj>","body":"<body>"}]]\n'
@@ -86,32 +82,42 @@ def _escalation_context() -> str:
         "sign in with that Google account first.\n"
     )
 
+
+def _recent_inbox_block(read_inbox_fn) -> str:
+    try:
+        recent = read_inbox_fn(limit=15, query="")
+        return _format_email_block(
+            "[EMAIL INBOX — recent (for recipient lookup / threading)]",
+            recent,
+        )
+    except RuntimeError as e:
+        return _shared_gmail_setup_error_block(e)
+    except Exception as e:
+        _logger.warning("send_email escalation: recent fetch failed: %s", e)
+        return _shared_email_fetch_failed_block("[EMAIL INBOX — recent]", e)
+
+
+def _escalation_context() -> str:
+    """Inject recent inbox so Opus has context for replies / threading,
+    plus the rules of engagement for sending."""
+    try:
+        from agent_skills.email_oauth import list_gmail_token_users
+        accounts = list_gmail_token_users()
+    except Exception:
+        accounts = []
+    rules = _send_email_rules(_sender_account_line(accounts))
+
     try:
         from agent_skills.email_tools import read_inbox
     except Exception as e:
         return f"{rules}\n[EMAIL ERROR]\nEmail tools failed to import: {e}\n[END]"
 
-    try:
-        recent = read_inbox(limit=15, query="")
-        block = _format_email_block(
-            "[EMAIL INBOX — recent (for recipient lookup / threading)]",
-            recent,
-        )
-    except RuntimeError as e:
-        block = (
-            "[EMAIL ERROR]\n"
-            f"Gmail not set up: {e}\n"
-            "Tell the user they need to sign in with Google on the Vessence "
-            "web UI to enable email access.\n[END]"
-        )
-    except Exception as e:
-        _logger.warning("send_email escalation: recent fetch failed: %s", e)
-        block = f"[EMAIL INBOX — recent]\nFetch failed: {e}\n[END]"
-
+    block = _recent_inbox_block(read_inbox)
     footer = (
-        f"(Fetched at {datetime.datetime.utcnow().isoformat()}Z. "
-        "Use this only as a recipient/address lookup. Do NOT quote inbox "
-        "contents to the user unless they asked.)"
+        fetched_at_footer(
+            "Use this only as a recipient/address lookup. Do NOT quote inbox "
+            "contents to the user unless they asked."
+        )
     )
 
     return f"{rules}\n{block}\n\n{footer}"

@@ -105,6 +105,54 @@ def _kill_process_tree(proc: asyncio.subprocess.Process) -> None:
             pass
 
 
+def _claude_tool_status_message(tool_name: str, tool_input: dict, labels: dict[str, str]) -> str:
+    label = labels.get(tool_name, tool_name)
+    desc = ""
+    if tool_name in ("Read", "Write", "Edit"):
+        path = tool_input.get("file_path", "")
+        desc = path.split("/")[-1] if path else ""
+    elif tool_name == "Bash":
+        desc = tool_input.get("description", "")
+        cmd_str = tool_input.get("command", "")
+        if not desc:
+            desc = cmd_str[:60] if cmd_str else ""
+        elif cmd_str:
+            desc = f"{desc}\tcmd:{cmd_str[:200]}"
+    elif tool_name in ("Grep", "Glob"):
+        desc = tool_input.get("pattern", "")[:50]
+    elif tool_name == "Agent":
+        desc = tool_input.get("description", "")[:50]
+    elif tool_name in ("WebSearch", "WebFetch"):
+        desc = tool_input.get("query", tool_input.get("url", ""))[:50]
+    return f"{label}: {desc}" if desc else label
+
+
+def _claude_message_usage(message: dict) -> dict | None:
+    msg_usage = message.get("usage")
+    if not msg_usage or not isinstance(msg_usage, dict):
+        return None
+    return {
+        "input_tokens": msg_usage.get("input_tokens", 0),
+        "output_tokens": msg_usage.get("output_tokens", 0),
+        "model": message.get("model"),
+    }
+
+
+def _claude_result_usage(event: dict, current_usage: dict | None) -> dict | None:
+    result_usage = event.get("usage")
+    if not result_usage or not isinstance(result_usage, dict):
+        return None
+    return {
+        "input_tokens": result_usage.get("input_tokens", 0),
+        "output_tokens": result_usage.get("output_tokens", 0),
+        "model": event.get("model") or (current_usage or {}).get("model"),
+    }
+
+
+def _claude_session_key(user_id: str, session_id: str) -> str:
+    return f"{user_id}:{session_id}"
+
+
 class ClaudePersistentManager:
     """Manages persistent Claude CLI sessions, one per web/android session."""
 
@@ -119,7 +167,7 @@ class ClaudePersistentManager:
         self._active_procs: dict[str, asyncio.subprocess.Process] = {}  # track running subprocesses
 
     async def get(self, user_id: str, session_id: str) -> "ClaudePersistentSession":
-        composite_key = f"{user_id}:{session_id}"
+        composite_key = _claude_session_key(user_id, session_id)
         async with self._lock:
             session = self._sessions.get(composite_key)
             if session is None:
@@ -137,7 +185,7 @@ class ClaudePersistentManager:
             return session
 
     async def end(self, user_id: str, session_id: str) -> None:
-        composite_key = f"{user_id}:{session_id}"
+        composite_key = _claude_session_key(user_id, session_id)
         async with self._lock:
             self._sessions.pop(composite_key, None)
             proc = self._active_procs.pop(composite_key, None)
@@ -197,7 +245,7 @@ class ClaudePersistentManager:
         Automatically rotates the session if the context window is filling up.
         Returns the full response text.
         """
-        composite_key = f"{user_id}:{session_id}"
+        composite_key = _claude_session_key(user_id, session_id)
         session = await self.get(user_id, session_id)
 
         # Store model for context limit lookups
@@ -521,13 +569,9 @@ class ClaudePersistentManager:
             msg = event["message"]
             if isinstance(msg, dict):
                 # Extract usage from message if present
-                msg_usage = msg.get("usage")
-                if msg_usage and isinstance(msg_usage, dict):
-                    usage = {
-                        "input_tokens": msg_usage.get("input_tokens", 0),
-                        "output_tokens": msg_usage.get("output_tokens", 0),
-                        "model": msg.get("model"),
-                    }
+                msg_usage = _claude_message_usage(msg)
+                if msg_usage is not None:
+                    usage = msg_usage
                 content = msg.get("content", [])
                 for block in content:
                     if block.get("type") == "text":
@@ -550,26 +594,11 @@ class ClaudePersistentManager:
                     elif block.get("type") == "tool_use" and on_status:
                         tool_name = block.get("name", "")
                         tool_input = block.get("input", {})
-                        label = self._TOOL_LABELS.get(tool_name, tool_name)
-                        desc = ""
-                        if tool_name in ("Read", "Write", "Edit"):
-                            path = tool_input.get("file_path", "")
-                            desc = path.split("/")[-1] if path else ""
-                        elif tool_name == "Bash":
-                            desc = tool_input.get("description", "")
-                            cmd_str = tool_input.get("command", "")
-                            if not desc:
-                                desc = cmd_str[:60] if cmd_str else ""
-                            elif cmd_str:
-                                desc = f"{desc}\tcmd:{cmd_str[:200]}"
-                        elif tool_name in ("Grep", "Glob"):
-                            desc = tool_input.get("pattern", "")[:50]
-                        elif tool_name == "Agent":
-                            desc = tool_input.get("description", "")[:50]
-                        elif tool_name in ("WebSearch", "WebFetch"):
-                            desc = tool_input.get("query", tool_input.get("url", ""))[:50]
-                        status_msg = f"{label}: {desc}" if desc else label
-                        on_status(status_msg)
+                        on_status(_claude_tool_status_message(
+                            tool_name,
+                            tool_input,
+                            self._TOOL_LABELS,
+                        ))
 
         elif event_type == "content_block_delta":
             delta_obj = event.get("delta", {})
@@ -589,13 +618,9 @@ class ClaudePersistentManager:
                     on_delta(delta)
                 accumulated = result_text
             # Extract usage from result event
-            result_usage = event.get("usage")
-            if result_usage and isinstance(result_usage, dict):
-                usage = {
-                    "input_tokens": result_usage.get("input_tokens", 0),
-                    "output_tokens": result_usage.get("output_tokens", 0),
-                    "model": event.get("model") or (usage or {}).get("model"),
-                }
+            result_usage = _claude_result_usage(event, usage)
+            if result_usage is not None:
+                usage = result_usage
             # Also check for cost_usd or other token fields
             if not usage and event.get("num_turns"):
                 # Fallback: log what fields are available for future use

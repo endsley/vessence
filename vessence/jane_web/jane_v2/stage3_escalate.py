@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import AsyncIterator
+from typing import Any, AsyncIterator
 
 from fastapi import Request
 
@@ -73,6 +73,39 @@ def _ndjson(event_type: str, data=None, **extra) -> str:
     return json.dumps(payload, ensure_ascii=True) + "\n"
 
 
+def _is_v1_ack_chunk(stripped_chunk: str) -> bool:
+    return stripped_chunk.startswith('{"type": "ack"') or stripped_chunk.startswith('{"type":"ack"')
+
+
+def _stage3_delta_events(payload: dict[str, Any], extractor: Any) -> list[str] | None:
+    if payload.get("type") != "delta" or not isinstance(payload.get("data"), str):
+        return None
+
+    cleaned_delta_text, tool_calls = extractor.feed(payload["data"])
+    events = [
+        _ndjson("tool_use", json.dumps(tool_call, ensure_ascii=True))
+        for tool_call in tool_calls
+    ]
+
+    if cleaned_delta_text:
+        payload = dict(payload)
+        payload["data"] = cleaned_delta_text
+        events.append(json.dumps(payload, ensure_ascii=True) + "\n")
+
+    return events
+
+
+def _stage3_tool_flush_events(extractor: Any) -> list[str]:
+    tail_cleaned, tail_tool_calls = extractor.flush()
+    events = [
+        _ndjson("tool_use", json.dumps(tool_call, ensure_ascii=True))
+        for tool_call in tail_tool_calls
+    ]
+    if tail_cleaned:
+        events.append(_ndjson("delta", tail_cleaned))
+    return events
+
+
 def _load_v1_stream():
     """Import v1's stream_message lazily to avoid circular imports."""
     try:
@@ -120,6 +153,15 @@ def _load_session_helpers():
     return get_or_bootstrap_session, _default_user_id, get_session_user
 
 
+def _class_protocol_status(reason: str) -> str:
+    injected_class = _reason_to_class(reason)
+    if injected_class is None:
+        return "n/a"
+    if _load_class_protocol(injected_class):
+        return f"loaded:{injected_class}"
+    return f"missing:{injected_class}"
+
+
 async def escalate_stream(
     body,
     request: Request,
@@ -154,13 +196,7 @@ async def escalate_stream(
     # before sending to Opus, so this is "first in body.message", not
     # necessarily first in Opus's full prompt.
     effective_body = _inject_class_protocol(effective_body, reason)
-    injected_class = _reason_to_class(reason)
-    if injected_class is None:
-        protocol_status = "n/a"
-    elif _load_class_protocol(injected_class):
-        protocol_status = f"loaded:{injected_class}"
-    else:
-        protocol_status = f"missing:{injected_class}"
+    protocol_status = _class_protocol_status(reason)
     logger.info(
         "stage3_escalate: reason=%s voice=%s prompt_len=%d sid_override=%s class_protocol=%s",
         reason,
@@ -215,7 +251,7 @@ async def escalate_stream(
             stripped = chunk.strip()
             if stripped:
                 # Each chunk is one NDJSON line; check if it's a v1 ack and skip
-                if stripped.startswith('{"type": "ack"') or stripped.startswith('{"type":"ack"'):
+                if _is_v1_ack_chunk(stripped):
                     if not v1_ack_suppressed:
                         v1_ack_suppressed = True
                         logger.debug("stage3_escalate: suppressed v1 ack (already emitted v2 ack)")
@@ -230,18 +266,10 @@ async def escalate_stream(
                     yield chunk # Yield original if not JSON
                     continue
 
-                if payload.get("type") == "delta" and isinstance(payload.get("data"), str):
-                    raw_delta_text = payload["data"]
-                    cleaned_delta_text, tool_calls = _extractor.feed(raw_delta_text)
-
-                    # Yield tool_use events
-                    for tc in tool_calls:
-                        yield _ndjson("tool_use", json.dumps(tc, ensure_ascii=True))
-
-                    # Yield cleaned delta (if any visible text remains)
-                    if cleaned_delta_text:
-                        payload["data"] = cleaned_delta_text
-                        yield json.dumps(payload, ensure_ascii=True) + "\n"
+                delta_events = _stage3_delta_events(payload, _extractor)
+                if delta_events is not None:
+                    for event in delta_events:
+                        yield event
                     continue # Continue to next chunk from stream_message
 
             # If it's not a delta event that we processed above, or if stripped was empty
@@ -250,11 +278,8 @@ async def escalate_stream(
             yield chunk
 
         # Flush any buffered partial marker at end of stream
-        tail_cleaned, tail_tool_calls = _extractor.flush()
-        for tc in tail_tool_calls:
-            yield _ndjson("tool_use", json.dumps(tc, ensure_ascii=True))
-        if tail_cleaned:
-            yield _ndjson("delta", tail_cleaned)
+        for event in _stage3_tool_flush_events(_extractor):
+            yield event
     except Exception as e:
         logger.exception("stage3_escalate: v1 stream_message crashed: %s", e)
         yield _ndjson("error", error=str(e))

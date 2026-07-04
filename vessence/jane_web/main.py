@@ -29,6 +29,7 @@ os.environ.setdefault(
 )
 
 import sys
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -41,7 +42,6 @@ from starlette.middleware.sessions import SessionMiddleware
 from pydantic import BaseModel
 import asyncio
 import aiofiles
-import base64
 import hashlib
 import json
 import logging
@@ -120,8 +120,14 @@ from vault_web.playlists import list_playlists, get_playlist, create_playlist, u
 try:
     from .announcements import AnnouncementsLog
     from .app_settings import JsonSettingsStore
-    from .auth_cookies import auth_cookie_specs
+    from .auth_cookies import apply_auth_cookie_spec, auth_cookie_specs
     from .auth_devices import trusted_device_id_for_fingerprint
+    from .auth_sessions import (
+        bootstrap_session_for_request as _bootstrap_session_for_request,
+        chat_stream_session_for_request as _chat_stream_session_for_request,
+        request_has_share_or_auth as _request_has_share_or_auth,
+        required_session_id_for_request as _required_session_id_for_request,
+    )
     from .cache_control import cache_control_header
     from .canonical_docs import (
         CANONICAL_DOCS_WHITELIST as _DOCS_WHITELIST,
@@ -155,23 +161,35 @@ try:
     from .cli_login_helpers import (
         clean_cli_output as _clean_cli_output,
         cli_output_lines as _cli_output_lines,
+        apply_claude_refresh_tokens as _apply_claude_refresh_tokens,
+        base64url_no_padding as _base64url_no_padding,
+        claude_oauth_authorization_url as _claude_oauth_authorization_url,
+        claude_oauth_refresh_request_spec as _claude_oauth_refresh_request_spec,
+        claude_refresh_token_from_credentials as _claude_refresh_token_from_credentials,
         cli_binary_for_provider as _cli_binary_for_provider,
+        cli_credentials_path as _cli_credentials_path,
+        write_cli_credentials as _write_cli_credentials,
         cli_login_candidates as _cli_login_candidates,
         cli_login_debug_payload as _cli_login_debug_payload,
-        append_status_stderr_tail as _append_status_stderr_tail,
+        cli_login_output_update as _cli_login_output_update,
+        CLI_LOGIN_IGNORED_PORTS as _CLI_LOGIN_IGNORED_PORTS,
         extract_claude_auth_url as _extract_claude_auth_url,
-        extract_device_code as _extract_device_code,
-        extract_first_auth_url as _extract_first_auth_url,
         extract_oauth_state as _extract_oauth_state,
+        gemini_oauth_authorization_url as _gemini_oauth_authorization_url,
         mask_email as _mask_email,
-        provider_auth_status_base as _provider_auth_status_base,
-        provider_auth_status_command as _provider_auth_status_command,
-        provider_auth_status_error as _provider_auth_status_error,
-        parse_provider_auth_status_output as _parse_provider_auth_status_output,
+        oauth_login_credentials_for_code as _oauth_login_credentials_for_code,
+        pkce_code_challenge as _pkce_code_challenge,
+        process_tree_socket_port as _process_tree_socket_port,
+        proc_net_listen_socket_candidates as _proc_net_listen_socket_candidates,
+        provider_auth_status_details as _provider_auth_status_details_impl,
         read_cli_transcript_lines as _read_cli_transcript_lines,
-        unsupported_provider_auth_status as _unsupported_provider_auth_status,
+        ss_login_callback_port as _ss_login_callback_port,
+        submit_cli_login_code_to_stdin as _submit_cli_login_code_to_stdin,
     )
-    from .conversation_keys import build_conversation_key_payload, conversation_device_id
+    from .conversation_keys import (
+        resolve_conversation_key_payload as _resolve_conversation_key_payload,
+        scoped_conversation_session_id as _resolve_scoped_conversation_session_id,
+    )
     from .contact_search import aggregate_contact_rows
     from .device_commands import DeviceCommandQueue
     from .device_diagnostics import DeviceDiagnosticsLog
@@ -205,18 +223,28 @@ try:
         filename_search_results as _filename_search_results,
         merge_index_search_results as _merge_index_search_results,
     )
-    from .instant_commands import commands_markdown, cron_jobs_markdown, instant_command_kind
+    from .instant_commands import instant_command_response
     from .chat_stream_dedupe import (
         begin_turn_dedupe,
-        finalize_turn_dedupe,
         iter_replay_ndjson,
     )
-    from .chat_stream_limits import mark_stream_closed, mark_stream_open, stream_limit_exceeded
+    from .chat_stream_events import (
+        done_stream_chunk as _done_stream_chunk,
+        instant_command_stream_chunks as _instant_command_stream_chunks,
+        offloaded_task_stream_chunks as _offloaded_task_stream_chunks,
+        status_stream_chunk as _status_stream_chunk,
+    )
+    from .chat_stream_limits import stream_limit_exceeded
+    from .chat_stream_runner import normal_chat_stream_chunks as _normal_chat_stream_chunks
     from .marketplace_helpers import (
         is_safe_listing_key,
         is_safe_marketplace_name,
         is_safe_photo_name,
         marketplace_create_search_payload,
+        marketplace_refresh_command,
+        marketplace_refresh_env,
+        marketplace_refresh_log_header,
+        marketplace_refresh_log_path,
     )
     from .permission_helpers import (
         permission_pending_entry,
@@ -224,13 +252,19 @@ try:
         permission_response_args,
         permission_wait_payload,
     )
+    from .pipeline_selection import (
+        should_use_v2_pipeline as _should_use_v2_pipeline,
+        should_use_v3_pipeline as _should_use_v3_pipeline,
+    )
     from .model_settings import (
         build_model_settings_payload,
         current_provider_payload,
         model_save_target,
     )
     from .music_playlists import (
+        cleanup_temporary_playlists as _cleanup_temporary_playlists_impl,
         find_matching_playlist,
+        music_playlist_from_query as _music_playlist_from_query,
         normalize_music_query,
         playlist_name_for_query,
         playlist_tracks,
@@ -238,8 +272,18 @@ try:
         select_music_files,
         should_delete_temporary_playlist,
     )
+    from .ollama_warmup import (
+        heartbeat_poll_seconds as _heartbeat_poll_seconds,
+        local_llm_prewarm_payload as _local_llm_prewarm_payload,
+        ollama_generate_endpoint as _ollama_generate_endpoint,
+        ollama_heartbeat_payload as _ollama_heartbeat_payload,
+        should_skip_heartbeat as _should_skip_heartbeat,
+    )
     from .user_access import (
         is_user_admin as _resolve_is_user_admin,
+        clean_seed_memories as _clean_seed_memories,
+        managed_user_display_name as _managed_user_display_name,
+        normalize_managed_user_email as _normalize_managed_user_email,
         public_user_config as _public_user_config,
         request_vault_root as _resolve_request_vault_root,
         require_capability as _resolve_require_capability,
@@ -266,16 +310,19 @@ try:
         client_ip as _client_ip,
         cookie_secure_flag as _cookie_secure_flag,
         is_android_webview_request,
+        is_local_control_ip as _is_local_control_ip,
         is_local_browser_access as _is_local_browser_access,
         is_local_request as _is_local_request,
         is_single_user_no_auth_mode as _is_single_user_no_auth_mode,
         session_log_id as _session_log_id,
     )
     from .request_logging import (
+        idle_state_record as _idle_state_record,
         is_polling_path as _is_polling_path,
         request_error_context as _request_error_context,
         should_touch_idle_state as _should_touch_idle_state,
     )
+    from .session_init import session_init_stream_chunks as _session_init_stream_chunks
     from .self_healing_reports import (
         normalize_self_healing_report,
         self_healing_report_authorized,
@@ -288,12 +335,16 @@ try:
         tax_interview_answer_args,
         tax_output_dir,
         tax_result_path,
+        tax_tool_command,
+        tax_tool_result_payload,
         tax_upload_document_args,
         tax_upload_path,
         tax_uploads_dir,
     )
     from .tts_chunks import split_tts_chunks
     from .tts_generation import (
+        concatenate_wav_chunks as _concatenate_wav_chunks,
+        tts_cached_media,
         tts_cache_paths,
         tts_chunk_wav_path,
         tts_combined_wav_path,
@@ -304,6 +355,7 @@ try:
     from .upload_helpers import (
         duplicate_upload_result,
         hash_index_entry,
+        load_upload_hash_index,
         next_available_path,
         parse_upload_descriptions,
         upload_description,
@@ -312,6 +364,8 @@ try:
         upload_safe_name,
         upload_subdir,
         upload_success_result,
+        upload_work_activity_message,
+        write_upload_hash_index,
     )
     from .web_automation_helpers import (
         automation_result_payload,
@@ -320,6 +374,7 @@ try:
         web_plan_profile_id,
         web_plan_raw_steps,
         web_plan_record_trace,
+        web_plan_storage_state_path,
         web_plan_step_specs,
         web_profile_capture_values,
         web_profile_create_values,
@@ -329,8 +384,14 @@ try:
 except ImportError:
     from announcements import AnnouncementsLog
     from app_settings import JsonSettingsStore
-    from auth_cookies import auth_cookie_specs
+    from auth_cookies import apply_auth_cookie_spec, auth_cookie_specs
     from auth_devices import trusted_device_id_for_fingerprint
+    from auth_sessions import (
+        bootstrap_session_for_request as _bootstrap_session_for_request,
+        chat_stream_session_for_request as _chat_stream_session_for_request,
+        request_has_share_or_auth as _request_has_share_or_auth,
+        required_session_id_for_request as _required_session_id_for_request,
+    )
     from cache_control import cache_control_header
     from canonical_docs import (
         CANONICAL_DOCS_WHITELIST as _DOCS_WHITELIST,
@@ -364,23 +425,35 @@ except ImportError:
     from cli_login_helpers import (
         clean_cli_output as _clean_cli_output,
         cli_output_lines as _cli_output_lines,
+        apply_claude_refresh_tokens as _apply_claude_refresh_tokens,
+        base64url_no_padding as _base64url_no_padding,
+        claude_oauth_authorization_url as _claude_oauth_authorization_url,
+        claude_oauth_refresh_request_spec as _claude_oauth_refresh_request_spec,
+        claude_refresh_token_from_credentials as _claude_refresh_token_from_credentials,
         cli_binary_for_provider as _cli_binary_for_provider,
+        cli_credentials_path as _cli_credentials_path,
+        write_cli_credentials as _write_cli_credentials,
         cli_login_candidates as _cli_login_candidates,
         cli_login_debug_payload as _cli_login_debug_payload,
-        append_status_stderr_tail as _append_status_stderr_tail,
+        cli_login_output_update as _cli_login_output_update,
+        CLI_LOGIN_IGNORED_PORTS as _CLI_LOGIN_IGNORED_PORTS,
         extract_claude_auth_url as _extract_claude_auth_url,
-        extract_device_code as _extract_device_code,
-        extract_first_auth_url as _extract_first_auth_url,
         extract_oauth_state as _extract_oauth_state,
+        gemini_oauth_authorization_url as _gemini_oauth_authorization_url,
         mask_email as _mask_email,
-        provider_auth_status_base as _provider_auth_status_base,
-        provider_auth_status_command as _provider_auth_status_command,
-        provider_auth_status_error as _provider_auth_status_error,
-        parse_provider_auth_status_output as _parse_provider_auth_status_output,
+        oauth_login_credentials_for_code as _oauth_login_credentials_for_code,
+        pkce_code_challenge as _pkce_code_challenge,
+        process_tree_socket_port as _process_tree_socket_port,
+        proc_net_listen_socket_candidates as _proc_net_listen_socket_candidates,
+        provider_auth_status_details as _provider_auth_status_details_impl,
         read_cli_transcript_lines as _read_cli_transcript_lines,
-        unsupported_provider_auth_status as _unsupported_provider_auth_status,
+        ss_login_callback_port as _ss_login_callback_port,
+        submit_cli_login_code_to_stdin as _submit_cli_login_code_to_stdin,
     )
-    from conversation_keys import build_conversation_key_payload, conversation_device_id
+    from conversation_keys import (
+        resolve_conversation_key_payload as _resolve_conversation_key_payload,
+        scoped_conversation_session_id as _resolve_scoped_conversation_session_id,
+    )
     from contact_search import aggregate_contact_rows
     from device_commands import DeviceCommandQueue
     from device_diagnostics import DeviceDiagnosticsLog
@@ -414,18 +487,28 @@ except ImportError:
         filename_search_results as _filename_search_results,
         merge_index_search_results as _merge_index_search_results,
     )
-    from instant_commands import commands_markdown, cron_jobs_markdown, instant_command_kind
+    from instant_commands import instant_command_response
     from chat_stream_dedupe import (
         begin_turn_dedupe,
-        finalize_turn_dedupe,
         iter_replay_ndjson,
     )
-    from chat_stream_limits import mark_stream_closed, mark_stream_open, stream_limit_exceeded
+    from chat_stream_events import (
+        done_stream_chunk as _done_stream_chunk,
+        instant_command_stream_chunks as _instant_command_stream_chunks,
+        offloaded_task_stream_chunks as _offloaded_task_stream_chunks,
+        status_stream_chunk as _status_stream_chunk,
+    )
+    from chat_stream_limits import stream_limit_exceeded
+    from chat_stream_runner import normal_chat_stream_chunks as _normal_chat_stream_chunks
     from marketplace_helpers import (
         is_safe_listing_key,
         is_safe_marketplace_name,
         is_safe_photo_name,
         marketplace_create_search_payload,
+        marketplace_refresh_command,
+        marketplace_refresh_env,
+        marketplace_refresh_log_header,
+        marketplace_refresh_log_path,
     )
     from permission_helpers import (
         permission_pending_entry,
@@ -433,13 +516,19 @@ except ImportError:
         permission_response_args,
         permission_wait_payload,
     )
+    from pipeline_selection import (
+        should_use_v2_pipeline as _should_use_v2_pipeline,
+        should_use_v3_pipeline as _should_use_v3_pipeline,
+    )
     from model_settings import (
         build_model_settings_payload,
         current_provider_payload,
         model_save_target,
     )
     from music_playlists import (
+        cleanup_temporary_playlists as _cleanup_temporary_playlists_impl,
         find_matching_playlist,
+        music_playlist_from_query as _music_playlist_from_query,
         normalize_music_query,
         playlist_name_for_query,
         playlist_tracks,
@@ -447,8 +536,18 @@ except ImportError:
         select_music_files,
         should_delete_temporary_playlist,
     )
+    from ollama_warmup import (
+        heartbeat_poll_seconds as _heartbeat_poll_seconds,
+        local_llm_prewarm_payload as _local_llm_prewarm_payload,
+        ollama_generate_endpoint as _ollama_generate_endpoint,
+        ollama_heartbeat_payload as _ollama_heartbeat_payload,
+        should_skip_heartbeat as _should_skip_heartbeat,
+    )
     from user_access import (
         is_user_admin as _resolve_is_user_admin,
+        clean_seed_memories as _clean_seed_memories,
+        managed_user_display_name as _managed_user_display_name,
+        normalize_managed_user_email as _normalize_managed_user_email,
         public_user_config as _public_user_config,
         request_vault_root as _resolve_request_vault_root,
         require_capability as _resolve_require_capability,
@@ -475,16 +574,19 @@ except ImportError:
         client_ip as _client_ip,
         cookie_secure_flag as _cookie_secure_flag,
         is_android_webview_request,
+        is_local_control_ip as _is_local_control_ip,
         is_local_browser_access as _is_local_browser_access,
         is_local_request as _is_local_request,
         is_single_user_no_auth_mode as _is_single_user_no_auth_mode,
         session_log_id as _session_log_id,
     )
     from request_logging import (
+        idle_state_record as _idle_state_record,
         is_polling_path as _is_polling_path,
         request_error_context as _request_error_context,
         should_touch_idle_state as _should_touch_idle_state,
     )
+    from session_init import session_init_stream_chunks as _session_init_stream_chunks
     from self_healing_reports import (
         normalize_self_healing_report,
         self_healing_report_authorized,
@@ -497,12 +599,16 @@ except ImportError:
         tax_interview_answer_args,
         tax_output_dir,
         tax_result_path,
+        tax_tool_command,
+        tax_tool_result_payload,
         tax_upload_document_args,
         tax_upload_path,
         tax_uploads_dir,
     )
     from tts_chunks import split_tts_chunks
     from tts_generation import (
+        concatenate_wav_chunks as _concatenate_wav_chunks,
+        tts_cached_media,
         tts_cache_paths,
         tts_chunk_wav_path,
         tts_combined_wav_path,
@@ -513,6 +619,7 @@ except ImportError:
     from upload_helpers import (
         duplicate_upload_result,
         hash_index_entry,
+        load_upload_hash_index,
         next_available_path,
         parse_upload_descriptions,
         upload_description,
@@ -521,6 +628,8 @@ except ImportError:
         upload_safe_name,
         upload_subdir,
         upload_success_result,
+        upload_work_activity_message,
+        write_upload_hash_index,
     )
     from web_automation_helpers import (
         automation_result_payload,
@@ -529,6 +638,7 @@ except ImportError:
         web_plan_profile_id,
         web_plan_raw_steps,
         web_plan_record_trace,
+        web_plan_storage_state_path,
         web_plan_step_specs,
         web_profile_capture_values,
         web_profile_create_values,
@@ -539,6 +649,15 @@ except ImportError:
 # ── Shared UI: point directly at vault_web's static + templates ──────────────
 VAULT_WEB_DIR = CODE_ROOT / "vault_web"
 BASE_DIR = Path(__file__).parent
+@asynccontextmanager
+async def _app_lifespan(_app: FastAPI):
+    await startup()
+    try:
+        yield
+    finally:
+        await shutdown()
+
+
 _release_downloads = ReleaseDownloads(CODE_ROOT)
 MARKETING_DIR = _release_downloads.marketing_dir
 MARKETING_DOWNLOADS_DIR = _release_downloads.downloads_dir
@@ -549,7 +668,7 @@ PUBLIC_RELEASE_DOWNLOADS = _release_downloads.public_release_downloads
 _INSTALLER_GLOBS = _release_downloads.installer_globs
 _resolve_android_apk_path = _release_downloads.resolve_android_apk_path
 
-app = FastAPI(title="Jane")
+app = FastAPI(title="Jane", lifespan=_app_lifespan)
 _session_secret = os.getenv("SESSION_SECRET_KEY", "")
 if not _session_secret or _session_secret in ("changeme", "changeme-generate-a-real-secret"):
     import secrets as _secrets
@@ -567,10 +686,7 @@ def _touch_idle_state():
     try:
         import json as _j
         from jane.config import IDLE_STATE_PATH
-        Path(IDLE_STATE_PATH).write_text(_j.dumps({
-            "last_active_ts": time.time(),
-            "last_active_iso": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        }))
+        Path(IDLE_STATE_PATH).write_text(_j.dumps(_idle_state_record(time.time())))
     except Exception:
         pass
 
@@ -583,7 +699,7 @@ def _touch_idle_state():
 async def rate_limit_middleware(request: Request, call_next):
     ip = _client_ip(request)
     # Exempt localhost (internal services like prompt queue runner)
-    if ip in ("127.0.0.1", "::1", "localhost"):
+    if _is_local_control_ip(ip):
         return await call_next(request)
     path = request.url.path
     category, max_req, window = _rate_limit_category(path)
@@ -718,7 +834,6 @@ def _login_context(request: Request, **extra):
 _background_tasks: set[asyncio.Task] = set()  # prevent GC of fire-and-forget tasks
 
 
-@app.on_event("startup")
 async def startup():
     # Initialize and auto-unlock SecretStore
     store = SecretStore()
@@ -907,13 +1022,11 @@ async def _prewarm_local_llm():
             from jane_web.jane_v2.models import LOCAL_LLM_NUM_CTX as _NUM_CTX
         except Exception:
             _NUM_CTX = int(os.environ.get("JANE_LOCAL_LLM_NUM_CTX", "8192"))
-        ollama_url = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
+        endpoint = _ollama_generate_endpoint(os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434"))
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=120)) as session:
             async with session.post(
-                f"{ollama_url}/api/generate",
-                json={"model": model, "prompt": "hi", "stream": False,
-                      "options": {"num_ctx": _NUM_CTX},
-                      "keep_alive": OLLAMA_KEEP_ALIVE},
+                endpoint,
+                json=_local_llm_prewarm_payload(model, _NUM_CTX, OLLAMA_KEEP_ALIVE),
             ) as resp:
                 await resp.read()
         _logger.info("Local LLM %s pre-warmed (keep_alive=%s)", model, OLLAMA_KEEP_ALIVE)
@@ -952,8 +1065,7 @@ async def _ollama_heartbeat_loop():
         _logger.warning("heartbeat: cannot import models.py (%s) — aborting", e)
         return
 
-    ollama_url = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
-    endpoint = f"{ollama_url}/api/generate"
+    endpoint = _ollama_generate_endpoint(os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434"))
 
     _logger.info(
         "Ollama heartbeat started: model=%s interval=%ds endpoint=%s",
@@ -964,7 +1076,7 @@ async def _ollama_heartbeat_loop():
     consecutive_failures = 0
     # Check more often than we ping so we catch idle windows promptly
     # without over-pinging when real traffic is flowing.
-    poll_s = max(2, interval_s // 5)
+    poll_s = _heartbeat_poll_seconds(interval_s)
     while True:
         await asyncio.sleep(poll_s)
         # Skip if real traffic already kept the runner warm — every
@@ -972,7 +1084,7 @@ async def _ollama_heartbeat_loop():
         # `record_ollama_activity()` in models.py, so heartbeat only
         # fires during true idle.
         try:
-            if seconds_since_last_ollama_activity() < interval_s:
+            if _should_skip_heartbeat(seconds_since_last_ollama_activity(), interval_s):
                 continue
         except Exception:
             pass
@@ -982,20 +1094,9 @@ async def _ollama_heartbeat_loop():
             ) as session:
                 async with session.post(
                     endpoint,
-                    json={
-                        "model": model,
-                        # Tiny prompt; single-token reply is enough to keep the
-                        # inference pipeline resident.
-                        "prompt": ".",
-                        "stream": False,
-                        "think": False,
-                        "options": {
-                            "temperature": 0.0,
-                            "num_predict": 1,
-                            "num_ctx": num_ctx,
-                        },
-                        "keep_alive": keep_alive,
-                    },
+                    # Tiny prompt; single-token reply is enough to keep the
+                    # inference pipeline resident.
+                    json=_ollama_heartbeat_payload(model, num_ctx, keep_alive),
                 ) as resp:
                     await resp.read()
             record_ollama_activity()
@@ -1041,7 +1142,6 @@ async def _reap_stale_sessions_loop():
             _logger.warning("Jane proxy session pruner error (non-fatal): %s", e)
 
 
-@app.on_event("shutdown")
 async def shutdown():
     """Clean up persistent workers to prevent zombie processes on restart.
 
@@ -1175,7 +1275,7 @@ async def reset_session_gate(request: Request):
     Body: {"session_id": "jane_android"}
     """
     client_ip = _client_ip(request)
-    if client_ip not in ("127.0.0.1", "::1", "localhost"):
+    if not _is_local_control_ip(client_ip):
         return JSONResponse({"error": "localhost only"}, status_code=403)
     try:
         body = await request.json()
@@ -1211,7 +1311,7 @@ async def rotate_brain_session(request: Request):
     Localhost only.
     """
     client_ip = _client_ip(request)
-    if client_ip not in ("127.0.0.1", "::1", "localhost"):
+    if not _is_local_control_ip(client_ip):
         return JSONResponse({"error": "localhost only"}, status_code=403)
     try:
         body = await request.json()
@@ -1238,7 +1338,7 @@ async def warmup_brain(request: Request):
     """Warm up the standing brain CLI process. Called by graceful_restart.sh
     before switching the proxy upstream. Read-only — no ChromaDB writes."""
     client_ip = _client_ip(request) if hasattr(request, 'headers') else ""
-    if client_ip not in ("127.0.0.1", "::1", "localhost", "unknown"):
+    if not _is_local_control_ip(client_ip, allow_unknown=True):
         return JSONResponse({"error": "localhost only"}, status_code=403)
     try:
         from llm_brain.v1.standing_brain import get_standing_brain_manager
@@ -1277,37 +1377,21 @@ def get_session_id(request: Request) -> Optional[str]:
 _trusted_device_session_cache: dict[str, str] = {}  # trusted_device_id → session_id
 
 def require_auth(request: Request):
-    # Single-user fresh install mode: only allow LOCAL requests without auth.
-    # External requests (via Cloudflare tunnel or any proxy) still require
-    # proper auth, so a fresh install with a public tunnel is NOT exposed.
-    if _is_single_user_no_auth_mode() and _is_local_request(request):
-        return "single_user_local"
-    # Localhost bypass (internal tools, health checks, prompt queue runner)
-    if not request.headers.get("cf-connecting-ip"):
-        client_host = request.client.host if request.client else ""
-        if client_host in ("127.0.0.1", "::1"):
-            return request.query_params.get("session_id") or "internal"
-    # Check existing session cookie
-    session_id = get_session_id(request)
-    fp = device_fingerprint_from_request(request)
-    if session_id and validate_session(session_id, fp):
+    session_id = _required_session_id_for_request(
+        request,
+        trusted_device_session_cache=_trusted_device_session_cache,
+        get_session_id_fn=get_session_id,
+        get_trusted_device_cookie_id_fn=get_trusted_device_cookie_id,
+        device_fingerprint_fn=device_fingerprint_from_request,
+        validate_session_fn=validate_session,
+        get_trusted_device_by_id_fn=get_trusted_device_by_id,
+        create_session_fn=create_session,
+        default_user_id_fn=_default_user_id,
+        is_single_user_no_auth_mode_fn=_is_single_user_no_auth_mode,
+        is_local_request_fn=_is_local_request,
+    )
+    if session_id:
         return session_id
-    # Fallback: trusted device cookie (handles post-restart session loss).
-    # Cache the created session per device to prevent session storms.
-    trusted_cookie = get_trusted_device_cookie_id(request)
-    if trusted_cookie:
-        cached = _trusted_device_session_cache.get(trusted_cookie)
-        if cached and validate_session(cached, fp):
-            return cached
-        trusted_row = get_trusted_device_by_id(trusted_cookie)
-        if trusted_row:
-            new_session = create_session(
-                fp,
-                trusted=True,
-                user_id=trusted_row["label"] or _default_user_id(),
-            )
-            _trusted_device_session_cache[trusted_cookie] = new_session
-            return new_session
     raise HTTPException(status_code=401, detail="Not authenticated")
 
 
@@ -1348,11 +1432,7 @@ def _require_admin_session(session_id: str) -> str:
 
 
 def _scoped_conversation_session_id(user_id: str | None, session_id: str | None) -> str:
-    try:
-        from agent_skills.user_manager import scoped_session_id
-        return scoped_session_id(user_id, session_id)
-    except Exception:
-        return (session_id or "").strip() or "default"
+    return _resolve_scoped_conversation_session_id(user_id, session_id)
 
 
 # ── Per-user vault + capability resolution ──────────────────────────────────
@@ -1420,43 +1500,14 @@ def resolve_conversation_key(request: Request, body) -> dict:
     Unmanaged (Chieh) accounts preserve their legacy `body.session_id`
     verbatim to avoid breaking in-flight conversations.
     """
-    raw_client_sid = (getattr(body, "session_id", None) or "").strip()
-    # Pull the auth session off the cookie (may be None for share-code fallbacks)
-    auth_session_id = None
-    try:
-        auth_session_id = get_session_id(request)
-    except Exception:
-        auth_session_id = None
-    user_id = (get_session_user(auth_session_id) if auth_session_id else None) or _default_user_id()
-    try:
-        from agent_skills.user_manager import is_managed_user, normalize_user_id
-        sanitized_user_id = normalize_user_id(user_id)
-        managed = is_managed_user(user_id)
-    except Exception:
-        sanitized_user_id = user_id
-        managed = False
-
-    header_device_id = (request.headers.get("x-jane-device-id") or "").strip()
-    trusted_cookie = None
-    try:
-        trusted_cookie = get_trusted_device_cookie_id(request)
-    except Exception:
-        trusted_cookie = None
-    fingerprint = ""
-    if not header_device_id and not trusted_cookie:
-        try:
-            fingerprint = device_fingerprint_from_request(request)
-        except Exception:
-            fingerprint = ""
-    # Trusted-device cookie is a stable per-install token — use it when header absent.
-    device_id = conversation_device_id(header_device_id, trusted_cookie, fingerprint)
-    return build_conversation_key_payload(
-        raw_client_sid=raw_client_sid,
-        auth_session_id=auth_session_id,
-        user_id=user_id,
-        sanitized_user_id=sanitized_user_id,
-        managed=managed,
-        device_id=device_id,
+    return _resolve_conversation_key_payload(
+        request,
+        body,
+        get_session_id_fn=get_session_id,
+        get_session_user_fn=get_session_user,
+        default_user_id_fn=_default_user_id,
+        get_trusted_device_cookie_id_fn=get_trusted_device_cookie_id,
+        device_fingerprint_fn=device_fingerprint_from_request,
     )
 
 
@@ -1478,110 +1529,46 @@ def _attach_auth_cookies(
         session_cookie_name=SESSION_COOKIE,
         trusted_device_cookie_name=TRUSTED_DEVICE_COOKIE,
     ):
-        response.set_cookie(
-            spec.name,
-            spec.value,
-            httponly=spec.httponly,
-            secure=_cookie_secure_flag(request),
-            samesite=spec.samesite,
-            max_age=spec.max_age,
-        )
+        apply_auth_cookie_spec(response, spec, secure=_cookie_secure_flag(request))
     return response
 
 
 def get_or_bootstrap_session(request: Request) -> tuple[Optional[str], Optional[str]]:
-    # Single-user fresh install: only auto-create sessions for LOCAL requests
-    if _is_single_user_no_auth_mode() and _is_local_request(request):
-        fp = device_fingerprint_from_request(request)
-        existing = get_session_id(request)
-        if existing and validate_session(existing, fp):
-            return existing, get_trusted_device_cookie_id(request)
-        session_id = create_session(fp, trusted=True, user_id=_default_user_id())
-        return session_id, None
-    session_id = get_session_id(request)
-    fp = device_fingerprint_from_request(request)
-    if session_id and validate_session(session_id, fp):
-        _logger.info(
-            "Session bootstrap reused existing session=%s trusted_cookie=%s ip=%s",
-            _session_log_id(session_id),
-            bool(get_trusted_device_cookie_id(request)),
-            _client_ip(request),
-        )
-        prewarm_session(session_id, get_session_user(session_id) or _default_user_id())
-        return session_id, get_trusted_device_cookie_id(request)
-
-    trusted_cookie_id = get_trusted_device_cookie_id(request)
-    trusted_row = get_trusted_device_by_id(trusted_cookie_id) if trusted_cookie_id else None
-    if trusted_row:
-        # Use the REQUEST's fingerprint (not the stored one) so subsequent
-        # validate_session calls match. The stored fingerprint may be stale
-        # (e.g., "any_fingerprint" from manual DB entries).
-        session_id = create_session(
-            fp,
-            trusted=True,
-            user_id=trusted_row["label"] or _default_user_id(),
-        )
-        _logger.info(
-            "Session bootstrap created session=%s via trusted-cookie trusted_device=%s ip=%s",
-            _session_log_id(session_id),
-            trusted_row["id"],
-            _client_ip(request),
-        )
-        prewarm_session(session_id, trusted_row["label"] or _default_user_id())
-        return session_id, trusted_row["id"]
-
-    trusted_row = get_trusted_device_by_fingerprint(fp)
-    if trusted_row:
-        session_id = create_session(
-            fp,
-            trusted=True,
-            user_id=trusted_row["label"] or _default_user_id(),
-        )
-        _logger.info(
-            "Session bootstrap created session=%s via fingerprint-match trusted_device=%s ip=%s",
-            _session_log_id(session_id),
-            trusted_row["id"],
-            _client_ip(request),
-        )
-        prewarm_session(session_id, trusted_row["label"] or _default_user_id())
-        return session_id, trusted_row["id"]
-
-    if _is_local_browser_access(request):
-        session_id = create_session(fp, trusted=False, user_id=_default_user_id())
-        _logger.info(
-            "Session bootstrap created local session=%s host=%s ip=%s",
-            _session_log_id(session_id),
-            request.headers.get("host", ""),
-            _client_ip(request),
-        )
-        prewarm_session(session_id, _default_user_id())
-        return session_id, None
-
-    _logger.info(
-        "Session bootstrap found no authenticated session ip=%s trusted_cookie=%s",
-        _client_ip(request),
-        bool(trusted_cookie_id),
+    return _bootstrap_session_for_request(
+        request,
+        get_session_id_fn=get_session_id,
+        get_trusted_device_cookie_id_fn=get_trusted_device_cookie_id,
+        device_fingerprint_fn=device_fingerprint_from_request,
+        validate_session_fn=validate_session,
+        create_session_fn=create_session,
+        get_session_user_fn=get_session_user,
+        default_user_id_fn=_default_user_id,
+        get_trusted_device_by_id_fn=get_trusted_device_by_id,
+        get_trusted_device_by_fingerprint_fn=get_trusted_device_by_fingerprint,
+        is_single_user_no_auth_mode_fn=_is_single_user_no_auth_mode,
+        is_local_request_fn=_is_local_request,
+        is_local_browser_access_fn=_is_local_browser_access,
+        client_ip_fn=_client_ip,
+        session_log_id_fn=_session_log_id,
+        prewarm_session_fn=prewarm_session,
+        logger=_logger,
     )
-    return None, None
 
 
 def check_share_or_auth(request: Request, path: str):
-    # Single-user fresh install: only allow LOCAL access without auth
-    if _is_single_user_no_auth_mode() and _is_local_request(request):
+    if _request_has_share_or_auth(
+        request,
+        path,
+        get_session_id_fn=get_session_id,
+        get_trusted_device_cookie_id_fn=get_trusted_device_cookie_id,
+        device_fingerprint_fn=device_fingerprint_from_request,
+        validate_session_fn=validate_session,
+        get_trusted_device_by_id_fn=get_trusted_device_by_id,
+        validate_share_fn=validate_share,
+        is_single_user_no_auth_mode_fn=_is_single_user_no_auth_mode,
+        is_local_request_fn=_is_local_request,
+    ):
         return True
-    session_id = get_session_id(request)
-    fp = device_fingerprint_from_request(request)
-    if session_id and validate_session(session_id, fp):
-        return True
-    # Trusted device fallback (same as require_auth)
-    trusted_cookie = get_trusted_device_cookie_id(request)
-    if trusted_cookie and get_trusted_device_by_id(trusted_cookie):
-        return True
-    share_code = request.cookies.get("share_code")
-    if share_code:
-        share = validate_share(share_code)
-        if share and (path.startswith(share["path"]) or share["path"] == "/"):
-            return True
     raise HTTPException(status_code=401, detail="Not authenticated")
 
 
@@ -2073,15 +2060,15 @@ async def generate_tts(request: Request, _=Depends(require_auth)):
     if not text:
         raise HTTPException(status_code=422, detail="text is required")
 
-    import wave, tempfile, shutil
+    import tempfile, shutil
     cache_paths = tts_cache_paths(VESSENCE_DATA_HOME, text)
     os.makedirs(cache_paths.cache_dir, exist_ok=True)
 
     # Check cache (both ogg and legacy wav)
-    if os.path.exists(cache_paths.ogg_path):
-        return FileResponse(cache_paths.ogg_path, media_type="audio/ogg")
-    if os.path.exists(cache_paths.legacy_wav_path):
-        return FileResponse(cache_paths.legacy_wav_path, media_type="audio/wav")
+    cached_media = tts_cached_media(cache_paths)
+    if cached_media:
+        cached_path, media_type = cached_media
+        return FileResponse(cached_path, media_type=media_type)
 
     gpu_flag = tts_gpu_flags()
     chunks = _split_tts_chunks(text[:1000])
@@ -2111,13 +2098,7 @@ async def generate_tts(request: Request, _=Depends(require_auth)):
 
         # Concatenate WAV chunks
         combined_wav = tts_combined_wav_path(tmp_dir)
-        with wave.open(chunk_wavs[0], 'rb') as first:
-            params = first.getparams()
-        with wave.open(combined_wav, 'wb') as out:
-            out.setparams(params)
-            for wp in chunk_wavs:
-                with wave.open(wp, 'rb') as w:
-                    out.writeframes(w.readframes(w.getnframes()))
+        _concatenate_wav_chunks(chunk_wavs, combined_wav)
 
         # Compress to Opus/OGG
         compress_result = await asyncio.to_thread(
@@ -2462,9 +2443,7 @@ async def list_managed_users(session_id: str = Depends(require_auth)):
 @app.post("/api/admin/users")
 async def create_managed_user(body: CreateManagedUserRequest, session_id: str = Depends(require_auth)):
     admin_user = _require_admin_session(session_id)
-    email = (body.email or "").strip().lower()
-    if not email or "@" not in email:
-        raise HTTPException(status_code=400, detail="A valid email address is required.")
+    email = _normalize_managed_user_email(body.email)
 
     from agent_skills.user_manager import create_user_space, normalize_user_id, user_config_exists
 
@@ -2472,8 +2451,8 @@ async def create_managed_user(body: CreateManagedUserRequest, session_id: str = 
     if user_config_exists(user_id):
         raise HTTPException(status_code=409, detail=f"User {email} already exists.")
 
-    display_name = (body.display_name or "").strip() or email.split("@", 1)[0]
-    seed_memories = [m.strip() for m in (body.seed_memories or []) if str(m or "").strip()]
+    display_name = _managed_user_display_name(body.display_name, email)
+    seed_memories = _clean_seed_memories(body.seed_memories)
     config = create_user_space(
         user_id,
         display_name,
@@ -2839,12 +2818,7 @@ async def upload_files(
     vault_root = Path(vault_root_str)
     hash_index_path = vault_root / ".hash_index.json"
     descriptions = parse_upload_descriptions(descriptions_json)
-
-    try:
-        with open(hash_index_path) as f:
-            hash_index = json.load(f)
-    except Exception:
-        hash_index = {}
+    hash_index = load_upload_hash_index(hash_index_path)
 
     results = []
     for index, upload in enumerate(files):
@@ -2903,18 +2877,14 @@ async def upload_files(
 
         results.append(upload_success_result(upload.filename, dest_path, rel_path, subdir, description))
 
-    try:
-        with open(hash_index_path, "w") as f:
-            json.dump(hash_index, f)
-    except Exception:
-        pass
+    write_upload_hash_index(hash_index_path, hash_index)
 
     with get_db() as conn:
         conn.execute("INSERT INTO file_changes DEFAULT VALUES")
 
-    uploaded_names = [r["saved_name"] for r in results if r.get("status") == "ok"]
-    if uploaded_names:
-        _log_work_activity(f"File upload: {', '.join(uploaded_names[:3])}", category="file_upload")
+    activity_message = upload_work_activity_message(results)
+    if activity_message:
+        _log_work_activity(activity_message, category="file_upload")
 
     return {"results": results}
 
@@ -3046,15 +3016,11 @@ def _cleanup_temporary_playlists():
     Keeps playlists created in the last 5 minutes so the Android app has
     time to fetch them before they're deleted.
     """
-    import datetime as _dt
-    try:
-        from vault_web.playlists import list_playlists, delete_playlist as _del
-        cutoff = (_dt.datetime.now() - _dt.timedelta(minutes=5)).strftime("%Y-%m-%d %H:%M:%S")
-        for p in list_playlists():
-            if should_delete_temporary_playlist(p, cutoff):
-                _del(p["id"])
-    except Exception as e:
-        _logger.warning("temporary playlist cleanup failed: %s", e)
+    _cleanup_temporary_playlists_impl(
+        list_playlists_fn=list_playlists,
+        delete_playlist_fn=delete_playlist,
+        logger=_logger,
+    )
 
 
 def create_music_playlist_from_query(query: str) -> dict | None:
@@ -3072,48 +3038,17 @@ def create_music_playlist_from_query(query: str) -> dict | None:
     """
     import glob as _glob, random as _random
 
-    _cleanup_temporary_playlists()
-    query_parts = normalize_music_query(query)
-
-    # ── Tier 0: match an existing named user playlist ─────────────────────
-    # Skip for generic "random" queries which should build a fresh random mix.
-    if query_parts.q_core and not query_parts.is_random:
-        try:
-            existing = list_playlists()
-        except Exception:
-            existing = []
-        # Ignore prior ephemeral playlists — user meant a real named one.
-        _hit = find_matching_playlist(query_parts.q_core, real_user_playlists(existing))
-        if _hit is not None:
-            full = get_playlist(_hit["id"])
-            if full:
-                _logger.info(
-                    "music query %r matched existing playlist %r (%d tracks) — Tier 0 hit",
-                    query, _hit.get("name", ""), len(full.get("tracks", []) or []),
-                )
-                # Mark NOT temporary — this is a real user playlist; cleanup
-                # must never touch it.
-                full["temporary"] = False
-                return full
-
-    vault_music = Path(os.environ.get("VAULT_HOME", Path.home() / "ambient" / "vault")) / "Music"
-
-    all_files = sorted(_glob.glob(str(vault_music / "**" / "*.mp3"), recursive=True))
-    if not all_files:
-        return None
-
-    if query_parts.is_random:
-        selected = _random.sample(all_files, min(10, len(all_files)))
-    else:
-        selected = select_music_files(query_parts.q, all_files)
-        if not selected:
-            return None
-
-    playlist_name = playlist_name_for_query(query_parts)
-    tracks = playlist_tracks(selected, vault_parent=vault_music.parent)
-    playlist = create_playlist(playlist_name, tracks)
-    playlist["temporary"] = True
-    return playlist
+    return _music_playlist_from_query(
+        query,
+        list_playlists_fn=list_playlists,
+        get_playlist_fn=get_playlist,
+        create_playlist_fn=create_playlist,
+        delete_playlist_fn=delete_playlist,
+        vault_home=os.environ.get("VAULT_HOME", Path.home() / "ambient" / "vault"),
+        glob_files_fn=_glob.glob,
+        random_sample_fn=_random.sample,
+        logger=_logger,
+    )
 
 
 @app.post("/api/music/play")
@@ -3179,7 +3114,7 @@ def _should_use_v2(body: ChatMessage) -> bool:
     get the rich Opus "thinking stream" for anything that escalates past
     Stage 2 (weather/music get answered locally by the local LLM and skip Opus).
     """
-    return os.environ.get("JANE_PIPELINE", "").strip().lower() != "v1"
+    return _should_use_v2_pipeline(os.environ)
 
 
 def _should_use_v3(body: ChatMessage) -> bool:
@@ -3191,7 +3126,7 @@ def _should_use_v3(body: ChatMessage) -> bool:
     is never imported. This flag is independent of `JANE_PIPELINE=v1`
     which forces the old gemma_router path regardless.
     """
-    return os.environ.get("JANE_USE_V3_PIPELINE", "").strip() == "1"
+    return _should_use_v3_pipeline(os.environ)
 
 
 @app.post("/api/jane/chat")
@@ -3332,33 +3267,8 @@ def _check_instant_command(message: str, platform: str = "web") -> str | None:
     Only matches short imperative commands, not questions or sentences that
     happen to contain the keyword.
     """
-    import subprocess as _sp
-    kind = instant_command_kind(message)
-    if kind == "job_queue":
-        try:
-            from agent_skills.show_job_queue import format_markdown_table, get_job_queue_data
-            return format_markdown_table(get_job_queue_data()) or "Job queue is empty."
-        except Exception:
-            return "Could not load job queue."
-
-    if kind == "completed_jobs":
-        try:
-            from agent_skills.show_job_queue import format_markdown_table, get_completed_jobs_data
-            return format_markdown_table(get_completed_jobs_data()) or "No completed jobs."
-        except Exception:
-            return "Could not load completed jobs."
-
-    if kind == "commands":
-        return commands_markdown()
-
-    if kind == "cron":
-        try:
-            r = _sp.run(["crontab", "-l"], capture_output=True, text=True, timeout=5)
-            return cron_jobs_markdown(r.stdout)
-        except Exception:
-            return "Could not load cron jobs."
-
-    return None
+    del platform
+    return instant_command_response(message)
 
 
 # ─── Chat Stream ─────────────────────────────────────────────────────────────
@@ -3370,13 +3280,12 @@ _MAX_STREAMS_PER_IP = 3
 
 
 async def _handle_jane_chat_stream(body: ChatMessage, request: Request):
-    # Allow internal requests from localhost (prompt queue runner)
-    client_host = request.client.host if request.client else ""
-    if client_host in ("127.0.0.1", "::1", "localhost"):
-        session_id = body.session_id or "prompt_queue_session"
-        trusted_device_id = None
-    else:
-        session_id, trusted_device_id = get_or_bootstrap_session(request)
+    session_id, trusted_device_id = _chat_stream_session_for_request(
+        request,
+        body_session_id=body.session_id,
+        get_or_bootstrap_session_fn=get_or_bootstrap_session,
+        is_local_control_ip_fn=_is_local_control_ip,
+    )
     if not session_id:
         _logger.warning(
             "Rejected jane stream request: no authenticated session body_session=%s ip=%s",
@@ -3432,8 +3341,8 @@ async def _handle_jane_chat_stream(body: ChatMessage, request: Request):
     instant_result = _check_instant_command(raw_message, platform=body.platform or "web")
     if instant_result is not None:
         async def _instant_stream():
-            yield json.dumps({"type": "delta", "data": instant_result}) + "\n"
-            yield json.dumps({"type": "done", "data": instant_result}) + "\n"
+            for chunk in _instant_command_stream_chunks(instant_result):
+                yield chunk
         return StreamingResponse(_instant_stream(), media_type="application/x-ndjson")
 
     # ── Big-task offload check ──────────────────────────────────────────────
@@ -3451,12 +3360,8 @@ async def _handle_jane_chat_stream(body: ChatMessage, request: Request):
         )
 
         async def offloaded_stream():
-            yield json.dumps({
-                "type": "offloaded",
-                "data": "I'll work on that in the background. You'll see progress updates here as I go.",
-                "task_id": task_id,
-            }) + "\n"
-            yield json.dumps({"type": "done", "data": "I'll work on that in the background. You'll see progress updates here as I go."}) + "\n"
+            for chunk in _offloaded_task_stream_chunks(task_id):
+                yield chunk
 
         response = StreamingResponse(
             offloaded_stream(),
@@ -3472,56 +3377,28 @@ async def _handle_jane_chat_stream(body: ChatMessage, request: Request):
     # session_id ("jane_android_xxxx") across requests — using the cookie-based
     # session would create a new conversation state on every request.
     requested_conversation_session_id = body.session_id or session_id
-    async def event_stream():
-        # Track concurrent streams per IP
-        open_count = mark_stream_open(_active_streams, stream_ip)
-        _logger.debug("Stream opened for %s (now %d active)", stream_ip, open_count)
-        user_id = get_session_user(session_id) or _default_user_id()
-        conversation_session_id = _scoped_conversation_session_id(user_id, requested_conversation_session_id)
-        _logger.info(
-            "Starting jane stream generator session=%s user=%s",
-            _session_log_id(conversation_session_id),
-            user_id,
-        )
-        # Capture emitted NDJSON so turn_dedupe can replay it for retries.
-        _captured: list[str] = []
-        _had_error = False
-        try:
-            async with asyncio.timeout(JANE_RESPONSE_WAIT_SECONDS):
-                async for chunk in stream_message(user_id, conversation_session_id, body.message, body.file_context, platform=body.platform, tts_enabled=body.tts_enabled or False):
-                    if turn_id:
-                        _captured.append(chunk)
-                    yield chunk
-        except (ConnectionError, OSError) as exc:
-            _had_error = True
-            _logger.warning(
-                "jane_chat_stream connection error session=%s user=%s: %s",
-                _session_log_id(session_id), user_id, exc,
-            )
-            yield json.dumps({"type": "error", "data": "⚠️ Connection lost. Please try again."}) + "\n"
-        except Exception as exc:
-            _had_error = True
-            _logger.exception(
-                "jane_chat_stream failed active_session=%s body_session=%s user=%s: %s",
-                _session_log_id(session_id),
-                _session_log_id(body.session_id),
-                user_id,
-                exc,
-            )
-            yield json.dumps({"type": "error", "data": f"⚠️ Could not reach Jane: {exc}"}) + "\n"
-            return
-        finally:
-            close_count = mark_stream_closed(_active_streams, stream_ip)
-            _logger.debug("Stream closed for %s (now %d active)", stream_ip, close_count)
-            _logger.info("Jane stream generator closed session=%s", _session_log_id(session_id))
-            if turn_id:
-                try:
-                    finalize_turn_dedupe(turn_id, _captured, had_error=_had_error)
-                except Exception as _e:
-                    _logger.warning("turn_dedupe finalize failed: %s", _e)
+    event_stream = _normal_chat_stream_chunks(
+        active_streams=_active_streams,
+        stream_ip=stream_ip,
+        auth_session_id=session_id,
+        body_session_id=body.session_id,
+        requested_conversation_session_id=requested_conversation_session_id,
+        message=body.message,
+        file_context=body.file_context,
+        platform=body.platform,
+        tts_enabled=body.tts_enabled or False,
+        turn_id=turn_id,
+        response_wait_seconds=JANE_RESPONSE_WAIT_SECONDS,
+        stream_message_fn=stream_message,
+        get_session_user_fn=get_session_user,
+        default_user_id_fn=_default_user_id,
+        scoped_session_id_fn=_scoped_conversation_session_id,
+        session_log_id_fn=_session_log_id,
+        logger=_logger,
+    )
 
     response = StreamingResponse(
-        event_stream(),
+        event_stream,
         media_type="application/x-ndjson",
         headers={
             "Cache-Control": "no-cache",
@@ -3613,59 +3490,20 @@ async def jane_init_session(body: SessionControl, request: Request):
         # Already warm — no init needed
         return JSONResponse({"status": "already_warm", "greeting": ""})
 
-    # Build context for the init turn, streaming status updates
     user_id = get_session_user(session_id) or _default_user_id()
-
-    async def _stream_init():
-        status_queue: asyncio.Queue = asyncio.Queue()
-
-        def _emit_status(msg: str):
-            status_queue.put_nowait(msg)
-
-        try:
-            # Build context with status callbacks
-            _emit_status("Loading personality and context...")
-            ctx = await build_jane_context_async(
-                "Session initialization",
-                [],
-                session_id=body.session_id or session_id,
-                platform="web",
-                on_status=_emit_status,
-                user_id=user_id,
-            )
-
-            # Drain and yield all queued status events
-            while not status_queue.empty():
-                s = status_queue.get_nowait()
-                yield json.dumps({"type": "status", "data": s}) + "\n"
-
-            yield json.dumps({"type": "status", "data": init_status}) + "\n"
-
-            init_prompt = (
-                f"{ctx.system_prompt}\n\n"
-                "This is a session initialization. Read your configuration and prepare for conversation. "
-                "Respond with a single short, warm greeting (1 sentence max). Do not ask questions."
-            )
-
-            profile = _get_execution_profile(brain_name)
-            # Codex's run_turn already takes (user_id, session_id, ...);
-            # Claude's was just updated to match. Pass user_id first for both.
-            greeting = await manager.run_turn(
-                user_id,
-                body.session_id or session_id,
-                init_prompt,
-                on_delta=lambda d: None,
-                on_status=lambda s: None,
-                timeout_seconds=profile.timeout_seconds,
-                model=None,
-                yolo=profile.mode == "yolo",
-            )
-            yield json.dumps({"type": "done", "data": greeting.strip()}) + "\n"
-        except Exception as e:
-            _logger.exception("Init session failed")
-            yield json.dumps({"type": "done", "data": "Hey! Ready when you are."}) + "\n"
-
-    return StreamingResponse(_stream_init(), media_type="application/x-ndjson")
+    stream = _session_init_stream_chunks(
+        manager=manager,
+        build_context_async=build_jane_context_async,
+        get_execution_profile_fn=_get_execution_profile,
+        brain_name=brain_name,
+        user_id=user_id,
+        session_id=body.session_id or session_id,
+        init_status=init_status,
+        status_chunk_fn=_status_stream_chunk,
+        done_chunk_fn=_done_stream_chunk,
+        logger=_logger,
+    )
+    return StreamingResponse(stream, media_type="application/x-ndjson")
 
 
 # ─── Essence Management API ──────────────────────────────────────────────────
@@ -4239,15 +4077,7 @@ async def web_automation_plan(request: Request, _=Depends(require_auth)):
     if profile_id:
         try:
             from agent_skills.web_automation import profiles as _profiles
-            # Domain guard: EVERY navigate step in the plan must target
-            # the profile's bound domain. First-step-only was a hole —
-            # a plan could land legitimately then hop to attacker.com
-            # while the profile cookies are still active.
-            for s in steps:
-                if s.action == "navigate":
-                    _profiles.bind_check(profile_id, s.args.get("url", ""))
-            storage_state = _profiles.storage_state_path(profile_id)
-            _profiles.touch_last_used(profile_id)
+            storage_state = web_plan_storage_state_path(profile_id, steps, _profiles)
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Profile load failed: {e}")
     opts = SessionOptions(
@@ -4427,7 +4257,7 @@ async def run_web_workflow(name_or_id: str, _=Depends(require_auth)):
 async def briefing_processor_status(request: Request):
     """Callback from the detached article processor after each article."""
     client_ip = _client_ip(request) if hasattr(request, 'headers') else ""
-    if client_ip not in ("127.0.0.1", "::1", "localhost", "unknown"):
+    if not _is_local_control_ip(client_ip, allow_unknown=True):
         return JSONResponse({"error": "localhost only"}, status_code=403)
     body = await request.json()
     aid = body.get("article_id", "?")
@@ -4782,20 +4612,15 @@ async def marketplace_refresh_now(name: str, _=Depends(require_auth)):
 
     python_bin = os.environ.get("PYTHON_BIN", sys.executable)
     cwd = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    log_dir = Path(os.environ.get("VESSENCE_DATA_HOME",
-                                  os.path.expanduser("~/ambient/vessence-data"))) / "logs"
-    log_dir.mkdir(parents=True, exist_ok=True)
-    log_path = log_dir / f"marketplace_refresh_{name}.log"
-    env = {**os.environ}
-    # Playwright runs headless here too — the web server has no display.
-    env.pop("DISPLAY", None)
-    env.pop("WAYLAND_DISPLAY", None)
+    data_home = os.environ.get("VESSENCE_DATA_HOME", os.path.expanduser("~/ambient/vessence-data"))
+    log_path = marketplace_refresh_log_path(data_home, name)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    env = marketplace_refresh_env(os.environ)
     logf = open(log_path, "a")
-    logf.write(f"\n=== manual refresh {name} at "
-               f"{datetime.now().isoformat(timespec='seconds')} ===\n")
+    logf.write(marketplace_refresh_log_header(name, datetime.now()))
     logf.flush()
     subprocess.Popen(
-        [python_bin, "-m", "agent_skills.marketplace.refresh", name],
+        marketplace_refresh_command(python_bin, name),
         cwd=cwd, env=env, stdout=logf, stderr=logf,
         start_new_session=True,
     )
@@ -4826,17 +4651,10 @@ def _run_tax_tool(tool_name: str, args: dict = None) -> dict:
     """Run a tax accountant tool and return the result."""
     python_bin = os.environ.get("PYTHON_BIN", sys.executable)
     tools_path = os.path.join(_TAX_FUNCTIONS_DIR, "custom_tools.py")
-    cmd = [python_bin, tools_path, tool_name]
-    if args:
-        cmd.append(json.dumps(args))
+    cmd = tax_tool_command(python_bin, tools_path, tool_name, args)
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=120,
                             cwd=_TAX_FUNCTIONS_DIR)
-    if result.returncode != 0:
-        return {"status": "error", "message": result.stderr[:500]}
-    try:
-        return json.loads(result.stdout)
-    except json.JSONDecodeError:
-        return {"status": "ok", "output": result.stdout.strip()}
+    return tax_tool_result_payload(result.returncode, result.stdout, result.stderr)
 
 
 @app.get("/tax-accountant")
@@ -4985,47 +4803,37 @@ def _attempt_claude_token_refresh() -> bool:
     if _claude_refresh_last_failure and (time.time() - _claude_refresh_last_failure) < _CLAUDE_REFRESH_COOLDOWN:
         return False
 
-    creds_path = Path.home() / ".claude" / ".credentials.json"
+    creds_path = _cli_credentials_path("claude")
     if not creds_path.exists():
         return False
 
     try:
         creds = json.loads(creds_path.read_text())
-        refresh_token = creds.get("claudeAiOauth", {}).get("refreshToken")
+        refresh_token = _claude_refresh_token_from_credentials(creds)
         if not refresh_token:
             return False
 
         # Token exchange with backoff
-        from urllib.parse import urlencode as _urlencode
         import urllib.request as _urllib_req
-        token_data = _urlencode({
-            "grant_type": "refresh_token",
-            "client_id": "9d1c250a-e61b-44d9-88ed-5944d1962f5e",
-            "refresh_token": refresh_token,
-        }).encode()
+        token_url, token_data, token_headers = _claude_oauth_refresh_request_spec(refresh_token)
 
         for attempt in range(3):
             try:
                 token_req = _urllib_req.Request(
-                    "https://platform.claude.com/v1/oauth/token",
+                    token_url,
                     data=token_data,
-                    headers={
-                        "Content-Type": "application/x-www-form-urlencoded",
-                        "User-Agent": "claude-code/2.1.86",
-                        "Accept": "application/json",
-                    },
+                    headers=token_headers,
                 )
                 token_resp = _urllib_req.urlopen(token_req, timeout=15)
                 tokens = json.loads(token_resp.read())
 
                 # Update credentials
-                scopes = tokens.get("scope", "").split(" ") if tokens.get("scope") else creds["claudeAiOauth"].get("scopes", [])
-                creds["claudeAiOauth"].update({
-                    "accessToken": tokens["access_token"],
-                    "refreshToken": tokens.get("refresh_token", refresh_token),
-                    "expiresAt": int(time.time() * 1000) + tokens.get("expires_in", 3600) * 1000,
-                    "scopes": scopes,
-                })
+                _apply_claude_refresh_tokens(
+                    creds,
+                    tokens,
+                    previous_refresh_token=refresh_token,
+                    now_ms=int(time.time() * 1000),
+                )
                 creds_path.write_text(json.dumps(creds), encoding="utf-8")
                 return True
             except Exception as exc:
@@ -5043,46 +4851,18 @@ def _attempt_claude_token_refresh() -> bool:
 
 
 def _provider_auth_status_details(provider: str) -> dict:
-    provider = normalize_frontier_provider(provider)
-    now = time.time()
-    if provider in _auth_status_cache:
-        ts, details = _auth_status_cache[provider]
-        if now - ts < 5:  # 5 second cache
-            return details
-
-    cmd = _provider_auth_status_command(provider)
-    if not cmd:
-        return _unsupported_provider_auth_status(provider)
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-    except Exception as exc:
-        return _provider_auth_status_error(provider, exc)
-    details = _provider_auth_status_base(provider, result.returncode)
-    if result.returncode != 0:
-        _append_status_stderr_tail(details, result.stderr or "")
-        # No cache for failed status check
-        return details
-    output = (result.stdout or "").strip()
-    if not output:
-        # No cache for empty output
-        return details
-
-    _parse_provider_auth_status_output(details, output)
-
-    # Automatic refresh for Claude if not logged in
-    if not details.get("logged_in") and provider == "claude":
-        if _attempt_claude_token_refresh():
-            # Refresh succeeded, re-run status check once (bypass cache)
-            try:
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-                if result.returncode == 0:
-                    output = (result.stdout or "").strip()
-                    _parse_provider_auth_status_output(details, output)
-            except Exception:
-                pass
-
-    _auth_status_cache[provider] = (now, details)
-    return details
+    return _provider_auth_status_details_impl(
+        provider,
+        cache=_auth_status_cache,
+        now_fn=time.time,
+        run_command_fn=lambda cmd: subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        ),
+        attempt_refresh_fn=_attempt_claude_token_refresh,
+    )
 
 
 def _provider_auth_status(provider: str) -> bool:
@@ -5132,41 +4912,18 @@ def _discover_cli_login_port() -> int | None:
     """
     if not _cli_login_process or _cli_login_process.poll() is not None:
         return None
-    import re as _re
 
     # Known ports to ignore (our own services)
-    KNOWN_PORTS = {8081, 8090, 8080, 8082, 8083, 8000, 3000, 53, 631, 11434}
+    KNOWN_PORTS = _CLI_LOGIN_IGNORED_PORTS
 
     # --- Method 1: Scan /proc/net/tcp AND /proc/net/tcp6 for LISTEN sockets ---
     # Claude CLI (Node.js) may bind on IPv6 ::1 instead of IPv4 127.0.0.1,
     # especially inside Docker containers.  Check both.
     try:
-        candidate_ports: list[int] = []
-        # IPv4 localhost hex representations
-        _IPV4_LOCALHOST = {"0100007F", "00000000"}
-        # IPv6 localhost (::1) in /proc/net/tcp6 format
-        _IPV6_LOCALHOST = {
-            "00000000000000000000000001000000",  # ::1
-            "00000000000000000000000000000000",  # ::
-        }
-        for tcp_path in ("/proc/net/tcp", "/proc/net/tcp6"):
-            try:
-                with open(tcp_path) as f:
-                    for line in f:
-                        parts = line.split()
-                        if len(parts) < 4:
-                            continue
-                        if parts[3] != "0A":  # 0A = LISTEN
-                            continue
-                        local = parts[1]
-                        ip_hex, port_hex = local.split(":")
-                        if ip_hex not in _IPV4_LOCALHOST and ip_hex not in _IPV6_LOCALHOST:
-                            continue
-                        port = int(port_hex, 16)
-                        if port not in KNOWN_PORTS and port not in candidate_ports:
-                            candidate_ports.append(port)
-            except FileNotFoundError:
-                continue
+        candidate_ports, inode_to_port = _proc_net_listen_socket_candidates(
+            ("/proc/net/tcp", "/proc/net/tcp6"),
+            known_ports=KNOWN_PORTS,
+        )
 
         # If there's exactly one unknown listening port, that's our target.
         # If multiple, try PID-based filtering below.
@@ -5175,62 +4932,10 @@ def _discover_cli_login_port() -> int | None:
 
         # Multiple candidates — try to narrow via PID fd matching
         if candidate_ports:
-            # Build inode → port map (check both tcp and tcp6)
-            inode_to_port: dict[int, int] = {}
-            for tcp_path in ("/proc/net/tcp", "/proc/net/tcp6"):
-                try:
-                    with open(tcp_path) as f:
-                        for line in f:
-                            parts = line.split()
-                            if len(parts) < 10 or parts[3] != "0A":
-                                continue
-                            ip_hex, port_hex = parts[1].split(":")
-                            if ip_hex not in _IPV4_LOCALHOST and ip_hex not in _IPV6_LOCALHOST:
-                                continue
-                            port = int(port_hex, 16)
-                            if port in KNOWN_PORTS:
-                                continue
-                            inode_to_port[int(parts[9])] = port
-                except FileNotFoundError:
-                    continue
-
             # Walk process tree from our PID
-            root_pid = _cli_login_process.pid
-            pids_to_check = [root_pid]
-            # Find children by scanning /proc/*/stat
-            try:
-                for entry in Path("/proc").iterdir():
-                    if not entry.name.isdigit():
-                        continue
-                    stat_path = entry / "stat"
-                    try:
-                        stat_text = stat_path.read_text()
-                        # Format: pid (comm) state ppid ...
-                        m = _re.search(r"\)\s+\S+\s+(\d+)", stat_text)
-                        if m and int(m.group(1)) in pids_to_check:
-                            pids_to_check.append(int(entry.name))
-                    except (OSError, PermissionError):
-                        continue
-            except (OSError, PermissionError):
-                pass
-
-            for pid in pids_to_check:
-                fd_dir = Path(f"/proc/{pid}/fd")
-                if not fd_dir.exists():
-                    continue
-                try:
-                    for fd in fd_dir.iterdir():
-                        try:
-                            target = os.readlink(str(fd))
-                        except (OSError, PermissionError):
-                            continue
-                        m = _re.match(r"socket:\[(\d+)\]", target)
-                        if m:
-                            inode = int(m.group(1))
-                            if inode in inode_to_port:
-                                return inode_to_port[inode]
-                except (OSError, PermissionError):
-                    continue
+            process_port = _process_tree_socket_port(_cli_login_process.pid, inode_to_port)
+            if process_port is not None:
+                return process_port
 
             # Still multiple candidates — return the highest port (most likely
             # to be the ephemeral one Claude picked)
@@ -5243,13 +4948,9 @@ def _discover_cli_login_port() -> int | None:
         result = subprocess.run(
             ["ss", "-tlnp"], capture_output=True, text=True, timeout=5,
         )
-        for line in result.stdout.splitlines():
-            if "claude" in line or "node" in line:
-                m = _re.search(r"127\.0\.0\.1:(\d+)", line)
-                if m:
-                    port = int(m.group(1))
-                    if port not in KNOWN_PORTS:
-                        return port
+        port = _ss_login_callback_port(result.stdout.splitlines(), known_ports=KNOWN_PORTS)
+        if port is not None:
+            return port
     except Exception:
         pass
 
@@ -5345,17 +5046,13 @@ def _attempt_cli_login_command(cmd: list[str]) -> tuple[str | None, list[str]]:
         line = _cli_login_process.stdout.readline()
         if not line:
             break
-        stripped = line.strip()
+        auth_url, _cli_login_device_code, stripped = _cli_login_output_update(
+            line,
+            auth_url=auth_url,
+            device_code=_cli_login_device_code,
+        )
         if stripped:
             output_lines.append(stripped)
-        # Extract URL
-        if not auth_url:
-            auth_url = _extract_first_auth_url(line)
-        # Extract device code (e.g. "MMVV-CSOZV" — uppercase with dash)
-        if auth_url and not _cli_login_device_code:
-            device_code = _extract_device_code(stripped)
-            if device_code:
-                _cli_login_device_code = device_code
         # Stop once we have both URL and device code (or just URL for non-device flows)
         if auth_url and (_cli_login_device_code or time.time() > deadline - 25):
             # Read a bit more to catch the device code if it comes shortly after
@@ -5366,12 +5063,14 @@ def _attempt_cli_login_command(cmd: list[str]) -> tuple[str | None, list[str]]:
                     if ready2:
                         line2 = _cli_login_process.stdout.readline()
                         if line2:
-                            stripped2 = line2.strip()
+                            auth_url, _cli_login_device_code, stripped2 = _cli_login_output_update(
+                                line2,
+                                auth_url=auth_url,
+                                device_code=_cli_login_device_code,
+                            )
                             if stripped2:
                                 output_lines.append(stripped2)
-                            device_code = _extract_device_code(stripped2)
-                            if device_code:
-                                _cli_login_device_code = device_code
+                            if _cli_login_device_code:
                                 break
             break
     return auth_url, output_lines
@@ -5405,46 +5104,24 @@ async def cli_login(request: Request):
 
     # --- Claude: self-managed OAuth (no dependency on CLI's callback server) ---
     if provider == "claude":
-        import hashlib as _hashlib
         global _claude_oauth_verifier, _claude_oauth_state
-        _claude_oauth_verifier = base64.urlsafe_b64encode(os.urandom(32)).rstrip(b"=").decode()
-        _claude_oauth_state = base64.urlsafe_b64encode(os.urandom(32)).rstrip(b"=").decode()
-        code_challenge = base64.urlsafe_b64encode(
-            _hashlib.sha256(_claude_oauth_verifier.encode()).digest()
-        ).rstrip(b"=").decode()
-        from urllib.parse import urlencode as _urlencode
-        auth_url = "https://claude.com/cai/oauth/authorize?" + _urlencode({
-            "code": "true",
-            "client_id": "9d1c250a-e61b-44d9-88ed-5944d1962f5e",
-            "response_type": "code",
-            "redirect_uri": "https://platform.claude.com/oauth/code/callback",
-            "scope": "org:create_api_key user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload",
-            "code_challenge": code_challenge,
-            "code_challenge_method": "S256",
-            "state": _claude_oauth_state,
-        })
+        _claude_oauth_verifier = _base64url_no_padding(os.urandom(32))
+        _claude_oauth_state = _base64url_no_padding(os.urandom(32))
+        auth_url = _claude_oauth_authorization_url(
+            _pkce_code_challenge(_claude_oauth_verifier),
+            _claude_oauth_state,
+        )
         return JSONResponse({"auth_url": auth_url})
 
     # --- Gemini: self-managed Google OAuth ---
     if provider == "gemini":
-        import hashlib as _hashlib
         global _gemini_oauth_verifier, _gemini_oauth_state
-        _gemini_oauth_verifier = base64.urlsafe_b64encode(os.urandom(32)).rstrip(b"=").decode()
-        _gemini_oauth_state = base64.urlsafe_b64encode(os.urandom(32)).rstrip(b"=").decode()
-        code_challenge = base64.urlsafe_b64encode(
-            _hashlib.sha256(_gemini_oauth_verifier.encode()).digest()
-        ).rstrip(b"=").decode()
-        from urllib.parse import urlencode as _urlencode
-        auth_url = "https://accounts.google.com/o/oauth2/v2/auth?" + _urlencode({
-            "client_id": "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com",
-            "response_type": "code",
-            "redirect_uri": "https://codeassist.google.com/authcode",
-            "access_type": "offline",
-            "scope": "https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile",
-            "code_challenge": code_challenge,
-            "code_challenge_method": "S256",
-            "state": _gemini_oauth_state,
-        })
+        _gemini_oauth_verifier = _base64url_no_padding(os.urandom(32))
+        _gemini_oauth_state = _base64url_no_padding(os.urandom(32))
+        auth_url = _gemini_oauth_authorization_url(
+            _pkce_code_challenge(_gemini_oauth_verifier),
+            _gemini_oauth_state,
+        )
         return JSONResponse({"auth_url": auth_url})
 
     # --- Other providers: use CLI-based login ---
@@ -5490,70 +5167,19 @@ async def cli_login_code(request: Request):
         if not _claude_oauth_verifier or not _claude_oauth_state:
             return JSONResponse({"ok": False, "error": "No active OAuth session. Click Connect Account again."}, status_code=400)
 
-        # The code from Anthropic's callback page is "AUTH_CODE#STATE" — extract just the code
-        auth_code = code.split("#")[0].strip()
-        if not auth_code:
-            return JSONResponse({"ok": False, "error": "Invalid code format."}, status_code=400)
-
-        # Exchange the code for tokens at Anthropic's token endpoint
-        from urllib.parse import urlencode as _urlencode
         import urllib.request as _urllib_req
-        token_data = _urlencode({
-            "grant_type": "authorization_code",
-            "client_id": "9d1c250a-e61b-44d9-88ed-5944d1962f5e",
-            "code": auth_code,
-            "code_verifier": _claude_oauth_verifier,
-            "redirect_uri": "https://platform.claude.com/oauth/code/callback",
-        }).encode()
+        creds, status_code, error = _oauth_login_credentials_for_code(
+            provider,
+            code,
+            _claude_oauth_verifier,
+            now_ms=int(time.time() * 1000),
+            request_factory=_urllib_req.Request,
+            urlopen_fn=_urllib_req.urlopen,
+        )
+        if error:
+            return JSONResponse({"ok": False, "error": error}, status_code=status_code)
 
-        try:
-            token_req = _urllib_req.Request(
-                "https://platform.claude.com/v1/oauth/token",
-                data=token_data,
-                headers={
-                    "Content-Type": "application/x-www-form-urlencoded",
-                    "User-Agent": "claude-code/2.1.86",
-                    "Accept": "application/json",
-                },
-            )
-            token_resp = _urllib_req.urlopen(token_req, timeout=15)
-            tokens = json.loads(token_resp.read())
-        except Exception as exc:
-            last_exc = exc
-
-        if not tokens:
-            error_detail = str(last_exc)
-            if hasattr(last_exc, "read"):
-                try:
-                    error_body = last_exc.read().decode()
-                    error_json = json.loads(error_body)
-                    if error_json.get("error", {}).get("type") == "rate_limit_error":
-                        return JSONResponse({"ok": False, "error": "Token exchange failed: Anthropic's servers are rate-limiting requests for this application. This is a known issue. Please try again in a few minutes."}, status_code=429)
-                    error_detail = error_body[:300]
-                except:
-                    error_detail = last_exc.read().decode()[:300]
-            
-            return JSONResponse({"ok": False, "error": f"Token exchange failed: {error_detail}"}, status_code=400)
-
-        # Write credentials to Claude CLI's config file
-        import shutil as _shutil
-        claude_bin = _shutil.which("claude")
-        # Determine the claude config directory
-        claude_dir = Path.home() / ".claude"
-        claude_dir.mkdir(parents=True, exist_ok=True)
-        creds_path = claude_dir / ".credentials.json"
-
-        scopes = tokens.get("scope", "").split(" ") if tokens.get("scope") else []
-        creds = {
-            "claudeAiOauth": {
-                "accessToken": tokens["access_token"],
-                "refreshToken": tokens["refresh_token"],
-                "expiresAt": int(time.time() * 1000) + tokens.get("expires_in", 3600) * 1000,
-                "scopes": scopes,
-            }
-        }
-        creds_path.write_text(json.dumps(creds), encoding="utf-8")
-        creds_path.chmod(0o600)
+        _write_cli_credentials(provider, creds)
 
         # Invalidate cache for provider status
         _auth_status_cache.pop(provider, None)
@@ -5572,54 +5198,21 @@ async def cli_login_code(request: Request):
             return JSONResponse({"ok": False, "error": "No active OAuth session. Click Connect Account again."}, status_code=400)
 
         auth_code = code.strip()
-        from urllib.parse import urlencode as _urlencode
         import urllib.request as _urllib_req
-        token_data = _urlencode({
-            "grant_type": "authorization_code",
-            "client_id": "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com",
-            "client_secret": os.getenv("GEMINI_CLI_OAUTH_SECRET", ""),
-            "code": auth_code,
-            "code_verifier": _gemini_oauth_verifier,
-            "redirect_uri": "https://codeassist.google.com/authcode",
-        }).encode()
+        gemini_client_secret = os.getenv("GEMINI_CLI_OAUTH_SECRET", "")
+        creds, status_code, error = _oauth_login_credentials_for_code(
+            provider,
+            auth_code,
+            _gemini_oauth_verifier,
+            now_ms=int(time.time() * 1000),
+            request_factory=_urllib_req.Request,
+            urlopen_fn=_urllib_req.urlopen,
+            client_secret=gemini_client_secret,
+        )
+        if error:
+            return JSONResponse({"ok": False, "error": error}, status_code=status_code)
 
-        try:
-            token_req = _urllib_req.Request(
-                "https://oauth2.googleapis.com/token",
-                data=token_data,
-                headers={"Content-Type": "application/x-www-form-urlencoded"},
-            )
-            token_resp = _urllib_req.urlopen(token_req, timeout=15)
-            tokens = json.loads(token_resp.read())
-        except Exception as exc:
-            last_exc = exc
-
-        if not tokens:
-            error_detail = str(last_exc)
-            if hasattr(last_exc, "read"):
-                try:
-                    error_body = last_exc.read().decode()
-                    error_json = json.loads(error_body)
-                    if "rateLimitExceeded" in error_body:
-                        return JSONResponse({"ok": False, "error": "Token exchange failed: Google's servers are rate-limiting requests for this application. Please try again in a few minutes."}, status_code=429)
-                    error_detail = error_body[:300]
-                except:
-                    error_detail = last_exc.read().decode()[:300]
-            return JSONResponse({"ok": False, "error": f"Token exchange failed: {error_detail}"}, status_code=400)
-
-        # Write credentials to Gemini CLI's config file (~/.gemini/oauth_creds.json)
-        gemini_dir = Path.home() / ".gemini"
-        gemini_dir.mkdir(parents=True, exist_ok=True)
-        creds_path = gemini_dir / "oauth_creds.json"
-
-        creds = {
-            "type": "authorized_user",
-            "client_id": "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com",
-            "client_secret": os.getenv("GEMINI_CLI_OAUTH_SECRET", ""),
-            "refresh_token": tokens.get("refresh_token", ""),
-        }
-        creds_path.write_text(json.dumps(creds), encoding="utf-8")
-        creds_path.chmod(0o600)
+        _write_cli_credentials(provider, creds)
 
         # Invalidate cache
         _auth_status_cache.pop(provider, None)
@@ -5631,17 +5224,10 @@ async def cli_login_code(request: Request):
     if not _cli_login_process or _cli_login_process.poll() is not None:
         return JSONResponse({"ok": False, "error": "No active login session. Start Connect Account again."}, status_code=400)
 
-        return JSONResponse({"ok": True, "authenticated": False, "pending": True, "debug": _cli_login_debug_snapshot(provider)})
-
     # --- Other providers: write code to stdin (original behavior) ---
-    if not getattr(_cli_login_process, "stdin", None):
-        return JSONResponse({"ok": False, "error": "This login session does not accept code entry."}, status_code=400)
-
-    try:
-        _cli_login_process.stdin.write(code + "\n")
-        _cli_login_process.stdin.flush()
-    except Exception as exc:
-        return JSONResponse({"ok": False, "error": f"Could not submit authentication code: {exc}"}, status_code=500)
+    submitted, error, status_code = _submit_cli_login_code_to_stdin(_cli_login_process, code)
+    if not submitted:
+        return JSONResponse({"ok": False, "error": error}, status_code=status_code or 500)
 
     deadline = time.time() + 20
     while time.time() < deadline:
@@ -5674,7 +5260,7 @@ async def cli_login_status(request: Request):
         response_data = {"authenticated": _cli_login_authenticated, "debug": _cli_login_debug_snapshot(provider)}
     else:
         response_data = {"authenticated": False, "debug": _cli_login_debug_snapshot(provider)}
-    if _client_ip(request) not in ("127.0.0.1", "::1", "localhost"):
+    if not _is_local_control_ip(_client_ip(request)):
         # Don't leak debug info to non-local requests
         response_data.pop("debug", None)
     return JSONResponse(response_data)

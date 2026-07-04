@@ -6,6 +6,7 @@ from jane_web.model_settings import (
     default_models,
     model_env_var,
     model_save_target,
+    model_tiers,
     provider_availability,
 )
 
@@ -43,6 +44,20 @@ def test_current_model_prefers_provider_env_then_legacy_then_default():
         "gemini-default",
         "JANE_MODEL_GEMINI",
     )
+
+
+def test_model_tiers_preserve_display_order_roles_and_models():
+    assert model_tiers(
+        orchestrator_model="orchestrator",
+        smart_model="smart",
+        cheap_model="cheap",
+        local_llm_model="local",
+    ) == [
+        {"tier": "Orchestrator", "role": "The Primary Brain (Reasoning, Code)", "model": "orchestrator"},
+        {"tier": "Agent", "role": "The Specialist (Research, Memory)", "model": "smart"},
+        {"tier": "Utility", "role": "The Worker (Archival, Triage)", "model": "cheap"},
+        {"tier": "Local", "role": "Privacy & Speed (Local Processing)", "model": "local"},
+    ]
 
 
 def test_build_model_settings_payload_uses_current_provider_and_tiers():

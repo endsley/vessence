@@ -1,5 +1,6555 @@
 # Vessence Refactor Journal
 
+## 2026-07-04 - Conversation Key Safe Resolver Helpers
+
+Goal/scope:
+- Extract safe resolver steps from conversation-key payload assembly.
+- Preserve managed-user scoping, unmanaged legacy session keys, device precedence, and fallback behavior when auth/user-manager helpers fail.
+
+Files/modules changed:
+- `jane_web/conversation_keys.py`
+- `tests/test_conversation_keys.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Client session ids still prefer the trimmed request body session id, then the auth session id, then `default`.
+- Managed conversation keys still include sanitized user id, device id, and client session id.
+- Unmanaged conversation keys still use the legacy client/auth/default session value directly.
+- Device ids still prefer the request header, then trusted-device cookie truncation, then request fingerprint truncation, then `nodevice`.
+- Auth/session-cookie/user-manager exceptions still fall back to the existing unauthenticated unmanaged behavior.
+
+Boundary chosen:
+- `safe_auth_session_id()`, `resolved_conversation_user_id()`, `managed_user_context()`, `safe_trusted_device_cookie()`, and `fallback_device_fingerprint()` isolate exception-tolerant lookup steps.
+- `resolve_conversation_key_payload()` now owns the full route-ready resolver flow while `build_conversation_key_payload()` remains a pure payload builder.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/conversation_keys.py tests/test_conversation_keys.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_conversation_keys.py -q` passed (`9 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1754 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Route handlers that still manually assemble auth/session/device context can adopt `resolve_conversation_key_payload()` where tests already cover the route contract.
+- Further changes to session identity should wait for route-level chat stream tests because conversation-key churn affects persisted chat state.
+
+## 2026-07-04 - Chat Error Incident Field Helpers
+
+Goal/scope:
+- Extract Android chat-error incident normalization from the Markdown job template.
+- Preserve generated job metadata, location hints, truncation, and default fallbacks.
+
+Files/modules changed:
+- `agent_skills/chat_error_audit_helpers.py`
+- `tests/test_chat_error_audit_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Empty exception classes still fall back to `UnknownException`.
+- Source locations still include `source_hint:line` only when both source and line are available.
+- Missing frame, version, message, stack, and voice fields still use the same fallback values.
+- Job Markdown still truncates messages to 400 characters and stack traces to 1800 characters.
+- Existing filename and Android-frame parsing behavior is unchanged.
+
+Boundary chosen:
+- `chat_error_source_location()` owns source/line fallback formatting.
+- `chat_error_incident_fields()` normalizes payload and frame fields for template use.
+- `chat_error_job_markdown()` now focuses on the job document body.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile agent_skills/chat_error_audit_helpers.py tests/test_chat_error_audit_helpers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_chat_error_audit_helpers.py -q` passed (`6 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1753 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- The job template itself is intentionally verbose operational guidance; further splits should focus only on reusable incident fields or filenames.
+
+## 2026-07-04 - Docs Todo Remove Item Scan
+
+Goal/scope:
+- Extract Google Docs TODO remove-item matching from replacement-plan construction.
+- Preserve category-scoped and whole-document remove behavior.
+
+Files/modules changed:
+- `agent_skills/docs_editing_helpers.py`
+- `tests/test_docs_editing_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Category-scoped removal still starts only after the matching category line.
+- Category-scoped removal still stops after the first blank following section content.
+- Whole-document removal still scans from the top when no category is provided.
+- List markers are still stripped from the success message, while `old_text` still uses the original line plus newline.
+- Missing items still return `None`.
+
+Boundary chosen:
+- `TodoRemoveItemScan` records the matched source line and cleaned item body.
+- `scan_todo_remove_item()` owns section scanning and substring matching.
+- `plan_todo_remove_item()` now only converts a scan result into the existing `TodoReplacementPlan`.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile agent_skills/docs_editing_helpers.py tests/test_docs_editing_helpers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_docs_editing_helpers.py -q` passed (`10 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1752 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- `find_end_of_section()` has line-offset logic, but it is short and already directly tested; no immediate split needed.
+
+## 2026-07-04 - Docs Todo Add Section Scan
+
+Goal/scope:
+- Extract the Google Docs TODO add-item section scan from replacement-plan construction.
+- Preserve the existing insertion behavior, including legacy empty-section handling.
+
+Files/modules changed:
+- `agent_skills/docs_editing_helpers.py`
+- `tests/test_docs_editing_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Numbered sections still append the next numeric item after the last numbered line.
+- Plain sections still append raw item text after the last scanned content line.
+- Missing categories still return `None`.
+- The existing empty-section behavior is unchanged: scanning continues into the next nonblank numbered line and uses it as the insertion anchor.
+- Success and failure messages are unchanged.
+
+Boundary chosen:
+- `TodoAddSectionScan` records the scan outcome without constructing replacement text.
+- `scan_todo_add_section()` owns line walking and numbered-item detection.
+- `plan_todo_add_item()` now converts a scan result into the existing `TodoReplacementPlan`.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile agent_skills/docs_editing_helpers.py tests/test_docs_editing_helpers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_docs_editing_helpers.py -q` passed (`10 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1752 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Remove-item planning can get a similar scan/result split, but add-item had the higher-risk insertion-number behavior to pin first.
+
+## 2026-07-04 - Education Homework Answer Formatters
+
+Goal/scope:
+- Split `format_response()` answer-type branches into focused formatter helpers.
+- Preserve the answer-form strings and JSON shapes used by the homework auto-answer flow.
+
+Files/modules changed:
+- `agent_skills/edu_homework_answers.py`
+- `tests/test_edu_homework_answers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Simple answer types and multiple choice still stringify the solution directly.
+- Vector, subspace basis, and matrix outputs still use MATLAB-style formatting.
+- Linear-system solve variants still emit `{"class": ..., "v": ...}` JSON.
+- Reachability and invertibility answers still emit their existing compact JSON shapes.
+- Solve-system-with-basis still returns unique vectors, infinite basis matrices, or empty values by classification.
+
+Boundary chosen:
+- `SIMPLE_ANSWER_TYPES` centralizes direct string answer types.
+- `_format_subspace_basis()` owns subspace kind dispatch.
+- `_format_linear_system_solve()`, `_format_classify_and_reach()`, `_format_invertibility_with_blank()`, and `_format_solve_system_with_basis()` isolate structured answer-type output.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile agent_skills/edu_homework_answers.py tests/test_edu_homework_answers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_edu_homework_answers.py -q` passed (`5 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1752 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Solver internals are already small; further work should focus on adding problem-type fixtures before changing algebra behavior.
+
+## 2026-07-04 - Pipeline Audit Report Section Builders
+
+Goal/scope:
+- Extract repeated pipeline-audit report section assembly from `build_pipeline_audit_report_markdown()`.
+- Preserve report ordering, count sorting, failure limits, pipe escaping, and response truncation.
+
+Files/modules changed:
+- `agent_skills/pipeline_audit_helpers.py`
+- `tests/test_pipeline_audit_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Stage/class/fix breakdowns still use most-common ordering.
+- Self-correct fix lines still render as `+N exemplars`.
+- Classification failures still render as a Markdown table capped at 30 rows.
+- Response failures still render as bullets capped at 20 rows.
+- Prompt pipes are still escaped and response snippets are still truncated to 150 characters.
+
+Boundary chosen:
+- `count_section_lines()` owns generic count breakdown rendering.
+- `classification_failure_table_lines()` owns the classification failure table.
+- `response_failure_lines()` owns response failure bullets.
+- The top-level report function now assembles header metrics and delegates section bodies.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile agent_skills/pipeline_audit_helpers.py tests/test_pipeline_audit_helpers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_pipeline_audit_helpers.py -q` passed (`9 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1751 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- The event summarizer is already compact; future audit work should focus on classifier-fix application, not this report renderer.
+
+## 2026-07-04 - Weather Cache Section Payload Builders
+
+Goal/scope:
+- Split cached weather JSON assembly into current, air-quality, and forecast section builders.
+- Preserve the public cache payload shape used by weather consumers.
+
+Files/modules changed:
+- `agent_skills/weather_payload_helpers.py`
+- `tests/test_weather_payload_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Current temperature, feels-like, humidity, wind, and WMO condition strings keep the same units and unknown-code fallback.
+- Air-quality values still render AQI plus PM/ozone values with `µg/m³`.
+- Forecast rows still include date, weekday, high, low, condition, precipitation, humidity range, wind, and UV index.
+- Empty pollen payloads are still omitted; non-empty pollen payloads are still included unchanged.
+- The top-level cache payload still contains `location`, `fetched`, `current`, `air_quality`, and `forecast`.
+
+Boundary chosen:
+- `current_weather_payload()` owns current-condition formatting.
+- `air_quality_payload()` owns AQI/particulate formatting.
+- `forecast_day_payload()` owns one daily forecast row.
+- `forecast_payload()` maps daily rows and leaves `weather_cache_payload()` as top-level assembly.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile agent_skills/weather_payload_helpers.py tests/test_weather_payload_helpers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_weather_payload_helpers.py -q` passed (`5 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1750 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Weather Stage 2 handler resume flow is already split enough; further work should target cache-read injection only if a fake cache harness is added.
+
+## 2026-07-04 - Todo Doc Category Parser Helpers
+
+Goal/scope:
+- Split Google Docs TODO category parsing policies into small pure helpers.
+- Preserve exported text parsing for BOMs, title lines, list markers, orphan items, headers, and prose noise.
+
+Files/modules changed:
+- `agent_skills/todo_doc_helpers.py`
+- `tests/test_todo_doc_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- UTF-8 BOM at the start of the export is still stripped.
+- A top-line TODO title is still skipped only at index 0.
+- Numbered, dash, star, and bullet list markers are still stripped from item text.
+- Orphan list items still attach to `Uncategorized`.
+- A category header is still recognized only when the next nonblank line is a list item.
+- Free prose and footer noise are still dropped.
+
+Boundary chosen:
+- `strip_doc_bom()` isolates Google export cleanup.
+- `is_todo_title_line()` isolates title skipping.
+- `list_item_text()` owns marker matching and item cleanup.
+- `next_nonblank_index()` and `is_category_header()` isolate header lookahead.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile agent_skills/todo_doc_helpers.py tests/test_todo_doc_helpers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_todo_doc_helpers.py -q` passed (`7 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1749 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Google Docs edit planning has more line-walking logic, but it preserves some legacy section-boundary behavior and should be split separately.
+
+## 2026-07-04 - Prompt Queue Entry Parser Helpers
+
+Goal/scope:
+- Split prompt queue Markdown parsing into chunk, status, body, and entry helpers.
+- Preserve `prompt_list.md` parsing behavior for statuses, multiline prompts, old notes, and archive separators.
+
+Files/modules changed:
+- `agent_skills/prompt_queue_docs.py`
+- `tests/test_prompt_queue_docs.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Header/non-entry chunks are still ignored by `parse_prompt_list()`.
+- Status tags still map `[new]` to pending, completed tags to complete, and incomplete tags to incomplete.
+- Inline prompt text after a status tag is still included as the first body line.
+- Body parsing still stops before old outcome notes and `---` separators.
+- Parsed entries still return `{index, text, status}` dictionaries in document order.
+
+Boundary chosen:
+- `prompt_entry_chunks()` isolates Markdown entry splitting.
+- `parse_status_prefix()` owns status-tag stripping.
+- `prompt_body_lines()` owns the body stopping rules.
+- `parse_prompt_chunk()` parses one numbered entry and lets `parse_prompt_list()` handle orchestration.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile agent_skills/prompt_queue_docs.py tests/test_prompt_queue_docs.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_prompt_queue_docs.py -q` passed (`8 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1748 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Status-update rendering has similar line-walking complexity, but the parser is now separated enough to make that a later focused slice.
+
+## 2026-07-04 - National Grid Month Entry Builder
+
+Goal/scope:
+- Extract National Grid account month-entry map construction from `summarize_account()`.
+- Preserve downloaded, current-bill, inferred-current, missing, and total summary behavior.
+
+Files/modules changed:
+- `agent_skills/nationalgrid_bill_helpers.py`
+- `tests/test_nationalgrid_bill_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Normal downloaded bill entries still populate `by_month` first.
+- Current-bill download matches still replace their month entries with `source=current_bill`.
+- Current-row inference still adds the next month only when it is targeted, missing, and has a parseable amount.
+- Invalid bill targets are still ignored.
+- `summarize_account()` still returns the same monthly amounts, counts, totals, record status, and record error fields.
+
+Boundary chosen:
+- `discovered_current_rows()` isolates usable current-bill rows.
+- `current_bill_source_bills()` isolates bills sourced from the current bill row.
+- `month_entries_by_month()` owns the downloaded/current/inferred merge before `summarize_account()` builds counts and totals.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile agent_skills/nationalgrid_bill_helpers.py tests/test_nationalgrid_bill_helpers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_nationalgrid_bill_helpers.py -q` passed (`12 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1747 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- `fetch_bills()` still mixes Playwright orchestration and result assembly, but it should wait for an extractor fake before splitting.
+
+## 2026-07-04 - Read Calendar Metadata Bucket Helpers
+
+Goal/scope:
+- Extract calendar escalation bucket specs and fetch/error handling from `_escalation_context()`.
+- Add direct tests for calendar metadata formatting that previously had no focused coverage.
+
+Files/modules changed:
+- `jane_web/jane_v2/classes/read_calendar/metadata.py`
+- `tests/test_read_calendar_metadata.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- The escalation context still fetches today, tomorrow, and next 90 days with max results 25, 25, and 200.
+- Credential/setup failures still stop later bucket fetches and return the Google sign-in guidance block.
+- General bucket failures still return an inline `Fetch failed` block while allowing later buckets.
+- Event line formatting still preserves timed, all-day, no-start, notes, and empty-block shapes.
+- The fetched-at footer is still omitted when credentials fail.
+
+Boundary chosen:
+- `CALENDAR_BUCKETS` names the bucket labels, range hints, and limits in one testable constant.
+- `_calendar_setup_error_block()` and `_calendar_fetch_failed_block()` centralize error text.
+- `_calendar_bucket_block()` owns one bucket fetch and returns both rendered block text and credential-failure status.
+- `_escalation_context()` now handles import, loop orchestration, and footer assembly.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v2/classes/read_calendar/metadata.py tests/test_read_calendar_metadata.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_read_calendar_metadata.py -q` passed (`3 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1746 passed`).
+- `git diff --check` passed.
+- `git diff --no-index --check /dev/null tests/test_read_calendar_metadata.py` produced no whitespace warnings; exit code was `1` only because the file is new.
+
+Remaining follow-up slices:
+- Event date/time parsing can be split further if more edge cases appear, but the bucket fetch/error policy is now the higher-value extracted boundary.
+
+## 2026-07-04 - Send Email Lookup Block Shared Renderer
+
+Goal/scope:
+- Route `send_email` recent-inbox rendering and Gmail error text through the shared email metadata helper.
+- Preserve the lookup-only inbox shape used for recipient/address discovery.
+
+Files/modules changed:
+- `jane_web/jane_v2/classes/email_metadata_helpers.py`
+- `jane_web/jane_v2/classes/send_email/metadata.py`
+- `tests/test_send_email_metadata.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Send-email lookup rows still show only sender, date, and subject.
+- Snippets and unread tags remain omitted from send-email lookup context even when source rows contain them.
+- Gmail setup failures still use the shared sign-in guidance block.
+- General recent-inbox failures still use the shorter `[EMAIL INBOX — recent]` failure label.
+- Read/delete email defaults still include snippets and unread tags.
+
+Boundary chosen:
+- `format_email_block()` and `email_row_lines()` now expose explicit `include_snippet` and `include_unread_tag` switches with defaults matching read/delete email behavior.
+- `send_email._format_email_block()` remains a thin wrapper that selects the lookup-only row shape.
+- `_recent_inbox_block()` reuses shared Gmail setup/fetch-failure block builders while keeping its custom logging and failure label.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v2/classes/email_metadata_helpers.py jane_web/jane_v2/classes/send_email/metadata.py tests/test_send_email_metadata.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_send_email_metadata.py tests/test_read_email_metadata.py tests/test_delete_email_metadata.py -q` passed (`14 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1743 passed`).
+- `git diff --check` passed.
+- `git diff --no-index --check /dev/null jane_web/jane_v2/classes/email_metadata_helpers.py` produced no whitespace warnings; exit code was `1` only because the file is new.
+
+Remaining follow-up slices:
+- A shared email fetch wrapper could support send-email too if it grows a separate success/failure label option, but the current direct wrapper is simpler.
+
+## 2026-07-04 - SMS Metadata Message Line Formatter
+
+Goal/scope:
+- Extract duplicated synced-message row formatting from read/delete message escalation metadata.
+- Preserve the different body policies: read-message uses enriched readback text; delete-message uses raw truncated body text.
+
+Files/modules changed:
+- `jane_web/jane_v2/classes/sms_metadata_helpers.py`
+- `jane_web/jane_v2/classes/read_messages/metadata.py`
+- `jane_web/jane_v2/classes/delete_messages/metadata.py`
+- `tests/test_sms_metadata_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Timestamp display still uses `%m/%d %I:%M %p` with leading zero stripped.
+- Outgoing rows whose sender starts with `Me → ` still render as `SENT by user to ...`.
+- Incoming rows still render as `RECEIVED from ...`, with `Unknown` fallback for blank senders.
+- Contact rows still render kind `contact`; non-contact rows still use `msg_type` or `unknown`.
+- Read-message and delete-message modules still own DB access, empty-state text, and body selection.
+
+Boundary chosen:
+- `format_message_timestamp()` isolates timestamp display policy.
+- `message_direction_label()` isolates sent/received wording.
+- `message_kind()` isolates contact versus message-type labeling.
+- `format_synced_message_line()` combines the shared pieces while accepting preselected body text.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v2/classes/sms_metadata_helpers.py jane_web/jane_v2/classes/read_messages/metadata.py jane_web/jane_v2/classes/delete_messages/metadata.py tests/test_sms_metadata_helpers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_sms_metadata_helpers.py -q` passed (`3 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1742 passed`).
+- `git diff --check` passed.
+- `git diff --no-index --check /dev/null jane_web/jane_v2/classes/sms_metadata_helpers.py` and `git diff --no-index --check /dev/null tests/test_sms_metadata_helpers.py` produced no whitespace warnings; exit code was `1` only because the files are new.
+
+Remaining follow-up slices:
+- Shared SMS DB-fetch helpers are possible, but the read/delete contexts have different body enrichment and operational instructions, so row formatting is the safer boundary for now.
+
+## 2026-07-04 - Shopping List Action Executor
+
+Goal/scope:
+- Split validated shopping-list action execution out of the Stage 2 handler.
+- Keep classifier-param validation, shopping-list API loading, and mutation dispatch as separate concerns.
+
+Files/modules changed:
+- `jane_web/jane_v2/classes/shopping_list/handler.py`
+- `tests/test_shopping_list_actions.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Missing params, malformed actions, unknown actions, and low-confidence destructive actions still escalate.
+- The handler still imports `agent_skills.shopping_list` lazily and escalates if import fails.
+- View/add/remove/clear/check still use the default list name.
+- Add/check with no items still returns `None`.
+- Remove and clear still pass the classifier confidence through to the underlying shopping-list API.
+
+Boundary chosen:
+- `_load_shopping_list_api()` isolates the lazy import and exposes the existing API functions as an injected dependency.
+- `_execute_shopping_list_action()` owns the store mutation and response-building branches after params are validated.
+- Focused tests use a fake in-memory API so mutation ordering and confidence propagation are checked without touching the real JSON store.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v2/classes/shopping_list/handler.py tests/test_shopping_list_actions.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_shopping_list_actions.py -q` passed (`9 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1739 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Named shopping lists are handled in the proxy path, not this Stage 2 handler; avoid mixing those flows until the classifier schema supports list names directly.
+
+## 2026-07-04 - Shared Email Metadata Bucket Helpers
+
+Goal/scope:
+- Extract duplicated read/delete email escalation bucket rendering and fetch-error handling.
+- Preserve local `read_email` and `delete_email` metadata helper names for existing call sites and tests.
+
+Files/modules changed:
+- `jane_web/jane_v2/classes/email_metadata_helpers.py`
+- `jane_web/jane_v2/classes/read_email/metadata.py`
+- `jane_web/jane_v2/classes/delete_email/metadata.py`
+- `tests/test_read_email_metadata.py`
+- `tests/test_delete_email_metadata.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Read-email rows still omit Gmail message IDs even when the source row has one.
+- Delete-email rows still include `id=...` and still fall back from `message_id` to `id`.
+- Gmail setup failures still return the sign-in guidance block and suppress later bucket fetches.
+- General fetch failures still log the bucket context and return the same `Fetch failed` block.
+- Read/delete email escalation contexts still use their existing labels, limits, queries, and footers.
+
+Boundary chosen:
+- `format_email_block()` owns row rendering with an explicit `include_message_id` switch.
+- `email_row_lines()` keeps truncation, unread tags, snippet inclusion, and ID rendering in one place.
+- `fetch_email_bucket()` owns the shared RuntimeError/general exception policy.
+- Class modules keep thin wrappers so metadata tests and private call sites stay stable.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v2/classes/email_metadata_helpers.py jane_web/jane_v2/classes/read_email/metadata.py jane_web/jane_v2/classes/delete_email/metadata.py tests/test_read_email_metadata.py tests/test_delete_email_metadata.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_read_email_metadata.py tests/test_delete_email_metadata.py -q` passed (`8 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1737 passed`).
+- `git diff --check` passed.
+- `git diff --no-index --check /dev/null jane_web/jane_v2/classes/email_metadata_helpers.py` produced no whitespace warnings; exit code was `1` only because the file is new.
+
+Remaining follow-up slices:
+- `send_email` has a related but intentionally smaller recipient-lookup block; it should only join the shared helper if we add options for its different privacy surface.
+
+## 2026-07-04 - Read Calendar Resume State Helpers
+
+Goal/scope:
+- Split the read-calendar multi-turn resume branch into named helpers for each pending-action state.
+- Preserve event-detail, event-choice, another-day, day-choice, and end-of-loop behavior.
+
+Files/modules changed:
+- `jane_web/jane_v2/classes/read_calendar/handler.py`
+- `tests/test_read_calendar_formatting.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- `no` and end phrases still close the read-calendar flow with `Ok.` before state-specific handling.
+- A `yes` after a single listed event still shows that event's details.
+- A `yes` after multiple listed events still asks `Which one?`.
+- Event number/name matching still takes precedence before day-range pivots.
+- Unmatched event-detail and event-choice replies still ask about another day.
+- Another-day and day-choice replies still answer explicit ranges and escalate vague replies.
+
+Boundary chosen:
+- `_is_calendar_end_signal()` and `_end_calendar_conversation()` isolate the common terminal branch.
+- `_handle_event_detail_or_stop()` owns detail selection, range pivots, and fallback.
+- `_handle_event_choice_reply()` owns the `Which one?` response path.
+- `_handle_another_day_or_stop()` and `_handle_day_choice_reply()` own range-followup routing.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v2/classes/read_calendar/handler.py tests/test_read_calendar_formatting.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_read_calendar_formatting.py -q` passed (`12 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1735 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Calendar metadata escalation context still has repeated source fetching, but it needs careful tests around external Google Calendar failures before refactoring.
+
+## 2026-07-04 - Send Message Resume Reply Helpers
+
+Goal/scope:
+- Extract the send-message Stage 2 resume branch into focused draft-field and reply-path helpers.
+- Preserve confirmation, revision, cancel, and escalation behavior for pending SMS drafts.
+
+Files/modules changed:
+- `jane_web/jane_v2/classes/send_message/handler.py`
+- `tests/test_send_message_parsing.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Confirmation replies still check yes/no before end phrases, so a bare `no` asks for a revised message instead of cancelling.
+- Incomplete confirmed drafts still abandon pending state and force Stage 3.
+- Strong cancel/end phrases still end the send-message conversation with `Ok.`.
+- Revised-body replies still treat one-word messages like `yes` as the new body, not as confirmation.
+- Empty revised bodies still abandon pending state and force Stage 3.
+
+Boundary chosen:
+- `_resume_draft_fields()` isolates legacy versus nested pending-action shape handling.
+- `_handle_send_confirmation_reply()` owns the yes/no/cancel/unknown branch.
+- `_handle_revised_body_reply()` owns revised-body text capture and abort behavior.
+- `_abandon_to_stage3()` and `_end_send_message_conversation()` centralize repeated terminal responses.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v2/classes/send_message/handler.py tests/test_send_message_parsing.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_send_message_parsing.py -q` passed (`27 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1732 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- The open-draft FIFO safety net can be split further once its session-state dependencies have direct characterization tests.
+
+## 2026-07-04 - Timer Ordinal Delete Parser Helper
+
+Goal/scope:
+- Extract shared ordinal-word parsing from timer delete target helpers.
+- Preserve delete target behavior for free-form prompts and params-provided delete phrases.
+
+Files/modules changed:
+- `jane_web/jane_v2/classes/timer/parsing.py`
+- `tests/test_timer_parsing.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Free-form delete prompts still require the ordinal word to be followed by `timer`.
+- Params delete phrases still allow a bare ordinal such as `third`.
+- Numeric id/index parsing still runs before ordinal matching.
+- Label fallback parsing and all-timer rejection are unchanged.
+
+Boundary chosen:
+- `ORDINAL_WORDS` centralizes the first-through-tenth mapping.
+- `ordinal_timer_index()` isolates the timer-required versus optional-timer suffix policy.
+- `extract_delete_target()` and `parse_delete_phrase()` now share the same ordinal handling.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v2/classes/timer/parsing.py tests/test_timer_parsing.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_timer_parsing.py -q` passed (`14 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1729 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Timer handler branch extraction is possible, but changing the set/list/cancel dispatch order should wait for more handler-level characterization.
+
+## 2026-07-04 - Todo List Quoted Item Parser Helper
+
+Goal/scope:
+- Extract shared quoted-item extraction from todo add/remove parsing.
+- Preserve Stage 2 todo edit intent parsing behavior.
+
+Files/modules changed:
+- `jane_web/jane_v2/classes/todo_list/parsing.py`
+- `tests/test_todo_list_parsing.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Add and remove requests still prefer quoted item text before other patterns.
+- Straight and curly quote characters are still supported.
+- Add placeholder detection and fallback add/remove regexes are unchanged.
+- Handler imports still point at the same parsing module helpers.
+
+Boundary chosen:
+- `quoted_item_text()` isolates the quote-matching regex shared by add and remove extraction.
+- `extract_item_text()` now keeps only edit-type-specific fallback parsing.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v2/classes/todo_list/parsing.py tests/test_todo_list_parsing.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_todo_list_parsing.py -q` passed (`19 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1729 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Broader todo handler flow still has resume/edit complexity, but the string extraction policy is now less duplicated.
+
+## 2026-07-04 - Music Playlist Existing Match Helper
+
+Goal/scope:
+- Extract existing user-playlist lookup from `music_playlist_from_query()`.
+- Preserve the music query flow while making Tier 0 playlist matching independently testable.
+
+Files/modules changed:
+- `jane_web/music_playlists.py`
+- `tests/test_music_playlists.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Temporary generated playlists are still ignored when matching existing playlists.
+- Random music queries still skip existing-playlist lookup.
+- Playlist listing errors still fall back to no match.
+- A full matched playlist still gets `temporary=False` before returning.
+- The Tier 0 match log message and track count behavior are unchanged.
+- File search and temporary playlist creation behavior are unchanged.
+
+Boundary chosen:
+- `existing_playlist_for_music_query()` owns the real-playlist match, full-playlist fetch, logging, and temporary flag policy.
+- `music_playlist_from_query()` now reads as cleanup, existing match, file selection, then temporary playlist creation.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/music_playlists.py tests/test_music_playlists.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_music_playlists.py -q` passed (`13 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1728 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- File-selection tiers are already isolated in `select_music_files()`; deeper changes there should be driven by concrete music-search examples.
+
+## 2026-07-04 - RA Useful Report Source Render Helpers
+
+Goal/scope:
+- Extract high-signal source finding lines and source trace row rendering from the RA useful report builder.
+- Preserve the generated app-facing RA research report content.
+
+Files/modules changed:
+- `agent_skills/ra_research_report_markdown.py`
+- `tests/test_ra_research_report_markdown.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- High-signal sources still render heading, evidence label, remission relevance, findings, useful next steps, clinician questions, caveats, and safety notes.
+- Safety lines starting with "no safety concerns" are still suppressed.
+- Source trace rows still render source heading, evidence label, and URL.
+- Overall useful report section order and fallback/default sections are unchanged.
+
+Boundary chosen:
+- `useful_finding_lines()` isolates per-source high-signal detail rendering.
+- `source_trace_line()` isolates the source trace row shape.
+- `build_useful_report_markdown()` remains the report-level section assembler.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile agent_skills/ra_research_report_markdown.py tests/test_ra_research_report_markdown.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_ra_research_report_markdown.py -q` passed (`10 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1726 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- The large deterministic RA plan/scheme templates remain intentionally static; changing their wording would be medical-report behavior, not a mechanical refactor.
+
+## 2026-07-04 - Nightly Pipeline Metric Summary Helper
+
+Goal/scope:
+- Extract markdown metric count parsing from nightly pipeline summary generation.
+- Preserve how pipeline audit counts are divided between problems and improvements.
+
+Files/modules changed:
+- `agent_skills/nightly_report_summaries.py`
+- `tests/test_nightly_report_summaries.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Count lines like `- Prompts audited: **30**` still become bullet text ending in a period.
+- Missing metric lines still produce no summary item.
+- `Auto-fixes applied` still routes to improvements.
+- Prompts audited, classification failures, and response failures still route to problems.
+- Response failure bullets and log-derived auto-fix lines are unchanged.
+
+Boundary chosen:
+- `pipeline_metric_bullet()` isolates the markdown count-line regex and bullet formatting.
+- `summarize_pipeline()` now focuses on routing parsed metrics into the right output bucket.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile agent_skills/nightly_report_summaries.py tests/test_nightly_report_summaries.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_nightly_report_summaries.py -q` passed (`8 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1725 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Other summary helpers can use the same pattern if their report parsing grows beyond one-off regexes.
+
+## 2026-07-04 - Nightly Report TLDR Rendering Helpers
+
+Goal/scope:
+- Extract TL;DR stage header and problem/fix list rendering from nightly self-improvement report generation.
+- Preserve the compact report lines used by the readable nightly report.
+
+Files/modules changed:
+- `agent_skills/nightly_report_rendering.py`
+- `tests/test_nightly_report_rendering.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Stage headers still use `✓`, `⏱`, or `✗` based on status.
+- Durations still render in minutes with one decimal place.
+- Problem and fix TL;DR lists still use the same nested indentation.
+- Stages with no problems or fixes still render "none detected" and "none applied" defaults.
+- `tldr_stage_lines()` still zips result/detail lists and preserves stage order.
+
+Boundary chosen:
+- `tldr_stage_header()` isolates status mark and duration formatting.
+- `tldr_problem_fix_lines()` isolates nested problem/fix/default rendering.
+- `tldr_stage_lines()` now composes the two helpers for each stage.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile agent_skills/nightly_report_rendering.py tests/test_nightly_report_rendering.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_nightly_report_rendering.py -q` passed (`11 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1724 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- More report rendering helpers could be split later, but the high-churn TL;DR section now has direct tests around its formatting policy.
+
+## 2026-07-04 - Audit Auto-Fix Report Row Helpers
+
+Goal/scope:
+- Extract auto-fix report row and line rendering from the full Markdown report builder.
+- Preserve the dry-run/live report contract used by `audit_auto_fixer.py`.
+
+Files/modules changed:
+- `agent_skills/audit_auto_fix_helpers.py`
+- `tests/test_audit_auto_fix_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Fixed/would-fix rows still truncate issue and reason to 80 characters.
+- Fixed rows still render `Unknown` file as `?` and otherwise use the basename.
+- Skipped rows still include only issue and reason.
+- Already-fixed/not-applicable lines still truncate issue text to 100 characters.
+- Reverted lines still bold the truncated issue and include the full reason.
+- Full report sections and dry-run/live headings are unchanged.
+
+Boundary chosen:
+- `_fix_result_file_name()` isolates the filename display policy.
+- `_fixed_result_row()`, `_skipped_result_row()`, `_not_applicable_result_line()`, and `_reverted_result_line()` isolate each section's row shape.
+- `generate_fix_report_markdown()` still controls section ordering and headings.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile agent_skills/audit_auto_fix_helpers.py tests/test_audit_auto_fix_helpers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_audit_auto_fix_helpers.py -q` passed (`10 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1723 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- The preflight and safety policy helpers are already separated; changing path safety rules should be behavior work with explicit examples.
+
+## 2026-07-04 - Dead Code Report Markdown Item Helpers
+
+Goal/scope:
+- Extract repeated Markdown item rendering from the dead-code report builder.
+- Preserve the generated report text used by the nightly code auditor.
+
+Files/modules changed:
+- `agent_skills/dead_code_report.py`
+- `tests/test_dead_code_report.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Clean reports still render the same "Codebase clean" message.
+- Auto-deleted and dead-file sections still render root-relative paths.
+- Possibly-dead function rows still render as ``path :: function()``.
+- Duplicate function body groups still render the group hash and indented root-relative paths.
+- Duplicate groups still cap at 20 rendered groups and report the remaining group count.
+
+Boundary chosen:
+- `_relative_path_item()` centralizes root-relative list items.
+- `_dead_function_item()` centralizes function candidate rows.
+- `_duplicate_group_lines()` owns duplicate-group expansion and truncation.
+- `build_dead_code_report_markdown()` still assembles report sections in the existing order.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile agent_skills/dead_code_report.py tests/test_dead_code_report.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_dead_code_report.py -q` passed (`4 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1722 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Larger dead-code auditor flow changes should keep this renderer as the stable output contract.
+
+## 2026-07-04 - Short-Term Memory Summary Prompt Builders
+
+Goal/scope:
+- Extract short-term memory summary prompt templates from `build_short_term_summary_plan()`.
+- Preserve code-change memory and generic turn-memory summarization behavior.
+
+Files/modules changed:
+- `memory/v1/conversation_text.py`
+- `tests/test_conversation_text.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Empty turns still return an immediate empty summary with `concise_turn_memory_v1`.
+- Short turns still use the rule-based immediate summary path.
+- Assistant code-edit turns still use `code_change_turn_memory_v1`, preserve bullets, and include the code-change prompt rules.
+- Long non-code turns still use `concise_turn_memory_v1` and the generic compression prompt.
+- Prompt role/turn interpolation still uses compacted turn text.
+
+Boundary chosen:
+- `_code_change_summary_prompt()` isolates the durable code-change memory instructions.
+- `_generic_turn_summary_prompt()` isolates the default long-turn compression instructions.
+- `build_short_term_summary_plan()` now focuses on selecting the correct plan path.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile memory/v1/conversation_text.py tests/test_conversation_text.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_conversation_text.py -q` passed (`10 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1721 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Prompt wording changes should be handled separately from refactors because they affect memory summarization behavior.
+
+## 2026-07-04 - Self-Improvement Context Renderer Helpers
+
+Goal/scope:
+- Split self-improvement Stage 3 context rendering into header, job summary, and entry-line helpers.
+- Preserve the voice-oriented context block contract consumed by the pipeline.
+
+Files/modules changed:
+- `jane_web/self_improvement_context.py`
+- `tests/test_self_improvement_context.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Empty entry lists still render the same self-improvement context wrapper and "No recent" guidance.
+- Header lines still include readable latest report, vocal summary log, and technical job logs.
+- Non-empty blocks still include the conversational response-style instructions.
+- Job categories still use `Counter.most_common()` order.
+- Numbered entries still default missing job/timestamp to `?`, severity to `info`, and strip summary whitespace.
+
+Boundary chosen:
+- `_context_header_lines()` centralizes the common block header.
+- `_job_category_summary()` isolates job counting and display order.
+- `_entry_reference_line()` isolates drill-down entry formatting.
+- `build_self_improvement_context_block()` remains responsible for assembling the full prompt block.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/self_improvement_context.py tests/test_self_improvement_context.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_self_improvement_context.py -q` passed (`3 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1720 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Changes to the voice guidance text itself should be treated as product/prompt behavior, not a mechanical refactor.
+
+## 2026-07-04 - Router Keyword Override Matchers
+
+Goal/scope:
+- Extract deterministic keyword-match policies from the legacy router override function.
+- Preserve override order and the calendar guard that avoids stealing scheduling requests.
+
+Files/modules changed:
+- `jane_web/router_overrides.py`
+- `tests/test_router_overrides.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Email read requests still override to `read_email` with response `read_email`.
+- Calendar/agenda read requests still override to `read_calendar` with response `today`.
+- Requests like "schedule a meeting" still do not trigger the calendar read override.
+- Text/SMS read requests still override to `read_messages` unless already syncing.
+- Sync-message requests still run after read-message matching and can override to `sync_messages`.
+- The `changes` tuple still records each classification transition in order.
+
+Boundary chosen:
+- `_is_read_email_request()`, `_is_read_calendar_request()`, `_is_read_messages_request()`, and `_is_sync_messages_request()` make each keyword policy directly testable.
+- `apply_router_keyword_overrides()` now focuses on ordered mutation of classification/response state.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/router_overrides.py tests/test_router_overrides.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_router_overrides.py -q` passed (`5 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1719 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- These keyword rules are now easier to adjust, but adding or removing trigger phrases should be handled as behavior work with prompt examples.
+
+## 2026-07-04 - Pending Action Type Resolution Helpers
+
+Goal/scope:
+- Split pending-action type-specific response handling out of the main resolver.
+- Preserve the resolver's ordered policy: follow-up pivot detection, cancel handling, then pending type dispatch.
+
+Files/modules changed:
+- `jane_web/jane_v2/pending_action_resolution.py`
+- `tests/test_pending_action_resolution.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- High-precision interrupts and topic pivots for Stage 2/Stage 3 follow-ups still clear pending state with `action="pivot"`.
+- Soft cancels for Stage 3 follow-ups and open SMS drafts are still ignored before type dispatch.
+- Strong/global cancels still return `action="cancel"`.
+- Send-message confirmation still only resolves on confirm phrases.
+- Open SMS drafts still route confirm phrases to `sms_draft_send` and edit phrases to `sms_draft_edit`.
+- Stage 3 follow-ups still include `pending_data`.
+- Stage 2 follow-ups still require `handler_class` and include both `handler_class` and `pending_data`.
+
+Boundary chosen:
+- `_send_message_confirmation_resolution()` and `_send_message_draft_resolution()` isolate SMS-specific pending actions.
+- `_stage3_followup_resolution()` and `_stage2_followup_resolution()` isolate follow-up payload construction.
+- `resolve_pending_action_response()` now reads as the high-level dispatch order.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v2/pending_action_resolution.py tests/test_pending_action_resolution.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_pending_action_resolution.py -q` passed (`10 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1718 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- The phrase classifiers in `pending_action_phrases.py` may be worth reviewing separately, but changing phrase coverage should be treated carefully because it affects user-facing routing.
+
+## 2026-07-04 - FIFO Turn Record Helper Split
+
+Goal/scope:
+- Split FIFO turn record construction into pure helpers for non-null structured fields, client-tool normalization, and metadata extraction.
+- Preserve the conversation context record shape used by v2/v3 pipeline persistence.
+
+Files/modules changed:
+- `jane_web/jane_v2/fifo_records.py`
+- `tests/test_fifo_records.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Base record fields still include `user_text`, `assistant_text`, `summary`, `stage`, and `intent`.
+- Optional `privacy` and `confidence` are still added only when truthy.
+- Handler structured fields with `None` values are still omitted.
+- Client tools still normalize to `{"name": name_or_tool, "args": args_or_empty_dict}` records.
+- `conversation_end` and `evidence` still land under `metadata` only when present/truthy.
+
+Boundary chosen:
+- `non_null_items()` isolates the structured-field merge policy.
+- `client_tool_result_records()` isolates client-tool-to-FIFO normalization.
+- `fifo_metadata_from_extras()` isolates which extras become metadata.
+- `build_fifo_turn_record()` remains the orchestration entry point.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v2/fifo_records.py tests/test_fifo_records.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_fifo_records.py -q` passed (`4 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1717 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Pipeline persistence functions still have larger orchestration branches, but the FIFO record shape is now isolated for safer future extraction.
+
+## 2026-07-04 - Unclear Prompt LLM Payload Helpers
+
+Goal/scope:
+- Extract the unclear-prompt qwen request payload and raw response policy from the async detector.
+- Preserve fail-open behavior and the Stage 1 unclear-prompt short-circuit contract.
+
+Files/modules changed:
+- `jane_web/jane_v2/unclear_prompt.py`
+- `tests/test_unclear_prompt.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Empty prompts still return `False` without an LLM call.
+- Model configuration is still imported inside `is_unclear()`.
+- The request payload still uses `stream=False`, `think=False`, temperature `0.0`, `num_predict=5`, and the configured context/keep-alive values.
+- Raw model output still classifies as unclear when the stripped uppercase response starts with `UNCLEAR`.
+- Ollama/model errors still fail open as clear.
+
+Boundary chosen:
+- `_unclear_prompt_payload()` makes the qwen request contract testable without an async call.
+- `_is_unclear_response()` isolates the intentionally broad prefix check.
+- `is_unclear()` still owns runtime imports, network call, timeout selection, logging, and failure handling.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v2/unclear_prompt.py tests/test_unclear_prompt.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_unclear_prompt.py -q` passed (`4 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1716 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- The Stage 1 unclear classifier integration is now easier to test, but changing prompt contents or model policy should be treated as behavior work rather than refactoring.
+
+## 2026-07-04 - Tool Result Parser Shared JSON Scanner
+
+Goal/scope:
+- Replace the duplicate brace-counting JSON object scanner in the v2 tool-result parser with the existing shared scanner.
+- Add direct parser coverage for nested tool-result payloads and malformed marker handling.
+
+Files/modules changed:
+- `jane_web/jane_v2/tool_result_parser.py`
+- `tests/test_tool_result_parser.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Leading `[TOOL_RESULT:{...}]` markers are still stripped before Stage 1 classification.
+- Nested JSON objects still parse correctly.
+- String values containing marker-like `}]` text still do not terminate the scan early.
+- Multiple leading markers are still accumulated in order.
+- Malformed markers are still left visible in the cleaned message and produce no parsed results.
+- `strip_tool_result_prefix()` still returns only the cleaned text.
+
+Boundary chosen:
+- `jane_web.client_tool_json.find_json_object_end()` was already the compatibility wrapper around the shared `jane.json_scanner` helper.
+- Reusing it removes a second implementation of the same escape/string/depth tracking behavior.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v2/tool_result_parser.py tests/test_tool_result_parser.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_tool_result_parser.py tests/test_stage1_prompt_cleaning.py -q` passed (`9 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1714 passed`).
+- `git diff --check` passed.
+- `git diff --no-index --check /dev/null tests/test_tool_result_parser.py` produced no whitespace errors for the new untracked test file.
+
+Remaining follow-up slices:
+- `jane_web.client_tool_markers` and the v2 parser now share the object scanner; any future marker grammar change should add scanner-level tests first.
+
+## 2026-07-03 - Weather Slice Slim Payload Helpers
+
+Goal/scope:
+- Extract weather multi-day detection and slim day payload builders from `slice_for()`.
+- Preserve the Stage 2 weather slice contract while making precipitation and weekly forecast branches easier to audit.
+
+Files/modules changed:
+- `jane_web/jane_v2/classes/weather/slices.py`
+- `tests/test_weather_slices.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- `this_week`, `weekend`, and `week` still select multi-day slices.
+- Precipitation still returns seven days for multi-day, one normalized day when available, and three days by default.
+- Precipitation day payloads still include only weekday, date, precipitation, and condition.
+- Weekly forecast day payloads still include only weekday, high, low, and condition.
+- Day forecast, current, overview, pollen, wind, and day-reference behavior are unchanged.
+
+Boundary chosen:
+- `is_multi_day_spec()` names the day-spec policy shared by normalization and slicing.
+- `precipitation_entries()` isolates which forecast rows are selected.
+- `precipitation_day_payload()` and `weekly_forecast_day_payload()` isolate the public payload shapes for the two slim list responses.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v2/classes/weather/slices.py tests/test_weather_slices.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_weather_slices.py -q` passed (`11 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1710 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Weather handler orchestration still has resume and answer flow complexity, but the pure slice payload policy is now separated enough to test handler changes independently.
+
+## 2026-07-03 - Self-Healing Report Normalization Helpers
+
+Goal/scope:
+- Extract self-healing report tag and payload fallback policies from the normalized report literal.
+- Preserve authorization behavior and the external report payload contract.
+
+Files/modules changed:
+- `jane_web/self_healing_reports.py`
+- `tests/test_self_healing_reports.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Local self-healing reports are still authorized without a token.
+- External reports still require a non-empty expected token matching `x-jane-self-heal-token`.
+- List-valued `tags` are still preserved as provided.
+- Non-list or missing `tags` still become `["external"]`.
+- Dict-valued `payload` is still preserved as provided.
+- Non-dict `payload` still falls back to the original request body.
+- Message truncation and default source/category/project-root behavior are unchanged.
+
+Boundary chosen:
+- `_report_tags()` names the list-only tag policy.
+- `_report_payload()` names the dict-only payload policy.
+- `normalize_self_healing_report()` still owns the final report shape.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/self_healing_reports.py tests/test_self_healing_reports.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_self_healing_reports.py -q` passed (`6 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1709 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- The FastAPI route in `jane_web/main.py` is now mostly orchestration around these helpers; deeper route extraction should wait for endpoint-level characterization tests.
+
+## 2026-07-03 - Rate Limit Window Policy Helpers
+
+Goal/scope:
+- Extract sliding-window hit filtering and stale-key cleanup policy from the in-memory rate limiter.
+- Preserve endpoint category buckets, strict window cutoff behavior, and periodic cleanup semantics.
+
+Files/modules changed:
+- `jane_web/rate_limit.py`
+- `tests/test_rate_limit.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Window hits are still kept only when `timestamp > cutoff`.
+- Requests at capacity still return `False` without appending a new timestamp.
+- Empty hit lists and keys whose last hit is older than `now - 120` are still removed during cleanup.
+- Keys with a last hit exactly at the stale cutoff are still retained.
+- Rate-limit categories and request limits are unchanged.
+
+Boundary chosen:
+- `active_window_hits()` isolates the strict cutoff policy.
+- `stale_rate_limit_keys()` isolates cleanup eligibility while `RateLimiter` still owns storage mutation and cleanup timing.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/rate_limit.py tests/test_rate_limit.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_rate_limit.py -q` passed (`5 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1707 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Middleware wiring in `jane_web/main.py` still has route-adjacent complexity, but deeper extraction should wait for route-level characterization tests.
+
+## 2026-07-03 - Device Diagnostics JSONL Decode Helper
+
+Goal/scope:
+- Extract newest-first JSONL decoding from Android device diagnostics reads.
+- Preserve missing-file behavior, line slicing, malformed-line skipping, and newest-first ordering.
+
+Files/modules changed:
+- `jane_web/device_diagnostics.py`
+- `tests/test_device_diagnostics.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Missing diagnostics files still return `[]`.
+- `read_recent()` still uses the existing `read_text().strip().split("\n")` line shape.
+- Only the last `lines` rows are considered.
+- Rows are still returned newest-first.
+- Malformed JSON lines are still ignored.
+
+Boundary chosen:
+- `_decode_recent_lines()` isolates the pure JSONL slice/reverse/decode policy.
+- `read_recent()` still owns file existence and file-read behavior.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/device_diagnostics.py tests/test_device_diagnostics.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_device_diagnostics.py -q` passed (`4 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1705 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- A shared JSONL reader for diagnostics and announcements may be useful later, but the malformed-line and filtering policies are still different enough to keep separate for now.
+
+## 2026-07-03 - Announcement Since Filter Helpers
+
+Goal/scope:
+- Extract announcement timestamp fallback and since-filter policy from JSONL reading.
+- Preserve malformed-line skipping, truncation behavior, timestamp fallback, inclusive cutoff, and invalid-date handling.
+
+Files/modules changed:
+- `jane_web/announcements.py`
+- `tests/test_announcements.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- `created_at` still takes precedence over `timestamp`.
+- Rows at exactly the `since` timestamp are still filtered out.
+- Rows with missing or invalid announcement timestamps still pass through when a valid `since` is provided.
+- Invalid `since` values still disable filtering.
+- Large logs are still truncated before reading rows.
+
+Boundary chosen:
+- `_created_at_value()` owns timestamp-field fallback.
+- `_is_after_since()` owns the inclusive cutoff decision while `read()` still owns file reading, truncation, JSON parsing, and row accumulation.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/announcements.py tests/test_announcements.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_announcements.py -q` passed (`5 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1704 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- JSONL append/read helpers for diagnostics and announcements could share a utility later, but only if both modules need the same malformed-line policy.
+
+## 2026-07-03 - File Search Index Path Helper
+
+Goal/scope:
+- Extract indexed-path selection from file-search metadata rows.
+- Preserve `path` before `file` precedence, absolute-path normalization, vault escape rejection, and merge behavior.
+
+Files/modules changed:
+- `jane_web/file_search_helpers.py`
+- `tests/test_file_search_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Index rows still prefer `meta["path"]` over `meta["file"]`.
+- Absolute paths under the vault root still become relative paths.
+- Paths starting with `..` still reject as vault escapes.
+- `merge_index_search_results()` still skips missing files and enriches existing filename hits with descriptions.
+
+Boundary chosen:
+- `index_path_from_meta()` owns metadata path/file choice plus normalization.
+- `normalize_index_path()` remains the path safety primitive used by both direct tests and metadata extraction.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/file_search_helpers.py tests/test_file_search_helpers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_file_search_helpers.py -q` passed (`7 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1703 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- File search route code can still be split further only with route-level tests around vault scoping and search pagination.
+
+## 2026-07-03 - Sync Payload Stripped Field Helper
+
+Goal/scope:
+- Extract shared string-field stripping for contact and SMS sync payload normalization.
+- Preserve required-field checks, optional field normalization, classifier inputs, and legacy `contact_id` behavior.
+
+Files/modules changed:
+- `jane_web/sync_payloads.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Blank contact display names still skip insertion.
+- Blank optional phone/email fields still become `None`.
+- Contact aliases still require both alias and phone number.
+- SMS messages still require sender and a truthy timestamp.
+- Message body passed to the classifier is still stripped.
+- `contact_id=None` still becomes the legacy string `"None"` because that path intentionally remains separate from `_stripped_field()`.
+
+Boundary chosen:
+- `_stripped_field()` owns the common `payload.get(key) or ""` plus `strip()` behavior.
+- The insert-value functions still own required-field and tuple-shape decisions.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/sync_payloads.py tests/test_sync_payloads.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_sync_payloads.py -q` passed (`6 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1702 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Contact/SMS route handlers can stay as database I/O orchestration; this helper module now owns the payload tuple normalization.
+
+## 2026-07-03 - File Browser Byte Range Helper
+
+Goal/scope:
+- Extract byte-range bound parsing from `range_response()`.
+- Preserve permissive range-header parsing, response headers, streaming behavior, and existing nonstandard suffix-range handling.
+
+Files/modules changed:
+- `jane_web/file_browser_helpers.py`
+- `tests/test_file_browser_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Invalid range headers still fall back to the full file.
+- Open-ended ranges like `bytes=2-` still run to the end of the file.
+- Existing `bytes=-4` behavior is preserved as `(0, 4, 5)` rather than HTTP suffix semantics.
+- `range_response()` still emits `206`, `Content-Range`, `Accept-Ranges`, and `Content-Length` with the same values.
+
+Boundary chosen:
+- `byte_range_bounds()` isolates pure range parsing from file streaming and `StreamingResponse` construction.
+- `range_response()` still owns file size lookup and byte iteration.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/file_browser_helpers.py tests/test_file_browser_helpers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_file_browser_helpers.py -q` passed (`7 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1702 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Fixing true HTTP suffix-range behavior would be a behavior change and should be handled separately.
+
+## 2026-07-03 - Model Settings Tier Payload Helper
+
+Goal/scope:
+- Extract model tier display payload construction from `build_model_settings_payload()`.
+- Preserve provider normalization, current/default model selection, available-models identity, tier order, role labels, and model values.
+
+Files/modules changed:
+- `jane_web/model_settings.py`
+- `tests/test_model_settings.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- The orchestrator tier still uses the active provider's current model.
+- Agent, Utility, and Local tiers still use the configured smart, cheap, and local model inputs.
+- Tier order and role text are unchanged.
+- `build_model_settings_payload()` still returns the same top-level keys and `AVAILABLE_MODELS` object.
+
+Boundary chosen:
+- `model_tiers()` owns the display-oriented tier list.
+- Provider/env selection remains in `current_model_for_provider()` and `build_model_settings_payload()`.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/model_settings.py tests/test_model_settings.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_model_settings.py -q` passed (`8 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1701 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Provider availability and model-save target helpers are already compact; route code can continue delegating to them.
+
+## 2026-07-03 - Env Settings Allowed Email Helpers
+
+Goal/scope:
+- Extract allowed-Google-email normalization and writeback helpers from add/remove operations.
+- Preserve `.env` editing behavior, duplicate detection, removal semantics, and environment mutation.
+
+Files/modules changed:
+- `jane_web/env_settings.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Email values are still stripped and lowercased before comparison.
+- Duplicate additions still return `False` without rewriting.
+- Missing removals still return `False` without rewriting.
+- Successful changes still write `ALLOWED_GOOGLE_EMAILS` as a comma-joined value and update `environ`.
+- Existing `write_var()` comment/key-preservation behavior is unchanged.
+
+Boundary chosen:
+- `_normalize_email()` centralizes the normalization rule.
+- `_write_allowed_google_emails()` gives add/remove a single writeback path while leaving raw `.env` file editing in `write_var()`.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/env_settings.py tests/test_env_settings.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_env_settings.py -q` passed (`4 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1700 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- `write_var()` still owns line-level `.env` rewriting; split only if more environment settings need shared active-line parsing.
+
+## 2026-07-03 - Canonical Docs Payload Helper
+
+Goal/scope:
+- Extract the shared canonical-document response payload shape used by metadata and body reads.
+- Preserve whitelist lookup, missing-file behavior, logging behavior, file stat fields, and body content inclusion.
+
+Files/modules changed:
+- `jane_web/canonical_docs.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Unknown or missing canonical docs still return `None`.
+- Metadata reads still stat the file without reading content.
+- Body reads still include content plus byte and last-modified metadata.
+- Payload key order is preserved for route-visible JSON: body responses still place `content` before `bytes` and `last_modified`.
+
+Boundary chosen:
+- `_doc_payload()` owns the common slug/title/file/stat payload construction.
+- `read_doc_meta()` and `read_doc_body()` still own file I/O and exception/logging behavior.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/canonical_docs.py tests/test_canonical_docs.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_canonical_docs.py -q` passed (`4 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1700 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- The canonical-doc route handlers in `main.py` can stay thin wrappers around these helpers; further work would be route extraction, not helper cleanup.
+
+## 2026-07-03 - Briefing Article Response Builder Helpers
+
+Goal/scope:
+- Split briefing article response construction into card normalization, filtering, category collection, and pagination helpers.
+- Preserve response shape, mutating card normalization, saved/topic filters, pagination errors, and `full_summary` stripping.
+
+Files/modules changed:
+- `jane_web/briefing_articles.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Cards still receive fallback `categories` from tags or topic.
+- Cards with `image_path` and no `image_url` still get `/api/briefing/image/<id>`.
+- `view="saved"` still takes priority over topic filtering.
+- Categories are still collected after filtering and before pagination.
+- Only returned page cards still have `full_summary` removed.
+- Bad pagination values still raise `ValueError("limit/offset must be integers")`.
+
+Boundary chosen:
+- `_normalize_briefing_card()`, `_filter_briefing_cards()`, `_briefing_categories()`, and `_briefing_page()` isolate the response-builder phases while keeping the public route helper as the orchestrator.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/briefing_articles.py tests/test_briefing_articles.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_briefing_articles.py -q` passed (`4 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1700 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Briefing route handlers in `main.py` still own file I/O and auth; helper extraction should stay at payload/response boundaries unless route-level tests are added.
+
+## 2026-07-03 - Nearest Memory Candidate Policy Helpers
+
+Goal/scope:
+- Name the distance-coercion and recent-short-term promotion decisions inside nearest-memory candidate selection.
+- Preserve nearest-memory filtering, promotion thresholds, lexical overlap behavior, formatting, sorting, and dedupe.
+
+Files/modules changed:
+- `memory/v1/nearest_memory.py`
+- `tests/test_nearest_memory.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Missing or non-numeric distances still reject a nearest-memory candidate.
+- Numeric strings still coerce to floats before comparison.
+- Recent short-term promotion still applies only to `short_term` rows with age `<= 14` days and lexical overlap `>= 0.35`.
+- Promoted recent short-term rows still bypass max-distance rejection and get priority `0`.
+- Non-promoted rows still enforce max distance and minimum lexical overlap.
+
+Boundary chosen:
+- `_candidate_distance()` isolates permissive distance coercion.
+- `_promotes_recent_short_term()` centralizes the promotion thresholds as named constants.
+- `nearest_memory_candidate()` still owns the source-specific low-signal, prompt-queue, file-index, and stale-short-term filters.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile memory/v1/nearest_memory.py tests/test_nearest_memory.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_nearest_memory.py -q` passed (`12 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1700 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Source-specific rejection logic in `nearest_memory_candidate()` could be split further, but only if it reduces the function without hiding the current filter order.
+
+## 2026-07-03 - Low-Signal Memory Text Helpers
+
+Goal/scope:
+- Reuse shared whitespace compaction and centralize regex-any matching inside low-signal memory filters.
+- Preserve shared-memory noise topics, short-term protocol/meta filtering, context snapshot drops, and theme-record drops.
+
+Files/modules changed:
+- `memory/v1/low_signal_memory.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Empty shared memories and known shared noise prefixes still drop.
+- Shared memories with `prompt_list`, `audit_flow`, or `performance_logs` topics still drop.
+- Short-term `context_snapshot` topics and `short_term_theme` rows still drop before protocol matching.
+- Protocol chatter still requires the same protocol signal and meta-prefix/marker checks before dropping.
+- Real content that merely mentions protocol words still stays.
+
+Boundary chosen:
+- `compact_whitespace()` is now reused for short-term low-signal text cleanup.
+- `_matches_any()` keeps repeated case-insensitive regex matching local to the filter module.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile memory/v1/low_signal_memory.py tests/test_low_signal_memory.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_low_signal_memory.py tests/test_retrieved_memory_facts.py -q` passed (`9 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1698 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- The low-signal pattern lists overlap with thematic-output filters; consolidation would need a shared policy test to avoid accidentally broadening either filter.
+
+## 2026-07-03 - Retrieved Memory Expiring-Distance Collector
+
+Goal/scope:
+- Extract the identical expiring-distance fact collection policy shared by Jane long-term, file-index, and essence memory facts.
+- Preserve public collector names, formatting, expiration checks, distance fail-open behavior, and result ordering.
+
+Files/modules changed:
+- `memory/v1/retrieved_memory_facts.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Expired rows are still skipped before formatting.
+- Distances still use `within_distance()`, including its legacy fail-open behavior for missing or bad distance values.
+- Formatted fact lines still include distance via `_meta_with_distance()`.
+- Jane long-term, file-index, and essence collectors still return the same lists for the same inputs.
+
+Boundary chosen:
+- `_collect_expiring_distance_facts()` names the shared filter/format policy once.
+- The public collector functions remain as thin wrappers so call sites and tests keep their domain-specific names.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile memory/v1/retrieved_memory_facts.py tests/test_retrieved_memory_facts.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_retrieved_memory_facts.py -q` passed (`5 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1698 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- User-memory tier splitting still has several policy branches; it is covered but should only be split if the new helper names make a branch materially clearer.
+
+## 2026-07-03 - Memory Text Timestamp Parser
+
+Goal/scope:
+- Centralize memory timestamp parsing for expiry, age, and recency formatting helpers.
+- Preserve falsey timestamp handling, `Z` timezone normalization, naive-datetime UTC normalization, and invalid timestamp fallbacks.
+
+Files/modules changed:
+- `memory/v1/memory_text.py`
+- `tests/test_memory_text.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Missing or invalid expiry timestamps still do not expire a memory.
+- Numeric `expires_at` values still compare directly against the current UTC timestamp.
+- Entries without `timestamp`/`created_at` still pass through `is_too_old()` and return `None` from `age_days()`.
+- `recency_label()` still returns `unknown age`, `just now`, minute/hour/day labels with the same thresholds.
+- `fmt_memory()` output shape is unchanged.
+
+Boundary chosen:
+- `parse_memory_datetime()` owns the shared ISO parsing and UTC normalization.
+- `_metadata_timestamp()` owns the repeated `timestamp` then `created_at` lookup for memory metadata.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile memory/v1/memory_text.py tests/test_memory_text.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_memory_text.py -q` passed (`5 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1698 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- `memory_retrieval.py` still has multi-stage retrieval/filtering code; split only around existing section-building and low-signal filtering tests.
+
+## 2026-07-03 - Conversation Window Transcript Cleanup Reuse
+
+Goal/scope:
+- Reuse the shared conversation text whitespace compaction helper in window transcript rendering.
+- Preserve ledger timestamp parsing, window grouping, metadata stripping, bad-output filtering, and transcript line shapes.
+
+Files/modules changed:
+- `memory/v1/conversation_windows.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Transcript lines still strip injected metadata before filtering.
+- Protocol/meta chatter is still skipped through `looks_like_bad_thematic_output()`.
+- Empty roles still render as the legacy empty prefix (`": content"`).
+- Session and window transcript builders keep the same separator and row handling.
+
+Boundary chosen:
+- `conversation_text.compact_whitespace()` is now the single whitespace-compaction helper for both short-term memory text and archival transcript rendering.
+- `conversation_windows.py` continues to own timestamp normalization and window grouping.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile memory/v1/conversation_windows.py memory/v1/conversation_text.py tests/test_conversation_windows.py tests/test_conversation_text.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_conversation_windows.py tests/test_conversation_text.py -q` passed (`15 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1697 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Window archival orchestration in `ConversationManager.run_window_archival()` still mixes DB reads, throttling, grouping, and promotion; split only with DB-stub characterization tests.
+
+## 2026-07-03 - Conversation Text Whitespace Helper
+
+Goal/scope:
+- Centralize repeated whitespace compaction in pure conversation-memory text helpers.
+- Preserve thematic-turn preparation, bad-output detection, short-term turn filtering, summary-plan prompts, and summary normalization.
+
+Files/modules changed:
+- `memory/v1/conversation_text.py`
+- `tests/test_conversation_text.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Injected metadata stripping remains unchanged.
+- Bad thematic output detection still normalizes whitespace before matching protocol/meta patterns.
+- Short-term memory filtering still uses lowercased compact text.
+- Short and long summary-plan boundaries are unchanged.
+- Bullet-preserving summary normalization still compacts each line and keeps the existing bullet conversion rules.
+
+Boundary chosen:
+- `compact_whitespace()` keeps a common text cleanup operation in the pure helper module instead of repeating `re.sub(r"\s+", " ", ...)` at every call site.
+- `ConversationManager` compatibility wrappers are left untouched because they already delegate to this helper module in the covered paths.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile memory/v1/conversation_text.py tests/test_conversation_text.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_conversation_text.py -q` passed (`9 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1697 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- `ConversationManager.update_short_term_memory()` still has inline orchestration around LLM summary fallback and Chroma writes; split only with tests that stub those side effects.
+
+## 2026-07-03 - Prefetch Cache Fresh Entry Helper
+
+Goal/scope:
+- Remove duplicate TTL freshness checks from the short-lived memory prefetch cache.
+- Keep cache freshness, cached-result lookup, TTL boundary, and over-cap pruning behavior unchanged.
+
+Files/modules changed:
+- `jane_web/prefetch_cache.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Missing entries are still not fresh and return an empty result.
+- Entries are still fresh only when `now - timestamp < ttl_seconds`; the exact TTL boundary remains stale.
+- `get()` still returns the cached `result` value or `""`.
+- `store()` pruning behavior is unchanged.
+
+Boundary chosen:
+- `_fresh_entry()` centralizes the cache-entry lookup plus TTL comparison used by both `is_fresh()` and `get()`.
+- The cache still owns its raw `entries` shape so existing Jane proxy compatibility aliases remain valid.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/prefetch_cache.py tests/test_prefetch_cache.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_prefetch_cache.py -q` passed (`3 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1696 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- `store()` currently prunes only expired entries when over capacity, which is intentionally preserved; adding LRU eviction would be a behavior change.
+
+## 2026-07-03 - Proxy Stale Session Expiration Records
+
+Goal/scope:
+- Move stale-session expiration metadata out of `jane_proxy.py` and into the pure `proxy_sessions.py` helper module.
+- Preserve idle-session pruning, global-idle blocking, malformed-key handling, logging fields, and `end_session()` behavior.
+
+Files/modules changed:
+- `jane_web/proxy_sessions.py`
+- `tests/test_proxy_sessions.py`
+- `jane_web/jane_proxy.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Stale-session selection still uses the strict `now - last_accessed_at > ttl` boundary.
+- Global Claude Code activity still blocks pruning before any per-session expiration work.
+- Malformed composite keys still get raw-dropped without calling `end_session()`.
+- Valid expired composite keys still call `end_session(user_id, session_id)`.
+- Expiration logs still include the composite-key prefix and integer idle seconds.
+
+Boundary chosen:
+- `stale_session_expirations()` now returns typed expiration records with split user/session ids and computed idle seconds.
+- `jane_proxy._prune_stale_sessions()` still owns live session deletion, logging, and calls into the broader shutdown path.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_proxy.py jane_web/proxy_sessions.py tests/test_proxy_sessions.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_proxy_sessions.py -q` passed (`6 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1696 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Session eviction at capacity still computes and handles oldest-session cleanup inline in `_get_session()`; it can be split once a focused eviction test exists around `end_session()` fallback behavior.
+- Stream execution remains too broad for uncharacterized edits; keep extracting pure helper decisions first.
+
+## 2026-07-03 - Auth Session Share Path Helper
+
+Goal/scope:
+- Extract the share-cookie path authorization rule from `request_has_share_or_auth()`.
+- Preserve existing session, trusted-device, single-user-local, share-cookie, and path-prefix behavior.
+
+Files/modules changed:
+- `jane_web/auth_sessions.py`
+- `tests/test_auth_sessions.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Valid sessions still authorize before trusted-device cookies.
+- Trusted-device cookies still authorize when a trusted-device row exists.
+- Share cookies still authorize root shares and paths with the same legacy `startswith()` prefix rule.
+- The legacy broad prefix match remains characterized: `/vault/sharedness/...` still matches a share rooted at `/vault/shared`.
+
+Boundary chosen:
+- `_share_allows_path()` makes the path authorization rule explicit and easy to harden later without mixing it into session/trusted-device resolution.
+- `request_has_share_or_auth()` still owns credential ordering and share-cookie lookup.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_auth_sessions.py -q` passed (`23 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1695 passed`).
+- `git diff --check` passed for tracked files.
+- `git diff --no-index --check /dev/null jane_web/auth_sessions.py` passed for the untracked helper module.
+- `git diff --no-index --check /dev/null tests/test_auth_sessions.py` passed for the untracked focused test file.
+
+Remaining follow-up slices:
+- The broad share-prefix behavior may deserve a future behavior-change fix, but this refactor deliberately only names and tests the existing contract.
+- Bootstrap session creation still has separate existing-session, trusted-device, and local-browser branches that can be split further with focused tests.
+
+## 2026-07-03 - Auth Cookie Response Apply Helper
+
+Goal/scope:
+- Extract the response `set_cookie` argument mapping for auth cookies.
+- Keep session/trusted-device refresh decisions, cookie names, max age, HttpOnly, SameSite, and secure-flag behavior unchanged.
+
+Files/modules changed:
+- `jane_web/auth_cookies.py`
+- `tests/test_auth_cookies.py`
+- `jane_web/main.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Auth cookie refresh planning still only emits cookies for changed non-empty session and trusted-device ids.
+- Route-provided cookie names and max-age overrides still flow through `auth_cookie_specs()`.
+- `main.py` still gets the secure value from `_cookie_secure_flag(request)` at the response-writing point.
+- Cookie writes still pass `name`, `value`, `httponly`, `secure`, `samesite`, and `max_age` to `Response.set_cookie` with the same values as before.
+
+Boundary chosen:
+- `auth_cookie_specs()` owns deciding which auth cookies need refreshing.
+- `apply_auth_cookie_spec()` owns the Starlette response-cookie argument mapping, keeping route code from spelling out cookie attributes inline.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_auth_cookies.py -q` passed (`4 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1694 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- `main.py` still owns the auth-cookie attachment orchestration because it depends on live request helpers; further extraction there should use route/request characterization tests.
+- Share-code cookie writes are adjacent but intentionally separate because they do not share auth-cookie refresh semantics.
+
+## 2026-07-03 - Conversation Key Client Session Helper
+
+Goal/scope:
+- Extract client-session fallback selection from Jane web conversation key payload construction.
+- Keep managed conversation keys, unmanaged legacy keys, device-id precedence, and resolver fallbacks unchanged.
+
+Files/modules changed:
+- `jane_web/conversation_keys.py`
+- `tests/test_conversation_keys.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Raw body `session_id` still wins after trimming whitespace.
+- Auth session id still fills in when the body session id is empty.
+- Missing raw/auth ids still use `default`.
+- Managed users still get `<sanitized_user>__<device>__<client_session>` keys, while unmanaged users keep the legacy client-session key.
+
+Boundary chosen:
+- `conversation_client_session_id()` isolates a fallback rule used by both payload metadata and unmanaged conversation keys.
+- `build_conversation_key_payload()` still owns managed-vs-unmanaged key construction.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/conversation_keys.py tests/test_conversation_keys.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_conversation_keys.py -q` passed (`8 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1693 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Conversation key resolution is now compact; further changes would likely affect session behavior and should use route-level chat tests.
+
+## 2026-07-03 - Instant Command Table Response Helper
+
+Goal/scope:
+- Extract shared load/format/fallback behavior for instant job-table commands.
+- Keep exact command matching, command-reference output, cron output, pending-job fallback, and completed-job fallback unchanged.
+
+Files/modules changed:
+- `jane_web/instant_commands.py`
+- `tests/test_instant_commands.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Job queue commands still format `get_job_queue_data()` through `format_markdown_table()`.
+- Empty pending jobs still return `Job queue is empty.`
+- Empty completed jobs still return `No completed jobs.`
+- Loader/formatter failures still return the same user-visible error strings.
+
+Boundary chosen:
+- `_table_command_response()` isolates the common table-command mechanics from command-kind routing.
+- `instant_command_response()` still owns selecting pending jobs, completed jobs, commands, cron, or no instant command.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/instant_commands.py tests/test_instant_commands.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_instant_commands.py -q` passed (`7 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1692 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Instant command matching is now compact; further changes should be treated as command behavior changes because they affect exact user phrases.
+
+## 2026-07-03 - Task Classifier Regex Scoring Helpers
+
+Goal/scope:
+- Extract regex scoring and code-reference detection from the background-task classifier.
+- Keep background-prefix forcing, follow-up quick routing, question quick routing, and compound implementation offload behavior unchanged.
+
+Files/modules changed:
+- `jane_web/task_classifier.py`
+- `tests/test_task_classifier.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Explicit `background:` / `bg:` prefixes still force `big`.
+- Follow-up starters such as `please go ahead` still stay `quick`.
+- Long questions with multiple quick-query signals still stay `quick`.
+- Compound implementation/refactor requests still classify as `big`.
+
+Boundary chosen:
+- `_pattern_score()` isolates repeated compiled-regex scoring.
+- `_has_code_references()` isolates the code-reference signal used by the long-message offload rule.
+- `classify_task()` still owns the order and thresholds of the offload policy.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/task_classifier.py tests/test_task_classifier.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_task_classifier.py -q` passed (`6 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1691 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Task offloader execution/retry behavior is already covered by focused tests; deeper changes should use fake thread/runner integration tests.
+
+## 2026-07-03 - V3 Pipeline Terminal Stage 2 Helper
+
+Goal/scope:
+- Extract shared terminal Stage 2 state mutation for v3 short-circuits.
+- Keep unclear-repeat and end-conversation behavior, response shapes, acknowledgments, and timing metadata unchanged.
+
+Files/modules changed:
+- `jane_web/jane_v3/pipeline.py`
+- `tests/test_v3_pipeline_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- `unclear` still returns the v2 repeat reply with `unclear_prompt=True` and does not escalate.
+- `end conversation` still returns `{"text": "Ok.", "conversation_end": True}` and does not escalate.
+- Terminal short-circuits still clear Stage 2/fallback acknowledgments and reset `stage2_ms` to `0`.
+- The state dict is still mutated in place, matching the surrounding pipeline helper style.
+
+Boundary chosen:
+- `_terminal_stage2_state()` captures the repeated terminal Stage 2 state shape shared by classifier short-circuits.
+- `_classify_and_maybe_handle()` still owns when each short-circuit applies and the log messages around them.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v3/pipeline.py tests/test_v3_pipeline_helpers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_v3_pipeline_helpers.py -q` passed (`19 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1690 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Route-level v3 non-streaming and streaming response assembly still contain duplication, but should be split only with response-contract tests around both paths.
+
+## 2026-07-03 - V3 Classifier Param Leak Helper
+
+Goal/scope:
+- Extract the v3 classifier guard that drops params when qwen chooses a different class than the schema target.
+- Keep param extraction, schema-class tracking, distance flooring, and final route confidence behavior unchanged.
+
+Files/modules changed:
+- `intent_classifier/v3/classifier.py`
+- `tests/test_v3_classifier_response.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Params are kept when the chosen class matches the schema class.
+- Params are dropped when qwen chooses a different class from the schema used to extract them.
+- Empty params remain empty and do not trigger the drop log path.
+- Final classifier return shape remains `(class, confidence, params)`.
+
+Boundary chosen:
+- `_params_for_chosen_class()` isolates a guardrail that protects handlers from receiving sibling-class fields.
+- `classify()` still owns the logging side effect and final return.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile intent_classifier/v3/classifier.py tests/test_v3_classifier_response.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_v3_classifier_response.py -q` passed (`13 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1689 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- v3 classifier validation and guardrails are now broken into small pure helpers; further work should require async classifier characterization with fake Chroma and fake qwen.
+
+## 2026-07-03 - V3 Classifier Distance Floor Helpers
+
+Goal/scope:
+- Extract v3 classifier chosen-class distance lookup and confidence-floor decision policy.
+- Keep Stage 2 confidence gating, pending-choice exemption, send-message exemption, `others` handling, and loose-distance flooring unchanged.
+
+Files/modules changed:
+- `intent_classifier/v3/classifier.py`
+- `tests/test_v3_classifier_response.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- The distance gate still uses the qwen-chosen class's normalized Chroma distance, not only the winner distance.
+- High/Very High choices above the Stage 2 max distance still floor to `Medium`.
+- Pending-action class choices still skip the floor.
+- `send message`, `others`, non-Stage-2 confidences, and classes absent from top-K still skip the floor.
+
+Boundary chosen:
+- `_chosen_class_distance()` isolates normalized ranked-list lookup.
+- `_should_floor_distance_confidence()` isolates the exemption matrix without importing the live classifier stack or qwen.
+- The default Stage 2 max distance lookup is evaluated inside the helper body to avoid import-order coupling with module constants.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile intent_classifier/v3/classifier.py tests/test_v3_classifier_response.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_v3_classifier_response.py -q` passed (`12 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1688 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- The v3 classifier parse/validation area is now well isolated; deeper `classify()` splitting should wait for async fake qwen and fake Chroma tests.
+
+## 2026-07-03 - V3 Classifier Allowed-Class Helper
+
+Goal/scope:
+- Extract v3 classifier runtime registry normalization for qwen class validation.
+- Keep unknown-class fallback, built-in `others` allowance, qwen parse behavior, and distance-floor behavior unchanged.
+
+Files/modules changed:
+- `intent_classifier/v3/classifier.py`
+- `tests/test_v3_classifier_response.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- `others` remains allowed even though it is not a Stage 2 handler.
+- Registry metadata names are still stripped and lowercased before comparison.
+- Empty metadata names are ignored.
+- If registry loading fails, validation still falls back to allowing only `others`.
+
+Boundary chosen:
+- `_allowed_classifier_classes()` isolates registry-shape conversion from qwen response parsing and validation.
+- `classify()` still owns importing the live registry and applying the unknown-class fallback.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile intent_classifier/v3/classifier.py tests/test_v3_classifier_response.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_v3_classifier_response.py -q` passed (`10 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1686 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- A future v3 classifier slice could extract distance-floor decision logic, but only after adding direct tests for pending-choice, send-message exemption, and loose Chroma distance cases.
+
+## 2026-07-03 - V3 Classifier Label Normalization Helper
+
+Goal/scope:
+- Centralize v3 classifier label normalization across Chroma labels, pending-action classes, and chosen-class distance gating.
+- Keep winner/runner-up handling, pending-class swap behavior, schema-class selection, and distance flooring unchanged.
+
+Files/modules changed:
+- `intent_classifier/v3/classifier.py`
+- `tests/test_v3_classifier_response.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- UPPER_CASE Chroma labels such as `TODO_LIST` still normalize to handler names like `todo list`.
+- Pending handler labels with underscores still normalize to the registry's lowercase-with-spaces names.
+- Empty or missing labels still normalize to an empty string.
+- The Stage 2 distance gate still compares the qwen-chosen class against normalized Chroma class labels.
+
+Boundary chosen:
+- `_handler_name_from_classifier_label()` isolates a repeated cross-boundary conversion between classifier labels and handler names.
+- `classify()` still owns candidate voting, FIFO loading, qwen prompt construction, parse validation, distance flooring, and param leak guards.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile intent_classifier/v3/classifier.py tests/test_v3_classifier_response.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_v3_classifier_response.py -q` passed (`9 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1685 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- The main `classify()` body still has parse validation and distance-floor policy inline; extract only with additional characterization tests around allowed classes and qwen response handling.
+
+## 2026-07-03 - Request Helper Local Host Constants
+
+Goal/scope:
+- Extract shared local-host constants and request client-host access from Jane web request helpers.
+- Keep Cloudflare/proxy rejection, secure-cookie detection, local-browser access, local-request access, and Android user-agent detection unchanged.
+
+Files/modules changed:
+- `jane_web/request_helpers.py`
+- `tests/test_request_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Local browser access still allows `127.0.0.1` and `::1`, but not `localhost`.
+- Local request checks still allow `localhost` when no proxy headers are present.
+- Local control IP checks still allow loopback hosts and optionally `unknown`.
+- Missing `request.client` still resolves to an empty host for local checks and `unknown` for `client_ip()`.
+
+Boundary chosen:
+- `_request_client_host()` isolates repeated request-client access and its missing-client fallback.
+- `LOCAL_BROWSER_HOSTS` and `LOCAL_REQUEST_HOSTS` make the intentionally different host policies explicit.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/request_helpers.py tests/test_request_helpers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_request_helpers.py -q` passed (`9 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1684 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Request logging helpers are already small; future route-level middleware extraction should use integration tests around FastAPI request objects.
+
+## 2026-07-03 - Server Data Calendar Range Override Helper
+
+Goal/scope:
+- Extract calendar message override parsing from server-side calendar range selection.
+- Keep router-response fallback and all legacy message override precedence unchanged.
+
+Files/modules changed:
+- `jane_web/server_data_contexts.py`
+- `tests/test_server_data_contexts.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Missing router response still defaults to `today`.
+- Explicit router ranges still survive when the user message has no range override.
+- Message mentions still override in the existing order: tomorrow, this week, next week, weekend, coming up/next 7.
+- The legacy `show this weekend` behavior still resolves to `this_week` because `this week` is checked first.
+
+Boundary chosen:
+- `_calendar_range_override_from_message()` isolates message-text parsing from router-response fallback.
+- `calendar_range_from_router_response()` remains the public compatibility function for server-side calendar reads.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/server_data_contexts.py tests/test_server_data_contexts.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_server_data_contexts.py -q` passed (`8 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1683 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Any change to the calendar range precedence should be handled as a product-behavior fix with explicit approval, not folded into this refactor.
+
+## 2026-07-03 - Server Data Email Query Parsers
+
+Goal/scope:
+- Extract email router-response limit and sender-query parsing from server-side data-context helpers.
+- Keep default unread query, numeric limit parsing, max-limit clamping, and sender query behavior unchanged.
+
+Files/modules changed:
+- `jane_web/server_data_contexts.py`
+- `tests/test_server_data_contexts.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Missing router responses still produce `EmailReadQuery(limit=10, query="is:unread")`.
+- Numeric counts still set the email fetch limit and clamp to the configured max.
+- `from:<sender>` tokens still override the default unread query.
+- Email and calendar prompt context shapes are unchanged.
+
+Boundary chosen:
+- `_email_limit_from_router_response()` and `_email_sender_query_from_router_response()` isolate parsing policy from the public `EmailReadQuery` assembly.
+- `email_read_query_from_router_response()` remains the compatibility facade used by server-side email fetch paths.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/server_data_contexts.py tests/test_server_data_contexts.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_server_data_contexts.py -q` passed (`7 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1682 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Calendar range precedence remains intentionally preserved; any change to weekend-vs-this-week matching should be treated as a behavior change, not a refactor.
+
+## 2026-07-03 - Session Init Prompt Builder
+
+Goal/scope:
+- Extract the persistent-session initialization prompt text from the streaming session-init orchestration.
+- Keep status streaming, context building, execution profile usage, yolo mode selection, greeting trimming, and fallback greeting unchanged.
+
+Files/modules changed:
+- `jane_web/session_init.py`
+- `tests/test_session_init.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- The context builder still receives the same prompt, empty history, session id, platform, status callback, and user id.
+- Status chunks still flush before the init-status chunk.
+- The manager still receives the same initialization prompt content, timeout, model, and yolo settings.
+- Errors still log `Init session failed` and yield `Hey! Ready when you are.`
+
+Boundary chosen:
+- `_session_init_prompt()` isolates the user-facing prompt contract from async queue and manager orchestration.
+- `session_init_stream_chunks()` still owns context/status streaming and provider turn execution.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/session_init.py tests/test_session_init.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_session_init.py -q` passed (`3 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1681 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Session initialization is now small; further refactors should target `jane_init_session` route-level provider/manager selection in `jane_web/main.py` only with route characterization tests.
+
+## 2026-07-03 - Pending Action Cancel Kind Helper
+
+Goal/scope:
+- Extract cancel-strength classification from deterministic pending-action resolution.
+- Keep soft cancel, strong cancel, global cancel, draft-send, draft-edit, and follow-up behavior unchanged.
+
+Files/modules changed:
+- `jane_web/jane_v2/pending_action_resolution.py`
+- `tests/test_pending_action_resolution.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Stage 3 follow-ups and open SMS drafts still ignore soft cancels such as `no`.
+- Strong cancels still cancel Stage 3 follow-ups and open SMS drafts.
+- Other pending-action types still use global cancel matching.
+- Non-cancel replies still fall through to their normal pending-action handlers.
+
+Boundary chosen:
+- `_cancel_kind()` is pure response-routing policy that can be tested independently of logging and payload construction.
+- `resolve_pending_action_response()` still owns logging and final resolution payload assembly.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_pending_action_resolution.py -q` passed (`9 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1680 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- This module is now mostly helper-driven; further changes should target caller-level pending-action lifecycle only with broader pipeline characterization tests.
+
+## 2026-07-03 - Pending Action Follow-Up Pivot Helper
+
+Goal/scope:
+- Extract follow-up pivot classification from deterministic pending-action resolution.
+- Keep high-precision interrupt, topic-pivot, cancel, confirmation, draft, Stage 2 follow-up, and Stage 3 follow-up behavior unchanged.
+
+Files/modules changed:
+- `jane_web/jane_v2/pending_action_resolution.py`
+- `tests/test_pending_action_resolution.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Only Stage 2 and Stage 3 follow-ups can pivot on high-precision interrupts or topic pivots.
+- High-precision interrupts still take precedence over topic-pivot routing.
+- Pivot responses still use the same common pending payload shape.
+- Non-follow-up pending actions such as SMS confirmation still ignore these pivot checks.
+
+Boundary chosen:
+- `_followup_pivot_kind()` is pure routing policy that can be tested without logger state or response construction.
+- `resolve_pending_action_response()` still owns logging and the final resolution payloads.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_pending_action_resolution.py -q` passed (`8 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1679 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Cancel strength routing is the next small candidate in this module, but it should stay covered by direct helper tests before being moved.
+
+## 2026-07-03 - Auth Session Trusted Bootstrap Lookup Helper
+
+Goal/scope:
+- Collapse duplicate trusted-device bootstrap branches in web auth session resolution.
+- Keep session reuse, trusted-cookie precedence, fingerprint fallback, prewarming, and local-browser fallback unchanged.
+
+Files/modules changed:
+- `jane_web/auth_sessions.py`
+- `tests/test_auth_sessions.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- A valid existing session still returns immediately and prewarms with the session user.
+- Trusted-device cookie rows still take precedence over fingerprint matches.
+- Fingerprint trusted-device matches still create trusted prewarmed sessions when no cookie row matches.
+- Missing auth still returns `(None, None)`.
+
+Boundary chosen:
+- `_trusted_bootstrap_row()` isolates source selection from session creation, logging, and request-specific fallback logic.
+- `bootstrap_session_for_request()` still owns the auth flow order and all session/prewarm side effects.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/auth_sessions.py tests/test_auth_sessions.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_auth_sessions.py -q` passed (`22 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1678 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- `bootstrap_session_for_request()` is shorter but still mixes logging and fallback creation; further extraction should keep exact auth precedence covered by tests.
+
+## 2026-07-03 - Turn Dedupe Begin Blocking Helper
+
+Goal/scope:
+- Extract the persistent turn-dedupe policy that decides whether an existing row blocks a new dispatch.
+- Keep retry behavior for pending, completed, failed, aged-out, and malformed timestamp rows unchanged.
+
+Files/modules changed:
+- `jane_web/turn_dedupe.py`
+- `tests/test_turn_dedupe_store.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Pending and completed rows inside the TTL still block `try_begin()`.
+- Failed rows inside the TTL are still overwritten so retry dispatch is allowed.
+- Aged-out rows are still overwritten.
+- Malformed timestamps still fall back to age `0.0`, preserving the existing conservative block for pending/completed rows.
+
+Boundary chosen:
+- `_existing_row_blocks_begin()` is pure policy that can be tested without opening the SQLite ledger.
+- `try_begin()` still owns database locking, row deletion, insertion, and transaction commit behavior.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_turn_dedupe_store.py -q` passed (`6 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1675 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Deeper store refactors should use a temporary SQLite ledger fixture before changing `_get_row()`, `try_begin()`, `wait_for_completion()`, or pruning behavior.
+
+## 2026-07-03 - Chat Stream Dedupe Completed Replay Helper
+
+Goal/scope:
+- Extract completed-cache replay decision construction from chat stream turn dedupe.
+- Keep completed replay, pending join, failed-begin race replay, and no-turn-id behavior unchanged.
+
+Files/modules changed:
+- `jane_web/chat_stream_dedupe.py`
+- `tests/test_chat_stream_dedupe.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Completed rows with cached response JSON still replay immediately with reason `completed`.
+- Pending rows still wait for completion and replay with reason `joined` when a cached response arrives.
+- Failed `try_begin()` races still replay completed cached responses with reason `race_completed`.
+- Pending rows and completed rows without response JSON still do not replay from the helper.
+
+Boundary chosen:
+- `_completed_replay()` isolates the repeated row-to-`TurnDedupeStart` mapping used by both initial lookup and race lookup paths.
+- `begin_turn_dedupe()` still owns store lookups, pending waits, begin attempts, and fallback decisions.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_chat_stream_dedupe.py -q` passed (`10 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1672 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Stream dedupe is now small; further changes should target the persistent `turn_dedupe` store or larger stream orchestration only when a clear tested behavior boundary exists.
+
+## 2026-07-03 - Chat Stream Identity Helper
+
+Goal/scope:
+- Extract user/conversation-session resolution from the normal chat stream runner.
+- Keep stream open/close accounting, scoped session id behavior, default-user fallback, and dedupe finalization unchanged.
+
+Files/modules changed:
+- `jane_web/chat_stream_runner.py`
+- `tests/test_chat_stream_runner.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Authenticated sessions still use `get_session_user_fn(auth_session_id)`.
+- Missing authenticated users still fall back to `default_user_id_fn()`.
+- Conversation ids are still scoped through `scoped_session_id_fn(user_id, requested_conversation_session_id)`.
+- `normal_chat_stream_chunks()` still passes the scoped conversation id to `stream_message_fn()`.
+
+Boundary chosen:
+- `stream_identity()` is pure request-identity plumbing that can be tested without an async stream.
+- The stream runner still owns timeout handling, exception-to-event conversion, active stream counts, and turn dedupe finalization.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/chat_stream_runner.py tests/test_chat_stream_runner.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_chat_stream_runner.py -q` passed (`3 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1670 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Stream error/finalization branches now have tests; further runner extraction should target a fake timeout path before changing exception handling.
+- `jane_proxy.stream_message()` remains the larger orchestration target but still needs a dedicated event-stream harness.
+
+## 2026-07-03 - Jane Proxy Session Key Helper Reuse
+
+Goal/scope:
+- Replace the last inline Jane proxy session composite-key construction with the shared helper.
+- Keep `end_session()` state removal, background ConversationManager close, and persistent brain cleanup unchanged.
+
+Files/modules changed:
+- `jane_web/jane_proxy.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Session keys remain `"<user_id>:<session_id>"`.
+- `end_session()` still pops the same `_sessions` entry and performs the same cleanup.
+- Existing proxy session helper tests continue to define the key/split contract.
+
+Boundary chosen:
+- `jane_web.proxy_sessions.session_composite_key()` was already imported and used in nearby session creation paths.
+- Reusing it removes drift between session creation, eviction, pruning, and explicit end-session cleanup.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_proxy.py jane_web/proxy_sessions.py tests/test_proxy_sessions.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_proxy_sessions.py -q` passed (`5 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1669 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- `stream_message()` remains the dominant large function in `jane_proxy`; split only with fake event-stream tests for dedupe, offload, and persistence paths.
+- Session key construction is now centralized for Jane proxy state.
+
+## 2026-07-03 - Brain Adapter Provider Timeout Resolver
+
+Goal/scope:
+- Extract shared provider-specific timeout environment lookup for brain adapters.
+- Keep idle timeout and wall-clock timeout behavior, env precedence, and defaults unchanged.
+
+Files/modules changed:
+- `llm_brain/v1/brain_adapters.py`
+- `tests/test_brain_adapters.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Provider-specific env vars like `JANE_IDLE_TIMEOUT_CLAUDE` still override generic env vars.
+- Generic env vars like `JANE_IDLE_TIMEOUT` still override provider defaults.
+- Unknown idle timeout fallback remains `120` seconds.
+- Unknown wall-clock timeout fallback remains `1800` seconds.
+
+Boundary chosen:
+- `_resolve_provider_timeout()` captures the common lookup order while callers supply their own env base, provider defaults, and fallback.
+- `build_execution_profile()` still owns assembling the final execution profile.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile llm_brain/v1/brain_adapters.py tests/test_brain_adapters.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_brain_adapters.py -q` passed (`6 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1669 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Streaming subprocess timeout behavior itself remains integration-heavy; use fake selector/process tests before changing it.
+- Adapter command builders are provider-specific and should stay separate unless shared behavior emerges under tests.
+
+## 2026-07-03 - Standing Brain Env Provider Parser
+
+Goal/scope:
+- Extract `.env` `JANE_BRAIN` parsing from `_configured_provider()`.
+- Keep env-file precedence, provider alias normalization, invalid-value fallback, and process-env fallback unchanged.
+
+Files/modules changed:
+- `llm_brain/v1/standing_brain.py`
+- `tests/test_standing_brain_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Commented, blank, and malformed env lines are ignored.
+- Valid `JANE_BRAIN` values from the env file still override process environment fallback.
+- Invalid provider values return no env-file provider and fall back to the existing environment/default logic.
+- `codex` still normalizes to the `openai` provider through `normalize_frontier_provider()`.
+
+Boundary chosen:
+- `_provider_from_env_lines()` is pure parsing policy and can be tested without touching the real env file.
+- `_configured_provider()` still owns filesystem reads and process-environment fallback.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile llm_brain/v1/standing_brain.py tests/test_standing_brain_helpers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_standing_brain_helpers.py -q` passed (`13 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1667 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- `_get_model()` still mixes current provider globals and legacy env variables; split only if tests pin provider/global interactions.
+- Provider switching remains process-heavy and should keep using small pure helpers around I/O boundaries.
+
+## 2026-07-03 - Persistent Claude Session Key Helper
+
+Goal/scope:
+- Extract persistent-Claude manager session-key construction.
+- Keep session lookup, end cleanup, active process tracking, and run-turn storage key behavior unchanged.
+
+Files/modules changed:
+- `llm_brain/v1/persistent_claude.py`
+- `tests/test_persistent_claude.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Claude persistent session keys remain `"<user_id>:<session_id>"`.
+- `get()`, `end()`, and `run_turn()` still address the same session/process records.
+- Capacity eviction, process cleanup, and session rotation behavior are unchanged.
+
+Boundary chosen:
+- `_claude_session_key()` aligns Claude with the persistent Codex and Gemini key helpers.
+- Manager methods still own locking, process lifecycle, and context rotation.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile llm_brain/v1/persistent_claude.py tests/test_persistent_claude.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_persistent_claude.py -q` passed (`7 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1666 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Active-process lifecycle paths still need fake process tests before changing eviction or stale reaping behavior.
+- Persistent provider managers now have consistent key helpers, but process cleanup remains provider-specific.
+
+## 2026-07-03 - Standing Codex Session Key Helper
+
+Goal/scope:
+- Extract standing-Codex app-server manager session-key construction.
+- Keep session lookup, creation, eviction, and unsubscribe-on-end behavior unchanged.
+
+Files/modules changed:
+- `llm_brain/v1/standing_codex.py`
+- `tests/test_standing_codex_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- App-server session keys remain `"<user_id>:<session_id>"`.
+- `get()` and `end()` still address the same stored session.
+- Session `last_used` refresh, capacity eviction, and thread unsubscribe behavior are unchanged.
+
+Boundary chosen:
+- `_codex_app_session_key()` mirrors the persistent provider key helpers and removes duplicate string construction.
+- `CodexAppServerManager` still owns locking and lifecycle behavior.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile llm_brain/v1/standing_codex.py tests/test_standing_codex_helpers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_standing_codex_helpers.py -q` passed (`6 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1665 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Standing Codex lifecycle paths still need fake RPC/process tests before deeper manager extraction.
+- Provider session-key helpers are now consistent across persistent Gemini, persistent Codex, and standing Codex.
+
+## 2026-07-03 - Persistent Gemini Session Key Helper
+
+Goal/scope:
+- Extract persistent-Gemini manager session-key construction.
+- Keep session lookup, creation, shutdown, and active-session storage unchanged.
+
+Files/modules changed:
+- `llm_brain/v1/persistent_gemini.py`
+- `tests/test_persistent_gemini.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Manager keys remain `"<user_id>:<session_id>"`.
+- `get()` and `shutdown()` still address the same session entry.
+- Session creation, user-specific CWD lookup, and capacity eviction behavior are unchanged.
+
+Boundary chosen:
+- `_gemini_session_key()` mirrors the persistent Codex key helper and removes duplicated string construction.
+- Manager methods still own locking and lifecycle operations.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile llm_brain/v1/persistent_gemini.py tests/test_persistent_gemini.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_persistent_gemini.py -q` passed (`3 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1664 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Manager stale-session reap and LRU eviction can be tested with fake sessions before further lifecycle refactors.
+- Persistent provider managers now share a clearer key-construction pattern but still have provider-specific lifecycle semantics.
+
+## 2026-07-03 - Persistent Gemini Dead Noise Filter Cleanup
+
+Goal/scope:
+- Remove unused persistent-Gemini noise filtering code.
+- Keep PTY prompt detection, text cleanup, delta emission, startup readiness, and turn completion unchanged.
+
+Files/modules changed:
+- `llm_brain/v1/persistent_gemini.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- `_is_meaningful()` was private and had no call sites.
+- `NOISE_INDICATORS` was only read by that unused method.
+- The read loop still forwards safe deltas and finishes turns based on prompt detection.
+
+Boundary chosen:
+- This was dead code, not a live behavior boundary.
+- Removing it reduces confusion around whether Gemini output is filtered; the current implementation uses prompt-position buffering instead.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile llm_brain/v1/persistent_gemini.py tests/test_persistent_gemini.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_persistent_gemini.py -q` passed (`2 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1663 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Add fake session-state tests before changing `_emit_safe_delta()` or `_finish_turn_if_prompt_seen()`.
+- The manager's stale reap and LRU eviction paths still need lightweight async tests.
+
+## 2026-07-03 - Persistent Gemini Startup Failure Helper
+
+Goal/scope:
+- Extract duplicated persistent-Gemini startup failure construction from the PTY read loop.
+- Keep readiness signaling, startup-buffer capture, process-returncode fallback, and error text unchanged.
+
+Files/modules changed:
+- `llm_brain/v1/persistent_gemini.py`
+- `tests/test_persistent_gemini.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Startup failures still prefer the trimmed startup buffer as the diagnostic snippet.
+- Empty startup buffers still fall back to `Gemini exited with code <returncode>`.
+- Error snippets are still truncated to 300 characters.
+- The read loop still sets `start_failure` and `ready_event` in the same process-exit branches.
+
+Boundary chosen:
+- `_gemini_startup_failure()` is pure formatting policy shared by three process-exit paths.
+- The async PTY read loop still owns I/O, prompt detection, and pending-turn completion.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile llm_brain/v1/persistent_gemini.py tests/test_persistent_gemini.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_persistent_gemini.py -q` passed (`2 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1663 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Persistent Gemini still lacks fake PTY/process tests for `_finish_turn_if_prompt_seen()` and stale-session reap/evict behavior.
+- Larger changes to `_read_loop()` should wait until those async session-state transitions are covered.
+
+## 2026-07-03 - Memory Retrieval Section Collector Adapter
+
+Goal/scope:
+- Extract the repeated future-result-to-collector adapter used by non-user memory sections.
+- Keep Jane long-term, short-term, file-index, and essence filtering behavior unchanged.
+
+Files/modules changed:
+- `memory/v1/memory_retrieval.py`
+- `tests/test_memory_retrieval_sections.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Each section still reads `(docs, metas, distances)` through `_safe_future_result()`.
+- Each section still passes its own `max_distance` value to the existing collector.
+- Short-term facts still receive the recency boost after semantic collection.
+- Unused plan sections still return empty lists.
+
+Boundary chosen:
+- `_collect_section_facts()` is a small adapter that removes boilerplate without hiding section-specific policy.
+- `_collect_non_user_section_facts()` still owns which sources are active and the short-term recency boost.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile memory/v1/memory_retrieval.py tests/test_memory_retrieval_sections.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_memory_retrieval_sections.py -q` passed (`13 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1661 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- User/shared memory collection has DS3000 anchor and legacy forgettable behavior; keep that separate from the generic section collector.
+- Further retrieval refactors should target nearest-memory query candidate assembly with dedicated ranking fixtures.
+
+## 2026-07-03 - Memory Retrieval Section Query Specs
+
+Goal/scope:
+- Extract memory retrieval source query configuration from `_submit_section_queries()`.
+- Keep query submission order, Chroma paths, collection names, limits, and precomputed-embedding behavior unchanged.
+
+Files/modules changed:
+- `memory/v1/memory_retrieval.py`
+- `tests/test_memory_retrieval_sections.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- User/shared memory is still submitted first, followed by Jane long-term, short-term, file index, and essence.
+- File index still caps its limit at `min(8, CHROMA_SEARCH_LIMIT)`.
+- User, long-term, short-term, and file-index queries still receive the precomputed query embedding when available.
+- Essence queries still avoid the precomputed embedding and use text query behavior.
+
+Boundary chosen:
+- `_section_query_specs()` is pure source-selection policy that can be tested without an executor or Chroma client.
+- `_submit_section_queries()` now only loops over specs and submits futures.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile memory/v1/memory_retrieval.py tests/test_memory_retrieval_sections.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_memory_retrieval_sections.py -q` passed (`12 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1660 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- `build_memory_sections()` still orchestrates cache, query plan, parallel retrieval, and section assembly; the major seams now have helpers.
+- Nearest-memory query specs are separate and should not be merged with section specs unless their different ranking/filtering behavior is tested together.
+
+## 2026-07-03 - Verify-First Missing Evidence Helper
+
+Goal/scope:
+- Extract missing-evidence source selection from the streaming evidence correction formatter.
+- Keep verify-first correction wording, stream FIFO persistence, and evidence metadata updates unchanged.
+
+Files/modules changed:
+- `jane_web/jane_v2/pipeline.py`
+- `tests/test_verify_first_policy.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Missing code/log evidence is still reported when code evidence is required and `tool_calls` is zero.
+- Missing memory evidence is still reported when memory evidence is required and absent.
+- If a flagged turn has no specific missing sources, the correction still falls back to "the required evidence".
+- The streamed correction sentence remains unchanged.
+
+Boundary chosen:
+- `_missing_evidence_sources()` is pure policy over the evidence metadata dict.
+- `_evidence_correction_for_stream()` still owns user-facing correction prose.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v2/pipeline.py tests/test_verify_first_policy.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_verify_first_policy.py -q` passed (`4 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1659 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- `_persist_fifo_for_stream()` still mixes evidence summary, pending-action extraction, logging, and FIFO write; split only with fake FIFO/evidence counter tests.
+- The `int(tool_calls)` conversion behavior is intentionally preserved; non-numeric values still remain a caller-data bug.
+
+## 2026-07-03 - Stage 2 Dispatcher Self-Correct Thread Helper
+
+Goal/scope:
+- Extract duplicate Stage 2 self-correction thread startup into one helper.
+- Keep gate-rejection behavior, wrong-class handler behavior, daemon threading, and disabled self-correction target unchanged.
+
+Files/modules changed:
+- `jane_web/jane_v2/stage2_dispatcher.py`
+- `tests/test_stage2_dispatcher_prompts.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Low-confidence gate rejections still start `_self_correct_classification()` in a daemon thread.
+- High-confidence gate rejections still skip self-correction.
+- Handler `wrong_class` results still start the same background thread and return `None`.
+- Thread args remain `(prompt, class_name)`.
+
+Boundary chosen:
+- `_start_self_correct_thread()` is process-side dispatch plumbing shared by two policy branches.
+- The gate and handler-result helpers still decide when self-correction is appropriate.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v2/stage2_dispatcher.py tests/test_stage2_dispatcher_prompts.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_stage2_dispatcher_prompts.py -q` passed (`14 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1658 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- `_self_correct_classification()` is currently disabled by an early return; any re-enable should be treated as a behavior change with Chroma write tests.
+- The pre-handler gate and continuation branches are now reasonably factored; further work should focus on mockable Ollama request construction if latency policy changes.
+
+## 2026-07-03 - Stage 2 Dispatcher Gate Dead-Code Cleanup
+
+Goal/scope:
+- Remove unused meta-signal locals from the Stage 2 gate-check path.
+- Keep gate prompt construction, Ollama request shape, fail-open behavior, and dispatch decisions unchanged.
+
+Files/modules changed:
+- `jane_web/jane_v2/stage2_dispatcher.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Unknown classes still skip the gate check.
+- Valid gate prompts still call the local Ollama model with the same body.
+- `"NO"` responses still reject the handler and all exceptions still fail open.
+- The removed `p_lower` and `META_SIGNALS` values were never read.
+
+Boundary chosen:
+- This was dead branch-local state, not a behavior boundary.
+- Removing it makes the gate-check policy easier to audit before any future real meta-prompt routing work.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v2/stage2_dispatcher.py tests/test_stage2_dispatcher_prompts.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_stage2_dispatcher_prompts.py -q` passed (`13 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1657 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Any future meta-signal bypass should be added intentionally with tests; the previous tuple was inert.
+- `_gate_check()` still owns live Ollama I/O and should not be split further without mock client coverage.
+
+## 2026-07-03 - V3 Pipeline Stage Metadata Helper
+
+Goal/scope:
+- Extract repeated V3 classification/timing metadata packaging for JSON and NDJSON responses.
+- Keep Stage 2 direct responses, Stage 3 fallback responses, v1 response annotation, and streaming `done` event shapes unchanged.
+
+Files/modules changed:
+- `jane_web/jane_v3/pipeline.py`
+- `tests/test_v3_pipeline_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Stage 2 responses still report the state classification, stage, stage1 timing, stage2 timing, and `stage3_ms=0`.
+- Stage 3 fallback paths still override `stage2_ms` to `0`.
+- v1 Stage 3 responses still receive the measured `stage3_ms` and dynamic ack.
+- Streaming `done` events still carry the same timing/classification fields.
+
+Boundary chosen:
+- `_v3_stage_metadata()` is pure response metadata assembly shared by non-streaming and streaming paths.
+- The handlers still own response text, extras, FIFO/ledger persistence, and Stage 3 delegation.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v3/pipeline.py tests/test_v3_pipeline_helpers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_v3_pipeline_helpers.py -q` passed (`18 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1657 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Stage 2 response persistence packaging is still duplicated between stream and non-stream; extract only after route-level tests cover client tool calls, pending actions, and conversation-end events together.
+- Stage 3 streaming metadata is emitted by the v2 escalation path, so this helper intentionally does not alter those events.
+
+## 2026-07-03 - V3 Pipeline Force-Stage3 Helper Reuse
+
+Goal/scope:
+- Replace repeated V3 Stage-3 state mutations with the existing `_force_stage3_state()` helper.
+- Keep classifier confidence routing, missing-handler routing, fallback acknowledgements, and Stage 2 state defaults unchanged.
+
+Files/modules changed:
+- `jane_web/jane_v3/pipeline.py`
+- `tests/test_v3_pipeline_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- `others` or non-high confidence classifications still force Stage 3.
+- Missing registry entries and registered classes without handlers still force Stage 3.
+- Fallback acknowledgements still come from `_ack_for(cls, escalate=True)`.
+- `stage2_ack` remains `None` from the base state in these routes.
+
+Boundary chosen:
+- `_force_stage3_state()` was already the shared mutation helper used by handler-result paths.
+- The classifier branch now uses the same state transition helper, reducing drift between Stage-3 routes.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v3/pipeline.py tests/test_v3_pipeline_helpers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_v3_pipeline_helpers.py -q` passed (`17 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1656 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- The unclear and end-conversation short-circuits still hand-roll terminal result state; extracting them should wait for exact route-level response tests.
+- The main `_classify_and_maybe_handle()` orchestration remains readable enough after helper reuse; deeper movement would need broader async branch fixtures.
+
+## 2026-07-03 - Short-Term Theme Eviction Selector
+
+Goal/scope:
+- Extract the short-term theme eviction selector from `ConversationManager._do_thematic_update()`.
+- Keep theme creation, eviction replacement, metadata creation, and writeback logging unchanged.
+
+Files/modules changed:
+- `memory/v1/conversation_themes.py`
+- `memory/v1/conversation_manager.py`
+- `tests/test_conversation_themes.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- When the theme registry is full, the theme with the lowest `last_updated_at` is still selected for replacement.
+- Missing `last_updated_at` still defaults to an empty string and sorts oldest.
+- The manager still uses the evicted theme's `theme_index` when writing the replacement metadata.
+
+Boundary chosen:
+- `oldest_theme_by_last_update()` is pure selection policy and sits with the other theme-registry helpers.
+- `_do_thematic_update()` still owns live update calls and the create-vs-evict branch.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile memory/v1/conversation_themes.py memory/v1/conversation_manager.py tests/test_conversation_themes.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_conversation_themes.py -q` passed (`13 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1655 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Theme create/evict write operations still need fake collection tests before extracting branch executors.
+- The selector intentionally preserves missing timestamps as oldest; changing that would alter eviction behavior.
+
+## 2026-07-03 - Short-Term Theme Update Metadata Helper
+
+Goal/scope:
+- Extract existing-theme metadata update shape from `ConversationManager._do_thematic_update()`.
+- Keep theme classification, summary generation, collection update calls, and writeback logging unchanged.
+
+Files/modules changed:
+- `memory/v1/conversation_themes.py`
+- `memory/v1/conversation_manager.py`
+- `tests/test_conversation_themes.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Updating a theme still preserves all existing metadata fields.
+- `turn_count` still defaults from `1` and increments by one.
+- `last_updated_at` and `expires_at` still refresh to the current update values.
+- Theme document updates still happen through the same `short_term_collection.update()` path.
+
+Boundary chosen:
+- `updated_short_term_theme_metadata()` belongs beside `short_term_theme_metadata()` as pure metadata-shape policy.
+- `_do_thematic_update()` still owns live Chroma operations, LLM classification/summarization, and create/evict branching.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile memory/v1/conversation_themes.py memory/v1/conversation_manager.py tests/test_conversation_themes.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_conversation_themes.py -q` passed (`12 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1654 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Theme create/evict selection can be split with fake collection tests for add/update paths.
+- `_do_thematic_update()` remains large because live collection mutation and LLM calls are still intertwined; future slices should add fixtures before moving branch orchestration.
+
+## 2026-07-03 - Standing Brain Claude Thinking Lines Helper
+
+Goal/scope:
+- Extract Claude thinking-block line cleanup from the standing-brain response parser.
+- Keep assistant event routing, seen-block tracking, tool events, text deltas, and result handling unchanged.
+
+Files/modules changed:
+- `llm_brain/v1/standing_brain.py`
+- `tests/test_standing_brain_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Thinking text is still split by newline and stripped per line.
+- Empty lines and lines with five or fewer characters are still ignored.
+- Thought previews are still truncated to 300 characters.
+- `_read_claude_response()` still yields each kept line as a `thought` event.
+
+Boundary chosen:
+- `_claude_thinking_lines()` is pure text transformation and can be tested without a live Claude stream.
+- The async parser still owns stream reads, JSON parsing, block dedupe, and generator yields.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile llm_brain/v1/standing_brain.py tests/test_standing_brain_helpers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_standing_brain_helpers.py -q` passed (`12 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1653 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Text delta and result-event handling can be extracted after adding async stream fixtures for accumulated text edge cases.
+- Tool-use/result event helpers are already pure; deeper parser changes should preserve `_seen_block_count` behavior with fixtures.
+
+## 2026-07-03 - Persistent Codex Failed Command Formatter
+
+Goal/scope:
+- Extract failed command-execution result formatting from the Codex stream loop.
+- Keep callback priority, pending-thought flushing, command shortening, and message truncation unchanged.
+
+Files/modules changed:
+- `llm_brain/v1/persistent_codex.py`
+- `tests/test_persistent_codex.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Failed command events still use `_format_command()` so `/bin/bash -lc ...` wrappers display the inner command.
+- Failure messages are still truncated to 300 characters.
+- Failed command details still use the same two-line `failed` / `↳` shape.
+- `_execute_streaming()` still chooses `on_tool_result` before `on_status`.
+
+Boundary chosen:
+- `_format_failed_command_result()` mirrors the existing successful `_format_tool_result()` boundary.
+- The stream loop remains responsible for event routing and callback dispatch.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile llm_brain/v1/persistent_codex.py tests/test_persistent_codex.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_persistent_codex.py -q` passed (`4 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1652 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- `item.started` command labels and `item.completed` agent-message handling can be extracted when tests cover callback fallback order.
+- The stream loop still needs timeout/nonzero-exit fake-process coverage before larger orchestration movement.
+
+## 2026-07-03 - Persistent Codex Error Event Helper
+
+Goal/scope:
+- Extract raw error-message extraction for Codex stream events.
+- Keep stream routing, normalized error text, process cleanup, and final CLI failure behavior unchanged.
+
+Files/modules changed:
+- `llm_brain/v1/persistent_codex.py`
+- `tests/test_persistent_codex.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Top-level `error` events still read the trimmed `message` field.
+- `turn.failed` events still read the trimmed nested `error.message` field only when `error` is a dict.
+- Malformed error events still produce no Codex error override.
+- `_normalize_error_message()` still handles JSON `detail` payloads after extraction.
+
+Boundary chosen:
+- `_codex_event_error_message()` is pure event-shape parsing used by multiple stream branches.
+- `_execute_streaming()` still owns callback dispatch, pending thought flushing, process lifecycle, stderr fallback, and timeout handling.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile llm_brain/v1/persistent_codex.py tests/test_persistent_codex.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_persistent_codex.py -q` passed (`3 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1651 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- `item.started`, `item.completed`, and `item.failed` command-event formatting can be split after tests cover callback priority and pending-thought flushing.
+- Fake-process tests now cover active-process cleanup, but timeout and nonzero-exit paths still need focused coverage before larger stream-loop refactors.
+
+## 2026-07-03 - Persistent Claude Usage Helpers
+
+Goal/scope:
+- Extract Claude NDJSON token-usage extraction from `_process_ndjson_line()`.
+- Keep assistant/result event parsing, text accumulation, callbacks, and session-id handling unchanged.
+
+Files/modules changed:
+- `llm_brain/v1/persistent_claude.py`
+- `tests/test_persistent_claude.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Assistant message usage still records input tokens, output tokens, and the message model.
+- Result event usage still overrides token counts and falls back to the previous model when the result omits one.
+- Missing, empty, or non-dict usage payloads still leave the current usage unchanged.
+
+Boundary chosen:
+- `_claude_message_usage()` and `_claude_result_usage()` are pure event-shape adapters.
+- `_process_ndjson_line()` still owns event routing, streaming deltas, status callbacks, and accumulated response state.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile llm_brain/v1/persistent_claude.py tests/test_persistent_claude.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_persistent_claude.py -q` passed (`6 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1650 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Assistant content-block text accumulation can be split after tests cover streamed deltas, repeated assistant events, and multi-turn accumulated text.
+- Result event handling can be split further once tests cover result text longer/equal/shorter than accumulated text.
+
+## 2026-07-03 - Janitor Split Plan Memory Helper
+
+Goal/scope:
+- Extract LLM split-plan memory cleanup from the live long-term normalization loop.
+- Keep split candidate selection, prompt generation, Chroma writes, original deletion, and report counters unchanged.
+
+Files/modules changed:
+- `memory/v1/janitor_normalization.py`
+- `memory/v1/janitor_memory.py`
+- `tests/test_janitor_normalization.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Split plans still read the `memories` array from the LLM JSON response.
+- Items are still coerced through `str()`, stripped, truncated to `MAX_REWRITTEN_CHARS`, and limited to `MAX_SPLIT_ITEMS`.
+- Blank strings are still dropped before truncation and limiting.
+- The live janitor still requires at least two cleaned memories before adding split records and quarantining the original.
+
+Boundary chosen:
+- `split_plan_memories()` is pure data cleanup that can be tested without a Chroma collection or LLM call.
+- `_normalize_long_term_memory_rows()` still owns live collection mutation and exception accounting.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile memory/v1/janitor_normalization.py memory/v1/janitor_memory.py tests/test_janitor_normalization.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_janitor_normalization.py -q` passed (`6 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1648 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- `_normalize_long_term_memory_rows()` can still be split around split-vs-rewrite action execution, but that needs fake collection and fake LLM tests for add/update/delete/error paths.
+- The preserved `str(None) == "None"` cleanup behavior is now explicit; changing it would be a behavior change and should be handled separately if desired.
+
+## 2026-07-03 - V3 Classifier Candidate Context Helper
+
+Goal/scope:
+- Extract V3 classifier primary/alternative candidate selection into one pure helper.
+- Keep prompt text, pending-action candidate swapping, and per-primary-class params schema selection unchanged.
+
+Files/modules changed:
+- `intent_classifier/v3/classifier.py`
+- `tests/test_v3_classifier_response.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Default mode still uses the Chroma winner as the primary prompt candidate and the runner-up as the alternative.
+- Pending follow-up mode still makes the pending handler class primary and demotes the Chroma winner to the alternative.
+- A pending class matching the winner, including case-only differences, no longer creates an alternative copy of the same class.
+- Params extraction schema still follows the actual primary class presented to qwen.
+
+Boundary chosen:
+- `_prompt_candidate_context()` is deterministic prompt-selection policy shared by prompt construction and classify-time schema selection.
+- `_build_prompt()` still owns prompt wording, class blocks, FIFO/Jane-question insertion, and params instructions.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile intent_classifier/v3/classifier.py tests/test_v3_classifier_response.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_v3_classifier_response.py -q` passed (`8 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1647 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- `_build_prompt()` can be split further only with exact prompt snapshot tests for pending and non-pending modes.
+- The classifier response parsing and delete-intent guards are now covered separately; threshold and distance-gate behavior should remain under route-level tests before changes.
+
+## 2026-07-03 - Standing Brain Restart Reason Helper
+
+Goal/scope:
+- Extract the standing-brain restart reason policy from `StandingBrainManager.send()`.
+- Keep the restart lifecycle, crash logging, and dead/failure/turn-refresh precedence unchanged.
+
+Files/modules changed:
+- `llm_brain/v1/standing_brain.py`
+- `tests/test_standing_brain_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Dead brain processes still take priority over failure-count and turn-count refresh reasons.
+- Hitting `MAX_FAILURES` still logs a crash and triggers a restart.
+- Hitting `MAX_TURNS_BEFORE_REFRESH` still refreshes context without using the failure crash path.
+- Restart failure still raises `RuntimeError` after logging the failed restart.
+
+Boundary chosen:
+- `_brain_restart_reason()` is deterministic policy over `BrainProcess` state and threshold values.
+- `StandingBrainManager.send()` still owns process kill/spawn behavior, lock handling, stdin writes, and response streaming.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile llm_brain/v1/standing_brain.py tests/test_standing_brain_helpers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_standing_brain_helpers.py -q` passed (`11 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1644 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- The standing-brain Claude response parser still has nested event parsing and session tracking that should only be split with stronger stream-line fixtures.
+- The manager send path can be split further after tests cover fake process restart and stdin failure scenarios.
+
+## 2026-07-03 - Persistent Claude Tool Status Helper
+
+Goal/scope:
+- Extract Claude Code tool-use status formatting from the persistent-Claude NDJSON parser.
+- Keep stream parsing, accumulated text handling, session id capture, usage extraction, and callback behavior unchanged.
+
+Files/modules changed:
+- `llm_brain/v1/persistent_claude.py`
+- `tests/test_persistent_claude.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- File tools still display the basename of `file_path`.
+- Bash tools still prefer `description`, append the command preview when present, and fall back to the first 60 command characters.
+- Grep/Glob, Agent, WebSearch, and WebFetch still use the same truncated fields.
+- Unknown tools still display the raw tool name.
+
+Boundary chosen:
+- `_claude_tool_status_message()` is deterministic formatting with no process or event-loop dependency.
+- `_process_ndjson_line()` still owns event-state transitions and callback invocation.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile llm_brain/v1/persistent_claude.py tests/test_persistent_claude.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_persistent_claude.py -q` passed (`4 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1643 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- `_process_ndjson_line()` can be split further after tests cover assistant text accumulation, content deltas, result usage, invalid JSON, and mixed assistant/tool blocks.
+- Persistent Claude and persistent Codex still duplicate some process-tree and stream-buffer patterns; share only after both paths have fake-process coverage.
+
+## 2026-07-03 - Task Classifier Follow-Up Regex Cleanup
+
+Goal/scope:
+- Move the task-offload follow-up starter regex out of `classify_task()` and compile it once at module load.
+- Add focused tests around the foreground/background classification boundaries used by the chat stream route.
+
+Files/modules changed:
+- `jane_web/task_classifier.py`
+- `tests/test_task_classifier.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- `background:` / `bg:` still forces offload and `strip_bg_prefix()` removes the prefix.
+- Long follow-up confirmations like "please go ahead ..." still stay on the foreground path so conversation history is available.
+- Long explanatory questions still stay quick.
+- Compound implementation/refactor requests still classify as big tasks.
+
+Boundary chosen:
+- `_FOLLOWUP_STARTERS_RE` is static regex policy and should not be recompiled per request.
+- The classifier still owns the overall scoring heuristic and chat-stream callers remain unchanged.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/task_classifier.py tests/test_task_classifier.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_task_classifier.py -q` passed (`5 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1639 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- The task classifier remains heuristic by design; future changes should add representative route-level tests before changing thresholds or regex patterns.
+
+## 2026-07-03 - Janitor Normalization Result Helper
+
+Goal/scope:
+- Remove duplicated long-term normalization counter initialization from the janitor runner and normalizer.
+- Keep normalization candidate selection, LLM rewrite/split calls, Chroma writes, and report payload fields unchanged.
+
+Files/modules changed:
+- `memory/v1/janitor_normalization.py`
+- `memory/v1/janitor_memory.py`
+- `tests/test_janitor_normalization.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Normalization results still expose `reviewed`, `rewritten`, `split`, `deleted_originals`, and `unchanged`, all initialized to zero.
+- Each call receives a fresh mutable dict.
+- The janitor report/history still receive the same normalization payload shape.
+
+Boundary chosen:
+- `empty_normalization_result()` belongs with the other pure long-term normalization helpers.
+- The janitor runner and normalizer continue to own live collection operations and logging.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile memory/v1/janitor_normalization.py memory/v1/janitor_memory.py tests/test_janitor_normalization.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_janitor_normalization.py tests/test_janitor_report.py -q` passed (`7 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1634 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- `_normalize_long_term_memory_rows()` still needs fake collection and fake LLM tests before splitting the rewrite/split branch orchestration further.
+- `run_janitor()` remains broad, but most remaining extraction candidates touch live Chroma clients, cron load gates, or file I/O.
+
+## 2026-07-03 - V3 Classifier Response Parser Helper
+
+Goal/scope:
+- Extract qwen JSON response parsing from the v3 classifier's live `classify()` path.
+- Keep Chroma voting, prompt construction, Ollama transport, handler-registry validation, delete-intent guard, distance floor, and param leak guard unchanged.
+
+Files/modules changed:
+- `intent_classifier/v3/classifier.py`
+- `tests/test_v3_classifier_response.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Markdown-fenced `json` responses are still unwrapped.
+- Surrounding prose is still trimmed down to the outer JSON object when possible.
+- Class names are still lowercased and stripped of square brackets.
+- Confidence still normalizes to title case and falls back to `Low` outside `Very High|High|Medium|Low`.
+- Params are still kept only when qwen emits a JSON object.
+- Missing class still returns the classifier fallback path without logging a parse exception.
+
+Boundary chosen:
+- `_parse_qwen_classification_response()` is deterministic output parsing and can be tested without ChromaDB or Ollama.
+- Runtime class validation and routing safety gates stay in `classify()` because they depend on the live registry and user prompt.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile intent_classifier/v3/classifier.py tests/test_v3_classifier_response.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_v3_classifier_response.py -q` passed (`5 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1633 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- The v3 classifier still needs fake Chroma/qwen tests before splitting candidate selection, pending-action schema selection, distance-floor policy, and registry validation further.
+- Prompt assembly is large but safer to leave intact until exact prompt snapshots are added for pending and non-pending modes.
+
+## 2026-07-03 - RA Report Summary Grouping Helper
+
+Goal/scope:
+- Extract useful-report summary ranking/grouping policy from the RA markdown renderer.
+- Keep generated report text, evidence rows, section ordering, and file-path output unchanged.
+
+Files/modules changed:
+- `agent_skills/ra_research_report_markdown.py`
+- `tests/test_ra_research_report_markdown.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- New summaries are still deduped before rendering.
+- High-signal summaries still require score >= 3 and exclusion from low-value/noisy classification, capped at five.
+- Low-signal summaries still sort by ascending signal score and cap at six.
+- Theme inference still prefers the current run and falls back to the first 30 cached summaries.
+
+Boundary chosen:
+- `useful_report_summary_groups()` owns deterministic ranking/filtering policy.
+- `build_useful_report_markdown()` remains responsible for section assembly and markdown text.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile agent_skills/ra_research_report_markdown.py tests/test_ra_research_report_markdown.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_ra_research_report_markdown.py -q` passed (`9 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1628 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- `build_useful_report_markdown()` can still be split by section builders, but only if tests pin exact section text for the low-signal, safety, next-focus, file-link, and source-trace branches.
+- The deterministic action plan and recommendation scheme are long static renderers; further splitting would mostly move prose unless table/section policy changes.
+
+## 2026-07-03 - Janitor Code Verification Report Helpers
+
+Goal/scope:
+- Extract code-memory verification result and markdown report shaping from the live janitor verification loop.
+- Keep Chroma reads/writes, Codex verification, frontier-provider correction, and vocal-summary logging unchanged.
+
+Files/modules changed:
+- `memory/v1/janitor_code_verification.py`
+- `memory/v1/janitor_memory.py`
+- `tests/test_janitor_code_verification.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Verification results still expose `checked`, `stale`, `fixed`, `deleted`, `errors`, `skipped_recent`, and `details`.
+- The markdown report still includes the same title, summary counts, non-accurate detail rows, action casing, and 12-character memory id prefix.
+- Accurate memories remain omitted from the report details.
+
+Boundary chosen:
+- `code_verification_result()` and `code_verification_report_markdown()` are deterministic output-shaping helpers and belong with the existing verification prompts/policy helpers.
+- `verify_code_memories()` still owns live Chroma access, Codex/frontier calls, update/delete application, logging, and report file I/O.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile memory/v1/janitor_code_verification.py memory/v1/janitor_memory.py tests/test_janitor_code_verification.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_janitor_code_verification.py tests/test_janitor_memory_rows.py -q` passed (`9 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1627 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- The verifier loop can be split further after fake Codex/frontier tests cover accurate, stale-update, stale-delete, keep, error, and recently-verified branches.
+- Report file writing could move behind an adapter later, but the current helper already isolates the output contract.
+
+## 2026-07-03 - Conversation Theme Metadata Helper
+
+Goal/scope:
+- Extract repeated short-term-theme metadata construction from `ConversationManager` into the conversation theme helper module.
+- Keep Chroma add/update calls, theme classification, summary generation, and fallback behavior unchanged.
+
+Files/modules changed:
+- `memory/v1/conversation_themes.py`
+- `memory/v1/conversation_manager.py`
+- `tests/test_conversation_themes.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- New, evicted, and fallback short-term themes still store `session_id`, `theme_title`, `theme_index`, `turn_count`, `first_turn_at`, `last_updated_at`, `memory_type`, and `expires_at` with the same values.
+- Existing-theme updates still merge into the previous metadata and increment `turn_count` in place.
+- Theme result filtering, sorting, prompts, and title parsing are unchanged.
+
+Boundary chosen:
+- `short_term_theme_metadata()` is pure record shaping and belongs with the other conversation theme helpers.
+- `ConversationManager` still owns Chroma writes, LLM classification, summary generation, and fallback control flow.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile memory/v1/conversation_themes.py memory/v1/conversation_manager.py tests/test_conversation_themes.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_conversation_themes.py tests/test_conversation_archival.py tests/test_conversation_text.py -q` passed (`27 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1626 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- `_do_thematic_update()` still mixes LLM decisions and Chroma writes; split further only with fake short-term collection tests that cover create, update, evict, and skipped-summary paths.
+- Window archival remains a larger candidate but needs DB-backed characterization around watermark advancement and poison-pill handling.
+
+## 2026-07-03 - Brain Adapter Subprocess Completion Helpers
+
+Goal/scope:
+- Extract subprocess timeout-message and completion-response shaping from the generic streaming brain adapter loop.
+- Keep subprocess launch, selector polling, idle/wall timeout enforcement, and stream delta callbacks unchanged.
+
+Files/modules changed:
+- `llm_brain/v1/brain_adapters.py`
+- `tests/test_brain_adapters.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Idle timeouts still report "no output" using the configured idle limit.
+- Wall-clock timeouts still report the configured max wall-clock limit.
+- Generic subprocess timeouts still use the underlying timeout value.
+- Nonzero exits still prefer stderr over stdout and cap the visible error detail at 500 characters.
+- Empty successful output still reports a stderr hint capped at 200 characters.
+
+Boundary chosen:
+- `_timeout_error_message()` and `_completed_subprocess_response()` are deterministic policy helpers with no selector or process dependency.
+- `_execute_subprocess_streaming()` still owns the live process lifecycle, file descriptor reads, callback delivery, and cleanup guarantees.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile llm_brain/v1/brain_adapters.py tests/test_brain_adapters.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_brain_adapters.py -q` passed (`4 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1625 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Selector/read-loop refactoring should wait for fake pipe/process tests that cover stdout deltas, stderr capture, idle timeout, wall timeout, and cleanup after unexpected exceptions.
+- Provider-specific command builders can be tested more broadly before moving common command/error paths out of the adapter classes.
+
+## 2026-07-03 - Persistent Codex Active-Process Key Cleanup
+
+Goal/scope:
+- Centralize the legacy persistent-Codex session key and use it consistently for active subprocess tracking.
+- Fix a cleanup mismatch that left completed Codex subprocess entries in `_active_procs`.
+
+Files/modules changed:
+- `llm_brain/v1/persistent_codex.py`
+- `tests/test_persistent_codex.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Session storage, eviction, explicit `end()`, and active process lookup still use the same `user_id:session_id` composite key.
+- Successful stream execution still returns the final agent message and thread id from Codex JSON events.
+- Process killing behavior on timeout/exception is unchanged.
+
+Bug fixed:
+- `_execute_streaming()` stored the process under `user_id:session_id` but removed only `session_id` in `finally`, so completed processes stayed in the manager's active-process map until explicit session end or eviction.
+
+Boundary chosen:
+- `_codex_session_key()` keeps the key contract local and prevents future drift between session and process maps.
+- The fake-process test drives `_execute_streaming()` through the successful JSON event path without launching Codex.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile llm_brain/v1/persistent_codex.py tests/test_persistent_codex.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_persistent_codex.py tests/test_codex_memory_context.py -q` passed (`4 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1621 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Legacy Codex event dispatch can be split after adding fake-process tests for command execution, item failure, turn failure, stderr/exit errors, and timeout cleanup.
+- The same session-key helper shape could be shared with `standing_codex` later if there is enough duplication to justify it.
+
+## 2026-07-03 - Shared Codex Auto-Memory Prompt Helper
+
+Goal/scope:
+- Remove duplicate Codex auto-memory prompt wrapping between the app-server and legacy persistent Codex managers.
+- Keep the live Chroma lookup, environment gates, and manager-specific logging local to each manager.
+
+Files/modules changed:
+- `llm_brain/v1/codex_memory_context.py`
+- `llm_brain/v1/standing_codex.py`
+- `llm_brain/v1/persistent_codex.py`
+- `tests/test_codex_memory_context.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Codex prompts still receive the same `[Jane Auto Memory]` block, bullet formatting, and safety instruction text when memory hits exist.
+- Empty memory-hit lists still leave the prompt unchanged.
+- `standing_codex` keeps its existing private helper aliases for current tests and any internal callers.
+- `persistent_codex` still catches memory lookup failures and returns the raw prompt on miss or exception.
+
+Boundary chosen:
+- `codex_memory_context.py` owns deterministic prompt text assembly shared by both Codex runtimes.
+- Memory retrieval, process-output silencing, session management, and stream execution remain in the manager modules.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile llm_brain/v1/codex_memory_context.py llm_brain/v1/standing_codex.py llm_brain/v1/persistent_codex.py tests/test_codex_memory_context.py tests/test_standing_codex_helpers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_codex_memory_context.py tests/test_standing_codex_helpers.py -q` passed (`7 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1619 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- The legacy persistent Codex stream event loop still mixes subprocess I/O and event dispatch; split only with fake process-stream tests.
+- `_silence_process_output` and process-tree cleanup are duplicated between Codex managers and can be shared later if tests cover failure and cleanup behavior.
+
+## 2026-07-03 - Stage 3 Stream Event Helpers
+
+Goal/scope:
+- Extract Stage 3 v1-stream event shaping from the live streaming loop.
+- Keep v1 auth/session lookup, stream invocation, ack suppression behavior, and client-tool marker output contracts unchanged.
+
+Files/modules changed:
+- `jane_web/jane_v2/stage3_escalate.py`
+- `tests/test_stage3_escalate_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Stage 3 still emits its own ack and suppresses v1 ack chunks with the same JSON-prefix match.
+- Embedded client-tool markers in delta chunks still emit `tool_use` events before the cleaned visible `delta`.
+- Buffered tool markers at stream end still flush before any cleaned tail delta.
+- Non-JSON chunks and non-delta JSON payloads still pass through the live stream loop unchanged.
+
+Boundary chosen:
+- `_is_v1_ack_chunk()`, `_stage3_delta_events()`, and `_stage3_tool_flush_events()` are deterministic event-shaping helpers that can be tested with a fake marker extractor.
+- The async generator, v1 stream import, session bootstrapping, request auth, and error handling remain in `escalate_stream()`.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v2/stage3_escalate.py tests/test_stage3_escalate_helpers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_stage3_escalate_helpers.py -q` passed (`10 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1617 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- The Stage 3 async generator can be split further only after fake v1-stream tests cover auth failure, v1 import failure, non-JSON passthrough, and crash-to-error behavior.
+- Stage 3 structured-state injection still depends on FIFO rendering and should stay local unless that context renderer gains broader tests.
+
+## 2026-07-03 - Reverse Proxy Control-Plane Helpers
+
+Goal/scope:
+- Extract reverse-proxy control-plane response and persisted-port restoration shaping into pure helpers.
+- Keep live proxy forwarding, WebSocket handling, rate limiting, and route contracts unchanged.
+
+Files/modules changed:
+- `jane_web/reverse_proxy.py`
+- `jane_web/reverse_proxy_helpers.py`
+- `tests/test_reverse_proxy_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- `/proxy/status` still returns the same upstream port, upstream URL, switch timestamp, total/active request counts, drain count, and previous-port keys.
+- Startup still prefers a valid persisted `proxy_state.json` upstream port and otherwise keeps the requested default.
+- Malformed persisted proxy state remains a silent fallback to the default port.
+
+Boundary chosen:
+- `proxy_status_payload()` and `restored_upstream_port()` are deterministic control-plane data helpers that can be tested without opening sockets or forwarding requests.
+- Runtime state mutation, persistence writes, aiohttp route registration, and proxy streaming remain in `reverse_proxy.py`.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/reverse_proxy.py jane_web/reverse_proxy_helpers.py tests/test_reverse_proxy_helpers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_reverse_proxy_helpers.py -q` passed (`7 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1613 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- The request-forwarding and WebSocket paths are still intentionally intact; split them only with fake aiohttp upstream tests that characterize streaming, body reads, connector errors, and cleanup counters.
+- `_ProxyRateLimiter` can be tested separately if future proxy changes touch abuse protection.
+
+## 2026-07-03 - Server Email Tool Dispatch Split
+
+Goal/scope:
+- Split server-side email client-tool execution into per-tool private executors.
+- Keep the public `execute_email_tool_serverside()` function as a dispatcher plus shared credential/error wrapper.
+
+Files/modules changed:
+- `jane_web/server_email_tools.py`
+- `tests/test_server_email_tools.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Inbox read, email read, search, send, and delete tools still import `agent_skills.email_tools` lazily and return the same visible status text.
+- Send-email validation, sent-email logging, delete validation, delete logging, unknown-tool warnings, Gmail setup failures, and generic error messages are unchanged.
+- The outer dispatcher still catches `RuntimeError` as missing Gmail setup and catches other exceptions as email errors.
+
+Boundary chosen:
+- Each `_execute_*_email()` helper owns one tool's argument extraction and agent-skill call.
+- `_EMAIL_TOOL_EXECUTORS` makes supported server-side tools explicit while preserving the existing public entry point used by `jane_proxy`.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/server_email_tools.py tests/test_server_email_tools.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_server_email_tools.py -q` passed (`7 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1611 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Calendar or other server-side client-tool executors should follow the same dispatcher-plus-per-tool-helper shape if they grow.
+- Email result formatting already lives in `email_tool_results.py`; no further split is needed there right now.
+
+## 2026-07-03 - Codex Auto-Memory Prelude Helper
+
+Goal/scope:
+- Extract Codex app-server auto-memory prompt wrapping from `_with_auto_memory_context()`.
+- Put the safety instructions around retrieved Chroma memories under direct tests.
+
+Files/modules changed:
+- `llm_brain/v1/standing_codex.py`
+- `tests/test_standing_codex_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Codex turns still prepend retrieved Chroma memory hits only when hits exist.
+- The auto-memory block still uses `[Jane Auto Memory]` markers, bullet-prefixed hits, and the same instruction to treat retrieved memory as background context only.
+- Empty hit lists still return the original prompt unchanged.
+
+Boundary chosen:
+- `_codex_auto_memory_prelude()` and `_codex_prompt_with_auto_memory()` are pure prompt-formatting helpers.
+- Live Chroma lookup, output silencing, exception fallback, and manager session behavior stay in `_with_auto_memory_context()` and `CodexAppServerManager`.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile llm_brain/v1/standing_codex.py tests/test_standing_codex_helpers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_standing_codex_helpers.py tests/test_standing_brain_helpers.py -q` passed (`15 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1611 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- `_run_turn_locked()` still contains the live Codex event loop and command-output capture; keep it intact unless a fake app-server message-stream harness is added.
+- Session eviction/key helpers are possible but lower value than event-loop characterization.
+
+## 2026-07-03 - Local Vector Owned-IDs Helper
+
+Goal/scope:
+- Extract memory-deletion ownership filtering from `LocalVectorMemoryService.delete_memory()`.
+- Harden deletion against malformed Chroma metadata rows without changing owner-only deletion semantics.
+
+Files/modules changed:
+- `memory/v1/local_vector_memory_helpers.py`
+- `memory/v1/local_vector_memory.py`
+- `tests/test_local_vector_memory_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- `delete_memory()` still no-ops for empty ID input.
+- Only memory IDs whose metadata `user_id` matches the requesting user are deleted.
+- Returned Chroma IDs are still passed to `collection.delete(ids=...)` in collection order.
+
+Bug-risk reduced:
+- Malformed or missing metadata rows are now ignored instead of raising while filtering owned IDs.
+- Metadata/ID length mismatches no longer index past the returned ID list.
+
+Boundary chosen:
+- `owned_memory_ids()` is deterministic result-shape filtering and belongs with the existing local-vector helper functions.
+- Chroma fetch/delete calls and logging remain in `LocalVectorMemoryService`.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile memory/v1/local_vector_memory.py memory/v1/local_vector_memory_helpers.py tests/test_local_vector_memory_helpers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_local_vector_memory_helpers.py -q` passed (`6 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1610 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- `LocalVectorMemoryService.search_memory()` still mixes Chroma query, tier bucketing, prompt construction, and Ollama call; split only if fake collection plus fake Ollama tests are added.
+
+## 2026-07-03 - Janitor Quarantine Entry Helper
+
+Goal/scope:
+- Extract deleted-memory quarantine record construction from Chroma row deletion.
+- Add fake-collection tests around backup shape and delete call ordering.
+
+Files/modules changed:
+- `memory/v1/janitor_memory.py`
+- `tests/test_janitor_memory_rows.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- `_delete_rows_with_quarantine()` still returns `0` for empty input.
+- Deleted row backups still include `deleted_at`, collection name, reason, id, doc, and metadata.
+- Chroma deletes still receive the same ordered row IDs after the quarantine append call.
+- Existing duplicate purge, known-junk purge, consolidation, and normalization callers still use `_delete_rows_with_quarantine()`.
+
+Boundary chosen:
+- `_quarantine_entries_for_rows()` is deterministic record shaping and can be tested without Chroma.
+- File append, Chroma deletion, logging, and janitor orchestration remain in `janitor_memory.py`.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile memory/v1/janitor_memory.py tests/test_janitor_memory_rows.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_janitor_memory_rows.py tests/test_janitor_rules.py tests/test_janitor_query_markers.py tests/test_janitor_code_verification.py -q` passed (`18 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1609 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Janitor normalization and consolidation still depend on LLM calls and Chroma mutations; keep future refactors behind fake collection plus fake LLM tests.
+- `_collect_collection_rows()` could be tested next, but it is already small and less valuable than the higher-level janitor orchestration seams.
+
+## 2026-07-03 - Managed User Input Helpers
+
+Goal/scope:
+- Move deterministic managed-user creation input handling out of the admin route body.
+- Keep `create_managed_user()` focused on admin authorization, user-manager calls, allowlist update, logging, and response shaping.
+
+Files/modules changed:
+- `jane_web/user_access.py`
+- `jane_web/main.py`
+- `tests/test_user_access.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Managed-user email input is still stripped, lowercased, and rejected with HTTP 400 when missing or lacking `@`.
+- Display names still use the stripped request value or fall back to the email local-part.
+- Seed memories still drop blank values and preserve stripped nonblank strings.
+- Existing public user config filtering, user-manager existence checks, allowlist update, and route response fields are unchanged.
+
+Boundary chosen:
+- `normalize_managed_user_email()`, `managed_user_display_name()`, and `clean_seed_memories()` are deterministic request-shaping helpers that belong with the existing managed-user access utilities.
+- Filesystem/user-manager mutations remain route-local because they depend on live `agent_skills.user_manager` functions and admin session state.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/user_access.py jane_web/main.py tests/test_user_access.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_user_access.py tests/test_auth_sessions.py -q` passed (`32 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1607 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Managed-user delete still owns user-manager filesystem deletion and allowlist cleanup inline; leave that route intact unless fake user-manager tests are added for the full deletion flow.
+
+## 2026-07-03 - V3 Active Pending Data Helper
+
+Goal/scope:
+- Extract the normal Stage 2 pending-action payload selection from `_classify_and_maybe_handle()`.
+- Keep handler dispatch context assembly easier to read without changing when pending state is passed to handlers.
+
+Files/modules changed:
+- `jane_web/jane_v3/pipeline.py`
+- `tests/test_v3_pipeline_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Normal v3 Stage 2 handlers still receive active pending data only when the FIFO pending action matches the current handler class and is awaiting the user.
+- Pending actions with `data` still pass that `data` payload to the handler.
+- Pending actions without `data` still pass the pending-action record itself.
+- Resolved or other-class pending actions are ignored for the current handler.
+
+Boundary chosen:
+- `_active_pending_data_for_class()` is a deterministic FIFO-state filter.
+- Recent-context rendering, active-state loading, handler kwargs, handler invocation, and Stage 2 result policy stayed in the existing normal Stage 2 branch.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v3/pipeline.py tests/test_v3_pipeline_helpers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_v3_pipeline_helpers.py tests/test_v3_privacy_gate.py tests/test_pipeline_selection.py -q` passed (`24 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1605 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- The normal Stage 2 branch still contains registry lookup, context rendering, invocation, and private-class safety. Extract the whole branch only if fake handler tests cover registry-missing, handler-missing, handler crash, private deflection, and success.
+
+## 2026-07-03 - V3 Resolver Follow-Up Dispatch Helper
+
+Goal/scope:
+- Extract the v3 resolver `followup` action branch from `_classify_and_maybe_handle()`.
+- Keep resolver action selection inline while moving follow-up handler lookup, context loading, invocation, and state shaping behind a focused async helper.
+
+Files/modules changed:
+- `jane_web/jane_v3/pipeline.py`
+- `tests/test_v3_pipeline_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Missing resolver follow-up handlers still force Stage 3 with the same fallback ack.
+- Valid follow-up handlers still receive FIFO context and pending data plus the original pending question when needed.
+- Invalid follow-up handler results still force Stage 3 and do not emit a consumed pending marker.
+- Valid follow-up handler results still receive Stage 2/fallback acks and emit the consumed pending marker only when the handler did not create a newer pending action.
+
+Boundary chosen:
+- `_resolver_followup_state()` owns the self-contained mini-dispatcher for resolved Stage 2 follow-ups.
+- `stage3_followup`, `cancel`, Stage 1 classification, normal Stage 2 dispatch, and privacy safety stayed in `_classify_and_maybe_handle()` or existing helpers.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v3/pipeline.py tests/test_v3_pipeline_helpers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_v3_pipeline_helpers.py tests/test_v3_privacy_gate.py tests/test_pipeline_selection.py -q` passed (`22 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1603 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- `_classify_and_maybe_handle()` is smaller but still handles cleanup, idle flush, resolver action selection, Stage 1, and normal Stage 2 orchestration. Further splits should target cleanup/idle-flush or normal Stage 2 dispatch only with similarly direct tests.
+- The resolver helper still imports v2 recent-context at call time to preserve current fallback behavior on context-load failures.
+
+## 2026-07-03 - V3 State Constructor Helper
+
+Goal/scope:
+- Replace repeated hand-built v3 routing-state dictionaries with one private constructor.
+- Preserve the distinct state shapes used by resolver fast paths and Stage 1 classifier results.
+
+Files/modules changed:
+- `jane_web/jane_v3/pipeline.py`
+- `tests/test_v3_pipeline_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Stage 3 follow-up, cancel, resolver follow-up missing-handler, resolver follow-up invalid-result, resolver follow-up success, and classifier-first states keep the same `cls`, `conf`, `classification`, timing, ack, result, and `force_stage3` fields.
+- `params` is still present on Stage 1 classifier states and absent from resolver fast-path states.
+- Resolver follow-up fallback ack behavior and consumed-pending marker behavior are unchanged.
+
+Boundary chosen:
+- `_v3_state()` owns only the repeated state shape and optional `params` inclusion.
+- Resolver action selection, handler lookup/invocation, handler-result policy, privacy safety, and Stage 3 escalation decisions stayed in their existing helpers/callers.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v3/pipeline.py tests/test_v3_pipeline_helpers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_v3_pipeline_helpers.py tests/test_v3_privacy_gate.py tests/test_pipeline_selection.py -q` passed (`19 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1600 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- `_classify_and_maybe_handle()` still has resolver follow-up orchestration inline; a future split should extract the follow-up dispatch branch only with fake registry/handler tests.
+- Stage 1 classifier execution and literal get-time fallback are small enough to leave inline for now.
+
+## 2026-07-03 - Stage 3 Pending Extras Helper
+
+Goal/scope:
+- Share Stage 3 pending-action extraction between non-streaming and streaming v2 paths.
+- Remove duplicated SMS-draft-vs-AWAITING payload assembly while preserving different awaiting expiry windows.
+
+Files/modules changed:
+- `jane_web/jane_v2/pipeline.py`
+- `tests/test_jane_v2_pipeline_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- SMS draft state still takes precedence over trailing `[[AWAITING:...]]` markers for pending-action payloads.
+- Open SMS drafts still create `SEND_MESSAGE_DRAFT_OPEN` pending actions with 5-minute expiry.
+- Stage 3 follow-up pending actions still carry the normalized awaiting topic, use a 2-minute non-stream expiry and 5-minute stream expiry, and include `original_class` except for `others` and `stage3_followup`.
+- Non-stream responses still strip trailing AWAITING markers from the client-facing response, and stream persistence still happens before yielding the terminal `done` event.
+
+Boundary chosen:
+- `_stage3_pending_extras_from_text()` is deterministic routing-state assembly from response text and classifier state.
+- Evidence correction, FIFO write timing, response-body mutation, and logging stayed in their existing non-stream/stream callers.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v2/pipeline.py tests/test_jane_v2_pipeline_helpers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_jane_v2_pipeline_helpers.py tests/test_pending_sms.py tests/test_awaiting_markers.py -q` passed (`33 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1599 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- `_persist_fifo_for_stream()` still owns evidence summarization and FIFO write timing; those should stay together unless stream-persistence characterization tests are added.
+- Non-stream and stream Stage 3 response mutation still differ enough that broader consolidation would risk route/stream contracts.
+
+## 2026-07-03 - Task Offloader Heartbeat Controller
+
+Goal/scope:
+- Extract periodic progress-heartbeat state from `_run_task()`.
+- Keep task execution orchestration separate from progress-buffer locking, stop-event handling, and heartbeat thread setup.
+
+Files/modules changed:
+- `jane_web/task_offloader.py`
+- `tests/test_task_offloader_context.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Offloaded tasks still announce start, run automation with the same retry policy, emit heartbeat progress from the latest automation delta, and write final success/error announcements.
+- Heartbeat writes still skip empty latest output and use the same `_heartbeat_progress_message()` formatter.
+- Automation errors, unexpected errors, and final success still stop heartbeat emission before writing terminal announcements.
+
+Boundary chosen:
+- `_TaskProgressHeartbeat` owns only the mutable heartbeat state and loop mechanics.
+- `_run_task()` still owns imports, history/context loading, retry execution, final message selection, and logging.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/task_offloader.py tests/test_task_offloader_context.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_task_offloader_context.py tests/test_task_offloader_messages.py tests/test_task_offloader_announcements.py -q` passed (`18 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1595 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- `_run_task()` is now mostly lifecycle orchestration. The remaining high-value extraction would be a terminal-announcement helper, but only if tests cover success, `AutomationError`, and unexpected-error branches end to end.
+- Larger task-offloader changes should avoid thread behavior changes unless a fake runner/thread characterization test is added first.
+
+## 2026-07-03 - CLI Login OAuth Exchange Helper
+
+Goal/scope:
+- Move provider-specific authorization-code token exchange out of `jane_web/main.py`.
+- Keep the `/api/cli-login/code` route focused on request parsing, session-state checks, cache invalidation, and JSON responses.
+
+Files/modules changed:
+- `jane_web/cli_login_helpers.py`
+- `jane_web/main.py`
+- `tests/test_cli_login_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Missing submitted codes, missing active OAuth sessions, invalid Claude callback code formats, token exchange failures, and successful credential writes still return the same route JSON/status shapes.
+- Claude still extracts the auth code from `AUTH_CODE#STATE`, writes `.claude/.credentials.json`, invalidates provider status cache, and reports status-check-pending only when credential verification fails.
+- Gemini still writes `.gemini/oauth_creds.json` using `GEMINI_CLI_OAUTH_SECRET` and invalidates provider status cache.
+- Non-OAuth CLI login code submission through process stdin is unchanged.
+
+Boundary chosen:
+- The new `oauth_login_credentials_for_code()` helper owns only the deterministic provider branch around request spec, token response parsing, route-error mapping, and credential payload construction.
+- Route-local globals, environment lookup, credential file writes, and auth-status verification stayed in `main.py`.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/cli_login_helpers.py jane_web/main.py tests/test_cli_login_helpers.py tests/test_cli_login_token_errors.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_cli_login_helpers.py tests/test_cli_login_token_errors.py -q` passed (`48 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1594 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- `cli_login_code()` is now mostly route orchestration; further CLI-login cleanup should focus on process/PTY lifecycle helpers only if tests cover the interactive branches.
+- `jane_web/main.py` still has other route-adjacent clusters, but each should be split behind focused route/helper tests.
+
+## 2026-07-03 - Memory Retrieval Non-User Fact Helper
+
+Goal/scope:
+- Extract Jane long-term, short-term, file-index, and essence fact collection from `build_memory_sections()`.
+- Keep non-user source collectors grouped behind one tested helper.
+
+Files/modules changed:
+- `memory/v1/memory_retrieval.py`
+- `tests/test_memory_retrieval_sections.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Jane long-term, short-term semantic facts, file-index facts, and essence facts still use the same Chroma future keys and max-distance thresholds.
+- Short-term facts still receive the existing recency boost after semantic collection.
+- Missing futures still resolve to empty lists through `_safe_future_result()`.
+
+Boundary chosen:
+- This slice did not change cache keys, query planning, query submission, user/shared fact handling, or final section ordering. Only non-user source fact collection moved into `_collect_non_user_section_facts()`.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile memory/v1/memory_retrieval.py tests/test_memory_retrieval_sections.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_memory_retrieval_sections.py tests/test_memory_sections.py -q` passed (`15 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1591 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- `build_memory_sections()` is now mostly top-level orchestration. Further memory retrieval work should focus on query-plan logic or Chroma adapters rather than this function.
+
+## 2026-07-03 - V3 Handler Kwargs and Invocation Helpers
+
+Goal/scope:
+- Extract v3 handler kwargs filtering and sync/async invocation.
+- Reuse the same invocation seam for resolver follow-up handlers and first-turn Stage 2 handlers.
+
+Files/modules changed:
+- `jane_web/jane_v3/pipeline.py`
+- `tests/test_v3_pipeline_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- v3 still passes only handler-supported `context`, `pending`, and `params` kwargs.
+- Resolver follow-up dispatch still omits `params`; first-turn handler dispatch still passes params when accepted.
+- Coroutine handlers are awaited directly; sync handlers still run via `asyncio.to_thread()`.
+
+Boundary chosen:
+- This slice did not change registry lookup, recent-context loading, pending payload construction, or handler-result normalization. It only moved signature filtering and sync/async invocation into `_v3_handler_kwargs()` and `_invoke_v3_handler()`.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v3/pipeline.py tests/test_v3_pipeline_helpers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_v3_pipeline_helpers.py tests/test_v3_privacy_gate.py tests/test_pipeline_selection.py -q` passed (`18 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1589 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- v3 classifier-state construction and early classifier short-circuits remain inline; split only with classifier-state tests.
+
+## 2026-07-03 - V3 Handler Result Normalization Helper
+
+Goal/scope:
+- Extract v3 Stage 2 handler-result policy from `_classify_and_maybe_handle()`.
+- Cover invalid results, private-class deflection, forced Stage 3 escalation, wrong-class escalation, and valid Stage 2 success in focused tests.
+
+Files/modules changed:
+- `jane_web/jane_v3/pipeline.py`
+- `tests/test_v3_pipeline_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Private `no_stage3` classes still return safe deflections instead of escalating when handlers fail, request escalation, or flag wrong-class.
+- Non-private invalid/declined, force-stage3, and wrong-class results still escalate with the same fallback ack.
+- Handler-provided pending-action resolutions are still preserved when a forced escalation includes one.
+- Valid handler results still get Stage 2 and fallback ack values and remain Stage 2 successes.
+
+Boundary chosen:
+- This slice only moved post-handler result interpretation into `_apply_v3_handler_result()`, with small `_terminal_deflection_state()` and `_force_stage3_state()` helpers. Handler lookup, kwargs introspection, invocation, privacy gating, and persistence stayed unchanged.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v3/pipeline.py tests/test_v3_pipeline_helpers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_v3_pipeline_helpers.py tests/test_v3_privacy_gate.py tests/test_pipeline_selection.py -q` passed (`16 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1587 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- v3 handler invocation still has inline kwargs introspection and sync/async execution; split only with fake handler registry tests.
+
+## 2026-07-03 - V3 Pending-State Helper Split
+
+Goal/scope:
+- Extract v3 pending-data, awaiting, original-class, Stage 2 dispatch payload, Stage 3 follow-up state, and cancel state helpers.
+- Make resolver fast paths in `jane_v3.pipeline._classify_and_maybe_handle()` less fragile around malformed pending `data`.
+
+Files/modules changed:
+- `jane_web/jane_v3/pipeline.py`
+- `tests/test_v3_pipeline_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- STAGE3_FOLLOWUP still skips Stage 1/2 and forces Stage 3 with the same synthetic state.
+- Cancel resolver actions still return a Stage 2-shaped `"Ok."` result and optional consumed marker.
+- STAGE2_FOLLOWUP dispatch still receives pending data plus the original pending question when absent.
+
+Bug-risk reduced:
+- v3 no longer assumes pending `data` is dict-shaped when reading `awaiting` or `original_class`.
+
+Boundary chosen:
+- This slice only moved deterministic pending-state assembly into helpers. Classifier calls, handler lookup/invocation, recent-context loading, and privacy gating stayed in `_classify_and_maybe_handle()`.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v3/pipeline.py tests/test_v3_pipeline_helpers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_v3_pipeline_helpers.py tests/test_v3_privacy_gate.py tests/test_pipeline_selection.py -q` passed (`12 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1583 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- v3 handler invocation and result normalization still live inline; split only with fake handler registry tests.
+
+## 2026-07-03 - Pipeline Resolved Pending-Action Merge Helper
+
+Goal/scope:
+- Replace duplicated FIFO structured-state merge logic across streaming and non-streaming Stage 2/Stage 3 persistence paths.
+- Preserve the rule that a resolved pending-action marker is attached only when the handler or Stage 3 did not emit a newer pending action.
+
+Files/modules changed:
+- `jane_web/jane_v2/pipeline.py`
+- `tests/test_jane_v2_pipeline_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Existing handler/Stage 3 `pending_action` values still win over stale resolved markers.
+- Missing structured state still receives the resolved marker so FIFO clears stale pending actions.
+- Stage 2 and Stage 3 persistence paths still call `_persist_turn_to_fifo()` with the same data after merging.
+
+Boundary chosen:
+- This slice only extracted `_merge_resolved_pending_action()` and replaced four duplicated merge blocks. It did not change awaiting-marker parsing, SMS draft extraction, evidence metadata, or FIFO persistence.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v2/pipeline.py tests/test_jane_v2_pipeline_helpers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_jane_v2_pipeline_helpers.py tests/test_pending_sms.py -q` passed (`25 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1579 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Streaming FIFO persistence still contains evidence correction, SMS draft, and AWAITING extraction in one helper; split those only with stream-persistence tests.
+
+## 2026-07-03 - Auth Trusted-Device Session Helper
+
+Goal/scope:
+- Remove duplicated trusted-device session creation from `bootstrap_session_for_request()`.
+- Share label/default-user selection and prewarm behavior between trusted-cookie and fingerprint-match branches.
+
+Files/modules changed:
+- `jane_web/auth_sessions.py`
+- `tests/test_auth_sessions.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Trusted-cookie and fingerprint-match branches still create trusted sessions, prewarm them, log branch-specific messages, and return `(session_id, trusted_device_id)`.
+- Empty trusted-device labels still fall back to the default user id.
+- Single-user local mode, existing-session reuse, and local-browser untrusted sessions are unchanged.
+
+Boundary chosen:
+- This slice only extracted `_create_trusted_row_session()`. It did not change auth bypass rules, trusted-device lookup order, or share/session validation helpers.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/auth_sessions.py tests/test_auth_sessions.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_auth_sessions.py -q` passed (`19 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1578 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- `bootstrap_session_for_request()` still contains branch orchestration; further extraction should focus on logging or existing-session reuse only if auth behavior changes.
+
+## 2026-07-03 - Memory Retrieval User/Shared Fact Helper
+
+Goal/scope:
+- Extract user/shared memory fact assembly from `build_memory_sections()`.
+- Keep DS3000 anchors, user-memory facts, and legacy forgettable facts in one source-specific helper.
+
+Files/modules changed:
+- `memory/v1/memory_retrieval.py`
+- `tests/test_memory_retrieval_sections.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Shared-memory queries still inject exact DS3000 lecture anchors before collected long-term facts.
+- User/shared Chroma results still pass through `collect_user_memory_facts()` with the same permanent, short-term, and user max-distance thresholds.
+- Legacy forgettable facts are still appended only when shared memory and short-term memory are both enabled.
+- Final section ordering remains owned by `build_memory_sections_from_facts()`.
+
+Boundary chosen:
+- This slice did not change query submission, Chroma futures, non-user memory collectors, or section cache behavior. Only user/shared source assembly moved into `_collect_user_and_shared_facts()`.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile memory/v1/memory_retrieval.py tests/test_memory_retrieval_sections.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_memory_retrieval_sections.py tests/test_memory_sections.py -q` passed (`13 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1577 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- `build_memory_sections()` still has small source collector blocks for Jane long-term, short-term, file index, and essence. Those can be grouped later if the memory retrieval surface changes.
+
+## 2026-07-03 - Janitor Known-Junk Collection Rule Split
+
+Goal/scope:
+- Split `classify_known_junk()` into user-memory and long-term archive rule groups.
+- Keep collection-specific deletion reason ordering easier to audit.
+
+Files/modules changed:
+- `memory/v1/janitor_rules.py`
+- `tests/test_janitor_rules.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- User-memory known junk topics, queue artifacts, Amber-era stale memories, superseded Waterlily/AcuBliss planning memories, Docker/Traefik stale memories, and low-value deploy snapshots still return the same deletion reasons.
+- Long-term archive untyped fragments, deferred feature snapshots, stale runtime/Discord/Docker memories, and deploy snapshots still return the same deletion reasons.
+- Unknown collections still return `None`.
+
+Boundary chosen:
+- This slice left the individual predicate helpers untouched and moved only collection-specific rule ordering into `_classify_user_memory_junk()` and `_classify_long_term_junk()`.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile memory/v1/janitor_rules.py tests/test_janitor_rules.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_janitor_rules.py tests/test_janitor_query_markers.py -q` passed (`10 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1575 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Larger janitor functions still orchestrate Chroma collection scans; split those only with fake collection tests.
+
+## 2026-07-03 - Nearest Memory Candidate Collection Helpers
+
+Goal/scope:
+- Split exact DS3000 anchor candidate construction from `query_nearest_memory_lines()`.
+- Split sequential query-spec execution and candidate filtering into a tested helper.
+
+Files/modules changed:
+- `memory/v1/memory_retrieval.py`
+- `tests/test_nearest_memory.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- DS3000 lecture anchors still get priority `0`, distance `0.0`, and `user_memories` source.
+- Nearest-memory Chroma specs still run sequentially to avoid fd-redirection races during model loads.
+- Failed query specs are still skipped best-effort.
+- Candidate acceptance still delegates to `nearest_memory_candidate()` with the same distance and lexical-overlap thresholds.
+
+Boundary chosen:
+- This slice did not change query intent planning, query-spec generation, embeddings, or final dedupe/sort selection. Only candidate collection moved into `_ds3000_anchor_candidates()` and `_nearest_candidates_from_query_specs()`.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile memory/v1/memory_retrieval.py tests/test_nearest_memory.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_nearest_memory.py tests/test_memory_retrieval_sections.py -q` passed (`17 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1573 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- `query_nearest_memory_lines()` is now mostly planning plus final selection; further work should target query-plan builders if memory routing evolves.
+
+## 2026-07-03 - Delete-Email Bucket Fetch Helper
+
+Goal/scope:
+- Extract shared Gmail bucket fetch/error handling from `delete_email.metadata._escalation_context()`.
+- Keep unread, spam, and promotions fetches on one tested path while preserving delete-specific `message_id` formatting.
+
+Files/modules changed:
+- `jane_web/jane_v2/classes/delete_email/metadata.py`
+- `tests/test_delete_email_metadata.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Delete-email escalation still fetches unread first, then spam and promotions when Gmail credentials are available.
+- RuntimeError from unread fetch still produces Gmail setup guidance and skips later buckets/footer.
+- Generic bucket fetch errors still produce bucket-specific `Fetch failed` blocks and log warnings.
+- Email rows still include `id=<message_id>` so Opus can emit `email.delete` markers.
+
+Boundary chosen:
+- This slice did not alter delete workflow instructions, params schema, ack text, or metadata examples. Only repeated Gmail fetch/error branches moved into `_delete_email_bucket()`.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v2/classes/delete_email/metadata.py tests/test_delete_email_metadata.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_delete_email_metadata.py tests/test_context_footers.py -q` passed (`5 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1571 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Email metadata is now reasonably split; further cleanup should focus on shared helper reuse only if duplicate logic begins to drift.
+
+## 2026-07-03 - Read-Email Bucket Fetch Helper
+
+Goal/scope:
+- Extract shared Gmail bucket fetch/error handling from `read_email.metadata._escalation_context()`.
+- Keep unread and spam inbox blocks on the same deterministic path.
+
+Files/modules changed:
+- `jane_web/jane_v2/classes/read_email/metadata.py`
+- `tests/test_read_email_metadata.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Read-email escalation still fetches unread email first, then spam if Gmail credentials are available.
+- RuntimeError from unread fetch still produces the Gmail setup guidance and skips spam/footer.
+- Generic fetch errors still produce bucket-specific `Fetch failed` blocks and log warnings.
+
+Boundary chosen:
+- This slice did not change metadata descriptions, params schema, ack text, or formatting of individual email rows. Only bucket fetch/error handling moved into `_read_email_bucket()`.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v2/classes/read_email/metadata.py tests/test_read_email_metadata.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_read_email_metadata.py tests/test_context_footers.py -q` passed (`5 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1568 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Delete-email metadata has the same bucket-fetch pattern across unread, spam, and promotions and is the next reasonable metadata cleanup.
+
+## 2026-07-03 - Send-Email Escalation Context Helper Split
+
+Goal/scope:
+- Split sender-account formatting, send-email rules text, and recent-inbox block construction out of `send_email.metadata._escalation_context()`.
+- Make Gmail setup and fetch-error context deterministic under focused tests.
+
+Files/modules changed:
+- `jane_web/jane_v2/classes/send_email/metadata.py`
+- `tests/test_send_email_metadata.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Send-email still always escalates to Stage 3 with the same rules-of-engagement text.
+- Available sender accounts still come from `list_gmail_token_users()`, with the same empty-state wording.
+- Recent inbox fetch still uses `read_inbox(limit=15, query="")`.
+- Gmail setup errors and generic fetch errors still produce the same prompt blocks.
+
+Boundary chosen:
+- This slice did not alter the metadata schema, few-shot examples, or Gmail tool marker format. Only deterministic context formatting moved into `_sender_account_line()`, `_send_email_rules()`, and `_recent_inbox_block()`.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v2/classes/send_email/metadata.py tests/test_send_email_metadata.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_send_email_metadata.py tests/test_context_footers.py -q` passed (`7 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1565 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Similar escalation-context splits may be useful in read/delete email metadata, but only where the fetch/error branches are still mixed with long rules text.
+
+## 2026-07-03 - Send-Message Recipient Resolution Helpers
+
+Goal/scope:
+- Split recipient resolution and post-resolution alias writeback out of `send_message.handle()`.
+- Keep send-message routing readable as metadata, recipient, response-policy.
+
+Files/modules changed:
+- `jane_web/jane_v2/classes/send_message/handler.py`
+- `tests/test_send_message_parsing.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Unresolved recipients still escalate to Stage 3.
+- Successful contact resolution still exposes the same phone/display values to the response policy.
+- Auto-alias writes remain best-effort and nonfatal.
+
+Boundary chosen:
+- This slice kept `sms_helpers` imports in `handle()` and did not change SMS marker builders, params parsing, LLM extraction, or direct-send response construction.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v2/classes/send_message/handler.py tests/test_send_message_parsing.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_send_message_parsing.py -q` passed (`24 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1560 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- `send_message.handle()` is now mostly orchestration; further work should target open-draft state lookup only if fake session-state tests are added.
+
+## 2026-07-03 - Todo-List First-Turn Routing Helpers
+
+Goal/scope:
+- Split first-turn TODO routing decisions out of `todo_list.handle()`.
+- Make Ambient-project decline, shopping-list param translation, and read-response selection independently testable.
+
+Files/modules changed:
+- `jane_web/jane_v2/classes/todo_list/handler.py`
+- `tests/test_todo_list_parsing.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Ambient-project prompts still decline so Stage 3 can answer project questions.
+- Shopping-list prompts still delegate to the shopping-list handler when import succeeds, with add/remove/view params mapped as before.
+- Params category, direct category mention, empty list, and ask-category read paths still return the same response builders.
+
+Boundary chosen:
+- This slice left cache loading, params-driven edits, regex edits, and resume handling in the existing flow. Only first-turn routing predicates and read response selection moved into helpers.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v2/classes/todo_list/handler.py tests/test_todo_list_parsing.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_todo_list_parsing.py tests/test_todo_list_responses.py -q` passed (`25 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1558 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- TODO handler logic is now split enough; further work should move toward shopping-list or pipeline streaming boundaries rather than subdividing this handler further.
+
+## 2026-07-03 - Task Offloader Context and Retry Helpers
+
+Goal/scope:
+- Split session-history loading and prompt-context construction out of `_run_task()`.
+- Extract automation retry behavior, including the empty-response retry announcement.
+
+Files/modules changed:
+- `jane_web/task_offloader.py`
+- `tests/test_task_offloader_context.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Offloaded tasks still announce start, run heartbeats, build Jane context from session history, and call `run_automation_prompt()` with `VESSENCE_HOME`.
+- Empty automation responses still retry once after writing the retry announcement and sleeping two seconds.
+- Non-retryable automation errors still propagate to `_run_task()`'s existing error announcement path.
+
+Boundary chosen:
+- The thread lifecycle, heartbeat thread, final announcement, and exception-to-announcement mapping stayed in `_run_task()`. Only context and retry decisions moved into `_load_offload_history()`, `_task_prompt_context()`, and `_run_automation_with_retries()`.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/task_offloader.py tests/test_task_offloader_context.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_task_offloader_context.py tests/test_task_offloader_messages.py tests/test_task_offloader_announcements.py -q` passed (`17 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1553 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- `_run_task()` still owns heartbeat lifecycle and final/error announcement mapping; extract those only with thread-free tests around announcement ordering.
+
+## 2026-07-03 - Pending SMS Draft Edit Helper Split
+
+Goal/scope:
+- Split deterministic SMS draft-edit prompt construction, composed-body cleanup, and draft-update response assembly out of `resolve_pending_sms_draft_edit()`.
+- Keep the async LLM call path focused on composing/fallback selection.
+
+Files/modules changed:
+- `jane_web/jane_v2/pending_sms.py`
+- `tests/test_pending_sms.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Draft edits still use the shared local Ollama client and the same payload options.
+- Empty composed output still falls back to the previous body.
+- LLM failures still concatenate the old body and user edit text.
+- Draft-update responses still emit the same `contacts.sms_draft_update` marker and `SEND_MESSAGE_DRAFT_OPEN` pending action.
+
+Boundary chosen:
+- This slice only moved deterministic string/response builders into `_sms_draft_edit_prompt()`, `_clean_composed_sms_body()`, and `_sms_draft_update_response()`. It did not change marker regexes or send/cancel behavior.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v2/pending_sms.py tests/test_pending_sms.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_pending_sms.py -q` passed (`12 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1549 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- `extract_sms_draft_state()` is already compact; future SMS work should focus on Stage 3 marker handling in the pipeline streaming path.
+
+## 2026-07-03 - Pending SMS Data Shape Helper
+
+Goal/scope:
+- Centralize pending SMS `data` extraction.
+- Make SMS pending-action marker, confirm, cancel, draft-send, draft-cancel, and draft-edit paths tolerate malformed non-dict `data`.
+
+Files/modules changed:
+- `jane_web/jane_v2/pending_sms.py`
+- `tests/test_pending_sms.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Valid pending SMS confirmation and draft payloads still produce the same client-tool markers and structured pending-action resolutions.
+- Pending consumed markers still include top-level or nested `awaiting` when present.
+
+Bug-risk reduced:
+- Malformed pending `data` now normalizes to `{}` instead of risking `.get()` attribute errors in SMS pending paths.
+
+Boundary chosen:
+- This slice only added `_pending_data()` and replaced repeated `pending.get("data") or {}` access. SMS marker parsing, direct-send marker construction, and LLM draft editing stayed unchanged.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v2/pending_sms.py tests/test_pending_sms.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_pending_sms.py tests/test_jane_v2_pipeline_helpers.py -q` passed (`21 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1546 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- The SMS draft edit path still mixes prompt construction, LLM fallback, and response construction; extract only if paired with fake LLM tests.
+
+## 2026-07-03 - Pipeline Pending Follow-Up State Helpers
+
+Goal/scope:
+- Extract Stage 2 follow-up pending payload preparation from `_classify_and_try_stage2()`.
+- Extract Stage 3 follow-up synthetic state construction and original-class lookup.
+
+Files/modules changed:
+- `jane_web/jane_v2/pipeline.py`
+- `tests/test_jane_v2_pipeline_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Stage 2 follow-up dispatch still receives pending data plus the original pending question when the data does not already include one.
+- Stage 3 follow-up resolver actions still return the same synthetic `stage3_followup:High` state, consumed marker, and original class/protocol hint.
+- Existing pending-consumed marker construction remains delegated to `pending_sms.pending_consumed_marker()`.
+
+Bug-risk reduced:
+- Original-class lookup for Stage 3 follow-ups now handles malformed non-dict pending `data` without risking an attribute error.
+
+Boundary chosen:
+- This slice only moved deterministic pending payload/state assembly into `_stage2_pending_for_dispatch()`, `_stage3_followup_original_class()`, and `_stage3_followup_state()`. Resolver action selection and dispatcher calls stayed in the pipeline.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v2/pipeline.py tests/test_jane_v2_pipeline_helpers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_jane_v2_pipeline_helpers.py tests/test_pending_sms.py -q` passed (`18 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1543 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- `_classify_and_try_stage2()` still contains resolver action dispatch, Stage 1 fallback, and Stage 2 dispatch timing. Further splits should target one resolver action group at a time.
+
+## 2026-07-03 - Stage 2 Dispatcher Handler Result Normalization
+
+Goal/scope:
+- Extract handler-result interpretation from `stage2_dispatcher.dispatch()`.
+- Keep `None`, `abandon_pending`, `wrong_class`, invalid shapes, and valid text responses in one tested contract.
+
+Files/modules changed:
+- `jane_web/jane_v2/stage2_dispatcher.py`
+- `tests/test_stage2_dispatcher_prompts.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Handlers returning `None` still decline and escalate.
+- `abandon_pending` responses still pass through unchanged.
+- `wrong_class` responses still start the disabled self-correction thread path and return `None`.
+- Invalid shapes still log and return `None`; valid dicts with `text` still pass through.
+
+Boundary chosen:
+- This slice did not touch registry lookup, gate/continuation checks, handler kwargs, or sync/async invocation. Only post-call result normalization moved into `_normalize_handler_result()`.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v2/stage2_dispatcher.py tests/test_stage2_dispatcher_prompts.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_stage2_dispatcher_prompts.py -q` passed (`13 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1539 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- `dispatch()` is now mostly registry lookup plus handler invocation; future Stage 2 work should move to individual handler boundaries.
+
+## 2026-07-03 - Stage 2 Dispatcher Pre-Handler Check Split
+
+Goal/scope:
+- Extract the Stage 2 gate/continuation precheck from `dispatch()`.
+- Make first-turn gate skips, rejected gates, and pending-topic changes directly testable without invoking handlers.
+
+Files/modules changed:
+- `jane_web/jane_v2/stage2_dispatcher.py`
+- `tests/test_stage2_dispatcher_prompts.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Pending follow-ups still use `_continuation_check()` with the literal pending question when available.
+- Gate rejections still escalate, and Low-confidence rejections still start the disabled self-correction thread path.
+- High-confidence gate rejections still skip self-correction writes.
+
+Bug fixed:
+- Near-identical first-turn Stage 1 matches now actually skip the LLM precheck and continue to handler invocation. Previously the branch logged a gate skip but fell into the follow-up continuation path because `skip_gate=True` made the `pending is None and not skip_gate` condition false.
+
+Boundary chosen:
+- This slice only moved pre-handler routing into `_pre_handler_dispatch_check()` and kept handler lookup, invocation, result validation, and metadata lookup in the dispatcher.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v2/stage2_dispatcher.py tests/test_stage2_dispatcher_prompts.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_stage2_dispatcher_prompts.py -q` passed (`10 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1536 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Handler-result normalization (`abandon_pending`, `wrong_class`, invalid shapes) can be extracted later if paired with dispatch-level tests.
+
+## 2026-07-03 - Memory Retrieval Legacy and Recency Fetch Helpers
+
+Goal/scope:
+- Extract legacy forgettable-memory loading from `build_memory_sections()`.
+- Extract short-term recency boost loading from `build_memory_sections()`.
+
+Files/modules changed:
+- `memory/v1/memory_retrieval.py`
+- `tests/test_memory_retrieval_sections.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Legacy forgettable memories still query the shared user-memory collection with `memory_type=forgettable`.
+- Expired, empty, and low-signal legacy short-term records are still filtered out before formatting.
+- Short-term recency boost still loads up to 200 records and applies the existing three-entry recency boost.
+- Chroma failures still degrade to the existing best-effort empty/unchanged result.
+
+Boundary chosen:
+- This slice left query planning, parallel semantic queries, fact collection thresholds, and final section assembly untouched. Only the side-effectful post-query fetches moved into `_collect_legacy_forgettable_facts()` and `_apply_short_term_recency_boost()`.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile memory/v1/memory_retrieval.py tests/test_memory_retrieval_sections.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_memory_retrieval_sections.py tests/test_nearest_memory.py tests/test_memory_sections.py tests/test_memory_sections_cache.py -q` passed (`22 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1532 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- `build_memory_sections()` still coordinates many source-specific fact collectors. Further splits should target pure collection/result assembly rather than changing Chroma query behavior.
+
+## 2026-07-03 - Send-Message Metadata and Response Policy Split
+
+Goal/scope:
+- Extract metadata source selection from `send_message.handle()`.
+- Extract the resolved-recipient response policy that decides between Stage 3 escalation, confirm/revise, and direct send.
+
+Files/modules changed:
+- `jane_web/jane_v2/classes/send_message/handler.py`
+- `tests/test_send_message_parsing.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Params-driven `ask` and missing-recipient paths still escalate to Stage 3.
+- LLM `WRONG_CLASS` still returns the self-correction sentinel.
+- Missing SMS body still escalates, incoherent body still asks for confirmation, low direct-send confidence still escalates, and high-confidence coherent body still emits the direct-send response.
+- Contact resolution and alias writes remain in `handle()` and still use the existing `sms_helpers` imports.
+
+Boundary chosen:
+- This slice avoided changing recipient resolution, database alias writes, and SMS marker builders. It only moved deterministic routing policy into `_message_metadata()` and `_resolved_message_response()`.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v2/classes/send_message/handler.py tests/test_send_message_parsing.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_send_message_parsing.py -q` passed (`22 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1528 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- `_check_open_draft()` still mixes session lookup, FIFO state reads, and prompt classification. Extracting the pure draft decision would be useful with a fake active-state provider.
+
+## 2026-07-03 - Todo-List Resume Edit Handler Split
+
+Goal/scope:
+- Split edit follow-up handling out of `todo_list._handle_resume()`.
+- Centralize pending-action shape normalization for current pipeline payloads and legacy pending wrappers.
+
+Files/modules changed:
+- `jane_web/jane_v2/classes/todo_list/handler.py`
+- `tests/test_todo_list_parsing.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Add-category, add-category-then-item, add-item-for-category, add-item, and remove-item follow-ups still return the same response shapes and error text.
+- Reading follow-ups still pass through to the existing end-phrase and category-read logic.
+- Google Docs edit calls and cache refreshes remain behind the same local imports.
+
+Boundary chosen:
+- The slice extracted `_todo_pending_data()`, `_todo_pending_awaiting()`, and the edit-resume branch helpers only. It did not change first-turn TODO parsing or category matching.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v2/classes/todo_list/handler.py tests/test_todo_list_parsing.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_todo_list_parsing.py -q` passed (`13 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1522 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- The TODO first-turn `handle()` path still mixes shopping-list delegation, params-driven edits, regex edits, and read routing. Extracting those gates would be useful if paired with handler-level tests.
+
+## 2026-07-03 - Stage 1 Classification Gate Helper Split
+
+Goal/scope:
+- Extract force-Stage-3 override detection and confidence-policy selection from `stage1_classifier.classify()`.
+- Make the Stage 1 routing gates testable without invoking ChromaDB.
+
+Files/modules changed:
+- `jane_web/jane_v2/stage1_classifier.py`
+- `tests/test_stage1_classifier_rules.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Explicit Stage 3 override phrases and regex variants still bypass ChromaDB and return `("others", "Low", 1.0)`.
+- Delegate/unknown classifications still demote to Low.
+- END_CONVERSATION still requires both a complete ending utterance and the existing 0.80 confidence floor.
+- Clinic schedule and strict-class keyword guards still demote ambiguous false positives to Stage 3.
+
+Boundary chosen:
+- This slice only moved deterministic policy decisions into `_force_stage3_override()` and `_classification_confidence()`. The ChromaDB call shape, class map, logging payload, and return tuple stayed in `classify()`.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v2/stage1_classifier.py tests/test_stage1_classifier_rules.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_stage1_classifier_rules.py tests/test_stage1_prompt_cleaning.py -q` passed (`15 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1517 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- `stage1_classifier.classify()` is now small enough; future routing work should focus on pipeline orchestration and Stage 2 handler boundaries.
+
+## 2026-07-03 - Stage 3 Class Protocol Status Helper
+
+Goal/scope:
+- Extract class-protocol status selection from `stage3_escalate.escalate_stream()`.
+- Preserve the existing `n/a`, `loaded:<class>`, and `missing:<class>` log status values.
+
+Files/modules changed:
+- `jane_web/jane_v2/stage3_escalate.py`
+- `tests/test_stage3_escalate_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Stage 3 still injects structured state, extracted params, voice hints, and class protocol in the same order.
+- Unknown/non-class escalation reasons still log protocol status as `n/a`.
+- Missing protocol files still log as `missing:<class>` and do not block escalation.
+
+Boundary chosen:
+- The stream loop is latency-sensitive and side-effectful, so this slice only extracted a pure status decision used for logging and diagnostics.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v2/stage3_escalate.py tests/test_stage3_escalate_helpers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_stage3_escalate_helpers.py tests/test_stage3_protocols.py tests/test_stage3_injections.py -q` passed (`17 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1507 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- The Stage 3 streaming chunk loop still mixes ack suppression, JSON parsing, and tool-marker extraction; split only with stream-level fake generator tests.
+
+## 2026-07-03 - Memory Retrieval Section Query Submission Split
+
+Goal/scope:
+- Split cache-key creation, section-query submission, and safe future result handling out of `build_memory_sections()`.
+- Preserve memory source order, Chroma collection names, per-source limits, and embedding reuse.
+
+Files/modules changed:
+- `memory/v1/memory_retrieval.py`
+- `tests/test_memory_retrieval_sections.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Shared/user memories are queried before Jane long-term, short-term, file index, and essence memory.
+- User/shared, Jane long-term, short-term, and file-index section queries still reuse the precomputed query embedding.
+- Essence memory still uses text-query fallback rather than the shared embedding, matching the prior call shape.
+- Missing or failed futures still produce empty `(docs, metas, distances)` tuples.
+
+Boundary chosen:
+- `build_memory_sections()` was doing cache handling, query planning/submission, result collection, Chroma recency boosts, fact collection, and final section assembly. `_memory_sections_cache_key()`, `_submit_section_queries()`, and `_safe_future_result()` remove one orchestration layer without moving Chroma fetch behavior.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile memory/v1/memory_retrieval.py tests/test_memory_retrieval_sections.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_memory_retrieval_sections.py tests/test_nearest_memory.py tests/test_memory_sections.py tests/test_memory_sections_cache.py -q` passed (`18 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1506 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- `build_memory_sections()` still contains legacy forgettable-memory and short-term recency boost I/O. Those can be extracted later with fake Chroma collections if memory retrieval needs more cleanup.
+
+## 2026-07-03 - Pending-Action Resolution Payload Helpers
+
+Goal/scope:
+- Remove duplicated pending-action response dict construction.
+- Centralize pending `data` and `awaiting` extraction for deterministic follow-up routing.
+
+Files/modules changed:
+- `jane_web/jane_v2/pending_action_resolution.py`
+- `tests/test_pending_action_resolution.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- High-precision interrupts and topic pivots still return `action="pivot"`.
+- Cancel/confirm/SMS draft routing action names and pending-turn IDs are unchanged.
+- Stage 2 and Stage 3 follow-up routing still returns the same handler class and pending payload for valid pending data.
+
+Bug-risk reduced:
+- Malformed non-dict pending `data` now produces empty `pending_data` and keeps routing on the existing abandon/escalate path instead of risking `.get()` errors in logging or payload construction.
+
+Boundary chosen:
+- The resolver is pure deterministic routing. `_resolution()`, `_pending_data()`, and `_pending_awaiting()` reduce repeated dict assembly without changing phrase classification helpers.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v2/pending_action_resolution.py tests/test_pending_action_resolution.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_pending_action_resolution.py tests/test_pending_action_expiry.py tests/test_pending_sms.py -q` passed (`16 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1503 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- `pending_action_resolver.resolve()` remains small enough; further work should focus on pipeline handling of resolver decisions rather than this pure routing module.
+
+## 2026-07-03 - Read-Calendar Pending State Helper Cleanup
+
+Goal/scope:
+- Extract repeated pending-data access from the read-calendar Stage 2 resume flow.
+- Preserve event-detail, event-choice, another-day, and day-choice follow-up behavior.
+
+Files/modules changed:
+- `jane_web/jane_v2/classes/read_calendar/handler.py`
+- `tests/test_read_calendar_formatting.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- End/no replies during calendar follow-up still close the conversation with `Ok.`.
+- Event-detail follow-ups still match by yes/number/summary, then fall back to day-range handling or another-day prompt.
+- Day-choice failures still abandon the pending action and force Stage 3.
+- Valid pending event lists and last-range values still flow into existing response builders unchanged.
+
+Bug-risk reduced:
+- Malformed `pending["data"]` and malformed pending `events` now flow to the existing abandon/escalate path instead of risking attribute errors in the resume handler.
+
+Boundary chosen:
+- `_calendar_pending_data()`, `_calendar_awaiting()`, and `_calendar_events_and_last_range()` isolate pending-state shape handling while leaving calendar API fetches, Qwen phrasing, and response builders untouched.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v2/classes/read_calendar/handler.py tests/test_read_calendar_formatting.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_read_calendar_formatting.py tests/test_read_calendar_prompts.py -q` passed (`13 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1501 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Calendar handler branch functions could be split further, but pending-state shape is now centralized and covered.
+
+## 2026-07-03 - Weather Pending Follow-Up Helper Split
+
+Goal/scope:
+- Extract weather pending follow-up normalization and replay from the main Stage 2 weather handler.
+- Preserve Medford-only cache behavior, day follow-up parsing, and Stage 3 abandon semantics.
+
+Files/modules changed:
+- `jane_web/jane_v2/classes/weather/handler.py`
+- `tests/test_weather_slices.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Research/online weather prompts still escalate before any cache work.
+- End phrases during weather follow-up still close the conversation through `end_conversation("Ok.")`.
+- Malformed pending data, non-Medford pending locations, missing follow-up days, and failed cache/LLM answers still return `{"abandon_pending": True, "force_stage3": True}`.
+- First-turn params still reject non-Medford locations using the same accepted local variants.
+
+Boundary chosen:
+- The resume branch had its own pending payload parsing, location validation, day extraction, and answer replay. `_pending_payload()`, `_pending_weather_fields()`, and `_handle_pending_weather()` make that branch testable without reading the weather cache or calling the local LLM.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v2/classes/weather/handler.py tests/test_weather_slices.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_weather_slices.py -q` passed (`10 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1500 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Weather first-turn params normalization could be extracted too, but the largest risk branch is now isolated and covered.
+
+## 2026-07-03 - Stage 2 Dispatcher Gate Helper and Result Guard
+
+Goal/scope:
+- Extract small helper seams from `stage2_dispatcher.dispatch()` for gate-skipping and pending-question text.
+- Fix a handler-result validation bug where non-dict handler returns could hit `result.get("wrong_class")` before shape validation.
+
+Files/modules changed:
+- `jane_web/jane_v2/stage2_dispatcher.py`
+- `tests/test_stage2_dispatcher_prompts.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Near-identical Stage 1 matches still skip the LLM gate only when there is no pending follow-up.
+- Pending follow-up continuation checks still receive the literal pending `question` when present.
+- `abandon_pending` and `wrong_class` dict results retain their existing control-flow behavior.
+
+Bug fixed:
+- A malformed handler return such as a string now logs an invalid-shape warning and returns `None` instead of raising `AttributeError` before the invalid-shape branch.
+
+Boundary chosen:
+- The dispatcher is central and risky to split broadly. `_should_skip_gate()` and `_pending_question_text()` isolate policy checks while the result guard is the narrowest safe correctness fix.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v2/stage2_dispatcher.py tests/test_stage2_dispatcher_prompts.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_stage2_dispatcher_prompts.py tests/test_stage2_handler_invocation.py -q` passed (`11 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1498 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- The dispatcher still mixes gate policy, handler invocation, self-correction, and result normalization. Further extraction should be done only with more direct dispatch tests to avoid changing routing semantics.
+
+## 2026-07-03 - Send-Message Resume and Auto-Alias Helpers
+
+Goal/scope:
+- Extract testable helper seams from the Stage 2 send-message handler.
+- Preserve SMS draft resume routing, open-draft safety-net behavior, recipient resolution, auto-alias learning, and direct-send/draft-send responses.
+
+Files/modules changed:
+- `jane_web/jane_v2/classes/send_message/handler.py`
+- `tests/test_send_message_parsing.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Pending follow-ups still resume when `handler_class == "send message"` or pending data awaits `send_confirmation` / `revised_body`.
+- Auto-aliasing still only happens for contact-resolution results, still skips empty aliases and aliases identical to the display name, and still refuses to overwrite an existing alias row.
+- Alias-write failures remain non-fatal to sending.
+
+Boundary chosen:
+- The handler's main path was mixing routing predicates, contact alias persistence, recipient resolution, and send/draft decisions. `_should_resume_send_message()` and `_maybe_auto_alias_contact()` isolate two side-effect boundaries without changing LLM extraction or SMS marker generation.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v2/classes/send_message/handler.py tests/test_send_message_parsing.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_send_message_parsing.py tests/test_sms_tool_markers.py tests/test_pending_sms.py -q` passed (`26 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1496 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- The send-message handler still has one large recipient-resolution/send-decision flow; a future slice could extract metadata selection from params vs LLM if more tests are added around the LLM sentinel cases.
+
+## 2026-07-03 - Todo-List Params Edit Dispatch Split
+
+Goal/scope:
+- Separate structured params normalization/edit dispatch from the todo-list handler's read and regex fallback flow.
+- Preserve the existing Google Doc edit, shopping-list delegation, cache loading, and category read behavior.
+
+Files/modules changed:
+- `jane_web/jane_v2/classes/todo_list/handler.py`
+- `tests/test_todo_list_parsing.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Pending follow-up turns still route to `_handle_resume()` before first-turn dispatch.
+- Structured `action=add/remove` params still call `_handle_edit(..., from_params=True)` with normalized item and category strings.
+- `action=read` and unknown non-edit actions still skip regex edit detection and continue into the read/category flow, matching the previous `action is None` guard.
+- Shopping-list misroute delegation remains before todo cache loading.
+
+Boundary chosen:
+- The todo handler had the same mixed structured/legacy shape as the timer handler. `_TodoActionParams`, `_todo_action_params()`, and `_handle_params_edit()` make the params path explicit while leaving I/O-heavy Google Docs editing in the existing helper.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v2/classes/todo_list/handler.py tests/test_todo_list_parsing.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_todo_list_parsing.py tests/test_todo_list_categories.py tests/test_todo_list_cache.py tests/test_todo_list_responses.py -q` passed (`26 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1493 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- `_handle_resume()` still has multiple add/remove/read continuation branches and could be split with fake docs-tool tests if future todo work needs more clarity.
+
+## 2026-07-03 - Timer Handler Params/Legacy Dispatch Split
+
+Goal/scope:
+- Split the Stage 2 timer handler's params-driven dispatch from its legacy regex dispatch.
+- Preserve existing timer set/list/count/cancel/delete behavior, including multi-turn resume handling.
+
+Files/modules changed:
+- `jane_web/jane_v2/classes/timer/handler.py`
+- `tests/test_timer_parsing.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Pending timer setup replies still route through `_handle_resume()` before any new dispatch.
+- Params action `set` still treats `label=""` as an explicit no-label opt-out while missing/`None` labels fall back to prompt label extraction.
+- Unknown params actions still fall through to the legacy prompt parser.
+- Delete params still escalate (`None`) when no target can be resolved.
+
+Boundary chosen:
+- `handle()` had two distinct responsibilities: honoring structured Stage 2 params and preserving old regex classification behavior. `_timer_action_params()`, `_handle_params_action()`, and `_handle_legacy_prompt()` separate those paths without moving parsing or response construction out of their existing modules.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v2/classes/timer/handler.py tests/test_timer_parsing.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_timer_parsing.py tests/test_timer_tool_markers.py -q` passed (`16 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1490 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Similar params/legacy splits may be worthwhile in other Stage 2 handlers with mixed structured and prompt-parsing paths.
+
+## 2026-07-03 - FastAPI Lifespan Startup/Shutdown Cleanup
+
+Goal/scope:
+- Replace deprecated `@app.on_event("startup")` / `@app.on_event("shutdown")` registration with a FastAPI lifespan context.
+- Preserve the existing `startup()` and `shutdown()` function bodies and callable names.
+
+Files/modules changed:
+- `jane_web/main.py`
+- `tests/test_pipeline_selection.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Startup still initializes SecretStore/session secret, DB schema, essences, turn dedupe, warmups, keepalives, standing brains, and shared-queue resume in the same order.
+- Shutdown still cleans up Claude, Gemini, Standing Brain, Standing Codex, and background tasks through the existing function.
+- Tests and internal call sites can still call `main.startup()` and `main.shutdown()` directly if needed.
+
+Boundary chosen:
+- `main.py` already had cohesive lifecycle functions. A small `_app_lifespan()` wrapper removes the FastAPI deprecation path without moving initialization code or changing routes.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/main.py tests/test_pipeline_selection.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_pipeline_selection.py tests/test_cli_login_token_errors.py -q` passed (`10 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1487 passed`, no warnings).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Startup still launches several background tasks inline; future refactors could extract lifecycle task registration into a tested helper if startup ordering needs to change.
+
+## 2026-07-03 - Command Metadata UTC Helper Cleanup
+
+Goal/scope:
+- Remove the remaining direct `datetime.utcnow()` usage from command/helper metadata writers.
+- Preserve naive UTC ISO metadata for Chroma/vault records and `YYYY-MM-DDTHH:MM:SSZ` formatting for the TODO cache.
+
+Files/modules changed:
+- `agent_skills/fetch_todo_list.py`
+- `memory/v1/add_fact.py`
+- `memory/v1/add_forgettable_memory.py`
+- `memory/v1/index_vault.py`
+- `tests/test_fetch_todo_list.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- `add_fact.py` still writes long-term memory metadata with the same offset-free ISO timestamp shape.
+- `add_forgettable_memory.py` still captures one `now` value and derives both `timestamp` and `expires_at` from it.
+- `index_vault.py` still stores file-index metadata with the same offset-free ISO timestamp shape.
+- `fetch_todo_list.py` still writes atomic JSON cache payloads with second-resolution `Z` timestamps.
+
+Boundary chosen:
+- The memory scripts can reuse the already-tested pure `local_vector_memory_helpers` timestamp functions without importing Chroma in tests. The TODO fetcher is lightweight enough to expose and test its own `_fetched_at_timestamp()` seam.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile agent_skills/fetch_todo_list.py memory/v1/add_fact.py memory/v1/add_forgettable_memory.py memory/v1/index_vault.py tests/test_fetch_todo_list.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_fetch_todo_list.py tests/test_local_vector_memory_helpers.py tests/test_todo_doc_helpers.py -q` passed (`13 passed`).
+- `rg -n "datetime\\.utcnow|datetime\\.datetime\\.utcnow|_dt\\.datetime\\.utcnow|dt\\.datetime\\.utcnow" jane_web memory agent_skills -S` returned no matches.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1486 passed, 4 warnings`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Direct UTC deprecation cleanup is complete for `jane_web`, `memory`, and `agent_skills`; future timestamp work should focus on higher-level schema consistency only if a concrete behavior issue appears.
+
+## 2026-07-03 - Stage 2 Escalation Footer Timestamp Helper
+
+Goal/scope:
+- Remove duplicated `datetime.utcnow()` footer formatting from email/calendar Stage 2 escalation context metadata.
+- Preserve the existing `(Fetched at <iso>Z. ...)` footer shape and each class-specific instruction string.
+
+Files/modules changed:
+- `jane_web/jane_v2/classes/context_footers.py`
+- `jane_web/jane_v2/classes/read_email/metadata.py`
+- `jane_web/jane_v2/classes/send_email/metadata.py`
+- `jane_web/jane_v2/classes/delete_email/metadata.py`
+- `jane_web/jane_v2/classes/read_calendar/metadata.py`
+- `tests/test_context_footers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Gmail inbox/spam/promotions and calendar data fetches still happen in the same order with the same error handling.
+- Read-email, send-email, delete-email, and read-calendar still append the same fetched-at footer instructions when credentials are available.
+- Calendar event date parsing still uses the local `datetime` import; only the footer timestamp generation moved.
+
+Boundary chosen:
+- These metadata modules share a small context-footer contract but should not share Gmail or Calendar fetch logic. A tiny `context_footers` helper makes timestamp output testable without importing live service clients.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v2/classes/context_footers.py jane_web/jane_v2/classes/read_email/metadata.py jane_web/jane_v2/classes/send_email/metadata.py jane_web/jane_v2/classes/delete_email/metadata.py jane_web/jane_v2/classes/read_calendar/metadata.py tests/test_context_footers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_context_footers.py tests/test_read_calendar_formatting.py tests/test_read_calendar_prompts.py -q` passed (`14 passed`).
+- `rg -n "datetime\\.utcnow|datetime\\.datetime\\.utcnow|_dt\\.datetime\\.utcnow|dt\\.datetime\\.utcnow" jane_web/jane_v2/classes/read_email/metadata.py jane_web/jane_v2/classes/send_email/metadata.py jane_web/jane_v2/classes/delete_email/metadata.py jane_web/jane_v2/classes/read_calendar/metadata.py -S` returned no matches.
+- Repo-wide UTC scan is now limited to `memory/v1/add_forgettable_memory.py`, `memory/v1/index_vault.py`, `memory/v1/add_fact.py`, and `agent_skills/fetch_todo_list.py`.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1484 passed, 4 warnings`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- The remaining direct UTC call sites are command/helper scripts with Chroma, vault, or todo-tool imports. Refactor them only if a lightweight helper seam can test metadata formatting without invoking live integrations.
+
+## 2026-07-03 - Stage 3 Pending-Action Expiry Helper Cleanup
+
+Goal/scope:
+- Remove duplicated direct UTC expiry calculations from Stage 3 pending-action persistence.
+- Preserve the existing `YYYY-MM-DDTHH:MM:SSZ` pending-action expiry format and minute offsets.
+
+Files/modules changed:
+- `jane_web/jane_v2/pipeline.py`
+- `tests/test_jane_v2_pipeline_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Non-stream SMS draft pending actions still expire after 5 minutes.
+- Non-stream `[[AWAITING:...]]` follow-up pending actions still expire after 2 minutes.
+- Streamed SMS draft and `[[AWAITING:...]]` pending actions still expire after 5 minutes.
+- FIFO persistence, marker stripping, resolved-pending merge behavior, and client response shaping are unchanged.
+
+Boundary chosen:
+- Stream and non-stream Stage 3 paths were building the same timestamp shape in four places. A local `_pending_action_expires_at()` helper makes that contract testable without changing resolver semantics or FIFO schemas.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v2/pipeline.py tests/test_jane_v2_pipeline_helpers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_jane_v2_pipeline_helpers.py tests/test_pending_action_expiry.py tests/test_fifo_records.py -q` passed (`14 passed`).
+- `rg -n "datetime\\.utcnow|datetime\\.datetime\\.utcnow|_dt\\.datetime\\.utcnow|dt\\.datetime\\.utcnow" jane_web/jane_v2/pipeline.py -S` returned no matches.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1482 passed, 4 warnings`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Stage 2 metadata fetchers still stamp context blocks with direct `datetime.utcnow()` calls; those are good candidates if their output formatting can be characterized without invoking live service clients.
+
+## 2026-07-03 - Context Summary UTC Helper Cleanup
+
+Goal/scope:
+- Remove `datetime.utcnow()` usage from the context-summary stop-hook writer.
+- Preserve the existing `YYYY-MM-DDTHH:MM:SSZ` snapshot timestamp.
+
+Files/modules changed:
+- `agent_skills/save_context_summary.py`
+- `tests/test_context_summary_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Context snapshot facts and `last_summary_record()` still receive the same timestamp string.
+- Qwen summarization, short-term memory subprocess invocation, and debug JSON writing are unchanged.
+
+Boundary chosen:
+- The module already exposes pure parsing/formatting helpers under tests. A local `_utcnow()` wrapper removes deprecation risk without changing hook I/O behavior.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile agent_skills/save_context_summary.py tests/test_context_summary_helpers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_context_summary_helpers.py -q` passed (`6 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1481 passed, 4 warnings`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Stage 2 pending-action expiry timestamps still use direct UTC helpers and can be cleaned with pending-action tests.
+
+## 2026-07-03 - Chat Error Audit UTC Helper Cleanup
+
+Goal/scope:
+- Remove `datetime.utcnow()` usage from Android chat-error audit job creation.
+- Reuse one captured timestamp for fallback diagnostic timestamp and created-date generation.
+
+Files/modules changed:
+- `agent_skills/chat_error_audit.py`
+- `tests/test_chat_error_audit_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- If the diagnostic payload includes a timestamp, that timestamp is still used unchanged.
+- Fallback timestamps keep the existing `%Y-%m-%dT%H:%M:%S.%fZ` shape.
+- Job markdown, source-frame detection, filename generation, and error fallback behavior are unchanged.
+
+Boundary chosen:
+- This module has focused helper tests and no live integration dependency. A local `_utcnow()` wrapper removes deprecation risk and avoids computing two slightly different "now" values in the same job.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile agent_skills/chat_error_audit.py tests/test_chat_error_audit_helpers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_chat_error_audit_helpers.py -q` passed (`5 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1480 passed, 4 warnings`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Other command helpers with Chroma or external imports should be timestamp-cleaned only after adding lightweight seams around their metadata construction.
+
+## 2026-07-03 - Conversation Manager UTC Helper Cleanup
+
+Goal/scope:
+- Remove direct `datetime.utcnow()` usage from `memory/v1/conversation_manager.py`.
+- Preserve the existing naive UTC timestamp and TTL metadata shapes.
+
+Files/modules changed:
+- `memory/v1/conversation_manager.py`
+- `tests/test_conversation_archival.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Window archival throttling, open-window cutoff logic, session archival stamps, theme registry timestamps, short-term TTL metadata, thematic update metadata, and fallback raw-theme metadata keep naive UTC values.
+- Existing persisted ISO strings remain offset-free, matching the previous Chroma/SQLite metadata shape.
+- Conversation archival helper imports and wiring remain unchanged.
+
+Boundary chosen:
+- This was a mechanical replacement behind `_utcnow()` and `_utcnow_iso()` after the janitor and turn-dedupe UTC helpers proved the same pattern. The slice avoids changing archival decisions or schemas.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile memory/v1/conversation_manager.py tests/test_conversation_archival.py tests/test_conversation_windows.py tests/test_short_term_structured.py tests/test_long_term_promotion.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_conversation_archival.py tests/test_conversation_windows.py tests/test_short_term_structured.py tests/test_long_term_promotion.py -q` passed (`24 passed`).
+- `rg -n "datetime\\.datetime\\.utcnow\\(\\)" memory/v1/conversation_manager.py` returned no matches.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1479 passed, 4 warnings`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Remaining `utcnow()` call sites are mostly command-line scripts or Stage 2 metadata fetchers; handle them only where a pure helper can pin output shape without pulling live integrations into tests.
+
+## 2026-07-03 - Self-Improve Log UTC Helper Cleanup
+
+Goal/scope:
+- Remove `datetime.utcnow()` usage from the self-improvement vocal summary log writer/reader.
+- Preserve the existing naive UTC cutoff and `YYYY-MM-DDTHH:MM:SSZ` log timestamp shape.
+
+Files/modules changed:
+- `agent_skills/self_improve_log.py`
+- `tests/test_self_improve_log_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- `log_vocal_summary()` still writes timestamps using `TIMESTAMP_FORMAT`.
+- `read_recent_summaries()` still computes a naive UTC cutoff before filtering parsed log lines.
+- Existing summary composition, severity normalization, newest-first sorting, and limit behavior are unchanged.
+
+Boundary chosen:
+- The module already depends on pure helper tests. A local `_utcnow()` wrapper removes Python 3.13 deprecation risk while leaving file I/O and record building intact.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile agent_skills/self_improve_log.py tests/test_self_improve_log_helpers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_self_improve_log_helpers.py -q` passed (`7 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1478 passed, 4 warnings`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Other timestamp writers should be handled only where tests can pin the persisted timestamp shape without importing heavy live integrations.
+
+## 2026-07-03 - Local Vector Memory UTC Helper Cleanup
+
+Goal/scope:
+- Move local-vector-memory timestamp generation into pure helper functions.
+- Remove direct `datetime.utcnow()` usage from `local_vector_memory.py` without importing the heavy Chroma/ADK module in tests.
+
+Files/modules changed:
+- `memory/v1/local_vector_memory_helpers.py`
+- `memory/v1/local_vector_memory.py`
+- `tests/test_local_vector_memory_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Generated timestamps and forgettable `expires_at` values remain naive ISO strings.
+- Forgettable TTL math still adds `FORGETTABLE_TTL_DAYS` days.
+- Search-time expiry filtering still compares against an ISO string with the same shape.
+
+Boundary chosen:
+- `local_vector_memory.py` has heavy runtime imports, while its helper module is already pure and tested. Moving timestamp generation into the helper gives coverage without coupling tests to ChromaDB or ADK imports.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile memory/v1/local_vector_memory_helpers.py memory/v1/local_vector_memory.py tests/test_local_vector_memory_helpers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_local_vector_memory_helpers.py -q` passed (`5 passed`).
+- `rg -n "datetime\\.utcnow|datetime\\.datetime\\.utcnow|utcnow\\(" memory/v1/local_vector_memory.py memory/v1/local_vector_memory_helpers.py` returned no matches.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1477 passed, 4 warnings`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- `conversation_manager.py` still has many timestamp call sites, but that module needs a dedicated pass with broader conversation-window tests.
+
+## 2026-07-03 - Janitor Expiry UTC Helper Cleanup
+
+Goal/scope:
+- Remove `datetime.utcnow()` usage from janitor expiry checks.
+- Preserve existing naive timestamp behavior for expiration metadata.
+
+Files/modules changed:
+- `memory/v1/janitor_expiry.py`
+- `tests/test_janitor_expiry.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Numeric and ISO-string `expires_at` values compare against the same Unix timestamp basis.
+- Missing and malformed expiration values still return not-expired.
+- `_utcnow()` returns a naive UTC `datetime`, matching the previous timestamp shape.
+
+Boundary chosen:
+- Expiry checks are a small pure helper module with direct tests, making this a low-risk continuation of the UTC deprecation cleanup.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile memory/v1/janitor_expiry.py tests/test_janitor_expiry.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_janitor_expiry.py -q` passed (`4 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1476 passed, 4 warnings`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- `local_vector_memory.py` and `conversation_manager.py` still contain several `utcnow()` paths and should be cleaned only with focused metadata timestamp tests.
+
+## 2026-07-03 - Turn Dedupe UTC Helper Cleanup
+
+Goal/scope:
+- Remove `datetime.utcnow()` usage from turn-level idempotency age calculations.
+- Keep the existing naive-UTC SQLite timestamp comparison behavior.
+
+Files/modules changed:
+- `jane_web/turn_dedupe.py`
+- `tests/test_turn_dedupe_store.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- SQLite `created_at` values with either space or `T` separators still parse as naive UTC timestamps.
+- Bad timestamps still fall back to age `0.0`, preserving the previous best-effort behavior.
+- Dedupe TTL, retry, completion, and failure state transitions are unchanged.
+
+Boundary chosen:
+- Turn dedupe is already isolated and has fake-store tests. Adding a small UTC helper removes Python 3.13 deprecation risk without touching the database schema or idempotency state machine.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/turn_dedupe.py tests/test_turn_dedupe_store.py tests/test_chat_stream_dedupe.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_turn_dedupe_store.py tests/test_chat_stream_dedupe.py -q` passed (`11 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1475 passed, 4 warnings`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Other memory modules still contain `utcnow()` call sites. Clean them in small module-specific passes with timestamp-shape tests.
+
+## 2026-07-03 - Auth Bootstrap Create/Prewarm Helper
+
+Goal/scope:
+- Centralize session create-and-prewarm behavior inside `jane_web/auth_sessions.py`.
+- Leave request authentication decisions and logging in `bootstrap_session_for_request()`.
+
+Files/modules changed:
+- `jane_web/auth_sessions.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Single-user local mode still reuses a valid existing session without prewarm and still creates a trusted session without prewarm when no valid session exists.
+- Valid session cookies still prewarm with the existing session user or default user.
+- Trusted-cookie, trusted-fingerprint, and local-browser bootstrap paths still create the same trusted/untrusted sessions and return the same trusted-device IDs.
+
+Boundary chosen:
+- Session creation plus prewarming is the common side effect across the non-cookie bootstrap paths. Extracting it avoids repeating that coupling while keeping auth branching and request-specific logs visible in the main bootstrap function.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/auth_sessions.py tests/test_auth_sessions.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_auth_sessions.py -q` passed (`18 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1472 passed, 4 warnings`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- `bootstrap_session_for_request()` is still broad because it deliberately exposes auth precedence. Further splitting should target named decision phases, not just line movement.
+
+## 2026-07-03 - Proxy Shopping List Action Helpers
+
+Goal/scope:
+- Move legacy/v2 shopping-list action parsing and response text out of `jane_proxy.stream_message()`.
+- Keep actual list mutations in the proxy branch that already chose to handle the shopping-list intent directly.
+
+Files/modules changed:
+- `jane_web/shopping_list_proxy.py`
+- `jane_web/jane_proxy.py`
+- `tests/test_shopping_list_proxy.py`
+- `REFACTORING.md`
+
+Bugs fixed:
+- Store extraction no longer uses `rstrip(" list")`, which stripped characters rather than the suffix. That caused stores such as `walmart` and `target` to become `walmar` and `targe`.
+- Direct remove/clear proxy actions now pass the required `confidence=1.0` keyword to `agent_skills.shopping_list.remove_item()` and `clear_list()` instead of raising a missing-argument `TypeError`.
+
+Behavior intentionally preserved:
+- Add/remove/clear still short-circuit when the router action starts with those verbs.
+- Unknown/show/check shopping-list actions still delegate with shopping-list context.
+- V2 task-context text keeps the repr-style item quoting; legacy short-circuit responses keep markdown-bold item names.
+- Direct mutation calls remain in `jane_proxy.py`; the helper owns only parsing and response shaping.
+
+Boundary chosen:
+- Store extraction and response formatting were duplicated in the v2 and legacy proxy branches. Extracting them gives one tested parser and avoids carrying forward the store-name truncation bug.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/shopping_list_proxy.py jane_web/jane_proxy.py tests/test_shopping_list_proxy.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_shopping_list_proxy.py -q` passed (`4 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1472 passed, 4 warnings`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- The broader shopping-list Stage 2 handler still only targets the default list. Extending classifier params to named lists would be a behavior change and should be handled separately.
+
+## 2026-07-03 - Proxy Email and Calendar Context Helpers
+
+Goal/scope:
+- Move server-side email and calendar prompt-context formatting out of `jane_proxy.stream_message()`.
+- Extract legacy email router-response parsing and calendar range-hint selection into tested helpers.
+
+Files/modules changed:
+- `jane_web/server_data_contexts.py`
+- `jane_web/jane_proxy.py`
+- `tests/test_server_data_contexts.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- V2 email/calendar task contexts keep their shorter no-leading-blank prompt blocks and error wording.
+- Legacy Gemma email/calendar delegate contexts keep their leading spacing, "fetched server-side just now" labels, summarization instructions, and setup/error guidance.
+- Legacy email parsing still defaults to `limit=10`, caps numeric limits at 20, and switches to `from:<sender>` queries when present.
+- Legacy calendar range selection preserves the old precedence, including `this weekend` matching `this_week` because `this week` is checked first.
+- Connector calls (`read_inbox`, `list_events_in_range`), logging, and delegation decisions remain in the proxy.
+
+Boundary chosen:
+- Prompt-context assembly and router-response parsing are deterministic policy. Extracting them makes the data injection contract directly testable while avoiding changes to Gmail/Calendar credential handling or network calls.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/server_data_contexts.py jane_web/jane_proxy.py tests/test_server_data_contexts.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_server_data_contexts.py -q` passed (`6 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1468 passed, 4 warnings`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- `stream_message()` still owns shopping-list mutation parsing and the larger Stage 2/delegation orchestration. Split those only after adding narrow tests for store-name parsing and response text.
+
+## 2026-07-03 - Proxy SMS Fetch and V2 Context Helpers
+
+Goal/scope:
+- Move synced-SMS SQL selection, row enrichment, display-time annotation, and v2 SMS task-context text out of `jane_proxy.stream_message()`.
+- Reuse one fetch helper for both the v2 `READ_MESSAGES` path and the legacy Gemma `read_messages` path.
+
+Files/modules changed:
+- `jane_web/sms_read_context.py`
+- `jane_web/jane_proxy.py`
+- `tests/test_sms_read_context.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Both SMS read paths still query messages newer than 5 days, select the same columns, order newest-first, and support optional sender/body filtering.
+- The v2 path still fetches at most 30 messages and preserves its shorter `[SMS INBOX DATA]` context wording.
+- The legacy router path still honors parsed limits up to 50 and preserves its richer readback instructions and DB-error fallback text.
+- SMS rows are still enriched through `enrich_synced_messages_for_readback()` and get the same `%b %d %I:%M %p` display-time field when timestamp formatting succeeds.
+
+Boundary chosen:
+- Fetch/query/enrichment is a real data-access boundary that was duplicated inside two branches of the proxy stream function. Extracting it gives direct tests for the SQL contract without moving router decisions, logging, or brain delegation.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/sms_read_context.py jane_web/jane_proxy.py tests/test_sms_read_context.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_sms_read_context.py -q` passed (`7 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1462 passed, 4 warnings`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- The remaining proxy read-email/read-calendar context branches still mix server-side fetches and text shaping. Extract pure context formatting before touching the connector calls.
+
+## 2026-07-03 - Proxy Music Playlist Context Helpers
+
+Goal/scope:
+- Move music playlist prompt/context text out of `jane_proxy.stream_message()`.
+- Cover both the v2 task-context path and the Gemma-router delegate-to-Opus path.
+
+Files/modules changed:
+- `jane_web/music_playlists.py`
+- `jane_web/jane_proxy.py`
+- `tests/test_music_playlists.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Playlist contexts still include playlist ID, name, total track count, and only the first 10 rendered track names.
+- The Gemma delegate context still instructs Opus to include the exact `[MUSIC_PLAY:<id>]` marker and to mention duplicates or unwanted versions.
+- Empty-result and error contexts preserve the previous wording for both v2 task context and Gemma delegate paths.
+- Playlist lookup/creation, filesystem scanning, DB access, and proxy logging remain in their existing owners.
+
+Boundary chosen:
+- Context text shaping is deterministic presentation policy. Extracting it reduces two branches in the large proxy stream function without touching music search, playlist persistence, or streaming behavior.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/music_playlists.py jane_web/jane_proxy.py tests/test_music_playlists.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_music_playlists.py -q` passed (`11 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1459 passed, 4 warnings`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- The proxy still owns several other server-side context injection branches. Split only deterministic parsing/text blocks unless fake DB/service tests are in place.
+
+## 2026-07-03 - Janitor UTC Helper Cleanup
+
+Goal/scope:
+- Centralize janitor-local UTC timestamps through `_utcnow()` and `_utcnow_iso()`.
+- Remove Python 3.13 `datetime.utcnow()` deprecation warnings from the janitor paths covered by marker refresh, code verification, old forgettable purge, and retention cleanup.
+
+Files/modules changed:
+- `memory/v1/janitor_memory.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Callers still receive naive UTC `datetime` objects or naive ISO strings, matching the existing metadata comparison and persisted timestamp shape.
+- Retention cleanup still compares file mtimes against the same UTC epoch seconds.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile memory/v1/janitor_memory.py tests/test_janitor_query_markers.py tests/test_janitor_code_verification.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_janitor_query_markers.py tests/test_janitor_code_verification.py tests/test_janitor_log_retention.py -q` passed (`12 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1457 passed, 4 warnings`).
+- `git diff --check` passed.
+
+## 2026-07-03 - Janitor Code Verification Candidate Fix
+
+Goal/scope:
+- Fix `verify_code_memories()` after candidate partitioning so eligible code memories are actually processed.
+- Add a fake-collection regression that exercises the split/reverify path without running Codex or ChromaDB.
+
+Files/modules changed:
+- `memory/v1/janitor_memory.py`
+- `tests/test_janitor_code_verification.py`
+- `REFACTORING.md`
+
+Bug fixed:
+- After `split_reverification_candidates()` returned `(code_mems, skipped_recent)`, the function assigned `code_mems = eligible_mems`. `eligible_mems` did not exist in that scope, so any run with eligible code memories failed before sorting or verifying them.
+
+Behavior intentionally preserved:
+- Recently verified memories are still skipped by the same reverify policy.
+- Eligible memories still sort oldest-first before the optional per-run cap.
+- Accurate memories still get stamped and reported without calling the frontier fixer.
+- `now_utc` remains a naive UTC datetime for existing metadata comparisons, but now avoids the Python 3.13 `utcnow()` deprecation warning.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile memory/v1/janitor_memory.py tests/test_janitor_code_verification.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_janitor_code_verification.py -q` passed (`6 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1457 passed, 4 warnings`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- `verify_code_memories()` still mixes external Codex/frontier calls, vocal summary logging, and report writing. Continue splitting those behind fake provider/report writer tests.
+
+## 2026-07-03 - Janitor Dynamic Query Marker Logging Fix
+
+Goal/scope:
+- Fix `refresh_dynamic_query_markers()` so successful marker writes are logged without referencing undefined local variables.
+- Add a regression test around marker refresh using fake Chroma clients and a temporary output file.
+
+Files/modules changed:
+- `memory/v1/janitor_memory.py`
+- `tests/test_janitor_query_markers.py`
+- `REFACTORING.md`
+
+Bug fixed:
+- The function wrote `dynamic_query_markers.json`, then attempted to log `len(personal)`, `len(project)`, and `len(file)`. Those names were not defined in the function, so the write path raised `NameError` and was reported as `Could not write dynamic query markers` even after the file was written.
+
+Behavior intentionally preserved:
+- Marker payload construction still comes from `dynamic_query_marker_payload()`.
+- Personal/project/file counts now come from the written payload lists.
+- `updated_at` remains a naive UTC ISO string, but now uses timezone-aware `datetime.now(datetime.timezone.utc)` internally to avoid the Python 3.13 `utcnow()` deprecation warning.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile memory/v1/janitor_memory.py tests/test_janitor_query_markers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_janitor_query_markers.py -q` passed (`3 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1456 passed, 4 warnings`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- `run_janitor()` still owns collection acquisition, purge/consolidation sequencing, report writing, verification, and marker refresh. Extract stage orchestration only with fake collection/client tests.
+
+## 2026-07-03 - Standing Brain Provider Switch Helpers
+
+Goal/scope:
+- Move provider CLI-name lookup, install script path/env planning, provider model selection, and switch-result payload shaping out of `switch_provider()`.
+- Keep current process kill, install subprocess execution, global provider mutation, spawn/auth detection, `.env` persistence, and logging in `StandingBrainManager`.
+
+Files/modules changed:
+- `llm_brain/v1/standing_brain.py`
+- `tests/test_standing_brain_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Claude/Gemini/OpenAI still map to `claude`, `gemini`, and `codex` CLI binaries respectively.
+- Missing CLI install still runs `docker/jane/install_brain.sh` under `VESSENCE_HOME` with `JANE_BRAIN` set to the target provider.
+- New provider model selection still prefers provider-specific env vars and falls back to configured defaults.
+- Success and needs-auth result payloads preserve fields and user-facing messages.
+
+Boundary chosen:
+- Switch planning and response shaping are pure policy. Extracting them reduces `switch_provider()` without changing install execution, process spawning, provider globals, or persisted `.env` writes.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile llm_brain/v1/standing_brain.py tests/test_standing_brain_helpers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_standing_brain_helpers.py -q` passed (`10 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1455 passed, 4 warnings`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- `switch_provider()` still owns the install subprocess and spawn/auth sequence. Split that only with mocked async subprocess and manager-spawn tests.
+
+## 2026-07-03 - Proxy SMS Readback Context Helpers
+
+Goal/scope:
+- Move synced-SMS router-response parsing, display-time annotation, brain context text, and error context text out of `jane_proxy.stream_message()`.
+- Keep DB access, SQL branch selection, row enrichment, logging, and message injection in `jane_proxy.py`.
+
+Files/modules changed:
+- `jane_web/jane_proxy.py`
+- `jane_web/sms_read_context.py`
+- `tests/test_sms_read_context.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Default SMS readback still looks back 5 days and limits to 30 messages.
+- Numeric router responses still set the limit, capped at 50.
+- Sender filter parsing preserves the legacy behavior, including lowercasing and keeping mixed sender/limit text as the filter string.
+- Message records still receive a best-effort `time` field formatted as `%b %d %I:%M %p`.
+- Nonempty, empty, and DB-error context text preserve the existing prompt instructions and fallback wording.
+
+Boundary chosen:
+- Query parsing and context text are deterministic policy. Extracting them removes another sizeable block from `stream_message()` while leaving the database and streaming side effects untouched.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/sms_read_context.py jane_web/jane_proxy.py tests/test_sms_read_context.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_sms_read_context.py -q` passed (`4 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1452 passed, 4 warnings`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- The SMS DB query itself can be extracted later with a fake connection test that covers sender filtering, no-filter reads, limit binding, and row enrichment.
+
+## 2026-07-03 - Proxy Router Keyword Override Helper
+
+Goal/scope:
+- Move the legacy Gemma-router keyword safety net out of `jane_proxy.stream_message()`.
+- Keep router invocation, logging, data injection, delegate ACK behavior, and streaming orchestration in `jane_proxy.py`.
+
+Files/modules changed:
+- `jane_web/jane_proxy.py`
+- `jane_web/router_overrides.py`
+- `tests/test_router_overrides.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Email/inbox/Gmail read-like prompts still override to `read_email` with `read_email` router response.
+- Calendar/agenda/my-schedule read-like prompts still override to `read_calendar` with `today` router response.
+- Text/SMS read-like prompts still override to `read_messages` with `read_inbox` router response.
+- Sync/resync message prompts still override to `sync_messages` with `sync` router response, including after an earlier read-message override in the same pass.
+- Override log messages are still emitted from `jane_proxy.py` with old and new classifications.
+
+Boundary chosen:
+- Keyword override policy is deterministic string matching. Extracting it removes a policy cluster from the 1400+ line stream function while avoiding the high-risk streaming, tool, and persistence paths.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/router_overrides.py jane_web/jane_proxy.py tests/test_router_overrides.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_router_overrides.py -q` passed (`4 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1448 passed, 4 warnings`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- The read-messages DB fetch/injection block and music playlist context block remain sizable inside `stream_message()`. Split either only with focused tests for query parsing, context text shape, and failure fallback text.
+
+## 2026-07-03 - Standing Codex App-Server Payload Helpers
+
+Goal/scope:
+- Move Codex app-server command construction, initialize payload, thread-start payload, turn-start payload, sandbox policy, and SecretStore env injection into focused helpers.
+- Keep app-server process lifecycle, RPC locking, thread management, stdout/stderr reading, and turn notification handling in `CodexAppServerManager`.
+
+Files/modules changed:
+- `llm_brain/v1/standing_codex.py`
+- `tests/test_standing_codex_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- The app-server still starts as `codex app-server --listen stdio://`.
+- Initialize capabilities and client identity are unchanged.
+- Thread starts still use OpenAI provider, `approvalPolicy="never"`, ephemeral mode, `serviceName="jane-web"`, and the same yolo/workspace sandbox strings.
+- Turn starts still send a single text input, current workdir, runtime workspace roots, model, approval policy, and the same sandbox policy shape.
+- SecretStore values are still injected only when the store is unlocked, into the same env keys.
+
+Boundary chosen:
+- App-server request payloads and env injection are pure policy. Extracting them reduces startup/thread/env methods and adds direct tests while deliberately leaving the 152-line turn event loop unchanged until there are stronger notification/command-output characterization tests.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile llm_brain/v1/standing_codex.py tests/test_standing_codex_helpers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_standing_codex_helpers.py -q` passed (`4 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1444 passed, 4 warnings`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- `_run_turn_locked()` still owns app-server event interpretation, command output buffering, callback dispatch, and final-response fallback. Split it only with a fake app-server message reader that covers response, reasoning, command output, command completion, background notifications, retry errors, and failed turns.
+
+## 2026-07-03 - CLI Login Stdin Submission Helper
+
+Goal/scope:
+- Move non-OAuth CLI authentication-code stdin writes out of `cli_login_code()`.
+- Add maintained endpoint coverage for the OpenAI/Codex-style login-code path.
+
+Files/modules changed:
+- `jane_web/main.py`
+- `jane_web/cli_login_helpers.py`
+- `tests/test_cli_login_helpers.py`
+- `tests/test_cli_login_token_errors.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Missing stdin still returns HTTP 400 with the same message.
+- Stdin write/flush exceptions still return HTTP 500 with the same message prefix.
+- Successful non-OAuth code submission still polls provider auth status and returns the debug snapshot on success.
+- The dead, unreachable pending response immediately after the no-active-process return was removed; it could not execute.
+
+Boundary chosen:
+- Stdin submission is a small, testable I/O edge. Extracting it keeps `cli_login_code()` focused on provider branch selection and polling while direct tests cover the write, flush, missing-stdin, and write-error cases.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/cli_login_helpers.py jane_web/main.py tests/test_cli_login_helpers.py tests/test_cli_login_token_errors.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_cli_login_helpers.py tests/test_cli_login_token_errors.py -q` passed (`45 passed, 4 warnings`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1440 passed, 4 warnings`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- The remaining large part of `cli_login_code()` is OAuth credential completion and non-OAuth polling. Split polling only after adding route tests for pending, exited-success, and exited-failure outcomes.
+
+## 2026-07-03 - CLI Login OAuth Token Fetch Helper
+
+Goal/scope:
+- Move duplicated Claude/Gemini OAuth token request execution and JSON decoding out of `cli_login_code()`.
+- Keep provider-specific request specs, credential payload shaping, credential file writes, auth-cache invalidation, and endpoint response shapes unchanged.
+
+Files/modules changed:
+- `jane_web/main.py`
+- `jane_web/cli_login_helpers.py`
+- `tests/test_cli_login_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Token endpoint requests still use the provider-specific URL, form body, and headers.
+- `urlopen` is still called with a 15-second timeout.
+- Any fetch or JSON parse exception is preserved for the existing `oauth_token_exchange_error()` mapper.
+- Claude and Gemini credential persistence still runs in the route after successful token parsing.
+
+Boundary chosen:
+- OAuth token fetching is shared I/O plumbing. Extracting it removes duplicated try/request/urlopen/json blocks while leaving the route responsible for provider-specific state and credential side effects.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/cli_login_helpers.py jane_web/main.py tests/test_cli_login_helpers.py tests/test_cli_login_token_errors.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_cli_login_helpers.py tests/test_cli_login_token_errors.py -q` passed (`41 passed, 4 warnings`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1436 passed, 4 warnings`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- `cli_login_code()` still owns provider branch selection, OAuth session validation, credential-write completion, and non-OAuth stdin polling. The non-OAuth path needs maintained route tests before further splitting.
+
+## 2026-07-03 - CLI Login Port Discovery Helpers
+
+Goal/scope:
+- Move `/proc/net/tcp*` candidate collection and `ss -tlnp` parsing out of `_discover_cli_login_port()`.
+- Keep process liveness checks, PID fd matching, subprocess fallback execution, and known-port filtering behavior in the existing login flow.
+
+Files/modules changed:
+- `jane_web/main.py`
+- `jane_web/cli_login_helpers.py`
+- `tests/test_cli_login_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Known Jane/local service ports are still ignored.
+- IPv4 localhost, IPv6 loopback, and wildcard listen sockets are still considered through the existing proc parser.
+- If exactly one unknown listener remains, it is returned immediately.
+- If multiple candidates remain, the process-tree socket match is still preferred, followed by the highest-port fallback.
+- `ss` fallback still only returns Claude/Node-owned `127.0.0.1:<port>` listeners not in the ignored-port set.
+
+Boundary chosen:
+- Socket-table parsing is pure policy. Extracting it removes duplicate `/proc/net` reads from the route module and gives the `ss` fallback direct tests without opening live sockets.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/cli_login_helpers.py jane_web/main.py tests/test_cli_login_helpers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_cli_login_helpers.py -q` passed (`35 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1434 passed, 4 warnings`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- `cli_login_code()` still mixes OAuth token exchange, credential persistence, provider status cache invalidation, stdin submission, and debug snapshot shaping. Continue splitting it only with route-level tests for each provider flow.
+
+## 2026-07-03 - Standing Brain Command, Env, and Stream Formatting Helpers
+
+Goal/scope:
+- Move standing-brain CLI command construction, turn prompt/stdin payload formatting, and Claude stream tool-preview formatting out of the async process manager.
+- Track whether a brain process was spawned while the vault was locked so the unlocked-vault self-heal path restarts only when needed.
+- Keep subprocess lifecycle, provider switching, stderr monitoring, NDJSON reading, and response streaming behavior in `StandingBrainManager`.
+
+Files/modules changed:
+- `llm_brain/v1/standing_brain.py`
+- `tests/test_standing_brain_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Claude commands still use stream-json input/output, the same permission-skip flag, and the same optional web permission hook settings.
+- Gemini and OpenAI command shapes are unchanged.
+- First-turn system prompt wrapping and Claude stdin JSON wire format are unchanged.
+- Claude tool-use and tool-result stream previews preserve the existing labels, truncation length, and text-part extraction behavior.
+- Vault secrets are still injected only when `SecretStore` is unlocked, but `_spawned_locked` is now set during `_spawn()` instead of defaulting to missing/true forever.
+
+Boundary chosen:
+- Command, environment, restart-decision, and stream-preview formatting are pure policy. Extracting them reduces `StandingBrainManager` and fixes the missing spawn-lock metadata without touching live process startup, auth fallback, provider switching, or stdout/stderr timing behavior.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile llm_brain/v1/standing_brain.py tests/test_standing_brain_helpers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_standing_brain_helpers.py -q` passed (`7 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest test_code/test_standing_brain_provider_sync.py -q` passed (`4 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1432 passed, 4 warnings`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- `send()` still mixes vault-unlock restart, provider-sync, restart policy, stdin write, response accounting, and empty-response error handling. Split those only after adding focused tests around restart decisions and provider-error yields.
+- `switch_provider()` still mixes install discovery, install execution, global provider mutation, spawn, auth detection, and `.env` persistence; the next safe boundary is an install-plan/result helper with mocked subprocess calls.
+
+## 2026-07-03 - Janitor Code Memory Candidate Helpers
+
+Goal/scope:
+- Move code-memory record extraction, recent-verification partitioning, and oldest-first sort key out of `verify_code_memories()`.
+- Keep ChromaDB access, Codex verification, frontier correction, notifications, and report writing in `janitor_memory.py`.
+
+Files/modules changed:
+- `memory/v1/janitor_memory.py`
+- `memory/v1/janitor_code_verification.py`
+- `tests/test_janitor_code_verification.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Only documents matching the existing code-memory detector become verification candidates.
+- Candidate text is still truncated to 500 characters by default.
+- Topic and metadata fields are preserved in the same record shape.
+- Recently verified memories are still skipped before sorting.
+- Never-verified memories still sort before timestamped memories.
+
+Boundary chosen:
+- Candidate selection is pure verification policy. Extracting it reduces the large verifier loop without touching Codex/frontier side effects and gives the truncation, skip, and ordering behavior direct tests.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile memory/v1/janitor_code_verification.py memory/v1/janitor_memory.py tests/test_janitor_code_verification.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_janitor_code_verification.py -q` passed (`5 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1425 passed, 4 warnings`).
+
+Remaining follow-up slices:
+- `verify_code_memories()` still owns external Codex/frontier calls and notification/report side effects; split those only with fake provider and fake collection tests.
+
+## 2026-07-03 - Proxy Persistence Stage Privacy Decision
+
+Goal/scope:
+- Move Stage-3 writeback gating for stage and local-only privacy out of `_persist_turns_async()`.
+- Keep worker threading, short-term writeback, FIFO write, memory update, session summary dispatch, and logging in `jane_proxy.py`.
+
+Files/modules changed:
+- `jane_web/jane_proxy.py`
+- `jane_web/proxy_persistence.py`
+- `tests/test_proxy_persistence.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Classes marked `privacy="local_only"` still skip Haiku/thematic memory and qwen session-summary work before stage checks.
+- Non-Stage-3 turns still skip thematic/session-summary work with the same log stage name.
+- Missing classes or privacy lookup failures still default to non-local-only.
+- Stage `None`, `stage3`, and case-insensitive `STAGE3` still run Stage-3-tier writeback.
+
+Boundary chosen:
+- The stage/privacy decision is high-value policy because it protects private local-only content from cloud writeback and avoids expensive subprocess work for Stage 2. Extracting it makes those gates explicit and directly tested without exercising the persistence worker thread.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/proxy_persistence.py jane_web/jane_proxy.py tests/test_proxy_persistence.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_proxy_persistence.py -q` passed (`4 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1423 passed, 4 warnings`).
+
+Non-gating drift observed:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_proxy_persistence.py test_code/test_jane_proxy_persistence.py -q` failed in stale `test_code` expectations unrelated to this extraction: the stub `add_messages()` lacks the current `cls=` argument, and the prune test does not account for the current global-idle archive gate.
+
+Remaining follow-up slices:
+- `_persist_turns_async()` still mixes worker lifecycle, FIFO persistence, and memory-summary dispatch. Split those only with maintained worker tests that accept the current `cls=` writeback contract and global-idle behavior.
+
+## 2026-07-03 - Tax Tool Command Result Helpers
+
+Goal/scope:
+- Move tax accountant custom-tool command construction and subprocess result parsing out of `_run_tax_tool()`.
+- Keep environment lookup, cwd, timeout, and subprocess execution in `main.py`.
+
+Files/modules changed:
+- `jane_web/main.py`
+- `jane_web/tax_helpers.py`
+- `tests/test_tax_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Tax tools still run as `[python_bin, custom_tools.py, tool_name]` with JSON args appended only when args are truthy.
+- Non-zero exits still return `{"status": "error", "message": stderr[:500]}`.
+- JSON stdout is still returned as parsed JSON, and non-JSON stdout still returns `{"status": "ok", "output": stdout.strip()}`.
+
+Boundary chosen:
+- Command/result shaping is deterministic tax route policy. Extracting it makes the result fallback and stderr truncation directly testable while leaving process execution in the route adapter.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/tax_helpers.py jane_web/main.py tests/test_tax_helpers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_tax_helpers.py -q` passed (`6 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1419 passed, 4 warnings`).
+
+Remaining follow-up slices:
+- The tax routes are now mostly thin wrappers around filesystem uploads, Chroma search, and custom-tool execution. Further refactor should happen in the tax essence functions if more tax-specific complexity appears.
+
+## 2026-07-03 - Marketplace Refresh Launch Helpers
+
+Goal/scope:
+- Move manual Facebook Marketplace refresh command, environment, log path, and log header construction out of `marketplace_refresh_now()`.
+- Keep search validation, running-status checks, log file opening, and subprocess launch in the route.
+
+Files/modules changed:
+- `jane_web/main.py`
+- `jane_web/marketplace_helpers.py`
+- `tests/test_marketplace_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Manual refresh still runs `python -m agent_skills.marketplace.refresh <name>`.
+- Refresh logs still write to `<VESSENCE_DATA_HOME>/logs/marketplace_refresh_<name>.log`.
+- The log header still uses `datetime.isoformat(timespec='seconds')`.
+- `DISPLAY` and `WAYLAND_DISPLAY` are still removed so Playwright runs headless from the web server.
+
+Boundary chosen:
+- Launch planning is deterministic route policy. Extracting it makes the environment sanitization and log path explicit without changing the route's subprocess side effects.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/marketplace_helpers.py jane_web/main.py tests/test_marketplace_helpers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_marketplace_helpers.py -q` passed (`6 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1417 passed, 4 warnings`).
+
+Remaining follow-up slices:
+- Marketplace route read handlers are small. Deeper refactors should target the marketplace harvester modules, not these thin API adapters.
+
+## 2026-07-03 - Chat Stream Session Resolver
+
+Goal/scope:
+- Move `_handle_jane_chat_stream()` session selection for localhost prompt-queue requests into `auth_sessions.py`.
+- Keep unauthenticated rejection logging and response handling in the route.
+
+Files/modules changed:
+- `jane_web/main.py`
+- `jane_web/auth_sessions.py`
+- `tests/test_auth_sessions.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Local-control requests still use `body.session_id` when present.
+- Local-control requests without a body session still use `prompt_queue_session`.
+- Local-control stream requests still do not attach a trusted-device id.
+- Non-local stream requests still delegate to `get_or_bootstrap_session()`.
+
+Boundary chosen:
+- This is auth/session policy shared with the other session helpers. Extracting it keeps the stream route focused on branch orchestration and gives the prompt-queue bypass direct coverage.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/auth_sessions.py jane_web/main.py tests/test_auth_sessions.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_auth_sessions.py test_code/test_jane_web_stream_error.py -q` passed (`19 passed, 4 warnings`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1416 passed, 4 warnings`).
+
+Remaining follow-up slices:
+- The stream route still owns dedupe start/replay, instant command bypass, and task offload; those should move only with route tests that assert response headers and auth-cookie attachment.
+
+## 2026-07-03 - Normal Chat Stream Runner
+
+Goal/scope:
+- Move the normal Jane chat stream async generator out of `_handle_jane_chat_stream()`.
+- Keep auth/bootstrap, turn-dedupe start/replay, stream-limit rejection, instant-command bypass, task offload, response creation, and auth-cookie attachment in the route.
+
+Files/modules changed:
+- `jane_web/main.py`
+- `jane_web/chat_stream_runner.py`
+- `tests/test_chat_stream_runner.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Normal streams still open and close the per-IP active stream counter around the generator.
+- User lookup, scoped conversation session id resolution, `stream_message()` argument order, timeout behavior, TTS flag handling, and platform/file-context forwarding are unchanged.
+- Captured NDJSON is still finalized for turn dedupe, with failed turns marked when the stream raises.
+- Connection errors and general backend exceptions still emit the same error event data.
+
+Boundary chosen:
+- The nested generator was stream-runner orchestration rather than route policy. Extracting it gives direct fake-backend coverage for success and failure while leaving the live FastAPI route responsible for pre-stream decisions and response cookies.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/chat_stream_runner.py jane_web/main.py tests/test_chat_stream_runner.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_chat_stream_runner.py tests/test_chat_stream_events.py test_code/test_jane_web_stream_error.py -q` passed (`7 passed, 4 warnings`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1413 passed, 4 warnings`).
+
+Remaining follow-up slices:
+- `_handle_jane_chat_stream()` still owns pre-stream branching; split internal-session auth, dedupe replay, instant-command, and offload decisions only with route-level tests for each branch.
+
+## 2026-07-03 - CLI Login Output State Helper
+
+Goal/scope:
+- Move repeated CLI login stdout line handling out of `_attempt_cli_login_command()`.
+- Preserve process polling, extra wait timing, and Claude PTY handling.
+
+Files/modules changed:
+- `jane_web/main.py`
+- `jane_web/cli_login_helpers.py`
+- `tests/test_cli_login_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Non-Claude CLI login still captures stripped non-empty output lines.
+- The first auth URL is still detected from stdout before a device code is accepted.
+- Device codes printed before any auth URL are still ignored.
+- Existing device codes are still preserved if later lines contain another code.
+
+Boundary chosen:
+- Auth URL/device-code extraction is pure stream-line state. Extracting it removes duplicated parsing from the initial read loop and the short extra read loop while making the ordering rule explicit in tests.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/cli_login_helpers.py jane_web/main.py tests/test_cli_login_helpers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_cli_login_helpers.py -q` passed (`33 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1411 passed, 4 warnings`).
+
+Remaining follow-up slices:
+- `_attempt_cli_login_command()` still owns subprocess lifecycle and polling deadlines; move that only with fake-process tests for timeout, no stdout, device-code-late, and process-exit behavior.
+
+## 2026-07-03 - Claude Token Refresh Helpers
+
+Goal/scope:
+- Move Claude OAuth refresh request construction, refresh-token extraction, and refreshed credential shaping out of `_attempt_claude_token_refresh()`.
+- Keep cooldown timing, retry/backoff, network I/O, and credential-file write in `main.py`.
+
+Files/modules changed:
+- `jane_web/main.py`
+- `jane_web/cli_login_helpers.py`
+- `tests/test_cli_login_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Claude refresh still uses `~/.claude/.credentials.json`.
+- Refresh requests still post to the Claude OAuth token endpoint with the same client id, `refresh_token` grant, content type, user agent, and accept header.
+- Refreshed credentials still update access token, refresh token fallback, expiry, and scopes with the same defaults.
+- 429 retry/backoff, failure cooldown updates, and silent failure behavior are unchanged.
+
+Boundary chosen:
+- Provider refresh request fields and credential JSON mutation are pure provider policy. Extracting them removes duplicated OAuth constants from the refresh path and gives direct coverage for the scope and refresh-token fallback cases.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/cli_login_helpers.py jane_web/main.py tests/test_cli_login_helpers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_cli_login_helpers.py -q` passed (`32 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1410 passed, 4 warnings`).
+
+Remaining follow-up slices:
+- `_attempt_claude_token_refresh()` still owns retry/backoff timing and file I/O; split only with tests that simulate 429s, failed reads, and cooldown timestamps.
+
+## 2026-07-03 - Session Init Stream Helper
+
+Goal/scope:
+- Move the persistent-session initialization async stream out of `jane_init_session()`.
+- Keep auth/bootstrap, brain selection, manager lookup, freshness checks, and FastAPI response construction in the route.
+
+Files/modules changed:
+- `jane_web/main.py`
+- `jane_web/session_init.py`
+- `tests/test_session_init.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Fresh persistent Claude/Codex sessions still emit queued context-build statuses, then the provider init status, then the trimmed greeting in a `done` event.
+- The init prompt text, `run_turn()` argument order, timeout/profile handling, `model=None`, and yolo-mode selection are unchanged.
+- Init failures still log `"Init session failed"` and yield the same fallback greeting.
+
+Boundary chosen:
+- The async generator is stream orchestration rather than route policy. Extracting it makes status ordering, prompt construction, profile forwarding, and fallback behavior testable without starting FastAPI or a persistent LLM manager.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/session_init.py jane_web/main.py tests/test_session_init.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_session_init.py -q` passed (`2 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1408 passed, 4 warnings`).
+
+Remaining follow-up slices:
+- `jane_init_session()` still owns persistent manager selection; extract that only if route tests cover Claude, Codex, non-persistent, and already-warm responses.
+
+## 2026-07-03 - CLI OAuth Token Request Specs
+
+Goal/scope:
+- Move Claude/Gemini OAuth token endpoint URLs, form bodies, and headers out of `cli_login_code()`.
+- Consolidate duplicated OAuth client ids and redirect URIs into shared CLI login helper constants.
+
+Files/modules changed:
+- `jane_web/main.py`
+- `jane_web/cli_login_helpers.py`
+- `tests/test_cli_login_helpers.py`
+- `tests/test_cli_login_token_errors.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Claude token exchange still posts to `https://platform.claude.com/v1/oauth/token` with the same client id, redirect URI, PKCE verifier, content type, user agent, and accept header.
+- Gemini token exchange still posts to `https://oauth2.googleapis.com/token` with the same client id, configured client secret, redirect URI, PKCE verifier, and content type.
+- Claude/Gemini authorization URLs and Gemini credential payloads retain their previous values while now sharing constants with token exchange.
+
+Boundary chosen:
+- Token request construction is pure provider policy. Extracting it keeps the route focused on active-session validation, network I/O, file persistence, and response handling while direct tests pin the exact provider fields and headers.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/cli_login_helpers.py jane_web/main.py tests/test_cli_login_helpers.py tests/test_cli_login_token_errors.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_cli_login_helpers.py tests/test_cli_login_token_errors.py -q` passed (`34 passed, 4 warnings`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1406 passed, 4 warnings`).
+
+Remaining follow-up slices:
+- The remaining `cli_login_code()` complexity is mostly the non-OAuth stdin polling flow and provider-specific route branching; split only after route-level tests cover pending, stdin-missing, process-exit, and success-debug responses.
+
+## 2026-07-03 - CLI Credential Persistence Helper
+
+Goal/scope:
+- Move Claude/Gemini CLI credential path selection, parent-directory creation, file write, and private chmod out of `cli_login_code()`.
+- Keep OAuth token exchange, payload construction, auth cache invalidation, and status verification in the route.
+
+Files/modules changed:
+- `jane_web/main.py`
+- `jane_web/cli_login_helpers.py`
+- `tests/test_cli_login_helpers.py`
+- `tests/test_cli_login_token_errors.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Claude credentials still write to `~/.claude/.credentials.json` with mode `0600`.
+- Gemini credentials still write to `~/.gemini/oauth_creds.json` with mode `0600`.
+- Credential JSON payload shapes are unchanged.
+- Successful token exchange still invalidates the provider auth-status cache and returns the same success response.
+
+Boundary chosen:
+- Credential persistence is provider-specific CLI policy shared by both OAuth success branches. Extracting it removes duplicated filesystem handling from the largest route function and lets tests pin the file path and permissions against a temporary home directory.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/cli_login_helpers.py jane_web/main.py tests/test_cli_login_helpers.py tests/test_cli_login_token_errors.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_cli_login_helpers.py tests/test_cli_login_token_errors.py -q` passed (`33 passed, 4 warnings`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1405 passed, 4 warnings`).
+
+Remaining follow-up slices:
+- `cli_login_code()` still owns token request construction and the non-OAuth CLI stdin flow. Split token request data only with tests that assert endpoint URLs, form fields, and headers for each provider.
+
+## 2026-07-03 - CLI Login Process Socket Helper
+
+Goal/scope:
+- Move CLI-login process-tree scanning and fd socket-inode matching out of `jane_web/main.py`.
+- Keep `_discover_cli_login_port()` responsible for candidate gathering, fallback ordering, and `ss` parsing.
+
+Files/modules changed:
+- `jane_web/main.py`
+- `jane_web/cli_login_helpers.py`
+- `tests/test_cli_login_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Port discovery still returns a single unknown listen port immediately.
+- Multiple candidates still build the same inode-to-port map from `/proc/net/tcp*`.
+- The process-tree narrowing still starts at the CLI login process pid, scans `/proc/*/stat`, checks fd symlink targets shaped as `socket:[inode]`, and returns the first matching port.
+- If fd matching does not identify a port, discovery still falls back to the highest candidate port before trying `ss -tlnp`.
+
+Boundary chosen:
+- `/proc/<pid>/stat` parsing and fd socket matching are Linux process-inspection policy, not route orchestration. Extracting them makes the fragile pid/inode logic directly testable with a temporary proc tree while keeping live process state in `main.py`.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/cli_login_helpers.py jane_web/main.py tests/test_cli_login_helpers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_cli_login_helpers.py -q` passed (`27 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1401 passed, 4 warnings`).
+
+Remaining follow-up slices:
+- `_discover_cli_login_port()` still owns the `ss` fallback parser; extract it only if future tests pin its line formats.
+
+## 2026-07-03 - Web Automation Profile Storage Helper
+
+Goal/scope:
+- Move web automation profile storage-state resolution and navigate-step domain checks out of the route.
+- Preserve the route's FastAPI error handling and task execution flow.
+
+Files/modules changed:
+- `jane_web/main.py`
+- `jane_web/web_automation_helpers.py`
+- `tests/test_web_automation_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Plans without a profile still run without storage state.
+- Plans with a profile still check every `navigate` step against the profile's bound domain.
+- Profile storage-state path and `touch_last_used()` are still called only after domain checks pass.
+- Profile-load failures still surface as `HTTPException(400, "Profile load failed: ...")`.
+
+Boundary chosen:
+- Profile storage resolution is route-independent web automation policy. Extracting it keeps the endpoint focused on module loading, FastAPI errors, and `run_task()` orchestration while giving the domain-guard loop direct tests.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/web_automation_helpers.py jane_web/main.py tests/test_web_automation_helpers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_web_automation_helpers.py -q` passed (`10 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1397 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Web profile capture still owns visible-browser orchestration and should stay in the route until browser-session tests are available.
+
+## 2026-07-03 - Loopback Predicate Reuse
+
+Goal/scope:
+- Reuse the shared local-control IP predicate in the remaining loopback checks in `jane_web/main.py`.
+
+Files/modules changed:
+- `jane_web/main.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Rate limiting still exempts `127.0.0.1`, `::1`, and `localhost`.
+- Internal prompt-queue stream requests still bypass auth only for those loopback host labels.
+- CLI-login status still strips debug payloads for non-local callers.
+
+Boundary chosen:
+- These branches used the same loopback tuple as the newly extracted request helper. Reusing it removes drift without adding route behavior.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/main.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_request_helpers.py test_code/test_jane_web_stream_error.py -q` passed (`9 passed, 4 warnings`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1396 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- The stream route still needs broader route tests before splitting dedupe, offload, and auth-cookie branches.
+
+## 2026-07-03 - Idle State Record Helper
+
+Goal/scope:
+- Move idle-state JSON payload construction out of `_touch_idle_state()`.
+- Keep write failure tolerance and `IDLE_STATE_PATH` import behavior in `main.py`.
+
+Files/modules changed:
+- `jane_web/main.py`
+- `jane_web/request_logging.py`
+- `tests/test_request_logging.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Idle-state writes still include `last_active_ts` and UTC `last_active_iso`.
+- `_touch_idle_state()` still ignores all write/import failures.
+- Middleware still touches idle state only for the same non-polling API GET/POST requests.
+
+Boundary chosen:
+- The timestamp-to-record conversion is pure request logging policy. Extracting it keeps the middleware writer small and gives the UTC format a direct test.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/request_logging.py jane_web/main.py tests/test_request_logging.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_request_logging.py -q` passed (`4 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1396 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Self-healing dispatch still lives in `main.py`; move it only with async background-task tests that prove task registration and warning fallback behavior.
+
+## 2026-07-03 - CLI Credential Payload Helpers
+
+Goal/scope:
+- Move Claude callback-code parsing and Claude/Gemini credential payload construction out of `cli_login_code()`.
+- Keep credential file paths, writes, chmod, cache invalidation, and endpoint state in `main.py`.
+
+Files/modules changed:
+- `jane_web/main.py`
+- `jane_web/cli_login_helpers.py`
+- `tests/test_cli_login_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Claude callback codes still strip anything after `#` and trim whitespace.
+- Claude credential JSON still uses `claudeAiOauth.accessToken`, `refreshToken`, `expiresAt`, and scope splitting from the token response.
+- Gemini credential JSON still uses the existing OAuth client id, configured client secret, and refresh token.
+- The route still writes credentials to the same files with mode `0600`, invalidates the same auth-status cache, and returns the same success payloads.
+
+Boundary chosen:
+- Credential payload construction is pure provider response shaping. Extracting it reduces the largest CLI route while leaving filesystem side effects in place until success-path route tests exist.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/cli_login_helpers.py jane_web/main.py tests/test_cli_login_helpers.py tests/test_cli_login_token_errors.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_cli_login_helpers.py tests/test_cli_login_token_errors.py -q` passed (`25 passed, 4 warnings`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1395 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- The credential-writing side effect can move behind a small file-writer helper after tests pin temporary home paths, file mode, and cache invalidation.
+
+## 2026-07-03 - OAuth Token Error Parser
+
+Goal/scope:
+- Move duplicated Claude/Gemini token-exchange error parsing out of `cli_login_code()`.
+- Remove the bare `except:` blocks in those token-error branches.
+
+Files/modules changed:
+- `jane_web/main.py`
+- `jane_web/cli_login_helpers.py`
+- `tests/test_cli_login_helpers.py`
+- `tests/test_cli_login_token_errors.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Generic token exchange failures still return status `400` with `Token exchange failed: ...`.
+- Claude rate-limit error bodies still return the Anthropic-specific status `429` message.
+- Gemini rate-limit bodies still return the Google-specific status `429` message.
+- The existing direct endpoint tests for raised `urlopen()` errors still return JSON errors instead of crashing.
+
+Boundary chosen:
+- Provider-specific token error body parsing is pure response policy. Centralizing it in `cli_login_helpers.py` reduces duplication in the largest remaining route and makes rate-limit handling testable without network calls.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/cli_login_helpers.py jane_web/main.py tests/test_cli_login_helpers.py tests/test_cli_login_token_errors.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_cli_login_helpers.py tests/test_cli_login_token_errors.py -q` passed (`24 passed, 4 warnings`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1394 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Successful token exchange and credential writing still need extraction, but that should wait for temporary-home tests that verify the exact credential file contents and permissions.
+
+## 2026-07-03 - Local Control IP Predicate
+
+Goal/scope:
+- Consolidate localhost-only control endpoint IP checks into `jane_web/request_helpers.py`.
+- Preserve the stricter admin endpoints and the callback/warmup endpoints that also allow `unknown`.
+
+Files/modules changed:
+- `jane_web/main.py`
+- `jane_web/request_helpers.py`
+- `tests/test_request_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Admin reset-gate and rotate-brain still allow only `127.0.0.1`, `::1`, and `localhost`.
+- Jane warmup and briefing processor status still allow those loopback labels plus `unknown`.
+- Non-local IPs still get the same `{"error": "localhost only"}` 403 response.
+
+Boundary chosen:
+- The same IP allowlist was duplicated across control/callback routes. A small request helper keeps the policy explicit and directly tested without changing route logic.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/request_helpers.py jane_web/main.py tests/test_request_helpers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_request_helpers.py -q` passed (`8 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1392 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- The control endpoints still duplicate JSON error response construction; extract that only if a broader route-response helper emerges across more endpoints.
+
+## 2026-07-03 - CLI Login Proc Socket Parser
+
+Goal/scope:
+- Move `/proc/net/tcp*` LISTEN socket parsing out of `jane_web/main.py`.
+- Keep `_discover_cli_login_port()` responsible for process-tree narrowing and `ss` fallback.
+
+Files/modules changed:
+- `jane_web/main.py`
+- `jane_web/cli_login_helpers.py`
+- `tests/test_cli_login_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Port discovery still scans both `/proc/net/tcp` and `/proc/net/tcp6`.
+- IPv4 localhost/any and IPv6 localhost/any bindings are still accepted.
+- Known Jane/system service ports are still ignored.
+- Candidate ports and inode-to-port mappings still come from TCP `LISTEN` rows only.
+- Multiple candidates are still narrowed through process fd socket inodes, then by choosing the highest remaining port.
+
+Boundary chosen:
+- `/proc/net` line parsing is pure Linux socket-table parsing. Extracting it gives direct coverage for header rows, non-listening rows, remote addresses, known ports, IPv4, and IPv6 without spawning a CLI login process.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/cli_login_helpers.py jane_web/main.py tests/test_cli_login_helpers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_cli_login_helpers.py -q` passed (`20 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1391 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- `_discover_cli_login_port()` still owns process-tree traversal and `ss` fallback; split those only with fixture-driven tests for `/proc/<pid>/stat` and fd symlink matching.
+
+## 2026-07-03 - Upload Hash Index Helpers
+
+Goal/scope:
+- Move upload hash-index persistence and upload work-log message shaping out of `jane_web/main.py`.
+- Keep file writes, Chroma indexing, memory fact insertion, and route response assembly in the route.
+
+Files/modules changed:
+- `jane_web/main.py`
+- `jane_web/upload_helpers.py`
+- `tests/test_upload_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Missing, invalid, or non-object `.hash_index.json` files still behave as an empty hash index.
+- Hash index write failures are still ignored.
+- Duplicate detection, destination selection, image description enforcement, filename selection, memory fact command construction, and success result shape are unchanged.
+- Work-log messages still include only successful saved names and cap the displayed list at the first three uploads.
+
+Boundary chosen:
+- Hash-index persistence and activity-message shaping are upload policy rather than route orchestration. Extracting them keeps the route focused on I/O sequencing while making the edge cases directly testable.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/upload_helpers.py jane_web/main.py tests/test_upload_helpers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_upload_helpers.py -q` passed (`9 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1390 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- The multi-upload route can be split further around per-file processing after adding a route-level duplicate/upload success test with fake `UploadFile` objects.
+
+## 2026-07-03 - TTS Media And WAV Helpers
+
+Goal/scope:
+- Move TTS cache-hit media selection and WAV chunk concatenation out of `jane_web/main.py`.
+- Keep Docker/ffmpeg subprocess orchestration in the route.
+
+Files/modules changed:
+- `jane_web/main.py`
+- `jane_web/tts_generation.py`
+- `tests/test_tts_generation.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Cached `.ogg` files still win over legacy `.wav` cache files.
+- Cache media types remain `audio/ogg` and `audio/wav`.
+- WAV concatenation still copies params from the first chunk and appends all frames in chunk order.
+- The TTS route still uses the same text limit, chunking, Docker command, ffmpeg command, timeout handling, and fallback-to-legacy-wav behavior.
+
+Boundary chosen:
+- Cache media selection and WAV concatenation are file-format policy, not route orchestration. Extracting them gives direct tests without invoking Docker, ffmpeg, or FastAPI.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/tts_generation.py jane_web/main.py tests/test_tts_generation.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_tts_generation.py tests/test_tts_chunks.py -q` passed (`11 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1388 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- The remaining TTS route subprocess orchestration can be split later behind an async runner abstraction if Docker/ffmpeg behavior needs broader testing.
+
+## 2026-07-03 - CLI OAuth Authorization URL Helpers
+
+Goal/scope:
+- Move self-managed Claude/Gemini OAuth verifier encoding, PKCE challenge generation, and authorization URL construction out of `jane_web/main.py`.
+- Keep `cli_login()` responsible for storing the provider verifier/state globals.
+
+Files/modules changed:
+- `jane_web/main.py`
+- `jane_web/cli_login_helpers.py`
+- `tests/test_cli_login_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Claude and Gemini still generate 32-byte random verifier and state values, base64url encoded without padding.
+- PKCE still uses SHA-256 and `S256`.
+- Claude authorization URL still uses the same client id, redirect URI, scope, code challenge, and state parameters.
+- Gemini authorization URL still uses the same client id, redirect URI, offline access, scopes, code challenge, and state parameters.
+- `/api/cli-login` response shape remains `{"auth_url": ...}` for self-managed OAuth providers.
+
+Boundary chosen:
+- OAuth URL construction is pure provider policy and belongs with the existing CLI-login parsing helpers. Main now only wires randomness, stores globals, and returns the route response.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/cli_login_helpers.py jane_web/main.py tests/test_cli_login_helpers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_cli_login_helpers.py -q` passed (`19 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1386 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Token exchange request/credential-writing helpers are still embedded in `cli_login_code()`; extract them after adding success-path tests that use temporary home directories and mocked token responses.
+
+## 2026-07-03 - CLI Token Exchange Error Path Fix
+
+Goal/scope:
+- Fix a correctness bug found while refactoring CLI-login auth-status code.
+- Keep Claude/Gemini token-exchange success behavior unchanged.
+
+Files/modules changed:
+- `jane_web/main.py`
+- `tests/test_cli_login_token_errors.py`
+- `REFACTORING.md`
+
+Bug fixed:
+- In `cli_login_code()`, the self-managed Claude and Gemini OAuth branches referenced `tokens` and `last_exc` after the token HTTP request even when `urlopen()` raised before either variable had been assigned. That produced `UnboundLocalError` instead of the intended JSON error response.
+
+Behavior intentionally preserved:
+- Successful token exchanges still write credentials, invalidate auth-status cache, and return the same success payloads.
+- Failed token exchanges still return `{"ok": False, "error": "Token exchange failed: ..."}` with status `400`.
+- Existing provider-specific rate-limit messages are unchanged.
+
+Boundary chosen:
+- This is a narrow bug fix in the existing route branch, with direct endpoint-function tests to avoid pulling in FastAPI startup and live CLI/OAuth state.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/main.py tests/test_cli_login_token_errors.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_cli_login_token_errors.py -q` passed (`2 passed, 4 warnings`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1385 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- The Claude/Gemini token-exchange branches should still be extracted into helpers later, but only after adding tests for successful credential writes and provider-specific rate-limit bodies.
+
+## 2026-07-03 - CLI Provider Auth Status Policy
+
+Goal/scope:
+- Move provider auth-status cache/command/refresh policy out of `jane_web/main.py`.
+- Keep `_provider_auth_status_details(provider)` as the main-module facade used by CLI-login endpoints.
+
+Files/modules changed:
+- `jane_web/main.py`
+- `jane_web/cli_login_helpers.py`
+- `tests/test_cli_login_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Auth status details are still cached for five seconds on successful non-empty status output.
+- Unsupported providers still return `supported=False`.
+- Status command exceptions still return a supported error payload without caching.
+- Nonzero status command exits still attach the stderr tail and are not cached.
+- Empty successful output is still not cached.
+- Claude still attempts token refresh once when status output says it is not logged in, then reruns the status command once if refresh succeeds.
+
+Boundary chosen:
+- `cli_login_helpers.py` already owned provider status parsing and payload shaping. Moving the surrounding status policy there makes the cache and refresh behavior testable with fake command runners while leaving endpoint globals and token refresh I/O in `main.py`.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/cli_login_helpers.py jane_web/main.py tests/test_cli_login_helpers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_cli_login_helpers.py -q` passed (`18 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1383 passed`).
+- `git diff --check` passed.
+
+Observation:
+- `test_code/test_jane_cli_login.py` remains stale/non-maintained for current CLI-login behavior. It expects the old Claude CLI fallback candidate, old Claude auth URL shape, debug payload exposure from TestClient's non-local IP, and older localhost bootstrap assumptions; it also hits an existing `tokens` initialization bug in the self-managed Claude code path when mocked token exchange fails. It was not used as this slice's gate.
+
+Remaining follow-up slices:
+- The self-managed Claude/Gemini token-exchange branches in `cli_login_code()` should be split next only with fresh route tests, because there is an existing error-path bug around uninitialized `tokens`/`last_exc`.
+
+## 2026-07-03 - Session Bootstrap Resolver
+
+Goal/scope:
+- Move `get_or_bootstrap_session()` branch logic out of `jane_web/main.py`.
+- Preserve the route-facing facade and the exact `(session_id, trusted_device_id)` return shape.
+
+Files/modules changed:
+- `jane_web/main.py`
+- `jane_web/auth_sessions.py`
+- `tests/test_auth_sessions.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Single-user local mode still reuses a valid existing session without prewarm, or creates a trusted default-user session with no trusted-device cookie.
+- Valid session cookies still log reuse, prewarm the session user, and return the current trusted-device cookie.
+- Trusted-device cookies still create trusted sessions using the request fingerprint and trusted row label/default user, log the trusted-cookie path, prewarm, and return the trusted row id.
+- Fingerprint-matched trusted devices still create trusted sessions, log the fingerprint-match path, prewarm, and return the trusted row id.
+- Local browser access still creates an untrusted default-user session, logs, prewarms, and returns no trusted-device id.
+- No-auth requests still return `(None, None)`.
+
+Boundary chosen:
+- `auth_sessions.py` now owns the auth decision and bootstrap policy family. Main keeps only FastAPI wiring, cookie attachment, and route orchestration, while tests can exercise session creation branches with fake storage and prewarm callbacks.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/auth_sessions.py jane_web/main.py tests/test_auth_sessions.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_auth_sessions.py -q` passed (`15 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1379 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Auth/session policy in `main.py` is now mostly facades; future work should target route grouping or move facade call sites only after route-level tests cover cookie refresh and login flows.
+
+## 2026-07-03 - Share Or Auth Access Decision
+
+Goal/scope:
+- Move `check_share_or_auth()`'s boolean access policy out of `jane_web/main.py`.
+- Keep the route-facing exception facade in `main.py`.
+
+Files/modules changed:
+- `jane_web/main.py`
+- `jane_web/auth_sessions.py`
+- `tests/test_auth_sessions.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Single-user local mode still grants access before checking session cookies.
+- Valid session cookies still grant access using the request fingerprint.
+- Trusted-device cookies still grant access when the trusted-device row exists.
+- Share cookies still grant access only when the requested path is under the shared path, with `/` granting all paths.
+- `check_share_or_auth()` still raises `HTTPException(401, "Not authenticated")` on denial.
+
+Boundary chosen:
+- This is the same auth/session policy family as `require_auth()` but without session creation. Moving it into `auth_sessions.py` reduces duplicated route logic and gives direct tests for share path matching and trusted-cookie fallback.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/auth_sessions.py jane_web/main.py tests/test_auth_sessions.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_auth_sessions.py -q` passed (`9 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1373 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- `get_or_bootstrap_session()` is the remaining large auth/session block in `main.py`; split it only with tests that cover local bootstrap, trusted-cookie bootstrap, fingerprint trusted-device bootstrap, and local-browser bootstrap side effects.
+
+## 2026-07-03 - Required Auth Session Resolver
+
+Goal/scope:
+- Move `require_auth()` session-resolution policy out of `jane_web/main.py`.
+- Keep the FastAPI dependency, 401 response, and trusted-device session cache in `main.py`.
+
+Files/modules changed:
+- `jane_web/main.py`
+- `jane_web/auth_sessions.py`
+- `tests/test_auth_sessions.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Single-user local mode still returns `single_user_local` before the localhost internal bypass.
+- Localhost non-Cloudflare requests still use the `session_id` query parameter or fall back to `internal`.
+- Valid session cookies still win before trusted-device fallback.
+- Trusted-device fallback still reuses a cached session when valid, otherwise creates a trusted session using the trusted row label or default user id, then caches it.
+- `require_auth()` still raises `HTTPException(401, "Not authenticated")` when no session can be resolved.
+
+Boundary chosen:
+- The session-resolution logic is auth policy with many branches but few FastAPI dependencies. Extracting it with injected storage/session functions makes trusted-device cache behavior directly testable while avoiding a broad move of session creation and route bootstrap side effects.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/auth_sessions.py jane_web/main.py tests/test_auth_sessions.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_auth_sessions.py tests/test_request_helpers.py tests/test_auth_devices.py tests/test_auth_cookies.py -q` passed (`18 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1369 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- `get_or_bootstrap_session()` and `check_share_or_auth()` still contain related auth/session policy, but each has more route side effects and should be split only with similarly focused characterization tests.
+
+## 2026-07-03 - Chat Stream NDJSON Event Helpers
+
+Goal/scope:
+- Extract repeated Jane chat stream NDJSON event construction from `jane_web/main.py`.
+- Preserve route control flow, auth, idempotency dedupe, stream limiting, and provider dispatch.
+
+Files/modules changed:
+- `jane_web/main.py`
+- `jane_web/chat_stream_events.py`
+- `tests/test_chat_stream_events.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Instant commands still emit `delta` then `done` chunks with the same text.
+- Big task offloads still emit the same `offloaded` event with `task_id`, then the same `done` event.
+- Stream error chunks still use `{"type": "error", "data": ...}` with the same user-facing text.
+- Session initialization still emits `status` and `done` chunks with the same JSON shape.
+
+Boundary chosen:
+- NDJSON event shapes are pure stream-contract policy. Keeping them in `chat_stream_events.py` gives direct contract tests while leaving the live stream generator and side effects in `main.py`.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/chat_stream_events.py jane_web/main.py tests/test_chat_stream_events.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_chat_stream_events.py test_code/test_jane_web_stream_error.py -q` passed (`5 passed, 4 warnings`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1364 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- The stream route can be split further only after adding route-level tests for dedupe replay, instant-command bypass, offload bypass, and auth-cookie refresh.
+
+## 2026-07-03 - Music Playlist Creation Workflow
+
+Goal/scope:
+- Move Jane's temporary music playlist cleanup and query-to-playlist workflow out of `jane_web/main.py`.
+- Keep `main.create_music_playlist_from_query()` as the compatibility facade used by `jane_proxy` and v2 music handlers.
+
+Files/modules changed:
+- `jane_web/main.py`
+- `jane_web/music_playlists.py`
+- `tests/test_music_playlists.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Generated playlists named `Random Mix` or `Playing: ...` older than five minutes are still cleaned up before creating a new playlist.
+- Existing user playlists still win before vault file search, and returned existing playlists are marked `temporary=False`.
+- Random queries still sample up to ten MP3 files.
+- Non-random queries still use the same substring, content-word, and fuzzy filename matching tiers before creating a temporary playlist.
+- The route and legacy import surface still call `create_music_playlist_from_query(query)` from `jane_web.main`.
+
+Boundary chosen:
+- `music_playlists.py` already owned query normalization, matching, playlist naming, and track shaping. Moving the workflow there keeps `main.py` out of music-domain decisions while dependency injection keeps database, filesystem, random sampling, and logging effects explicit in tests.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/music_playlists.py jane_web/main.py tests/test_music_playlists.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_music_playlists.py -q` passed (`9 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1360 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- `jane_proxy` and v2 music handlers can eventually import the workflow directly from `jane_web.music_playlists`, but keeping the `main.py` facade avoids broad import churn in this slice.
+
+## 2026-07-03 - Conversation Key Assembly Helper
+
+Goal/scope:
+- Move request/body conversation-key assembly out of `jane_web/main.py` and into `jane_web/conversation_keys.py`.
+- Keep `main.resolve_conversation_key()` as the route-facing facade.
+
+Files/modules changed:
+- `jane_web/main.py`
+- `jane_web/conversation_keys.py`
+- `tests/test_conversation_keys.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Managed users still get `<sanitized_user_id>__<device_id>__<client_session_id>` keys.
+- Unmanaged/legacy sessions still preserve the raw client session id when present.
+- Auth-session lookup, default-user fallback, user-manager import fallback, header device id precedence, trusted-device-cookie fallback, and fingerprint fallback keep the same order.
+- `resolve_conversation_key(request, body)` remains available from `jane_web.main`.
+
+Boundary chosen:
+- `conversation_keys.py` already owned the pure key-shaping helpers; moving the request assembly there keeps route code focused on orchestration and makes user-manager/device fallback behavior directly testable with injected dependencies.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/conversation_keys.py jane_web/main.py tests/test_conversation_keys.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_conversation_keys.py -q` passed (`7 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1357 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Continue extracting pure request/auth policy from `main.py`, but leave session creation and prewarm side effects in place until route-level auth tests cover those flows.
+
+## 2026-07-03 - Ollama Warmup Payload Helpers
+
+Goal/scope:
+- Move Jane web's Ollama startup/heartbeat endpoint and payload construction out of `jane_web/main.py`.
+- Keep the async startup loops, model imports, retry logging, and heartbeat activity-recording behavior unchanged.
+
+Files/modules changed:
+- `jane_web/main.py`
+- `jane_web/ollama_warmup.py`
+- `tests/test_ollama_warmup.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Local LLM prewarm still posts to `/api/generate` with prompt `"hi"`, `stream=False`, the live `LOCAL_LLM_NUM_CTX`, and `OLLAMA_KEEP_ALIVE`.
+- Heartbeat pings still post prompt `"."`, `think=False`, `temperature=0.0`, `num_predict=1`, the live context size, and the live keep-alive value.
+- Heartbeat polling still runs at `max(2, interval // 5)` and skips when recent real Ollama activity is younger than the configured interval.
+- `OLLAMA_BASE_URL` normalization still strips trailing slashes and falls back to `http://localhost:11434`.
+
+Boundary chosen:
+- Endpoint and payload construction are pure request-shape policy, while `main.py` should own only the startup loop and logging. Extracting the pure parts gives direct tests for the warmup contract without touching live Ollama, `aiohttp`, or FastAPI startup behavior.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/ollama_warmup.py jane_web/main.py tests/test_ollama_warmup.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_ollama_warmup.py -q` passed (`5 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1355 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Continue peeling pure request/session policy out of `jane_web/main.py`; avoid splitting route handlers until route-level characterization tests cover response shapes.
+
+## 2026-07-03 - V2 Pipeline Session Scoping Reuse
+
+Goal/scope:
+- Reuse the shared conversation session scoping helper in `jane_web/jane_v2/pipeline.py`.
+- Preserve canonical session id precedence for body session id before cookie fallback.
+
+Files/modules changed:
+- `jane_web/jane_v2/pipeline.py`
+- `tests/test_jane_v2_pipeline_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- `_canonical_session_id()` still prefers `body.session_id`, then the cookie session id.
+- A missing canonical id still returns `None`.
+- Managed-user scoping still delegates through the same user-manager resolver via `conversation_keys.scoped_conversation_session_id`.
+
+Boundary chosen:
+- The v2 pipeline had the same inline user-manager import/fallback policy as `main.py`; reusing the shared helper removes duplication while keeping pipeline routing behavior unchanged.
+- Focused tests pin body-session precedence and cookie fallback without invoking the full chat pipeline.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v2/pipeline.py tests/test_jane_v2_pipeline_helpers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_jane_v2_pipeline_helpers.py tests/test_conversation_keys.py -q` passed (`12 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1350 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Continue consolidating route/session helpers before attempting larger `main.py` or `jane_proxy.py` splits.
+
+## 2026-07-03 - Conversation Session Scoping Helper
+
+Goal/scope:
+- Move conversation session scoping fallback logic out of `jane_web/main.py`.
+- Keep the route-local `_scoped_conversation_session_id()` facade intact.
+
+Files/modules changed:
+- `jane_web/main.py`
+- `jane_web/conversation_keys.py`
+- `tests/test_conversation_keys.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Managed-user scoping still delegates to `agent_skills.user_manager.scoped_session_id`.
+- If the user-manager import or resolver fails, the fallback remains the stripped session id or `"default"`.
+- The chat streaming route still calls `_scoped_conversation_session_id()` before dispatching to `jane_proxy.stream_message`.
+
+Boundary chosen:
+- Conversation-key construction and device/session scoping already live in `conversation_keys.py`, so this removes another route-policy concern from `main.py` without changing auth, stream, or persistence behavior.
+- The resolver loader is injectable so fallback behavior is tested without touching runtime user-manager state.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/conversation_keys.py jane_web/main.py tests/test_conversation_keys.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_conversation_keys.py -q` passed (`5 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1348 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- The v2 pipeline has a similar inline scoped-session fallback that can use this helper after checking its focused tests.
+
+## 2026-07-03 - Main Instant Command Response Helper
+
+Goal/scope:
+- Move instant-command response construction out of `jane_web/main.py`.
+- Keep the route-level `_check_instant_command(message, platform)` facade intact for the streaming route.
+
+Files/modules changed:
+- `jane_web/main.py`
+- `jane_web/instant_commands.py`
+- `tests/test_instant_commands.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Exact short command matching is unchanged.
+- Job queue, completed jobs, commands table, and cron output responses keep the same success/empty/error text.
+- The streaming route still receives either a markdown string or `None` from `_check_instant_command`.
+
+Boundary chosen:
+- `instant_commands.py` already owned phrase classification and markdown formatting, so moving response assembly there makes `main.py` less responsible for data lookup details without touching streaming or auth flow.
+- Injected helper callbacks make the queue and cron branches testable without importing runtime queue modules or shelling out to `crontab`.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/instant_commands.py jane_web/main.py tests/test_instant_commands.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_instant_commands.py -q` passed (`6 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1346 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Continue reducing `main.py` by extracting local/localhost stream request policy and auth/session response helpers where tests can pin route behavior.
+
+## 2026-07-03 - Main Pipeline Selection Policy
+
+Goal/scope:
+- Move Jane chat pipeline environment policy out of `jane_web/main.py`.
+- Preserve the existing private `_should_use_v2(body)` and `_should_use_v3(body)` facades used by the route handlers.
+
+Files/modules changed:
+- `jane_web/main.py`
+- `jane_web/pipeline_selection.py`
+- `tests/test_pipeline_selection.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- `JANE_PIPELINE=v1` remains the only v2 rollback switch.
+- `JANE_USE_V3_PIPELINE=1` remains the only v3 opt-in switch, with surrounding whitespace still stripped.
+- `/api/jane/chat` and `/api/jane/chat/stream` route branching still calls the same private facade names in `main.py`.
+
+Boundary chosen:
+- Pipeline selection is pure environment policy, so extracting it is a low-risk first step toward shrinking `main.py` without touching route response contracts.
+- The direct `main.py` facades remain to avoid breaking private imports or route tests.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/pipeline_selection.py jane_web/main.py tests/test_pipeline_selection.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_pipeline_selection.py -q` passed (`3 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1343 passed`).
+- `git diff --check` passed.
+
+Observation:
+- A non-maintained focused run of `test_code/test_jane_web_streaming.py` still has stale expectations around v3 routing and execution-profile defaults in this environment; it was not used as the gate for this pure helper extraction.
+
+Remaining follow-up slices:
+- Continue peeling pure route policy out of `main.py`, especially instant-command response construction and local/localhost stream request policy.
+
+## 2026-07-03 - Weather Prompt Date Injection
+
+Goal/scope:
+- Fix a date-dependent weather prompt characterization failure found at the start of the new refactor run.
+- Keep runtime weather phrasing behavior unchanged while allowing tests to pin the reference date.
+
+Files/modules changed:
+- `jane_web/jane_v2/classes/weather/phrasing.py`
+- `tests/test_weather_slices.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Runtime calls still default to `day_reference()` with the current local date.
+- Weather prompt text, payload options, keep-alive handling, and Stage 2 handler flow are unchanged.
+
+Boundary chosen:
+- The nondeterminism lived in the pure prompt builder, so injecting `today` there avoids wider handler changes and prevents the test from failing when the calendar date changes.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v2/classes/weather/phrasing.py tests/test_weather_slices.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_weather_slices.py -q` passed (`8 passed`).
+
+Remaining follow-up slices:
+- Continue with route/stream characterization around `jane_web/main.py` and `jane_web/jane_proxy.py` before splitting larger live-path code.
+
 ## 2026-07-02 - Fifteen-Hour Refactor Closeout
 
 Goal/scope:

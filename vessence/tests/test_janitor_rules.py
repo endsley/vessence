@@ -1,4 +1,6 @@
 from memory.v1.janitor_rules import (
+    _classify_long_term_junk,
+    _classify_user_memory_junk,
     classify_known_junk,
     is_low_value_classes_deploy_snapshot,
     is_stale_vessence_docker_memory,
@@ -59,6 +61,18 @@ def test_classify_user_memory_stale_runtime_and_superseded_skills():
     ) == "Superseded AcuBliss extraction planning memory"
 
 
+def test_user_memory_junk_helper_returns_none_for_nonmatching_memory():
+    assert _classify_user_memory_junk(
+        "Keep this useful fact",
+        "keep this useful fact",
+        "project",
+        "project",
+        "",
+        codex_skill_exists=lambda _name: False,
+        vessence_docker_compose_missing=lambda: False,
+    ) is None
+
+
 def test_classify_long_term_reasons():
     assert classify(LONG, "archived transcript", {}) == (
         "Untyped archived transcript fragment with no topic metadata"
@@ -68,6 +82,16 @@ def test_classify_long_term_reasons():
         "Theme: article-sharing workflow deferred follow-up feature request",
         {"topic": "Project: vessence"},
     ) == "Deferred feature-request snapshot"
+
+
+def test_long_term_junk_helper_keeps_typed_nonmatching_memory():
+    assert _classify_long_term_junk(
+        "keep this useful archive",
+        {"topic": "project"},
+        "project",
+        "",
+        vessence_docker_compose_missing=lambda: False,
+    ) is None
 
 
 def test_docker_and_classes_rules_keep_existing_guards():

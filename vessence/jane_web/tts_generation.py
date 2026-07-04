@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import wave
 from collections.abc import Sequence
 from dataclasses import dataclass
 
@@ -27,6 +28,18 @@ def tts_cache_paths(data_home: str, text: str) -> TtsCachePaths:
         ogg_path=os.path.join(cache_dir, f"{text_hash}.ogg"),
         legacy_wav_path=os.path.join(cache_dir, f"{text_hash}.wav"),
     )
+
+
+def tts_cached_media(
+    cache_paths: TtsCachePaths,
+    *,
+    exists_fn=os.path.exists,
+) -> tuple[str, str] | None:
+    if exists_fn(cache_paths.ogg_path):
+        return cache_paths.ogg_path, "audio/ogg"
+    if exists_fn(cache_paths.legacy_wav_path):
+        return cache_paths.legacy_wav_path, "audio/wav"
+    return None
 
 
 def tts_gpu_flags(nvidia_smi_path: str = "/usr/bin/nvidia-smi") -> list[str]:
@@ -86,3 +99,13 @@ def tts_ffmpeg_command(combined_wav: str, ogg_path: str) -> list[str]:
         "48k",
         ogg_path,
     ]
+
+
+def concatenate_wav_chunks(chunk_wavs: Sequence[str], combined_wav: str) -> None:
+    with wave.open(chunk_wavs[0], "rb") as first:
+        params = first.getparams()
+    with wave.open(combined_wav, "wb") as out:
+        out.setparams(params)
+        for wav_path in chunk_wavs:
+            with wave.open(wav_path, "rb") as wav:
+                out.writeframes(wav.readframes(wav.getnframes()))

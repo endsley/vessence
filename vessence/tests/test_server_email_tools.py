@@ -18,6 +18,13 @@ def test_server_email_tools_use_extracted_result_helpers():
     assert server_email_tools._format_email_search_results is format_email_search_results
     assert server_email_tools._prepare_send_email_args is prepare_send_email_args
     assert server_email_tools._format_sent_email_status is format_sent_email_status
+    assert set(server_email_tools._EMAIL_TOOL_EXECUTORS) == {
+        "email.read_inbox",
+        "email.read",
+        "email.search",
+        "email.send",
+        "email.delete",
+    }
 
 
 def _install_email_tools(monkeypatch, **funcs):

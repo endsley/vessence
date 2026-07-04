@@ -2,7 +2,12 @@ from dataclasses import dataclass
 
 import pytest
 
-from jane_web.chat_stream_dedupe import begin_turn_dedupe, finalize_turn_dedupe, iter_replay_ndjson
+from jane_web.chat_stream_dedupe import (
+    _completed_replay,
+    begin_turn_dedupe,
+    finalize_turn_dedupe,
+    iter_replay_ndjson,
+)
 
 
 @dataclass
@@ -37,6 +42,26 @@ class FakeDedupeStore:
 
     def mark_failed(self, turn_id):
         self.calls.append(("mark_failed", turn_id))
+
+
+def test_completed_replay_builds_cached_response_decision():
+    decision = _completed_replay(
+        Row("completed", "cached\n"),
+        "race_completed",
+        pending_join_waited=True,
+    )
+
+    assert decision is not None
+    assert decision.active_turn_id == ""
+    assert decision.replay_response_json == "cached\n"
+    assert decision.replay_reason == "race_completed"
+    assert decision.pending_join_waited is True
+
+
+def test_completed_replay_ignores_incomplete_cache_rows():
+    assert _completed_replay(Row("pending"), "completed") is None
+    assert _completed_replay(Row("completed", ""), "completed") is None
+    assert _completed_replay(None, "completed") is None
 
 
 @pytest.mark.asyncio

@@ -14,20 +14,6 @@ ANSI_ESCAPE_RE = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
 PROMPT_PATTERNS = [
     "Type your message or @path/to/file",
 ]
-NOISE_INDICATORS = [
-    "Waiting for auth...",
-    "Gemini CLI update available!",
-    "Automatic update failed",
-    "Ready (user)",
-    "Logged in with Google",
-    "screen reader-friendly view",
-    "YOLO mode",
-    "~ no sandbox",
-    "Logging in...",
-    "Logged in.",
-    "Updated successfully",
-    "update manually",
-]
 
 
 @dataclass
@@ -41,6 +27,15 @@ class TurnInterruptedError(RuntimeError):
     def __init__(self, message: str, emitted_len: int = 0):
         super().__init__(message)
         self.emitted_len = emitted_len
+
+
+def _gemini_startup_failure(startup_buffer: str, returncode: int | None) -> RuntimeError:
+    snippet = startup_buffer.strip() or f"Gemini exited with code {returncode}"
+    return RuntimeError(f"Persistent Gemini failed during startup: {snippet[:300]}")
+
+
+def _gemini_session_key(user_id: str, session_id: str) -> str:
+    return f"{user_id}:{session_id}"
 
 
 class GeminiPersistentSession:
@@ -232,15 +227,6 @@ class GeminiPersistentSession:
                 return idx, pattern
         return None, None
 
-    def _is_meaningful(self, text: str) -> bool:
-        stripped = text.strip()
-        if len(stripped) <= 5:
-            return False
-        for indicator in NOISE_INDICATORS:
-            if indicator in stripped and len(stripped) < len(indicator) + 20:
-                return False
-        return True
-
     def _emit_safe_delta(self) -> None:
         pending = self.pending_turn
         if not pending or not pending.on_delta:
@@ -285,8 +271,10 @@ class GeminiPersistentSession:
                 if not data_bytes:
                     if self.process and self.process.returncode is not None:
                         if not self.ready_event.is_set():
-                            snippet = self.startup_buffer.strip() or f"Gemini exited with code {self.process.returncode}"
-                            self.start_failure = RuntimeError(f"Persistent Gemini failed during startup: {snippet[:300]}")
+                            self.start_failure = _gemini_startup_failure(
+                                self.startup_buffer,
+                                self.process.returncode,
+                            )
                             self.ready_event.set()
                         break
                     await asyncio.sleep(0.05)
@@ -294,8 +282,10 @@ class GeminiPersistentSession:
             except OSError:
                 if self.process and self.process.returncode is not None:
                     if not self.ready_event.is_set():
-                        snippet = self.startup_buffer.strip() or f"Gemini exited with code {self.process.returncode}"
-                        self.start_failure = RuntimeError(f"Persistent Gemini failed during startup: {snippet[:300]}")
+                        self.start_failure = _gemini_startup_failure(
+                            self.startup_buffer,
+                            self.process.returncode,
+                        )
                         self.ready_event.set()
                     break
                 await asyncio.sleep(0.1)
@@ -320,8 +310,10 @@ class GeminiPersistentSession:
                     self.startup_buffer = self.startup_buffer[prompt_idx + len(pattern):]
                     self.start_failure = None
                 elif self.process and self.process.returncode is not None:
-                    snippet = self.startup_buffer.strip() or f"Gemini exited with code {self.process.returncode}"
-                    self.start_failure = RuntimeError(f"Persistent Gemini failed during startup: {snippet[:300]}")
+                    self.start_failure = _gemini_startup_failure(
+                        self.startup_buffer,
+                        self.process.returncode,
+                    )
                     self.ready_event.set()
                 continue
 
@@ -352,7 +344,7 @@ class GeminiPersistentManager:
         self._lock = asyncio.Lock()
 
     async def get(self, user_id: str, session_id: str) -> GeminiPersistentSession:
-        composite_key = f"{user_id}:{session_id}"
+        composite_key = _gemini_session_key(user_id, session_id)
         async with self._lock:
             session = self._sessions.get(composite_key)
             if session is None:
@@ -373,7 +365,7 @@ class GeminiPersistentManager:
             return session
 
     async def shutdown(self, user_id: str, session_id: str) -> None:
-        composite_key = f"{user_id}:{session_id}"
+        composite_key = _gemini_session_key(user_id, session_id)
         async with self._lock:
             session = self._sessions.pop(composite_key, None)
         if session:

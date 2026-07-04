@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import datetime
-import re
 from typing import Any
 
-from memory.v1.conversation_text import looks_like_bad_thematic_output, strip_injected_metadata
+from memory.v1.conversation_text import compact_whitespace, looks_like_bad_thematic_output, strip_injected_metadata
 
 LedgerTurn = tuple[int, Any, Any, datetime.datetime | None]
 SessionTranscriptRow = tuple[Any, Any]
@@ -40,11 +39,7 @@ def latest_metadata_timestamp(metadatas: list[dict[str, Any] | None]) -> str | N
 
 
 def transcript_line(role: Any, content: Any) -> str | None:
-    cleaned = re.sub(
-        r"\s+",
-        " ",
-        strip_injected_metadata(content or ""),
-    ).strip()
+    cleaned = compact_whitespace(strip_injected_metadata(content or ""))
     if not cleaned or looks_like_bad_thematic_output(cleaned):
         return None
     return f"{(role or '').upper()}: {cleaned}"

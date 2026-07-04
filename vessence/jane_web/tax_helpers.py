@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import json
 import re
 from collections.abc import Callable, Mapping
 from typing import Any
@@ -19,6 +20,27 @@ def tax_interview_answer_args(body: Mapping[str, Any]) -> dict[str, Any]:
         "step_id": body.get("step_id", "filing_status"),
         "user_response": body.get("response", {}),
     }
+
+
+def tax_tool_command(
+    python_bin: str,
+    tools_path: str,
+    tool_name: str,
+    args: Mapping[str, Any] | None = None,
+) -> list[str]:
+    command = [python_bin, tools_path, tool_name]
+    if args:
+        command.append(json.dumps(args))
+    return command
+
+
+def tax_tool_result_payload(returncode: int, stdout: str, stderr: str) -> dict[str, Any]:
+    if returncode != 0:
+        return {"status": "error", "message": stderr[:500]}
+    try:
+        return json.loads(stdout)
+    except json.JSONDecodeError:
+        return {"status": "ok", "output": stdout.strip()}
 
 
 def tax_output_dir(tax_essence_dir: str) -> str:

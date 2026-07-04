@@ -8,6 +8,9 @@ from agent_skills.ra_research_report_markdown import (
     default_tracking_items,
     list_to_markdown,
     source_heading,
+    source_trace_line,
+    useful_finding_lines,
+    useful_report_summary_groups,
 )
 from agent_skills.ra_research_report_tables import (
     EMPTY_EVIDENCE_ROW,
@@ -114,6 +117,66 @@ def test_build_useful_report_markdown_includes_high_signal_sections_and_paths():
     assert "- Living recommendation scheme: `/vault/scheme.md`" in report
     assert "- `pmid-1` Treat to target CDAI remission guidance | guideline, open_access_full_text | https://example.test/high" in report
     assert report.endswith("\n")
+
+
+def test_useful_report_summary_groups_rank_signal_and_fallback_themes():
+    high_signal = {
+        "source_id": "pmid-high",
+        "title": "Treat to target monitoring",
+        "study_type": "guideline",
+        "evidence_scope": "open_access_full_text",
+        "remission_relevance": "CDAI treat-to-target scoring changes clinician questions.",
+        "main_findings": ["Validated disease activity scoring matters."],
+    }
+    low_signal = {
+        "source_id": "pmid-low",
+        "title": "Speculative technology outside RA remission",
+        "evidence_scope": "abstract_only",
+        "remission_relevance": "Does not directly address rheumatoid arthritis remission.",
+        "needs_llm_review": True,
+    }
+
+    groups = useful_report_summary_groups(
+        [low_signal, high_signal, high_signal],
+        [{"remission_relevance": "Diet and omega-3 evidence for rheumatoid arthritis."}],
+    )
+
+    assert groups["unique_new"] == [low_signal, high_signal]
+    assert groups["ranked_new"][0] == high_signal
+    assert groups["high_signal"] == [high_signal]
+    assert groups["low_signal"] == [low_signal]
+    assert "treat-to-target and remission scoring" in groups["themes"]
+
+
+def test_useful_report_source_render_helpers_preserve_high_signal_shapes():
+    summary = {
+        "source_id": "pmid-1",
+        "title": "Treat to target CDAI remission guidance",
+        "study_type": "guideline",
+        "evidence_scope": "open_access_full_text",
+        "remission_relevance": "CDAI target selection changes what Kathia should ask about.",
+        "main_findings": ["CDAI treat-to-target care improves remission monitoring."],
+        "limitations": ["Monitor ESR, CRP, infection risk, and medication safety."],
+        "actionable_implications": ["Ask whether CDAI is the active target."],
+        "clinician_discussion_points": ["Which remission score is being used?"],
+        "safety_concerns": ["Discuss infection risk before medication changes."],
+        "url": "https://example.test/high",
+    }
+
+    assert useful_finding_lines(summary) == [
+        "### `pmid-1` Treat to target CDAI remission guidance",
+        "- Evidence: guideline, open_access_full_text.",
+        "- Why it matters: CDAI target selection changes what Kathia should ask about.",
+        "- Finding: CDAI treat-to-target care improves remission monitoring.",
+        "- Useful next step: Ask whether CDAI is the active target.",
+        "- Clinician question: Which remission score is being used?",
+        "- Caveat: Monitor ESR, CRP, infection risk, and medication safety.",
+        "- Safety note: Discuss infection risk before medication changes.",
+    ]
+    assert source_trace_line(summary) == (
+        "- `pmid-1` Treat to target CDAI remission guidance | "
+        "guideline, open_access_full_text | https://example.test/high"
+    )
 
 
 def test_build_useful_report_markdown_uses_defaults_without_signal():

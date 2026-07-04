@@ -1,4 +1,4 @@
-from jane_web.rate_limit import RateLimiter, rate_limit_category
+from jane_web.rate_limit import RateLimiter, active_window_hits, rate_limit_category, stale_rate_limit_keys
 
 
 def test_rate_limit_category_matches_existing_endpoint_buckets():
@@ -8,6 +8,21 @@ def test_rate_limit_category_matches_existing_endpoint_buckets():
     assert rate_limit_category("/api/files/upload") == ("upload", 20, 60)
     assert rate_limit_category("/api/anything") == ("api", 60, 60)
     assert rate_limit_category("/chat") == ("", 0, 0)
+
+
+def test_active_window_hits_uses_strict_cutoff_boundary():
+    assert active_window_hits([39.9, 40.0, 40.1, 100.0], cutoff=40.0) == [40.1, 100.0]
+
+
+def test_stale_rate_limit_keys_uses_last_hit_and_empty_list_policy():
+    assert stale_rate_limit_keys(
+        {
+            "empty": [],
+            "stale": [1.0, 79.9],
+            "fresh": [1.0, 80.0],
+        },
+        now=200.0,
+    ) == ["empty", "stale"]
 
 
 def test_rate_limiter_blocks_after_max_requests_until_window_expires():

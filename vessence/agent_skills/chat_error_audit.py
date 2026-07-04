@@ -37,6 +37,10 @@ VESSENCE_HOME = Path(os.environ.get("VESSENCE_HOME", str(Path(__file__).resolve(
 JOB_QUEUE_DIR = VESSENCE_HOME / "configs" / "job_queue"
 
 
+def _utcnow() -> dt.datetime:
+    return dt.datetime.now(dt.timezone.utc).replace(tzinfo=None)
+
+
 def _next_job_number() -> int:
     """Return 1 + the highest existing job number across active + completed."""
     highest = 0
@@ -94,7 +98,8 @@ def create_audit_job(payload: dict) -> Path | None:
 
         exc_class = payload.get("exception_class", "") or "UnknownException"
         stack = payload.get("stack_trace", "") or ""
-        ts = payload.get("timestamp", "") or dt.datetime.utcnow().strftime(
+        now = _utcnow()
+        ts = payload.get("timestamp", "") or now.strftime(
             "%Y-%m-%dT%H:%M:%S.%fZ"
         )
 
@@ -107,7 +112,7 @@ def create_audit_job(payload: dict) -> Path | None:
             payload,
             frame=frame,
             source_hint=src_hint,
-            created_date=dt.datetime.utcnow().strftime("%Y-%m-%d"),
+            created_date=now.strftime("%Y-%m-%d"),
             timestamp=ts,
         )
         job_path.write_text(body)

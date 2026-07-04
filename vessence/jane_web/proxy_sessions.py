@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -43,6 +44,34 @@ def stale_session_keys(
         for composite_key, state in list(sessions.items())
         if now_ts - state.last_accessed_at > ttl_seconds
     ]
+
+
+@dataclass(frozen=True)
+class StaleSessionExpiration:
+    composite_key: str
+    user_id: str
+    session_id: str
+    idle_seconds: int
+
+
+def stale_session_expirations(
+    sessions: Mapping[str, Any],
+    *,
+    now_ts: float,
+    ttl_seconds: float,
+) -> list[StaleSessionExpiration]:
+    expirations: list[StaleSessionExpiration] = []
+    for composite_key in stale_session_keys(sessions, now_ts=now_ts, ttl_seconds=ttl_seconds):
+        user_id, session_id = split_session_composite_key(composite_key)
+        expirations.append(
+            StaleSessionExpiration(
+                composite_key=composite_key,
+                user_id=user_id,
+                session_id=session_id,
+                idle_seconds=int(now_ts - sessions[composite_key].last_accessed_at),
+            )
+        )
+    return expirations
 
 
 def oldest_session_key(sessions: Mapping[str, Any]) -> str:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import date
 from typing import Any
 
 from .slices import day_reference
@@ -36,8 +37,13 @@ User question: {prompt}
 Your 1-sentence spoken answer:"""
 
 
-def weather_answer_prompt(slice_obj: dict[str, Any], prompt: str) -> str:
-    day_ref = day_reference(slice_obj)
+def weather_answer_prompt(
+    slice_obj: dict[str, Any],
+    prompt: str,
+    *,
+    today: date | None = None,
+) -> str:
+    day_ref = day_reference(slice_obj, today=today)
     return ANSWER_TEMPLATE.format(
         slice=json.dumps(slice_obj, indent=2),
         prompt=prompt,
@@ -52,10 +58,11 @@ def weather_phrase_payload(
     model: str,
     num_ctx: int,
     keep_alive: str | int = -1,
+    today: date | None = None,
 ) -> dict[str, Any]:
     return {
         "model": model,
-        "prompt": weather_answer_prompt(slice_obj, prompt),
+        "prompt": weather_answer_prompt(slice_obj, prompt, today=today),
         "stream": False,
         "think": False,
         "options": {"temperature": 0.2, "num_predict": 60, "num_ctx": num_ctx},

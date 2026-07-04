@@ -9,6 +9,8 @@ from agent_skills.nightly_report_rendering import (
     status_counts,
     summary_log_lines,
     summary_log_preamble,
+    tldr_problem_fix_lines,
+    tldr_stage_header,
     tldr_stage_lines,
     top_followups,
     unique_archive_path,
@@ -107,6 +109,33 @@ def test_tldr_stage_lines_preserves_existing_markers_and_defaults():
         "- 3. ✗ Doc Drift (0.5m)",
         "  - Problems:",
         "    - drift",
+    ]
+
+
+def test_tldr_stage_helper_lines_preserve_header_and_empty_defaults():
+    result = {"status": "exit-2"}
+    detail = {
+        "name": "Doc Drift",
+        "elapsed_s": 30,
+        "problems_tldr_list": [],
+        "fixes_tldr_list": [],
+    }
+
+    assert tldr_stage_header(3, result, detail) == "- 3. ✗ Doc Drift (0.5m)"
+    assert tldr_problem_fix_lines(detail) == [
+        "  - Problems: none detected",
+        "  - Fixes: none applied",
+    ]
+    assert tldr_problem_fix_lines(
+        {
+            "problems_tldr_list": ["drift"],
+            "fixes_tldr_list": ["updated docs"],
+        }
+    ) == [
+        "  - Problems:",
+        "    - drift",
+        "  - Fixes:",
+        "    - updated docs",
     ]
 
 

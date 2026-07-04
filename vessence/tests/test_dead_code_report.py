@@ -1,7 +1,12 @@
 import datetime as dt
 
 from agent_skills import dead_code_auditor
-from agent_skills.dead_code_report import build_dead_code_report_markdown
+from agent_skills.dead_code_report import (
+    _dead_function_item,
+    _duplicate_group_lines,
+    _relative_path_item,
+    build_dead_code_report_markdown,
+)
 
 
 def test_dead_code_auditor_reexports_report_renderer():
@@ -23,6 +28,26 @@ def test_build_dead_code_report_markdown_for_clean_codebase(tmp_path):
         "Codebase clean — no dead code candidates found. ✅\n"
         "\n"
     )
+
+
+def test_dead_code_report_item_helpers_preserve_markdown_shapes(tmp_path):
+    path = tmp_path / "agent_skills" / "old.py"
+    duplicate_groups = [
+        (f"hash-{index}", [tmp_path / "agent_skills" / f"{index}.py"])
+        for index in range(22)
+    ]
+
+    assert _relative_path_item(tmp_path, path) == "- `agent_skills/old.py`"
+    assert _relative_path_item(tmp_path, path, indent="    ") == "    - `agent_skills/old.py`"
+    assert _dead_function_item(tmp_path, path, "unused_func") == (
+        "- `agent_skills/old.py` :: `unused_func()`"
+    )
+    lines = _duplicate_group_lines(tmp_path, duplicate_groups)
+    assert lines[:2] == [
+        "- group `hash-0`:",
+        "    - `agent_skills/0.py`",
+    ]
+    assert lines[-1] == "- … and 2 more groups"
 
 
 def test_build_dead_code_report_markdown_for_all_sections(tmp_path):

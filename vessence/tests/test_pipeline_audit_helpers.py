@@ -6,8 +6,11 @@ from agent_skills import pipeline_audit_100
 from agent_skills.pipeline_audit_helpers import (
     build_judge_prompt,
     build_pipeline_audit_report_markdown,
+    classification_failure_table_lines,
+    count_section_lines,
     parse_judge_response,
     recent_prompt_rows_from_jsonl,
+    response_failure_lines,
     strip_system_context,
     summarize_pipeline_events,
 )
@@ -109,6 +112,43 @@ def test_build_judge_prompt_preserves_audit_contract_and_truncates_response() ->
     assert "x" * 301 not in prompt
     assert "weather, others" in prompt
     assert "CLASSIFICATION_OK: yes | no" in prompt
+
+
+def test_pipeline_report_section_helpers_preserve_sorting_limits_and_escaping():
+    assert count_section_lines("Stage breakdown", {"stage3": 1, "stage2": 3}) == [
+        "## Stage breakdown",
+        "- stage2: 3",
+        "- stage3: 1",
+        "",
+    ]
+    assert count_section_lines(
+        "Fixes",
+        {"weather": 2},
+        line_formatter=lambda key, count: f"- {key}: +{count} exemplars",
+    ) == ["## Fixes", "- weather: +2 exemplars", ""]
+
+    classification_failures = [
+        {"prompt": f"prompt {index} | pipe", "got": "others", "should_be": "weather"}
+        for index in range(31)
+    ]
+    lines = classification_failure_table_lines(classification_failures)
+    assert "| prompt 0 \\| pipe | others | weather |" in lines
+    assert not any("prompt 30" in line for line in lines)
+
+    response_failures = [
+        {
+            "prompt": f"response {index} | pipe",
+            "classification": "weather",
+            "stage": "stage3",
+            "response": "x" * 200,
+        }
+        for index in range(21)
+    ]
+    lines = response_failure_lines(response_failures)
+    assert "- **response 0 \\| pipe** (weather/stage3): " + ("x" * 150) in lines
+    assert not any("response 20" in line for line in lines)
+    assert classification_failure_table_lines([]) == []
+    assert response_failure_lines([]) == []
 
 
 def test_build_pipeline_audit_report_markdown_preserves_sections_and_limits():

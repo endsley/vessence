@@ -6,12 +6,16 @@ import datetime
 from typing import Any
 
 
+def _utcnow() -> datetime.datetime:
+    return datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+
+
 def is_expired_value(expires_at: Any, *, now_ts: float | None = None) -> bool:
     """Return True if expires_at (Unix int/float or ISO string) has passed."""
     if not expires_at:
         return False
     if now_ts is None:
-        now_ts = datetime.datetime.utcnow().timestamp()
+        now_ts = _utcnow().timestamp()
     if isinstance(expires_at, (int, float)):
         return expires_at < now_ts
     try:

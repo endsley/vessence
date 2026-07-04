@@ -10,6 +10,10 @@ NUM_WORDS = {
     "twelve": 12, "fifteen": 15, "twenty": 20, "thirty": 30, "forty": 40,
     "forty-five": 45, "fifty": 50, "sixty": 60, "ninety": 90, "half": 0.5,
 }
+ORDINAL_WORDS = {
+    "first": 1, "second": 2, "third": 3, "fourth": 4, "fifth": 5,
+    "sixth": 6, "seventh": 7, "eighth": 8, "ninth": 9, "tenth": 10,
+}
 
 _HALF_HOUR_RE = re.compile(r"\bhalf\s+(?:an?\s+)?hour\b", re.I)
 _AND_HALF_RE = re.compile(r"(\d+(?:\.\d+)?)\s*(?:and\s*a\s*half|\.5)\s*(hour|hr)s?\b", re.I)
@@ -120,6 +124,14 @@ def pretty_duration(ms: int) -> str:
     )
 
 
+def ordinal_timer_index(prompt: str, *, timer_required: bool) -> int | None:
+    timer_suffix = r"\s+timer\b" if timer_required else r"(?:\s+timer)?\b"
+    for word, index in ORDINAL_WORDS.items():
+        if re.search(rf"\b(?:the\s+)?{word}{timer_suffix}", prompt):
+            return index
+    return None
+
+
 def extract_delete_target(prompt_lower: str) -> dict | None:
     """Detect delete-specific intent and extract which timer to delete."""
     if "timer" not in prompt_lower:
@@ -129,17 +141,15 @@ def extract_delete_target(prompt_lower: str) -> dict | None:
         return None
     if any(word in prompt_lower for word in ("all my timers", "all the timers", "every timer", "all timers")):
         return None
-    ordinals = {"first": 1, "second": 2, "third": 3, "fourth": 4, "fifth": 5,
-                "sixth": 6, "seventh": 7, "eighth": 8, "ninth": 9, "tenth": 10}
     match = re.search(r"\b(?:the\s+)?(\d+)(?:st|nd|rd|th)?\s*timer\b", prompt_lower)
     if match:
         return {"index": int(match.group(1))}
     match = re.search(r"\btimer\s+(?:number\s+|#)?(\d+)\b", prompt_lower)
     if match:
         return {"id": int(match.group(1))}
-    for word, n in ordinals.items():
-        if re.search(rf"\b(?:the\s+)?{word}\s+timer\b", prompt_lower):
-            return {"index": n}
+    ordinal_index = ordinal_timer_index(prompt_lower, timer_required=True)
+    if ordinal_index is not None:
+        return {"index": ordinal_index}
     match = re.search(
         r"\b(?:delete|remove|drop|scrap)\s+(?:the\s+|my\s+)?([a-z][a-z\s]{1,30}?)\s+timer\b",
         prompt_lower,
@@ -156,17 +166,15 @@ def parse_delete_phrase(phrase: str) -> dict | None:
     if not phrase:
         return None
     prompt = phrase.lower().strip()
-    ordinals = {"first": 1, "second": 2, "third": 3, "fourth": 4, "fifth": 5,
-                "sixth": 6, "seventh": 7, "eighth": 8, "ninth": 9, "tenth": 10}
     match = re.search(r"\btimer\s+(?:number\s+|#)?(\d+)\b", prompt)
     if match:
         return {"id": int(match.group(1))}
     match = re.search(r"\b(?:the\s+)?(\d+)(?:st|nd|rd|th)?\s*timer\b", prompt)
     if match:
         return {"index": int(match.group(1))}
-    for word, n in ordinals.items():
-        if re.search(rf"\b(?:the\s+)?{word}(?:\s+timer)?\b", prompt):
-            return {"index": n}
+    ordinal_index = ordinal_timer_index(prompt, timer_required=False)
+    if ordinal_index is not None:
+        return {"index": ordinal_index}
     match = re.search(
         r"\b(?:the\s+|my\s+)?([a-z][a-z\s]{1,30}?)(?:\s+timer)?$",
         prompt,

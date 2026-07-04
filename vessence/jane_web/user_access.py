@@ -122,6 +122,21 @@ def public_user_config(config: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def normalize_managed_user_email(email: str | None) -> str:
+    normalized = (email or "").strip().lower()
+    if not normalized or "@" not in normalized:
+        raise HTTPException(status_code=400, detail="A valid email address is required.")
+    return normalized
+
+
+def managed_user_display_name(display_name: str | None, email: str) -> str:
+    return (display_name or "").strip() or email.split("@", 1)[0]
+
+
+def clean_seed_memories(seed_memories: Sequence[Any] | None) -> list[str]:
+    return [memory.strip() for memory in (seed_memories or []) if str(memory or "").strip()]
+
+
 def is_user_admin(
     user_id: str | None,
     *,

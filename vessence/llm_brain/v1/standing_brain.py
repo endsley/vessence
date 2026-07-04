@@ -66,6 +66,23 @@ _STDERR_ERROR_PATTERNS: dict[str, list[tuple[str, str]]] = {
 # All supported providers
 ALL_PROVIDERS = ("claude", "gemini", "openai")
 
+BRAIN_SECRET_KEYS = (
+    "GOOGLE_API_KEY",
+    "OPENAI_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "TAVILY_API_KEY",
+    "GOOGLE_CLIENT_ID",
+    "GOOGLE_CLIENT_SECRET",
+)
+
+
+@dataclass(frozen=True)
+class BrainProcessEnvironment:
+    """Environment prepared for a spawned brain process."""
+    env: dict[str, str]
+    injected_count: int
+    spawned_locked: bool
+
 
 def _provider_uses_standing_process(provider: str) -> bool:
     """Return whether this provider supports the long-lived standing-brain CLI path."""
@@ -87,6 +104,233 @@ def _classify_stderr_line(provider: str, line: str) -> tuple[str, str] | None:
 def _available_providers(current: str) -> list[str]:
     """Return providers the user can switch to (excluding the current one)."""
     return [p for p in ALL_PROVIDERS if p != current]
+
+
+def _claude_permission_hook_settings(hook_script: str, python_bin: str) -> str:
+    """Return Claude CLI hook settings for web permission approval."""
+    return json.dumps({"hooks": {"PreToolUse": [{
+        "matcher": "Bash|Write|Edit|NotebookEdit",
+        "hooks": [{"type": "command",
+                   "command": f"{python_bin} {hook_script}",
+                   "timeout": 300}],
+    }]}})
+
+
+def _standing_brain_command(
+    provider: str,
+    model: str,
+    *,
+    environ: Optional[dict[str, str]] = None,
+    binary_resolver=shutil.which,
+    hook_file_exists=os.path.isfile,
+    module_dir: Optional[str | Path] = None,
+    python_executable: str = sys.executable,
+) -> list[str]:
+    """Build the CLI command for a standing brain provider."""
+    env = environ if environ is not None else os.environ
+    if provider == "claude":
+        cli_bin = env.get("CLAUDE_BIN") or binary_resolver("claude") or "claude"
+        cmd = [
+            cli_bin, "--print", "--verbose",
+            "--input-format", "stream-json",
+            "--output-format", "stream-json",
+            "--model", model,
+        ]
+        hooks_root = Path(module_dir) if module_dir is not None else Path(__file__).parent
+        hook_script = str(hooks_root / "hooks" / "permission_gate.py")
+        cmd.append("--dangerously-skip-permissions")
+        if env.get("JANE_WEB_PERMISSIONS", "0") == "1" and hook_file_exists(hook_script):
+            python_bin = env.get("PYTHON_BIN") or python_executable
+            cmd.extend(["--settings", _claude_permission_hook_settings(hook_script, python_bin)])
+        return cmd
+
+    if provider == "gemini":
+        cli_bin = env.get("GEMINI_BIN") or binary_resolver("gemini") or "/usr/local/bin/gemini"
+        return [
+            cli_bin,
+            "--approval-mode", "yolo",
+            "--output-format", "text",
+            "--model", model,
+        ]
+
+    if provider == "openai":
+        cli_bin = env.get("CODEX_BIN") or binary_resolver("codex") or "codex"
+        return [
+            cli_bin, "exec",
+            "--model", model,
+            "--approval-mode", "full-auto",
+        ]
+
+    raise RuntimeError(f"Unknown provider: {provider}")
+
+
+def _prompt_for_turn(message: str, system_prompt: str, turn_count: int) -> str:
+    """Return the prompt text for this turn."""
+    if turn_count == 0 and system_prompt:
+        return f"{system_prompt}\n\nUser: {message}\nJane:"
+    return message
+
+
+def _stdin_payload_for_provider(provider: str, full_message: str, session_id: Optional[str]) -> str:
+    """Return the stdin payload expected by the provider CLI."""
+    if provider == "claude":
+        return json.dumps({
+            "type": "user",
+            "message": {"role": "user", "content": full_message},
+            "session_id": session_id or "default",
+            "parent_tool_use_id": None,
+        }) + "\n"
+    return full_message + "\n"
+
+
+def _claude_tool_use_description(block: dict) -> str:
+    """Return a human-readable description for a Claude tool-use block."""
+    tool_name = block.get("name", "unknown")
+    tool_input = block.get("input", {})
+    if not isinstance(tool_input, dict):
+        tool_input = {}
+    if tool_name in ("Read", "read_file"):
+        return f"📖 Reading {tool_input.get('file_path', tool_input.get('path', ''))}"
+    if tool_name in ("Edit", "edit_file"):
+        return f"✏️ Editing {tool_input.get('file_path', tool_input.get('path', ''))}"
+    if tool_name in ("Write", "write_file"):
+        return f"📝 Writing {tool_input.get('file_path', tool_input.get('path', ''))}"
+    if tool_name in ("Grep", "grep", "search"):
+        pattern = tool_input.get("pattern", tool_input.get("query", ""))
+        return f"🔍 Searching for \"{pattern[:80]}\""
+    if tool_name in ("Glob", "glob"):
+        return f"📁 Finding files matching {tool_input.get('pattern', '')}"
+    if tool_name in ("Bash", "bash"):
+        cmd = tool_input.get("command", "")
+        return f"⚡ Running: {cmd[:120]}"
+    if tool_name == "Agent":
+        agent_desc = tool_input.get("description", tool_input.get("prompt", "")[:80])
+        return f"🤖 Spawning agent: {agent_desc}"
+    if tool_name in ("WebSearch", "web_search"):
+        query = tool_input.get("query", "")
+        return f"🌐 Searching web: {query[:100]}"
+    if tool_name in ("WebFetch", "web_fetch"):
+        url = tool_input.get("url", "")
+        return f"🌐 Fetching: {url[:100]}"
+    return f"🔧 Using {tool_name}"
+
+
+def _claude_tool_result_preview(content) -> Optional[str]:
+    """Return a bounded preview for a Claude tool-result block, or None."""
+    if isinstance(content, list):
+        parts = [
+            p.get("text", "")
+            for p in content
+            if isinstance(p, dict) and p.get("type") == "text"
+        ]
+        content = "\n".join(parts)
+    if not isinstance(content, str) or not content.strip():
+        return None
+    stripped = content.strip()
+    preview = stripped[:500]
+    if len(stripped) > 500:
+        preview += f" … ({len(stripped)} chars total)"
+    return f"↳ {preview}"
+
+
+def _claude_thinking_lines(thinking_text: str, *, max_chars: int = 300) -> list[str]:
+    return [
+        line[:max_chars]
+        for line in (line.strip() for line in thinking_text.split("\n"))
+        if line and len(line) > 5
+    ]
+
+
+def _brain_process_environment(environ: dict[str, str], store) -> BrainProcessEnvironment:
+    """Return process environment and vault-lock metadata for a brain spawn."""
+    env = environ.copy()
+    if not store.is_unlocked():
+        return BrainProcessEnvironment(env=env, injected_count=0, spawned_locked=True)
+
+    injected_count = 0
+    for key in BRAIN_SECRET_KEYS:
+        value = store.get(key)
+        if value:
+            env[key] = value
+            injected_count += 1
+    return BrainProcessEnvironment(env=env, injected_count=injected_count, spawned_locked=False)
+
+
+def _provider_cli_name(provider: str) -> str:
+    return {
+        "claude": "claude",
+        "gemini": "gemini",
+        "openai": "codex",
+    }.get(provider, provider)
+
+
+def _provider_model(provider: str, environ: Optional[dict[str, str]] = None) -> str:
+    env = environ if environ is not None else os.environ
+    return (
+        env.get(_ENV_VAR_FOR_MODEL.get(provider, ""), "")
+        or _DEFAULT_MODELS.get(provider, "gemini-2.5-pro")
+    )
+
+
+def _brain_install_script_path(environ: Optional[dict[str, str]] = None) -> str:
+    env = environ if environ is not None else os.environ
+    return os.path.join(
+        env.get("VESSENCE_HOME", os.path.expanduser("~/ambient/vessence")),
+        "docker", "jane", "install_brain.sh",
+    )
+
+
+def _brain_install_env(provider: str, environ: Optional[dict[str, str]] = None) -> dict[str, str]:
+    env = (environ if environ is not None else os.environ).copy()
+    env["JANE_BRAIN"] = provider
+    return env
+
+
+def _provider_switch_result(
+    *,
+    provider: str,
+    model: str,
+    was_installed: bool,
+    needs_auth: bool,
+) -> dict:
+    result = {
+        "ok": True,
+        "provider": provider,
+        "model": model,
+        "was_installed": was_installed,
+        "needs_auth": needs_auth,
+    }
+    if needs_auth:
+        result["auth_url"] = None
+        result["message"] = f"{provider} CLI needs authentication. Use the login flow to authenticate."
+    else:
+        result["message"] = f"Switched to {provider} ({model})"
+    return result
+
+
+def _should_restart_for_unlocked_store(store_unlocked: bool, bp: Optional["BrainProcess"]) -> bool:
+    """Return whether an unlocked vault should trigger a brain restart."""
+    return bool(
+        store_unlocked
+        and bp
+        and bp.alive
+        and getattr(bp, "_spawned_locked", True)
+    )
+
+
+def _brain_restart_reason(
+    bp: "BrainProcess",
+    *,
+    max_failures: int,
+    max_turns: int,
+) -> str | None:
+    if not bp.alive:
+        return "dead"
+    if bp.consecutive_failures >= max_failures:
+        return f"hit {max_failures} consecutive failures"
+    if bp.turn_count >= max_turns:
+        return f"hit {max_turns} turns, refreshing context"
+    return None
 
 
 # ── Configuration ────────────────────────────────────────────────────────────
@@ -112,18 +356,27 @@ def _configured_provider() -> str:
 
     env_path = Path(ENV_FILE_PATH) if ENV_FILE_PATH else None
     if env_path and env_path.exists():
-        for raw_line in env_path.read_text(encoding="utf-8", errors="replace").splitlines():
-            line = raw_line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key, value = line.split("=", 1)
-            if key.strip() == "JANE_BRAIN":
-                provider = normalize_frontier_provider(value.strip())
-                if provider in ALL_PROVIDERS:
-                    return provider
+        provider = _provider_from_env_lines(
+            env_path.read_text(encoding="utf-8", errors="replace").splitlines()
+        )
+        if provider:
+            return provider
 
     provider = normalize_frontier_provider(os.environ.get("JANE_BRAIN", _PROVIDER))
     return provider if provider in ALL_PROVIDERS else _PROVIDER
+
+
+def _provider_from_env_lines(lines: list[str]) -> str | None:
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        if key.strip() == "JANE_BRAIN":
+            provider = normalize_frontier_provider(value.strip())
+            if provider in ALL_PROVIDERS:
+                return provider
+    return None
 
 
 def _get_model() -> str:
@@ -243,47 +496,7 @@ class StandingBrainManager:
 
     def _build_cmd(self, bp: BrainProcess) -> list[str]:
         """Build the CLI command for the current provider."""
-        if _PROVIDER == "claude":
-            cli_bin = os.environ.get("CLAUDE_BIN", shutil.which("claude") or "claude")
-            cmd = [
-                cli_bin, "--print", "--verbose",
-                "--input-format", "stream-json",
-                "--output-format", "stream-json",
-                "--model", bp.model,
-            ]
-            # Web permission gate: use hook-based approval instead of skip-all
-            hook_script = os.path.join(os.path.dirname(__file__), "hooks", "permission_gate.py")
-            if os.environ.get("JANE_WEB_PERMISSIONS", "0") == "1" and os.path.isfile(hook_script):
-                python_bin = os.environ.get("PYTHON_BIN", sys.executable)
-                cmd.append("--dangerously-skip-permissions")
-                import json as _json
-                hook_settings = _json.dumps({"hooks": {"PreToolUse": [{
-                    "matcher": "Bash|Write|Edit|NotebookEdit",
-                    "hooks": [{"type": "command",
-                               "command": f"{python_bin} {hook_script}",
-                               "timeout": 300}],
-                }]}})
-                cmd.extend(["--settings", hook_settings])
-            else:
-                cmd.append("--dangerously-skip-permissions")
-            return cmd
-        elif _PROVIDER == "gemini":
-            cli_bin = os.environ.get("GEMINI_BIN", shutil.which("gemini") or "/usr/local/bin/gemini")
-            return [
-                cli_bin,
-                "--approval-mode", "yolo",
-                "--output-format", "text",
-                "--model", bp.model,
-            ]
-        elif _PROVIDER == "openai":
-            cli_bin = os.environ.get("CODEX_BIN", shutil.which("codex") or "codex")
-            return [
-                cli_bin, "exec",
-                "--model", bp.model,
-                "--approval-mode", "full-auto",
-            ]
-        else:
-            raise RuntimeError(f"Unknown provider: {_PROVIDER}")
+        return _standing_brain_command(_PROVIDER, bp.model)
 
     async def _spawn(self, bp: BrainProcess):
         """Spawn a new CLI process for the brain."""
@@ -305,23 +518,13 @@ class StandingBrainManager:
             os.path.expanduser("~/ambient/vessence"),
         )
         
-        # Inject secrets from SecretStore into the process environment
-        env = os.environ.copy()
+        # Inject secrets from SecretStore into the process environment.
         store = SecretStore()
-        if store.is_unlocked():
-            # List of keys we want to pass to CLI brains
-            brain_keys = [
-                "GOOGLE_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY",
-                "TAVILY_API_KEY", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"
-            ]
-            injected_count = 0
-            for k in brain_keys:
-                val = store.get(k)
-                if val:
-                    env[k] = val
-                    injected_count += 1
-            if injected_count > 0:
-                logger.info("Injected %d secrets into brain [%s] process environment", injected_count, bp.model)
+        process_env = _brain_process_environment(os.environ, store)
+        env = process_env.env
+        bp._spawned_locked = process_env.spawned_locked
+        if process_env.injected_count > 0:
+            logger.info("Injected %d secrets into brain [%s] process environment", process_env.injected_count, bp.model)
 
         bp.process = await asyncio.create_subprocess_exec(
             *cmd,
@@ -455,23 +658,14 @@ class StandingBrainManager:
             await self._kill(self._brain)
 
         # 2. Check if CLI is installed, install if needed
-        cli_check = {
-            "claude": "claude",
-            "gemini": "gemini",
-            "openai": "codex",
-        }
-        cli_name = cli_check.get(new_provider, new_provider)
+        cli_name = _provider_cli_name(new_provider)
         needs_install = shutil.which(cli_name) is None
 
         if needs_install:
             logger.info("CLI '%s' not found, installing...", cli_name)
-            install_script = os.path.join(
-                os.environ.get("VESSENCE_HOME", os.path.expanduser("~/ambient/vessence")),
-                "docker", "jane", "install_brain.sh",
-            )
+            install_script = _brain_install_script_path()
             if os.path.isfile(install_script):
-                env = os.environ.copy()
-                env["JANE_BRAIN"] = new_provider
+                env = _brain_install_env(new_provider)
                 # Remove the flag file so install_brain.sh doesn't skip
                 flag_file = "/app/data/.brain_installed"
                 if os.path.exists(flag_file):
@@ -498,10 +692,7 @@ class StandingBrainManager:
         os.environ["JANE_BRAIN"] = new_provider
 
         # 4. Update model for new provider
-        new_model = (
-            os.environ.get(_ENV_VAR_FOR_MODEL.get(new_provider, ""), "")
-            or _DEFAULT_MODELS.get(new_provider, "gemini-2.5-pro")
-        )
+        new_model = _provider_model(new_provider)
         self._brain = BrainProcess(model=new_model)
 
         # 5. Spawn new process
@@ -524,21 +715,12 @@ class StandingBrainManager:
             self._update_env_file(new_provider)
 
         # 7. Report provider switch result
-        result = {
-            "ok": True,
-            "provider": new_provider,
-            "model": new_model,
-            "was_installed": needs_install,
-            "needs_auth": needs_auth,
-        }
-
-        if needs_auth:
-            # Provide OAuth info so frontend can show auth link
-            result["auth_url"] = None  # Will be resolved by the /api/cli-login endpoint
-            result["message"] = f"{new_provider} CLI needs authentication. Use the login flow to authenticate."
-        else:
-            result["message"] = f"Switched to {new_provider} ({new_model})"
-
+        result = _provider_switch_result(
+            provider=new_provider,
+            model=new_model,
+            was_installed=needs_install,
+            needs_auth=needs_auth,
+        )
         logger.info("Provider switch complete: %s → %s (needs_auth=%s)", old_provider, new_provider, needs_auth)
         return result
 
@@ -583,15 +765,10 @@ class StandingBrainManager:
         
         # Self-healing: if vault is unlocked but brain is missing keys, force restart
         store = SecretStore()
-        if store.is_unlocked() and self._brain and self._brain.alive:
-            # Check for a critical key that SHOULD be there
-            critical_key = "ANTHROPIC_API_KEY" if _PROVIDER == "claude" else "GOOGLE_API_KEY"
-            # Since we can't easily check the brain's internal env, we check if we were 
-            # unlocked when we started. If not, restart.
-            if getattr(self._brain, "_spawned_locked", True):
-                logger.info("Vault is now unlocked but brain was spawned locked. Restarting brain [%s]...", self._brain.model)
-                await self._kill(self._brain)
-                await self._spawn(self._brain)
+        if _should_restart_for_unlocked_store(store.is_unlocked(), self._brain):
+            logger.info("Vault is now unlocked but brain was spawned locked. Restarting brain [%s]...", self._brain.model)
+            await self._kill(self._brain)
+            await self._spawn(self._brain)
 
         configured_provider = _configured_provider()
         if configured_provider != _PROVIDER:
@@ -611,10 +788,12 @@ class StandingBrainManager:
             raise RuntimeError("Standing brain not started")
 
         async with bp._lock:
-            if not bp.alive or bp.consecutive_failures >= MAX_FAILURES or bp.turn_count >= MAX_TURNS_BEFORE_REFRESH:
-                reason = ("dead" if not bp.alive
-                          else f"hit {MAX_FAILURES} consecutive failures" if bp.consecutive_failures >= MAX_FAILURES
-                          else f"hit {MAX_TURNS_BEFORE_REFRESH} turns, refreshing context")
+            reason = _brain_restart_reason(
+                bp,
+                max_failures=MAX_FAILURES,
+                max_turns=MAX_TURNS_BEFORE_REFRESH,
+            )
+            if reason:
                 logger.info("Brain [%s] is %s, restarting...", bp.model, reason)
                 if not bp.alive or bp.consecutive_failures >= MAX_FAILURES:
                     _log_crash(f"Standing Brain [{bp.model}] — {reason}")
@@ -625,22 +804,8 @@ class StandingBrainManager:
                     _log_crash(f"Standing Brain [{bp.model}] — restart failed")
                     raise RuntimeError(f"Brain {bp.model} failed to restart")
 
-            # Build the prompt — include system prompt on first turn only
-            if bp.turn_count == 0 and system_prompt:
-                full_message = f"{system_prompt}\n\nUser: {message}\nJane:"
-            else:
-                full_message = message
-
-            # Send message via stdin — format depends on provider
-            if _PROVIDER == "claude":
-                input_msg = json.dumps({
-                    "type": "user",
-                    "message": {"role": "user", "content": full_message},
-                    "session_id": bp.session_id or "default",
-                    "parent_tool_use_id": None,
-                }) + "\n"
-            else:
-                input_msg = full_message + "\n"
+            full_message = _prompt_for_turn(message, system_prompt, bp.turn_count)
+            input_msg = _stdin_payload_for_provider(_PROVIDER, full_message, bp.session_id)
 
             try:
                 bp.process.stdin.write(input_msg.encode())
@@ -856,54 +1021,17 @@ class StandingBrainManager:
                         if thinking_text:
                             # Yield all meaningful lines so the web shows
                             # the same intermediate reasoning the CLI prints.
-                            for line in thinking_text.split("\n"):
-                                line = line.strip()
-                                if line and len(line) > 5:
-                                    yield ("thought", line[:300])
+                            for line in _claude_thinking_lines(thinking_text):
+                                yield ("thought", line)
 
                     elif block_type == "tool_use":
-                        tool_name = block.get("name", "unknown")
-                        tool_input = block.get("input", {})
-                        if tool_name in ("Read", "read_file"):
-                            desc = f"📖 Reading {tool_input.get('file_path', tool_input.get('path', ''))}"
-                        elif tool_name in ("Edit", "edit_file"):
-                            desc = f"✏️ Editing {tool_input.get('file_path', tool_input.get('path', ''))}"
-                        elif tool_name in ("Write", "write_file"):
-                            desc = f"📝 Writing {tool_input.get('file_path', tool_input.get('path', ''))}"
-                        elif tool_name in ("Grep", "grep", "search"):
-                            pattern = tool_input.get("pattern", tool_input.get("query", ""))
-                            desc = f"🔍 Searching for \"{pattern[:80]}\""
-                        elif tool_name in ("Glob", "glob"):
-                            desc = f"📁 Finding files matching {tool_input.get('pattern', '')}"
-                        elif tool_name in ("Bash", "bash"):
-                            cmd = tool_input.get("command", "")
-                            desc = f"⚡ Running: {cmd[:120]}"
-                        elif tool_name == "Agent":
-                            agent_desc = tool_input.get("description", tool_input.get("prompt", "")[:80])
-                            desc = f"🤖 Spawning agent: {agent_desc}"
-                        elif tool_name in ("WebSearch", "web_search"):
-                            query = tool_input.get("query", "")
-                            desc = f"🌐 Searching web: {query[:100]}"
-                        elif tool_name in ("WebFetch", "web_fetch"):
-                            url = tool_input.get("url", "")
-                            desc = f"🌐 Fetching: {url[:100]}"
-                        else:
-                            desc = f"🔧 Using {tool_name}"
-                        yield ("tool_use", desc)
+                        yield ("tool_use", _claude_tool_use_description(block))
 
                     elif block_type == "tool_result":
                         # Show tool results so the web mirrors CLI output
-                        content = block.get("content", "")
-                        if isinstance(content, list):
-                            # Multi-part result — extract text parts
-                            parts = [p.get("text", "") for p in content if isinstance(p, dict) and p.get("type") == "text"]
-                            content = "\n".join(parts)
-                        if isinstance(content, str) and content.strip():
-                            # Truncate long results but show enough to be useful
-                            preview = content.strip()[:500]
-                            if len(content.strip()) > 500:
-                                preview += f" … ({len(content.strip())} chars total)"
-                            yield ("tool_result", f"↳ {preview}")
+                        preview = _claude_tool_result_preview(block.get("content", ""))
+                        if preview:
+                            yield ("tool_result", preview)
 
                     elif block_type == "text":
                         text = block.get("text", "")

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from typing import Any
+
 
 JOB_QUEUE_PHRASES = {
     "show job queue", "job queue", "show me the job queue",
@@ -57,3 +60,73 @@ def cron_jobs_markdown(crontab_stdout: str) -> str:
     if not lines:
         return "No active cron jobs."
     return "```\n" + "\n".join(lines) + "\n```"
+
+
+def _load_job_queue_helpers() -> tuple[Callable[[], Any], Callable[[Any], str]]:
+    from agent_skills.show_job_queue import format_markdown_table, get_job_queue_data
+
+    return get_job_queue_data, format_markdown_table
+
+
+def _load_completed_jobs_helpers() -> tuple[Callable[[], Any], Callable[[Any], str]]:
+    from agent_skills.show_job_queue import format_markdown_table, get_completed_jobs_data
+
+    return get_completed_jobs_data, format_markdown_table
+
+
+def _crontab_stdout() -> str:
+    import subprocess
+
+    result = subprocess.run(["crontab", "-l"], capture_output=True, text=True, timeout=5)
+    return result.stdout
+
+
+def _table_command_response(
+    helpers: Callable[[], tuple[Callable[[], Any], Callable[[Any], str]]],
+    *,
+    empty_message: str,
+    error_message: str,
+) -> str:
+    try:
+        load_data, format_table = helpers()
+        return format_table(load_data()) or empty_message
+    except Exception:
+        return error_message
+
+
+def instant_command_response(
+    message: str,
+    *,
+    job_queue_helpers: Callable[[], tuple[Callable[[], Any], Callable[[Any], str]]] = (
+        _load_job_queue_helpers
+    ),
+    completed_jobs_helpers: Callable[[], tuple[Callable[[], Any], Callable[[Any], str]]] = (
+        _load_completed_jobs_helpers
+    ),
+    crontab_stdout: Callable[[], str] = _crontab_stdout,
+) -> str | None:
+    kind = instant_command_kind(message)
+    if kind == "job_queue":
+        return _table_command_response(
+            job_queue_helpers,
+            empty_message="Job queue is empty.",
+            error_message="Could not load job queue.",
+        )
+
+    if kind == "completed_jobs":
+        return _table_command_response(
+            completed_jobs_helpers,
+            empty_message="No completed jobs.",
+            error_message="Could not load completed jobs.",
+        )
+
+    if kind == "commands":
+        return commands_markdown()
+
+    if kind == "cron":
+        try:
+            return cron_jobs_markdown(crontab_stdout())
+        except Exception:
+            return "Could not load cron jobs."
+
+    return None

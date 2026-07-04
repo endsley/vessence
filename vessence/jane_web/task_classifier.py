@@ -34,6 +34,21 @@ _MIN_LENGTH_FOR_OFFLOAD = 80
 
 _big_re = [re.compile(p, re.IGNORECASE | re.MULTILINE) for p in _BIG_TASK_PATTERNS]
 _quick_re = [re.compile(p, re.IGNORECASE | re.MULTILINE) for p in _QUICK_QUERY_PATTERNS]
+_FOLLOWUP_STARTERS_RE = re.compile(
+    r"^(?:please\s+)?"
+    r"(?:go (?:ahead|and|on)|do (?:it|that|this)|yes(?:\s+please)?|sure|ok(?:ay)?|"
+    r"sounds good|proceed|go for it|implement (?:it|this|that)|let'?s do (?:it|this)|"
+    r"run with it|make it so)\b",
+    re.IGNORECASE,
+)
+
+
+def _pattern_score(patterns: list[re.Pattern], text: str) -> int:
+    return sum(1 for pattern in patterns if pattern.search(text))
+
+
+def _has_code_references(text: str) -> bool:
+    return bool(re.search(r'`[^`]+`|\.py|\.js|\.ts|\.html|\.css', text))
 
 
 def classify_task(message: str) -> str:
@@ -60,27 +75,20 @@ def classify_task(message: str) -> str:
     # their antecedent. If the message STARTS with a follow-up cue, keep it
     # on the foreground path so the standing brain has history. (Does NOT
     # match bare "please X" since many big tasks start politely with please.)
-    _FOLLOWUP_STARTERS = re.compile(
-        r"^(?:please\s+)?"
-        r"(?:go (?:ahead|and|on)|do (?:it|that|this)|yes(?:\s+please)?|sure|ok(?:ay)?|"
-        r"sounds good|proceed|go for it|implement (?:it|this|that)|let'?s do (?:it|this)|"
-        r"run with it|make it so)\b",
-        re.IGNORECASE,
-    )
-    if _FOLLOWUP_STARTERS.match(stripped):
+    if _FOLLOWUP_STARTERS_RE.match(stripped):
         return "quick"
 
     # Check for quick-query patterns first (questions are rarely big tasks)
-    quick_score = sum(1 for r in _quick_re if r.search(stripped))
+    quick_score = _pattern_score(_quick_re, stripped)
     if quick_score >= 2:
         return "quick"
 
     # Check for big-task patterns
-    big_score = sum(1 for r in _big_re if r.search(stripped))
+    big_score = _pattern_score(_big_re, stripped)
 
     # Compound signals: long message + multiple sentences + imperative verbs
     sentence_count = len(re.split(r'[.!]\s+', stripped))
-    has_code_refs = bool(re.search(r'`[^`]+`|\.py|\.js|\.ts|\.html|\.css', stripped))
+    has_code_refs = _has_code_references(stripped)
 
     if big_score >= 2:
         return "big"

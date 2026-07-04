@@ -54,6 +54,21 @@ def current_model_for_provider(
     return current, default, env_var
 
 
+def model_tiers(
+    *,
+    orchestrator_model: str,
+    smart_model: str,
+    cheap_model: str,
+    local_llm_model: str,
+) -> list[dict[str, str]]:
+    return [
+        {"tier": "Orchestrator", "role": "The Primary Brain (Reasoning, Code)", "model": orchestrator_model},
+        {"tier": "Agent", "role": "The Specialist (Research, Memory)", "model": smart_model},
+        {"tier": "Utility", "role": "The Worker (Archival, Triage)", "model": cheap_model},
+        {"tier": "Local", "role": "Privacy & Speed (Local Processing)", "model": local_llm_model},
+    ]
+
+
 def build_model_settings_payload(
     environ: Mapping[str, str] = os.environ,
     *,
@@ -65,18 +80,16 @@ def build_model_settings_payload(
     provider = normalize_frontier_provider(environ.get("JANE_BRAIN", "claude"))
     current, default, env_var = current_model_for_provider(provider, environ, provider_models)
 
-    tiers = [
-        {"tier": "Orchestrator", "role": "The Primary Brain (Reasoning, Code)", "model": current},
-        {"tier": "Agent", "role": "The Specialist (Research, Memory)", "model": smart_model},
-        {"tier": "Utility", "role": "The Worker (Archival, Triage)", "model": cheap_model},
-        {"tier": "Local", "role": "Privacy & Speed (Local Processing)", "model": local_llm_model},
-    ]
-
     return {
         "provider": provider,
         "model": {"current": current, "default": default, "env_var": env_var},
         "available_models": AVAILABLE_MODELS,
-        "tiers": tiers,
+        "tiers": model_tiers(
+            orchestrator_model=current,
+            smart_model=smart_model,
+            cheap_model=cheap_model,
+            local_llm_model=local_llm_model,
+        ),
     }
 
 

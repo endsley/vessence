@@ -1,8 +1,15 @@
+from datetime import datetime
+from pathlib import Path
+
 from jane_web.marketplace_helpers import (
     is_safe_listing_key,
     is_safe_marketplace_name,
     is_safe_photo_name,
     marketplace_create_search_payload,
+    marketplace_refresh_command,
+    marketplace_refresh_env,
+    marketplace_refresh_log_header,
+    marketplace_refresh_log_path,
 )
 
 
@@ -64,3 +71,26 @@ def test_marketplace_create_search_payload_preserves_raw_query_validation_order(
         {"name": "chairs", "queries": "chair"},
         default_location_id="boston",
     )["raw_queries_valid"] is False
+
+
+def test_marketplace_refresh_launch_helpers_preserve_route_values():
+    assert marketplace_refresh_command("/python", "chairs") == [
+        "/python",
+        "-m",
+        "agent_skills.marketplace.refresh",
+        "chairs",
+    ]
+    assert marketplace_refresh_env(
+        {
+            "DISPLAY": ":0",
+            "WAYLAND_DISPLAY": "wayland-1",
+            "KEEP": "yes",
+        }
+    ) == {"KEEP": "yes"}
+    assert marketplace_refresh_log_path("/data", "chairs") == Path(
+        "/data/logs/marketplace_refresh_chairs.log"
+    )
+    assert marketplace_refresh_log_header(
+        "chairs",
+        datetime(2026, 7, 3, 12, 34, 56, 900),
+    ) == "\n=== manual refresh chairs at 2026-07-03T12:34:56 ===\n"

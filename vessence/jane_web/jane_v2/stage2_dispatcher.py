@@ -82,6 +82,14 @@ def _self_correct_classification(prompt: str, wrong_class: str):
         logger.warning("self-correct failed: %s", e)
 
 
+def _start_self_correct_thread(prompt: str, class_name: str) -> None:
+    threading.Thread(
+        target=_self_correct_classification,
+        args=(prompt, class_name),
+        daemon=True,
+    ).start()
+
+
 async def _continuation_check(
     class_name: str,
     prompt: str,
@@ -161,14 +169,6 @@ async def _gate_check(class_name: str, prompt: str, context: str) -> bool:
     if not gate_prompt:
         return True  # unknown class → no gate (fail open)
 
-    p_lower = prompt.lower()
-    META_SIGNALS = ("how does", "why does", "explain the", "debug",
-                    " handler", " classifier", " pipeline",
-                    "the time you told me", "you got", "was wrong",
-                    "incorrect", "fix it", "broken", "stale", "should auto",
-                    "in your code", "in the codebase", "the way you handled",
-                    "shouldn't", "doesn't sync", "keep failing")
-
     from jane_web.jane_v2.models import (
         LOCAL_LLM as model,
         LOCAL_LLM_NUM_CTX,
@@ -199,6 +199,113 @@ async def _gate_check(class_name: str, prompt: str, context: str) -> bool:
 
 
 _NEAR_IDENTICAL_DIST = 0.10
+_DISPATCH_CONTINUE = object()
+
+
+def _should_skip_gate(pending: dict | None, min_dist: float) -> bool:
+    return pending is None and min_dist <= _NEAR_IDENTICAL_DIST
+
+
+def _pending_question_text(pending: dict | None) -> str:
+    if not isinstance(pending, dict):
+        return ""
+    return str(pending.get("question") or "")
+
+
+async def _pre_handler_dispatch_check(
+    class_name: str,
+    prompt: str,
+    context: str,
+    pending: dict | None,
+    stage1_conf: str,
+    min_dist: float,
+):
+    # Universal WRONG_CLASS gate — runs for EVERY class before the handler.
+    # Handlers may also have their own deeper checks, but this catches the
+    # obvious misclassifications uniformly.
+    # Skip when Stage 1 already passed with "High" confidence — its own
+    # maturity gate (conf + margin thresholds) already validated the class.
+    # The LLM gate adds ~300ms-12s latency for no gain in that case.
+    # Skip the gate LLM when Stage 1 had a near-identical chroma match —
+    # the prompt is basically a verbatim exemplar, so the gate can only
+    # add latency and introduce false negatives (e.g. rejecting because
+    # recent FIFO context is about a different topic). The coarse voting
+    # margin ("High") already gave some confidence; the tight min_dist
+    # threshold is the real guard.
+    skip_gate = _should_skip_gate(pending, min_dist)
+    if skip_gate:
+        logger.info(
+            "dispatcher: gate skipped for %r (class=%r, min_dist=%.3f ≤ %.2f)",
+            prompt[:60], class_name, min_dist, _NEAR_IDENTICAL_DIST,
+        )
+    if pending is None:
+        if skip_gate:
+            return _DISPATCH_CONTINUE
+        if not await _gate_check(class_name, prompt, context):
+            logger.info("dispatcher: gate check rejected %r for class %r → escalating",
+                        prompt[:60], class_name)
+            # Skip the ChromaDB self-correct write when Stage 1 was High
+            # confidence. The gate LLM and the Stage 1 classifier disagree
+            # often on edge phrasings ("what is all my to-do list", "what's
+            # on my todo", "why what's on my to-do list") and poisoning a
+            # legitimate High-conf class into DELEGATE_OPUS breaks future
+            # classifications. The escalate-on-rejection behavior still
+            # runs — we just stop corrupting training data.
+            # See transcript review 2026-04-18 Issues 2, 8, 16, 17.
+            if stage1_conf != "High":
+                _start_self_correct_thread(prompt, class_name)
+            else:
+                logger.info(
+                    "dispatcher: skipping self-correct for %r "
+                    "(stage1_conf=High — trust classifier)",
+                    class_name,
+                )
+            return None
+    else:
+        # Follow-up resume: the class was decided in the prior turn. Short
+        # answers ("clinic", "2") pass through, but longer replies get an
+        # LLM check to catch topic changes like "what about Google Docs?"
+        # mid-TODO-flow. When the pending includes a `question` field with
+        # the literal text Jane asked, the LLM gets much sharper signal than
+        # from the generic class description.
+        pending_question = _pending_question_text(pending)
+        if not await _continuation_check(
+            class_name, prompt, context, pending_question=pending_question or None,
+        ):
+            logger.info(
+                "dispatcher: topic change detected during %r followup → abandoning (q=%r)",
+                class_name, pending_question[:60],
+            )
+            return {"abandon_pending": True}
+    return _DISPATCH_CONTINUE
+
+
+def _normalize_handler_result(result, class_name: str, prompt: str) -> dict | None:
+    if result is None:
+        logger.info("dispatcher: handler for %r declined (returned None)", class_name)
+        return None
+
+    # Handler is intentionally abandoning an active STAGE2_FOLLOWUP so
+    # the pipeline can reroute the user's pivot/follow-up question.
+    if isinstance(result, dict) and result.get("abandon_pending"):
+        return result
+
+    # Handler explicitly signals WRONG_CLASS — teach Stage 1 to avoid this.
+    if isinstance(result, dict) and result.get("wrong_class"):
+        logger.info(
+            "dispatcher: handler for %r says WRONG_CLASS — self-correcting",
+            class_name,
+        )
+        _start_self_correct_thread(prompt, class_name)
+        return None
+
+    if not isinstance(result, dict) or "text" not in result:
+        logger.warning(
+            "dispatcher: handler for %r returned invalid shape: %r", class_name, type(result)
+        )
+        return None
+
+    return result
 
 
 async def dispatch(
@@ -244,67 +351,16 @@ async def dispatch(
         logger.info("dispatcher: no class %r in registry", class_name)
         return None
 
-    # Universal WRONG_CLASS gate — runs for EVERY class before the handler.
-    # Handlers may also have their own deeper checks, but this catches the
-    # obvious misclassifications uniformly.
-    # Skip when Stage 1 already passed with "High" confidence — its own
-    # maturity gate (conf + margin thresholds) already validated the class.
-    # The LLM gate adds ~300ms-12s latency for no gain in that case.
-    # Skip the gate LLM when Stage 1 had a near-identical chroma match —
-    # the prompt is basically a verbatim exemplar, so the gate can only
-    # add latency and introduce false negatives (e.g. rejecting because
-    # recent FIFO context is about a different topic). The coarse voting
-    # margin ("High") already gave some confidence; the tight min_dist
-    # threshold is the real guard.
-    skip_gate = pending is None and min_dist <= _NEAR_IDENTICAL_DIST
-    if skip_gate:
-        logger.info(
-            "dispatcher: gate skipped for %r (class=%r, min_dist=%.3f ≤ %.2f)",
-            prompt[:60], class_name, min_dist, _NEAR_IDENTICAL_DIST,
-        )
-    if pending is None and not skip_gate:
-        if not await _gate_check(class_name, prompt, context):
-            logger.info("dispatcher: gate check rejected %r for class %r → escalating",
-                        prompt[:60], class_name)
-            # Skip the ChromaDB self-correct write when Stage 1 was High
-            # confidence. The gate LLM and the Stage 1 classifier disagree
-            # often on edge phrasings ("what is all my to-do list", "what's
-            # on my todo", "why what's on my to-do list") and poisoning a
-            # legitimate High-conf class into DELEGATE_OPUS breaks future
-            # classifications. The escalate-on-rejection behavior still
-            # runs — we just stop corrupting training data.
-            # See transcript review 2026-04-18 Issues 2, 8, 16, 17.
-            if stage1_conf != "High":
-                threading.Thread(
-                    target=_self_correct_classification,
-                    args=(prompt, class_name),
-                    daemon=True,
-                ).start()
-            else:
-                logger.info(
-                    "dispatcher: skipping self-correct for %r "
-                    "(stage1_conf=High — trust classifier)",
-                    class_name,
-                )
-            return None
-    else:
-        # Follow-up resume: the class was decided in the prior turn. Short
-        # answers ("clinic", "2") pass through, but longer replies get an
-        # LLM check to catch topic changes like "what about Google Docs?"
-        # mid-TODO-flow. When the pending includes a `question` field with
-        # the literal text Jane asked, the LLM gets much sharper signal than
-        # from the generic class description.
-        pending_question = ""
-        if isinstance(pending, dict):
-            pending_question = str(pending.get("question") or "")
-        if not await _continuation_check(
-            class_name, prompt, context, pending_question=pending_question or None,
-        ):
-            logger.info(
-                "dispatcher: topic change detected during %r followup → abandoning (q=%r)",
-                class_name, pending_question[:60],
-            )
-            return {"abandon_pending": True}
+    pre_handler_result = await _pre_handler_dispatch_check(
+        class_name,
+        prompt,
+        context,
+        pending,
+        stage1_conf,
+        min_dist,
+    )
+    if pre_handler_result is not _DISPATCH_CONTINUE:
+        return pre_handler_result
 
     handler = meta.get("handler")
     if handler is None:
@@ -327,35 +383,7 @@ async def dispatch(
         logger.exception("dispatcher: handler for %r crashed: %s", class_name, e)
         return None
 
-    if result is None:
-        logger.info("dispatcher: handler for %r declined (returned None)", class_name)
-        return None
-
-    # Handler is intentionally abandoning an active STAGE2_FOLLOWUP so
-    # the pipeline can reroute the user's pivot/follow-up question.
-    if isinstance(result, dict) and result.get("abandon_pending"):
-        return result
-
-    # Handler explicitly signals WRONG_CLASS — teach Stage 1 to avoid this
-    if result.get("wrong_class"):
-        logger.info(
-            "dispatcher: handler for %r says WRONG_CLASS — self-correcting",
-            class_name,
-        )
-        threading.Thread(
-            target=_self_correct_classification,
-            args=(prompt, class_name),
-            daemon=True,
-        ).start()
-        return None
-
-    if not isinstance(result, dict) or "text" not in result:
-        logger.warning(
-            "dispatcher: handler for %r returned invalid shape: %r", class_name, type(result)
-        )
-        return None
-
-    return result
+    return _normalize_handler_result(result, class_name, prompt)
 
 
 def metadata_for(class_name: str) -> dict[str, Any] | None:

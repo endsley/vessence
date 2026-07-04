@@ -31,6 +31,7 @@ import json
 import logging
 import time
 import asyncio
+import datetime as _dt
 from typing import Any, AsyncIterator
 
 from fastapi import Request
@@ -47,6 +48,9 @@ from jane_web.attachment_context import (
     attachment_stage3_state,
     copy_chat_body_with_updates,
     expand_file_context,
+)
+from jane_web.conversation_keys import (
+    scoped_conversation_session_id as _resolve_scoped_conversation_session_id,
 )
 from jane_web.evidence_context import (
     append_required_memory_evidence as _append_required_memory_evidence,
@@ -104,6 +108,14 @@ _STAGE2_FIFO_TURNS_PRIVATE = 7
 # ─── shared helpers ──────────────────────────────────────────────────────────
 
 
+def _utcnow() -> _dt.datetime:
+    return _dt.datetime.now(_dt.timezone.utc).replace(tzinfo=None)
+
+
+def _pending_action_expires_at(minutes: int) -> str:
+    return (_utcnow() + _dt.timedelta(minutes=minutes)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def _stage2_fifo_turns(cls: str | None, *, default: int = _STAGE2_FIFO_TURNS_DEFAULT) -> int:
     """Private Stage 2 handlers get deeper local FIFO context."""
     try:
@@ -113,6 +125,91 @@ def _stage2_fifo_turns(cls: str | None, *, default: int = _STAGE2_FIFO_TURNS_DEF
     except Exception:
         pass
     return default
+
+
+def _stage2_pending_for_dispatch(pending: dict, pending_data: dict | None) -> dict:
+    pending_for_dispatch = dict(pending_data) if isinstance(pending_data, dict) else {}
+    if pending.get("question") and "question" not in pending_for_dispatch:
+        pending_for_dispatch["question"] = pending.get("question")
+    return pending_for_dispatch
+
+
+def _stage3_followup_original_class(pending: dict) -> str:
+    data = pending.get("data") if isinstance(pending.get("data"), dict) else {}
+    return pending.get("original_class") or data.get("original_class") or ""
+
+
+def _stage3_followup_state(pending: dict, awaiting: str) -> dict[str, Any]:
+    consumed_marker = _pending_consumed_marker(
+        pending, status="resolved", resolution="answered"
+    )
+    out = {
+        "cls": "stage3_followup", "conf": "High",
+        "classification": "stage3_followup:High",
+        "stage1_ms": 0, "stage2_ms": 0, "result": None,
+        "stage2_ack": None, "fallback_ack": None,
+        "force_stage3": True,
+        "stage3_followup_topic": awaiting,
+        "resolve_pending_action": consumed_marker,
+    }
+    # Persist the original class/protocol so Stage 3 can load the
+    # right class_protocol instead of using the synthetic
+    # "stage3_followup" name (which has no class folder). See
+    # transcript review 2026-04-18 Issue 6.
+    original_cls = _stage3_followup_original_class(pending)
+    if original_cls:
+        out["stage3_followup_original_class"] = original_cls
+    return out
+
+
+def _merge_resolved_pending_action(
+    structured: dict | None,
+    resolved_pending_action: dict | None,
+) -> dict | None:
+    if resolved_pending_action and not (structured and structured.get("pending_action")):
+        return {**(structured or {}), "pending_action": resolved_pending_action}
+    return structured
+
+
+def _stage3_pending_extras_from_text(
+    response_text: str,
+    state: dict,
+    *,
+    awaiting_expiry_minutes: int,
+) -> tuple[str, str | None, dict | None]:
+    cleaned_text, awaiting_topic = _extract_awaiting_marker(response_text)
+    structured_extras: dict | None = None
+
+    # SMS draft tracking takes precedence over AWAITING. If Stage 3 opened
+    # a draft (sms_draft / sms_draft_update without a closing sms_send or
+    # sms_cancel), stash it so the next user reply short-circuits to send.
+    draft_state = _extract_sms_draft_state(response_text)
+    if draft_state:
+        structured_extras = {
+            "intent": "send message",
+            "pending_action": {
+                "type": "SEND_MESSAGE_DRAFT_OPEN",
+                "handler_class": "send message",
+                "status": "awaiting_user",
+                "awaiting": "confirm_draft",
+                "data": draft_state,
+                "expires_at": _pending_action_expires_at(5),
+            },
+        }
+    elif awaiting_topic:
+        original_class = state.get("cls") or ""
+        pa_fields = {
+            "type": "STAGE3_FOLLOWUP",
+            "handler_class": "stage3",
+            "status": "awaiting_user",
+            "awaiting": awaiting_topic,
+            "expires_at": _pending_action_expires_at(awaiting_expiry_minutes),
+        }
+        if original_class and original_class not in ("others", "stage3_followup"):
+            pa_fields["original_class"] = original_class
+        structured_extras = {"pending_action": pa_fields}
+
+    return cleaned_text, awaiting_topic, structured_extras
 
 
 def _inject_self_improvement_context(body):
@@ -501,11 +598,7 @@ def _canonical_session_id(body, request) -> str | None:
     if not sid:
         return None
     user_id = _cookie_session_user(request)
-    try:
-        from agent_skills.user_manager import scoped_session_id
-        return scoped_session_id(user_id, sid)
-    except Exception:
-        return sid
+    return _resolve_scoped_conversation_session_id(user_id, sid)
 
 
 async def _classify_and_try_stage2(
@@ -607,35 +700,12 @@ async def _classify_and_try_stage2(
             # lingers and hijacks the next unrelated request. If Stage 3 does
             # emit a new AWAITING marker downstream, that overrides this
             # "resolved" marker in the new FIFO row (see _persist_fifo_for_stream).
-            consumed_marker = _pending_consumed_marker(
-                pending, status="resolved", resolution="answered"
-            )
-            out = {
-                "cls": "stage3_followup", "conf": "High",
-                "classification": "stage3_followup:High",
-                "stage1_ms": 0, "stage2_ms": 0, "result": None,
-                "stage2_ack": None, "fallback_ack": None,
-                "force_stage3": True,
-                "stage3_followup_topic": awaiting,
-                "resolve_pending_action": consumed_marker,
-            }
-            # Persist the original class/protocol so Stage 3 can load the
-            # right class_protocol instead of using the synthetic
-            # "stage3_followup" name (which has no class folder). See
-            # transcript review 2026-04-18 Issue 6.
-            original_cls = pending.get("original_class") or (
-                pending.get("data") or {}
-            ).get("original_class")
-            if original_cls:
-                out["stage3_followup_original_class"] = original_cls
-            return out
+            return _stage3_followup_state(pending, awaiting)
         elif action == "followup":
             # Re-dispatch to the Stage 2 handler that's mid-conversation.
             handler_class = resolved["handler_class"]
             pending_data = resolved.get("pending_data", {})
-            pending_for_dispatch = dict(pending_data) if isinstance(pending_data, dict) else {}
-            if pending.get("question") and "question" not in pending_for_dispatch:
-                pending_for_dispatch["question"] = pending.get("question")
+            pending_for_dispatch = _stage2_pending_for_dispatch(pending, pending_data)
             fifo_ctx = ""
             try:
                 fifo_ctx = recent_context.render_stage2_context(
@@ -845,9 +915,10 @@ async def handle_chat(body, request: Request):
         handler_structured = (
             state["result"].get("structured") if isinstance(state["result"], dict) else None
         )
-        resolved_pa = state.get("resolve_pending_action")
-        if resolved_pa and not (handler_structured and handler_structured.get("pending_action")):
-            handler_structured = {**(handler_structured or {}), "pending_action": resolved_pa}
+        handler_structured = _merge_resolved_pending_action(
+            handler_structured,
+            state.get("resolve_pending_action"),
+        )
         _persist_turn_to_fifo(
             canonical_sid, prompt, visible_text or text,
             stage="stage2",
@@ -985,59 +1056,32 @@ async def handle_chat(body, request: Request):
     # Stage 3 state block sees continuity. v1 has its own long-term memory,
     # so we only record a minimal handoff summary here.
     raw_response = v1_body.get("response", "") or ""
-    cleaned_text, awaiting_topic = _extract_awaiting_marker(raw_response)
-    structured_extras: dict | None = None
-    # SMS draft tracking takes precedence over AWAITING. If Stage 3 opened
-    # a draft (sms_draft / sms_draft_update without a closing sms_send or
-    # sms_cancel), stash it so the next user reply short-circuits to send.
-    draft_state = _extract_sms_draft_state(raw_response)
-    if draft_state:
-        import datetime as _dt
-        structured_extras = {
-            "intent": "send message",
-            "pending_action": {
-                "type": "SEND_MESSAGE_DRAFT_OPEN",
-                "handler_class": "send message",
-                "status": "awaiting_user",
-                "awaiting": "confirm_draft",
-                "data": draft_state,
-                "expires_at": (
-                    _dt.datetime.utcnow() + _dt.timedelta(minutes=5)
-                ).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            },
-        }
+    cleaned_text, awaiting_topic, structured_extras = _stage3_pending_extras_from_text(
+        raw_response,
+        state,
+        awaiting_expiry_minutes=2,
+    )
+    pending_action = (structured_extras or {}).get("pending_action", {})
+    if pending_action.get("type") == "SEND_MESSAGE_DRAFT_OPEN":
         logger.info("pipeline: stage3 (non-stream) SMS_DRAFT_OPEN draft_id=%s",
-                    draft_state.get("draft_id", "")[:12])
+                    pending_action.get("data", {}).get("draft_id", "")[:12])
     elif awaiting_topic:
-        import datetime as _dt
         # Preserve the originating class so that when the user replies to
         # this AWAITING marker on a later turn, Stage 3 can load the right
         # class_protocol (weather, send_message, etc.) instead of falling
         # back to the synthetic "stage3_followup" name that has no class
         # folder. See transcript review 2026-04-18 Issue 6.
-        original_class = state.get("cls") or ""
-        pa_fields = {
-            "type": "STAGE3_FOLLOWUP",
-            "handler_class": "stage3",
-            "status": "awaiting_user",
-            "awaiting": awaiting_topic,
-            "expires_at": (
-                _dt.datetime.utcnow() + _dt.timedelta(minutes=2)
-            ).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        }
-        if original_class and original_class not in ("others", "stage3_followup"):
-            pa_fields["original_class"] = original_class
-        structured_extras = {"pending_action": pa_fields}
         logger.info("pipeline: stage3 (non-stream) AWAITING → topic=%s (original_class=%s)",
-                    awaiting_topic, original_class or "-")
+                    awaiting_topic, state.get("cls") or "-")
         # Strip marker from client-facing response too.
         v1_body["response"] = cleaned_text
         new_body_bytes = json.dumps(v1_body, ensure_ascii=True).encode("utf-8")
         v1_response.body = new_body_bytes
         v1_response.headers["content-length"] = str(len(new_body_bytes))
-    resolved_pa = state.get("resolve_pending_action")
-    if resolved_pa and not (structured_extras and structured_extras.get("pending_action")):
-        structured_extras = {**(structured_extras or {}), "pending_action": resolved_pa}
+    structured_extras = _merge_resolved_pending_action(
+        structured_extras,
+        state.get("resolve_pending_action"),
+    )
     _persist_turn_to_fifo(
         canonical_sid, prompt, cleaned_text or raw_response,
         stage="stage3",
@@ -1052,11 +1096,7 @@ async def handle_chat(body, request: Request):
 def _evidence_correction_for_stream(evidence_meta: dict) -> str:
     if not evidence_meta.get("flagged"):
         return ""
-    missing: list[str] = []
-    if evidence_meta.get("requires_code") and int(evidence_meta.get("tool_calls") or 0) == 0:
-        missing.append("a code/log tool result")
-    if evidence_meta.get("requires_memory") and not evidence_meta.get("memory_evidence"):
-        missing.append("Chroma memory evidence")
+    missing = _missing_evidence_sources(evidence_meta)
     if not missing:
         missing.append("the required evidence")
     if len(missing) == 1:
@@ -1067,6 +1107,15 @@ def _evidence_correction_for_stream(evidence_meta: dict) -> str:
         "\n\nChieh, correction: I do not have "
         f"{missing_text} for that answer, so I should not claim it is verified."
     )
+
+
+def _missing_evidence_sources(evidence_meta: dict) -> list[str]:
+    missing: list[str] = []
+    if evidence_meta.get("requires_code") and int(evidence_meta.get("tool_calls") or 0) == 0:
+        missing.append("a code/log tool result")
+    if evidence_meta.get("requires_memory") and not evidence_meta.get("memory_evidence"):
+        missing.append("Chroma memory evidence")
+    return missing
 
 
 def _persist_fifo_for_stream(
@@ -1105,49 +1154,24 @@ def _persist_fifo_for_stream(
                 full_stage3_text += correction_text
         except Exception as exc:
             logger.warning("pipeline: evidence summary failed: %s", exc)
-    cleaned_text, awaiting_topic = _extract_awaiting_marker(full_stage3_text)
-    structured_extras: dict | None = None
-    # SMS draft tracking wins over AWAITING when both appear.
-    draft_state = _extract_sms_draft_state(full_stage3_text)
-    if draft_state:
-        import datetime as _dt
-        structured_extras = {
-            "intent": "send message",
-            "pending_action": {
-                "type": "SEND_MESSAGE_DRAFT_OPEN",
-                "handler_class": "send message",
-                "status": "awaiting_user",
-                "awaiting": "confirm_draft",
-                "data": draft_state,
-                "expires_at": (
-                    _dt.datetime.utcnow() + _dt.timedelta(minutes=5)
-                ).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            },
-        }
+    cleaned_text, awaiting_topic, structured_extras = _stage3_pending_extras_from_text(
+        full_stage3_text,
+        state,
+        awaiting_expiry_minutes=5,
+    )
+    pending_action = (structured_extras or {}).get("pending_action", {})
+    if pending_action.get("type") == "SEND_MESSAGE_DRAFT_OPEN":
         logger.info("pipeline: stage3 (stream) SMS_DRAFT_OPEN draft_id=%s",
-                    draft_state.get("draft_id", "")[:12])
+                    pending_action.get("data", {}).get("draft_id", "")[:12])
     elif awaiting_topic:
-        import datetime as _dt
         # Preserve originating class for Stage 3 class_protocol loading on
         # the next turn. See transcript review 2026-04-18 Issue 6.
-        original_class = state.get("cls") or ""
-        pa_fields = {
-            "type": "STAGE3_FOLLOWUP",
-            "handler_class": "stage3",
-            "status": "awaiting_user",
-            "awaiting": awaiting_topic,
-            "expires_at": (
-                _dt.datetime.utcnow() + _dt.timedelta(minutes=5)
-            ).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        }
-        if original_class and original_class not in ("others", "stage3_followup"):
-            pa_fields["original_class"] = original_class
-        structured_extras = {"pending_action": pa_fields}
         logger.info("pipeline: stage3 emitted AWAITING marker → topic=%s (original_class=%s)",
-                    awaiting_topic, original_class or "-")
-    resolved_pa = state.get("resolve_pending_action")
-    if resolved_pa and not (structured_extras and structured_extras.get("pending_action")):
-        structured_extras = {**(structured_extras or {}), "pending_action": resolved_pa}
+                    awaiting_topic, state.get("cls") or "-")
+    structured_extras = _merge_resolved_pending_action(
+        structured_extras,
+        state.get("resolve_pending_action"),
+    )
     _persist_turn_to_fifo(
         canonical_sid, prompt, cleaned_text or full_stage3_text,
         stage="stage3",
@@ -1225,9 +1249,10 @@ async def handle_chat_stream(body, request: Request):
             handler_structured = (
                 state["result"].get("structured") if isinstance(state["result"], dict) else None
             )
-            resolved_pa = state.get("resolve_pending_action")
-            if resolved_pa and not (handler_structured and handler_structured.get("pending_action")):
-                handler_structured = {**(handler_structured or {}), "pending_action": resolved_pa}
+            handler_structured = _merge_resolved_pending_action(
+                handler_structured,
+                state.get("resolve_pending_action"),
+            )
             _persist_turn_to_fifo(
                 canonical_sid, prompt, visible_text or text,
                 stage="stage2",

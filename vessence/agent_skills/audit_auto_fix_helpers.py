@@ -146,6 +146,26 @@ def result_status_counts(results: list[dict[str, Any]]) -> dict[str, int]:
     }
 
 
+def _fix_result_file_name(result: dict[str, Any]) -> str:
+    return Path(result["file"]).name if result["file"] != "Unknown" else "?"
+
+
+def _fixed_result_row(result: dict[str, Any]) -> str:
+    return f"| {result['issue'][:80]} | `{_fix_result_file_name(result)}` | {result['reason'][:80]} |"
+
+
+def _skipped_result_row(result: dict[str, Any]) -> str:
+    return f"| {result['issue'][:80]} | {result['reason'][:80]} |"
+
+
+def _not_applicable_result_line(result: dict[str, Any]) -> str:
+    return f"- {result['issue'][:100]}"
+
+
+def _reverted_result_line(result: dict[str, Any]) -> str:
+    return f"- **{result['issue'][:80]}** — {result['reason']}"
+
+
 def generate_fix_report_markdown(
     audit_report_path: str,
     results: list[dict[str, Any]],
@@ -176,8 +196,7 @@ def generate_fix_report_markdown(
         lines.append("| Issue | File | Fix Applied |")
         lines.append("|-------|------|-------------|")
         for r in fixed:
-            fname = Path(r["file"]).name if r["file"] != "Unknown" else "?"
-            lines.append(f"| {r['issue'][:80]} | `{fname}` | {r['reason'][:80]} |")
+            lines.append(_fixed_result_row(r))
         lines.append("")
 
     if skipped:
@@ -186,21 +205,21 @@ def generate_fix_report_markdown(
         lines.append("| Issue | Reason |")
         lines.append("|-------|--------|")
         for r in skipped:
-            lines.append(f"| {r['issue'][:80]} | {r['reason'][:80]} |")
+            lines.append(_skipped_result_row(r))
         lines.append("")
 
     if not_applicable:
         lines.append(f"## Already Fixed / Not Applicable ({len(not_applicable)})")
         lines.append("")
         for r in not_applicable:
-            lines.append(f"- {r['issue'][:100]}")
+            lines.append(_not_applicable_result_line(r))
         lines.append("")
 
     if reverted:
         lines.append(f"## Reverted ({len(reverted)})")
         lines.append("")
         for r in reverted:
-            lines.append(f"- **{r['issue'][:80]}** — {r['reason']}")
+            lines.append(_reverted_result_line(r))
         lines.append("")
 
     return "\n".join(lines)

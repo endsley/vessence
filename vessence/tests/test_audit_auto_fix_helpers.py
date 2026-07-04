@@ -8,6 +8,11 @@ from agent_skills.audit_auto_fix_prompt import (
 from agent_skills.audit_auto_fix_helpers import (
     FORBIDDEN_PATTERNS,
     SAFE_EXTENSIONS,
+    _fixed_result_row,
+    _fix_result_file_name,
+    _not_applicable_result_line,
+    _reverted_result_line,
+    _skipped_result_row,
     audit_report_candidates,
     extract_json_array_text,
     fix_issue_preflight_result,
@@ -168,6 +173,24 @@ def test_partition_and_count_fix_results():
         "not_applicable": 1,
         "reverted": 1,
     }
+
+
+def test_fix_report_result_line_helpers_preserve_truncation_and_filename_policy():
+    fixed = {
+        "issue": "x" * 90,
+        "file": "/repo/configs/README.md",
+        "reason": "r" * 90,
+    }
+    skipped = {"issue": "Needs review", "file": "Unknown", "reason": "Human judgment"}
+    not_applicable = {"issue": "a" * 110}
+    reverted = {"issue": "b" * 90, "reason": "Fix introduced syntax error"}
+
+    assert _fix_result_file_name(fixed) == "README.md"
+    assert _fix_result_file_name(skipped) == "?"
+    assert _fixed_result_row(fixed) == f"| {'x' * 80} | `README.md` | {'r' * 80} |"
+    assert _skipped_result_row(skipped) == "| Needs review | Human judgment |"
+    assert _not_applicable_result_line(not_applicable) == f"- {'a' * 100}"
+    assert _reverted_result_line(reverted) == f"- **{'b' * 80}** — Fix introduced syntax error"
 
 
 def test_generate_fix_report_markdown_preserves_sections_and_truncation():

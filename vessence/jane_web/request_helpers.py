@@ -6,9 +6,16 @@ import os
 from collections.abc import Mapping
 from typing import Any
 
+LOCAL_BROWSER_HOSTS = frozenset({"127.0.0.1", "::1"})
+LOCAL_REQUEST_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
+
 
 def session_log_id(session_id: str | None) -> str:
     return session_id[:12] if session_id else "none"
+
+
+def _request_client_host(request: Any) -> str:
+    return request.client.host if request.client else ""
 
 
 def client_ip(request: Any) -> str:
@@ -27,8 +34,7 @@ def is_local_browser_access(request: Any) -> bool:
 
     if request.headers.get("cf-connecting-ip"):
         return False
-    client_host = request.client.host if request.client else ""
-    return client_host in ("127.0.0.1", "::1")
+    return _request_client_host(request) in LOCAL_BROWSER_HOSTS
 
 
 def cookie_secure_flag(request: Any) -> bool:
@@ -51,8 +57,14 @@ def is_local_request(request: Any) -> bool:
         return False
     if request.headers.get("x-forwarded-for"):
         return False
-    client_host = request.client.host if request.client else ""
-    return client_host in ("127.0.0.1", "::1", "localhost")
+    return _request_client_host(request) in LOCAL_REQUEST_HOSTS
+
+
+def is_local_control_ip(client_ip: str, *, allow_unknown: bool = False) -> bool:
+    allowed = set(LOCAL_REQUEST_HOSTS)
+    if allow_unknown:
+        allowed.add("unknown")
+    return client_ip in allowed
 
 
 def is_android_webview_request(request: Any) -> bool:

@@ -17,6 +17,11 @@ from jane_web.jane_v2.ollama_client import post_local_llm_response as _post_loca
 logger = logging.getLogger(__name__)
 
 
+def _pending_data(pending: dict) -> dict:
+    data = pending.get("data") if isinstance(pending, dict) else None
+    return data if isinstance(data, dict) else {}
+
+
 def pending_consumed_marker(
     pending: dict,
     *,
@@ -30,7 +35,7 @@ def pending_consumed_marker(
         "status": status,
         "resolution": resolution,
     }
-    awaiting = pending.get("awaiting") or (pending.get("data") or {}).get("awaiting")
+    awaiting = pending.get("awaiting") or _pending_data(pending).get("awaiting")
     if awaiting:
         marker["awaiting"] = awaiting
     return {key: value for key, value in marker.items() if value}
@@ -38,7 +43,7 @@ def pending_consumed_marker(
 
 def resolve_pending_sms_confirmation(pending: dict) -> dict:
     """Build a Stage 2-shaped result dict that sends the pending SMS."""
-    data = pending.get("data") or {}
+    data = _pending_data(pending)
     phone = data.get("phone_number") or ""
     body = data.get("body") or data.get("message_body") or ""
     display = data.get("display_name") or data.get("recipient") or "them"
@@ -64,7 +69,7 @@ def resolve_pending_sms_confirmation(pending: dict) -> dict:
 
 def cancel_pending_sms_confirmation(pending: dict) -> dict:
     """Build a Stage 2-shaped result dict that drops the pending SMS."""
-    data = pending.get("data") or {}
+    data = _pending_data(pending)
     display = data.get("display_name") or data.get("recipient") or "them"
     return {
         "text": f"Okay, not sending that to {display}.",
@@ -116,7 +121,7 @@ def extract_sms_draft_state(text: str) -> dict | None:
 
 def resolve_pending_sms_draft_send(pending: dict) -> dict:
     """User confirmed an open sms_draft. Emit sms_send with the draft_id."""
-    data = pending.get("data") or {}
+    data = _pending_data(pending)
     draft_id = data.get("draft_id") or ""
     query = data.get("query") or data.get("display_name") or data.get("recipient") or "them"
     body = data.get("body") or ""
@@ -142,7 +147,7 @@ def resolve_pending_sms_draft_send(pending: dict) -> dict:
 
 def cancel_pending_sms_draft(pending: dict) -> dict:
     """User cancelled an open sms_draft. Emit sms_cancel with the draft_id."""
-    data = pending.get("data") or {}
+    data = _pending_data(pending)
     draft_id = data.get("draft_id") or ""
     query = data.get("query") or data.get("display_name") or data.get("recipient") or "them"
     marker = _sms_draft_cancel_marker(draft_id)
@@ -159,15 +164,8 @@ def cancel_pending_sms_draft(pending: dict) -> dict:
     }
 
 
-async def resolve_pending_sms_draft_edit(pending: dict, edit_text: str) -> dict:
-    """Compose an sms_draft_update result for an edited open draft."""
-    data = pending.get("data") or {}
-    draft_id = data.get("draft_id") or ""
-    query = data.get("query") or data.get("display_name") or data.get("recipient") or "them"
-    old_body = data.get("body") or ""
-    new_body = old_body
-
-    compose_prompt = (
+def _sms_draft_edit_prompt(old_body: str, edit_text: str) -> str:
+    return (
         "You are revising an SMS draft based on the user's edit instruction.\n"
         "CRITICAL: output ONLY the new message body - no preamble, no quotes, "
         "no 'Sure, here is' prefix. Just the revised SMS body text itself.\n\n"
@@ -175,32 +173,17 @@ async def resolve_pending_sms_draft_edit(pending: dict, edit_text: str) -> dict:
         f"USER EDIT INSTRUCTION: {edit_text}\n\n"
         "NEW BODY:"
     )
-    try:
-        def payload_builder(prompt_text: str, *, model: str, num_ctx: int, keep_alive: str | int) -> dict:
-            return {
-                "model": model,
-                "prompt": prompt_text,
-                "stream": False,
-                "think": False,
-                "options": {
-                    "temperature": 0.2,
-                    "num_predict": 80,
-                    "num_ctx": num_ctx,
-                },
-                "keep_alive": keep_alive,
-            }
 
-        composed = await _post_local_llm_response(compose_prompt, payload_builder)
-        composed = composed.strip()
-        composed = composed.strip('"').strip("'").strip()
-        if composed.lower().startswith("new body:"):
-            composed = composed[len("new body:"):].strip()
-        if composed:
-            new_body = composed
-    except Exception as exc:
-        logger.warning("draft-edit compose failed (%s) - using fallback concat", exc)
-        new_body = f"{old_body}. {edit_text}".strip()
 
+def _clean_composed_sms_body(composed: str) -> str:
+    composed = (composed or "").strip()
+    composed = composed.strip('"').strip("'").strip()
+    if composed.lower().startswith("new body:"):
+        composed = composed[len("new body:"):].strip()
+    return composed
+
+
+def _sms_draft_update_response(draft_id: str, query: str, new_body: str) -> dict:
     marker = _sms_draft_update_marker(draft_id, new_body)
     return {
         "text": f"Updated. To {query}: {new_body}. {marker}",
@@ -224,3 +207,37 @@ async def resolve_pending_sms_draft_edit(pending: dict, edit_text: str) -> dict:
             },
         },
     }
+
+
+async def resolve_pending_sms_draft_edit(pending: dict, edit_text: str) -> dict:
+    """Compose an sms_draft_update result for an edited open draft."""
+    data = _pending_data(pending)
+    draft_id = data.get("draft_id") or ""
+    query = data.get("query") or data.get("display_name") or data.get("recipient") or "them"
+    old_body = data.get("body") or ""
+    new_body = old_body
+
+    compose_prompt = _sms_draft_edit_prompt(old_body, edit_text)
+    try:
+        def payload_builder(prompt_text: str, *, model: str, num_ctx: int, keep_alive: str | int) -> dict:
+            return {
+                "model": model,
+                "prompt": prompt_text,
+                "stream": False,
+                "think": False,
+                "options": {
+                    "temperature": 0.2,
+                    "num_predict": 80,
+                    "num_ctx": num_ctx,
+                },
+                "keep_alive": keep_alive,
+            }
+
+        composed = _clean_composed_sms_body(await _post_local_llm_response(compose_prompt, payload_builder))
+        if composed:
+            new_body = composed
+    except Exception as exc:
+        logger.warning("draft-edit compose failed (%s) - using fallback concat", exc)
+        new_body = f"{old_body}. {edit_text}".strip()
+
+    return _sms_draft_update_response(draft_id, query, new_body)

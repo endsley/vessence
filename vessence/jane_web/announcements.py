@@ -29,11 +29,8 @@ class AnnouncementsLog:
                     payload = json.loads(raw)
                 except json.JSONDecodeError:
                     continue
-                created_at = payload.get("created_at") or payload.get("timestamp")
-                if since_dt and created_at:
-                    created_dt = self._parse_datetime(created_at)
-                    if created_dt and created_dt <= since_dt:
-                        continue
+                if not self._is_after_since(payload, since_dt):
+                    continue
                 rows.append(payload)
         return rows
 
@@ -51,3 +48,17 @@ class AnnouncementsLog:
             return datetime.fromisoformat(value) if value else None
         except ValueError:
             return None
+
+    @staticmethod
+    def _created_at_value(payload: dict) -> str | None:
+        return payload.get("created_at") or payload.get("timestamp")
+
+    @classmethod
+    def _is_after_since(cls, payload: dict, since_dt: datetime | None) -> bool:
+        if not since_dt:
+            return True
+        created_at = cls._created_at_value(payload)
+        if not created_at:
+            return True
+        created_dt = cls._parse_datetime(created_at)
+        return not (created_dt and created_dt <= since_dt)

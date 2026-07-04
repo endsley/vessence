@@ -21,6 +21,7 @@ Nightly janitor prunes rows older than 24h (see janitor_system.py).
 """
 from __future__ import annotations
 
+import datetime
 import logging
 import os
 import sqlite3
@@ -47,6 +48,29 @@ DEDUPE_TTL_SECONDS = 300
 JOIN_WAIT_SECONDS = 120
 
 _db_lock = threading.Lock()
+
+
+def _utcnow() -> datetime.datetime:
+    return datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+
+
+def _age_seconds_since(created_at: str, *, now: datetime.datetime | None = None) -> float:
+    dt = datetime.datetime.fromisoformat(created_at.replace(" ", "T"))
+    return ((now or _utcnow()) - dt).total_seconds()
+
+
+def _existing_row_blocks_begin(
+    status: str,
+    created_at: str,
+    *,
+    now: datetime.datetime | None = None,
+    ttl_seconds: int = DEDUPE_TTL_SECONDS,
+) -> bool:
+    try:
+        age = _age_seconds_since(created_at, now=now)
+    except Exception:
+        age = 0.0
+    return age <= ttl_seconds and status in ("pending", "completed")
 
 
 def _conn() -> sqlite3.Connection:
@@ -89,9 +113,7 @@ class DedupeRow:
     def age_seconds(self) -> float:
         """Best-effort — SQLite returns the timestamp as a string."""
         try:
-            import datetime
-            dt = datetime.datetime.fromisoformat(self.created_at.replace(" ", "T"))
-            return (datetime.datetime.utcnow() - dt).total_seconds()
+            return _age_seconds_since(self.created_at)
         except Exception:
             return 0.0
 
@@ -145,16 +167,7 @@ def try_begin(turn_id: str, session_id: str) -> bool:
         ).fetchone()
         if existing:
             status = existing["status"]
-            # Compute age in seconds.
-            try:
-                import datetime
-                dt = datetime.datetime.fromisoformat(
-                    str(existing["created_at"]).replace(" ", "T")
-                )
-                age = (datetime.datetime.utcnow() - dt).total_seconds()
-            except Exception:
-                age = 0.0
-            if age <= DEDUPE_TTL_SECONDS and status in ("pending", "completed"):
+            if _existing_row_blocks_begin(status, str(existing["created_at"])):
                 return False
             # status=failed OR aged out → overwrite.
             c.execute("DELETE FROM turn_dedupe WHERE turn_id = ?", (turn_id,))

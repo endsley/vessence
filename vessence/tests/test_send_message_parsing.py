@@ -1,3 +1,5 @@
+import asyncio
+
 from jane_web.jane_v2.classes.send_message import handler
 from jane_web.jane_v2.classes.send_message.extraction_prompt import (
     EXTRACT_PROMPT,
@@ -23,6 +25,10 @@ from jane_web.jane_v2.classes.send_message.responses import (
 from jane_web.jane_v2.ollama_client import post_local_llm_response
 
 
+def run(coro):
+    return asyncio.run(coro)
+
+
 def test_handler_uses_extracted_send_message_helpers() -> None:
     assert handler._is_coherent is is_coherent
     assert handler._parse_extraction is parse_extraction
@@ -33,6 +39,255 @@ def test_handler_uses_extracted_send_message_helpers() -> None:
     assert handler._build_extraction_prompt is build_extraction_prompt
     assert handler._extraction_request_payload is extraction_request_payload
     assert handler._post_local_llm_response is post_local_llm_response
+
+
+def test_send_message_resume_predicate_accepts_handler_or_awaiting_data() -> None:
+    assert handler._should_resume_send_message({"handler_class": "send message"})
+    assert handler._should_resume_send_message({"data": {"awaiting": "revised_body"}})
+    assert not handler._should_resume_send_message({"handler_class": "timer"})
+    assert not handler._should_resume_send_message(None)
+
+
+def test_send_message_resume_draft_fields_accept_nested_and_legacy_shapes() -> None:
+    assert handler._resume_draft_fields({
+        "data": {
+            "awaiting": "send_confirmation",
+            "draft": {"phone": "+15551234567", "display": "Mia", "body": "Running late"},
+        }
+    }) == ("send_confirmation", "+15551234567", "Mia", "Running late")
+
+    assert handler._resume_draft_fields({"awaiting": "revised_body", "draft": {}}) == (
+        "revised_body",
+        "",
+        "them",
+        "",
+    )
+
+
+def test_send_message_confirmation_reply_preserves_yes_no_cancel_and_unknown_paths() -> None:
+    yes = handler._handle_send_confirmation_reply("yes", "+15551234567", "Mia", "Running late")
+    assert yes["conversation_end"] is True
+    assert yes["structured"]["entities"]["message_body"] == "Running late"
+
+    no = handler._handle_send_confirmation_reply("no", "+15551234567", "Mia", "Running late")
+    assert no["text"] == "Please give me the updated message."
+    assert no["structured"]["pending_action"]["awaiting"] == "revised_body"
+
+    cancel = handler._handle_send_confirmation_reply("cancel", "+15551234567", "Mia", "Running late")
+    assert cancel == {
+        "text": "Ok.",
+        "conversation_end": True,
+        "structured": {"intent": "send message"},
+    }
+
+    assert handler._handle_send_confirmation_reply("maybe", "+15551234567", "Mia", "Running late") == {
+        "abandon_pending": True,
+        "force_stage3": True,
+    }
+    assert handler._handle_send_confirmation_reply("yes", "", "Mia", "Running late") == {
+        "abandon_pending": True,
+        "force_stage3": True,
+    }
+
+
+def test_send_message_revised_body_reply_preserves_one_word_body_and_abort_paths() -> None:
+    response = handler._handle_revised_body_reply("yes", "+15551234567", "Mia")
+    assert response["text"] == "Message to Mia: yes. Should I send it?"
+    assert response["structured"]["pending_action"]["awaiting"] == "send_confirmation"
+
+    assert handler._handle_revised_body_reply("   ", "+15551234567", "Mia") == {
+        "abandon_pending": True,
+        "force_stage3": True,
+    }
+    assert handler._handle_revised_body_reply("stop", "+15551234567", "Mia") == {
+        "text": "Ok.",
+        "conversation_end": True,
+        "structured": {"intent": "send message"},
+    }
+
+
+def test_message_metadata_uses_classifier_params_without_llm() -> None:
+    assert run(
+        handler._message_metadata(
+            "text Mia running late",
+            "",
+            {"recipient": " Mia ", "body": " Running late ", "confidence": 0.91},
+        )
+    ) == {
+        "recipient": "Mia",
+        "body": "Running late",
+        "coherent": True,
+        "confidence": 0.91,
+    }
+    assert run(handler._message_metadata("ask Mia when she is free", "", {"intent_kind": "ask"})) is None
+    assert run(handler._message_metadata("text someone running late", "", {"body": "Running late"})) is None
+
+
+def test_message_metadata_falls_back_to_llm_extract(monkeypatch) -> None:
+    async def fake_extract(prompt, context):
+        return {"recipient": prompt, "body": context, "coherent": True}
+
+    monkeypatch.setattr(handler, "_extract_via_llm", fake_extract)
+
+    assert run(handler._message_metadata("Mia", "Running late", None)) == {
+        "recipient": "Mia",
+        "body": "Running late",
+        "coherent": True,
+    }
+
+
+def test_message_metadata_preserves_wrong_class_sentinel(monkeypatch) -> None:
+    async def fake_extract(_prompt, _context):
+        return WRONG_CLASS_SENTINEL
+
+    monkeypatch.setattr(handler, "_extract_via_llm", fake_extract)
+
+    assert run(handler._message_metadata("weather?", "", None)) is WRONG_CLASS_SENTINEL
+
+
+class FakeAliasConn:
+    def __init__(self, existing=None):
+        self.existing = existing
+        self.calls = []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        return None
+
+    def execute(self, sql, params):
+        self.calls.append((sql, params))
+        return self
+
+    def fetchone(self):
+        return self.existing
+
+
+def test_auto_alias_contact_writes_only_new_contact_aliases() -> None:
+    aliases = []
+    conn = FakeAliasConn()
+
+    wrote = handler._maybe_auto_alias_contact(
+        "Lee",
+        {"source": "contacts", "phone_number": "+1555", "display_name": "Lee Chen"},
+        normalize_name_fn=lambda value: (value or "").strip().lower(),
+        add_alias_fn=lambda alias, phone, display_name: aliases.append((alias, phone, display_name)) or True,
+        get_db_fn=lambda: conn,
+    )
+
+    assert wrote is True
+    assert aliases == [("lee", "+1555", "Lee Chen")]
+    assert conn.calls == [
+        (
+            "SELECT 1 FROM contact_aliases WHERE LOWER(alias) = ? LIMIT 1",
+            ("lee",),
+        )
+    ]
+
+
+def test_auto_alias_contact_skips_existing_aliases_and_non_contacts() -> None:
+    assert not handler._maybe_auto_alias_contact(
+        "Lee",
+        {"source": "contacts", "phone_number": "+1555", "display_name": "Lee Chen"},
+        normalize_name_fn=lambda value: (value or "").strip().lower(),
+        add_alias_fn=lambda *args, **kwargs: True,
+        get_db_fn=lambda: FakeAliasConn(existing=(1,)),
+    )
+    assert not handler._maybe_auto_alias_contact(
+        "Lee Chen",
+        {"source": "contacts", "phone_number": "+1555", "display_name": "Lee Chen"},
+        normalize_name_fn=lambda value: (value or "").strip().lower(),
+        add_alias_fn=lambda *args, **kwargs: True,
+        get_db_fn=lambda: FakeAliasConn(),
+    )
+    assert not handler._maybe_auto_alias_contact(
+        "Lee",
+        {"source": "alias", "phone_number": "+1555", "display_name": "Lee Chen"},
+        normalize_name_fn=lambda value: (value or "").strip().lower(),
+        add_alias_fn=lambda *args, **kwargs: True,
+        get_db_fn=lambda: FakeAliasConn(),
+    )
+
+
+def test_resolve_message_recipient_returns_resolved_or_none() -> None:
+    calls = []
+
+    resolved = handler._resolve_message_recipient(
+        {"recipient": "Mia"},
+        lambda recipient: calls.append(recipient) or {
+            "phone_number": "+1555",
+            "display_name": "Mia",
+        },
+    )
+
+    assert resolved == {"phone_number": "+1555", "display_name": "Mia"}
+    assert calls == ["Mia"]
+    assert handler._resolve_message_recipient({"recipient": "Unknown"}, lambda _recipient: None) is None
+
+
+def test_auto_alias_resolved_recipient_reports_success_and_swallows_failure(monkeypatch) -> None:
+    monkeypatch.setattr(handler, "_maybe_auto_alias_contact", lambda *args, **kwargs: True)
+
+    assert handler._maybe_auto_alias_resolved_recipient(
+        {"recipient": "Lee"},
+        {"source": "contacts", "phone_number": "+1555", "display_name": "Lee Chen"},
+        normalize_name_fn=lambda value: value.lower(),
+        add_alias_fn=lambda *args, **kwargs: True,
+    )
+
+    def fail_alias(*_args, **_kwargs):
+        raise RuntimeError("db locked")
+
+    monkeypatch.setattr(handler, "_maybe_auto_alias_contact", fail_alias)
+
+    assert not handler._maybe_auto_alias_resolved_recipient(
+        {"recipient": "Lee"},
+        {"source": "contacts", "phone_number": "+1555", "display_name": "Lee Chen"},
+        normalize_name_fn=lambda value: value.lower(),
+        add_alias_fn=lambda *args, **kwargs: True,
+    )
+
+
+def test_resolved_message_response_escalates_without_body() -> None:
+    assert handler._resolved_message_response(
+        {"body": "(none)", "coherent": True},
+        "+1555",
+        "Mia",
+    ) is None
+    assert handler._resolved_message_response(
+        {"body": " ", "coherent": True},
+        "+1555",
+        "Mia",
+    ) is None
+
+
+def test_resolved_message_response_confirms_incoherent_body() -> None:
+    response = handler._resolved_message_response(
+        {"body": "I will be at", "coherent": False},
+        "+1555",
+        "Mia",
+    )
+
+    assert response["text"] == "Message to Mia: I will be at. Should I send it?"
+    assert response["structured"]["pending_action"]["awaiting"] == "send_confirmation"
+
+
+def test_resolved_message_response_applies_confidence_floor() -> None:
+    assert handler._resolved_message_response(
+        {"body": "Running late", "coherent": True, "confidence": 0.79},
+        "+1555",
+        "Mia",
+    ) is None
+
+    response = handler._resolved_message_response(
+        {"body": "Running late", "coherent": True, "confidence": 0.8},
+        "+1555",
+        "Mia",
+    )
+
+    assert response["conversation_end"] is True
+    assert response["structured"]["entities"]["message_body"] == "Running late"
 
 
 def test_extraction_prompt_includes_optional_context_and_strips_prompt() -> None:

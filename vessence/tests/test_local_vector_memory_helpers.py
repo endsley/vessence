@@ -1,11 +1,17 @@
+import datetime
+
 from memory.v1.local_vector_memory_helpers import (
     RECENT_FORGETTABLE_HEADING,
     bucket_memory_facts,
+    forgettable_expiry_iso,
     format_memory_fact,
     is_forgettable_expired,
     librarian_system_instruction,
     librarian_user_prompt,
     memory_tier_sections,
+    owned_memory_ids,
+    utcnow_naive,
+    utcnow_iso,
 )
 
 
@@ -13,6 +19,15 @@ def test_forgettable_expiry_uses_iso_string_boundary():
     assert is_forgettable_expired({"expires_at": "2026-07-01T00:00:00"}, "2026-07-02T00:00:00")
     assert not is_forgettable_expired({"expires_at": "2026-07-03T00:00:00"}, "2026-07-02T00:00:00")
     assert not is_forgettable_expired({}, "2026-07-02T00:00:00")
+
+
+def test_timestamp_helpers_preserve_naive_iso_shape_and_ttl_math():
+    assert utcnow_naive().tzinfo is None
+    assert "T" in utcnow_iso()
+    assert forgettable_expiry_iso(
+        7,
+        now_fn=lambda: datetime.datetime(2026, 7, 2, 12, 0, 0),
+    ) == "2026-07-09T12:00:00"
 
 
 def test_format_memory_fact_preserves_timestamp_topic_and_expiry_shape():
@@ -48,6 +63,22 @@ def test_bucket_memory_facts_filters_expired_forgettable_and_keeps_tiers():
     assert [line.split(": ")[1] for line in permanent] == ["permanent"]
     assert [line.split(": ")[1] for line in long_term] == ["long"]
     assert [line.split(": ")[1] for line in forgettable] == ["recent"]
+
+
+def test_owned_memory_ids_filters_by_user_and_skips_bad_metadata():
+    assert owned_memory_ids(
+        {
+            "ids": ["a", "b", "c", "d"],
+            "metadatas": [
+                {"user_id": "u1"},
+                {"user_id": "u2"},
+                None,
+                {"user_id": "u1"},
+                {"user_id": "u1"},
+            ],
+        },
+        "u1",
+    ) == ["a", "d"]
 
 
 def test_memory_tier_sections_and_librarian_prompts_preserve_headings():

@@ -27,6 +27,10 @@ def normalize_index_path(path_value: str, vault_root: str) -> str | None:
     return fpath
 
 
+def index_path_from_meta(meta: dict[str, Any], vault_root: str) -> str | None:
+    return normalize_index_path(meta.get("path", "") or meta.get("file", "") or "", vault_root)
+
+
 def row_scope_allowed(meta: dict[str, Any], allowed_scope: str | None) -> bool:
     row_scope = (meta.get("user_id") or "").strip()
     return not (allowed_scope and row_scope and row_scope != allowed_scope)
@@ -92,7 +96,7 @@ def merge_index_search_results(
         meta = meta or {}
         if not row_scope_allowed(meta, allowed_scope):
             continue
-        indexed_path = normalize_index_path(meta.get("path", "") or meta.get("file", "") or "", vault_root)
+        indexed_path = index_path_from_meta(meta, vault_root)
         if not indexed_path:
             continue
         filename = os.path.basename(indexed_path)

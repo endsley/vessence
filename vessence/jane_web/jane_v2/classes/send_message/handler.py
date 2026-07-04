@@ -61,6 +61,17 @@ if str(_VAULT_WEB_DIR) not in sys.path:
 
 logger = logging.getLogger(__name__)
 
+
+def _should_resume_send_message(pending: dict | None) -> bool:
+    return bool(
+        pending
+        and (
+            pending.get("handler_class") == "send message"
+            or (pending.get("data") or {}).get("awaiting") in {"send_confirmation", "revised_body"}
+        )
+    )
+
+
 def _check_open_draft(prompt: str) -> dict | None:
     """If there's an open SMS draft in the FIFO, handle confirm/cancel/edit
     here in Stage 2 instead of falling through to Stage 3 or re-extracting."""
@@ -129,52 +140,202 @@ async def _extract_via_llm(prompt: str, context: str) -> dict | None:
     return _parse_extraction(raw)
 
 
+async def _message_metadata(
+    prompt: str,
+    context: str,
+    params: dict | None,
+) -> dict | None:
+    if params:
+        param_status, metadata = _parse_params_metadata(params)
+        if param_status == "ask":
+            logger.info("send_message handler: intent_kind=ask - escalating to Opus draft path")
+            return None
+        if param_status == "missing_recipient":
+            logger.info("send_message handler: params has no recipient - escalating")
+            return None
+        return metadata
+
+    metadata = await _extract_via_llm(prompt, context)
+    if metadata is _WRONG_CLASS_SENTINEL:
+        logger.info("send_message handler: LLM says WRONG_CLASS - escalating with self-correct")
+        return _WRONG_CLASS_SENTINEL
+    if not metadata:
+        logger.warning("send_message handler: extract failed - escalating")
+        return None
+    return metadata
+
+
 async def _handle_resume(prompt: str, pending: dict) -> dict | None:
     """Resume a STAGE2_FOLLOWUP for send_message (confirm-or-revise loop)."""
-    from agent_skills import end_phrase, confirmation
-    from agent_skills.private_handler_utils import end_conversation
+    awaiting, phone, display, body = _resume_draft_fields(pending)
 
+    if awaiting == "send_confirmation":
+        return _handle_send_confirmation_reply(prompt, phone, display, body)
+
+    if awaiting == "revised_body":
+        return _handle_revised_body_reply(prompt, phone, display)
+
+    logger.warning("send_message handler: unknown awaiting %r → abandon", awaiting)
+    return _abandon_to_stage3()
+
+
+def _resume_draft_fields(pending: dict) -> tuple[str, str, str, str]:
     data = pending.get("data") if isinstance(pending.get("data"), dict) else pending
     awaiting = (data or {}).get("awaiting") or pending.get("awaiting") or ""
     draft = (data or {}).get("draft") or {}
-    phone = draft.get("phone") or ""
-    display = draft.get("display") or "them"
-    body = draft.get("body") or ""
+    return (
+        awaiting,
+        draft.get("phone") or "",
+        draft.get("display") or "them",
+        draft.get("body") or "",
+    )
 
-    if awaiting == "send_confirmation":
-        # Order matters: check is_yes/is_no BEFORE end_phrase. Bare "no"
-        # answers "Should I send it?" with "no, change it" — treating it
-        # as a cancel here would surprise the user (see confirmation.py
-        # docstring for full rationale). Cancel is reserved for stronger
-        # phrases like "cancel"/"nevermind"/"stop", which are in
-        # end_phrase but not is_no.
-        if confirmation.is_yes(prompt):
-            if not phone or not body:
-                logger.warning("send_message handler: resume yes but draft incomplete → abandon")
-                return {"abandon_pending": True, "force_stage3": True}
-            logger.info("send_message handler: confirmed → send to %s", display)
-            return _build_sent_response(phone, display, body, prefix="Done.")
-        if confirmation.is_no(prompt):
-            return _build_revision_request_response(phone, display)
-        if end_phrase.is_end(prompt):
-            logger.info("send_message handler: resume — end phrase, cancelling draft to %s", display)
-            return end_conversation("Ok.", structured={"intent": "send message"})
-        logger.info("send_message handler: resume — unrecognized confirm reply → escalate")
-        return {"abandon_pending": True, "force_stage3": True}
 
-    if awaiting == "revised_body":
-        # In the revised_body slot, the user is supplying a new message body.
-        # Don't apply is_yes/is_no here — those would clobber valid 1-word
-        # bodies. Only end_phrase aborts.
-        if end_phrase.is_end(prompt):
-            return end_conversation("Ok.", structured={"intent": "send message"})
-        new_body = (prompt or "").strip()
-        if not new_body:
-            return {"abandon_pending": True, "force_stage3": True}
-        return _build_confirmation_response(phone, display, new_body)
-
-    logger.warning("send_message handler: unknown awaiting %r → abandon", awaiting)
+def _abandon_to_stage3() -> dict:
     return {"abandon_pending": True, "force_stage3": True}
+
+
+def _end_send_message_conversation() -> dict:
+    from agent_skills.private_handler_utils import end_conversation
+
+    return end_conversation("Ok.", structured={"intent": "send message"})
+
+
+def _handle_send_confirmation_reply(
+    prompt: str,
+    phone: str,
+    display: str,
+    body: str,
+) -> dict | None:
+    from agent_skills import confirmation, end_phrase
+
+    # Order matters: check is_yes/is_no BEFORE end_phrase. Bare "no"
+    # answers "Should I send it?" with "no, change it" - treating it
+    # as a cancel here would surprise the user (see confirmation.py
+    # docstring for full rationale). Cancel is reserved for stronger
+    # phrases like "cancel"/"nevermind"/"stop", which are in
+    # end_phrase but not is_no.
+    if confirmation.is_yes(prompt):
+        if not phone or not body:
+            logger.warning("send_message handler: resume yes but draft incomplete -> abandon")
+            return _abandon_to_stage3()
+        logger.info("send_message handler: confirmed -> send to %s", display)
+        return _build_sent_response(phone, display, body, prefix="Done.")
+    if confirmation.is_no(prompt):
+        return _build_revision_request_response(phone, display)
+    if end_phrase.is_end(prompt):
+        logger.info("send_message handler: resume - end phrase, cancelling draft to %s", display)
+        return _end_send_message_conversation()
+    logger.info("send_message handler: resume - unrecognized confirm reply -> escalate")
+    return _abandon_to_stage3()
+
+
+def _handle_revised_body_reply(prompt: str, phone: str, display: str) -> dict | None:
+    from agent_skills import end_phrase
+
+    # In the revised_body slot, the user is supplying a new message body.
+    # Don't apply is_yes/is_no here; those would clobber valid one-word bodies.
+    # Only end_phrase aborts.
+    if end_phrase.is_end(prompt):
+        return _end_send_message_conversation()
+    new_body = (prompt or "").strip()
+    if not new_body:
+        return _abandon_to_stage3()
+    return _build_confirmation_response(phone, display, new_body)
+
+
+def _maybe_auto_alias_contact(
+    spoken_recipient: str,
+    resolved: dict,
+    *,
+    normalize_name_fn,
+    add_alias_fn,
+    get_db_fn=None,
+) -> bool:
+    if resolved.get("source") != "contacts":
+        return False
+
+    phone = resolved.get("phone_number") or ""
+    display = resolved.get("display_name") or ""
+    spoken = normalize_name_fn(spoken_recipient)
+    display_norm = normalize_name_fn(display)
+    if not spoken or spoken == display_norm:
+        return False
+
+    if get_db_fn is None:
+        from vault_web.database import get_db as get_db_fn
+    with get_db_fn() as conn:
+        existing = conn.execute(
+            "SELECT 1 FROM contact_aliases WHERE LOWER(alias) = ? LIMIT 1",
+            (spoken,),
+        ).fetchone()
+    if existing:
+        return False
+
+    return bool(add_alias_fn(spoken, phone, display_name=display))
+
+
+def _resolved_message_response(metadata: dict, phone: str, display: str) -> dict | None:
+    # If the body is missing (user just said "text my wife"), let Stage 3 ask
+    # for it; there is no draft to confirm yet.
+    if metadata["body"] == "(none)" or not metadata["body"].strip():
+        logger.info("send_message handler: no body for '%s' - escalating", display)
+        return None
+
+    # If qwen flagged the body as garbled / cut off, don't blast it. Build a
+    # draft and ask the user to confirm or revise.
+    if not metadata["coherent"]:
+        logger.info("send_message handler: coherence=no -> confirm-or-revise for '%s'", display)
+        return _build_confirmation_response(phone, display, metadata["body"])
+
+    if "confidence" in metadata and not _has_direct_send_confidence(metadata["confidence"]):
+        logger.info(
+            "send_message handler: confidence %r below direct-send floor - escalating",
+            metadata["confidence"],
+        )
+        return None
+
+    logger.info("send_message handler: fast-path -> %s (%s)", display, phone)
+    return _build_sent_response(phone, display, metadata["body"])
+
+
+def _resolve_message_recipient(metadata: dict, resolve_recipient_fn) -> dict | None:
+    resolved = resolve_recipient_fn(metadata["recipient"])
+    if resolved is None:
+        # Unresolved — let Stage 3 (Opus) figure out who this person is.
+        logger.info(
+            "send_message handler: recipient '%s' unresolved - escalating",
+            metadata["recipient"],
+        )
+        return None
+    return resolved
+
+
+def _maybe_auto_alias_resolved_recipient(
+    metadata: dict,
+    resolved: dict,
+    *,
+    normalize_name_fn,
+    add_alias_fn,
+) -> bool:
+    try:
+        if _maybe_auto_alias_contact(
+            metadata["recipient"],
+            resolved,
+            normalize_name_fn=normalize_name_fn,
+            add_alias_fn=add_alias_fn,
+        ):
+            logger.info(
+                "send_message handler: auto-aliased '%s' -> %s (%s)",
+                normalize_name_fn(metadata["recipient"]),
+                resolved.get("phone_number") or "",
+                resolved.get("display_name") or "",
+            )
+            return True
+    except Exception as alias_exc:
+        # Never let alias-write fail the send.
+        logger.warning("auto-alias attempt failed (non-fatal): %s", alias_exc)
+    return False
 
 
 async def handle(prompt: str, context: str = "", pending: dict | None = None,
@@ -191,9 +352,7 @@ async def handle(prompt: str, context: str = "", pending: dict | None = None,
         return None
 
     # Resume path: STAGE2_FOLLOWUP from a previous send_message turn.
-    if pending and (pending.get("handler_class") == "send message"
-                    or (pending.get("data") or {}).get("awaiting") in
-                       {"send_confirmation", "revised_body"}):
+    if _should_resume_send_message(pending):
         return await _handle_resume(prompt, pending)
 
     # Step 0: If there's an open SMS draft, handle confirm/cancel here
@@ -204,23 +363,11 @@ async def handle(prompt: str, context: str = "", pending: dict | None = None,
         return draft_result
 
     # Step 1: Build metadata from params, or fall back to LLM extraction.
-    metadata: dict | None = None
-    if params:
-        param_status, metadata = _parse_params_metadata(params)
-        if param_status == "ask":
-            logger.info("send_message handler: intent_kind=ask — escalating to Opus draft path")
-            return None
-        if param_status == "missing_recipient":
-            logger.info("send_message handler: params has no recipient — escalating")
-            return None
-    else:
-        metadata = await _extract_via_llm(prompt, context)
-        if metadata is _WRONG_CLASS_SENTINEL:
-            logger.info("send_message handler: LLM says WRONG_CLASS — escalating with self-correct")
-            return _WRONG_CLASS_SENTINEL
-        if not metadata:
-            logger.warning("send_message handler: extract failed — escalating")
-            return None
+    metadata = await _message_metadata(prompt, context, params)
+    if metadata is _WRONG_CLASS_SENTINEL:
+        return _WRONG_CLASS_SENTINEL
+    if not metadata:
+        return None
 
     logger.info(
         "send_message handler: recipient=%r body=%r coherent=%s",
@@ -234,14 +381,8 @@ async def handle(prompt: str, context: str = "", pending: dict | None = None,
         logger.warning("send_message handler: sms_helpers import failed: %s", e)
         return None  # escalate
 
-    resolved = resolve_recipient(metadata["recipient"])
-
+    resolved = _resolve_message_recipient(metadata, resolve_recipient)
     if resolved is None:
-        # Unresolved — let Stage 3 (Opus) figure out who this person is
-        logger.info(
-            "send_message handler: recipient '%s' unresolved — escalating",
-            metadata["recipient"],
-        )
         return None
 
     phone = resolved["phone_number"]
@@ -255,47 +396,12 @@ async def handle(prompt: str, context: str = "", pending: dict | None = None,
     # We do NOT overwrite an existing alias — add_alias uses INSERT OR
     # REPLACE which would clobber Chieh's curated entries. Guard by
     # checking the alias table first.
-    try:
-        if resolved.get("source") == "contacts":
-            spoken = _normalize_name(metadata["recipient"])
-            display_norm = _normalize_name(display)
-            if spoken and spoken != display_norm:
-                from vault_web.database import get_db as _get_db
-                with _get_db() as _conn:
-                    _existing = _conn.execute(
-                        "SELECT 1 FROM contact_aliases WHERE LOWER(alias) = ? LIMIT 1",
-                        (spoken,),
-                    ).fetchone()
-                if not _existing:
-                    if add_alias(spoken, phone, display_name=display):
-                        logger.info(
-                            "send_message handler: auto-aliased '%s' → %s (%s)",
-                            spoken, phone, display,
-                        )
-    except Exception as _alias_exc:
-        # Never let alias-write fail the send.
-        logger.warning("auto-alias attempt failed (non-fatal): %s", _alias_exc)
+    _maybe_auto_alias_resolved_recipient(
+        metadata,
+        resolved,
+        normalize_name_fn=_normalize_name,
+        add_alias_fn=add_alias,
+    )
 
-    # Step 4: If the body is missing (user just said "text my wife"), let
-    # Stage 3 ask for it — there's no draft to confirm yet.
-    if metadata["body"] == "(none)" or not metadata["body"].strip():
-        logger.info("send_message handler: no body for '%s' — escalating", display)
-        return None
-
-    # Step 3: Coherence check. If qwen flagged the body as garbled / cut off,
-    # don't blast it. Build a draft and ask the user to confirm or revise.
-    if not metadata["coherent"]:
-        logger.info("send_message handler: coherence=no → confirm-or-revise for '%s'", display)
-        return _build_confirmation_response(phone, display, metadata["body"])
-
-    if "confidence" in metadata and not _has_direct_send_confidence(metadata["confidence"]):
-        logger.info(
-            "send_message handler: confidence %r below direct-send floor — escalating",
-            metadata["confidence"],
-        )
-        return None
-
-    # Step 5: Fast-path send — embed CLIENT_TOOL marker in text and end the
-    # conversation so the voice loop returns to wake-word mode.
-    logger.info("send_message handler: fast-path → %s (%s)", display, phone)
-    return _build_sent_response(phone, display, metadata["body"])
+    # Step 3: Decide whether to send, confirm/revise, or escalate.
+    return _resolved_message_response(metadata, phone, display)

@@ -28,6 +28,12 @@ from jane_web.client_tool_markers import (
 from jane_web.file_context import resolve_file_context_value
 from jane_web.music_playlists import (
     extract_fallback_music_play_marker as _extract_fallback_music_play_marker,
+    music_playlist_delegate_context as _music_playlist_delegate_context,
+    music_playlist_delegate_error_context as _music_playlist_delegate_error_context,
+    music_playlist_no_match_delegate_context as _music_playlist_no_match_delegate_context,
+    music_playlist_no_match_task_context as _music_playlist_no_match_task_context,
+    music_playlist_task_context as _music_playlist_task_context,
+    music_playlist_task_error_context as _music_playlist_task_error_context,
     replace_music_play_marker as _replace_music_play_marker,
 )
 from jane_web.persistent_prompt import (
@@ -47,20 +53,55 @@ from jane_web.proxy_brain import (
     web_chat_model as _get_web_chat_model,
 )
 from jane_web.proxy_logging import LOG_MAX_BYTES, ProxyRequestLogger
+from jane_web.proxy_persistence import (
+    privacy_local_only_for_class as _privacy_local_only_for_class,
+    stage3_writeback_decision as _stage3_writeback_decision,
+)
 from jane_web.proxy_sessions import (
     global_idle_blocks_prune as _global_idle_blocks_prune,
     oldest_session_key as _oldest_session_key,
     read_global_idle_ts as _read_global_idle_ts_from_path,
     session_composite_key as _session_composite_key,
     split_session_composite_key as _split_session_composite_key,
-    stale_session_keys as _stale_session_keys,
+    stale_session_expirations as _stale_session_expirations,
 )
 from jane_web.proxy_text import (
     message_for_persistence as _message_for_persistence,
     prepare_phone_tool_message as _prepare_phone_tool_message,
     progress_snapshot as _progress_snapshot,
 )
+from jane_web.router_overrides import apply_router_keyword_overrides as _apply_router_keyword_overrides
 from jane_web.server_email_tools import execute_email_tool_serverside as _execute_email_tool_serverside
+from jane_web.server_data_contexts import (
+    calendar_delegate_context as _calendar_delegate_context,
+    calendar_delegate_credentials_error_context as _calendar_delegate_credentials_error_context,
+    calendar_delegate_error_context as _calendar_delegate_error_context,
+    calendar_range_from_router_response as _calendar_range_from_router_response,
+    calendar_task_context as _calendar_task_context,
+    calendar_task_credentials_error_context as _calendar_task_credentials_error_context,
+    calendar_task_error_context as _calendar_task_error_context,
+    email_delegate_context as _email_delegate_context,
+    email_delegate_credentials_error_context as _email_delegate_credentials_error_context,
+    email_delegate_error_context as _email_delegate_error_context,
+    email_read_query_from_router_response as _email_read_query_from_router_response,
+    email_task_context as _email_task_context,
+    email_task_credentials_error_context as _email_task_credentials_error_context,
+    email_task_error_context as _email_task_error_context,
+)
+from jane_web.shopping_list_proxy import (
+    parse_shopping_list_proxy_action as _parse_shopping_list_proxy_action,
+    shopping_list_legacy_response as _shopping_list_legacy_response,
+    shopping_list_v2_task_context as _shopping_list_v2_task_context,
+)
+from jane_web.sms_read_context import (
+    SmsReadQuery as _SmsReadQuery,
+    fetch_sms_readback_messages as _fetch_sms_readback_messages,
+    sms_inbox_context as _sms_inbox_context,
+    sms_read_error_context as _sms_read_error_context,
+    sms_read_query_from_router_response as _sms_read_query_from_router_response,
+    sms_task_context as _sms_task_context,
+    sms_task_error_context as _sms_task_error_context,
+)
 from jane_web.tts_contract import (
     combine_tts_detail as _combine_tts_detail,
     enforce_tts_output_contract as _enforce_tts_output_contract,
@@ -221,23 +262,22 @@ def _prune_stale_sessions(now: float | None = None) -> None:
     global_last = _read_global_idle_ts()
     if _global_idle_blocks_prune(now_ts, global_last, SESSION_IDLE_TTL_SECONDS):
         return
-    expired_keys = _stale_session_keys(
+    expirations = _stale_session_expirations(
         _sessions,
         now_ts=now_ts,
         ttl_seconds=SESSION_IDLE_TTL_SECONDS,
     )
-    for composite_key in expired_keys:
+    for expiration in expirations:
         logger.info(
             "[%s] Expiring idle Jane web session after %ds",
-            composite_key[:12],
-            int(now_ts - _sessions[composite_key].last_accessed_at),
+            expiration.composite_key[:12],
+            expiration.idle_seconds,
         )
-        user_id, session_id = _split_session_composite_key(composite_key)
-        if not session_id:
+        if not expiration.session_id:
             # Malformed key — drop without calling end_session to avoid crash.
-            _sessions.pop(composite_key, None)
+            _sessions.pop(expiration.composite_key, None)
             continue
-        end_session(user_id, session_id)
+        end_session(expiration.user_id, expiration.session_id)
 
 
 async def _execute_brain_sync(user_id: str, session_id: str, brain_name: str, adapter, request_ctx) -> str:
@@ -550,7 +590,7 @@ async def _await_prewarm_if_running(session_id: str, state: JaneSessionState, ti
 
 
 def end_session(user_id: str, session_id: str) -> None:
-    composite_key = f"{user_id}:{session_id}"
+    composite_key = _session_composite_key(user_id, session_id)
     state = _sessions.pop(composite_key, None)
     if state and state.conv_manager:
         conv_manager = state.conv_manager
@@ -690,15 +730,17 @@ def _persist_turns_async(
     Gating stage3-tier work on actual stage3 routing eliminates this for
     the common case (voice Q&A handled by v2 handlers).
     """
-    is_stage3 = (stage or "stage3").lower() == "stage3"
     # Explicit privacy gate (independent of stage). Looked up once up-front
     # so the worker thread doesn't have to re-import.
-    privacy_local_only = False
-    try:
+    def _privacy_for_class(class_name: str) -> str:
         from agent_skills.private_handler_utils import privacy_for
-        privacy_local_only = (privacy_for(cls) == "local_only") if cls else False
-    except Exception:
-        privacy_local_only = False
+        return privacy_for(class_name)
+
+    privacy_local_only = _privacy_local_only_for_class(cls, _privacy_for_class)
+    stage3_decision = _stage3_writeback_decision(
+        stage,
+        privacy_local_only=privacy_local_only,
+    )
 
     def _worker() -> None:
         logger.info(
@@ -742,24 +784,24 @@ def _persist_turns_async(
             except Exception as exc:
                 logger.warning("[%s] FIFO write failed (non-fatal): %s", session_id[:12], exc)
 
-        if privacy_local_only:
+        if not stage3_decision.run_stage3_writeback and stage3_decision.reason == "privacy_local_only":
             # Explicit privacy skip — class is marked local_only. Thematic
             # memory (Haiku CLI) and session summary (qwen subprocess) would
             # embed verbatim content and cannot run. Independent of stage
             # so a future reroute of a private class does not accidentally
             # send data to cloud writeback.
-            _log_stage(session_id, "persistence_privacy_skip_haiku_summary", time.perf_counter())
+            _log_stage(session_id, stage3_decision.skip_log_stage, time.perf_counter())
             logger.info(
                 "[%s] Persistence worker finished (privacy=local_only cls=%s — skipped thematic + summary)",
                 _session_log_id(session_id), cls or "-",
             )
             return
 
-        if not is_stage3:
+        if not stage3_decision.run_stage3_writeback:
             # Stage 2 short-circuit — skip thematic + session summary. These
             # are for Opus-tier substantive content; Stage 2 turns are
             # handler-generated templated responses with no durable topic.
-            _log_stage(session_id, "persistence_stage2_skip_theme_summary", time.perf_counter())
+            _log_stage(session_id, stage3_decision.skip_log_stage, time.perf_counter())
             logger.info("[%s] Persistence worker finished (stage2 — skipped thematic + summary)", _session_log_id(session_id))
             return
 
@@ -1288,105 +1330,43 @@ async def stream_message(
                 _stage2_delegate_ack = "Checking your messages..."
                 try:
                     from vault_web.database import get_db as _v2_get_db
-                    import json as _v2j
                     _v2_filter = _stage1.get("filter", "")
-                    _v2_since_ms = int((time.time() - 5 * 86400) * 1000)
+                    _v2_query = _SmsReadQuery(days=5, limit=30, sender_filter=_v2_filter or None)
                     with _v2_get_db() as _v2c:
-                        if _v2_filter:
-                            _v2_fq = f"%{_v2_filter}%"
-                            _v2_rows = _v2c.execute(
-                                "SELECT sender, body, timestamp_ms, is_read, is_contact, msg_type "
-                                "FROM synced_messages WHERE timestamp_ms > ? "
-                                "AND (sender LIKE ? OR body LIKE ?) "
-                                "ORDER BY timestamp_ms DESC LIMIT 30",
-                                (_v2_since_ms, _v2_fq, _v2_fq),
-                            ).fetchall()
-                        else:
-                            _v2_rows = _v2c.execute(
-                                "SELECT sender, body, timestamp_ms, is_read, is_contact, msg_type "
-                                "FROM synced_messages WHERE timestamp_ms > ? "
-                                "ORDER BY timestamp_ms DESC LIMIT 30",
-                                (_v2_since_ms,),
-                            ).fetchall()
-                    from jane_web.message_readback import enrich_synced_messages_for_readback
-                    _v2_msgs = enrich_synced_messages_for_readback([dict(r) for r in _v2_rows])
-                    if _v2_msgs:
-                        from datetime import datetime as _v2dt
-                        for _m2 in _v2_msgs:
-                            try:
-                                _m2["time"] = _v2dt.fromtimestamp(_m2["timestamp_ms"] / 1000).strftime("%b %d %I:%M %p")
-                            except Exception:
-                                pass
-                        _v2_task_ctx = (
-                            "[SMS INBOX DATA — fetched from synced messages DB]\n"
-                            + _v2j.dumps(_v2_msgs, indent=2, default=str)
-                            + "\n[END SMS INBOX DATA]\n\n"
-                            "msg_type guide: personal=important contacts, reminder=appointments, "
-                            "notification=shipping/delivery, spam=skip, unknown=mention if important."
-                            " Use body_for_readback as the text to read to the user. If "
-                            "body_resolution is unresolved_talkingpoints_link, say the linked "
-                            "message could not be opened automatically instead of reading the "
-                            "wrapper notification as the message."
-                        )
-                    else:
-                        _v2_task_ctx = "[SMS INBOX DATA]\nNo text messages found in the last 5 days.\n[END SMS INBOX DATA]"
+                        _v2_msgs = _fetch_sms_readback_messages(_v2c, _v2_query)
+                    _v2_task_ctx = _sms_task_context(_v2_msgs)
                     logger.info("[%s] v2 READ_MESSAGES: fetched %d msgs%s",
                                 session_id[:12], len(_v2_msgs),
                                 f" (filter: {_v2_filter})" if _v2_filter else "")
                 except Exception as _v2_sms_err:
                     logger.error("[%s] v2 SMS fetch failed: %s", session_id[:12], _v2_sms_err)
-                    _v2_task_ctx = f"[SMS ERROR]\nFailed to fetch messages: {_v2_sms_err}\n[END SMS ERROR]"
+                    _v2_task_ctx = _sms_task_error_context(_v2_sms_err)
             elif _s1_cls == "READ_EMAIL":
                 _stage2_delegate_ack = "Let me check your email..."
                 try:
                     from agent_skills.email_tools import read_inbox as _v2_read_inbox
                     _v2_emails = _v2_read_inbox(limit=10, query="is:unread")
-                    if _v2_emails:
-                        import json as _v2ej
-                        _v2_task_ctx = (
-                            "[EMAIL INBOX DATA — fetched server-side]\n"
-                            + _v2ej.dumps(_v2_emails, indent=2, default=str)
-                            + "\n[END EMAIL INBOX DATA]"
-                        )
-                    else:
-                        _v2_task_ctx = "[EMAIL INBOX DATA]\nNo unread emails found.\n[END EMAIL INBOX DATA]"
+                    _v2_task_ctx = _email_task_context(_v2_emails)
                     logger.info("[%s] v2 READ_EMAIL: fetched %d emails", session_id[:12], len(_v2_emails) if _v2_emails else 0)
                 except RuntimeError as _v2_email_err:
-                    _v2_task_ctx = f"[EMAIL ERROR]\nGmail not set up: {_v2_email_err}\n[END EMAIL ERROR]"
+                    _v2_task_ctx = _email_task_credentials_error_context(_v2_email_err)
                 except Exception as _v2_email_err:
                     logger.error("[%s] v2 email fetch failed: %s", session_id[:12], _v2_email_err)
-                    _v2_task_ctx = f"[EMAIL ERROR]\nFailed to fetch emails: {_v2_email_err}\n[END EMAIL ERROR]"
+                    _v2_task_ctx = _email_task_error_context(_v2_email_err)
             elif _s1_cls == "READ_CALENDAR":
                 _stage2_delegate_ack = "Let me check your calendar..."
                 _v2_range = (_stage1.get("range") or "today").strip()
                 try:
                     from agent_skills.calendar_tools import list_events_in_range as _v2_list_cal
                     _v2_events = _v2_list_cal(_v2_range, max_results=25)
-                    if _v2_events:
-                        import json as _v2cj
-                        _v2_task_ctx = (
-                            f"[CALENDAR DATA — range={_v2_range}, fetched server-side]\n"
-                            + _v2cj.dumps(_v2_events, indent=2, default=str)
-                            + "\n[END CALENDAR DATA]"
-                        )
-                    else:
-                        _v2_task_ctx = (
-                            f"[CALENDAR DATA — range={_v2_range}]\n"
-                            f"No events found.\n[END CALENDAR DATA]"
-                        )
+                    _v2_task_ctx = _calendar_task_context(_v2_events, _v2_range)
                     logger.info("[%s] v2 READ_CALENDAR: fetched %d events (range=%s)",
                                 session_id[:12], len(_v2_events) if _v2_events else 0, _v2_range)
                 except RuntimeError as _v2_cal_err:
-                    _v2_task_ctx = (
-                        f"[CALENDAR ERROR]\nGoogle Calendar not set up: {_v2_cal_err}\n"
-                        f"[END CALENDAR ERROR]"
-                    )
+                    _v2_task_ctx = _calendar_task_credentials_error_context(_v2_cal_err)
                 except Exception as _v2_cal_err:
                     logger.error("[%s] v2 calendar fetch failed: %s", session_id[:12], _v2_cal_err)
-                    _v2_task_ctx = (
-                        f"[CALENDAR ERROR]\nFailed to fetch calendar: {_v2_cal_err}\n"
-                        f"[END CALENDAR ERROR]"
-                    )
+                    _v2_task_ctx = _calendar_task_error_context(_v2_cal_err)
             elif _s1_cls == "MUSIC_PLAY":
                 _v2_query = _stage1.get("query", "")
                 _stage2_delegate_ack = f"Playing {_v2_query}..." if _v2_query else "Playing music..."
@@ -1394,55 +1374,29 @@ async def stream_message(
                     from jane_web.main import create_music_playlist_from_query as _v2_pl_fn
                     _v2_pl = _v2_pl_fn(_v2_query)
                     if _v2_pl and _v2_pl.get("tracks"):
-                        _v2_tnames = ", ".join(t.get("title", t.get("path", "?")) for t in _v2_pl["tracks"][:10])
-                        _v2_task_ctx = (
-                            f"[MUSIC DATA]\n"
-                            f"Playlist ID: {_v2_pl['id']}\n"
-                            f"Name: {_v2_pl['name']}\n"
-                            f"Tracks ({len(_v2_pl['tracks'])}): {_v2_tnames}\n"
-                            f"[END MUSIC DATA]"
-                        )
+                        _v2_task_ctx = _music_playlist_task_context(_v2_pl)
                     else:
-                        _v2_task_ctx = "[MUSIC DATA]\nNo matching tracks found.\n[END MUSIC DATA]"
+                        _v2_task_ctx = _music_playlist_no_match_task_context()
                 except Exception as _v2_music_err:
                     logger.warning("[%s] v2 music playlist failed: %s", session_id[:12], _v2_music_err)
-                    _v2_task_ctx = f"[MUSIC ERROR]\n{_v2_music_err}\n[END MUSIC ERROR]"
+                    _v2_task_ctx = _music_playlist_task_error_context(_v2_music_err)
             elif _s1_cls == "SHOPPING_LIST":
-                _v2_action = (_stage1.get("action") or "").lower().strip()
                 try:
                     from agent_skills.shopping_list import (
                         add_item as _v2_add_item,
                         remove_item as _v2_rm_item,
                         clear_list as _v2_clear_list,
                     )
-                    _v2_store = "default"
-                    if _v2_action.startswith("add "):
-                        _v2_item = _v2_action[4:].strip()
-                        for _v2_kw in (" to costco", " to the costco", " to walmart",
-                                       " to the walmart", " to grocery", " to the grocery",
-                                       " to target", " to the target"):
-                            if _v2_kw in _v2_item.lower():
-                                _v2_store = _v2_kw.split("to ")[-1].strip().rstrip(" list").strip()
-                                _v2_item = _v2_item[:_v2_item.lower().index(_v2_kw)].strip()
-                                break
-                        _v2_updated = _v2_add_item(_v2_item, _v2_store)
-                        _v2_task_ctx = (f"Added {_v2_item!r} to the {_v2_store} list. "
-                                        f"Current list: {', '.join(_v2_updated) or '(empty)'}")
-                    elif _v2_action.startswith("remove "):
-                        _v2_item = _v2_action[7:].strip()
-                        for _v2_kw in (" from costco", " from the costco",
-                                       " from walmart", " from grocery"):
-                            if _v2_kw in _v2_item.lower():
-                                _v2_store = _v2_kw.split("from ")[-1].strip().rstrip(" list").strip()
-                                _v2_item = _v2_item[:_v2_item.lower().index(_v2_kw)].strip()
-                                break
-                        _v2_updated = _v2_rm_item(_v2_item, _v2_store)
-                        _v2_task_ctx = (f"Removed {_v2_item!r} from the {_v2_store} list. "
-                                        f"Current list: {', '.join(_v2_updated) or '(empty)'}")
-                    elif _v2_action.startswith("clear"):
-                        _v2_store = _v2_action.replace("clear", "").strip() or "default"
-                        _v2_clear_list(_v2_store)
-                        _v2_task_ctx = f"Cleared the {_v2_store} shopping list."
+                    _v2_action = _parse_shopping_list_proxy_action(_stage1.get("action"))
+                    if _v2_action and _v2_action.kind == "add":
+                        _v2_updated = _v2_add_item(_v2_action.item, _v2_action.store)
+                        _v2_task_ctx = _shopping_list_v2_task_context(_v2_action, _v2_updated)
+                    elif _v2_action and _v2_action.kind == "remove":
+                        _v2_updated = _v2_rm_item(_v2_action.item, _v2_action.store, confidence=1.0)
+                        _v2_task_ctx = _shopping_list_v2_task_context(_v2_action, _v2_updated)
+                    elif _v2_action and _v2_action.kind == "clear":
+                        _v2_clear_list(_v2_action.store, confidence=1.0)
+                        _v2_task_ctx = _shopping_list_v2_task_context(_v2_action)
                 except Exception as _v2_shop_err:
                     logger.warning("[%s] v2 shopping list failed: %s", session_id[:12], _v2_shop_err)
             # ── Execute Stage 2 ────────────────────────────────────────────────────
@@ -1501,31 +1455,16 @@ async def stream_message(
                            if h.get("role") in ("user", "assistant") and isinstance(h.get("content"), str)]
         _classification, _router_response = await classify_prompt(message, _router_history)
         # Keyword safety net: override Gemma if it misclassifies obvious intents
-        _msg_lower = (message or "").lower()
-        if _classification != "read_email" and any(kw in _msg_lower for kw in ("email", "inbox", "gmail")):
-            if any(kw in _msg_lower for kw in ("read", "check", "see", "show", "any new", "what")):
-                logger.info("[%s] Keyword override: %s → read_email", session_id[:12], _classification)
-                _classification = "read_email"
-                _router_response = "read_email"
-        if _classification != "read_calendar" and any(kw in _msg_lower for kw in ("calendar", "agenda", "schedule")):
-            if any(kw in _msg_lower for kw in ("read", "check", "see", "show", "what's on", "what is on",
-                                               "what do i have", "anything on", "pull up", "look at",
-                                               "am i busy", "am i free", "my day look")):
-                # Avoid stealing "schedule a meeting" — only fire on "my schedule" or "schedule today/..."
-                if "calendar" in _msg_lower or "agenda" in _msg_lower or "my schedule" in _msg_lower:
-                    logger.info("[%s] Keyword override: %s → read_calendar", session_id[:12], _classification)
-                    _classification = "read_calendar"
-                    _router_response = "today"
-        if _classification != "read_messages" and _classification != "sync_messages" and any(kw in _msg_lower for kw in ("text msg", "text message", "texts", "sms")):
-            if any(kw in _msg_lower for kw in ("read", "check", "see", "show", "any new", "what")):
-                logger.info("[%s] Keyword override: %s → read_messages", session_id[:12], _classification)
-                _classification = "read_messages"
-                _router_response = "read_inbox"
-        if _classification != "sync_messages" and any(kw in _msg_lower for kw in ("sync", "resync", "re-sync")):
-            if any(kw in _msg_lower for kw in ("message", "messages", "texts", "sms", "text")):
-                logger.info("[%s] Keyword override: %s → sync_messages", session_id[:12], _classification)
-                _classification = "sync_messages"
-                _router_response = "sync"
+        _keyword_override = _apply_router_keyword_overrides(_classification, _router_response, message)
+        for _old_classification, _new_classification in _keyword_override.changes:
+            logger.info(
+                "[%s] Keyword override: %s → %s",
+                session_id[:12],
+                _old_classification,
+                _new_classification,
+            )
+        _classification = _keyword_override.classification
+        _router_response = _keyword_override.response
         if _classification == "music_play" and _router_response:
             # Music: delegate to Opus for nuanced handling (e.g., "play something
             # relaxing", "skip the piano tutorials"). Server pre-creates the playlist
@@ -1538,24 +1477,12 @@ async def stream_message(
                 from jane_web.main import create_music_playlist_from_query
                 playlist = create_music_playlist_from_query(_router_response)
                 if playlist is not None and len(playlist.get("tracks", [])) > 0:
-                    track_count = len(playlist["tracks"])
-                    track_names = ", ".join(t.get("title", t.get("path", "?")) for t in playlist["tracks"][:10])
-                    _music_ctx = (
-                        f"\n\n[MUSIC DATA — playlist created server-side]\n"
-                        f"Playlist ID: {playlist['id']}\n"
-                        f"Name: {playlist['name']}\n"
-                        f"Tracks ({track_count}): {track_names}\n"
-                        f"[END MUSIC DATA]\n\n"
-                        f"To play this playlist, include [MUSIC_PLAY:{playlist['id']}] in your response.\n"
-                        f"Tell the user what you're playing. If tracks include duplicates or "
-                        f"unwanted versions (e.g., tutorials vs originals), mention it."
-                    )
-                    message = message + _music_ctx
+                    message = message + _music_playlist_delegate_context(playlist)
                 else:
-                    message = message + "\n\n[MUSIC DATA]\nNo matching tracks found for this query.\n[END MUSIC DATA]\nTell the user you couldn't find matching music."
+                    message = message + _music_playlist_no_match_delegate_context()
             except Exception as _music_err:
                 logger.warning("[%s] Music playlist creation failed: %s", session_id[:12], _music_err)
-                message = message + f"\n\n[MUSIC ERROR]\nFailed to search music library: {_music_err}\n[END MUSIC ERROR]"
+                message = message + _music_playlist_delegate_error_context(_music_err)
         elif _classification == "read_messages":
             # Read messages server-side from synced_messages DB (synced by Android).
             # Same pattern as read_email: inject data into the brain context.
@@ -1566,84 +1493,21 @@ async def stream_message(
             _sms_data_ctx = ""
             try:
                 from vault_web.database import get_db as _get_sms_db
-                import json as _sms_json
                 # Parse optional sender filter from router response
-                _sms_resp = (_router_response or "").lower().strip()
-                _sms_days = 5
-                _sms_limit = 30
-                _sender_filter = None
-                # Check for sender name in response (e.g., "read_inbox kathia")
-                import re as _sms_re
-                _sms_parts = _sms_resp.replace("read_inbox", "").replace("read_messages", "").strip()
-                if _sms_parts and not _sms_parts.isdigit():
-                    _sender_filter = _sms_parts.strip()
-                _limit_match = _sms_re.search(r"\b(\d+)\b", _sms_resp)
-                if _limit_match:
-                    _sms_limit = min(int(_limit_match.group(1)), 50)
-
-                _since_ms = int((time.time() - _sms_days * 86400) * 1000)
+                _sms_query = _sms_read_query_from_router_response(_router_response)
                 with _get_sms_db() as _sms_conn:
-                    if _sender_filter:
-                        _filter_q = f"%{_sender_filter}%"
-                        _sms_rows = _sms_conn.execute(
-                            """SELECT sender, body, timestamp_ms, is_read, is_contact, msg_type
-                               FROM synced_messages
-                               WHERE timestamp_ms > ? AND (sender LIKE ? OR body LIKE ?)
-                               ORDER BY timestamp_ms DESC LIMIT ?""",
-                            (_since_ms, _filter_q, _filter_q, _sms_limit),
-                        ).fetchall()
-                    else:
-                        _sms_rows = _sms_conn.execute(
-                            """SELECT sender, body, timestamp_ms, is_read, is_contact, msg_type
-                               FROM synced_messages
-                               WHERE timestamp_ms > ?
-                               ORDER BY timestamp_ms DESC LIMIT ?""",
-                            (_since_ms, _sms_limit),
-                        ).fetchall()
-                    from jane_web.message_readback import enrich_synced_messages_for_readback
-                    _sms_list = enrich_synced_messages_for_readback([dict(r) for r in _sms_rows])
+                    _sms_list = _fetch_sms_readback_messages(_sms_conn, _sms_query)
 
+                _sms_data_ctx = _sms_inbox_context(_sms_list)
                 if _sms_list:
-                    from datetime import datetime as _dt
-                    for _m in _sms_list:
-                        try:
-                            _m["time"] = _dt.fromtimestamp(_m["timestamp_ms"] / 1000).strftime("%b %d %I:%M %p")
-                        except Exception:
-                            pass
-                    _sms_data_ctx = (
-                        "\n\n[SMS INBOX DATA — fetched from synced messages DB]\n"
-                        + _sms_json.dumps(_sms_list, indent=2, default=str)
-                        + "\n[END SMS INBOX DATA]\n\n"
-                        "Summarize these text messages. Each message has a msg_type field:\n"
-                        "- 'personal' (is_contact=true): from known contacts — read these first, they're important\n"
-                        "- 'reminder': appointments, due dates, renewals — mention briefly\n"
-                        "- 'notification': shipping, delivery, order updates — mention briefly\n"
-                        "- 'spam': promotions, deals, marketing — skip unless user asks\n"
-                        "- 'unknown': unrecognized sender — mention only if content seems important\n"
-                        "Use body_for_readback as the text to read to the user. If "
-                        "body_resolution is unresolved_talkingpoints_link, say the linked "
-                        "message could not be opened automatically instead of reading the "
-                        "wrapper notification as the message.\n"
-                        "Group personal messages by sender. If the user asked about a specific person, focus on those."
-                    )
+                    _sms_count = len(_sms_list)
                 else:
-                    _sms_data_ctx = (
-                        "\n\n[SMS INBOX DATA — fetched from synced messages DB]\n"
-                        "No text messages found in the last 5 days.\n"
-                        "[END SMS INBOX DATA]\n\n"
-                        "Tell the user no recent text messages were found. "
-                        "If messages haven't synced yet, suggest they open the Vessence app on their phone."
-                    )
+                    _sms_count = 0
                 logger.info("[%s] Fetched %d SMS messages from synced DB%s",
-                            session_id[:12], len(_sms_list),
-                            f" (filter: {_sender_filter})" if _sender_filter else "")
+                            session_id[:12], _sms_count,
+                            f" (filter: {_sms_query.sender_filter})" if _sms_query.sender_filter else "")
             except Exception as _sms_err:
-                _sms_data_ctx = (
-                    "\n\n[SMS ERROR]\n"
-                    f"Failed to fetch messages from DB: {_sms_err}\n"
-                    "Apologize and suggest the user open the Vessence app to trigger a sync.\n"
-                    "[END SMS ERROR]"
-                )
+                _sms_data_ctx = _sms_read_error_context(_sms_err)
                 logger.error("[%s] SMS DB fetch failed: %s", session_id[:12], _sms_err)
             if _sms_data_ctx:
                 message = message + _sms_data_ctx
@@ -1674,55 +1538,17 @@ async def stream_message(
             try:
                 from agent_skills.email_tools import read_inbox as _read_inbox
                 # Parse limit and query from router response
-                _email_resp = (_router_response or "").lower().strip()
-                _email_limit = 10
-                _email_query = "is:unread"
-                # Check for number in response (e.g., "read_email 3")
-                import re as _email_re
-                _limit_match = _email_re.search(r"\b(\d+)\b", _email_resp)
-                if _limit_match:
-                    _email_limit = min(int(_limit_match.group(1)), 20)
-                # Check for sender filter (e.g., "from:bob")
-                _from_match = _email_re.search(r"from:(\S+)", _email_resp)
-                if _from_match:
-                    _email_query = f"from:{_from_match.group(1)}"
-                _emails = _read_inbox(limit=_email_limit, query=_email_query)
-                if _emails:
-                    import json as _ej
-                    _email_data_ctx = (
-                        "\n\n[EMAIL INBOX DATA — fetched server-side just now]\n"
-                        + _ej.dumps(_emails, indent=2, default=str)
-                        + "\n[END EMAIL INBOX DATA]\n\n"
-                        "Summarize these emails for the user. Triage: personal/important emails first, "
-                        "skip spam/promos. Quote sender and subject. If the user asked about a specific "
-                        "sender or count, honor that."
-                    )
-                else:
-                    _email_data_ctx = (
-                        "\n\n[EMAIL INBOX DATA — fetched server-side just now]\n"
-                        "No unread emails found.\n"
-                        "[END EMAIL INBOX DATA]\n\n"
-                        "Tell the user their inbox is clear."
-                    )
+                _email_query = _email_read_query_from_router_response(_router_response)
+                _emails = _read_inbox(limit=_email_query.limit, query=_email_query.query)
+                _email_data_ctx = _email_delegate_context(_emails)
                 logger.info("[%s] Fetched %d emails server-side", session_id[:12], len(_emails))
             except RuntimeError as _email_err:
                 # No Gmail credentials — tell the brain so it can explain
-                _email_data_ctx = (
-                    "\n\n[EMAIL ERROR]\n"
-                    f"Gmail is not set up yet: {_email_err}\n"
-                    "Tell the user they need to sign in with Google on the Vessence web UI "
-                    "to enable email access. The sign-in page is at their Jane web URL.\n"
-                    "[END EMAIL ERROR]"
-                )
+                _email_data_ctx = _email_delegate_credentials_error_context(_email_err)
                 logger.warning("[%s] Email fetch failed (no credentials): %s",
                                session_id[:12], _email_err)
             except Exception as _email_err:
-                _email_data_ctx = (
-                    "\n\n[EMAIL ERROR]\n"
-                    f"Failed to fetch emails: {_email_err}\n"
-                    "Apologize and suggest trying again.\n"
-                    "[END EMAIL ERROR]"
-                )
+                _email_data_ctx = _email_delegate_error_context(_email_err)
                 logger.error("[%s] Email fetch failed: %s", session_id[:12], _email_err)
             # Inject email data into the brain message
             if _email_data_ctx:
@@ -1736,94 +1562,38 @@ async def stream_message(
             _gemma_short_circuit = False
             _cal_data_ctx = ""
             # Parse range hint from router response (default today) and from user msg
-            _cal_range = (_router_response or "today").strip().lower() or "today"
-            if "tomorrow" in _msg_lower:
-                _cal_range = "tomorrow"
-            elif "this week" in _msg_lower:
-                _cal_range = "this_week"
-            elif "next week" in _msg_lower:
-                _cal_range = "next_week"
-            elif "this weekend" in _msg_lower or "weekend" in _msg_lower:
-                _cal_range = "weekend"
-            elif "coming up" in _msg_lower or "next 7" in _msg_lower:
-                _cal_range = "next"
+            _cal_range = _calendar_range_from_router_response(_router_response, message)
             try:
                 from agent_skills.calendar_tools import list_events_in_range as _list_cal_range
                 _cal_events = _list_cal_range(_cal_range, max_results=25)
-                if _cal_events:
-                    import json as _cj
-                    _cal_data_ctx = (
-                        f"\n\n[CALENDAR DATA — range={_cal_range}, fetched server-side just now]\n"
-                        + _cj.dumps(_cal_events, indent=2, default=str)
-                        + "\n[END CALENDAR DATA]\n\n"
-                        "Summarize these events naturally. Count them, mention titles and start times, "
-                        "flag back-to-back meetings or conflicts. If the user asked about a specific "
-                        "person/topic, filter accordingly. Times are in the user's local timezone."
-                    )
-                else:
-                    _cal_data_ctx = (
-                        f"\n\n[CALENDAR DATA — range={_cal_range}, fetched server-side just now]\n"
-                        "No events found.\n"
-                        "[END CALENDAR DATA]\n\n"
-                        f"Tell the user their {_cal_range.replace('_', ' ')} is clear."
-                    )
+                _cal_data_ctx = _calendar_delegate_context(_cal_events, _cal_range)
                 logger.info("[%s] Fetched %d calendar events server-side (range=%s)",
                             session_id[:12], len(_cal_events), _cal_range)
             except RuntimeError as _cal_err:
-                _cal_data_ctx = (
-                    "\n\n[CALENDAR ERROR]\n"
-                    f"Google Calendar is not set up: {_cal_err}\n"
-                    "Tell the user they need to sign in with Google on the Vessence web UI "
-                    "to enable calendar access.\n"
-                    "[END CALENDAR ERROR]"
-                )
+                _cal_data_ctx = _calendar_delegate_credentials_error_context(_cal_err)
                 logger.warning("[%s] Calendar fetch failed (no credentials): %s",
                                session_id[:12], _cal_err)
             except Exception as _cal_err:
-                _cal_data_ctx = (
-                    "\n\n[CALENDAR ERROR]\n"
-                    f"Failed to fetch calendar: {_cal_err}\n"
-                    "Apologize and suggest trying again.\n"
-                    "[END CALENDAR ERROR]"
-                )
+                _cal_data_ctx = _calendar_delegate_error_context(_cal_err)
                 logger.error("[%s] Calendar fetch failed: %s", session_id[:12], _cal_err)
             if _cal_data_ctx:
                 message = message + _cal_data_ctx
         elif _classification == "shopping_list":
             # Shopping list intent — handle add/remove directly, delegate queries to brain.
             logger.info("[%s] Gemma router: shopping_list action='%s'", session_id[:12], _router_response)
-            from agent_skills.shopping_list import add_item, remove_item, clear_list, get_all_lists, format_for_context as _fmt_shopping
-            _action = (_router_response or "").lower().strip()
-            if _action.startswith("add "):
-                _item = _action[4:].strip()
-                # Detect store name: "add X to costco" or "add X to the costco list"
-                _store = "default"
-                for _kw in (" to costco", " to the costco", " to walmart", " to the walmart",
-                            " to grocery", " to the grocery", " to target", " to the target"):
-                    if _kw in _item.lower():
-                        _store = _kw.split("to ")[-1].strip().rstrip(" list").strip()
-                        _item = _item[:_item.lower().index(_kw)].strip()
-                        break
-                _updated = add_item(_item, _store)
-                _list_display = ", ".join(_updated) if _updated else "(empty)"
-                _router_response = f"Added **{_item}** to the {_store} list. Current list: {_list_display}"
+            from agent_skills.shopping_list import add_item, remove_item, clear_list
+            _action = _parse_shopping_list_proxy_action(_router_response)
+            if _action and _action.kind == "add":
+                _updated = add_item(_action.item, _action.store)
+                _router_response = _shopping_list_legacy_response(_action, _updated)
                 _gemma_short_circuit = True
-            elif _action.startswith("remove "):
-                _item = _action[7:].strip()
-                _store = "default"
-                for _kw in (" from costco", " from the costco", " from walmart", " from grocery"):
-                    if _kw in _item.lower():
-                        _store = _kw.split("from ")[-1].strip().rstrip(" list").strip()
-                        _item = _item[:_item.lower().index(_kw)].strip()
-                        break
-                _updated = remove_item(_item, _store)
-                _list_display = ", ".join(_updated) if _updated else "(empty)"
-                _router_response = f"Removed **{_item}** from the {_store} list. Current list: {_list_display}"
+            elif _action and _action.kind == "remove":
+                _updated = remove_item(_action.item, _action.store, confidence=1.0)
+                _router_response = _shopping_list_legacy_response(_action, _updated)
                 _gemma_short_circuit = True
-            elif _action.startswith("clear"):
-                _store = _action.replace("clear", "").strip() or "default"
-                clear_list(_store)
-                _router_response = f"Cleared the {_store} shopping list."
+            elif _action and _action.kind == "clear":
+                clear_list(_action.store, confidence=1.0)
+                _router_response = _shopping_list_legacy_response(_action)
                 _gemma_short_circuit = True
             else:
                 # Show/check/query — delegate to brain with list in context

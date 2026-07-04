@@ -208,6 +208,57 @@ _FORCE_STAGE3_RE = re.compile(
     re.IGNORECASE,
 )
 
+
+def _force_stage3_override(cleaned_prompt: str) -> str | None:
+    lc = (cleaned_prompt or "").lower()
+    for phrase in FORCE_STAGE3_PHRASES:
+        if phrase in lc:
+            return phrase
+    if _FORCE_STAGE3_RE.search(lc):
+        return "__regex__"
+    return None
+
+
+def _classification_confidence(
+    raw_cls: str,
+    cls: str,
+    confidence: float,
+    margin: float,
+    cleaned_prompt: str,
+) -> str:
+    gate = _gate_for(raw_cls)
+    if raw_cls == "DELEGATE_OPUS" or cls == "others":
+        return "Low"
+    if raw_cls == "END_CONVERSATION" and not _end_conversation_phrase_ok(cleaned_prompt):
+        logger.info(
+            "stage1_classifier: END_CONVERSATION phrase guard rejected %r",
+            cleaned_prompt[:100],
+        )
+        return "Low"
+    if raw_cls == "END_CONVERSATION" and confidence < 0.80:
+        # Extra floor: a wrong END_CONVERSATION destroys the session.
+        return "Low"
+    if raw_cls == "CLINIC_SCHEDULES_INFO" and not _clinic_schedule_ok(cleaned_prompt):
+        logger.info(
+            "stage1_classifier: CLINIC_SCHEDULES_INFO rejected personal schedule phrasing %r",
+            cleaned_prompt[:100],
+        )
+        return "Low"
+    if confidence < gate["conf"] or margin < gate["margin"]:
+        # Below this class's maturity gate → demote so Stage 3 decides.
+        return "Low"
+    if raw_cls in STRICT_CLASSES and not _strict_keyword_ok(raw_cls, cleaned_prompt):
+        # Strict-class keyword guard: even a unanimous embedding vote must be
+        # backed by a literal keyword. Stops false positives like
+        # "any updates from yesterday" → READ_MESSAGES.
+        logger.info(
+            "stage1_classifier: STRICT %s lacks keyword in %r — demote to Low",
+            raw_cls, cleaned_prompt[:80],
+        )
+        return "Low"
+    return "High"
+
+
 async def classify(
     user_prompt: str,
     session_id: str | None = None,
@@ -235,13 +286,11 @@ async def classify(
 
     # Hard phrase override — user explicitly asked for deeper thinking.
     # Bypass ChromaDB so loose embedding matches in sibling classes can't win.
-    _lc = cleaned.lower()
-    for _p in FORCE_STAGE3_PHRASES:
-        if _p in _lc:
-            logger.info("stage1_classifier: FORCE_STAGE3 phrase override (%r)", _p)
-            return ("others", "Low", 1.0)
-    # Regex fallback for variants like "think this deeply" / "reason it through"
-    if _FORCE_STAGE3_RE.search(_lc):
+    override = _force_stage3_override(cleaned)
+    if override and override != "__regex__":
+        logger.info("stage1_classifier: FORCE_STAGE3 phrase override (%r)", override)
+        return ("others", "Low", 1.0)
+    if override == "__regex__":
         logger.info("stage1_classifier: FORCE_STAGE3 regex override")
         return ("others", "Low", 1.0)
 
@@ -262,38 +311,7 @@ async def classify(
     # error-capture (questions that embed near goodbyes, etc.) lives in
     # Stage 2's _gate_check — that's the three-stage design.
     margin = result.get("margin", 0.0)
-    gate = _gate_for(raw_cls)
-    if raw_cls == "DELEGATE_OPUS" or cls == "others":
-        conf = "Low"
-    elif raw_cls == "END_CONVERSATION" and not _end_conversation_phrase_ok(cleaned):
-        logger.info(
-            "stage1_classifier: END_CONVERSATION phrase guard rejected %r",
-            cleaned[:100],
-        )
-        conf = "Low"
-    elif raw_cls == "END_CONVERSATION" and confidence < 0.80:
-        # Extra floor: a wrong END_CONVERSATION destroys the session.
-        conf = "Low"
-    elif raw_cls == "CLINIC_SCHEDULES_INFO" and not _clinic_schedule_ok(cleaned):
-        logger.info(
-            "stage1_classifier: CLINIC_SCHEDULES_INFO rejected personal schedule phrasing %r",
-            cleaned[:100],
-        )
-        conf = "Low"
-    elif confidence < gate["conf"] or margin < gate["margin"]:
-        # Below this class's maturity gate → demote so Stage 3 decides.
-        conf = "Low"
-    elif raw_cls in STRICT_CLASSES and not _strict_keyword_ok(raw_cls, cleaned):
-        # Strict-class keyword guard: even a unanimous embedding vote must be
-        # backed by a literal keyword. Stops false positives like
-        # "any updates from yesterday" → READ_MESSAGES.
-        logger.info(
-            "stage1_classifier: STRICT %s lacks keyword in %r — demote to Low",
-            raw_cls, cleaned[:80],
-        )
-        conf = "Low"
-    else:
-        conf = "High"
+    conf = _classification_confidence(raw_cls, cls, confidence, margin, cleaned)
 
     min_dist = float(result.get("min_dist", 1.0))
     logger.info(

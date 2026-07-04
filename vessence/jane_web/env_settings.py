@@ -32,26 +32,33 @@ class EnvFileSettings:
         self.environ[key] = value
 
     def add_allowed_google_email(self, email: str) -> bool:
-        normalized = (email or "").strip().lower()
+        normalized = self._normalize_email(email)
         current = self._allowed_google_emails()
         if normalized in current:
             return False
         current.append(normalized)
-        self.write_var("ALLOWED_GOOGLE_EMAILS", ",".join(current))
+        self._write_allowed_google_emails(current)
         return True
 
     def remove_allowed_google_email(self, email: str) -> bool:
-        normalized = (email or "").strip().lower()
+        normalized = self._normalize_email(email)
         current = self._allowed_google_emails()
         if normalized not in current:
             return False
         current.remove(normalized)
-        self.write_var("ALLOWED_GOOGLE_EMAILS", ",".join(current))
+        self._write_allowed_google_emails(current)
         return True
+
+    @staticmethod
+    def _normalize_email(email: str) -> str:
+        return (email or "").strip().lower()
 
     def _allowed_google_emails(self) -> list[str]:
         return [
-            email.strip().lower()
+            self._normalize_email(email)
             for email in self.environ.get("ALLOWED_GOOGLE_EMAILS", "").split(",")
             if email.strip()
         ]
+
+    def _write_allowed_google_emails(self, emails: list[str]) -> None:
+        self.write_var("ALLOWED_GOOGLE_EMAILS", ",".join(emails))

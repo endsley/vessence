@@ -1,4 +1,38 @@
-from jane_web.self_improvement_context import build_self_improvement_context_block
+from jane_web.self_improvement_context import (
+    _context_header_lines,
+    _entry_reference_line,
+    _job_category_summary,
+    build_self_improvement_context_block,
+)
+
+
+def test_self_improvement_context_helpers_preserve_header_summary_and_entry_shapes():
+    assert _context_header_lines(
+        log_path="/tmp/vocal.jsonl",
+        tech_logs="/tmp/*.log",
+        latest_report="/tmp/latest.md",
+    ) == [
+        "\n\n[SELF IMPROVEMENT CONTEXT]",
+        "Readable latest report: /tmp/latest.md",
+        "Vocal summary log file: /tmp/vocal.jsonl",
+        "Technical job logs: /tmp/*.log",
+    ]
+    assert _job_category_summary(
+        [
+            {"job": "Transcript Review"},
+            {"job": "Timer Audit"},
+            {"job": "Transcript Review"},
+            {},
+        ]
+    ) == "Transcript Review (2), Timer Audit (1), ? (1)"
+    assert _entry_reference_line(
+        2,
+        {
+            "timestamp": "2026-07-02T01:00:00Z",
+            "job": "Timer Audit",
+            "summary": " Cleaned a timer edge case. ",
+        },
+    ) == "2. [2026-07-02T01:00:00Z | Timer Audit | info] Cleaned a timer edge case."
 
 
 def test_build_self_improvement_context_block_empty_log_shape():

@@ -41,10 +41,35 @@ def is_login_wall_body(
     return any(marker.lower() in body_lower for marker in markers)
 
 
+def strip_doc_bom(text: str) -> str:
+    return text[1:] if text.startswith("\ufeff") else text
+
+
+def is_todo_title_line(index: int, line: str) -> bool:
+    return index == 0 and line.strip().lower() in TODO_TITLE_LINES
+
+
+def list_item_text(raw_line: str) -> str | None:
+    if not LIST_MARKER_RE.match(raw_line):
+        return None
+    return LIST_MARKER_RE.sub("", raw_line).strip()
+
+
+def next_nonblank_index(lines: list[str], start: int) -> int:
+    index = start
+    while index < len(lines) and not lines[index].strip():
+        index += 1
+    return index
+
+
+def is_category_header(lines: list[str], index: int) -> bool:
+    next_index = next_nonblank_index(lines, index + 1)
+    return next_index < len(lines) and list_item_text(lines[next_index]) is not None
+
+
 def parse_categories(text: str) -> list[dict[str, Any]]:
     # Strip UTF-8 BOM that Google's export sometimes prepends.
-    if text.startswith("\ufeff"):
-        text = text[1:]
+    text = strip_doc_bom(text)
     lines = text.splitlines()
     result: list[dict[str, Any]] = []
     i = 0
@@ -58,28 +83,26 @@ def parse_categories(text: str) -> list[dict[str, Any]]:
             continue
 
         # Skip the doc title on its own line if present at top.
-        if i == 0 and line.lower() in TODO_TITLE_LINES:
+        if is_todo_title_line(i, line):
             i += 1
             continue
 
-        if LIST_MARKER_RE.match(raw):
+        item_text = list_item_text(raw)
+        if item_text is not None:
             # List item without a preceding header: attach to last category
             # or synthesize an "Uncategorized" bucket.
             if not result:
                 result.append({"name": "Uncategorized", "items": []})
-            result[-1]["items"].append(LIST_MARKER_RE.sub("", raw).strip())
+            result[-1]["items"].append(item_text)
             i += 1
             continue
 
         # Potential header: only confirm if the next non-blank line is a
         # list marker. This guards against free prose being treated as a
         # new category.
-        j = i + 1
-        while j < n and not lines[j].strip():
-            j += 1
-        if j < n and LIST_MARKER_RE.match(lines[j]):
+        if is_category_header(lines, i):
             result.append({"name": line, "items": []})
-            i = j
+            i = next_nonblank_index(lines, i + 1)
             continue
 
         # Line isn't a header: drop it to keep prose and footer noise out.

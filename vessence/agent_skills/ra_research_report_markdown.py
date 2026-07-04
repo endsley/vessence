@@ -268,17 +268,10 @@ def build_deterministic_recommendation_scheme(
     return header + "\n" + "\n".join(evidence_rows) + "\n\n" + footer
 
 
-def build_useful_report_markdown(
+def useful_report_summary_groups(
     new_summaries: list[dict[str, Any]],
     all_summaries: list[dict[str, Any]],
-    codex_result: dict[str, Any] | None,
-    source_count: int,
-    *,
-    recommendation_path: Any = "",
-    action_plan_path: Any = "",
-    compressed_context_path: Any = "",
-    discoveries_path: Any = "",
-) -> str:
+) -> dict[str, Any]:
     unique_new = dedupe_summaries(new_summaries)
     ranked_new = sorted(unique_new, key=summary_signal_score, reverse=True)
     high_signal = [
@@ -290,6 +283,61 @@ def build_useful_report_markdown(
         if is_low_value_summary(summary)
     ][:6]
     themes = infer_report_themes(unique_new) or infer_report_themes(all_summaries[:30])
+    return {
+        "unique_new": unique_new,
+        "ranked_new": ranked_new,
+        "high_signal": high_signal,
+        "low_signal": low_signal,
+        "themes": themes,
+    }
+
+
+def useful_finding_lines(summary: dict[str, Any]) -> list[str]:
+    findings = list_values(summary.get("main_findings"), max_items=2, max_chars=260)
+    actions = filter_report_items(list_values(summary.get("actionable_implications"), max_items=2, max_chars=240))
+    questions = filter_report_items(list_values(summary.get("clinician_discussion_points"), max_items=2, max_chars=240))
+    caveats = filter_report_items(list_values(summary.get("limitations"), max_items=1, max_chars=240))
+    safety = filter_report_items(list_values(summary.get("safety_concerns"), max_items=1, max_chars=240))
+    lines = [
+        f"### {source_heading(summary)}",
+        f"- Evidence: {evidence_label(summary)}.",
+        f"- Why it matters: {text_value(summary.get('remission_relevance'), 340) or 'No remission relevance captured.'}",
+    ]
+    for finding in findings:
+        lines.append(f"- Finding: {finding}")
+    for action in actions:
+        lines.append(f"- Useful next step: {action}")
+    for question in questions:
+        lines.append(f"- Clinician question: {question}")
+    for caveat in caveats:
+        lines.append(f"- Caveat: {caveat}")
+    for flag in safety:
+        if not flag.lower().startswith("no safety concerns"):
+            lines.append(f"- Safety note: {flag}")
+    return lines
+
+
+def source_trace_line(summary: dict[str, Any]) -> str:
+    return f"- {source_heading(summary, 120)} | {evidence_label(summary)} | {summary.get('url', '')}"
+
+
+def build_useful_report_markdown(
+    new_summaries: list[dict[str, Any]],
+    all_summaries: list[dict[str, Any]],
+    codex_result: dict[str, Any] | None,
+    source_count: int,
+    *,
+    recommendation_path: Any = "",
+    action_plan_path: Any = "",
+    compressed_context_path: Any = "",
+    discoveries_path: Any = "",
+) -> str:
+    groups = useful_report_summary_groups(new_summaries, all_summaries)
+    unique_new = groups["unique_new"]
+    ranked_new = groups["ranked_new"]
+    high_signal = groups["high_signal"]
+    low_signal = groups["low_signal"]
+    themes = groups["themes"]
     discoveries = list_values((codex_result or {}).get("discoveries"), max_items=5, max_chars=260)
     open_questions = list_values((codex_result or {}).get("open_questions"), max_items=5, max_chars=260)
     useful_for_questions = high_signal or [summary for summary in ranked_new if not is_low_value_summary(summary)]
@@ -329,29 +377,7 @@ def build_useful_report_markdown(
     if not high_signal:
         lines.append("- None this run. The report is flagging this explicitly instead of burying the signal in a source list.")
     for summary in high_signal:
-        findings = list_values(summary.get("main_findings"), max_items=2, max_chars=260)
-        actions = filter_report_items(list_values(summary.get("actionable_implications"), max_items=2, max_chars=240))
-        questions = filter_report_items(list_values(summary.get("clinician_discussion_points"), max_items=2, max_chars=240))
-        caveats = filter_report_items(list_values(summary.get("limitations"), max_items=1, max_chars=240))
-        safety = filter_report_items(list_values(summary.get("safety_concerns"), max_items=1, max_chars=240))
-        lines.extend(
-            [
-                f"### {source_heading(summary)}",
-                f"- Evidence: {evidence_label(summary)}.",
-                f"- Why it matters: {text_value(summary.get('remission_relevance'), 340) or 'No remission relevance captured.'}",
-            ]
-        )
-        for finding in findings:
-            lines.append(f"- Finding: {finding}")
-        for action in actions:
-            lines.append(f"- Useful next step: {action}")
-        for question in questions:
-            lines.append(f"- Clinician question: {question}")
-        for caveat in caveats:
-            lines.append(f"- Caveat: {caveat}")
-        for flag in safety:
-            if not flag.lower().startswith("no safety concerns"):
-                lines.append(f"- Safety note: {flag}")
+        lines.extend(useful_finding_lines(summary))
 
     questions = collect_report_items(
         useful_for_questions,
@@ -404,9 +430,7 @@ def build_useful_report_markdown(
     lines.extend(["", "## Source Trace"])
     if unique_new:
         for summary in unique_new:
-            lines.append(
-                f"- {source_heading(summary, 120)} | {evidence_label(summary)} | {summary.get('url', '')}"
-            )
+            lines.append(source_trace_line(summary))
     else:
         lines.append("- No new source trace for this run.")
 

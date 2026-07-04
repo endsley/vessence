@@ -53,6 +53,35 @@ _FORCE_ESCALATE_PHRASES = (
     "explain why", "explain the cause", "cause of",
     "news about", "latest on",
 )
+_MEDFORD_LOCATIONS = ("medford", "medford ma", "medford, ma")
+
+
+def _abandon_to_stage3() -> dict:
+    return {"abandon_pending": True, "force_stage3": True}
+
+
+def _pending_payload(pending: dict) -> dict | None:
+    if not isinstance(pending, dict):
+        return None
+    if "data" not in pending:
+        return pending
+    data = pending.get("data")
+    return data if isinstance(data, dict) else None
+
+
+def _pending_weather_fields(pending: dict) -> tuple[str, str] | None:
+    data = _pending_payload(pending)
+    if data is None:
+        return None
+    topic = data.get("topic") or "overview"
+    location = data.get("location") or ""
+    if not isinstance(topic, str) or not isinstance(location, str):
+        return None
+    location = location.strip().lower()
+    if location and location not in _MEDFORD_LOCATIONS:
+        return None
+    return topic.strip().lower(), location
+
 
 async def _phrase(slice_obj: dict, prompt: str) -> str | None:
     day_ref = _day_reference(slice_obj)
@@ -99,6 +128,30 @@ async def _answer_for(prompt: str, topic: str, day, location: str | None) -> dic
     return _wrap_with_followup(text, topic, location)
 
 
+async def _handle_pending_weather(prompt: str, pending: dict) -> dict | None:
+    from agent_skills import end_phrase
+    from agent_skills.private_handler_utils import end_conversation
+
+    if end_phrase.is_end(prompt):
+        logger.info("weather handler: end-phrase on resume — closing")
+        return end_conversation("Ok.", structured={"intent": "weather"})
+
+    fields = _pending_weather_fields(pending)
+    if fields is None:
+        logger.info("weather handler: malformed or non-Medford pending state → abandon")
+        return _abandon_to_stage3()
+    topic, location = fields
+
+    day_spec = _day_from_followup(prompt)
+    if not day_spec:
+        logger.info("weather handler: no day in follow-up reply → escalate")
+        return _abandon_to_stage3()
+    result = await _answer_for(prompt, topic, day_spec, location)
+    if result is None:
+        return _abandon_to_stage3()
+    return result
+
+
 async def handle(prompt: str, context: str = "", pending: dict | None = None,
                  params: dict | None = None) -> dict | None:
     p_lower = (prompt or "").lower()
@@ -108,39 +161,7 @@ async def handle(prompt: str, context: str = "", pending: dict | None = None,
 
     # ── Resume branch (repeating-read continuation) ──────────────────────
     if pending:
-        from agent_skills import end_phrase
-        from agent_skills.private_handler_utils import end_conversation
-        if end_phrase.is_end(prompt):
-            logger.info("weather handler: end-phrase on resume — closing")
-            return end_conversation("Ok.", structured={"intent": "weather"})
-        if not isinstance(pending, dict):
-            logger.info("weather handler: malformed pending state → abandon")
-            return {"abandon_pending": True, "force_stage3": True}
-        if "data" in pending:
-            data = pending.get("data")
-            if not isinstance(data, dict):
-                logger.info("weather handler: malformed pending data → abandon")
-                return {"abandon_pending": True, "force_stage3": True}
-        else:
-            data = pending
-        topic = data.get("topic") or "overview"
-        location = data.get("location") or ""
-        if not isinstance(topic, str) or not isinstance(location, str):
-            logger.info("weather handler: malformed pending fields → abandon")
-            return {"abandon_pending": True, "force_stage3": True}
-        location = location.strip().lower()
-        if location and location not in ("medford", "medford ma", "medford, ma"):
-            logger.info("weather handler: non-Medford pending location %r → abandon", location)
-            return {"abandon_pending": True, "force_stage3": True}
-        topic = topic.strip().lower()
-        day_spec = _day_from_followup(prompt)
-        if not day_spec:
-            logger.info("weather handler: no day in follow-up reply → escalate")
-            return {"abandon_pending": True, "force_stage3": True}
-        result = await _answer_for(prompt, topic, day_spec, location)
-        if result is None:
-            return {"abandon_pending": True, "force_stage3": True}
-        return result
+        return await _handle_pending_weather(prompt, pending)
 
     if params is None:
         params = {}
@@ -154,7 +175,7 @@ async def handle(prompt: str, context: str = "", pending: dict | None = None,
         logger.info("weather handler: malformed params fields → escalate")
         return None
     location = location.strip().lower()
-    if location and location not in ("medford", "medford ma", "medford, ma"):
+    if location and location not in _MEDFORD_LOCATIONS:
         logger.info("weather handler: non-Medford location %r → escalate", location)
         return None
 

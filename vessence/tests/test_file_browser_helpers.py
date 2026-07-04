@@ -3,6 +3,7 @@ import pytest
 from jane_web.file_browser_helpers import (
     FILE_TYPE_EXTENSIONS,
     MIME_TO_SUBDIR,
+    byte_range_bounds,
     detect_file_type,
     paginate_listing,
     range_response,
@@ -50,6 +51,13 @@ def test_detect_file_type_uses_extension_sets_case_insensitively():
     assert detect_file_type("notes.md") == "document"
     assert detect_file_type("archive.zip") == "other"
     assert ".pdf" in FILE_TYPE_EXTENSIONS["document"]
+
+
+def test_byte_range_bounds_preserves_existing_permissive_parsing():
+    assert byte_range_bounds("bytes=2-4", 6) == (2, 4, 3)
+    assert byte_range_bounds("bytes=2-", 6) == (2, 5, 4)
+    assert byte_range_bounds("bytes=-4", 6) == (0, 4, 5)
+    assert byte_range_bounds("not-a-range", 6) == (0, 5, 6)
 
 
 @pytest.mark.asyncio

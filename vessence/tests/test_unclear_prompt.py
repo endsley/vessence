@@ -3,6 +3,32 @@ import asyncio
 from jane_web.jane_v2 import unclear_prompt
 
 
+def test_unclear_prompt_payload_preserves_qwen_request_shape():
+    payload = unclear_prompt._unclear_prompt_payload(
+        "  apple meeting blue  ",
+        model="qwen",
+        num_ctx=2048,
+        keep_alive="5m",
+    )
+
+    assert payload["model"] == "qwen"
+    assert "User prompt: apple meeting blue" in payload["prompt"]
+    assert payload["stream"] is False
+    assert payload["think"] is False
+    assert payload["options"] == {
+        "temperature": 0.0,
+        "num_predict": 5,
+        "num_ctx": 2048,
+    }
+    assert payload["keep_alive"] == "5m"
+
+
+def test_is_unclear_response_preserves_prefix_policy():
+    assert unclear_prompt._is_unclear_response(" unclear ")
+    assert unclear_prompt._is_unclear_response("UNCLEAR because it trails")
+    assert not unclear_prompt._is_unclear_response(" clear ")
+
+
 def test_unclear_prompt_uses_shared_ollama_client(monkeypatch):
     captured = {}
 

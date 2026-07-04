@@ -127,6 +127,49 @@ def theme_entries_from_results(results: dict[str, Any]) -> list[dict[str, Any]]:
     return themes
 
 
+def short_term_theme_metadata(
+    *,
+    session_id: str,
+    theme_title: str,
+    theme_index: int,
+    now_iso: str,
+    expires_iso: str,
+    turn_count: int = 1,
+    first_turn_at: str | None = None,
+) -> dict[str, Any]:
+    return {
+        "session_id": session_id,
+        "theme_title": theme_title,
+        "theme_index": theme_index,
+        "turn_count": turn_count,
+        "first_turn_at": first_turn_at or now_iso,
+        "last_updated_at": now_iso,
+        "memory_type": "short_term_theme",
+        "expires_at": expires_iso,
+    }
+
+
+def updated_short_term_theme_metadata(
+    metadata: dict[str, Any],
+    *,
+    now_iso: str,
+    expires_iso: str,
+) -> dict[str, Any]:
+    return {
+        **metadata,
+        "turn_count": metadata.get("turn_count", 1) + 1,
+        "last_updated_at": now_iso,
+        "expires_at": expires_iso,
+    }
+
+
+def oldest_theme_by_last_update(themes: list[dict[str, Any]]) -> dict[str, Any]:
+    return min(
+        themes,
+        key=lambda theme: theme["metadata"].get("last_updated_at", ""),
+    )
+
+
 def archivist_prompt(
     transcript: str,
     *,

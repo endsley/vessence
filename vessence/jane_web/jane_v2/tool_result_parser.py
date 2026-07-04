@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import json
 
+from jane_web.client_tool_json import find_json_object_end
+
 _TOOL_RESULT_OPEN = "[TOOL_RESULT:"
 _TOOL_RESULT_CLOSE = "]"
 
@@ -39,31 +41,7 @@ def extract_tool_results(user_message: str) -> tuple[str, list[dict]]:
             json_start += 1
         if json_start >= len(cleaned) or cleaned[json_start] != "{":
             break
-        depth = 0
-        in_str = False
-        escape = False
-        i = json_start
-        json_end: int | None = None
-        while i < len(cleaned):
-            ch = cleaned[i]
-            if in_str:
-                if escape:
-                    escape = False
-                elif ch == "\\":
-                    escape = True
-                elif ch == '"':
-                    in_str = False
-            else:
-                if ch == '"':
-                    in_str = True
-                elif ch == "{":
-                    depth += 1
-                elif ch == "}":
-                    depth -= 1
-                    if depth == 0:
-                        json_end = i + 1
-                        break
-            i += 1
+        json_end = find_json_object_end(cleaned, json_start)
         if json_end is None:
             break
         j = json_end

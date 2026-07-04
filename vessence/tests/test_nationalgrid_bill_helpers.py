@@ -7,13 +7,16 @@ from agent_skills import nationalgrid_bills
 from agent_skills.nationalgrid_bill_helpers import (
     aggregate_fetch_totals,
     current_bill_downloaded_entry,
+    current_bill_source_bills,
     downloaded_month_entry,
+    discovered_current_rows,
     extractor_config,
     inferred_current_bill_entry,
     infer_year_from_prompt,
     latest_discovered_month_index,
     missing_month_entry,
     month_key_from_index,
+    month_entries_by_month,
     money_text,
     money_to_decimal,
     monthly_amounts_for_targets,
@@ -208,6 +211,34 @@ def test_nationalgrid_current_bill_helpers_infer_current_month_rows():
         "row_text": "Current bill $120",
     }
     assert inferred_current_bill_entry(discovered_rows, discovered_current, ["2026-02"], {"2026-02": {}}) is None
+
+
+def test_nationalgrid_month_entries_by_month_combines_downloaded_current_and_inferred_rows():
+    record = {
+        "bills": [
+            {"target": "2026-01", "amount": "$100.50", "path": "/tmp/jan.pdf"},
+            {"target": "2026-03", "amount": "$120", "match_type": "download_from_current"},
+            {"target": "bad", "amount": "$999"},
+        ],
+        "discovered_rows": [
+            {"month_key": "2026-01", "amount": "$100.50"},
+            {"is_current": True, "amount": "$120", "row_text": "Current bill $120"},
+        ],
+    }
+
+    by_month = month_entries_by_month(record, ["2026-01", "2026-02", "2026-03"])
+
+    assert discovered_current_rows(record["discovered_rows"]) == [
+        {"is_current": True, "amount": "$120", "row_text": "Current bill $120"}
+    ]
+    assert current_bill_source_bills(record) == [
+        {"target": "2026-03", "amount": "$120", "match_type": "download_from_current"}
+    ]
+    assert set(by_month) == {"2026-01", "2026-02", "2026-03"}
+    assert by_month["2026-01"]["status"] == "downloaded"
+    assert by_month["2026-02"]["status"] == "amount_found_pdf_missing"
+    assert by_month["2026-02"]["source"] == "current_bill_row"
+    assert by_month["2026-03"]["source"] == "current_bill"
 
 
 def test_summarize_account_preserves_downloaded_missing_current_and_totals():

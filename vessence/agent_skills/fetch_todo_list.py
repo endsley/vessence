@@ -75,6 +75,14 @@ def _doc_id() -> str:
     return os.environ.get("TODO_DOC_ID", _DEFAULT_DOC_ID)
 
 
+def _utcnow() -> dt.datetime:
+    return dt.datetime.now(dt.timezone.utc).replace(tzinfo=None)
+
+
+def _fetched_at_timestamp() -> str:
+    return _utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def fetch_doc_text(doc_id: str | None = None, timeout: int = 30) -> str:
     """Download the plain-text export. Raises RuntimeError on failure.
 
@@ -121,7 +129,7 @@ def write_cache(
         categories,
         raw_text,
         doc_id,
-        fetched_at=dt.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+        fetched_at=_fetched_at_timestamp(),
     )
     # Atomic write: temp file + os.replace. Protects the handler from
     # reading a half-written cache if the fetcher is killed mid-write.

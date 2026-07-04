@@ -2,6 +2,8 @@ import datetime as dt
 
 from memory.v1 import memory_retrieval
 from memory.v1.nearest_memory import (
+    _candidate_distance,
+    _promotes_recent_short_term,
     lexical_overlap,
     nearest_memory_candidate,
     nearest_query_terms,
@@ -27,6 +29,21 @@ def test_lexical_overlap_counts_query_terms_in_document():
     assert lexical_overlap("DS3000 homework plan", terms) == 2 / 3
     assert lexical_overlap("nothing relevant", terms) == 0
     assert lexical_overlap("anything", set()) == 0
+
+
+def test_candidate_distance_coerces_numeric_values_and_rejects_bad_values():
+    assert _candidate_distance("0.25") == 0.25
+    assert _candidate_distance(0.5) == 0.5
+    assert _candidate_distance(None) is None
+    assert _candidate_distance("bad") is None
+
+
+def test_recent_short_term_promotion_preserves_age_and_overlap_boundaries():
+    assert _promotes_recent_short_term("short_term", 14, 0.35)
+    assert not _promotes_recent_short_term("short_term", 14.1, 0.35)
+    assert not _promotes_recent_short_term("short_term", 14, 0.34)
+    assert not _promotes_recent_short_term("user_memories", 1, 1.0)
+    assert not _promotes_recent_short_term("short_term", None, 1.0)
 
 
 def test_nearest_memory_candidate_accepts_valid_memory_and_formats_distance():
@@ -118,6 +135,57 @@ def test_nearest_memory_candidate_rejects_stale_short_term_and_file_index_record
 
 def test_memory_retrieval_uses_nearest_memory_selector():
     assert memory_retrieval._select_nearest_memory_lines is select_nearest_memory_lines
+
+
+def test_ds3000_anchor_candidates_format_exact_anchor(monkeypatch):
+    monkeypatch.setattr(memory_retrieval, "_ds3000_lecture_subtopics", lambda query: ["week1"])
+    monkeypatch.setattr(
+        memory_retrieval,
+        "_get_ds3000_lecture_anchors",
+        lambda subtopics: [("Anchor doc", {"topic": "ds3000", "subtopic": subtopics[0]})],
+    )
+    monkeypatch.setattr(memory_retrieval, "_extract_content_key", lambda doc: f"key:{doc}")
+    monkeypatch.setattr(memory_retrieval, "_fmt_memory", lambda doc, meta: f"{meta['subtopic']}:{doc}")
+
+    assert memory_retrieval._ds3000_anchor_candidates("ds3000 week1") == [
+        (0, 0.0, "user_memories", "key:Anchor doc", "week1:Anchor doc")
+    ]
+
+
+def test_nearest_candidates_from_query_specs_skips_failed_specs(monkeypatch):
+    calls = []
+
+    def fake_query_collection(path, collection, query, limit, query_emb):
+        calls.append((path, collection, query, limit, query_emb))
+        if collection == "bad":
+            raise RuntimeError("boom")
+        return (
+            ["DS3000 homework", "unrelated"],
+            [{"topic": "teaching"}, {"topic": "other"}],
+            [0.25, 0.25],
+        )
+
+    monkeypatch.setattr(memory_retrieval, "_query_collection", fake_query_collection)
+
+    candidates = memory_retrieval._nearest_candidates_from_query_specs(
+        [
+            ("user_memories", "/ok", "ok", 2),
+            ("short_term", "/bad", "bad", 2),
+        ],
+        "ds3000 homework",
+        [1.0],
+        {"ds3000", "homework"},
+        max_distance=0.5,
+        min_lexical_overlap=0.34,
+    )
+
+    assert calls == [
+        ("/ok", "ok", "ds3000 homework", 2, [1.0]),
+        ("/bad", "bad", "ds3000 homework", 2, [1.0]),
+    ]
+    assert len(candidates) == 1
+    assert candidates[0][2] == "user_memories"
+    assert "(Dist: 0.2500): DS3000 homework" in candidates[0][4]
 
 
 def test_select_nearest_memory_lines_sorts_dedupes_and_limits_candidates():

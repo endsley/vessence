@@ -1,5 +1,7 @@
 from agent_skills import docs_tools
 from agent_skills.docs_editing_helpers import (
+    TodoAddSectionScan,
+    TodoRemoveItemScan,
     build_insert_text_request,
     build_replace_all_text_request,
     build_todo_category_section,
@@ -7,6 +9,8 @@ from agent_skills.docs_editing_helpers import (
     find_end_of_section,
     plan_todo_add_item,
     plan_todo_remove_item,
+    scan_todo_add_section,
+    scan_todo_remove_item,
     todo_category_exists,
 )
 
@@ -64,6 +68,12 @@ def test_plan_todo_add_item_preserves_numbered_list_behavior():
 
     plan = plan_todo_add_item(text, "Vacuum", "Home")
 
+    assert scan_todo_add_section(text, "Home") == TodoAddSectionScan(
+        found_section=True,
+        insert_after_line="2. Laundry",
+        numbered_insert_line="2. Laundry",
+        last_item_num=2,
+    )
     assert plan is not None
     assert plan.old_text == "2. Laundry"
     assert plan.new_text == "2. Laundry\n3. Vacuum"
@@ -75,6 +85,12 @@ def test_plan_todo_add_item_preserves_plain_and_empty_section_behavior():
     plain_plan = plan_todo_add_item("Home\nDishes\nLaundry\n\n", "Vacuum", "Home")
     empty_plan = plan_todo_add_item("Home\n\nWork\n1. Email\n", "Vacuum", "Home")
 
+    assert scan_todo_add_section("Home\n\nWork\n1. Email\n", "Home") == TodoAddSectionScan(
+        found_section=True,
+        insert_after_line="1. Email",
+        numbered_insert_line="1. Email",
+        last_item_num=1,
+    )
     assert plain_plan is not None
     assert plain_plan.old_text == "Laundry"
     assert plain_plan.new_text == "Laundry\nVacuum"
@@ -86,6 +102,12 @@ def test_plan_todo_add_item_preserves_plain_and_empty_section_behavior():
 
 def test_plan_todo_add_item_returns_none_for_missing_category():
     assert plan_todo_add_item("Home\nDishes\n", "Vacuum", "Work") is None
+    assert scan_todo_add_section("Home\nDishes\n", "Work") == TodoAddSectionScan(
+        found_section=False,
+        insert_after_line=None,
+        numbered_insert_line=None,
+        last_item_num=0,
+    )
 
 
 def test_plan_todo_remove_item_strips_list_marker_for_match_and_message():
@@ -93,6 +115,10 @@ def test_plan_todo_remove_item_strips_list_marker_for_match_and_message():
 
     plan = plan_todo_remove_item(text, "lau", "Home")
 
+    assert scan_todo_remove_item(text, "lau", "Home") == TodoRemoveItemScan(
+        line="2. Laundry",
+        item_body="Laundry",
+    )
     assert plan is not None
     assert plan.old_text == "2. Laundry\n"
     assert plan.new_text == ""
@@ -103,9 +129,14 @@ def test_plan_todo_remove_item_strips_list_marker_for_match_and_message():
 def test_plan_todo_remove_item_without_category_scans_whole_doc():
     plan = plan_todo_remove_item("Home\n- Dishes\n\nWork\n- Email\n", "email")
 
+    assert scan_todo_remove_item("Home\n- Dishes\n\nWork\n- Email\n", "email") == TodoRemoveItemScan(
+        line="- Email",
+        item_body="Email",
+    )
     assert plan is not None
     assert plan.old_text == "- Email\n"
     assert plan.success_message == "Removed: Email"
+    assert scan_todo_remove_item("Home\n- Dishes\n", "missing") is None
 
 
 def test_category_helpers_preserve_existing_matching_and_placeholder_text():

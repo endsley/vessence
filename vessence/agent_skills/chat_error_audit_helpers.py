@@ -36,6 +36,33 @@ def chat_error_job_filename(job_number: int, exception_class: str) -> str:
     return f"job_{job_number:03d}_{slugify_chat_error(f'chat_error_{exc_short}')}.md"
 
 
+def chat_error_source_location(frame: dict[str, Any] | None, source_hint: str) -> str:
+    frame = frame or {}
+    line_hint = frame.get("line")
+    return f"{source_hint}:{line_hint}" if source_hint and line_hint else (source_hint or "unknown")
+
+
+def chat_error_incident_fields(
+    payload: dict[str, Any],
+    *,
+    frame: dict[str, Any] | None,
+    source_hint: str,
+) -> dict[str, Any]:
+    exc_class = payload.get("exception_class", "") or "UnknownException"
+    frame = frame or {}
+    return {
+        "exc_class": exc_class,
+        "exc_short": exc_class.rsplit(".", 1)[-1],
+        "message": payload.get("message", "") or "",
+        "stack": payload.get("stack_trace", "") or "",
+        "app_version": payload.get("app_version", "") or "?",
+        "version_code": payload.get("version_code", "") or "?",
+        "from_voice": payload.get("from_voice", "") or "",
+        "class_method": frame.get("class_method", "?"),
+        "location": chat_error_source_location(frame, source_hint),
+    }
+
+
 def chat_error_job_markdown(
     payload: dict[str, Any],
     *,
@@ -44,17 +71,8 @@ def chat_error_job_markdown(
     created_date: str,
     timestamp: str,
 ) -> str:
-    exc_class = payload.get("exception_class", "") or "UnknownException"
-    exc_short = exc_class.rsplit(".", 1)[-1]
-    message = payload.get("message", "") or ""
-    stack = payload.get("stack_trace", "") or ""
-    app_version = payload.get("app_version", "") or "?"
-    version_code = payload.get("version_code", "") or "?"
-    from_voice = payload.get("from_voice", "") or ""
-    frame = frame or {}
-    line_hint = frame.get("line")
-    loc = f"{source_hint}:{line_hint}" if source_hint and line_hint else (source_hint or "unknown")
-    title = f"Audit Android chat_error: {exc_short}"
+    incident = chat_error_incident_fields(payload, frame=frame, source_hint=source_hint)
+    title = f"Audit Android chat_error: {incident['exc_short']}"
 
     return f"""---
 Title: {title}
@@ -73,16 +91,16 @@ occurrence opens an audit job per Chieh's directive.
 ## Incident
 
 - **Timestamp:** {timestamp}
-- **Exception:** `{exc_class}`
-- **Message:** `{message[:400]}`
-- **APK:** v{app_version} (code {version_code})
-- **From voice:** {from_voice}
-- **First app frame:** `{frame.get("class_method", "?")}` at `{loc}`
+- **Exception:** `{incident['exc_class']}`
+- **Message:** `{incident['message'][:400]}`
+- **APK:** v{incident['app_version']} (code {incident['version_code']})
+- **From voice:** {incident['from_voice']}
+- **First app frame:** `{incident['class_method']}` at `{incident['location']}`
 
 ## Stack trace
 
 ```
-{stack[:1800]}
+{incident['stack'][:1800]}
 ```
 
 ## Scope

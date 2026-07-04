@@ -4,6 +4,8 @@ from jane_web.tax_helpers import (
     tax_interview_answer_args,
     tax_output_dir,
     tax_result_path,
+    tax_tool_command,
+    tax_tool_result_payload,
     tax_upload_document_args,
     tax_upload_path,
     tax_uploads_dir,
@@ -22,6 +24,35 @@ def test_tax_interview_answer_args_preserves_defaults():
     assert tax_interview_answer_args({"step_id": "income", "response": {"w2": True}}) == {
         "step_id": "income",
         "user_response": {"w2": True},
+    }
+
+
+def test_tax_tool_command_serializes_non_empty_args_only():
+    assert tax_tool_command("/python", "/tools.py", "calculate_tax") == [
+        "/python",
+        "/tools.py",
+        "calculate_tax",
+    ]
+    assert tax_tool_command("/python", "/tools.py", "interview_step", {"step_id": "filing_status"}) == [
+        "/python",
+        "/tools.py",
+        "interview_step",
+        '{"step_id": "filing_status"}',
+    ]
+
+
+def test_tax_tool_result_payload_preserves_error_json_and_plain_stdout_shapes():
+    assert tax_tool_result_payload(2, "", "x" * 600) == {
+        "status": "error",
+        "message": "x" * 500,
+    }
+    assert tax_tool_result_payload(0, '{"status": "ok", "value": 3}', "") == {
+        "status": "ok",
+        "value": 3,
+    }
+    assert tax_tool_result_payload(0, "  generated file  \n", "") == {
+        "status": "ok",
+        "output": "generated file",
     }
 
 

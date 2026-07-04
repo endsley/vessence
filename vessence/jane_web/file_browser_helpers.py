@@ -47,8 +47,7 @@ def paginate_listing(listing: dict, offset: int, limit: int) -> dict:
     return listing
 
 
-def range_response(path: Path, mime: str, range_header: str):
-    size = path.stat().st_size
+def byte_range_bounds(range_header: str, size: int) -> tuple[int, int, int]:
     start, end = 0, size - 1
     try:
         ranges = range_header.replace("bytes=", "").split("-")
@@ -58,6 +57,12 @@ def range_response(path: Path, mime: str, range_header: str):
         pass
     end = min(end, size - 1)
     length = end - start + 1
+    return start, end, length
+
+
+def range_response(path: Path, mime: str, range_header: str):
+    size = path.stat().st_size
+    start, end, length = byte_range_bounds(range_header, size)
 
     def iter_file():
         with open(path, "rb") as f:

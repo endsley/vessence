@@ -1,8 +1,10 @@
 from memory.v1.janitor_normalization import (
     NORMALIZED_STYLE_V2,
+    empty_normalization_result,
     long_term_normalization_candidates,
     rewrite_normalization_prompt,
     rewritten_normalized_metadata,
+    split_plan_memories,
     split_normalization_prompt,
     split_normalized_metadatas,
 )
@@ -13,6 +15,20 @@ def row(row_id: str, doc: str, topic: str | None = "Decision", **meta):
     if topic is not None:
         metadata["topic"] = topic
     return {"id": row_id, "doc": doc, "meta": metadata}
+
+
+def test_empty_normalization_result_preserves_report_counter_shape():
+    assert empty_normalization_result() == {
+        "reviewed": 0,
+        "rewritten": 0,
+        "split": 0,
+        "deleted_originals": 0,
+        "unchanged": 0,
+    }
+    first = empty_normalization_result()
+    second = empty_normalization_result()
+    first["reviewed"] = 1
+    assert second["reviewed"] == 0
 
 
 def test_long_term_normalization_candidates_preserve_existing_filters():
@@ -52,6 +68,24 @@ def test_normalization_prompts_preserve_split_and_rewrite_contracts():
     assert "- Keep under 500 characters" in rewrite_prompt
     assert "- Remove transcript chatter, filler, or temporary status" in rewrite_prompt
     assert "Topic: Decision" in rewrite_prompt
+
+
+def test_split_plan_memories_preserves_llm_plan_cleanup_behavior():
+    memories = split_plan_memories(
+        {
+            "memories": [
+                " first memory ",
+                "",
+                "x" * 10,
+                None,
+                "last item is over limit",
+            ]
+        },
+        max_chars=5,
+        max_items=3,
+    )
+
+    assert memories == ["first", "xxxxx", "None"]
 
 
 def test_split_normalized_metadatas_preserve_split_shape():

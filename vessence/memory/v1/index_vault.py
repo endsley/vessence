@@ -23,7 +23,6 @@ import re
 import zipfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from datetime import datetime
 
 _REQUIRED_PYTHON = os.environ.get('ADK_VENV_PYTHON', 'python3')
 if os.path.exists(_REQUIRED_PYTHON) and sys.executable != _REQUIRED_PYTHON:
@@ -55,6 +54,7 @@ from jane.config import (
     VAULT_DIR,
     VECTOR_DB_FILE_INDEX,
 )
+from memory.v1.local_vector_memory_helpers import utcnow_iso
 
 VAULT_PATH = Path(VAULT_DIR)
 HASH_INDEX_PATH = VAULT_PATH / ".hash_index.json"
@@ -107,7 +107,7 @@ def add_to_chromadb(collection, filepath: str, description: str, file_type: str,
         "topic": "file_index",
         "subtopic": file_type,
         "memory_type": "file_index",
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": utcnow_iso(),
         "path": filepath,
     }
     collection.add(

@@ -47,6 +47,7 @@ from jane_web.jane_v3.privacy_gate import (
 )
 
 logger = logging.getLogger(__name__)
+_PARAMS_UNSET = object()
 
 
 # ── Helpers pulled from v2 (single source of truth) ──────────────────────────
@@ -222,6 +223,307 @@ def _literal_stage1_get_time(prompt: str) -> tuple[str, str, dict[str, Any]] | N
     return ("get time", "Very High", {"literal_stage1": True})
 
 
+def _pending_data(pending: dict) -> dict:
+    data = pending.get("data") if isinstance(pending, dict) else None
+    return data if isinstance(data, dict) else {}
+
+
+def _pending_awaiting(pending: dict) -> str:
+    return pending.get("awaiting") or _pending_data(pending).get("awaiting") or ""
+
+
+def _pending_original_class(pending: dict) -> str:
+    return pending.get("original_class") or _pending_data(pending).get("original_class") or ""
+
+
+def _stage2_pending_for_dispatch(pending: dict, pending_data: dict | None) -> dict:
+    pending_for_dispatch = dict(pending_data) if isinstance(pending_data, dict) else {}
+    if pending.get("question") and "question" not in pending_for_dispatch:
+        pending_for_dispatch["question"] = pending.get("question")
+    return pending_for_dispatch
+
+
+def _active_pending_data_for_class(active_state: dict, cls: str):
+    pending_action = active_state.get("pending_action") or {}
+    if (
+        pending_action.get("handler_class") == cls
+        and pending_action.get("status") == "awaiting_user"
+    ):
+        return pending_action.get("data") or pending_action
+    return None
+
+
+def _v3_state(
+    cls: str,
+    conf: str,
+    *,
+    stage1_ms: int = 0,
+    stage2_ms: int = 0,
+    result: dict | None = None,
+    stage2_ack: str | None = None,
+    fallback_ack: str | None = None,
+    force_stage3: bool = False,
+    params: dict | None | object = _PARAMS_UNSET,
+) -> dict[str, Any]:
+    state: dict[str, Any] = {
+        "cls": cls,
+        "conf": conf,
+        "classification": f"{cls}:{conf}",
+        "stage1_ms": stage1_ms,
+        "stage2_ms": stage2_ms,
+        "result": result,
+        "stage2_ack": stage2_ack,
+        "fallback_ack": fallback_ack,
+        "force_stage3": force_stage3,
+    }
+    if params is not _PARAMS_UNSET:
+        state["params"] = params
+    return state
+
+
+def _stage3_followup_state(
+    pending: dict,
+    awaiting: str,
+    consumed_marker: dict | None,
+) -> dict[str, Any]:
+    original_cls = _pending_original_class(pending)
+    state = _v3_state("stage3_followup", "High", force_stage3=True)
+    state["stage3_followup_topic"] = awaiting
+    if original_cls:
+        state["stage3_followup_original_class"] = original_cls
+    if consumed_marker:
+        state["resolve_pending_action"] = consumed_marker
+    return state
+
+
+def _cancel_pending_state(pending: dict, consumed_marker: dict | None) -> dict[str, Any]:
+    cls = pending.get("handler_class") or "others"
+    state = _v3_state(cls, "High", result={"text": "Ok.", "conversation_end": True})
+    if consumed_marker:
+        state["resolve_pending_action"] = consumed_marker
+    return state
+
+
+def _terminal_deflection_state(
+    state: dict[str, Any],
+    cls: str,
+    reason: str,
+    *,
+    safe_deflection_fn,
+) -> dict[str, Any]:
+    logger.warning(
+        "jane_v3: no_stage3 class %r — %s, returning safe deflection", cls, reason,
+    )
+    state["result"] = safe_deflection_fn(cls)
+    state["stage2_ack"] = _ack_for(cls, escalate=False)
+    state["fallback_ack"] = None
+    state["force_stage3"] = False
+    return state
+
+
+def _force_stage3_state(state: dict[str, Any], cls: str) -> dict[str, Any]:
+    state["force_stage3"] = True
+    state["fallback_ack"] = _ack_for(cls, escalate=True)
+    return state
+
+
+def _terminal_stage2_state(state: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
+    state["result"] = result
+    state["force_stage3"] = False
+    state["stage2_ack"] = None
+    state["fallback_ack"] = None
+    state["stage2_ms"] = 0
+    return state
+
+
+def _v3_stage_metadata(
+    state: dict[str, Any],
+    *,
+    stage: str,
+    stage2_ms: int | None = None,
+    stage3_ms: int = 0,
+) -> dict[str, Any]:
+    return {
+        "classification": state["classification"],
+        "stage": stage,
+        "stage1_ms": state["stage1_ms"],
+        "stage2_ms": state["stage2_ms"] if stage2_ms is None else stage2_ms,
+        "stage3_ms": stage3_ms,
+    }
+
+
+def _apply_v3_handler_result(
+    state: dict[str, Any],
+    result,
+    cls: str,
+    *,
+    no_stage3: bool,
+    safe_deflection_fn,
+) -> dict[str, Any]:
+    # Handler declined OR returned an invalid shape.
+    if not isinstance(result, dict) or "text" not in result:
+        if no_stage3:
+            return _terminal_deflection_state(
+                state,
+                cls,
+                "handler returned invalid shape",
+                safe_deflection_fn=safe_deflection_fn,
+            )
+        logger.info("jane_v3: handler %r returned invalid shape → Stage 3", cls)
+        return _force_stage3_state(state, cls)
+
+    # Handler explicitly wants Stage 3 (abandon_pending / force_stage3).
+    if result.get("abandon_pending") or result.get("force_stage3"):
+        if no_stage3:
+            return _terminal_deflection_state(
+                state,
+                cls,
+                "handler requested escalation",
+                safe_deflection_fn=safe_deflection_fn,
+            )
+        logger.info("jane_v3: handler %r requested escalation → Stage 3", cls)
+        _force_stage3_state(state, cls)
+        # Preserve any pending-action resolution the handler wanted to emit.
+        structured = result.get("structured") or {}
+        if structured.get("pending_action"):
+            state["resolve_pending_action"] = structured.get("pending_action")
+        return state
+
+    # Handler says WRONG_CLASS — Haiku's guess was wrong even after its own
+    # second-check inside the handler.
+    if result.get("wrong_class"):
+        if no_stage3:
+            return _terminal_deflection_state(
+                state,
+                cls,
+                "handler flagged WRONG_CLASS",
+                safe_deflection_fn=safe_deflection_fn,
+            )
+        logger.info("jane_v3: handler %r flagged WRONG_CLASS → Stage 3", cls)
+        return _force_stage3_state(state, cls)
+
+    state["result"] = result
+    state["stage2_ack"] = _ack_for(cls, escalate=False)
+    state["fallback_ack"] = _ack_for(cls, escalate=True)
+    return state
+
+
+def _v3_handler_kwargs(
+    handler,
+    *,
+    context: str,
+    pending: dict | None,
+    params: dict | None | object = _PARAMS_UNSET,
+) -> dict[str, Any]:
+    import inspect
+
+    kwargs: dict[str, Any] = {}
+    try:
+        sig = inspect.signature(handler)
+        if "context" in sig.parameters:
+            kwargs["context"] = context
+        if "pending" in sig.parameters:
+            kwargs["pending"] = pending
+        if params is not _PARAMS_UNSET and "params" in sig.parameters:
+            kwargs["params"] = params
+    except (TypeError, ValueError):
+        pass
+    return kwargs
+
+
+async def _invoke_v3_handler(handler, prompt: str, kwargs: dict[str, Any]):
+    import asyncio
+    import inspect
+
+    if inspect.iscoroutinefunction(handler):
+        return await handler(prompt, **kwargs)
+    return await asyncio.to_thread(lambda: handler(prompt, **kwargs))
+
+
+async def _resolver_followup_state(
+    prompt: str,
+    session_id: str,
+    resolved: dict,
+    pending: dict,
+    consume_fn,
+) -> dict[str, Any]:
+    handler_class = (resolved.get("handler_class") or "").strip()
+    logger.info(
+        "jane_v3 pipeline: resolver → followup (handler=%s awaiting=%s)",
+        handler_class or "-",
+        _pending_awaiting(pending) or "-",
+    )
+    registry = class_registry.get_registry()
+    meta = registry.get(handler_class)
+    handler = meta.get("handler") if meta else None
+    if not handler:
+        logger.warning(
+            "jane_v3: resolver followup target %r missing handler → Stage 3",
+            handler_class,
+        )
+        fallback_cls = handler_class or "others"
+        return _v3_state(
+            fallback_cls,
+            "High",
+            fallback_ack=_ack_for(fallback_cls, escalate=True),
+            force_stage3=True,
+        )
+
+    pending_data = resolved.get("pending_data", {})
+    pending_for_dispatch = _stage2_pending_for_dispatch(pending, pending_data)
+    try:
+        from jane_web.jane_v2 import recent_context as _recent_context
+        fifo_ctx = _recent_context.render_stage2_context(
+            session_id,
+            max_turns=_stage2_fifo_turns(handler_class, default=4),
+        ) or ""
+    except Exception as e:
+        logger.warning("jane_v3: followup recent_context load failed: %s", e)
+        fifo_ctx = ""
+
+    kwargs = _v3_handler_kwargs(
+        handler,
+        context=fifo_ctx,
+        pending=pending_for_dispatch,
+    )
+
+    t2 = time.perf_counter()
+    try:
+        result = await _invoke_v3_handler(handler, prompt, kwargs)
+    except Exception as e:
+        logger.exception("jane_v3: resolver followup handler %r crashed: %s", handler_class, e)
+        result = None
+    stage2_ms = int((time.perf_counter() - t2) * 1000)
+
+    if not isinstance(result, dict) or "text" not in result:
+        logger.warning(
+            "jane_v3: resolver followup handler %r returned invalid shape → Stage 3",
+            handler_class,
+        )
+        return _v3_state(
+            handler_class,
+            "High",
+            stage2_ms=stage2_ms,
+            fallback_ack=_ack_for(handler_class, escalate=True),
+            force_stage3=True,
+        )
+
+    state = _v3_state(
+        handler_class,
+        "High",
+        stage2_ms=stage2_ms,
+        result=result,
+        stage2_ack=_ack_for(handler_class, escalate=False),
+        fallback_ack=_ack_for(handler_class, escalate=True),
+    )
+    structured = result.get("structured") or {}
+    if not structured.get("pending_action") and consume_fn:
+        state["resolve_pending_action"] = consume_fn(
+            pending, status="resolved", resolution="answered"
+        )
+    return state
+
+
 async def _classify_and_maybe_handle(prompt: str, session_id: str) -> dict:
     """Run v3 classifier + handler dispatch. Shared by chat + chat_stream.
 
@@ -298,8 +600,8 @@ async def _classify_and_maybe_handle(prompt: str, session_id: str) -> dict:
             _consume = None
 
         if action == "stage3_followup":
-            awaiting = pending.get("awaiting") or "previous_question"
-            original_cls = pending.get("original_class") or (pending.get("data") or {}).get("original_class")
+            awaiting = _pending_awaiting(pending) or "previous_question"
+            original_cls = _pending_original_class(pending)
             logger.info(
                 "jane_v3 pipeline: resolver → stage3_followup (awaiting=%s original_class=%s)",
                 awaiting, original_cls or "-",
@@ -308,23 +610,7 @@ async def _classify_and_maybe_handle(prompt: str, session_id: str) -> dict:
                 _consume(pending, status="resolved", resolution="answered")
                 if _consume else None
             )
-            state: dict[str, Any] = {
-                "cls": "stage3_followup",
-                "conf": "High",
-                "classification": "stage3_followup:High",
-                "stage1_ms": 0,
-                "stage2_ms": 0,
-                "result": None,
-                "stage2_ack": None,
-                "fallback_ack": None,
-                "force_stage3": True,
-                "stage3_followup_topic": awaiting,
-            }
-            if original_cls:
-                state["stage3_followup_original_class"] = original_cls
-            if consumed_marker:
-                state["resolve_pending_action"] = consumed_marker
-            return state
+            return _stage3_followup_state(pending, awaiting, consumed_marker)
 
         if action == "cancel":
             logger.info(
@@ -336,119 +622,16 @@ async def _classify_and_maybe_handle(prompt: str, session_id: str) -> dict:
                 _consume(pending, status="cancelled", resolution="abandoned")
                 if _consume else None
             )
-            state = {
-                "cls": (pending.get("handler_class") or "others"),
-                "conf": "High",
-                "classification": f"{(pending.get('handler_class') or 'others')}:High",
-                "stage1_ms": 0,
-                "stage2_ms": 0,
-                "result": {"text": "Ok.", "conversation_end": True},
-                "stage2_ack": None,
-                "fallback_ack": None,
-                "force_stage3": False,
-            }
-            if consumed_marker:
-                state["resolve_pending_action"] = consumed_marker
-            return state
+            return _cancel_pending_state(pending, consumed_marker)
 
         if action == "followup":
-            handler_class = (_resolved.get("handler_class") or "").strip()
-            logger.info(
-                "jane_v3 pipeline: resolver → followup (handler=%s awaiting=%s)",
-                handler_class or "-",
-                pending.get("awaiting") or (pending.get("data") or {}).get("awaiting") or "-",
+            return await _resolver_followup_state(
+                prompt,
+                session_id,
+                _resolved,
+                pending,
+                _consume,
             )
-            registry = class_registry.get_registry()
-            meta = registry.get(handler_class)
-            handler = meta.get("handler") if meta else None
-            if not handler:
-                logger.warning(
-                    "jane_v3: resolver followup target %r missing handler → Stage 3",
-                    handler_class,
-                )
-                return {
-                    "cls": handler_class or "others",
-                    "conf": "High",
-                    "classification": f"{handler_class or 'others'}:High",
-                    "stage1_ms": 0,
-                    "stage2_ms": 0,
-                    "result": None,
-                    "stage2_ack": None,
-                    "fallback_ack": _ack_for(handler_class or "others", escalate=True),
-                    "force_stage3": True,
-                }
-
-            pending_data = _resolved.get("pending_data", {})
-            pending_for_dispatch = dict(pending_data) if isinstance(pending_data, dict) else {}
-            if pending.get("question") and "question" not in pending_for_dispatch:
-                pending_for_dispatch["question"] = pending.get("question")
-            try:
-                from jane_web.jane_v2 import recent_context as _recent_context
-                fifo_ctx = _recent_context.render_stage2_context(
-                    session_id,
-                    max_turns=_stage2_fifo_turns(handler_class, default=4),
-                ) or ""
-            except Exception as e:
-                logger.warning("jane_v3: followup recent_context load failed: %s", e)
-                fifo_ctx = ""
-
-            import inspect
-            kwargs: dict[str, Any] = {}
-            try:
-                sig = inspect.signature(handler)
-                if "context" in sig.parameters:
-                    kwargs["context"] = fifo_ctx
-                if "pending" in sig.parameters:
-                    kwargs["pending"] = pending_for_dispatch
-            except (TypeError, ValueError):
-                pass
-
-            t2 = time.perf_counter()
-            try:
-                import asyncio
-                if inspect.iscoroutinefunction(handler):
-                    result = await handler(prompt, **kwargs)
-                else:
-                    result = await asyncio.to_thread(lambda: handler(prompt, **kwargs))
-            except Exception as e:
-                logger.exception("jane_v3: resolver followup handler %r crashed: %s", handler_class, e)
-                result = None
-            stage2_ms = int((time.perf_counter() - t2) * 1000)
-
-            if not isinstance(result, dict) or "text" not in result:
-                logger.warning(
-                    "jane_v3: resolver followup handler %r returned invalid shape → Stage 3",
-                    handler_class,
-                )
-                return {
-                    "cls": handler_class,
-                    "conf": "High",
-                    "classification": f"{handler_class}:High",
-                    "stage1_ms": 0,
-                    "stage2_ms": stage2_ms,
-                    "result": None,
-                    "stage2_ack": None,
-                    "fallback_ack": _ack_for(handler_class, escalate=True),
-                    "force_stage3": True,
-                }
-
-            state = {
-                "cls": handler_class,
-                "conf": "High",
-                "classification": f"{handler_class}:High",
-                "stage1_ms": 0,
-                "stage2_ms": stage2_ms,
-                "result": result,
-                "stage2_ack": _ack_for(handler_class, escalate=False),
-                "fallback_ack": _ack_for(handler_class, escalate=True),
-                "force_stage3": False,
-            }
-            structured = result.get("structured") or {}
-            if not structured.get("pending_action") and _consume:
-                state["resolve_pending_action"] = _consume(
-                    pending, status="resolved", resolution="answered"
-                )
-            return state
 
     # ── Stage 1 (v3): Haiku classification ───────────────────────────────
     t1 = time.perf_counter()
@@ -465,18 +648,7 @@ async def _classify_and_maybe_handle(prompt: str, session_id: str) -> dict:
     classification = f"{cls}:{conf}"
     logger.info("jane_v3 pipeline: stage1 %s (%dms) params=%s", classification, stage1_ms, params)
 
-    state: dict[str, Any] = {
-        "cls": cls,
-        "conf": conf,
-        "params": params,
-        "classification": classification,
-        "stage1_ms": stage1_ms,
-        "stage2_ms": 0,
-        "result": None,
-        "stage2_ack": None,
-        "fallback_ack": None,
-        "force_stage3": False,
-    }
+    state = _v3_state(cls, conf, params=params, stage1_ms=stage1_ms)
 
     # ── Unclear short-circuit ───────────────────────────────────────────
     # The classifier now folds STT-noise detection into its single qwen
@@ -486,14 +658,13 @@ async def _classify_and_maybe_handle(prompt: str, session_id: str) -> dict:
     # call is both cheaper and simpler. Canned response is the same.
     if cls == "unclear":
         from jane_web.jane_v2 import unclear_prompt as _unclear
-        state["result"] = {
-            "text": _unclear.REPEAT_REPLY,
-            "unclear_prompt": True,
-        }
-        state["force_stage3"] = False
-        state["stage2_ack"] = None
-        state["fallback_ack"] = None
-        state["stage2_ms"] = 0
+        _terminal_stage2_state(
+            state,
+            {
+                "text": _unclear.REPEAT_REPLY,
+                "unclear_prompt": True,
+            },
+        )
         logger.info("jane_v3 pipeline: unclear short-circuit (classifier verdict)")
         return state
 
@@ -502,10 +673,7 @@ async def _classify_and_maybe_handle(prompt: str, session_id: str) -> dict:
     # the class has a registered handler. Anything else comes back as
     # ("others", "Low") and is Stage-3-bound.
     if cls == "others" or conf not in ("Very High", "High"):
-        state["force_stage3"] = True
-        state["stage2_ack"] = None
-        state["fallback_ack"] = _ack_for(cls, escalate=True)
-        return state
+        return _force_stage3_state(state, cls)
 
     # ── End-conversation short-circuit ──────────────────────────────────
     # `end conversation` has no handler.py by design — the class only
@@ -515,10 +683,10 @@ async def _classify_and_maybe_handle(prompt: str, session_id: str) -> dict:
     # pipeline handles this inline at pipeline.py:1080-1087; we mirror
     # that here so the voice loop actually terminates when v3 is active.
     if cls == "end conversation":
-        state["result"] = {"text": "Ok.", "conversation_end": True}
-        state["stage2_ack"] = None
-        state["fallback_ack"] = None
-        state["stage2_ms"] = 0
+        _terminal_stage2_state(
+            state,
+            {"text": "Ok.", "conversation_end": True},
+        )
         logger.info("jane_v3 pipeline: end_conversation short-circuit")
         return state
 
@@ -527,16 +695,12 @@ async def _classify_and_maybe_handle(prompt: str, session_id: str) -> dict:
     meta = registry.get(cls)
     if not meta:
         logger.info("jane_v3: class %r not in registry → Stage 3", cls)
-        state["force_stage3"] = True
-        state["fallback_ack"] = _ack_for(cls, escalate=True)
-        return state
+        return _force_stage3_state(state, cls)
     handler = meta.get("handler")
     if handler is None:
         # Registered class but no handler (e.g. "others", rare stub classes)
         logger.info("jane_v3: class %r has no handler → Stage 3", cls)
-        state["force_stage3"] = True
-        state["fallback_ack"] = _ack_for(cls, escalate=True)
-        return state
+        return _force_stage3_state(state, cls)
 
     # Pull optional pending state + FIFO context from v2's helpers, for
     # handlers that implement multi-turn internal state (timer awaiting
@@ -552,35 +716,23 @@ async def _classify_and_maybe_handle(prompt: str, session_id: str) -> dict:
             max_turns=_stage2_fifo_turns(cls, default=4),
         ) or ""
         active_state = get_active_state(session_id) or {}
-        pa = active_state.get("pending_action") or {}
-        if pa.get("handler_class") == cls and pa.get("status") == "awaiting_user":
-            pending_data = pa.get("data") or pa
+        pending_data = _active_pending_data_for_class(active_state, cls)
     except Exception as e:
         logger.warning("jane_v3: recent_context load failed: %s", e)
 
     # Introspect handler signature (same pattern v2 uses) so we pass only
     # the kwargs the handler accepts. Backward-compatible with older handlers.
-    import inspect
-    kwargs: dict = {}
-    try:
-        sig = inspect.signature(handler)
-        if "context" in sig.parameters:
-            kwargs["context"] = fifo_ctx
-        if "pending" in sig.parameters:
-            kwargs["pending"] = pending_data
-        if "params" in sig.parameters:
-            kwargs["params"] = params
-    except (TypeError, ValueError):
-        pass
+    kwargs = _v3_handler_kwargs(
+        handler,
+        context=fifo_ctx,
+        pending=pending_data,
+        params=params,
+    )
 
     t2 = time.perf_counter()
     result = None
     try:
-        import asyncio
-        if inspect.iscoroutinefunction(handler):
-            result = await handler(prompt, **kwargs)
-        else:
-            result = await asyncio.to_thread(lambda: handler(prompt, **kwargs))
+        result = await _invoke_v3_handler(handler, prompt, kwargs)
     except Exception as e:
         logger.exception("jane_v3: handler %r crashed: %s", cls, e)
         result = None
@@ -594,51 +746,16 @@ async def _classify_and_maybe_handle(prompt: str, session_id: str) -> dict:
     from agent_skills.private_handler_utils import is_no_stage3, safe_deflection
     no_stage3 = is_no_stage3(cls)
 
-    def _terminal_deflection(reason: str) -> dict:
-        logger.warning(
-            "jane_v3: no_stage3 class %r — %s, returning safe deflection", cls, reason,
-        )
-        state["result"] = safe_deflection(cls)
-        state["stage2_ack"] = _ack_for(cls, escalate=False)
-        state["fallback_ack"] = None
-        state["force_stage3"] = False
+    state = _apply_v3_handler_result(
+        state,
+        result,
+        cls,
+        no_stage3=no_stage3,
+        safe_deflection_fn=safe_deflection,
+    )
+    if state["result"] is None or state["force_stage3"]:
         return state
 
-    # Handler declined OR returned an invalid shape.
-    if not isinstance(result, dict) or "text" not in result:
-        if no_stage3:
-            return _terminal_deflection("handler returned invalid shape")
-        logger.info("jane_v3: handler %r returned invalid shape → Stage 3", cls)
-        state["force_stage3"] = True
-        state["fallback_ack"] = _ack_for(cls, escalate=True)
-        return state
-
-    # Handler explicitly wants Stage 3 (abandon_pending / force_stage3).
-    if result.get("abandon_pending") or result.get("force_stage3"):
-        if no_stage3:
-            return _terminal_deflection("handler requested escalation")
-        logger.info("jane_v3: handler %r requested escalation → Stage 3", cls)
-        state["force_stage3"] = True
-        state["fallback_ack"] = _ack_for(cls, escalate=True)
-        # Preserve any pending-action resolution the handler wanted to emit.
-        structured = result.get("structured") or {}
-        if structured.get("pending_action"):
-            state["resolve_pending_action"] = structured.get("pending_action")
-        return state
-
-    # Handler says WRONG_CLASS — Haiku's guess was wrong even after its own
-    # second-check inside the handler.
-    if result.get("wrong_class"):
-        if no_stage3:
-            return _terminal_deflection("handler flagged WRONG_CLASS")
-        logger.info("jane_v3: handler %r flagged WRONG_CLASS → Stage 3", cls)
-        state["force_stage3"] = True
-        state["fallback_ack"] = _ack_for(cls, escalate=True)
-        return state
-
-    state["result"] = result
-    state["stage2_ack"] = _ack_for(cls, escalate=False)
-    state["fallback_ack"] = _ack_for(cls, escalate=True)
     logger.info(
         "jane_v3 pipeline: stage2 %s handler (%dms)",
         cls, state["stage2_ms"],
@@ -686,13 +803,9 @@ async def handle_chat(body, request: Request):
         resp: dict[str, Any] = {
             "response": visible_text or text,
             "ack": None,
-            "classification": state["classification"],
-            "stage": "stage2",
-            "stage1_ms": state["stage1_ms"],
-            "stage2_ms": state["stage2_ms"],
-            "stage3_ms": 0,
             "files": [],
         }
+        resp.update(_v3_stage_metadata(state, stage="stage2"))
         if all_tool_calls:
             resp["client_tool_calls"] = all_tool_calls
         resp.update(extras)
@@ -722,12 +835,8 @@ async def handle_chat(body, request: Request):
         return JSONResponse({
             "response": "Jane v3 pipeline is unavailable.",
             "ack": dynamic_ack,
-            "classification": state["classification"],
-            "stage": "stage3",
-            "stage1_ms": state["stage1_ms"],
-            "stage2_ms": 0,
-            "stage3_ms": 0,
             "files": [],
+            **_v3_stage_metadata(state, stage="stage3", stage2_ms=0),
         })
 
     t3 = time.perf_counter()
@@ -740,11 +849,12 @@ async def handle_chat(body, request: Request):
         v1_body = json.loads(raw) if raw else {}
     except Exception:
         v1_body = {}
-    v1_body["classification"] = state["classification"]
-    v1_body["stage"] = "stage3"
-    v1_body["stage1_ms"] = state["stage1_ms"]
-    v1_body["stage2_ms"] = 0
-    v1_body["stage3_ms"] = stage3_ms
+    v1_body.update(_v3_stage_metadata(
+        state,
+        stage="stage3",
+        stage2_ms=0,
+        stage3_ms=stage3_ms,
+    ))
     v1_body["ack"] = dynamic_ack
     cleaned_text = v1_body.get("response") or ""
     # FIFO write removed — v1_chat → send_message → _persist_turns_async
@@ -812,11 +922,7 @@ async def handle_chat_stream(body, request: Request):
             if extras.get("conversation_end"):
                 yield _ndjson("conversation_end", "true")
             yield _ndjson("done", visible_text or text,
-                          classification=state["classification"],
-                          stage="stage2",
-                          stage1_ms=state["stage1_ms"],
-                          stage2_ms=state["stage2_ms"],
-                          stage3_ms=0)
+                          **_v3_stage_metadata(state, stage="stage2"))
             _persist_turn_to_fifo(
                 canonical_sid, prompt, visible_text or text,
                 stage="stage2",

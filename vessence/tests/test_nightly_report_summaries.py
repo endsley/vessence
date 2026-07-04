@@ -3,6 +3,7 @@ from agent_skills.nightly_report_summaries import (
     bullet,
     condense_tldr_items,
     extract_markdown_bullets,
+    pipeline_metric_bullet,
     summarize_generic_log,
     summarize_pipeline,
     summarize_transcript_review,
@@ -54,6 +55,13 @@ def test_extract_markdown_bullets_stops_at_next_heading():
         "- First issue",
         "- Second issue",
     ]
+
+
+def test_pipeline_metric_bullet_extracts_markdown_count_lines():
+    report = "- Prompts audited: **30**\n- Other: plain"
+
+    assert pipeline_metric_bullet(report, "Prompts audited") == "- Prompts audited: 30."
+    assert pipeline_metric_bullet(report, "Classification failures") is None
 
 
 def test_summarize_pipeline_collects_counts_failures_and_autofixes():

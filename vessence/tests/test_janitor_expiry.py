@@ -1,6 +1,7 @@
 import datetime as dt
 
 from memory.v1.janitor_expiry import (
+    _utcnow,
     expired_ids_from_metadata,
     is_expired_value,
     old_ids_from_metadata,
@@ -16,6 +17,12 @@ def test_is_expired_value_preserves_janitor_expiry_contract():
     assert is_expired_value("2026-07-02T11:59:59", now_ts=now)
     assert not is_expired_value("2026-07-02T12:00:01", now_ts=now)
     assert not is_expired_value("not a timestamp", now_ts=now)
+
+
+def test_utcnow_helper_preserves_naive_datetime_shape():
+    now = _utcnow()
+
+    assert now.tzinfo is None
 
 
 def test_expired_ids_from_metadata_uses_expires_at_only():

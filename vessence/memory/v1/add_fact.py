@@ -38,10 +38,10 @@ class _silence:
 os.environ["ORT_LOGGING_LEVEL"] = "3"
 with _silence():
     import chromadb
-import datetime
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from jane.config import get_chroma_client, VECTOR_DB_USER_MEMORIES, CHROMA_COLLECTION_USER_MEMORIES
+from memory.v1.local_vector_memory_helpers import utcnow_iso
 
 
 def add_fact(
@@ -68,7 +68,7 @@ def add_fact(
         "author": author,
         "topic": topic,
         "memory_type": "long_term",
-        "timestamp": datetime.datetime.utcnow().isoformat(),
+        "timestamp": utcnow_iso(),
     }
     if subtopic:
         metadata["subtopic"] = subtopic

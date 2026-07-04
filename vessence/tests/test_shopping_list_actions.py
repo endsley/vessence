@@ -33,6 +33,73 @@ def test_handler_uses_extracted_shopping_list_helpers() -> None:
     assert handler._build_check_response is build_check_response
 
 
+def _fake_shopping_api(initial=None):
+    state = {"items": list(initial or []), "calls": []}
+
+    def add_item(item, list_name):
+        state["calls"].append(("add", item, list_name))
+        state["items"].append(item)
+
+    def remove_item(item, list_name, *, confidence):
+        state["calls"].append(("remove", item, list_name, confidence))
+        state["items"] = [existing for existing in state["items"] if existing.lower() != item.lower()]
+
+    def get_list(list_name):
+        state["calls"].append(("get", list_name))
+        return list(state["items"])
+
+    def clear_list(list_name, *, confidence):
+        state["calls"].append(("clear", list_name, confidence))
+        state["items"] = []
+
+    return state, {
+        "add_item": add_item,
+        "remove_item": remove_item,
+        "get_list": get_list,
+        "clear_list": clear_list,
+    }
+
+
+def test_execute_shopping_list_action_handles_view_add_and_check_with_fake_api() -> None:
+    state, api = _fake_shopping_api(["milk"])
+
+    assert handler._execute_shopping_list_action("view", [], None, api) == {
+        "text": "Your shopping list has: milk."
+    }
+    assert handler._execute_shopping_list_action("add", ["eggs", "bread"], None, api) == {
+        "text": "Added eggs, bread. Your shopping list now has 3 items."
+    }
+    assert handler._execute_shopping_list_action("check", ["Milk", "bananas"], None, api) == {
+        "text": "Mixed: Milk is on the list; bananas is not."
+    }
+    assert handler._execute_shopping_list_action("add", [], None, api) is None
+    assert state["calls"] == [
+        ("get", "default"),
+        ("add", "eggs", "default"),
+        ("add", "bread", "default"),
+        ("get", "default"),
+        ("get", "default"),
+    ]
+
+
+def test_execute_shopping_list_action_handles_remove_clear_and_unknown_with_fake_api() -> None:
+    state, api = _fake_shopping_api(["milk", "eggs"])
+
+    assert handler._execute_shopping_list_action("remove", ["Milk"], 0.91, api) == {
+        "text": "Removed Milk from your shopping list."
+    }
+    assert state["items"] == ["eggs"]
+    assert handler._execute_shopping_list_action("clear", [], 0.92, api) == {
+        "text": "Your shopping list has been cleared."
+    }
+    assert state["items"] == []
+    assert handler._execute_shopping_list_action("unknown", [], None, api) is None
+    assert state["calls"] == [
+        ("remove", "Milk", "default", 0.91),
+        ("clear", "default", 0.92),
+    ]
+
+
 def test_split_items_accepts_comma_separated_strings_only() -> None:
     assert split_items("milk, eggs,  bread ") == ["milk", "eggs", "bread"]
     assert split_items("milk,, eggs") == ["milk", "eggs"]

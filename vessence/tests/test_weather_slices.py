@@ -1,3 +1,4 @@
+import asyncio
 from datetime import date
 import re
 
@@ -15,14 +16,19 @@ from jane_web.jane_v2.classes.weather.responses import (
 )
 from jane_web.jane_v2.classes.weather.slices import (
     DAY_PHRASE_MAP,
+    MULTI_DAY_SPECS,
     NEUTRAL_DAY_REFS,
     VALID_TOPICS,
     WEEKDAYS,
     day_from_followup,
     day_reference,
     ensure_day_reference,
+    is_multi_day_spec,
     normalize_day,
+    precipitation_day_payload,
+    precipitation_entries,
     slice_for,
+    weekly_forecast_day_payload,
     without_debug_fields,
 )
 from jane_web.jane_v2.ollama_client import post_local_llm_response
@@ -100,10 +106,47 @@ def test_weather_followup_uses_shared_pending_continuation_shape() -> None:
     assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", pending["expires_at"])
 
 
+def test_weather_pending_helpers_accept_nested_payloads_and_medford_only() -> None:
+    nested = {"data": {"topic": "Forecast", "location": "Medford, MA"}}
+
+    assert handler._pending_payload(nested) == {"topic": "Forecast", "location": "Medford, MA"}
+    assert handler._pending_weather_fields(nested) == ("forecast", "medford, ma")
+    assert handler._pending_weather_fields({"topic": "wind", "location": ""}) == ("wind", "")
+    assert handler._pending_weather_fields({"data": "bad"}) is None
+    assert handler._pending_weather_fields({"data": {"topic": "wind", "location": "Boston"}}) is None
+    assert handler._abandon_to_stage3() == {"abandon_pending": True, "force_stage3": True}
+
+
+def test_weather_pending_handler_replays_answer_for_followup_day(monkeypatch) -> None:
+    captured = {}
+
+    async def fake_answer(prompt, topic, day, location):
+        captured.update({"prompt": prompt, "topic": topic, "day": day, "location": location})
+        return {"text": "Saturday looks clear."}
+
+    monkeypatch.setattr(handler, "_day_from_followup", lambda prompt: "saturday")
+    monkeypatch.setattr(handler, "_answer_for", fake_answer)
+
+    result = asyncio.run(
+        handler._handle_pending_weather(
+            "Saturday",
+            {"data": {"topic": "forecast", "location": "Medford"}},
+        )
+    )
+
+    assert result == {"text": "Saturday looks clear."}
+    assert captured == {
+        "prompt": "Saturday",
+        "topic": "forecast",
+        "day": "saturday",
+        "location": "medford",
+    }
+
+
 def test_weather_answer_prompt_and_payload_preserve_phrase_request_shape() -> None:
     slice_obj = {"topic": "day_forecast", "day": {"date": "2026-07-04", "weekday": "Saturday"}}
 
-    prompt = weather_answer_prompt(slice_obj, "How hot?")
+    prompt = weather_answer_prompt(slice_obj, "How hot?", today=date(2026, 7, 2))
 
     assert 'refer to this day as "Saturday"' in prompt
     assert '"topic": "day_forecast"' in prompt
@@ -116,6 +159,7 @@ def test_weather_answer_prompt_and_payload_preserve_phrase_request_shape() -> No
         model="qwen",
         num_ctx=4096,
         keep_alive="5m",
+        today=date(2026, 7, 2),
     )
     assert payload["model"] == "qwen"
     assert payload["stream"] is False
@@ -143,6 +187,31 @@ def test_normalize_day_matches_relative_weekday_and_iso_specs() -> None:
     assert normalize_day("2026-07-03 please", forecast, today=today) is forecast[1]
     assert normalize_day("weekend", forecast, today=today) is None
     assert normalize_day("nonsense", forecast, today=today) is None
+
+
+def test_weather_multi_day_and_slim_day_payload_helpers() -> None:
+    forecast = _forecast()
+
+    assert MULTI_DAY_SPECS == {"this_week", "weekend", "week"}
+    assert is_multi_day_spec("weekend")
+    assert is_multi_day_spec("this_week")
+    assert not is_multi_day_spec("tomorrow")
+    assert not is_multi_day_spec(None)
+    assert precipitation_entries(forecast[2], forecast, multi_day=False) == [forecast[2]]
+    assert precipitation_entries(None, forecast, multi_day=False) == forecast[:3]
+    assert precipitation_entries(forecast[2], forecast, multi_day=True) == forecast[:7]
+    assert precipitation_day_payload(forecast[1]) == {
+        "weekday": "Friday",
+        "date": "2026-07-03",
+        "precipitation": {"chance": 10},
+        "condition": "Friday clear",
+    }
+    assert weekly_forecast_day_payload(forecast[1]) == {
+        "weekday": "Friday",
+        "high": 81,
+        "low": 61,
+        "condition": "Friday clear",
+    }
 
 
 def test_slice_for_builds_minimal_forecast_precipitation_and_overview_payloads() -> None:

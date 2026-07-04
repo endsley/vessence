@@ -34,6 +34,7 @@ import json
 import logging
 import os
 import re
+from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +63,70 @@ def _is_delete_intent(user_prompt: str) -> bool:
     if not user_prompt:
         return False
     return bool(_DELETE_INTENT_RE.match(user_prompt.strip()))
+
+
+def _handler_name_from_classifier_label(label: str | None) -> str:
+    return (label or "").lower().replace("_", " ").strip()
+
+
+def _allowed_classifier_classes(registry: dict) -> set[str]:
+    allowed = {"others"}
+    for meta in (registry or {}).values():
+        n = (meta.get("name") or "").strip().lower()
+        if n:
+            allowed.add(n)
+    return allowed
+
+
+def _chosen_class_distance(ranked: list[dict], cls: str) -> float | None:
+    for rec in ranked:
+        if _handler_name_from_classifier_label(rec["class"]) == cls:
+            return float(rec["best_distance"])
+    return None
+
+
+def _should_floor_distance_confidence(
+    *,
+    conf: str,
+    cls: str,
+    chosen_distance: float | None,
+    is_pending_choice: bool,
+    stage2_max_distance: float | None = None,
+) -> bool:
+    max_distance = STAGE2_MAX_DISTANCE if stage2_max_distance is None else stage2_max_distance
+    return (
+        conf in _STAGE2_CONFS
+        and cls != "others"
+        and cls != "send message"
+        and not is_pending_choice
+        and chosen_distance is not None
+        and chosen_distance > max_distance
+    )
+
+
+def _params_for_chosen_class(params: dict, cls: str, schema_class: str) -> dict:
+    if params and cls != (schema_class or "").lower():
+        return {}
+    return params
+
+
+def _parse_qwen_classification_response(raw: str) -> tuple[str, str, dict] | None:
+    text = raw.strip().strip("`").strip()
+    if text.lower().startswith("json"):
+        text = text.split("\n", 1)[-1].strip()
+    start = text.find("{")
+    end = text.rfind("}")
+    if start >= 0 and end > start:
+        text = text[start : end + 1]
+    parsed = json.loads(text)
+    cls = str(parsed.get("class", "")).strip().lower().strip("[]").strip()
+    conf = str(parsed.get("confidence", "Low")).strip().title()
+    if conf not in ("Very High", "High", "Medium", "Low"):
+        conf = "Low"
+    params = parsed.get("params") if isinstance(parsed.get("params"), dict) else {}
+    if not cls:
+        return None
+    return cls, conf, params
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
@@ -309,6 +374,47 @@ def _compact_def(text: str, max_chars: int = 280) -> str:
     return head
 
 
+@dataclass(frozen=True)
+class PromptCandidateContext:
+    has_pending: bool
+    primary_class: str
+    primary_def: str
+    alt_class: str | None
+    alt_def: str
+
+
+def _prompt_candidate_context(
+    *,
+    winner_class: str,
+    winner_def: str,
+    runnerup_class: str | None,
+    runnerup_def: str,
+    pending_class: str = "",
+    pending_def: str = "",
+) -> PromptCandidateContext:
+    has_pending = bool(
+        pending_class
+        and pending_class.lower() != (winner_class or "").lower()
+    )
+    if has_pending:
+        return PromptCandidateContext(
+            has_pending=True,
+            primary_class=pending_class,
+            primary_def=pending_def,
+            alt_class=winner_class,
+            alt_def=winner_def,
+        )
+
+    alt_class = runnerup_class if (runnerup_class and runnerup_class != winner_class) else None
+    return PromptCandidateContext(
+        has_pending=False,
+        primary_class=winner_class,
+        primary_def=winner_def,
+        alt_class=alt_class,
+        alt_def=runnerup_def if alt_class else "",
+    )
+
+
 def _build_prompt(
     winner_class: str,
     winner_def: str,
@@ -333,18 +439,19 @@ def _build_prompt(
     - Default: chroma winner is option 1, runner-up is option 2.
     Both modes always offer `others` and `unclear`.
     """
-    has_pending = bool(
-        pending_class
-        and pending_class.lower() != (winner_class or "").lower()
+    candidate_context = _prompt_candidate_context(
+        winner_class=winner_class,
+        winner_def=winner_def,
+        runnerup_class=runnerup_class,
+        runnerup_def=runnerup_def,
+        pending_class=pending_class,
+        pending_def=pending_def,
     )
-    if has_pending:
-        primary_class, primary_def = pending_class, pending_def
-        alt_class = winner_class
-        alt_def = winner_def
-    else:
-        primary_class, primary_def = winner_class, winner_def
-        alt_class = runnerup_class if (runnerup_class and runnerup_class != winner_class) else None
-        alt_def = runnerup_def if alt_class else ""
+    has_pending = candidate_context.has_pending
+    primary_class = candidate_context.primary_class
+    primary_def = candidate_context.primary_def
+    alt_class = candidate_context.alt_class
+    alt_def = candidate_context.alt_def
 
     primary_block = f"[{primary_class}] {_compact_def(primary_def)}".rstrip()
     alt_block = (
@@ -509,9 +616,9 @@ async def classify(
 
     # Normalize UPPER_CASE embedding labels to lowercase-with-spaces
     # handler names (e.g. "TODO_LIST" → "todo list").
-    winner_handler = winner["class"].lower().replace("_", " ")
+    winner_handler = _handler_name_from_classifier_label(winner["class"])
     runnerup_handler = (
-        runnerup["class"].lower().replace("_", " ") if runnerup else None
+        _handler_name_from_classifier_label(runnerup["class"]) if runnerup else None
     )
 
     # 3. Gather FIFO + definitions for qwen
@@ -535,16 +642,21 @@ async def classify(
     # handler registry keys (handler_class comes in as "todo_list" but
     # the registry uses "todo list").
     raw_pending_class, pending_question = _pending_action_class(session_id or "")
-    pending_class = raw_pending_class.lower().replace("_", " ").strip()
+    pending_class = _handler_name_from_classifier_label(raw_pending_class)
     pending_def = _class_definition(pending_class) if pending_class else ""
 
     # _build_prompt swaps the "primary" candidate to pending_class when a
     # STAGE2_FOLLOWUP is open. Mirror that swap here so qwen sees the
     # schema for whatever class it's being asked to instantiate.
-    has_pending = bool(
-        pending_class and pending_class != (winner_handler or "").lower()
+    candidate_context = _prompt_candidate_context(
+        winner_class=winner_handler,
+        winner_def=winner_def,
+        runnerup_class=runnerup_handler,
+        runnerup_def=runnerup_def,
+        pending_class=pending_class,
+        pending_def=pending_def,
     )
-    if has_pending:
+    if candidate_context.has_pending:
         primary_param_schema = _class_param_schema(pending_class)
         schema_class = pending_class
 
@@ -575,33 +687,16 @@ async def classify(
     # 5. Parse {class, confidence, params?}
     params: dict = {}
     try:
-        text = raw.strip().strip("`").strip()
-        if text.lower().startswith("json"):
-            text = text.split("\n", 1)[-1].strip()
-        start = text.find("{")
-        end = text.rfind("}")
-        if start >= 0 and end > start:
-            text = text[start : end + 1]
-        parsed = json.loads(text)
-        cls = str(parsed.get("class", "")).strip().lower().strip("[]").strip()
-        conf = str(parsed.get("confidence", "Low")).strip().title()
-        if conf not in ("Very High", "High", "Medium", "Low"):
-            conf = "Low"
-        # Pull params iff qwen emitted them as a dict.
-        raw_params = parsed.get("params")
-        if isinstance(raw_params, dict):
-            params = raw_params
-        if not cls:
+        parsed_response = _parse_qwen_classification_response(raw)
+        if parsed_response is None:
             return ("others", "Low", {})
+        cls, conf, params = parsed_response
         # Validate against the runtime handler registry; anything off-list
         # becomes "others".
         allowed = {"others"}
         try:
             from jane_web.jane_v2 import classes as class_registry
-            for meta in class_registry.get_registry().values():
-                n = (meta.get("name") or "").strip().lower()
-                if n:
-                    allowed.add(n)
+            allowed = _allowed_classifier_classes(class_registry.get_registry())
         except Exception:
             pass
         if cls not in allowed:
@@ -638,12 +733,8 @@ async def classify(
     # qwen picks the pending-action class, skip the floor (the FIFO context
     # is the evidence, not chroma).
     winner_best_distance = float(winner.get("best_distance", 1.0))
-    chosen_distance = None
-    for rec in ranked:
-        if rec["class"].lower().replace("_", " ") == cls:
-            chosen_distance = float(rec["best_distance"])
-            break
-    pending_class_normalized = (pending_class or "").lower().strip()
+    chosen_distance = _chosen_class_distance(ranked, cls)
+    pending_class_normalized = _handler_name_from_classifier_label(pending_class)
     is_pending_choice = bool(pending_class_normalized) and cls == pending_class_normalized
     # Only floor when the chosen class IS in chroma top-K with a loose
     # distance. If chosen isn't in top-K at all, qwen is making a non-chroma-
@@ -653,13 +744,11 @@ async def classify(
     # own COHERENT=yes/no guard from qwen, so a second classifier-level
     # safety net just routes legitimate texts to Opus unnecessarily. Trust
     # qwen here and let the handler decide whether to fast-path or escalate.
-    if (
-        conf in _STAGE2_CONFS
-        and cls != "others"
-        and cls != "send message"
-        and not is_pending_choice
-        and chosen_distance is not None
-        and chosen_distance > STAGE2_MAX_DISTANCE
+    if _should_floor_distance_confidence(
+        conf=conf,
+        cls=cls,
+        chosen_distance=chosen_distance,
+        is_pending_choice=is_pending_choice,
     ):
         logger.info(
             "v3: distance floor (chosen=%s dist=%.3f > %.3f, winner=%s dist=%.3f) — %s:%s → Medium (escalate)",
@@ -679,12 +768,13 @@ async def classify(
     # winner, or pending-swap target). If qwen overrode to a different class,
     # those params describe the wrong intent — drop them so the handler for
     # the actual `cls` doesn't receive a sibling class's loader/slots.
-    if params and cls != (schema_class or "").lower():
+    safe_params = _params_for_chosen_class(params, cls, schema_class)
+    if params and not safe_params:
         logger.info(
             "v3: dropping params (extracted for %r, qwen chose %r) — params=%s",
             schema_class, cls, params,
         )
-        params = {}
+    params = safe_params
 
     logger.info(
         "v3: qwen → %s:%s params=%s (winner=%s %d/%d dist=%.3f, runnerup=%s %d, had_fifo=%s)",

@@ -19,7 +19,6 @@ import os
 import sys
 import uuid
 import argparse
-import datetime
 from pathlib import Path
 
 _REQUIRED_PYTHON = os.environ.get('ADK_VENV_PYTHON', 'python3')
@@ -49,6 +48,7 @@ with silence_stderr_fd():
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from jane.config import get_chroma_client, SHORT_TERM_TTL_DAYS as DEFAULT_TTL_DAYS, VECTOR_DB_SHORT_TERM as SHORT_TERM_DB_PATH, CHROMA_COLLECTION_SHORT_TERM
+from memory.v1.local_vector_memory_helpers import forgettable_expiry_iso, utcnow_naive
 
 
 def add_forgettable_memory(
@@ -62,9 +62,9 @@ def add_forgettable_memory(
     Adds a short-term memory entry (formerly 'forgettable') to the shared
     short_term_memory DB. Expires after `days` days; purged by nightly janitor.
     """
-    now = datetime.datetime.utcnow()
+    now = utcnow_naive()
     created_at = now.isoformat()
-    expires_at = (now + datetime.timedelta(days=days)).isoformat()
+    expires_at = forgettable_expiry_iso(days, now_fn=lambda: now)
     memory_id = str(uuid.uuid4())
 
     with silence_stderr_fd():

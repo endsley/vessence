@@ -5,6 +5,22 @@ from __future__ import annotations
 import datetime
 
 
+def parse_memory_datetime(value: object) -> datetime.datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=datetime.timezone.utc)
+        return parsed
+    except Exception:
+        return None
+
+
+def _metadata_timestamp(meta: dict) -> object:
+    return (meta or {}).get("timestamp", (meta or {}).get("created_at", ""))
+
+
 def is_expired(meta: dict) -> bool:
     expires_at = (meta or {}).get("expires_at")
     if not expires_at:
@@ -14,41 +30,26 @@ def is_expired(meta: dict) -> bool:
     if isinstance(expires_at, (int, float)):
         return expires_at < now_ts
 
-    try:
-        expires_dt = datetime.datetime.fromisoformat(str(expires_at).replace("Z", "+00:00"))
-        if expires_dt.tzinfo is None:
-            expires_dt = expires_dt.replace(tzinfo=datetime.timezone.utc)
-        return expires_dt.timestamp() < now_ts
-    except Exception:
+    expires_dt = parse_memory_datetime(expires_at)
+    if expires_dt is None:
         return False
+    return expires_dt.timestamp() < now_ts
 
 
 def is_too_old(meta: dict, max_days: int = 3) -> bool:
     """Return True if the entry is older than max_days. Entries without timestamps pass through."""
-    ts_str = (meta or {}).get("timestamp", (meta or {}).get("created_at", ""))
-    if not ts_str:
+    ts = parse_memory_datetime(_metadata_timestamp(meta))
+    if ts is None:
         return False
-    try:
-        ts = datetime.datetime.fromisoformat(str(ts_str).replace("Z", "+00:00"))
-        if ts.tzinfo is None:
-            ts = ts.replace(tzinfo=datetime.timezone.utc)
-        age = (datetime.datetime.now(datetime.timezone.utc) - ts).total_seconds() / 86400
-        return age > max_days
-    except Exception:
-        return False
+    age = (datetime.datetime.now(datetime.timezone.utc) - ts).total_seconds() / 86400
+    return age > max_days
 
 
 def age_days(meta: dict) -> float | None:
-    ts_str = (meta or {}).get("timestamp", (meta or {}).get("created_at", ""))
-    if not ts_str:
+    ts = parse_memory_datetime(_metadata_timestamp(meta))
+    if ts is None:
         return None
-    try:
-        ts = datetime.datetime.fromisoformat(str(ts_str).replace("Z", "+00:00"))
-        if ts.tzinfo is None:
-            ts = ts.replace(tzinfo=datetime.timezone.utc)
-        return (datetime.datetime.now(datetime.timezone.utc) - ts).total_seconds() / 86400
-    except Exception:
-        return None
+    return (datetime.datetime.now(datetime.timezone.utc) - ts).total_seconds() / 86400
 
 
 def is_none_content(doc: str) -> bool:
@@ -60,21 +61,18 @@ def is_none_content(doc: str) -> bool:
 def recency_label(ts_str: str) -> str:
     if not ts_str or ts_str == "Unknown Time":
         return "unknown age"
-    try:
-        ts = datetime.datetime.fromisoformat(str(ts_str).replace("Z", "+00:00"))
-        if ts.tzinfo is None:
-            ts = ts.replace(tzinfo=datetime.timezone.utc)
-        delta = datetime.datetime.now(datetime.timezone.utc) - ts
-        secs = delta.total_seconds()
-        if secs < 0:
-            return "just now"
-        if secs < 3600:
-            return f"{int(secs // 60)}m ago"
-        if secs < 86400:
-            return f"{int(secs // 3600)}h ago"
-        return f"{int(secs // 86400)}d ago"
-    except Exception:
+    ts = parse_memory_datetime(ts_str)
+    if ts is None:
         return "unknown age"
+    delta = datetime.datetime.now(datetime.timezone.utc) - ts
+    secs = delta.total_seconds()
+    if secs < 0:
+        return "just now"
+    if secs < 3600:
+        return f"{int(secs // 60)}m ago"
+    if secs < 86400:
+        return f"{int(secs // 3600)}h ago"
+    return f"{int(secs // 86400)}d ago"
 
 
 def fmt_memory(doc: str, meta: dict | None) -> str:

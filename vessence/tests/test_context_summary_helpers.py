@@ -18,6 +18,10 @@ def test_save_context_summary_exposes_helpers():
     assert save_context_summary._should_summarize_response is should_summarize_response
 
 
+def test_save_context_summary_utcnow_helper_preserves_naive_shape():
+    assert save_context_summary._utcnow().tzinfo is None
+
+
 def test_parse_hook_payload_accepts_dict_json_only():
     assert parse_hook_payload('{"message": "hello"}') == {"message": "hello"}
     assert parse_hook_payload("  ") == {}

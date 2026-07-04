@@ -1,5 +1,8 @@
 from memory.v1.conversation_text import (
+    _code_change_summary_prompt,
+    _generic_turn_summary_prompt,
     build_short_term_summary_plan,
+    compact_whitespace,
     looks_like_bad_thematic_output,
     looks_like_code_edit,
     normalize_short_term_summary,
@@ -7,6 +10,12 @@ from memory.v1.conversation_text import (
     should_store_short_term_turn,
     strip_injected_metadata,
 )
+
+
+def test_compact_whitespace_collapses_runs_and_handles_empty_values():
+    assert compact_whitespace(" one\n\t two   three ") == "one two three"
+    assert compact_whitespace("") == ""
+    assert compact_whitespace(None) == ""
 
 
 def test_strip_injected_metadata_removes_protocol_and_state_blocks():
@@ -44,6 +53,20 @@ def test_should_store_short_term_turn_filters_low_value_chatter():
     assert should_store_short_term_turn("user", "MEMORY_SYSTEM_OK")
     assert not should_store_short_term_turn("assistant", "I'm here. What do you need?")
     assert should_store_short_term_turn("user", "Remember that the RA cron should keep source artifacts.")
+
+
+def test_short_term_summary_prompt_helpers_preserve_prompt_contracts():
+    code_prompt = _code_change_summary_prompt("assistant", "Patched memory/v1/file.py")
+    assert code_prompt.startswith(
+        "Summarize this assistant turn as a compact code-change memory note"
+    )
+    assert "- Start each bullet with '- '." in code_prompt
+    assert "Role: assistant\nTurn: Patched memory/v1/file.py" in code_prompt
+
+    generic_prompt = _generic_turn_summary_prompt("user", "Decision: keep behavior stable.")
+    assert generic_prompt.startswith("Compress this single conversation turn")
+    assert "- Do not add analysis or speculation." in generic_prompt
+    assert "Role: user\nTurn: Decision: keep behavior stable." in generic_prompt
 
 
 def test_code_edit_detection_and_summary_normalization():

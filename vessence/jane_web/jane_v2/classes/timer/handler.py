@@ -26,6 +26,7 @@ State machine (SET flow):
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import logging
 
 from .parsing import (
@@ -79,6 +80,15 @@ logger = logging.getLogger(__name__)
 # timer while we're still assembling the current one" — this is a same-
 # class restart signal that the dispatcher's LLM gate won't catch (same
 # class, same handler), so keep it.
+
+
+@dataclass(frozen=True)
+class _TimerActionParams:
+    action: str | None = None
+    duration_text: str | None = None
+    label: str | None = None
+    label_provided: bool = False
+    delete_target: str | None = None
 
 
 def _fire_set(duration_ms: int, label: str, *, from_followup: bool = False) -> dict:
@@ -137,62 +147,67 @@ def _handle_resume(prompt: str, pending: dict) -> dict | None:
     return {"abandon_pending": True}
 
 
-def handle(prompt: str, pending: dict | None = None, params: dict | None = None) -> dict | None:
-    # ── Resume path: we're mid-conversation with this user ────────────
-    if pending:
-        return _handle_resume(prompt, pending)
+def _timer_action_params(params: dict | None) -> _TimerActionParams:
+    if not params:
+        return _TimerActionParams()
+    label = params.get("label")
+    return _TimerActionParams(
+        action=(params.get("action") or "").strip().lower() or None,
+        duration_text=(params.get("duration_text") or None),
+        label=label,
+        label_provided=label is not None,
+        delete_target=(params.get("delete_target") or None),
+    )
 
-    p_lower = prompt.lower()
 
-    action = None
-    param_duration_text: str | None = None
-    param_label = None  # None = unspecified; "" = explicit opt-out
-    param_delete_target: str | None = None
-    if params:
-        action = (params.get("action") or "").strip().lower() or None
-        param_duration_text = (params.get("duration_text") or None)
-        if "label" in params:
-            param_label = params.get("label")  # keep "" distinct from missing
-        param_delete_target = (params.get("delete_target") or None)
+def _handle_params_action(
+    prompt: str,
+    p_lower: str,
+    parsed: _TimerActionParams,
+) -> tuple[bool, dict | None]:
+    if parsed.action is None:
+        return False, None
 
-    # ── Params-driven dispatch ────────────────────────────────────────
-    if action == "count":
+    if parsed.action == "count":
         logger.info("timer handler: count query (params)")
-        return _build_count_response()
+        return True, _build_count_response()
 
-    if action == "list":
+    if parsed.action == "list":
         logger.info("timer handler: list (params)")
-        return _build_list_response()
+        return True, _build_list_response()
 
-    if action == "cancel":
+    if parsed.action == "cancel":
         logger.info("timer handler: cancel (params)")
-        return _build_cancel_response()
+        return True, _build_cancel_response()
 
-    if action == "delete":
-        target = _parse_delete_phrase(param_delete_target or "") or _extract_delete_target(p_lower)
+    if parsed.action == "delete":
+        target = _parse_delete_phrase(parsed.delete_target or "") or _extract_delete_target(p_lower)
         if target is None:
             logger.info("timer handler: delete with no resolvable target — escalating")
-            return None
+            return True, None
         logger.info("timer handler: delete %s (params)", target)
-        return _build_delete_response(target)
+        return True, _build_delete_response(target)
 
-    if action == "set":
+    if parsed.action == "set":
         duration_ms = 0
-        if param_duration_text:
-            duration_ms = _parse_duration_ms(param_duration_text)
+        if parsed.duration_text:
+            duration_ms = _parse_duration_ms(parsed.duration_text)
         if duration_ms <= 0:
             duration_ms = _parse_duration_ms(prompt)
         if duration_ms <= 0:
             logger.info("timer handler: set with no duration — ask")
-            return _ask_duration({})
-        # Label: use param_label if provided (even if ""), else extract.
-        label = param_label if param_label is not None else _extract_label(prompt)
-        if label is None or (label == "" and param_label is None):
-            return _ask_label({"duration_ms": duration_ms})
+            return True, _ask_duration({})
+        # Label: use parsed label if provided (even if ""), else extract.
+        label = parsed.label if parsed.label_provided else _extract_label(prompt)
+        if label is None or (label == "" and not parsed.label_provided):
+            return True, _ask_label({"duration_ms": duration_ms})
         # `label == ""` from params means user opted out → fire without label.
-        return _fire_set(duration_ms, label or "")
+        return True, _fire_set(duration_ms, label or "")
 
-    # ── Legacy regex path (no params, e.g. v2 pipeline) ────────────────
+    return False, None
+
+
+def _handle_legacy_prompt(prompt: str, p_lower: str) -> dict | None:
     # COUNT / QUERY — "how many timers do I have"
     # timer.list already returns a count-friendly summary on Android.
     if _is_count_query(p_lower):
@@ -246,3 +261,20 @@ def handle(prompt: str, pending: dict | None = None, params: dict | None = None)
         logger.info("timer handler: duration=%d but no label → ask", duration_ms)
         return _ask_label({"duration_ms": duration_ms})
     return _fire_set(duration_ms, label)
+
+
+def handle(prompt: str, pending: dict | None = None, params: dict | None = None) -> dict | None:
+    # ── Resume path: we're mid-conversation with this user ────────────
+    if pending:
+        return _handle_resume(prompt, pending)
+
+    p_lower = prompt.lower()
+    params_handled, params_response = _handle_params_action(
+        prompt,
+        p_lower,
+        _timer_action_params(params),
+    )
+    if params_handled:
+        return params_response
+
+    return _handle_legacy_prompt(prompt, p_lower)

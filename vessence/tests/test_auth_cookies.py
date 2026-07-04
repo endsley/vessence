@@ -1,4 +1,17 @@
-from jane_web.auth_cookies import AUTH_COOKIE_MAX_AGE_SECONDS, AuthCookieSpec, auth_cookie_specs
+from jane_web.auth_cookies import (
+    AUTH_COOKIE_MAX_AGE_SECONDS,
+    AuthCookieSpec,
+    apply_auth_cookie_spec,
+    auth_cookie_specs,
+)
+
+
+class _Response:
+    def __init__(self):
+        self.calls = []
+
+    def set_cookie(self, *args, **kwargs):
+        self.calls.append((args, kwargs))
 
 
 def test_auth_cookie_specs_refresh_changed_session_and_trusted_device():
@@ -44,4 +57,18 @@ def test_auth_cookie_specs_allows_route_cookie_names():
     assert specs == [
         AuthCookieSpec("s", "session", max_age=30),
         AuthCookieSpec("t", "device", max_age=30),
+    ]
+
+
+def test_apply_auth_cookie_spec_sets_response_cookie_attributes():
+    response = _Response()
+    spec = AuthCookieSpec("cookie-name", "cookie-value", max_age=45, httponly=False, samesite="strict")
+
+    apply_auth_cookie_spec(response, spec, secure=True)
+
+    assert response.calls == [
+        (
+            ("cookie-name", "cookie-value"),
+            {"httponly": False, "secure": True, "samesite": "strict", "max_age": 45},
+        )
     ]

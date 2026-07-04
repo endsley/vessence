@@ -56,6 +56,17 @@ def automation_result_payload(result: Any) -> dict[str, Any]:
     }
 
 
+def web_plan_storage_state_path(profile_id: str | None, steps: list[Any], profiles: Any) -> Any | None:
+    if not profile_id:
+        return None
+    for step in steps:
+        if step.action == "navigate":
+            profiles.bind_check(profile_id, step.args.get("url", ""))
+    storage_state = profiles.storage_state_path(profile_id)
+    profiles.touch_last_used(profile_id)
+    return storage_state
+
+
 def web_profile_create_values(body: Mapping[str, Any]) -> tuple[str, str]:
     name = (body.get("display_name") or "").strip()
     domain = (body.get("domain") or "").strip()

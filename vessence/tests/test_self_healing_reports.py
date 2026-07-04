@@ -1,6 +1,11 @@
 from types import SimpleNamespace
 
-from jane_web.self_healing_reports import normalize_self_healing_report, self_healing_report_authorized
+from jane_web.self_healing_reports import (
+    _report_payload,
+    _report_tags,
+    normalize_self_healing_report,
+    self_healing_report_authorized,
+)
 
 
 def _request(headers=None):
@@ -31,6 +36,22 @@ def test_self_healing_report_authorized_requires_matching_token_for_external_req
         expected_token="",
         is_local_request_fn=lambda request: False,
     )
+
+
+def test_report_tags_preserves_list_tags_and_defaults_others():
+    tags = ["android", 3]
+
+    assert _report_tags({"tags": tags}) is tags
+    assert _report_tags({"tags": "android"}) == ["external"]
+    assert _report_tags({}) == ["external"]
+
+
+def test_report_payload_preserves_dict_payload_or_uses_body():
+    payload = {"detail": "broken"}
+    body = {"payload": "not-a-dict"}
+
+    assert _report_payload({"payload": payload}) is payload
+    assert _report_payload(body) is body
 
 
 def test_normalize_self_healing_report_preserves_fields_and_truncates_message():

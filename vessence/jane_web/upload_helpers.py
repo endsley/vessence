@@ -16,6 +16,23 @@ def parse_upload_descriptions(descriptions_json: str | None) -> list[Any]:
     return descriptions if isinstance(descriptions, list) else []
 
 
+def load_upload_hash_index(hash_index_path: Path) -> dict[str, Any]:
+    try:
+        with open(hash_index_path) as f:
+            hash_index = json.load(f)
+    except Exception:
+        return {}
+    return hash_index if isinstance(hash_index, dict) else {}
+
+
+def write_upload_hash_index(hash_index_path: Path, hash_index: Mapping[str, Any]) -> None:
+    try:
+        with open(hash_index_path, "w") as f:
+            json.dump(hash_index, f)
+    except Exception:
+        pass
+
+
 def upload_description(descriptions: Sequence[Any], index: int) -> str:
     """Return the stripped description for an upload slot."""
     if index >= len(descriptions):
@@ -118,3 +135,14 @@ def upload_memory_fact_command(
     if memory_path:
         command += ["--memory-path", memory_path]
     return command
+
+
+def upload_work_activity_message(results: Sequence[Mapping[str, Any]]) -> str | None:
+    uploaded_names = [
+        str(result["saved_name"])
+        for result in results
+        if result.get("status") == "ok" and result.get("saved_name")
+    ]
+    if not uploaded_names:
+        return None
+    return f"File upload: {', '.join(uploaded_names[:3])}"

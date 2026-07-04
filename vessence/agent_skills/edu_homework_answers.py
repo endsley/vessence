@@ -7,69 +7,89 @@ from typing import Any
 import sympy as sp
 
 
+SIMPLE_ANSWER_TYPES = {"", "number", "math_expression", "fraction", "text", "multiple_choice"}
+
+
 def format_response(answer_type: str | None, solution: Any) -> str:
     """Convert a snapshot.solution into the string the answer form expects."""
     at = answer_type or ""
 
-    if at in ("", "number", "math_expression", "fraction", "text"):
-        return str(solution)
-
-    if at == "multiple_choice":
+    if at in SIMPLE_ANSWER_TYPES:
         return str(solution)
 
     if at == "vector":
         return _matlab_vec(solution)
 
     if at == "subspace_basis":
-        A = solution["A"]
-        kind = solution["kind"]
-        if kind == "null_space":
-            cols = _nullspace_basis(A)
-        elif kind == "column_space":
-            cols = _columnspace_basis(A)
-        elif kind == "row_space":
-            cols = _rowspace_basis(A)
-        else:
-            raise ValueError(f"unknown subspace kind: {kind!r}")
-        return _matlab_matrix(cols)
+        return _format_subspace_basis(solution)
 
     if at == "linear_system_solve":
-        c = solution["classification"]
-        if c == "unique":
-            v_str = _matlab_vec(solution.get("v") or [])
-        elif c == "infinite":
-            v_str = _matlab_vec(_solve_particular(solution["A"], solution["b"]))
-        else:
-            v_str = ""
-        return json.dumps({"class": c, "v": v_str})
+        return _format_linear_system_solve(solution)
 
     if at == "classify_and_reach":
-        return json.dumps({
-            "class": solution["classification"],
-            "reach": "yes" if solution.get("reachable") else "no",
-        })
+        return _format_classify_and_reach(solution)
 
     if at == "invertibility_with_blank":
-        is_inv = bool(solution.get("invertible"))
-        c = "invertible" if is_inv else "not_invertible"
-        blank = "" if not is_inv else str(solution.get("blank") or "")
-        return json.dumps({"class": c, "blank": blank})
+        return _format_invertibility_with_blank(solution)
 
     if at == "solve_system_with_basis":
-        c = solution["classification"]
-        A = solution.get("A")
-        b = solution.get("b")
-        if c == "unique":
-            x = _solve_unique(A, b)
-            return json.dumps({"class": c, "v": _matlab_vec(x), "M": ""})
-        if c == "infinite":
-            x_p = _solve_particular(A, b)
-            ns = _nullspace_basis(A)
-            cols = [x_p] + ns
-            return json.dumps({"class": c, "v": "", "M": _matlab_matrix(cols)})
-        return json.dumps({"class": c, "v": "", "M": ""})
+        return _format_solve_system_with_basis(solution)
 
     raise ValueError(f"Unsupported answer_type for auto-answer: {at!r}")
+
+
+def _format_subspace_basis(solution: Any) -> str:
+    A = solution["A"]
+    kind = solution["kind"]
+    if kind == "null_space":
+        cols = _nullspace_basis(A)
+    elif kind == "column_space":
+        cols = _columnspace_basis(A)
+    elif kind == "row_space":
+        cols = _rowspace_basis(A)
+    else:
+        raise ValueError(f"unknown subspace kind: {kind!r}")
+    return _matlab_matrix(cols)
+
+
+def _format_linear_system_solve(solution: Any) -> str:
+    c = solution["classification"]
+    if c == "unique":
+        v_str = _matlab_vec(solution.get("v") or [])
+    elif c == "infinite":
+        v_str = _matlab_vec(_solve_particular(solution["A"], solution["b"]))
+    else:
+        v_str = ""
+    return json.dumps({"class": c, "v": v_str})
+
+
+def _format_classify_and_reach(solution: Any) -> str:
+    return json.dumps({
+        "class": solution["classification"],
+        "reach": "yes" if solution.get("reachable") else "no",
+    })
+
+
+def _format_invertibility_with_blank(solution: Any) -> str:
+    is_inv = bool(solution.get("invertible"))
+    c = "invertible" if is_inv else "not_invertible"
+    blank = "" if not is_inv else str(solution.get("blank") or "")
+    return json.dumps({"class": c, "blank": blank})
+
+
+def _format_solve_system_with_basis(solution: Any) -> str:
+    c = solution["classification"]
+    A = solution.get("A")
+    b = solution.get("b")
+    if c == "unique":
+        x = _solve_unique(A, b)
+        return json.dumps({"class": c, "v": _matlab_vec(x), "M": ""})
+    if c == "infinite":
+        x_p = _solve_particular(A, b)
+        ns = _nullspace_basis(A)
+        cols = [x_p] + ns
+        return json.dumps({"class": c, "v": "", "M": _matlab_matrix(cols)})
+    return json.dumps({"class": c, "v": "", "M": ""})
 
 
 def _matlab_vec(values) -> str:

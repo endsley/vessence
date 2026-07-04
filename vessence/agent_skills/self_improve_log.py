@@ -46,6 +46,10 @@ _VESSENCE_DATA_HOME = Path(os.environ.get(
 VOCAL_LOG_PATH = _VESSENCE_DATA_HOME / "self_improve_vocal_log.jsonl"
 
 
+def _utcnow() -> dt.datetime:
+    return dt.datetime.now(dt.timezone.utc).replace(tzinfo=None)
+
+
 def log_vocal_summary(
     job: str,
     *,
@@ -71,7 +75,7 @@ def log_vocal_summary(
         what_was_done: One-sentence plain description of the fix.
         severity: "critical" | "medium" | "low" | "info".
     """
-    timestamp = dt.datetime.utcnow().strftime(_TIMESTAMP_FORMAT)
+    timestamp = _utcnow().strftime(_TIMESTAMP_FORMAT)
     record = _build_vocal_summary_record(
         job,
         timestamp=timestamp,
@@ -106,6 +110,6 @@ def read_recent_summaries(
     """
     if not VOCAL_LOG_PATH.exists():
         return []
-    cutoff = dt.datetime.utcnow() - dt.timedelta(days=days)
+    cutoff = _utcnow() - dt.timedelta(days=days)
     with VOCAL_LOG_PATH.open(encoding="utf-8") as f:
         return _recent_summaries_from_lines(f, cutoff=cutoff, limit=limit)

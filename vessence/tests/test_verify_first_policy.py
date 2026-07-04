@@ -1,5 +1,8 @@
 from jane_web.verify_first_policy import needs_verification
-from jane_web.jane_v2.pipeline import _evidence_correction_for_stream
+from jane_web.jane_v2.pipeline import (
+    _evidence_correction_for_stream,
+    _missing_evidence_sources,
+)
 
 
 def test_write_access_verification_requires_tool_evidence():
@@ -24,3 +27,18 @@ def test_stream_correction_when_required_tool_evidence_missing():
 
     assert "code/log tool result" in correction
     assert "should not claim it is verified" in correction
+
+
+def test_missing_evidence_sources_preserves_code_and_memory_requirements():
+    assert _missing_evidence_sources({
+        "requires_code": True,
+        "tool_calls": 0,
+        "requires_memory": True,
+        "memory_evidence": False,
+    }) == ["a code/log tool result", "Chroma memory evidence"]
+    assert _missing_evidence_sources({
+        "requires_code": True,
+        "tool_calls": 2,
+        "requires_memory": True,
+        "memory_evidence": True,
+    }) == []

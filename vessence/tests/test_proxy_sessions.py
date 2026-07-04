@@ -1,11 +1,13 @@
 from types import SimpleNamespace
 
 from jane_web.proxy_sessions import (
+    StaleSessionExpiration,
     global_idle_blocks_prune,
     oldest_session_key,
     read_global_idle_ts,
     session_composite_key,
     split_session_composite_key,
+    stale_session_expirations,
     stale_session_keys,
 )
 
@@ -45,6 +47,19 @@ def test_stale_session_keys_use_strict_ttl_boundary():
     }
 
     assert stale_session_keys(sessions, now_ts=100.0, ttl_seconds=30.0) == ["u:a", "u:c"]
+
+
+def test_stale_session_expirations_include_split_key_and_idle_seconds():
+    sessions = {
+        "u:a": SimpleNamespace(last_accessed_at=50.5),
+        "malformed": SimpleNamespace(last_accessed_at=40.0),
+        "u:fresh": SimpleNamespace(last_accessed_at=95.0),
+    }
+
+    assert stale_session_expirations(sessions, now_ts=100.0, ttl_seconds=30.0) == [
+        StaleSessionExpiration("u:a", "u", "a", 49),
+        StaleSessionExpiration("malformed", "malformed", "", 60),
+    ]
 
 
 def test_oldest_session_key_uses_last_accessed_at():

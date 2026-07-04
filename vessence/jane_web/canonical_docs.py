@@ -25,6 +25,25 @@ def _doc_path(meta: dict[str, str], config_dir: Path | None) -> Path:
     return (config_dir or configs_dir()) / meta["file"]
 
 
+def _doc_payload(
+    slug: str,
+    meta: dict[str, str],
+    stat: Any,
+    *,
+    content: str | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "slug": slug,
+        "title": meta["title"],
+        "file": meta["file"],
+    }
+    if content is not None:
+        payload["content"] = content
+    payload["bytes"] = int(stat.st_size)
+    payload["last_modified"] = int(stat.st_mtime)
+    return payload
+
+
 def read_doc_meta(
     slug: str,
     *,
@@ -45,13 +64,7 @@ def read_doc_meta(
         if logger:
             logger.warning("docs: failed to stat %s: %s", path, exc)
         return None
-    return {
-        "slug": slug,
-        "title": meta["title"],
-        "file": meta["file"],
-        "bytes": int(stat.st_size),
-        "last_modified": int(stat.st_mtime),
-    }
+    return _doc_payload(slug, meta, stat)
 
 
 def read_doc_body(
@@ -74,11 +87,4 @@ def read_doc_body(
         if logger:
             logger.warning("docs: failed to read %s: %s", path, exc)
         return None
-    return {
-        "slug": slug,
-        "title": meta["title"],
-        "file": meta["file"],
-        "content": content,
-        "bytes": int(stat.st_size),
-        "last_modified": int(stat.st_mtime),
-    }
+    return _doc_payload(slug, meta, stat, content=content)

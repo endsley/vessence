@@ -12,10 +12,13 @@ Android handler executes (deletes SMS rows from the phone DB AND
 dismisses matching notifications from the shade).
 """
 
-import datetime
 import logging
 import sys
 from pathlib import Path
+
+from jane_web.jane_v2.classes.sms_metadata_helpers import (
+    format_synced_message_line as _format_synced_message_line,
+)
 
 _VAULT_WEB_DIR = Path(__file__).resolve().parents[4] / "vault_web"
 if str(_VAULT_WEB_DIR) not in sys.path:
@@ -80,23 +83,10 @@ def _escalation_context() -> str:
         return "\n".join(lines)
 
     lines.append("Recent synced messages (most recent first):")
-    for i, r in enumerate(rows):
+    for i, r in enumerate(rows, 1):
         r = dict(r)
-        ts = datetime.datetime.fromtimestamp(
-            r["timestamp_ms"] / 1000
-        ).strftime("%m/%d %I:%M %p").lstrip("0")
-        sender_raw = r["sender"] or "Unknown"
         body = (r["body"] or "").strip()[:160]
-        kind = "contact" if r.get("is_contact") else (r.get("msg_type") or "unknown")
-        if sender_raw.startswith("Me → "):
-            other = sender_raw[len("Me → "):].strip()
-            lines.append(
-                f"{i+1}. [{ts}] (SENT by user to {other}) ({kind}): {body}"
-            )
-        else:
-            lines.append(
-                f"{i+1}. [{ts}] (RECEIVED from {sender_raw}) ({kind}): {body}"
-            )
+        lines.append(_format_synced_message_line(i, r, body))
     return "\n".join(lines)
 
 

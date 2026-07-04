@@ -9,6 +9,7 @@ from jane_web.web_automation_helpers import (
     web_plan_profile_id,
     web_plan_raw_steps,
     web_plan_record_trace,
+    web_plan_storage_state_path,
     web_plan_step_specs,
     web_profile_capture_values,
     web_profile_create_values,
@@ -63,6 +64,37 @@ def test_automation_result_payload_shape():
         "summary": "done",
         "data": {"x": 1},
     }
+
+
+def test_web_plan_storage_state_path_checks_every_navigate_step_and_touches_profile():
+    class Profiles:
+        def __init__(self):
+            self.checked = []
+            self.touched = []
+
+        def bind_check(self, profile_id, url):
+            self.checked.append((profile_id, url))
+
+        def storage_state_path(self, profile_id):
+            return f"/profiles/{profile_id}.json"
+
+        def touch_last_used(self, profile_id):
+            self.touched.append(profile_id)
+
+    profiles = Profiles()
+    steps = [
+        SimpleNamespace(action="navigate", args={"url": "https://bank.example"}),
+        SimpleNamespace(action="click", args={"selector": "#go"}),
+        SimpleNamespace(action="navigate", args={"url": "https://bank.example/accounts"}),
+    ]
+
+    assert web_plan_storage_state_path("prof-1", steps, profiles) == "/profiles/prof-1.json"
+    assert profiles.checked == [
+        ("prof-1", "https://bank.example"),
+        ("prof-1", "https://bank.example/accounts"),
+    ]
+    assert profiles.touched == ["prof-1"]
+    assert web_plan_storage_state_path(None, steps, profiles) is None
 
 
 def test_web_profile_create_values_strip_required_fields():

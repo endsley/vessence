@@ -1,9 +1,11 @@
 from types import SimpleNamespace
 
 from jane_web.request_helpers import (
+    _request_client_host,
     client_ip,
     cookie_secure_flag,
     is_android_webview_request,
+    is_local_control_ip,
     is_local_browser_access,
     is_local_request,
     is_single_user_no_auth_mode,
@@ -33,6 +35,11 @@ def test_client_ip_prefers_cloudflare_then_real_ip_then_client_host():
     assert client_ip(_request(host=None)) == "unknown"
 
 
+def test_request_client_host_preserves_missing_client_fallback():
+    assert _request_client_host(_request(host="127.0.0.1")) == "127.0.0.1"
+    assert _request_client_host(_request(host=None)) == ""
+
+
 def test_cookie_secure_flag_uses_scheme_or_forwarded_proto_first_value():
     assert cookie_secure_flag(_request(scheme="https"))
     assert cookie_secure_flag(_request(headers={"x-forwarded-proto": "https, http"}))
@@ -58,6 +65,15 @@ def test_local_request_rejects_proxy_headers_and_allows_localhost_name():
     assert not is_local_request(_request(headers={"cf-connecting-ip": "198.51.100.1"}, host="127.0.0.1"))
     assert not is_local_request(_request(headers={"x-forwarded-for": "198.51.100.1"}, host="127.0.0.1"))
     assert not is_local_request(_request(host="203.0.113.5"))
+
+
+def test_local_control_ip_allows_loopback_and_optional_unknown():
+    assert is_local_control_ip("127.0.0.1")
+    assert is_local_control_ip("::1")
+    assert is_local_control_ip("localhost")
+    assert not is_local_control_ip("unknown")
+    assert is_local_control_ip("unknown", allow_unknown=True)
+    assert not is_local_control_ip("198.51.100.1", allow_unknown=True)
 
 
 def test_android_webview_request_detects_vessences_user_agent():

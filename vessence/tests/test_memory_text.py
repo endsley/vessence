@@ -7,8 +7,18 @@ from memory.v1.memory_text import (
     is_expired,
     is_none_content,
     is_too_old,
+    parse_memory_datetime,
     recency_label,
 )
+
+
+def test_parse_memory_datetime_normalizes_iso_values_to_utc():
+    assert parse_memory_datetime("2026-07-03T12:34:56Z") == datetime.datetime(
+        2026, 7, 3, 12, 34, 56, tzinfo=datetime.timezone.utc
+    )
+    assert parse_memory_datetime("2026-07-03T12:34:56").tzinfo == datetime.timezone.utc
+    assert parse_memory_datetime("") is None
+    assert parse_memory_datetime("not a timestamp") is None
 
 
 def test_is_expired_handles_numeric_and_iso_values():

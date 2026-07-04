@@ -11,6 +11,50 @@ STATUS_TAGS = {
     "[INCOMPLETE]": "incomplete",
     "[new]": "pending",
 }
+ENTRY_START_RE = re.compile(r"^(\d+)\.\s*")
+
+
+def prompt_entry_chunks(content: str) -> list[str]:
+    return [chunk.strip() for chunk in re.split(r"\n(?=\d+\.\s)", content) if chunk.strip()]
+
+
+def parse_status_prefix(text: str) -> tuple[str, str]:
+    status = "pending"
+    inline_text = text
+    for tag, parsed_status in STATUS_TAGS.items():
+        if text.startswith(tag):
+            status = parsed_status
+            inline_text = text[len(tag):].strip()
+            break
+    return status, inline_text
+
+
+def prompt_body_lines(inline_text: str, following_lines: list[str]) -> list[str]:
+    body_lines = []
+    if inline_text:
+        body_lines.append(inline_text)
+    for line in following_lines:
+        if line.startswith("   -") or line.startswith("\t-"):
+            break
+        if line.strip() == "---":
+            break
+        body_lines.append(line)
+    return body_lines
+
+
+def parse_prompt_chunk(chunk: str) -> dict | None:
+    lines = chunk.splitlines()
+    if not lines:
+        return None
+    first = lines[0].strip()
+    match = ENTRY_START_RE.match(first)
+    if not match:
+        return None
+
+    idx = int(match.group(1))
+    status, inline_text = parse_status_prefix(first[match.end():])
+    text = "\n".join(prompt_body_lines(inline_text, lines[1:])).strip()
+    return {"index": idx, "text": text, "status": status}
 
 
 def parse_prompt_list(content: str) -> list[dict]:
@@ -24,40 +68,10 @@ def parse_prompt_list(content: str) -> list[dict]:
            - sub-bullet outcome/note
     """
     prompts = []
-    chunks = re.split(r"\n(?=\d+\.\s)", content)
-    for chunk in chunks:
-        chunk = chunk.strip()
-        if not chunk:
-            continue
-        lines = chunk.splitlines()
-        first = lines[0].strip()
-        m = re.match(r"^(\d+)\.\s*", first)
-        if not m:
-            continue
-        idx = int(m.group(1))
-        after_num = first[m.end():]
-
-        status = "pending"
-        inline_text = after_num
-        for tag, parsed_status in STATUS_TAGS.items():
-            if after_num.startswith(tag):
-                status = parsed_status
-                inline_text = after_num[len(tag):].strip()
-                break
-
-        body_lines = []
-        if inline_text:
-            body_lines.append(inline_text)
-        for line in lines[1:]:
-            if line.startswith("   -") or line.startswith("\t-"):
-                break
-            if line.strip() == "---":
-                break
-            body_lines.append(line)
-
-        text = "\n".join(body_lines).strip()
-        prompts.append({"index": idx, "text": text, "status": status})
-
+    for chunk in prompt_entry_chunks(content):
+        parsed = parse_prompt_chunk(chunk)
+        if parsed is not None:
+            prompts.append(parsed)
     return prompts
 
 

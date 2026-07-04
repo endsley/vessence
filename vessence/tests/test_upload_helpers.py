@@ -3,6 +3,7 @@ from pathlib import Path
 from jane_web.upload_helpers import (
     duplicate_upload_result,
     hash_index_entry,
+    load_upload_hash_index,
     next_available_path,
     parse_upload_descriptions,
     upload_description,
@@ -11,6 +12,8 @@ from jane_web.upload_helpers import (
     upload_safe_name,
     upload_subdir,
     upload_success_result,
+    upload_work_activity_message,
+    write_upload_hash_index,
 )
 
 
@@ -19,6 +22,21 @@ def test_parse_upload_descriptions_returns_only_lists():
     assert parse_upload_descriptions('{"not": "a list"}') == []
     assert parse_upload_descriptions("not json") == []
     assert parse_upload_descriptions(None) == []
+
+
+def test_upload_hash_index_load_and_write_helpers(tmp_path):
+    path = tmp_path / ".hash_index.json"
+
+    assert load_upload_hash_index(path) == {}
+
+    write_upload_hash_index(path, {"hash": {"path": "docs/file.md"}})
+    assert load_upload_hash_index(path) == {"hash": {"path": "docs/file.md"}}
+
+    path.write_text("[]")
+    assert load_upload_hash_index(path) == {}
+
+    path.write_text("not json")
+    assert load_upload_hash_index(path) == {}
 
 
 def test_upload_description_strips_and_handles_missing_slots():
@@ -144,3 +162,16 @@ def test_upload_memory_fact_text_and_command_preserve_common_arguments():
         "--user-id",
         "child",
     ]
+
+
+def test_upload_work_activity_message_uses_first_three_successes():
+    assert upload_work_activity_message([]) is None
+    assert upload_work_activity_message(
+        [
+            {"status": "duplicate", "saved_name": "old.md"},
+            {"status": "ok", "saved_name": "one.md"},
+            {"status": "ok", "saved_name": "two.md"},
+            {"status": "ok", "saved_name": "three.md"},
+            {"status": "ok", "saved_name": "four.md"},
+        ]
+    ) == "File upload: one.md, two.md, three.md"

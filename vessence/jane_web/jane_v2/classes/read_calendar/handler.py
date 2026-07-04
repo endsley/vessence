@@ -71,6 +71,31 @@ from .prompts import (
 
 logger = logging.getLogger(__name__)
 
+
+def _abandon_to_stage3() -> dict:
+    return {"abandon_pending": True, "force_stage3": True}
+
+
+def _calendar_pending_data(pending: dict) -> dict:
+    if not isinstance(pending, dict):
+        return {}
+    data = pending.get("data")
+    return data if isinstance(data, dict) else {}
+
+
+def _calendar_awaiting(pending: dict) -> str | None:
+    data = _calendar_pending_data(pending)
+    return data.get("awaiting") or (pending.get("awaiting") if isinstance(pending, dict) else None)
+
+
+def _calendar_events_and_last_range(pending: dict) -> tuple[list[dict], str]:
+    data = _calendar_pending_data(pending)
+    events = data.get("events") or []
+    if not isinstance(events, list):
+        events = []
+    return events, data.get("last_range", "today")
+
+
 async def _ask_qwen(prompt_text: str, num_predict: int = 120) -> str | None:
     try:
         return await _post_local_llm_response(
@@ -126,60 +151,95 @@ async def _answer_for_range(prompt: str, range_hint: str) -> dict | None:
 
 
 async def _handle_resume(prompt: str, pending: dict) -> dict | None:
-    from agent_skills import end_phrase, confirmation
-    from agent_skills.private_handler_utils import end_conversation
-
-    awaiting = (pending.get("data") or {}).get("awaiting") or pending.get("awaiting")
+    awaiting = _calendar_awaiting(pending)
 
     # End-of-loop signals — same in both states.
-    if end_phrase.is_end(prompt) or confirmation.is_no(prompt):
+    if _is_calendar_end_signal(prompt):
         logger.info("calendar handler: end signal on resume (%s) → close", awaiting)
-        return end_conversation("Ok.", structured={"intent": "read calendar"})
+        return _end_calendar_conversation()
 
     if awaiting == "event_detail_or_stop":
-        events = (pending.get("data") or {}).get("events") or []
-        last_range = (pending.get("data") or {}).get("last_range", "today")
-        if confirmation.is_yes(prompt) and len(events) == 1:
-            return await _show_event_detail(events[0], last_range)
-        if confirmation.is_yes(prompt):
-            return _build_event_choice_response(last_range, events)
-        matched = _match_event(prompt, events)
-        if matched:
-            return await _show_event_detail(matched, last_range)
-        range_hint = _resolve_range(prompt)
-        if range_hint is not None:
-            return await _answer_for_range(prompt, range_hint)
-        logger.info("calendar handler: no event match in detail follow-up → ask another day")
-        return _ask_another_day(last_range)
+        events, last_range = _calendar_events_and_last_range(pending)
+        return await _handle_event_detail_or_stop(prompt, events, last_range)
 
     if awaiting == "awaiting_event_choice":
-        events = (pending.get("data") or {}).get("events") or []
-        last_range = (pending.get("data") or {}).get("last_range", "today")
-        matched = _match_event(prompt, events)
-        if matched:
-            return await _show_event_detail(matched, last_range)
-        logger.info("calendar handler: no event match in 'which one?' reply → ask another day")
-        return _ask_another_day(last_range)
+        events, last_range = _calendar_events_and_last_range(pending)
+        return await _handle_event_choice_reply(prompt, events, last_range)
 
     if awaiting == "another_day_or_stop":
-        range_hint = _resolve_range(prompt)
-        if range_hint is not None:
-            return await _answer_for_range(prompt, range_hint)
-        if confirmation.is_yes(prompt):
-            return _build_day_choice_response()
-        logger.info("calendar handler: no day in follow-up reply → escalate")
-        return {"abandon_pending": True, "force_stage3": True}
+        return await _handle_another_day_or_stop(prompt)
 
     if awaiting == "awaiting_day_choice":
-        range_hint = _resolve_range(prompt)
-        if range_hint is None:
-            logger.info("calendar handler: no day in 'which day?' reply → escalate")
-            return {"abandon_pending": True, "force_stage3": True}
-        return await _answer_for_range(prompt, range_hint)
+        return await _handle_day_choice_reply(prompt)
 
     # Unknown awaiting tag — let Stage 3 sort it out.
     logger.info("calendar handler: unknown pending awaiting=%r → escalate", awaiting)
-    return {"abandon_pending": True, "force_stage3": True}
+    return _abandon_to_stage3()
+
+
+def _is_calendar_end_signal(prompt: str) -> bool:
+    from agent_skills import confirmation, end_phrase
+
+    return end_phrase.is_end(prompt) or confirmation.is_no(prompt)
+
+
+def _end_calendar_conversation() -> dict:
+    from agent_skills.private_handler_utils import end_conversation
+
+    return end_conversation("Ok.", structured={"intent": "read calendar"})
+
+
+async def _handle_event_detail_or_stop(
+    prompt: str,
+    events: list[dict],
+    last_range: str,
+) -> dict | None:
+    from agent_skills import confirmation
+
+    if confirmation.is_yes(prompt) and len(events) == 1:
+        return await _show_event_detail(events[0], last_range)
+    if confirmation.is_yes(prompt):
+        return _build_event_choice_response(last_range, events)
+    matched = _match_event(prompt, events)
+    if matched:
+        return await _show_event_detail(matched, last_range)
+    range_hint = _resolve_range(prompt)
+    if range_hint is not None:
+        return await _answer_for_range(prompt, range_hint)
+    logger.info("calendar handler: no event match in detail follow-up → ask another day")
+    return _ask_another_day(last_range)
+
+
+async def _handle_event_choice_reply(
+    prompt: str,
+    events: list[dict],
+    last_range: str,
+) -> dict | None:
+    matched = _match_event(prompt, events)
+    if matched:
+        return await _show_event_detail(matched, last_range)
+    logger.info("calendar handler: no event match in 'which one?' reply → ask another day")
+    return _ask_another_day(last_range)
+
+
+async def _handle_another_day_or_stop(prompt: str) -> dict | None:
+    from agent_skills import confirmation
+
+    range_hint = _resolve_range(prompt)
+    if range_hint is not None:
+        return await _answer_for_range(prompt, range_hint)
+    if confirmation.is_yes(prompt):
+        return _build_day_choice_response()
+    logger.info("calendar handler: no day in follow-up reply → escalate")
+    return _abandon_to_stage3()
+
+
+async def _handle_day_choice_reply(prompt: str) -> dict | None:
+    range_hint = _resolve_range(prompt)
+    if range_hint is None:
+        logger.info("calendar handler: no day in 'which day?' reply → escalate")
+        return _abandon_to_stage3()
+    return await _answer_for_range(prompt, range_hint)
 
 
 async def handle(prompt: str, context: str = "", pending: dict | None = None,

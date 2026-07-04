@@ -37,6 +37,20 @@ def _anchor_doc_set(exact_anchor_docs: Iterable[str] | None) -> set[str]:
     return {doc for doc in exact_anchor_docs or ()}
 
 
+def _collect_expiring_distance_facts(
+    docs: list[str],
+    metas: list[dict],
+    distances: list[float | None],
+    *,
+    max_distance: float | None,
+) -> list[str]:
+    return [
+        fmt_memory(doc, _meta_with_distance(meta, distance))
+        for doc, meta, distance in zip(docs, metas, distances)
+        if not is_expired(meta or {}) and within_distance(distance, max_distance)
+    ]
+
+
 def collect_user_memory_facts(
     docs: list[str],
     metas: list[dict],
@@ -92,11 +106,12 @@ def collect_jane_long_term_facts(
     *,
     max_distance: float | None,
 ) -> list[str]:
-    return [
-        fmt_memory(doc, _meta_with_distance(meta, distance))
-        for doc, meta, distance in zip(docs, metas, distances)
-        if not is_expired(meta or {}) and within_distance(distance, max_distance)
-    ]
+    return _collect_expiring_distance_facts(
+        docs,
+        metas,
+        distances,
+        max_distance=max_distance,
+    )
 
 
 def collect_short_term_semantic_facts(
@@ -160,11 +175,12 @@ def collect_file_index_facts(
     *,
     max_distance: float | None,
 ) -> list[str]:
-    return [
-        fmt_memory(doc, _meta_with_distance(meta, distance))
-        for doc, meta, distance in zip(docs, metas, distances)
-        if not is_expired(meta or {}) and within_distance(distance, max_distance)
-    ]
+    return _collect_expiring_distance_facts(
+        docs,
+        metas,
+        distances,
+        max_distance=max_distance,
+    )
 
 
 def collect_essence_facts(
@@ -174,8 +190,9 @@ def collect_essence_facts(
     *,
     max_distance: float | None,
 ) -> list[str]:
-    return [
-        fmt_memory(doc, _meta_with_distance(meta, distance))
-        for doc, meta, distance in zip(docs, metas, distances)
-        if not is_expired(meta or {}) and within_distance(distance, max_distance)
-    ]
+    return _collect_expiring_distance_facts(
+        docs,
+        metas,
+        distances,
+        max_distance=max_distance,
+    )

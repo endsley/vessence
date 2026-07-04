@@ -3,8 +3,13 @@ from agent_skills.todo_doc_helpers import (
     build_todo_cache_payload,
     decode_doc_body,
     export_url,
+    is_category_header,
     is_login_wall_body,
+    is_todo_title_line,
+    list_item_text,
+    next_nonblank_index,
     parse_categories,
+    strip_doc_bom,
     todo_item_count,
 )
 
@@ -12,6 +17,20 @@ from agent_skills.todo_doc_helpers import (
 def test_fetch_todo_list_exposes_helper_parser_and_export_url():
     assert fetch_todo_list.parse_categories is parse_categories
     assert fetch_todo_list._export_url is export_url
+
+
+def test_parse_category_line_helpers_preserve_marker_and_header_rules():
+    lines = ["Home", "", "- Dishes", "Footer"]
+
+    assert strip_doc_bom("\ufeffTODO list") == "TODO list"
+    assert strip_doc_bom("TODO list") == "TODO list"
+    assert is_todo_title_line(0, "Todo List")
+    assert not is_todo_title_line(1, "Todo List")
+    assert list_item_text("  2) Call the office") == "Call the office"
+    assert list_item_text("Footer") is None
+    assert next_nonblank_index(lines, 1) == 2
+    assert is_category_header(lines, 0)
+    assert not is_category_header(lines, 2)
 
 
 def test_parse_categories_handles_titles_headers_markers_and_noise():

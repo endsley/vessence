@@ -38,6 +38,10 @@ ADD_MEMORY = ADD_MEMORY_SCRIPT
 CONTEXT_LOG = CONTEXT_SUMMARY_PATH
 
 
+def _utcnow() -> datetime.datetime:
+    return datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+
+
 def ask_qwen_summarize(text: str) -> str:
     """Ask Qwen to produce a 2-3 sentence summary of the given text."""
     prompt = (
@@ -71,7 +75,7 @@ def main():
     if not summary or "[summary unavailable" in summary:
         sys.exit(0)
 
-    now = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    now = _utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
     fact = _context_snapshot_fact(now, summary)
 
     try:

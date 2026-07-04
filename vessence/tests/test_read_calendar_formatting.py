@@ -1,3 +1,4 @@
+import asyncio
 from datetime import date, datetime
 
 from jane_web.jane_v2.classes.read_calendar import handler
@@ -23,6 +24,10 @@ from jane_web.jane_v2.classes.read_calendar.responses import (
 )
 
 
+def run(coro):
+    return asyncio.run(coro)
+
+
 def test_handler_uses_extracted_calendar_formatting_helpers() -> None:
     assert handler._RANGE_PATTERNS is RANGE_PATTERNS
     assert handler._format_time is format_time
@@ -33,6 +38,111 @@ def test_handler_uses_extracted_calendar_formatting_helpers() -> None:
     assert handler._pending is build_calendar_pending
     assert handler._wrap_with_followup is build_range_followup_response
     assert handler._ask_another_day is build_another_day_response
+
+
+def test_calendar_pending_helpers_preserve_nested_state_and_malformed_fallbacks() -> None:
+    pending = {
+        "data": {
+            "awaiting": "event_detail_or_stop",
+            "events": [{"id": "e1"}],
+            "last_range": "tomorrow",
+        }
+    }
+
+    assert handler._calendar_pending_data(pending) == pending["data"]
+    assert handler._calendar_awaiting(pending) == "event_detail_or_stop"
+    assert handler._calendar_events_and_last_range(pending) == ([{"id": "e1"}], "tomorrow")
+    assert handler._calendar_awaiting({"awaiting": "another_day_or_stop"}) == (
+        "another_day_or_stop"
+    )
+    assert handler._calendar_pending_data({"data": "bad"}) == {}
+    assert handler._calendar_events_and_last_range({"data": {"events": "bad"}}) == ([], "today")
+    assert handler._abandon_to_stage3() == {"abandon_pending": True, "force_stage3": True}
+
+
+def test_calendar_resume_end_signal_helpers_preserve_terminal_shape() -> None:
+    assert handler._is_calendar_end_signal("no")
+    assert handler._is_calendar_end_signal("stop")
+    assert not handler._is_calendar_end_signal("tomorrow")
+    assert handler._end_calendar_conversation() == {
+        "text": "Ok.",
+        "conversation_end": True,
+        "structured": {"intent": "read calendar"},
+    }
+
+
+def test_calendar_event_detail_resume_helper_routes_detail_choice_day_and_fallback(monkeypatch) -> None:
+    async def fake_show_event_detail(event, last_range):
+        return {"text": f"detail {event['id']} {last_range}"}
+
+    async def fake_answer_for_range(prompt, range_hint):
+        return {"text": f"range {range_hint}", "prompt": prompt}
+
+    monkeypatch.setattr(handler, "_show_event_detail", fake_show_event_detail)
+    monkeypatch.setattr(handler, "_answer_for_range", fake_answer_for_range)
+
+    events = [
+        {"id": "e1", "summary": "Doctor Appointment"},
+        {"id": "e2", "summary": "Dinner with Lee"},
+    ]
+
+    assert run(handler._handle_event_detail_or_stop("yes", [events[0]], "today")) == {
+        "text": "detail e1 today"
+    }
+
+    choice = run(handler._handle_event_detail_or_stop("yes", events, "today"))
+    assert choice["text"] == "Which one?"
+    assert choice["structured"]["pending_action"]["awaiting"] == "awaiting_event_choice"
+
+    assert run(handler._handle_event_detail_or_stop("tell me about 2", events, "today")) == {
+        "text": "detail e2 today"
+    }
+    assert run(handler._handle_event_detail_or_stop("tomorrow", events, "today")) == {
+        "text": "range tomorrow",
+        "prompt": "tomorrow",
+    }
+
+    fallback = run(handler._handle_event_detail_or_stop("something else", events, "today"))
+    assert fallback["text"] == ANOTHER_DAY_QUESTION
+    assert fallback["structured"]["pending_action"]["awaiting"] == "another_day_or_stop"
+
+
+def test_calendar_choice_and_day_resume_helpers_route_or_escalate(monkeypatch) -> None:
+    async def fake_show_event_detail(event, last_range):
+        return {"text": f"detail {event['id']} {last_range}"}
+
+    async def fake_answer_for_range(prompt, range_hint):
+        return {"text": f"range {range_hint}", "prompt": prompt}
+
+    monkeypatch.setattr(handler, "_show_event_detail", fake_show_event_detail)
+    monkeypatch.setattr(handler, "_answer_for_range", fake_answer_for_range)
+
+    events = [{"id": "e1", "summary": "Dentist"}]
+
+    assert run(handler._handle_event_choice_reply("dentist details", events, "today")) == {
+        "text": "detail e1 today"
+    }
+    event_fallback = run(handler._handle_event_choice_reply("wrong one", events, "today"))
+    assert event_fallback["text"] == ANOTHER_DAY_QUESTION
+
+    assert run(handler._handle_another_day_or_stop("next week")) == {
+        "text": "range next week",
+        "prompt": "next week",
+    }
+    assert run(handler._handle_another_day_or_stop("yes"))["text"] == DAY_CHOICE_QUESTION
+    assert run(handler._handle_another_day_or_stop("maybe")) == {
+        "abandon_pending": True,
+        "force_stage3": True,
+    }
+
+    assert run(handler._handle_day_choice_reply("friday")) == {
+        "text": "range friday",
+        "prompt": "friday",
+    }
+    assert run(handler._handle_day_choice_reply("maybe")) == {
+        "abandon_pending": True,
+        "force_stage3": True,
+    }
 
 
 def test_resolve_range_accepts_specific_days_and_weeks_only() -> None:

@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
+from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 
@@ -40,3 +42,22 @@ def marketplace_create_search_payload(
         "filters": body.get("filters"),
         "location_id": body.get("location_id") or default_location_id,
     }
+
+
+def marketplace_refresh_command(python_bin: str, name: str) -> list[str]:
+    return [python_bin, "-m", "agent_skills.marketplace.refresh", name]
+
+
+def marketplace_refresh_env(environ: Mapping[str, str]) -> dict[str, str]:
+    env = dict(environ)
+    env.pop("DISPLAY", None)
+    env.pop("WAYLAND_DISPLAY", None)
+    return env
+
+
+def marketplace_refresh_log_path(data_home: str | Path, name: str) -> Path:
+    return Path(data_home) / "logs" / f"marketplace_refresh_{name}.log"
+
+
+def marketplace_refresh_log_header(name: str, now: datetime) -> str:
+    return f"\n=== manual refresh {name} at {now.isoformat(timespec='seconds')} ===\n"

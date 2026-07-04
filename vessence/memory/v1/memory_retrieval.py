@@ -221,6 +221,322 @@ def _get_ds3000_lecture_anchors(subtopics: list[str]) -> list[tuple[str, dict]]:
     return anchors
 
 
+def _memory_sections_cache_key(
+    query: str,
+    assistant_name: str,
+    essence_chromadb_path: str | None,
+    user_memory_path: str | None,
+    user_id: str | None,
+) -> tuple[str, str, str, str, str]:
+    return (
+        query or "",
+        assistant_name or "",
+        essence_chromadb_path or "",
+        user_memory_path or "",
+        user_id or "",
+    )
+
+
+def _submit_section_query(
+    futures: dict,
+    executor,
+    key: str,
+    path: str | None,
+    collection: str,
+    query: str,
+    limit: int,
+    query_emb: list[float] | None = None,
+) -> None:
+    args = [_query_collection, path or "", collection, query, limit]
+    if query_emb is not None:
+        args.append(query_emb)
+    futures[key] = executor.submit(*args)
+
+
+def _section_query_specs(
+    plan,
+    *,
+    user_memory_path: str | None,
+    essence_chromadb_path: str | None,
+) -> list[tuple[str, str | None, str, int, bool]]:
+    specs: list[tuple[str, str | None, str, int, bool]] = []
+    if plan.use_user_memory or plan.use_shared:
+        specs.append((
+            "user_memories",
+            user_memory_path if plan.use_user_memory else VECTOR_DB_USER_MEMORIES,
+            CHROMA_COLLECTION_USER_MEMORIES,
+            CHROMA_SEARCH_LIMIT,
+            True,
+        ))
+    if plan.use_jane_long_term:
+        specs.append((
+            "jane_long_term",
+            VECTOR_DB_LONG_TERM,
+            CHROMA_COLLECTION_LONG_TERM,
+            CHROMA_LONG_TERM_LIMIT,
+            True,
+        ))
+    if plan.use_short_term:
+        specs.append((
+            "short_term",
+            VECTOR_DB_SHORT_TERM,
+            CHROMA_COLLECTION_SHORT_TERM,
+            CHROMA_SHORT_TERM_LIMIT,
+            True,
+        ))
+    if plan.use_file_index:
+        specs.append((
+            "file_index",
+            VECTOR_DB_FILE_INDEX,
+            CHROMA_COLLECTION_FILE_INDEX,
+            min(8, CHROMA_SEARCH_LIMIT),
+            True,
+        ))
+    if plan.use_essence:
+        specs.append((
+            "essence",
+            essence_chromadb_path,
+            "essence_knowledge",
+            CHROMA_SEARCH_LIMIT,
+            False,
+        ))
+    return specs
+
+
+def _submit_section_queries(
+    executor,
+    plan,
+    query: str,
+    query_emb: list[float] | None,
+    *,
+    user_memory_path: str | None,
+    essence_chromadb_path: str | None,
+) -> dict:
+    futures: dict[str, "Future"] = {}
+    for key, path, collection, limit, use_query_embedding in _section_query_specs(
+        plan,
+        user_memory_path=user_memory_path,
+        essence_chromadb_path=essence_chromadb_path,
+    ):
+        _submit_section_query(
+            futures,
+            executor,
+            key,
+            path,
+            collection,
+            query,
+            limit,
+            query_emb if use_query_embedding else None,
+        )
+    return futures
+
+
+def _safe_future_result(
+    futures: dict,
+    future_key: str,
+) -> tuple[list[str], list[dict], list[float | None]]:
+    if future_key not in futures:
+        return [], [], []
+    try:
+        return futures[future_key].result()
+    except Exception:
+        return [], [], []
+
+
+def _collect_legacy_forgettable_facts() -> list[str]:
+    try:
+        with silence_stderr_fd():
+            client = get_chroma_client(path=VECTOR_DB_USER_MEMORIES)
+            collection = client.get_collection(name=CHROMA_COLLECTION_USER_MEMORIES)
+            extra_results = collection.get(
+                where={"memory_type": "forgettable"},
+                include=["documents", "metadatas"],
+            )
+    except Exception:
+        return []
+
+    facts: list[str] = []
+    extra_ids = extra_results.get("ids", [])
+    extra_docs = extra_results.get("documents", [])
+    extra_metas = extra_results.get("metadatas", [])
+    for _extra_id, extra_doc, extra_meta in zip(extra_ids, extra_docs, extra_metas):
+        extra_meta = extra_meta or {}
+        if _is_expired(extra_meta):
+            continue
+        if _is_none_content(extra_doc) or _is_low_signal_short_term_memory(extra_doc, extra_meta):
+            continue
+        facts.append(_fmt_memory(extra_doc, extra_meta))
+    return facts
+
+
+def _apply_short_term_recency_boost(short_term_facts: list[str]) -> list[str]:
+    # Recency boost: always include the N most recent short-term entries
+    # regardless of semantic similarity, so recent changes never get missed.
+    try:
+        short_term_path = VECTOR_DB_SHORT_TERM
+        if not os.path.exists(short_term_path):
+            return short_term_facts
+        with silence_stderr_fd():
+            short_term_client = get_chroma_client(path=short_term_path)
+            short_term_collection = short_term_client.get_collection(name=CHROMA_COLLECTION_SHORT_TERM)
+        all_results = short_term_collection.get(
+            include=["documents", "metadatas"],
+            limit=min(200, short_term_collection.count()),
+        )
+        if all_results["documents"]:
+            return _collect_short_term_with_recency_boost(
+                short_term_facts,
+                all_results["documents"],
+                all_results["metadatas"],
+                limit=3,
+            )
+    except Exception:
+        pass
+    return short_term_facts
+
+
+def _ds3000_anchor_candidates(query: str) -> list[tuple[int, float, str, str, str]]:
+    candidates: list[tuple[int, float, str, str, str]] = []
+    for doc, meta in _get_ds3000_lecture_anchors(_ds3000_lecture_subtopics(query)):
+        candidates.append((0, 0.0, "user_memories", _extract_content_key(doc), _fmt_memory(doc, meta)))
+    return candidates
+
+
+def _nearest_candidates_from_query_specs(
+    query_specs,
+    query: str,
+    query_emb: list[float] | None,
+    query_terms: set[str],
+    *,
+    max_distance: float,
+    min_lexical_overlap: float,
+) -> list[tuple[int, float, str, str, str]]:
+    candidates: list[tuple[int, float, str, str, str]] = []
+
+    # Run sequentially. The underlying Chroma/SentenceTransformer stack writes
+    # to process-wide stdout/stderr during lazy loads; parallel lookups can race
+    # the fd redirection and leak noise into Codex prompt preflight output.
+    for source, path, collection, search_limit in query_specs:
+        try:
+            docs, metas, distances = _query_collection(
+                path,
+                collection,
+                query,
+                search_limit,
+                query_emb,
+            )
+        except Exception:
+            continue
+        for doc, meta, distance in zip(docs, metas, distances):
+            candidate = _nearest_memory_candidate(
+                source,
+                doc,
+                meta,
+                distance,
+                query_terms=query_terms,
+                max_distance=max_distance,
+                min_lexical_overlap=min_lexical_overlap,
+            )
+            if candidate is not None:
+                candidates.append(candidate)
+    return candidates
+
+
+def _collect_user_and_shared_facts(
+    plan,
+    query: str,
+    futures: dict,
+) -> tuple[list[str], list[str], list[str]]:
+    permanent_facts: list[str] = []
+    long_term_facts: list[str] = []
+    legacy_short_term_facts: list[str] = []
+
+    exact_ds3000_anchors = []
+    if plan.use_shared:
+        exact_ds3000_anchors = _get_ds3000_lecture_anchors(_ds3000_lecture_subtopics(query))
+        long_term_facts.extend(_fmt_memory(doc, meta) for doc, meta in exact_ds3000_anchors)
+
+    if plan.use_user_memory or plan.use_shared:
+        docs, metas, distances = _safe_future_result(futures, "user_memories")
+        user_facts = _collect_user_memory_facts(
+            docs,
+            metas,
+            distances,
+            exact_anchor_docs=(doc for doc, _meta in exact_ds3000_anchors),
+            permanent_max_distance=CHROMA_PERMANENT_MAX_DISTANCE,
+            short_term_max_distance=CHROMA_SHORT_TERM_MAX_DISTANCE,
+            user_max_distance=CHROMA_USER_MAX_DISTANCE,
+        )
+        permanent_facts.extend(user_facts.permanent)
+        long_term_facts.extend(user_facts.long_term)
+        legacy_short_term_facts.extend(user_facts.legacy_short_term)
+
+    if plan.use_shared and plan.use_short_term:
+        legacy_short_term_facts.extend(_collect_legacy_forgettable_facts())
+
+    return permanent_facts, long_term_facts, legacy_short_term_facts
+
+
+def _collect_section_facts(
+    futures: dict,
+    future_key: str,
+    collector,
+    *,
+    max_distance: float,
+) -> list[str]:
+    docs, metas, distances = _safe_future_result(futures, future_key)
+    return collector(
+        docs,
+        metas,
+        distances,
+        max_distance=max_distance,
+    )
+
+
+def _collect_non_user_section_facts(
+    plan,
+    futures: dict,
+) -> tuple[list[str], list[str], list[str], list[str]]:
+    jane_long_term_facts: list[str] = []
+    if plan.use_jane_long_term:
+        jane_long_term_facts = _collect_section_facts(
+            futures,
+            "jane_long_term",
+            _collect_jane_long_term_facts,
+            max_distance=CHROMA_LONG_TERM_MAX_DISTANCE,
+        )
+
+    short_term_facts: list[str] = []
+    if plan.use_short_term:
+        short_term_facts = _collect_section_facts(
+            futures,
+            "short_term",
+            _collect_short_term_semantic_facts,
+            max_distance=CHROMA_SHORT_TERM_MAX_DISTANCE,
+        )
+        short_term_facts = _apply_short_term_recency_boost(short_term_facts)
+
+    file_index_facts: list[str] = []
+    if plan.use_file_index:
+        file_index_facts = _collect_section_facts(
+            futures,
+            "file_index",
+            _collect_file_index_facts,
+            max_distance=CHROMA_FILE_INDEX_MAX_DISTANCE,
+        )
+
+    essence_facts: list[str] = []
+    if plan.use_essence:
+        essence_facts = _collect_section_facts(
+            futures,
+            "essence",
+            _collect_essence_facts,
+            max_distance=CHROMA_USER_MAX_DISTANCE,
+        )
+
+    return jane_long_term_facts, short_term_facts, file_index_facts, essence_facts
+
+
 def build_memory_sections(
     query: str,
     assistant_name: str = "Jane",
@@ -228,12 +544,12 @@ def build_memory_sections(
     user_memory_path: str | None = None,
     user_id: str | None = None,
 ) -> list[str]:
-    cache_key = (
-        query or "",
-        assistant_name or "",
-        essence_chromadb_path or "",
-        user_memory_path or "",
-        user_id or "",
+    cache_key = _memory_sections_cache_key(
+        query,
+        assistant_name,
+        essence_chromadb_path,
+        user_memory_path,
+        user_id,
     )
     cached = _sections_cache_get(cache_key)
     if cached is not None:
@@ -252,169 +568,29 @@ def build_memory_sections(
         query_emb = _embed_query_text(query)
 
     # --- Submit all applicable queries in parallel ---
-    futures: dict[str, "Future"] = {}
     with ThreadPoolExecutor(max_workers=5) as executor:
-        if plan.use_user_memory or plan.use_shared:
-            futures["user_memories"] = executor.submit(
-                _query_collection,
-                user_memory_path if plan.use_user_memory else VECTOR_DB_USER_MEMORIES,
-                CHROMA_COLLECTION_USER_MEMORIES,
-                query,
-                CHROMA_SEARCH_LIMIT,
-                query_emb,
-            )
-        if plan.use_jane_long_term:
-            futures["jane_long_term"] = executor.submit(
-                _query_collection,
-                VECTOR_DB_LONG_TERM,
-                CHROMA_COLLECTION_LONG_TERM,
-                query,
-                CHROMA_LONG_TERM_LIMIT,
-                query_emb,
-            )
-        if plan.use_short_term:
-            futures["short_term"] = executor.submit(
-                _query_collection,
-                VECTOR_DB_SHORT_TERM,
-                CHROMA_COLLECTION_SHORT_TERM,
-                query,
-                CHROMA_SHORT_TERM_LIMIT,
-                query_emb,
-            )
-        if plan.use_file_index:
-            futures["file_index"] = executor.submit(
-                _query_collection,
-                VECTOR_DB_FILE_INDEX,
-                CHROMA_COLLECTION_FILE_INDEX,
-                query,
-                min(8, CHROMA_SEARCH_LIMIT),
-                query_emb,
-            )
-        if plan.use_essence:
-            futures["essence"] = executor.submit(
-                _query_collection,
-                essence_chromadb_path,
-                "essence_knowledge",
-                query,
-                CHROMA_SEARCH_LIMIT,
-            )
-
-    # --- Collect results, gracefully handling per-query failures ---
-    def _safe_get(future_key: str) -> tuple[list[str], list[dict], list[float | None]]:
-        if future_key not in futures:
-            return [], [], []
-        try:
-            return futures[future_key].result()
-        except Exception:
-            return [], [], []
+        futures = _submit_section_queries(
+            executor,
+            plan,
+            query,
+            query_emb,
+            user_memory_path=user_memory_path,
+            essence_chromadb_path=essence_chromadb_path,
+        )
 
     # -- user_memories (shared or managed-user private Chroma) --
-    permanent_facts: list[str] = []
-    long_term_facts: list[str] = []
-    legacy_short_term_facts: list[str] = []
+    permanent_facts, long_term_facts, legacy_short_term_facts = _collect_user_and_shared_facts(
+        plan,
+        query,
+        futures,
+    )
 
-    exact_ds3000_anchors = []
-    if plan.use_shared:
-        exact_ds3000_anchors = _get_ds3000_lecture_anchors(_ds3000_lecture_subtopics(query))
-        long_term_facts.extend(_fmt_memory(doc, meta) for doc, meta in exact_ds3000_anchors)
-
-    if plan.use_user_memory or plan.use_shared:
-        docs, metas, distances = _safe_get("user_memories")
-        user_facts = _collect_user_memory_facts(
-            docs,
-            metas,
-            distances,
-            exact_anchor_docs=(doc for doc, _meta in exact_ds3000_anchors),
-            permanent_max_distance=CHROMA_PERMANENT_MAX_DISTANCE,
-            short_term_max_distance=CHROMA_SHORT_TERM_MAX_DISTANCE,
-            user_max_distance=CHROMA_USER_MAX_DISTANCE,
-        )
-        permanent_facts.extend(user_facts.permanent)
-        long_term_facts.extend(user_facts.long_term)
-        legacy_short_term_facts.extend(user_facts.legacy_short_term)
-
-    if plan.use_shared and plan.use_short_term:
-        try:
-            with silence_stderr_fd():
-                client = get_chroma_client(path=VECTOR_DB_USER_MEMORIES)
-                collection = client.get_collection(name=CHROMA_COLLECTION_USER_MEMORIES)
-                extra_results = collection.get(
-                    where={"memory_type": "forgettable"},
-                    include=["documents", "metadatas"],
-                )
-            extra_ids = extra_results.get("ids", [])
-            extra_docs = extra_results.get("documents", [])
-            extra_metas = extra_results.get("metadatas", [])
-            for extra_id, extra_doc, extra_meta in zip(extra_ids, extra_docs, extra_metas):
-                if _is_expired(extra_meta):
-                    continue
-                if _is_none_content(extra_doc) or _is_low_signal_short_term_memory(extra_doc, extra_meta):
-                    continue
-                legacy_short_term_facts.append(_fmt_memory(extra_doc, extra_meta))
-        except Exception:
-            pass
-
-    # -- jane long-term --
-    jane_long_term_facts: list[str] = []
-    if plan.use_jane_long_term:
-        jane_lt_docs, jane_lt_metas, jane_lt_distances = _safe_get("jane_long_term")
-        jane_long_term_facts = _collect_jane_long_term_facts(
-            jane_lt_docs,
-            jane_lt_metas,
-            jane_lt_distances,
-            max_distance=CHROMA_LONG_TERM_MAX_DISTANCE,
-        )
-
-    # -- short-term (semantic match + recency boost) --
-    short_term_facts: list[str] = []
-    if plan.use_short_term:
-        st_docs, st_metas, st_distances = _safe_get("short_term")
-        short_term_facts = _collect_short_term_semantic_facts(
-            st_docs,
-            st_metas,
-            st_distances,
-            max_distance=CHROMA_SHORT_TERM_MAX_DISTANCE,
-        )
-        # Recency boost: always include the N most recent short-term entries
-        # regardless of semantic similarity, so recent changes never get missed.
-        try:
-            _st_path = VECTOR_DB_SHORT_TERM
-            if os.path.exists(_st_path):
-                with silence_stderr_fd():
-                    _st_client = get_chroma_client(path=_st_path)
-                    _st_col = _st_client.get_collection(name=CHROMA_COLLECTION_SHORT_TERM)
-                _all = _st_col.get(include=["documents", "metadatas"], limit=min(200, _st_col.count()))
-                if _all["documents"]:
-                    short_term_facts = _collect_short_term_with_recency_boost(
-                        short_term_facts,
-                        _all["documents"],
-                        _all["metadatas"],
-                        limit=3,
-                    )
-        except Exception:
-            pass  # recency boost is best-effort
-
-    # -- file index --
-    file_index_facts: list[str] = []
-    if plan.use_file_index:
-        fi_docs, fi_metas, fi_distances = _safe_get("file_index")
-        file_index_facts = _collect_file_index_facts(
-            fi_docs,
-            fi_metas,
-            fi_distances,
-            max_distance=CHROMA_FILE_INDEX_MAX_DISTANCE,
-        )
-
-    # -- essence memory --
-    essence_facts: list[str] = []
-    if plan.use_essence:
-        ess_docs, ess_metas, ess_distances = _safe_get("essence")
-        essence_facts = _collect_essence_facts(
-            ess_docs,
-            ess_metas,
-            ess_distances,
-            max_distance=CHROMA_USER_MAX_DISTANCE,
-        )
+    (
+        jane_long_term_facts,
+        short_term_facts,
+        file_index_facts,
+        essence_facts,
+    ) = _collect_non_user_section_facts(plan, futures)
 
     sections = _build_memory_sections_from_facts(
         permanent_facts=permanent_facts,
@@ -459,23 +635,7 @@ def query_nearest_memory_lines(
 
     query_emb = _embed_query_text(query)
     query_terms = _nearest_query_terms(normalized)
-    candidates: list[tuple[int, float, str, str, str]] = []
-
-    for doc, meta in _get_ds3000_lecture_anchors(_ds3000_lecture_subtopics(query)):
-        candidates.append((0, 0.0, "user_memories", _extract_content_key(doc), _fmt_memory(doc, meta)))
-
-    def _add_candidate(source: str, doc: str, meta: dict | None, distance: float | None) -> None:
-        candidate = _nearest_memory_candidate(
-            source,
-            doc,
-            meta,
-            distance,
-            query_terms=query_terms,
-            max_distance=max_distance,
-            min_lexical_overlap=min_lexical_overlap,
-        )
-        if candidate is not None:
-            candidates.append(candidate)
+    candidates = _ds3000_anchor_candidates(query)
 
     query_specs = _build_nearest_query_specs(
         plan,
@@ -495,21 +655,15 @@ def query_nearest_memory_lines(
         chroma_search_limit=CHROMA_SEARCH_LIMIT,
     )
 
-    # Run sequentially. The underlying Chroma/SentenceTransformer stack writes
-    # to process-wide stdout/stderr during lazy loads; parallel lookups can race
-    # the fd redirection and leak noise into Codex prompt preflight output.
-    for source, path, collection, search_limit in query_specs:
-        try:
-            docs, metas, distances = _query_collection(
-                path,
-                collection,
-                query,
-                search_limit,
-                query_emb,
-            )
-        except Exception:
-            continue
-        for doc, meta, distance in zip(docs, metas, distances):
-            _add_candidate(source, doc, meta, distance)
+    candidates.extend(
+        _nearest_candidates_from_query_specs(
+            query_specs,
+            query,
+            query_emb,
+            query_terms,
+            max_distance=max_distance,
+            min_lexical_overlap=min_lexical_overlap,
+        )
+    )
 
     return _select_nearest_memory_lines(candidates, limit)

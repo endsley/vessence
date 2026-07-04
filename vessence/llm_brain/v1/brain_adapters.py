@@ -279,26 +279,39 @@ def resolve_timeout_seconds(brain_name: str | None, timeout_seconds: int | None 
     return provider_default
 
 
-def _resolve_idle_timeout(brain_name: str | None) -> int:
+def _resolve_provider_timeout(
+    brain_name: str | None,
+    *,
+    base_key: str,
+    defaults: dict[str, int],
+    default: int,
+) -> int:
     normalized = (brain_name or "").lower()
-    env_val = os.environ.get(f"JANE_IDLE_TIMEOUT_{normalized.upper()}")
+    env_val = os.environ.get(f"{base_key}_{normalized.upper()}")
     if env_val:
         return int(env_val)
-    env_val = os.environ.get("JANE_IDLE_TIMEOUT")
+    env_val = os.environ.get(base_key)
     if env_val:
         return int(env_val)
-    return PROVIDER_IDLE_DEFAULTS.get(normalized, 120)
+    return defaults.get(normalized, default)
+
+
+def _resolve_idle_timeout(brain_name: str | None) -> int:
+    return _resolve_provider_timeout(
+        brain_name,
+        base_key="JANE_IDLE_TIMEOUT",
+        defaults=PROVIDER_IDLE_DEFAULTS,
+        default=120,
+    )
 
 
 def _resolve_wall_timeout(brain_name: str | None) -> int:
-    normalized = (brain_name or "").lower()
-    env_val = os.environ.get(f"JANE_WALL_TIMEOUT_{normalized.upper()}")
-    if env_val:
-        return int(env_val)
-    env_val = os.environ.get("JANE_WALL_TIMEOUT")
-    if env_val:
-        return int(env_val)
-    return PROVIDER_WALL_DEFAULTS.get(normalized, 1800)
+    return _resolve_provider_timeout(
+        brain_name,
+        base_key="JANE_WALL_TIMEOUT",
+        defaults=PROVIDER_WALL_DEFAULTS,
+        default=1800,
+    )
 
 
 def build_execution_profile(
@@ -324,6 +337,42 @@ def get_brain_adapter(brain_name: str, execution_profile: ExecutionProfile) -> B
     }
     adapter_cls = registry.get(brain_name.lower(), GeminiBrainAdapter)
     return adapter_cls(execution_profile)
+
+
+def _timeout_error_message(
+    adapter: BrainAdapter,
+    exc: subprocess.TimeoutExpired,
+    *,
+    idle_timeout: int,
+) -> str:
+    detail = getattr(exc, "output", "") or ""
+    if "idle" in str(detail):
+        return f"{adapter.label} CLI killed: no output for {idle_timeout}s (idle timeout)"
+    if "wall" in str(detail):
+        return f"{adapter.label} CLI killed: exceeded {adapter.execution_profile.max_wall_seconds}s wall-clock limit"
+    return f"{adapter.label} CLI timed out after {exc.timeout}s"
+
+
+def _completed_subprocess_response(
+    adapter: BrainAdapter,
+    stdout_chunks: list[str],
+    stderr_chunks: list[str],
+    returncode: int | None,
+) -> str:
+    if returncode != 0:
+        err = ("".join(stderr_chunks) or "".join(stdout_chunks) or "").strip()
+        raise BrainAdapterError(
+            f"{adapter.label} CLI failed (exit code {returncode}): {err[:500] or 'no error output'}"
+        )
+
+    response = adapter.parse_output("".join(stdout_chunks))
+    if not response:
+        stderr_hint = "".join(stderr_chunks).strip()[:200]
+        raise BrainAdapterError(
+            f"{adapter.label} returned an empty response (exit code {returncode}, "
+            f"stderr: {stderr_hint or 'none'})"
+        )
+    return response
 
 
 def _execute_subprocess_streaming(
@@ -435,14 +484,9 @@ def _execute_subprocess_streaming(
     except subprocess.TimeoutExpired as exc:
         _kill_pgroup(process)
         process.wait()
-        detail = getattr(exc, "output", "") or ""
-        if "idle" in str(detail):
-            msg = f"{adapter.label} CLI killed: no output for {idle_timeout}s (idle timeout)"
-        elif "wall" in str(detail):
-            msg = f"{adapter.label} CLI killed: exceeded {adapter.execution_profile.max_wall_seconds}s wall-clock limit"
-        else:
-            msg = f"{adapter.label} CLI timed out after {exc.timeout}s"
-        raise BrainAdapterError(msg) from exc
+        raise BrainAdapterError(
+            _timeout_error_message(adapter, exc, idle_timeout=idle_timeout)
+        ) from exc
     finally:
         selector.close()
         # Ensure process is dead — prevents zombies on unexpected exceptions
@@ -454,17 +498,9 @@ def _execute_subprocess_streaming(
         if process.stderr:
             process.stderr.close()
 
-    if process.returncode != 0:
-        err = ("".join(stderr_chunks) or "".join(stdout_chunks) or "").strip()
-        raise BrainAdapterError(
-            f"{adapter.label} CLI failed (exit code {process.returncode}): {err[:500] or 'no error output'}"
-        )
-
-    response = adapter.parse_output("".join(stdout_chunks))
-    if not response:
-        stderr_hint = "".join(stderr_chunks).strip()[:200]
-        raise BrainAdapterError(
-            f"{adapter.label} returned an empty response (exit code {process.returncode}, "
-            f"stderr: {stderr_hint or 'none'})"
-        )
-    return response
+    return _completed_subprocess_response(
+        adapter,
+        stdout_chunks,
+        stderr_chunks,
+        process.returncode,
+    )

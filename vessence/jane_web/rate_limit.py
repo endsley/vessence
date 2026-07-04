@@ -7,6 +7,14 @@ from collections.abc import Callable
 from time import monotonic
 
 
+def active_window_hits(hits: list[float], cutoff: float) -> list[float]:
+    return [timestamp for timestamp in hits if timestamp > cutoff]
+
+
+def stale_rate_limit_keys(hits_by_key: dict[str, list[float]], now: float) -> list[str]:
+    return [key for key, hits in hits_by_key.items() if not hits or hits[-1] < now - 120]
+
+
 class RateLimiter:
     """Simple in-memory sliding-window rate limiter."""
 
@@ -20,7 +28,7 @@ class RateLimiter:
         if now - self._last_cleanup > 60:
             self._cleanup(now)
         cutoff = now - window_seconds
-        timestamps = [timestamp for timestamp in self._hits[key] if timestamp > cutoff]
+        timestamps = active_window_hits(self._hits[key], cutoff)
         if len(timestamps) >= max_requests:
             self._hits[key] = timestamps
             return False
@@ -29,8 +37,7 @@ class RateLimiter:
         return True
 
     def _cleanup(self, now: float) -> None:
-        stale_keys = [key for key, hits in self._hits.items() if not hits or hits[-1] < now - 120]
-        for key in stale_keys:
+        for key in stale_rate_limit_keys(self._hits, now):
             del self._hits[key]
         self._last_cleanup = now
 

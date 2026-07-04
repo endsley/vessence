@@ -49,30 +49,39 @@ def summary_log_lines(results: list[dict[str, Any]], started: dt.datetime) -> li
     return lines
 
 
+def tldr_stage_header(index: int, result: dict[str, Any], detail: dict[str, Any]) -> str:
+    status_emoji = {"ok": "✓", "timeout": "⏱"}
+    mark = status_emoji.get(result["status"], "✗")
+    minutes = detail["elapsed_s"] / 60
+    return f"- {index}. {mark} {detail['name']} ({minutes:.1f}m)"
+
+
+def tldr_problem_fix_lines(detail: dict[str, Any]) -> list[str]:
+    problems_tldr_list = detail.get("problems_tldr_list") or []
+    fixes_tldr_list = detail.get("fixes_tldr_list") or []
+    lines: list[str] = []
+    if problems_tldr_list:
+        lines.append("  - Problems:")
+        for problem in problems_tldr_list:
+            lines.append(f"    - {problem}")
+    if fixes_tldr_list:
+        lines.append("  - Fixes:")
+        for fix in fixes_tldr_list:
+            lines.append(f"    - {fix}")
+    if not problems_tldr_list and not fixes_tldr_list:
+        lines.append("  - Problems: none detected")
+        lines.append("  - Fixes: none applied")
+    return lines
+
+
 def tldr_stage_lines(
     results: list[dict[str, Any]],
     details: list[dict[str, Any]],
 ) -> list[str]:
-    status_emoji = {"ok": "✓", "timeout": "⏱"}
     lines: list[str] = []
     for idx, (result, detail) in enumerate(zip(results, details), 1):
-        mark = status_emoji.get(result["status"], "✗")
-        minutes = detail["elapsed_s"] / 60
-        lines.append(f"- {idx}. {mark} {detail['name']} ({minutes:.1f}m)")
-
-        problems_tldr_list = detail.get("problems_tldr_list") or []
-        fixes_tldr_list = detail.get("fixes_tldr_list") or []
-        if problems_tldr_list:
-            lines.append("  - Problems:")
-            for problem in problems_tldr_list:
-                lines.append(f"    - {problem}")
-        if fixes_tldr_list:
-            lines.append("  - Fixes:")
-            for fix in fixes_tldr_list:
-                lines.append(f"    - {fix}")
-        if not problems_tldr_list and not fixes_tldr_list:
-            lines.append("  - Problems: none detected")
-            lines.append("  - Fixes: none applied")
+        lines.append(tldr_stage_header(idx, result, detail))
+        lines.extend(tldr_problem_fix_lines(detail))
     return lines
 
 

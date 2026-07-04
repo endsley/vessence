@@ -39,6 +39,8 @@ from jane_web.reverse_proxy_helpers import (
     forwarded_request_headers as _forwarded_request_headers,
     is_streaming_response as _is_streaming_response,
     is_websocket_upgrade as _is_websocket_upgrade,
+    proxy_status_payload as _proxy_status_payload,
+    restored_upstream_port as _restored_upstream_port,
 )
 
 logger = logging.getLogger("jane.reverse_proxy")
@@ -205,15 +207,7 @@ async def handle_status(request: web.Request) -> web.Response:
     """GET /proxy/status"""
     if not _is_localhost(request):
         return web.json_response({"error": "forbidden"}, status=403)
-    return web.json_response({
-        "upstream_port": state.upstream_port,
-        "upstream_url": state.upstream_url,
-        "switched_at": state.switched_at,
-        "total_requests": state.total_requests,
-        "active_requests": state.active_requests,
-        "drain_active": state.drain_active(),
-        "previous_port": state._previous_port,
-    })
+    return web.json_response(_proxy_status_payload(state))
 
 
 # ---------------------------------------------------------------------------
@@ -362,13 +356,9 @@ async def _proxy_websocket(
 
 def create_app(upstream_port: int = 8081) -> web.Application:
     # Restore persisted state if available
-    try:
-        if STATE_FILE.exists():
-            saved = json.loads(STATE_FILE.read_text())
-            upstream_port = saved.get("upstream_port", upstream_port)
-            logger.info("Restored persisted upstream port: %d", upstream_port)
-    except Exception:
-        pass
+    upstream_port, restored = _restored_upstream_port(STATE_FILE, upstream_port)
+    if restored:
+        logger.info("Restored persisted upstream port: %d", upstream_port)
     state.upstream_port = upstream_port
 
     app = web.Application(client_max_size=_PROXY_CLIENT_MAX_SIZE_BYTES)
