@@ -1,4 +1,19 @@
-from memory.v1.memory_sections import build_memory_sections_from_facts
+from memory.v1.memory_sections import (
+    build_memory_sections_from_facts,
+    dedupe_memory_fact_groups,
+    memory_section,
+)
+
+
+def test_memory_section_helpers_preserve_format_and_cross_group_dedupe():
+    assert memory_section("## Label", ["one", "two"]) == "## Label\none\ntwo"
+    assert dedupe_memory_fact_groups(
+        ["(a): Same fact.", "(a): Same fact."],
+        ["(b): Same fact.", "(b): New fact."],
+    ) == (
+        ["(a): Same fact."],
+        ["(b): New fact."],
+    )
 
 
 def test_build_memory_sections_from_facts_preserves_order_and_labels():

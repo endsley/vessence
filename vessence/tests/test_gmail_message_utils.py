@@ -5,9 +5,13 @@ from zoneinfo import ZoneInfo
 from agent_skills import nutricost_deal_monitor
 from agent_skills.gmail_message_utils import (
     google_calendar_event_end_from_subject,
+    google_calendar_subject_date,
+    google_calendar_subject_match,
+    google_calendar_subject_times,
     header_map,
     message_is_older_than_days,
     message_text,
+    parse_subject_time,
     sender_matches_domains,
 )
 
@@ -90,7 +94,19 @@ def test_google_calendar_subject_parser_uses_end_time_and_period_fallback():
         "Notification: Appointment @ Tue Jun 23, 2026 "
         "7 - 8pm (EDT) (chieh.t.wu@gmail.com)"
     )
+    match = google_calendar_subject_match(subject)
+
+    assert parse_subject_time("12am") == dt.time(0, 0)
+    assert parse_subject_time("7", fallback_period="pm") == dt.time(19, 0)
+    assert parse_subject_time("24:00") is None
+    assert match is not None
+    assert google_calendar_subject_date(match) == dt.date(2026, 6, 23)
+    assert google_calendar_subject_times(match) == (dt.time(7, 0), dt.time(20, 0))
 
     assert google_calendar_event_end_from_subject(subject) == dt.datetime(
         2026, 6, 23, 20, 0, tzinfo=NY,
     )
+    assert google_calendar_event_end_from_subject("Notification @ Jun 23, 2026") == dt.datetime(
+        2026, 6, 23, 23, 59, 59, 999999, tzinfo=NY,
+    )
+    assert google_calendar_subject_match("No calendar details") is None

@@ -47,7 +47,12 @@ from jane.config import (
 from agent_skills.prompt_queue_docs import (
     delete_prompt_entry,
     parse_prompt_list,
+    prompt_failure_detail,
+    prompt_result_discord_message,
+    prompt_result_note,
+    prompt_result_status,
     prompt_summary,
+    queue_prompt_run_text,
     remove_completed_prompt_entries,
     render_prompt_status_update,
     render_completed_archive_section,
@@ -416,45 +421,20 @@ def main():
                 f"🔄 **Retrying prompt #{idx}** _(previously incomplete)_\n\n"
                 f"{prompt_summary(text)}"
             )
-            # Prepend failure context so Claude can diagnose and fix
-            run_text = (
-                f"This prompt previously ran but was marked INCOMPLETE (empty or failed result). "
-                f"Please investigate why it may have failed, then complete it properly.\n\n"
-                f"Original prompt:\n{text}"
-            )
         else:
             logger.info(f"Processing prompt {idx}")
             send_discord(
                 f"🤖 **Starting prompt #{idx}:**\n\n"
                 f"{prompt_summary(text)}"
             )
-            run_text = text
 
+        run_text = queue_prompt_run_text(text, is_retry)
         result, success = run_prompt(run_text)
         log_to_memory(idx, text, result, success)
 
-        status = "complete" if success else "incomplete"
-        note = result[:200].replace('\n', ' ').strip()
-        mark_prompt(idx, status, note=note)
-
-        if success:
-            discord_msg = (
-                f"✅ **Prompt #{idx} COMPLETE**\n\n"
-                f"**Result:**\n{result}"
-            )
-        else:
-            failure_detail = (
-                result.strip()
-                if result.strip()
-                else "_(No output returned — possible timeout, permission error, or execution failure.)_"
-            )
-            discord_msg = (
-                f"⚠️ **Prompt #{idx} INCOMPLETE**\n\n"
-                f"**Prompt was:**\n{prompt_summary(text)}\n\n"
-                f"**What went wrong:**\n{failure_detail}\n\n"
-                f"_Review the above and edit the prompt or fix the underlying issue before the next retry._"
-            )
-        send_discord(discord_msg)
+        status = prompt_result_status(success)
+        mark_prompt(idx, status, note=prompt_result_note(result))
+        send_discord(prompt_result_discord_message(idx, text, result, success))
         logger.info(f"Prompt {idx} done: {status}")
 
         # Small pause between prompts

@@ -1,5 +1,6 @@
 from jane_web.client_tool_markers import (
     ToolMarkerExtractor,
+    _leading_tool_result_marker,
     build_client_tool_marker,
     extract_tool_results,
     format_tool_results_for_brain,
@@ -75,6 +76,24 @@ def test_extract_tool_results_handles_nested_json_and_marker_like_string():
             "data": {"body": "literal }] text", "nested": {"count": 2}},
         }
     ]
+
+
+def test_leading_tool_result_marker_returns_payload_and_consumed_end():
+    message = (
+        '  [TOOL_RESULT: {"tool":"messages.fetch_unread",'
+        '"data":{"body":"literal }] text"}} ] next'
+    )
+
+    payload, marker_end = _leading_tool_result_marker(message)
+
+    assert payload == {
+        "tool": "messages.fetch_unread",
+        "data": {"body": "literal }] text"},
+    }
+    assert message[marker_end:] == " next"
+    assert _leading_tool_result_marker("hello [TOOL_RESULT:{}]") is None
+    assert _leading_tool_result_marker("[TOOL_RESULT:{} missing close") is None
+    assert _leading_tool_result_marker("[TOOL_RESULT:[1, 2]]") is None
 
 
 def test_extract_tool_results_leaves_malformed_marker_visible():

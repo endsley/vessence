@@ -16,7 +16,11 @@ from agent_skills.self_healing_helpers import (
     jsonable,
     new_incident_fingerprint_record,
     redacted_request_headers,
+    self_heal_job_context_lines,
     self_heal_job_path,
+    self_heal_job_steps_section,
+    self_heal_job_title,
+    self_heal_job_verification_section,
     should_auto_repair,
     slugify,
 )
@@ -231,6 +235,40 @@ def test_incident_title_and_jsonable_helpers():
     assert incident_title_text(exception_incident) == "ValueError at /api/chat"
     assert incident_title_text(report_incident) == "IllegalStateException"
     assert jsonable({"date": dt.date(2026, 7, 2)}) == {"date": "2026-07-02"}
+
+
+def test_self_heal_job_section_helpers_preserve_markdown_contract():
+    incident = {
+        "source": "jane_web",
+        "category": "exception",
+        "project_root": "/repo",
+        "fingerprint": "abc123",
+        "request": {"path": "/api/chat"},
+        "exception": {"type": "ValueError", "top_frame": "file.py:1"},
+    }
+
+    assert self_heal_job_title(incident) == "Self-heal jane_web: ValueError at /api/chat"
+    assert self_heal_job_context_lines(incident, default_project_root="/default") == [
+        "## Context",
+        "- Source: `jane_web`",
+        "- Category: `exception`",
+        "- Project root: `/repo`",
+        "- Fingerprint: `abc123`",
+        "- Request path: `/api/chat`",
+    ]
+    assert self_heal_job_context_lines(
+        {"source": "worker", "category": "report", "request": {}},
+        default_project_root="/default",
+    )[3] == "- Project root: `/default`"
+    assert self_heal_job_steps_section(Path("/data/incidents/incident.json")).startswith(
+        "## Steps\n1. Read the incident JSON at `/data/incidents/incident.json`"
+    )
+    assert "Do not speculate from the stack trace alone." in self_heal_job_steps_section(
+        Path("/data/incidents/incident.json")
+    )
+    assert self_heal_job_verification_section().endswith(
+        "leave a clear report explaining the blocker and evidence checked."
+    )
 
 
 def test_build_self_heal_job_markdown_preserves_job_contract():

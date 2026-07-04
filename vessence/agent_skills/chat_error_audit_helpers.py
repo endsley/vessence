@@ -63,17 +63,7 @@ def chat_error_incident_fields(
     }
 
 
-def chat_error_job_markdown(
-    payload: dict[str, Any],
-    *,
-    frame: dict[str, Any] | None,
-    source_hint: str,
-    created_date: str,
-    timestamp: str,
-) -> str:
-    incident = chat_error_incident_fields(payload, frame=frame, source_hint=source_hint)
-    title = f"Audit Android chat_error: {incident['exc_short']}"
-
+def chat_error_front_matter(title: str, created_date: str) -> str:
     return f"""---
 Title: {title}
 Priority: 2
@@ -81,29 +71,37 @@ Status: pending
 Created: {created_date}
 Auto-generated: true
 Source: android_chat_error_hook
----
+---"""
 
-## Problem
+
+def chat_error_problem_section() -> str:
+    return """## Problem
 An Android `chat_error` diagnostic landed on the server. Jane's streaming
 chat caught an exception and surfaced a broken reply to the user. Every
-occurrence opens an audit job per Chieh's directive.
+occurrence opens an audit job per Chieh's directive."""
 
-## Incident
+
+def chat_error_incident_section(incident: dict[str, Any], timestamp: str) -> str:
+    return f"""## Incident
 
 - **Timestamp:** {timestamp}
 - **Exception:** `{incident['exc_class']}`
 - **Message:** `{incident['message'][:400]}`
 - **APK:** v{incident['app_version']} (code {incident['version_code']})
 - **From voice:** {incident['from_voice']}
-- **First app frame:** `{incident['class_method']}` at `{incident['location']}`
+- **First app frame:** `{incident['class_method']}` at `{incident['location']}`"""
 
-## Stack trace
+
+def chat_error_stack_section(stack: str) -> str:
+    return f"""## Stack trace
 
 ```
-{incident['stack'][:1800]}
-```
+{stack[:1800]}
+```"""
 
-## Scope
+
+def chat_error_scope_section() -> str:
+    return """## Scope
 1. Open the source file identified above (fallback: search the stack trace for
    the first `com.vessences.android.*` frame and navigate to that line).
 2. Read the surrounding code and determine whether the exception is:
@@ -118,18 +116,43 @@ occurrence opens an audit job per Chieh's directive.
 5. For contract violations: fix both sides (app + server) so the incident
    cannot recur.
 6. Write a small test reproducing the failure mode when feasible.
-7. Log the outcome via `work_log_tools.log_activity(..., category="chat_error_audit")`.
+7. Log the outcome via `work_log_tools.log_activity(..., category="chat_error_audit")`."""
 
-## Verification
+
+def chat_error_verification_section() -> str:
+    return """## Verification
 - Build APK, install, verify the specific scenario no longer surfaces the
   same exception class + frame.
-- If a fix is non-trivial, document the trade-offs in the incident commit.
+- If a fix is non-trivial, document the trade-offs in the incident commit."""
 
-## Notes
+
+def chat_error_notes_section() -> str:
+    return """## Notes
 - If this is the 5th+ time the same `exception_class` + first frame has
   opened a job, escalate priority and consider a broader redesign rather
   than another point fix.
 - Consider whether the Android client should retry instead of surfacing
   the error — but ONLY for reads/idempotent requests. NEVER auto-retry
-  `send_message` turns; they may double-send.
-"""
+  `send_message` turns; they may double-send."""
+
+
+def chat_error_job_markdown(
+    payload: dict[str, Any],
+    *,
+    frame: dict[str, Any] | None,
+    source_hint: str,
+    created_date: str,
+    timestamp: str,
+) -> str:
+    incident = chat_error_incident_fields(payload, frame=frame, source_hint=source_hint)
+    title = f"Audit Android chat_error: {incident['exc_short']}"
+
+    return "\n\n".join([
+        chat_error_front_matter(title, created_date),
+        chat_error_problem_section(),
+        chat_error_incident_section(incident, timestamp),
+        chat_error_stack_section(incident["stack"]),
+        chat_error_scope_section(),
+        chat_error_verification_section(),
+        chat_error_notes_section(),
+    ]) + "\n"

@@ -167,6 +167,44 @@ def incident_title_text(incident: dict[str, Any]) -> str:
     return str(payload.get("exception_class") or incident.get("message") or incident.get("category"))[:120]
 
 
+def self_heal_job_title(incident: dict[str, Any]) -> str:
+    return f"Self-heal {incident.get('source', 'unknown')}: {incident_title_text(incident)}"
+
+
+def self_heal_job_context_lines(
+    incident: dict[str, Any],
+    *,
+    default_project_root: Path | str,
+) -> list[str]:
+    project_root = incident.get("project_root") or str(default_project_root)
+    return [
+        "## Context",
+        f"- Source: `{incident.get('source', '')}`",
+        f"- Category: `{incident.get('category', '')}`",
+        f"- Project root: `{project_root}`",
+        f"- Fingerprint: `{incident.get('fingerprint', '')}`",
+        f"- Request path: `{incident.get('request', {}).get('path', '')}`",
+    ]
+
+
+def self_heal_job_steps_section(incident_path: Path) -> str:
+    return f"""## Steps
+1. Read the incident JSON at `{incident_path}` and the relevant service logs.
+2. Inspect source code before explaining the cause. Do not speculate from the stack trace alone.
+3. Reproduce with a focused test or command when feasible.
+4. If the root cause is clear, patch the smallest relevant surface.
+5. Do not revert unrelated dirty work. Preserve user changes.
+6. Run focused verification. Broaden tests only if the fix touches shared behavior.
+7. Record the outcome in the incident report and work log."""
+
+
+def self_heal_job_verification_section() -> str:
+    return """## Verification
+- The failing route/action no longer throws the captured error.
+- A focused test, syntax check, or local smoke test covers the fixed path.
+- If no safe fix is possible, leave a clear report explaining the blocker and evidence checked."""
+
+
 def build_self_heal_job_markdown(
     incident: dict[str, Any],
     incident_path: Path,
@@ -174,8 +212,11 @@ def build_self_heal_job_markdown(
     created_date: date,
     default_project_root: Path | str,
 ) -> str:
-    title = f"Self-heal {incident.get('source', 'unknown')}: {incident_title_text(incident)}"
-    project_root = incident.get("project_root") or str(default_project_root)
+    title = self_heal_job_title(incident)
+    context = "\n".join(self_heal_job_context_lines(
+        incident,
+        default_project_root=default_project_root,
+    ))
     return f"""# Job: {title}
 Status: pending
 Priority: high
@@ -188,26 +229,11 @@ Incident: {incident_path}
 Jane should inspect the incident evidence, diagnose the root cause, and apply a
 minimal, verified fix if the evidence supports one.
 
-## Context
-- Source: `{incident.get("source", "")}`
-- Category: `{incident.get("category", "")}`
-- Project root: `{project_root}`
-- Fingerprint: `{incident.get("fingerprint", "")}`
-- Request path: `{incident.get("request", {}).get("path", "")}`
+{context}
 
-## Steps
-1. Read the incident JSON at `{incident_path}` and the relevant service logs.
-2. Inspect source code before explaining the cause. Do not speculate from the stack trace alone.
-3. Reproduce with a focused test or command when feasible.
-4. If the root cause is clear, patch the smallest relevant surface.
-5. Do not revert unrelated dirty work. Preserve user changes.
-6. Run focused verification. Broaden tests only if the fix touches shared behavior.
-7. Record the outcome in the incident report and work log.
+{self_heal_job_steps_section(incident_path)}
 
-## Verification
-- The failing route/action no longer throws the captured error.
-- A focused test, syntax check, or local smoke test covers the fixed path.
-- If no safe fix is possible, leave a clear report explaining the blocker and evidence checked.
+{self_heal_job_verification_section()}
 """
 
 

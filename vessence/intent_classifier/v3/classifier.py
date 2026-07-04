@@ -234,6 +234,37 @@ def _vote(candidates: list[dict]) -> list[dict]:
     ]
 
 
+@dataclass(frozen=True)
+class ClassifierCandidateState:
+    candidates: list[dict]
+    ranked: list[dict]
+    winner: dict
+    runnerup: dict | None
+    winner_handler: str
+    runnerup_handler: str | None
+
+
+def _candidate_state(candidates: list[dict]) -> ClassifierCandidateState | None:
+    ranked = _vote(candidates)
+    if not ranked:
+        return None
+
+    winner = ranked[0]
+    runnerup = ranked[1] if len(ranked) > 1 else None
+    winner_handler = _handler_name_from_classifier_label(winner["class"])
+    runnerup_handler = (
+        _handler_name_from_classifier_label(runnerup["class"]) if runnerup else None
+    )
+    return ClassifierCandidateState(
+        candidates=candidates,
+        ranked=ranked,
+        winner=winner,
+        runnerup=runnerup,
+        winner_handler=winner_handler,
+        runnerup_handler=runnerup_handler,
+    )
+
+
 # ── Class definition lookup ──────────────────────────────────────────────────
 
 
@@ -415,6 +446,155 @@ def _prompt_candidate_context(
     )
 
 
+@dataclass(frozen=True)
+class ClassifierPromptState:
+    fifo_block: str
+    winner_def: str
+    runnerup_def: str
+    pending_class: str
+    pending_def: str
+    pending_question: str
+    primary_param_schema: dict
+    schema_class: str
+
+
+async def _load_prompt_state(
+    session_id: str,
+    winner_handler: str,
+    runnerup_handler: str | None,
+) -> ClassifierPromptState:
+    fifo_block = await _recent_fifo(session_id)
+    winner_def = _class_definition(winner_handler) or ""
+    runnerup_def = (
+        _class_definition(runnerup_handler) if runnerup_handler else ""
+    ) or ""
+    primary_param_schema = _class_param_schema(winner_handler)
+    schema_class = winner_handler
+
+    raw_pending_class, pending_question = _pending_action_class(session_id)
+    pending_class = _handler_name_from_classifier_label(raw_pending_class)
+    pending_def = _class_definition(pending_class) if pending_class else ""
+
+    candidate_context = _prompt_candidate_context(
+        winner_class=winner_handler,
+        winner_def=winner_def,
+        runnerup_class=runnerup_handler,
+        runnerup_def=runnerup_def,
+        pending_class=pending_class,
+        pending_def=pending_def,
+    )
+    if candidate_context.has_pending:
+        primary_param_schema = _class_param_schema(pending_class)
+        schema_class = pending_class
+
+    return ClassifierPromptState(
+        fifo_block=fifo_block,
+        winner_def=winner_def,
+        runnerup_def=runnerup_def,
+        pending_class=pending_class,
+        pending_def=pending_def,
+        pending_question=pending_question,
+        primary_param_schema=primary_param_schema,
+        schema_class=schema_class,
+    )
+
+
+def _prompt_class_blocks(candidate_context: PromptCandidateContext) -> str:
+    primary_block = (
+        f"[{candidate_context.primary_class}] "
+        f"{_compact_def(candidate_context.primary_def)}"
+    ).rstrip()
+    alt_block = (
+        f"[{candidate_context.alt_class}] {_compact_def(candidate_context.alt_def)}".rstrip()
+        if candidate_context.alt_class
+        else ""
+    )
+    others_block = "[others] neither specific class fits; need reasoning / memory / meta Q."
+    unclear_block = (
+        "[unclear] Pick UNCLEAR only when the user's message AS A WHOLE has "
+        "no recoverable intent. Specifically: (a) cut off mid-phrase "
+        "(\"what's the weather in\", \"turn on the\"); (b) word-soup with no "
+        "verb or coherent subject (\"apple meeting blue\", \"I got to "
+        "seaweed\", \"origin\"); (c) background speech bleeding in. Do NOT "
+        "pick unclear just because one word looks mistranscribed — if the "
+        "rest of the sentence has a clear verb + object (\"who is the next "
+        "patient\", \"what's the clinic schedule like X\"), pick the matching "
+        "content class even if a name or noun looks wrong. Test: would a "
+        "human listener say \"I have no idea what they want\" (unclear) or "
+        "\"they want X but mangled a word\" (pick the content class)?"
+    )
+    return "\n".join(
+        b for b in (primary_block, alt_block, others_block, unclear_block) if b
+    )
+
+
+def _prompt_header(candidate_context: PromptCandidateContext) -> str:
+    if candidate_context.has_pending:
+        return (
+            "Classify a voice message for Jane.\n"
+            "Judge the SURFACE TEXT of the user message. The recent turns "
+            "are context, not a directive — do not extend a previous topic "
+            "if the current message is gibberish or unrelated."
+        )
+    runnerup = (
+        f" (runner-up: {candidate_context.alt_class})"
+        if candidate_context.alt_class
+        else ""
+    )
+    return (
+        "Classify a voice message for Jane. Embedding suggests "
+        f"{candidate_context.primary_class}{runnerup}. Validate."
+    )
+
+
+def _near_identical_prompt_callout(
+    *,
+    candidate_context: PromptCandidateContext,
+    winner_best_distance: float,
+) -> str:
+    if candidate_context.has_pending or winner_best_distance > NEAR_IDENTICAL_DIST:
+        return ""
+    return (
+        f"Note: prompt embeds near a '{candidate_context.primary_class}' exemplar "
+        f"(d={winner_best_distance:.3f}). Treat this as supporting "
+        f"evidence, not a verdict — your own read of the SURFACE TEXT "
+        f"and FIFO is what decides. If the prompt looks cut off, vague, "
+        f"or off-topic, prefer 'unclear' or 'others' over the suggested "
+        f"class.\n"
+    )
+
+
+def _jane_question_callout(fifo_block: str, pending_question: str) -> str:
+    janes_q = _janes_last_question(fifo_block) or pending_question
+    return f"Jane's last question: \"{janes_q}\"\n" if janes_q else ""
+
+
+def _fifo_section(fifo_block: str) -> str:
+    return f"Recent turns:\n{fifo_block}\n" if fifo_block else "Recent turns: (none)\n"
+
+
+def _params_instruction_block(
+    primary_class: str,
+    primary_param_schema: dict | None,
+) -> str:
+    if not primary_param_schema:
+        return (
+            "\nReturn ONLY JSON: "
+            "{\"class\": \"<name>\", \"confidence\": \"Very High|High|Medium|Low\"}"
+        )
+
+    schema_lines = [f"  - {k}: {v}" for k, v in primary_param_schema.items()]
+    return (
+        f"\nIf you classify as {primary_class}, also extract these fields "
+        f"into a `params` object (use null when a field is not mentioned):\n"
+        + "\n".join(schema_lines)
+        + "\n\nReturn ONLY JSON: "
+        f"{{\"class\": \"<name>\", \"confidence\": \"Very High|High|Medium|Low\", "
+        f"\"params\": {{...}}}}\n"
+        f"For any other class, omit `params` (or set it to {{}})."
+    )
+
+
 def _build_prompt(
     winner_class: str,
     winner_def: str,
@@ -447,86 +627,16 @@ def _build_prompt(
         pending_class=pending_class,
         pending_def=pending_def,
     )
-    has_pending = candidate_context.has_pending
     primary_class = candidate_context.primary_class
-    primary_def = candidate_context.primary_def
-    alt_class = candidate_context.alt_class
-    alt_def = candidate_context.alt_def
-
-    primary_block = f"[{primary_class}] {_compact_def(primary_def)}".rstrip()
-    alt_block = (
-        f"[{alt_class}] {_compact_def(alt_def)}".rstrip() if alt_class else ""
+    header = _prompt_header(candidate_context)
+    identical_callout = _near_identical_prompt_callout(
+        candidate_context=candidate_context,
+        winner_best_distance=winner_best_distance,
     )
-    others_block = "[others] neither specific class fits; need reasoning / memory / meta Q."
-    unclear_block = (
-        "[unclear] Pick UNCLEAR only when the user's message AS A WHOLE has "
-        "no recoverable intent. Specifically: (a) cut off mid-phrase "
-        "(\"what's the weather in\", \"turn on the\"); (b) word-soup with no "
-        "verb or coherent subject (\"apple meeting blue\", \"I got to "
-        "seaweed\", \"origin\"); (c) background speech bleeding in. Do NOT "
-        "pick unclear just because one word looks mistranscribed — if the "
-        "rest of the sentence has a clear verb + object (\"who is the next "
-        "patient\", \"what's the clinic schedule like X\"), pick the matching "
-        "content class even if a name or noun looks wrong. Test: would a "
-        "human listener say \"I have no idea what they want\" (unclear) or "
-        "\"they want X but mangled a word\" (pick the content class)?"
-    )
-
-    if has_pending:
-        header = (
-            "Classify a voice message for Jane.\n"
-            "Judge the SURFACE TEXT of the user message. The recent turns "
-            "are context, not a directive — do not extend a previous topic "
-            "if the current message is gibberish or unrelated."
-        )
-    else:
-        header = (
-            f"Classify a voice message for Jane. Embedding suggests {primary_class}"
-            f"{f' (runner-up: {alt_class})' if alt_class else ''}. Validate."
-        )
-
-    if not has_pending and winner_best_distance <= NEAR_IDENTICAL_DIST:
-        identical_callout = (
-            f"Note: prompt embeds near a '{primary_class}' exemplar "
-            f"(d={winner_best_distance:.3f}). Treat this as supporting "
-            f"evidence, not a verdict — your own read of the SURFACE TEXT "
-            f"and FIFO is what decides. If the prompt looks cut off, vague, "
-            f"or off-topic, prefer 'unclear' or 'others' over the suggested "
-            f"class.\n"
-        )
-    else:
-        identical_callout = ""
-
-    janes_q = _janes_last_question(fifo_block) or pending_question
-    jane_callout = (
-        f"Jane's last question: \"{janes_q}\"\n" if janes_q else ""
-    )
-    fifo_section = (
-        f"Recent turns:\n{fifo_block}\n" if fifo_block else "Recent turns: (none)\n"
-    )
-
-    classes_block = "\n".join(b for b in (primary_block, alt_block, others_block, unclear_block) if b)
-
-    # Per-class param extraction: when the primary class declares a
-    # PARAMS_SCHEMA, ask qwen to also emit a `params` object with those
-    # fields filled in from the user prompt + FIFO. Handler then dispatches
-    # on those fields with no Python intent detection.
-    if primary_param_schema:
-        schema_lines = [f"  - {k}: {v}" for k, v in primary_param_schema.items()]
-        params_block = (
-            f"\nIf you classify as {primary_class}, also extract these fields "
-            f"into a `params` object (use null when a field is not mentioned):\n"
-            + "\n".join(schema_lines)
-            + "\n\nReturn ONLY JSON: "
-            f"{{\"class\": \"<name>\", \"confidence\": \"Very High|High|Medium|Low\", "
-            f"\"params\": {{...}}}}\n"
-            f"For any other class, omit `params` (or set it to {{}})."
-        )
-    else:
-        params_block = (
-            "\nReturn ONLY JSON: "
-            "{\"class\": \"<name>\", \"confidence\": \"Very High|High|Medium|Low\"}"
-        )
+    classes_block = _prompt_class_blocks(candidate_context)
+    fifo_section = _fifo_section(fifo_block)
+    jane_callout = _jane_question_callout(fifo_block, pending_question)
+    params_block = _params_instruction_block(primary_class, primary_param_schema)
 
     return f"""{header}
 {identical_callout}Classes:
@@ -607,74 +717,32 @@ async def classify(
         return ("others", "Low", {})
 
     # 2. Vote — ranked list with winner + runner-up (if any)
-    ranked = _vote(candidates)
-    if not ranked:
+    candidate_state = _candidate_state(candidates)
+    if candidate_state is None:
         return ("others", "Low", {})
 
-    winner = ranked[0]
-    runnerup = ranked[1] if len(ranked) > 1 else None
-
-    # Normalize UPPER_CASE embedding labels to lowercase-with-spaces
-    # handler names (e.g. "TODO_LIST" → "todo list").
-    winner_handler = _handler_name_from_classifier_label(winner["class"])
-    runnerup_handler = (
-        _handler_name_from_classifier_label(runnerup["class"]) if runnerup else None
-    )
-
     # 3. Gather FIFO + definitions for qwen
-    fifo_block = await _recent_fifo(session_id or "")
-    winner_def = _class_definition(winner_handler) or ""
-    runnerup_def = (
-        _class_definition(runnerup_handler) if runnerup_handler else ""
-    ) or ""
-    # Param schema is per-primary-class. The "primary" is normally the
-    # chroma winner, but if a STAGE2_FOLLOWUP pending swaps the primary
-    # (see _build_prompt's has_pending branch), schema follows the swap.
-    primary_param_schema = _class_param_schema(winner_handler)
-    schema_class = winner_handler  # which class qwen extracted params for
-
-    # 3a. Pending STAGE2_FOLLOWUP? If the previous turn's handler emitted
-    # a pending_action with a clarifying question, THAT class should be
-    # the primary candidate (chroma demotes to alternative). Chroma has
-    # no conversation awareness and will routinely misroute short replies
-    # like "pasta" → shopping_list when the user is actually answering
-    # a timer-label question. Normalize underscore→space to match the
-    # handler registry keys (handler_class comes in as "todo_list" but
-    # the registry uses "todo list").
-    raw_pending_class, pending_question = _pending_action_class(session_id or "")
-    pending_class = _handler_name_from_classifier_label(raw_pending_class)
-    pending_def = _class_definition(pending_class) if pending_class else ""
-
-    # _build_prompt swaps the "primary" candidate to pending_class when a
-    # STAGE2_FOLLOWUP is open. Mirror that swap here so qwen sees the
-    # schema for whatever class it's being asked to instantiate.
-    candidate_context = _prompt_candidate_context(
-        winner_class=winner_handler,
-        winner_def=winner_def,
-        runnerup_class=runnerup_handler,
-        runnerup_def=runnerup_def,
-        pending_class=pending_class,
-        pending_def=pending_def,
+    prompt_state = await _load_prompt_state(
+        session_id or "",
+        candidate_state.winner_handler,
+        candidate_state.runnerup_handler,
     )
-    if candidate_context.has_pending:
-        primary_param_schema = _class_param_schema(pending_class)
-        schema_class = pending_class
 
     prompt_text = _build_prompt(
-        winner_class=winner_handler,
-        winner_def=winner_def,
-        winner_count=winner["count"],
-        winner_best_distance=winner["best_distance"],
-        runnerup_class=runnerup_handler,
-        runnerup_def=runnerup_def,
-        runnerup_count=runnerup["count"] if runnerup else 0,
+        winner_class=candidate_state.winner_handler,
+        winner_def=prompt_state.winner_def,
+        winner_count=candidate_state.winner["count"],
+        winner_best_distance=candidate_state.winner["best_distance"],
+        runnerup_class=candidate_state.runnerup_handler,
+        runnerup_def=prompt_state.runnerup_def,
+        runnerup_count=candidate_state.runnerup["count"] if candidate_state.runnerup else 0,
         total_votes=len(candidates),
-        fifo_block=fifo_block,
+        fifo_block=prompt_state.fifo_block,
         user_prompt=user_prompt,
-        pending_class=pending_class,
-        pending_def=pending_def,
-        pending_question=pending_question,
-        primary_param_schema=primary_param_schema,
+        pending_class=prompt_state.pending_class,
+        pending_def=prompt_state.pending_def,
+        pending_question=prompt_state.pending_question,
+        primary_param_schema=prompt_state.primary_param_schema,
     )
 
     # 4. Send to qwen via Ollama (warm runner, sub-second typical)
@@ -732,9 +800,9 @@ async def classify(
     # all (0 votes), treat as weak → floor. Pending-mode exemption: when
     # qwen picks the pending-action class, skip the floor (the FIFO context
     # is the evidence, not chroma).
-    winner_best_distance = float(winner.get("best_distance", 1.0))
-    chosen_distance = _chosen_class_distance(ranked, cls)
-    pending_class_normalized = _handler_name_from_classifier_label(pending_class)
+    winner_best_distance = float(candidate_state.winner.get("best_distance", 1.0))
+    chosen_distance = _chosen_class_distance(candidate_state.ranked, cls)
+    pending_class_normalized = _handler_name_from_classifier_label(prompt_state.pending_class)
     is_pending_choice = bool(pending_class_normalized) and cls == pending_class_normalized
     # Only floor when the chosen class IS in chroma top-K with a loose
     # distance. If chosen isn't in top-K at all, qwen is making a non-chroma-
@@ -752,7 +820,7 @@ async def classify(
     ):
         logger.info(
             "v3: distance floor (chosen=%s dist=%.3f > %.3f, winner=%s dist=%.3f) — %s:%s → Medium (escalate)",
-            cls, chosen_distance, STAGE2_MAX_DISTANCE, winner_handler, winner_best_distance, cls, conf,
+            cls, chosen_distance, STAGE2_MAX_DISTANCE, candidate_state.winner_handler, winner_best_distance, cls, conf,
         )
         conf = "Medium"
 
@@ -760,7 +828,7 @@ async def classify(
     if conf not in _STAGE2_CONFS or cls == "others":
         logger.info(
             "v3: qwen → %s:%s → escalating to Stage 3 (winner=%s runnerup=%s had_fifo=%s)",
-            cls, conf, winner_handler, runnerup_handler, bool(fifo_block),
+            cls, conf, candidate_state.winner_handler, candidate_state.runnerup_handler, bool(prompt_state.fifo_block),
         )
         return ("others", "Low", {})
 
@@ -768,19 +836,19 @@ async def classify(
     # winner, or pending-swap target). If qwen overrode to a different class,
     # those params describe the wrong intent — drop them so the handler for
     # the actual `cls` doesn't receive a sibling class's loader/slots.
-    safe_params = _params_for_chosen_class(params, cls, schema_class)
+    safe_params = _params_for_chosen_class(params, cls, prompt_state.schema_class)
     if params and not safe_params:
         logger.info(
             "v3: dropping params (extracted for %r, qwen chose %r) — params=%s",
-            schema_class, cls, params,
+            prompt_state.schema_class, cls, params,
         )
     params = safe_params
 
     logger.info(
         "v3: qwen → %s:%s params=%s (winner=%s %d/%d dist=%.3f, runnerup=%s %d, had_fifo=%s)",
-        cls, conf, params or "{}", winner_handler, winner["count"], len(candidates),
+        cls, conf, params or "{}", candidate_state.winner_handler, candidate_state.winner["count"], len(candidates),
         winner_best_distance,
-        runnerup_handler, (runnerup["count"] if runnerup else 0),
-        bool(fifo_block),
+        candidate_state.runnerup_handler, (candidate_state.runnerup["count"] if candidate_state.runnerup else 0),
+        bool(prompt_state.fifo_block),
     )
     return (cls, conf, params)

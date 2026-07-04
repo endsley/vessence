@@ -462,6 +462,84 @@ def process_unread_cleanup_message(
     return decision.outcome
 
 
+def count_nutricost_messages(
+    service,
+    message_ids: list[str],
+    day: dt.date,
+    *,
+    threshold: int,
+    dry_run: bool,
+    state: dict,
+    log_failure=None,
+) -> dict[str, int]:
+    return count_message_outcomes(
+        message_ids,
+        lambda message_id: process_message(service, message_id, day, threshold, dry_run, state),
+        failure_outcome="failed",
+        log_failure=log_failure,
+    )
+
+
+def count_crunchlabs_messages(
+    service,
+    message_ids: list[str],
+    day: dt.date,
+    *,
+    dry_run: bool,
+    log_failure=None,
+) -> dict[str, int]:
+    return count_message_outcomes(
+        message_ids,
+        lambda message_id: process_crunchlabs_message(service, message_id, day, dry_run),
+        failure_outcome="crunchlabs_failed",
+        log_failure=log_failure,
+    )
+
+
+def count_google_calendar_messages(
+    service,
+    message_ids: list[str],
+    *,
+    dry_run: bool,
+    now: dt.datetime | None = None,
+    log_failure=None,
+) -> dict[str, int]:
+    return count_message_outcomes(
+        message_ids,
+        lambda message_id: process_google_calendar_message(service, message_id, dry_run=dry_run, now=now),
+        failure_outcome="google_calendar_failed",
+        log_failure=log_failure,
+    )
+
+
+def count_sender_cleanup_messages(
+    service,
+    message_ids: list[str],
+    spec: SenderCleanupSpec,
+    *,
+    dry_run: bool,
+    now: dt.datetime | None = None,
+    log_failure=None,
+) -> dict[str, int]:
+    return count_message_outcomes(
+        message_ids,
+        lambda message_id: process_sender_cleanup_message(
+            service,
+            message_id,
+            label=spec.label,
+            sender_fragments=spec.sender_fragments,
+            sender_domains=spec.sender_domains,
+            older_than_days=spec.retention_days,
+            dry_run=dry_run,
+            subject_fragments=spec.subject_fragments,
+            required_label_ids=spec.required_label_ids,
+            now=now,
+        ),
+        failure_outcome=f"{_sender_cleanup_prefix(spec.label)}_failed",
+        log_failure=log_failure,
+    )
+
+
 def count_unread_cleanup_messages(
     service,
     message_ids: list[str],
@@ -559,10 +637,13 @@ def main() -> int:
     counts: dict[str, int] = {}
     merge_outcome_counts(
         counts,
-        count_message_outcomes(
+        count_nutricost_messages(
+            service,
             message_ids,
-            lambda message_id: process_message(service, message_id, day, args.threshold, args.dry_run, state),
-            failure_outcome="failed",
+            day,
+            threshold=args.threshold,
+            dry_run=args.dry_run,
+            state=state,
             log_failure=lambda message_id, exc: LOGGER.exception("Failed processing %s: %s", message_id, exc),
         ),
     )
@@ -573,10 +654,11 @@ def main() -> int:
     LOGGER.info("Found %d CrunchLabs candidate message(s)", len(crunchlabs_message_ids))
     merge_outcome_counts(
         counts,
-        count_message_outcomes(
+        count_crunchlabs_messages(
+            service,
             crunchlabs_message_ids,
-            lambda message_id: process_crunchlabs_message(service, message_id, day, args.dry_run),
-            failure_outcome="crunchlabs_failed",
+            day,
+            dry_run=args.dry_run,
             log_failure=lambda message_id, exc: LOGGER.exception(
                 "Failed processing CrunchLabs message %s: %s",
                 message_id,
@@ -597,20 +679,11 @@ def main() -> int:
         LOGGER.info("Found %d %s candidate message(s)", len(cleanup_message_ids), spec.label)
         merge_outcome_counts(
             counts,
-            count_message_outcomes(
+            count_sender_cleanup_messages(
+                service,
                 cleanup_message_ids,
-                lambda message_id, spec=spec: process_sender_cleanup_message(
-                    service,
-                    message_id,
-                    label=spec.label,
-                    sender_fragments=spec.sender_fragments,
-                    sender_domains=spec.sender_domains,
-                    older_than_days=spec.retention_days,
-                    dry_run=args.dry_run,
-                    subject_fragments=spec.subject_fragments,
-                    required_label_ids=spec.required_label_ids,
-                ),
-                failure_outcome=f"{_sender_cleanup_prefix(spec.label)}_failed",
+                spec,
+                dry_run=args.dry_run,
                 log_failure=lambda message_id, exc, spec=spec: LOGGER.exception(
                     "Failed processing %s message %s: %s",
                     spec.label,
@@ -626,10 +699,10 @@ def main() -> int:
     LOGGER.info("Found %d Google Calendar candidate message(s)", len(google_calendar_message_ids))
     merge_outcome_counts(
         counts,
-        count_message_outcomes(
+        count_google_calendar_messages(
+            service,
             google_calendar_message_ids,
-            lambda message_id: process_google_calendar_message(service, message_id, dry_run=args.dry_run),
-            failure_outcome="google_calendar_failed",
+            dry_run=args.dry_run,
             log_failure=lambda message_id, exc: LOGGER.exception(
                 "Failed processing Google Calendar message %s: %s",
                 message_id,

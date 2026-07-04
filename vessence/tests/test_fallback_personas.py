@@ -1,8 +1,39 @@
 from agent_skills.fallback_personas import (
+    amber_capability_text,
     amber_fallback_persona,
     build_amber_persona,
     build_jane_persona,
+    persona_essay_section,
+    user_essay_title,
 )
+
+
+def test_persona_helper_sections_preserve_capability_and_essay_shapes():
+    assert amber_capability_text(
+        [
+            {
+                "name": "Calendar",
+                "description": "Manage events",
+                "tools": ["calendar"],
+                "fallback_tag": "[CALENDAR]",
+            },
+            {
+                "name": "Notes",
+                "description": "Read notes",
+                "tools": ["vault", "search"],
+            },
+        ]
+    ) == (
+        "- Calendar: Manage events (Tools: calendar)\n"
+        "  IMPORTANT: To use this, say '[CALENDAR]' on a new line.\n"
+        "- Notes: Read notes (Tools: vault, search)\n"
+    )
+    assert persona_essay_section("YOUR IDENTITY (Jane)", "Jane essay") == (
+        "\n\n## YOUR IDENTITY (Jane):\nJane essay"
+    )
+    assert persona_essay_section("ABOUT USER", "") == ""
+    assert user_essay_title("the user", "user") == "ABOUT USER (your user)"
+    assert user_essay_title("Chieh") == "ABOUT CHIEH (your user)"
 
 
 def test_build_amber_persona_preserves_manifest_sections_and_essays():

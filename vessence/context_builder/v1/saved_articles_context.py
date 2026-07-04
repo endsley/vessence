@@ -110,38 +110,50 @@ def format_saved_article_context(entry: dict, article: dict, remaining_chars: in
     return "\n".join(parts)
 
 
-def build_saved_articles_context(message: str) -> str:
-    if not should_include_saved_articles(message):
-        return ""
-    path = saved_articles_index_path()
+def load_saved_articles_index(path: Path | None = None) -> dict:
+    path = path or saved_articles_index_path()
     if not path.exists():
-        return ""
+        return {}
     try:
         saved = json.loads(path.read_text(encoding="utf-8", errors="replace"))
     except Exception:
-        return ""
-    if not isinstance(saved, dict):
-        return ""
+        return {}
+    return saved if isinstance(saved, dict) else {}
 
-    terms = article_query_terms(message)
+
+def saved_article_candidates(
+    saved: dict,
+    terms: set[str],
+) -> list[tuple[int, str, dict, dict]]:
     candidates: list[tuple[int, str, dict, dict]] = []
-    for article_id, entry in saved.items():
+    for _article_id, entry in saved.items():
         if not isinstance(entry, dict):
             continue
         article = load_saved_article_entry_article(entry)
         score = score_saved_article(terms, entry, article) if terms else 0
         saved_at = str(entry.get("saved_at") or "")
         candidates.append((score, saved_at, entry, article))
+    return candidates
 
-    if not candidates:
-        return ""
+
+def ranked_saved_article_candidates(
+    candidates: list[tuple[int, str, dict, dict]],
+    terms: set[str],
+) -> list[tuple[int, str, dict, dict]]:
     if terms and any(score > 0 for score, _saved_at, _entry, _article in candidates):
         candidates = [candidate for candidate in candidates if candidate[0] > 0]
-    candidates.sort(key=lambda candidate: (candidate[0], candidate[1]), reverse=True)
+    return sorted(candidates, key=lambda candidate: (candidate[0], candidate[1]), reverse=True)
 
+
+def saved_article_context_sections(
+    candidates: list[tuple[int, str, dict, dict]],
+    *,
+    max_chars: int = MAX_SAVED_ARTICLE_CONTEXT_CHARS,
+    limit: int = 3,
+) -> list[str]:
     sections: list[str] = []
-    remaining = MAX_SAVED_ARTICLE_CONTEXT_CHARS
-    for score, _saved_at, entry, article in candidates[:3]:
+    remaining = max_chars
+    for score, _saved_at, entry, article in candidates[:limit]:
         block = format_saved_article_context(entry, article, remaining)
         if not block:
             continue
@@ -151,6 +163,22 @@ def build_saved_articles_context(message: str) -> str:
         remaining -= len(block) + 80
         if remaining <= 800:
             break
+    return sections
+
+
+def build_saved_articles_context(message: str) -> str:
+    if not should_include_saved_articles(message):
+        return ""
+    saved = load_saved_articles_index()
+    if not saved:
+        return ""
+
+    terms = article_query_terms(message)
+    candidates = saved_article_candidates(saved, terms)
+    if not candidates:
+        return ""
+    candidates = ranked_saved_article_candidates(candidates, terms)
+    sections = saved_article_context_sections(candidates)
 
     if not sections:
         return ""

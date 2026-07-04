@@ -9,6 +9,7 @@ from collections.abc import Sequence
 DEFAULT_VOCAL_LOG_PATH = "$VESSENCE_DATA_HOME/self_improve_vocal_log.jsonl"
 DEFAULT_TECH_LOGS = "$VESSENCE_DATA_HOME/logs/self_improve_*.log"
 DEFAULT_LATEST_REPORT = "$VESSENCE_HOME/configs/self_improvement_latest.md"
+SELF_IMPROVEMENT_CONTEXT_END = "[END SELF IMPROVEMENT CONTEXT]"
 
 
 def _context_header_lines(*, log_path: str, tech_logs: str, latest_report: str) -> list[str]:
@@ -33,33 +34,23 @@ def _entry_reference_line(index: int, entry: dict) -> str:
     return f"{index}. [{ts} | {job} | {severity}] {summary}"
 
 
-def build_self_improvement_context_block(
-    entries: Sequence[dict],
-    *,
-    log_path: str = DEFAULT_VOCAL_LOG_PATH,
-    tech_logs: str = DEFAULT_TECH_LOGS,
-    latest_report: str = DEFAULT_LATEST_REPORT,
-) -> str:
-    if not entries:
-        lines = _context_header_lines(
-            log_path=log_path,
-            tech_logs=tech_logs,
-            latest_report=latest_report,
-        )
-        lines.append(
-            "No recent self-improvement entries found (empty log or "
-            "older than 14 days). Tell the user nothing's been logged "
-            "yet and the nightly job may not have run recently."
-        )
-        lines.append("[END SELF IMPROVEMENT CONTEXT]")
-        return "\n".join(lines)
-
+def _empty_context_lines(*, log_path: str, tech_logs: str, latest_report: str) -> list[str]:
     lines = _context_header_lines(
         log_path=log_path,
         tech_logs=tech_logs,
         latest_report=latest_report,
     )
     lines.append(
+        "No recent self-improvement entries found (empty log or "
+        "older than 14 days). Tell the user nothing's been logged "
+        "yet and the nightly job may not have run recently."
+    )
+    lines.append(SELF_IMPROVEMENT_CONTEXT_END)
+    return lines
+
+
+def _voice_response_style_message(entries: Sequence[dict]) -> str:
+    return (
         "RESPONSE STYLE — CRITICAL. The user is on voice and doesn't "
         "want a long recital. Your reply should be CONVERSATIONAL:\n"
         "  0) When the user asks for the most recent self-improvement "
@@ -86,9 +77,34 @@ def build_self_improvement_context_block(
         + _job_category_summary(entries)
         + "."
     )
-    lines.append("")
-    lines.append("Entries (numbered for drill-down reference):")
-    for index, entry in enumerate(entries, 1):
-        lines.append(_entry_reference_line(index, entry))
-    lines.append("[END SELF IMPROVEMENT CONTEXT]")
+
+
+def _numbered_entry_reference_lines(entries: Sequence[dict]) -> list[str]:
+    lines = ["", "Entries (numbered for drill-down reference):"]
+    lines.extend(_entry_reference_line(index, entry) for index, entry in enumerate(entries, 1))
+    lines.append(SELF_IMPROVEMENT_CONTEXT_END)
+    return lines
+
+
+def build_self_improvement_context_block(
+    entries: Sequence[dict],
+    *,
+    log_path: str = DEFAULT_VOCAL_LOG_PATH,
+    tech_logs: str = DEFAULT_TECH_LOGS,
+    latest_report: str = DEFAULT_LATEST_REPORT,
+) -> str:
+    if not entries:
+        return "\n".join(_empty_context_lines(
+            log_path=log_path,
+            tech_logs=tech_logs,
+            latest_report=latest_report,
+        ))
+
+    lines = _context_header_lines(
+        log_path=log_path,
+        tech_logs=tech_logs,
+        latest_report=latest_report,
+    )
+    lines.append(_voice_response_style_message(entries))
+    lines.extend(_numbered_entry_reference_lines(entries))
     return "\n".join(lines)

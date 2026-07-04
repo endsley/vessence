@@ -221,35 +221,39 @@ def parse_subject_time(value: str, fallback_period: str | None = None) -> dt.tim
     return dt.time(hour, minute)
 
 
-def google_calendar_event_end_from_subject(subject: str) -> dt.datetime | None:
-    match = re.search(
-        r"@\s*"
-        r"(?:[A-Z][a-z]{2}\s+)?"
-        r"(?P<month>[A-Z][a-z]{2})\s+"
-        r"(?P<day>\d{1,2}),\s+"
-        r"(?P<year>\d{4})"
-        r"(?:\s+"
-        r"(?P<start>\d{1,2}(?::\d{2})?\s*(?:am|pm)?)"
-        r"(?:\s*-\s*(?P<end>\d{1,2}(?::\d{2})?\s*(?:am|pm)?))?"
-        r")?",
-        str(subject or ""),
-        flags=re.IGNORECASE,
-    )
-    if not match:
-        return None
+GOOGLE_CALENDAR_SUBJECT_RE = re.compile(
+    r"@\s*"
+    r"(?:[A-Z][a-z]{2}\s+)?"
+    r"(?P<month>[A-Z][a-z]{2})\s+"
+    r"(?P<day>\d{1,2}),\s+"
+    r"(?P<year>\d{4})"
+    r"(?:\s+"
+    r"(?P<start>\d{1,2}(?::\d{2})?\s*(?:am|pm)?)"
+    r"(?:\s*-\s*(?P<end>\d{1,2}(?::\d{2})?\s*(?:am|pm)?))?"
+    r")?",
+    flags=re.IGNORECASE,
+)
 
+
+def google_calendar_subject_match(subject: str) -> re.Match | None:
+    return GOOGLE_CALENDAR_SUBJECT_RE.search(str(subject or ""))
+
+
+def google_calendar_subject_date(match: re.Match) -> dt.date | None:
     try:
-        event_date = dt.datetime.strptime(
+        return dt.datetime.strptime(
             f"{match.group('month')} {match.group('day')} {match.group('year')}",
             "%b %d %Y",
         ).date()
     except ValueError:
         return None
 
+
+def google_calendar_subject_times(match: re.Match) -> tuple[dt.time, dt.time] | None:
     start_text = match.group("start")
     end_text = match.group("end")
     if not start_text:
-        return dt.datetime.combine(event_date, dt.time.max, tzinfo=ZoneInfo("America/New_York"))
+        return None
 
     start_period_match = re.search(r"(am|pm)\s*$", start_text, flags=re.IGNORECASE)
     start_period = start_period_match.group(1).lower() if start_period_match else None
@@ -257,7 +261,23 @@ def google_calendar_event_end_from_subject(subject: str) -> dt.datetime | None:
     end_time = parse_subject_time(end_text or start_text, fallback_period=start_period)
     if not start_time or not end_time:
         return None
+    return start_time, end_time
 
+
+def google_calendar_event_end_from_subject(subject: str) -> dt.datetime | None:
+    match = google_calendar_subject_match(subject)
+    if not match:
+        return None
+
+    event_date = google_calendar_subject_date(match)
+    if not event_date:
+        return None
+
+    times = google_calendar_subject_times(match)
+    if not times:
+        return dt.datetime.combine(event_date, dt.time.max, tzinfo=ZoneInfo("America/New_York"))
+
+    start_time, end_time = times
     event_end = dt.datetime.combine(event_date, end_time, tzinfo=ZoneInfo("America/New_York"))
     event_start = dt.datetime.combine(event_date, start_time, tzinfo=ZoneInfo("America/New_York"))
     if event_end < event_start:

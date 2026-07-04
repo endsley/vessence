@@ -3,6 +3,29 @@
 from __future__ import annotations
 
 
+def amber_capability_text(capabilities: list[dict]) -> str:
+    text = ""
+    for cap in capabilities:
+        text += (
+            f"- {cap['name']}: {cap['description']} "
+            f"(Tools: {', '.join(cap['tools'])})\n"
+        )
+        if "fallback_tag" in cap:
+            text += (
+                f"  IMPORTANT: To use this, say '{cap['fallback_tag']}' "
+                "on a new line.\n"
+            )
+    return text
+
+
+def persona_essay_section(title: str, essay: str) -> str:
+    return f"\n\n## {title}:\n{essay}" if essay else ""
+
+
+def user_essay_title(user_name: str, essay_user_name: str | None = None) -> str:
+    return f"ABOUT {(essay_user_name or user_name).upper()} (your user)"
+
+
 def build_amber_persona(
     manifest: dict,
     *,
@@ -20,16 +43,7 @@ def build_amber_persona(
         "CAPABILITIES:\n"
     )
 
-    for cap in manifest["capabilities"]:
-        persona += (
-            f"- {cap['name']}: {cap['description']} "
-            f"(Tools: {', '.join(cap['tools'])})\n"
-        )
-        if "fallback_tag" in cap:
-            persona += (
-                f"  IMPORTANT: To use this, say '{cap['fallback_tag']}' "
-                "on a new line.\n"
-            )
+    persona += amber_capability_text(manifest["capabilities"])
 
     persona += "\nIDENTITY RULES:\n"
     for rule in manifest.get("identity_rules", []):
@@ -42,12 +56,9 @@ def build_amber_persona(
         f"Be warm, efficient, and stay in character as {user_name}'s assistant Amber."
     )
 
-    if amber_essay:
-        persona += f"\n\n## YOUR IDENTITY (Amber):\n{amber_essay}"
-    if user_essay:
-        persona += f"\n\n## ABOUT {(essay_user_name or user_name).upper()} (your user):\n{user_essay}"
-    if jane_essay:
-        persona += f"\n\n## ABOUT JANE (your colleague):\n{jane_essay}"
+    persona += persona_essay_section("YOUR IDENTITY (Amber)", amber_essay)
+    persona += persona_essay_section(user_essay_title(user_name, essay_user_name), user_essay)
+    persona += persona_essay_section("ABOUT JANE (your colleague)", jane_essay)
 
     return persona
 
@@ -71,8 +82,6 @@ def build_jane_persona(
         "You are currently acting as an emergency fallback because the primary model is unavailable. "
         "Keep your expert persona and help the user as much as you can with your knowledge."
     )
-    if jane_essay:
-        base += f"\n\n## YOUR IDENTITY (Jane):\n{jane_essay}"
-    if user_essay:
-        base += f"\n\n## ABOUT {(essay_user_name or user_name).upper()} (your user):\n{user_essay}"
+    base += persona_essay_section("YOUR IDENTITY (Jane)", jane_essay)
+    base += persona_essay_section(user_essay_title(user_name, essay_user_name), user_essay)
     return base

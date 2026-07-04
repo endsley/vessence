@@ -4,9 +4,14 @@ from agent_skills.prompt_queue_docs import (
     parse_prompt_chunk,
     parse_status_prefix,
     parse_prompt_list,
+    prompt_failure_detail,
     prompt_body_lines,
+    prompt_result_discord_message,
+    prompt_result_note,
+    prompt_result_status,
     prompt_entry_chunks,
     prompt_summary,
+    queue_prompt_run_text,
     remove_completed_prompt_entries,
     render_prompt_status_update,
     render_completed_archive_section,
@@ -16,6 +21,11 @@ from agent_skills.prompt_queue_docs import (
 
 def test_prompt_queue_runner_reexports_prompt_summary_helper():
     assert prompt_queue_runner.prompt_summary is prompt_summary
+    assert prompt_queue_runner.queue_prompt_run_text is queue_prompt_run_text
+    assert prompt_queue_runner.prompt_result_status is prompt_result_status
+    assert prompt_queue_runner.prompt_result_note is prompt_result_note
+    assert prompt_queue_runner.prompt_failure_detail is prompt_failure_detail
+    assert prompt_queue_runner.prompt_result_discord_message is prompt_result_discord_message
 
 
 def test_prompt_entry_parser_helpers_preserve_status_and_body_boundaries():
@@ -155,3 +165,28 @@ def test_prompt_summary_preserves_existing_truncation_markers():
         "_(prompt continues…)_"
     )
     assert prompt_summary("x" * 20, max_chars=10) == "xxxxxxxxxx…"
+
+
+def test_queue_prompt_result_helpers_preserve_retry_status_note_and_messages():
+    retry_text = queue_prompt_run_text("Original task", is_retry=True)
+
+    assert queue_prompt_run_text("Original task", is_retry=False) == "Original task"
+    assert "marked INCOMPLETE" in retry_text
+    assert retry_text.endswith("Original prompt:\nOriginal task")
+    assert prompt_result_status(True) == "complete"
+    assert prompt_result_status(False) == "incomplete"
+    assert prompt_result_note("line one\nline two", max_chars=12) == "line one lin"
+    assert prompt_failure_detail("  failed hard  ") == "failed hard"
+    assert prompt_failure_detail("") == (
+        "_(No output returned — possible timeout, permission error, or execution failure.)_"
+    )
+    assert prompt_result_discord_message(3, "Do it", "Done", True) == (
+        "✅ **Prompt #3 COMPLETE**\n\n"
+        "**Result:**\nDone"
+    )
+
+    failed = prompt_result_discord_message(4, "Fix the thing", "", False)
+
+    assert failed.startswith("⚠️ **Prompt #4 INCOMPLETE**")
+    assert "**Prompt was:**\nFix the thing" in failed
+    assert "No output returned" in failed

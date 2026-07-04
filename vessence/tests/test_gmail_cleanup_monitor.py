@@ -89,6 +89,39 @@ def test_crunchlabs_messages_are_trashed_for_daily_window():
     assert "from:crunchlabs" in monitor.build_crunchlabs_query(day, include_trash=False)
 
 
+def test_crunchlabs_count_helper_uses_daily_window_policy_and_failure_outcome():
+    day = dt.date(2026, 6, 29)
+    service = _Service({
+        "in-window": _message(
+            dt.datetime(2026, 6, 29, 9, 0, tzinfo=NY),
+            "CrunchLabs <hello@crunchlabs.com>",
+            "New box",
+        ),
+        "out-of-window": _message(
+            dt.datetime(2026, 6, 28, 23, 0, tzinfo=NY),
+            "CrunchLabs <hello@crunchlabs.com>",
+            "Older box",
+        ),
+    })
+    failures = []
+
+    counts = monitor.count_crunchlabs_messages(
+        service,
+        ["in-window", "out-of-window", "missing"],
+        day,
+        dry_run=True,
+        log_failure=lambda message_id, exc: failures.append((message_id, type(exc).__name__)),
+    )
+
+    assert counts == {
+        "crunchlabs_would_trash": 1,
+        "crunchlabs_out_of_scope": 1,
+        "crunchlabs_failed": 1,
+    }
+    assert failures == [("missing", "KeyError")]
+    assert service.trashed == []
+
+
 def test_sender_cleanup_respects_age_and_sender_header():
     now = dt.datetime(2026, 6, 29, 12, 0, tzinfo=NY)
     service = _Service({
@@ -197,6 +230,52 @@ def test_sender_cleanup_can_require_category_and_subject():
         now=now,
     ) == "discord_missed_messages_skipped_labels"
     assert service.trashed == ["missed-discord"]
+
+
+def test_sender_cleanup_count_helper_uses_spec_policy_and_failure_outcome():
+    now = dt.datetime(2026, 6, 29, 12, 0, tzinfo=NY)
+    service = _Service({
+        "old-redfin": _message(
+            now - dt.timedelta(days=4),
+            "Redfin <updates@redfin.com>",
+            "Homes near you",
+        ),
+        "young-redfin": _message(
+            now - dt.timedelta(days=1),
+            "Redfin <updates@redfin.com>",
+            "New listing",
+        ),
+        "wrong-sender": _message(
+            now - dt.timedelta(days=4),
+            "Someone Else <hello@example.com>",
+            "Not redfin",
+        ),
+    })
+    failures = []
+    spec = monitor.SenderCleanupSpec(
+        "Redfin",
+        monitor.REDFIN_FROM_QUERY,
+        monitor.REDFIN_SENDER_FRAGMENTS,
+        retention_days=3,
+    )
+
+    counts = monitor.count_sender_cleanup_messages(
+        service,
+        ["old-redfin", "young-redfin", "wrong-sender", "missing"],
+        spec,
+        dry_run=True,
+        now=now,
+        log_failure=lambda message_id, exc: failures.append((message_id, type(exc).__name__)),
+    )
+
+    assert counts == {
+        "redfin_would_trash": 1,
+        "redfin_too_recent": 1,
+        "redfin_skipped": 1,
+        "redfin_failed": 1,
+    }
+    assert failures == [("missing", "KeyError")]
+    assert service.trashed == []
 
 
 def test_low_priority_cleanup_specs_use_three_day_targeted_queries():
@@ -332,6 +411,57 @@ def test_google_calendar_messages_delete_only_after_event_passed():
     assert monitor.process_google_calendar_message(service, "future", dry_run=False, now=now) == "google_calendar_future_event"
     assert service.trashed == ["past"]
     assert "calendar-notification" in monitor.build_google_calendar_query(include_trash=False)
+
+
+def test_google_calendar_count_helper_uses_event_policy_and_failure_outcome():
+    now = dt.datetime(2026, 6, 29, 12, 0, tzinfo=NY)
+    passed_ics = "\n".join([
+        "BEGIN:VCALENDAR",
+        "BEGIN:VEVENT",
+        "DTSTART:20260620T090000",
+        "DTEND:20260620T100000",
+        "END:VEVENT",
+        "END:VCALENDAR",
+    ])
+    future_ics = "\n".join([
+        "BEGIN:VCALENDAR",
+        "BEGIN:VEVENT",
+        "DTSTART:20260720T090000",
+        "DTEND:20260720T100000",
+        "END:VEVENT",
+        "END:VCALENDAR",
+    ])
+    service = _Service({
+        "past": _message(
+            now - dt.timedelta(days=10),
+            "Google Calendar <calendar-notification@google.com>",
+            "Past event",
+            calendar_text=passed_ics,
+        ),
+        "future": _message(
+            now - dt.timedelta(days=10),
+            "Google Calendar <calendar-notification@google.com>",
+            "Future event",
+            calendar_text=future_ics,
+        ),
+    })
+    failures = []
+
+    counts = monitor.count_google_calendar_messages(
+        service,
+        ["past", "future", "missing"],
+        dry_run=True,
+        now=now,
+        log_failure=lambda message_id, exc: failures.append((message_id, type(exc).__name__)),
+    )
+
+    assert counts == {
+        "google_calendar_would_trash": 1,
+        "google_calendar_future_event": 1,
+        "google_calendar_failed": 1,
+    }
+    assert failures == [("missing", "KeyError")]
+    assert service.trashed == []
 
 
 def test_google_calendar_messages_fall_back_to_subject_date():

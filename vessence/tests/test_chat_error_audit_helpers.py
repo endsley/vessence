@@ -1,9 +1,16 @@
 from agent_skills import chat_error_audit
 from agent_skills.chat_error_audit_helpers import (
+    chat_error_front_matter,
     chat_error_incident_fields,
+    chat_error_incident_section,
     chat_error_job_filename,
     chat_error_job_markdown,
+    chat_error_notes_section,
+    chat_error_problem_section,
+    chat_error_scope_section,
     chat_error_source_location,
+    chat_error_stack_section,
+    chat_error_verification_section,
     first_android_frame,
     slugify_chat_error,
 )
@@ -67,6 +74,38 @@ def test_chat_error_incident_helpers_preserve_location_and_defaults():
         frame=frame,
         source_hint="StreamClient.kt",
     )["location"] == "StreamClient.kt:42"
+
+
+def test_chat_error_markdown_section_helpers_preserve_static_contract():
+    incident = {
+        "exc_class": "java.net.SocketException",
+        "message": "message",
+        "app_version": "1.2.3",
+        "version_code": 44,
+        "from_voice": True,
+        "class_method": "com.vessences.android.chat.StreamClient.read",
+        "location": "StreamClient.kt:42",
+    }
+
+    assert chat_error_front_matter("Audit Android chat_error: SocketException", "2026-07-02") == (
+        "---\n"
+        "Title: Audit Android chat_error: SocketException\n"
+        "Priority: 2\n"
+        "Status: pending\n"
+        "Created: 2026-07-02\n"
+        "Auto-generated: true\n"
+        "Source: android_chat_error_hook\n"
+        "---"
+    )
+    assert chat_error_problem_section().startswith("## Problem\nAn Android `chat_error`")
+    assert "- **Timestamp:** 2026-07-02T12:00:00Z" in chat_error_incident_section(
+        incident,
+        "2026-07-02T12:00:00Z",
+    )
+    assert chat_error_stack_section("s" * 1805).count("s") == 1800
+    assert "Do NOT add a blanket try/catch" in chat_error_scope_section()
+    assert "Build APK" in chat_error_verification_section()
+    assert "NEVER auto-retry" in chat_error_notes_section()
 
 
 def test_chat_error_job_markdown_renders_metadata_and_truncates_payload():

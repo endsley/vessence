@@ -8,6 +8,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from agent_skills import facebook_marketplace_message_cleanup as cleanup  # noqa: E402
 from agent_skills.facebook_marketplace_rules import (  # noqa: E402
     Conversation,
+    _month_label_age_days,
+    _relative_unit_age_days,
+    _relative_unit_matches_age_days,
+    _weekday_label_age_days,
     classify_conversation,
     classify_conversations,
     conversation_from_row,
@@ -62,6 +66,20 @@ def test_parse_relative_age_days_from_facebook_labels():
     assert parse_relative_age_days("New message  \u00b7  13m", now=now) == 0
     assert parse_relative_age_days("Jun 25", now=now) == 5
     assert parse_relative_age_days("Sat", now=now) == 3
+
+
+def test_relative_age_helper_branches_preserve_unit_month_and_weekday_rules():
+    now = dt.datetime(2026, 1, 2, 12, 0)
+
+    assert _relative_unit_age_days("13", "m") == 0
+    assert _relative_unit_age_days("2", "weeks") == 14
+    assert _relative_unit_age_days("3", "months") == 90
+    assert _relative_unit_matches_age_days([("1", "d"), ("2", "w")]) == 14
+    assert _relative_unit_matches_age_days([]) is None
+    assert _month_label_age_days("dec 31", now) == 2
+    assert _month_label_age_days("jan 3", now) == 364
+    assert _weekday_label_age_days("thu", now) == 1
+    assert _weekday_label_age_days("fri", now) is None
 
 
 def test_sold_signal_deletes_but_sold_question_does_not():

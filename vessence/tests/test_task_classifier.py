@@ -1,7 +1,11 @@
 from jane_web import task_classifier
 from jane_web.task_classifier import (
     _has_code_references,
+    _has_background_prefix,
+    _is_big_task_by_features,
+    _is_followup_starter,
     _pattern_score,
+    _task_sentence_count,
     classify_task,
     strip_bg_prefix,
 )
@@ -16,6 +20,39 @@ def test_task_classifier_pattern_and_code_reference_helpers():
     assert _pattern_score(task_classifier._quick_re, "implement the change") == 0
     assert _has_code_references("update `main.py` and styles.css")
     assert not _has_code_references("update the docs")
+    assert _has_background_prefix("bg: run this in the background")
+    assert _has_background_prefix("background: run this in the background")
+    assert not _has_background_prefix("please background this")
+    assert _is_followup_starter("please go ahead and implement that")
+    assert not _is_followup_starter("please implement a new upload workflow")
+    assert _task_sentence_count("One. Two. Three.") == 3
+
+
+def test_task_classifier_big_task_feature_thresholds():
+    assert _is_big_task_by_features(
+        big_score=2,
+        sentence_count=1,
+        has_code_refs=False,
+        text_len=80,
+    )
+    assert _is_big_task_by_features(
+        big_score=1,
+        sentence_count=4,
+        has_code_refs=False,
+        text_len=80,
+    )
+    assert _is_big_task_by_features(
+        big_score=1,
+        sentence_count=1,
+        has_code_refs=True,
+        text_len=201,
+    )
+    assert not _is_big_task_by_features(
+        big_score=1,
+        sentence_count=1,
+        has_code_refs=True,
+        text_len=200,
+    )
 
 
 def test_classify_task_forces_background_prefix_and_strips_prefix():

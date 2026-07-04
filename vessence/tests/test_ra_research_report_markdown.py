@@ -6,11 +6,24 @@ from agent_skills.ra_research_report_markdown import (
     build_useful_report_markdown,
     default_clinician_questions,
     default_tracking_items,
+    deterministic_action_plan_footer,
+    deterministic_action_plan_header,
+    deterministic_recommendation_scheme_footer,
+    deterministic_recommendation_scheme_header,
     list_to_markdown,
+    run_report_source_detail_lines,
+    run_report_source_details_lines,
     source_heading,
     source_trace_line,
     useful_finding_lines,
+    useful_report_bottom_line_lines,
+    useful_report_changed_lines,
+    useful_report_file_lines,
+    useful_report_low_signal_lines,
+    useful_report_next_focus_items,
+    useful_report_safety_lines,
     useful_report_summary_groups,
+    useful_report_source_trace_lines,
 )
 from agent_skills.ra_research_report_tables import (
     EMPTY_EVIDENCE_ROW,
@@ -179,6 +192,80 @@ def test_useful_report_source_render_helpers_preserve_high_signal_shapes():
     )
 
 
+def test_useful_report_section_builders_preserve_fallbacks_and_paths():
+    summary = {
+        "source_id": "pmid-1",
+        "title": "Treat to target CDAI remission guidance",
+        "study_type": "guideline",
+        "evidence_scope": "open_access_full_text",
+        "remission_relevance": "CDAI target selection changes clinician discussion.",
+        "url": "https://example.test/high",
+    }
+
+    assert useful_report_bottom_line_lines(
+        [summary],
+        source_count=3,
+        themes=["treat-to-target"],
+        high_signal=[summary],
+    ) == [
+        "## Bottom Line",
+        "- This run processed 1 unique new or upgraded source summary; the cache now has 3 sources.",
+        "- Main themes this run: treat-to-target.",
+        (
+            "- Highest-value item: `pmid-1` Treat to target CDAI remission guidance. "
+            "Practical read: CDAI target selection changes clinician discussion."
+        ),
+        (
+            "- The standing practical path remains clinician-led treat-to-target care, "
+            "objective disease-activity scoring, symptom tracking, and no unsupervised "
+            "medication/supplement changes."
+        ),
+    ]
+    assert useful_report_changed_lines(["New finding."], []) == [
+        "",
+        "## What Changed This Run",
+        "- New finding.",
+    ]
+    assert useful_report_safety_lines([])[-1].startswith("- No new specific safety flag")
+    assert useful_report_safety_lines(["Discuss infection risk."]) == [
+        "",
+        "## Safety Flags",
+        "- Discuss infection risk.",
+    ]
+    assert useful_report_low_signal_lines([]) == [
+        "",
+        "## Low-Value Or Noisy Sources",
+        "- No obvious low-value/noisy source was added this run.",
+    ]
+    assert useful_report_next_focus_items(["Find monitoring intervals."]) == [
+        "Find monitoring intervals."
+    ]
+    assert len(useful_report_next_focus_items([])) == 3
+    assert useful_report_file_lines(
+        recommendation_path="/vault/scheme.md",
+        action_plan_path="/vault/action.md",
+        compressed_context_path="/vault/context.md",
+        discoveries_path="/vault/discoveries.md",
+    ) == [
+        "",
+        "## Full Files",
+        "- Living recommendation scheme: `/vault/scheme.md`",
+        "- Action plan: `/vault/action.md`",
+        "- Compressed context for future runs: `/vault/context.md`",
+        "- Discoveries log: `/vault/discoveries.md`",
+    ]
+    assert useful_report_source_trace_lines([summary]) == [
+        "",
+        "## Source Trace",
+        "- `pmid-1` Treat to target CDAI remission guidance | guideline, open_access_full_text | https://example.test/high",
+    ]
+    assert useful_report_source_trace_lines([]) == [
+        "",
+        "## Source Trace",
+        "- No new source trace for this run.",
+    ]
+
+
 def test_build_useful_report_markdown_uses_defaults_without_signal():
     report = build_useful_report_markdown([], [], None, 0)
 
@@ -216,6 +303,22 @@ def test_deterministic_ra_builders_include_timestamp_evidence_and_safety():
     assert "RA Remission / Asymptomatic-State Research Scheme" in scheme
     assert "| Treat \\| target | Full text | Supports CDAI scoring. | /vault/artifact |" in scheme
     assert "Medication starts" in scheme
+
+
+def test_deterministic_ra_document_section_helpers_preserve_static_contract():
+    action_header = deterministic_action_plan_header("2026-07-02 12:00 EDT")
+    scheme_header = deterministic_recommendation_scheme_header("2026-07-02 12:00 EDT")
+
+    assert action_header.startswith("# RA Recommendation Plan\n\nLast updated: 2026-07-02 12:00 EDT")
+    assert action_header.endswith("| Source | Type | Scope | Implication |\n|---|---|---|---|")
+    assert "## What Would Change This Plan" in deterministic_action_plan_footer()
+    assert deterministic_action_plan_footer().endswith("recommendation.\n")
+    assert scheme_header.startswith(
+        "# RA Remission / Asymptomatic-State Research Scheme\n\nLast updated: 2026-07-02 12:00 EDT"
+    )
+    assert scheme_header.endswith("| Source | Scope | Remission relevance | Saved artifact |\n|---|---|---|---|")
+    assert "## Next Research Questions" in deterministic_recommendation_scheme_footer()
+    assert deterministic_recommendation_scheme_footer().endswith("avoiding overtreatment?\n")
 
 
 def test_deterministic_ra_builders_include_empty_evidence_rows():
@@ -268,3 +371,38 @@ def test_build_run_report_markdown_wraps_useful_report_and_source_details():
     assert "## Standing Action Plan Snapshot\n\nACTION-" in report
     assert "## Standing Scheme Snapshot\n\nSCHEME-" in report
     assert report.endswith("\n")
+
+
+def test_run_report_source_detail_helpers_preserve_detail_block_and_empty_fallback():
+    summary = {
+        "source_id": "pmid-3",
+        "title": "RA remission monitoring review",
+        "study_type": "systematic review",
+        "evidence_scope": "open_access_full_text",
+        "remission_relevance": "Monitoring changes clinician discussion.",
+        "main_findings": ["CDAI and CRP monitoring were discussed."],
+        "artifact_dir": "/vault/papers/pmid-3",
+        "url": "https://example.test/pmid-3",
+    }
+
+    detail = run_report_source_detail_lines(summary)
+
+    assert detail[:8] == [
+        "### RA remission monitoring review",
+        "- Source ID: `pmid-3`",
+        "- URL: https://example.test/pmid-3",
+        "- Scope: open_access_full_text",
+        "- Evidence type: systematic review",
+        "- Saved artifact: `/vault/papers/pmid-3`",
+        "- Remission relevance: Monitoring changes clinician discussion.",
+        "- Usefulness label: useful signal",
+    ]
+    assert detail[-1] == ""
+    assert run_report_source_details_lines([summary])[:2] == [
+        "## New Source Details",
+        "### RA remission monitoring review",
+    ]
+    assert run_report_source_details_lines([]) == [
+        "## New Source Details",
+        "- No new sources processed this run; cached recommendation scheme was refreshed.",
+    ]

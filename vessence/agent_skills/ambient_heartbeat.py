@@ -27,6 +27,8 @@ from agent_skills.ambient_heartbeat_rules import (
     apply_research_note_to_spec as _apply_research_note_to_spec,
     automation_synthesis_prompt as _automation_synthesis_prompt,
     heartbeat_discord_summary,
+    heartbeat_should_run as _heartbeat_should_run,
+    heartbeat_sleep_window as _heartbeat_sleep_window,
     implementation_prompt as _implementation_prompt,
     implementation_ready_tasks_from_text as _implementation_ready_tasks_from_text,
     is_cache_stale as _is_cache_stale,
@@ -279,14 +281,13 @@ def main():
         pass
 
     # 1. Idle check (bypassed during sleep hours 2-6 AM local time)
-    import datetime as _dt
-    _now_hour = _dt.datetime.now().hour
-    _is_sleep_window = 1 <= _now_hour < 7
-    if is_user_active() and not _is_sleep_window:
+    _now = datetime.datetime.now()
+    _is_sleep_window = _heartbeat_sleep_window(_now)
+    if not _heartbeat_should_run(is_user_active(), _now):
         logger.info("User is active — exiting without running.")
         return
     if _is_sleep_window:
-        logger.info(f"Sleep-window override active (hour={_now_hour}) — running regardless of activity.")
+        logger.info(f"Sleep-window override active (hour={_now.hour}) — running regardless of activity.")
 
     cache = load_cache()
     research_done = []

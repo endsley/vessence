@@ -29,6 +29,64 @@ def _duplicate_group_lines(
     return lines
 
 
+def _auto_deleted_section_lines(root: Path, auto_deleted: list[Path]) -> list[str]:
+    if not auto_deleted:
+        return []
+    lines = [f"## Auto-deleted ({len(auto_deleted)} files)\n"]
+    lines.extend(_relative_path_item(root, path) for path in auto_deleted)
+    lines.append("")
+    return lines
+
+
+def _dead_files_section_lines(root: Path, dead_files: list[Path]) -> list[str]:
+    if not dead_files:
+        return []
+    lines = [
+        f"## Dead files — review needed ({len(dead_files)})\n",
+        "(Candidates for deletion, but failed an auto-delete safety check —",
+        " usually means the file is too new, too large, or outside agent_skills/test_code.)\n",
+    ]
+    lines.extend(_relative_path_item(root, path) for path in dead_files)
+    lines.append("")
+    return lines
+
+
+def _dead_functions_section_lines(
+    root: Path,
+    dead_functions: list[tuple[Path, str]],
+    *,
+    limit: int = 50,
+) -> list[str]:
+    if not dead_functions:
+        return []
+    lines = [
+        f"## Possibly-dead functions ({len(dead_functions)})\n",
+        "(No references found via grep. May be false positives if called via",
+        " getattr, dynamic dispatch, or HTTP route registration.)\n",
+    ]
+    for path, name in dead_functions[:limit]:
+        lines.append(_dead_function_item(root, path, name))
+    if len(dead_functions) > limit:
+        lines.append(f"- … and {len(dead_functions) - limit} more")
+    lines.append("")
+    return lines
+
+
+def _duplicate_functions_section_lines(
+    root: Path,
+    duplicate_groups: list[tuple[str, list[Path]]],
+) -> list[str]:
+    if not duplicate_groups:
+        return []
+    lines = [
+        f"## Duplicate function bodies ({len(duplicate_groups)} groups)\n",
+        "(Identical bodies — candidates for extraction into a shared helper.)\n",
+    ]
+    lines.extend(_duplicate_group_lines(root, duplicate_groups))
+    lines.append("")
+    return lines
+
+
 def build_dead_code_report_markdown(
     *,
     root: Path,
@@ -41,35 +99,10 @@ def build_dead_code_report_markdown(
     ts = generated_at.strftime("%Y-%m-%d %H:%M")
     body = [f"# Dead Code Report — {ts}\n"]
 
-    if auto_deleted:
-        body.append(f"## Auto-deleted ({len(auto_deleted)} files)\n")
-        for path in auto_deleted:
-            body.append(_relative_path_item(root, path))
-        body.append("")
-
-    if dead_files:
-        body.append(f"## Dead files — review needed ({len(dead_files)})\n")
-        body.append("(Candidates for deletion, but failed an auto-delete safety check —")
-        body.append(" usually means the file is too new, too large, or outside agent_skills/test_code.)\n")
-        for path in dead_files:
-            body.append(_relative_path_item(root, path))
-        body.append("")
-
-    if dead_functions:
-        body.append(f"## Possibly-dead functions ({len(dead_functions)})\n")
-        body.append("(No references found via grep. May be false positives if called via")
-        body.append(" getattr, dynamic dispatch, or HTTP route registration.)\n")
-        for path, name in dead_functions[:50]:
-            body.append(_dead_function_item(root, path, name))
-        if len(dead_functions) > 50:
-            body.append(f"- … and {len(dead_functions) - 50} more")
-        body.append("")
-
-    if duplicate_groups:
-        body.append(f"## Duplicate function bodies ({len(duplicate_groups)} groups)\n")
-        body.append("(Identical bodies — candidates for extraction into a shared helper.)\n")
-        body.extend(_duplicate_group_lines(root, duplicate_groups))
-        body.append("")
+    body.extend(_auto_deleted_section_lines(root, auto_deleted))
+    body.extend(_dead_files_section_lines(root, dead_files))
+    body.extend(_dead_functions_section_lines(root, dead_functions))
+    body.extend(_duplicate_functions_section_lines(root, duplicate_groups))
 
     if not (auto_deleted or dead_files or dead_functions or duplicate_groups):
         body.append("Codebase clean — no dead code candidates found. ✅\n")

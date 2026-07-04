@@ -26,18 +26,43 @@ _SUMMARY_SYSTEM = (
 )
 
 
+def broadcast_summary_prompt(user_message: str, partial_response: str) -> str:
+    return (
+        f"{_SUMMARY_SYSTEM}\n\n"
+        f"User asked: {user_message[:200]}\n\n"
+        f"Partial response so far ({len(partial_response)} chars):\n"
+        f"{partial_response[:1500]}\n\n"
+        "Write ONE sentence summarizing what the assistant is currently working on:"
+    )
+
+
+def haiku_summary_log_entry(
+    user_message: str,
+    partial_response: str,
+    summary: str,
+    *,
+    timestamp: str,
+) -> str:
+    return json.dumps({
+        "timestamp": timestamp,
+        "model": "haiku",
+        "source": "broadcast",
+        "user_msg": user_message[:150],
+        "partial_len": len(partial_response),
+        "summary": summary,
+    })
+
+
+def truncate_summary_log_lines(lines: list[str], *, keep: int = 500) -> list[str]:
+    return lines[-keep:]
+
+
 def _summarize_sync(user_message: str, partial_response: str) -> str:
     """Call Claude Haiku via CLI to summarize the partial response."""
     try:
         import subprocess
 
-        prompt = (
-            f"{_SUMMARY_SYSTEM}\n\n"
-            f"User asked: {user_message[:200]}\n\n"
-            f"Partial response so far ({len(partial_response)} chars):\n"
-            f"{partial_response[:1500]}\n\n"
-            "Write ONE sentence summarizing what the assistant is currently working on:"
-        )
+        prompt = broadcast_summary_prompt(user_message, partial_response)
         result = subprocess.run(
             [CLAUDE_CLI, "--model", "haiku", "--print"],
             input=prompt,
@@ -52,7 +77,6 @@ def _summarize_sync(user_message: str, partial_response: str) -> str:
         # Log for quality evaluation
         if summary:
             try:
-                import json as _json
                 import datetime as _dt
                 log_path = os.path.join(
                     os.environ.get("VESSENCE_DATA_HOME", os.path.expanduser("~/ambient/vessence-data")),
@@ -66,17 +90,15 @@ def _summarize_sync(user_message: str, partial_response: str) -> str:
                         with open(log_path, "r") as rf:
                             lines = rf.readlines()
                         with open(log_path, "w") as wf:
-                            wf.writelines(lines[-500:])
+                            wf.writelines(truncate_summary_log_lines(lines))
                 except Exception:
                     pass
-                entry = _json.dumps({
-                    "timestamp": _dt.datetime.now(_dt.timezone.utc).isoformat(),
-                    "model": "haiku",
-                    "source": "broadcast",
-                    "user_msg": user_message[:150],
-                    "partial_len": len(partial_response),
-                    "summary": summary,
-                })
+                entry = haiku_summary_log_entry(
+                    user_message,
+                    partial_response,
+                    summary,
+                    timestamp=_dt.datetime.now(_dt.timezone.utc).isoformat(),
+                )
                 with open(log_path, "a") as f:
                     f.write(entry + "\n")
             except Exception:

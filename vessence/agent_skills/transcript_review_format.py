@@ -129,6 +129,32 @@ def build_condensed_context(
     return combined
 
 
+def codex_report_header(date_str: str, generated: dt.datetime) -> str:
+    return (
+        f"# Transcript Quality Review — {date_str}\n\n"
+        f"Generated: {generated.strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+    )
+
+
+def codex_issue_section(index: int, issue: dict) -> str:
+    sev = issue.get("severity", "?")
+    parts = [
+        (
+            f"## Issue {index} [{sev}]\n\n"
+            f"**Turn:** {issue.get('turn_time', '?')}\n"
+            f"**User said:** {issue.get('user_msg_snippet', '?')}\n\n"
+            f"**Problem:** {issue.get('issue', '?')}\n\n"
+            f"**Root cause:** {issue.get('root_cause', '?')}\n\n"
+            f"**Suggested fix:** {issue.get('suggested_fix', '?')}\n\n"
+            f"**Log evidence:**\n"
+        )
+    ]
+    for line in issue.get("relevant_log_lines", []):
+        parts.append(f"```\n{line}\n```\n")
+    parts.append("\n---\n\n")
+    return "".join(parts)
+
+
 def build_codex_report_markdown(
     issues: list[dict],
     date_str: str,
@@ -137,27 +163,9 @@ def build_codex_report_markdown(
 ) -> str:
     """Render Codex transcript-review findings as Markdown."""
     generated = generated_at or dt.datetime.now()
-    header = (
-        f"# Transcript Quality Review — {date_str}\n\n"
-        f"Generated: {generated.strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-    )
+    header = codex_report_header(date_str, generated)
 
     if not issues:
         return header + "No issues found. All turns look reasonable.\n"
 
-    parts = []
-    for i, issue in enumerate(issues, 1):
-        sev = issue.get("severity", "?")
-        parts.append(
-            f"## Issue {i} [{sev}]\n\n"
-            f"**Turn:** {issue.get('turn_time', '?')}\n"
-            f"**User said:** {issue.get('user_msg_snippet', '?')}\n\n"
-            f"**Problem:** {issue.get('issue', '?')}\n\n"
-            f"**Root cause:** {issue.get('root_cause', '?')}\n\n"
-            f"**Suggested fix:** {issue.get('suggested_fix', '?')}\n\n"
-            f"**Log evidence:**\n"
-        )
-        for line in issue.get("relevant_log_lines", []):
-            parts.append(f"```\n{line}\n```\n")
-        parts.append("\n---\n\n")
-    return header + "".join(parts)
+    return header + "".join(codex_issue_section(i, issue) for i, issue in enumerate(issues, 1))

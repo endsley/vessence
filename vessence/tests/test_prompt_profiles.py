@@ -1,6 +1,9 @@
 from context_builder.v1 import context_builder
 from context_builder.v1.prompt_profiles import (
     _classify_prompt_profile,
+    _is_file_lookup_request,
+    _is_project_work_request,
+    _is_simple_factual_request,
     _profile_for_intent_level,
     _profile_for_message_category,
 )
@@ -37,6 +40,18 @@ def test_profile_for_data_greeting_and_simple_modes_preserve_flags():
 def test_profile_for_unknown_intent_level_defers_to_message_classifier():
     assert _profile_for_intent_level("unknown") is None
     assert _classify_prompt_profile("where is my PDF?").name == "file_lookup"
+
+
+def test_message_category_predicates_preserve_profile_gates():
+    assert _is_file_lookup_request("show the vault file")
+    assert _is_file_lookup_request("hello", file_context="upload.pdf")
+    assert not _is_file_lookup_request("tell me more")
+    assert _is_project_work_request("debug the API endpoint", "debug the api endpoint")
+    assert _is_project_work_request("tell me about chromadb", "tell me about chromadb")
+    assert not _is_project_work_request("who is Amy?", "who is amy?")
+    assert _is_simple_factual_request("who is amy?")
+    assert _is_simple_factual_request("tiny question?")
+    assert not _is_simple_factual_request("tell me more about that")
 
 
 def test_classify_prompt_profile_preserves_message_category_order():

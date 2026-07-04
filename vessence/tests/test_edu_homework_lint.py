@@ -1,8 +1,30 @@
-from agent_skills.edu_homework_lint import lint_prompt
+from agent_skills.edu_homework_lint import (
+    lint_issue,
+    lint_prompt,
+    prompt_without_display_math,
+    prompt_without_inline_or_environment_math,
+    typo_lint_issues,
+)
 
 
 def kinds(issues):
     return [issue["kind"] for issue in issues]
+
+
+def test_lint_helpers_preserve_issue_shape_typo_order_and_math_stripping():
+    assert lint_issue("high", "kind", "message") == {
+        "severity": "high",
+        "kind": "kind",
+        "message": "message",
+    }
+    assert typo_lint_issues("Please recieve thier file") == [
+        {"severity": "med", "kind": "typo", "message": "Likely typo: 'recieve' -> 'receive'"},
+        {"severity": "med", "kind": "typo", "message": "Likely typo: 'thier' -> 'their'"},
+    ]
+    assert prompt_without_display_math(r"before $$\frac{1}{2}$$ after") == "before  after"
+    assert prompt_without_inline_or_environment_math(
+        r"$\frac{1}{2}$ \begin{matrix}\sqrt{x}\end{matrix} \frac{1}{3}"
+    ).strip() == r"\frac{1}{3}"
 
 
 def test_lint_prompt_flags_template_math_typo_and_short_prompt_issues():

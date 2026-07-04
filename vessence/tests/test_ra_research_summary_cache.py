@@ -6,7 +6,10 @@ from agent_skills.ra_research_summary_cache import (
     load_cached_summary,
     readable_text_from_artifact,
     read_json_dict,
+    summary_list_markdown,
+    summary_section_markdown,
     summary_to_markdown,
+    summary_trace_markdown,
 )
 
 
@@ -89,6 +92,36 @@ def test_readable_text_from_artifact_prefers_full_text_then_readable_then_abstra
     (artifact / "full_text.txt").write_text("full", encoding="utf-8")
     assert readable_text_from_artifact(artifact) == "full"
     assert readable_text_from_artifact(tmp_path / "missing") == ""
+
+
+def test_summary_markdown_helpers_preserve_list_and_section_shapes():
+    assert summary_list_markdown([" Finding\none ", ""]) == "- Finding one"
+    assert summary_list_markdown([""]) == ""
+    assert summary_list_markdown(" Single\nfinding ") == "- Single finding"
+    assert summary_list_markdown(None) == "- None captured."
+
+    assert summary_section_markdown("Main Findings", "- Finding") == "## Main Findings\n- Finding\n\n"
+    assert summary_section_markdown("Final", "- Point", final=True) == "## Final\n- Point\n"
+
+    assert summary_trace_markdown(
+        {
+            "title": "Title",
+            "source_id": "s1",
+            "citation": "Citation",
+            "url": "https://example.test",
+            "evidence_scope": "full_text",
+            "study_type": "review",
+            "artifact_dir": "/tmp/artifact",
+        }
+    ) == (
+        "# Title\n\n"
+        "- Source ID: `s1`\n"
+        "- Citation: Citation\n"
+        "- URL: https://example.test\n"
+        "- Evidence scope: full_text\n"
+        "- Study type: review\n"
+        "- Saved artifact directory: `/tmp/artifact`\n\n"
+    )
 
 
 def test_summary_to_markdown_keeps_source_trace_sections():

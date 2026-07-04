@@ -253,35 +253,60 @@ def write_summary(results: list[dict], started: dt.datetime) -> None:
         f.write("\n".join(lines) + "\n")
 
 
+REPORT_SUMMARY_JOBS = {
+    "Dead Code Auditor",
+    "Pipeline Audit (30 prompts)",
+    "Doc Drift Auditor",
+    "Transcript Quality Review",
+}
+
+
+def existing_job_artifacts(name: str) -> list[str]:
+    return [
+        str(artifact)
+        for artifact in JOB_ARTIFACTS.get(name, [])
+        if artifact.exists()
+    ]
+
+
+def primary_job_report_text(name: str) -> str:
+    artifacts = JOB_ARTIFACTS.get(name, [])
+    return _read_text(artifacts[0]) if artifacts else ""
+
+
+def job_output_summary(
+    name: str,
+    report_text: str,
+    log_tail: str,
+) -> tuple[list[str], list[str], list[str]]:
+    followups: list[str] = []
+    if name == "Dead Code Auditor":
+        problems, improvements = _summarize_dead_code(report_text, log_tail)
+    elif name == "Pipeline Audit (30 prompts)":
+        problems, improvements = _summarize_pipeline(report_text, log_tail)
+    elif name == "Doc Drift Auditor":
+        problems, improvements = _summarize_doc_drift(report_text, log_tail)
+    elif name == "Transcript Quality Review":
+        problems, improvements = _summarize_transcript_review(report_text, log_tail)
+        followups = _extract_field(report_text, "Suggested fix", limit=4)
+    else:
+        problems, improvements = _summarize_generic_log(log_tail)
+    return problems, improvements, followups
+
+
 def _job_details(result: dict) -> dict:
     name = result["name"]
     raw_log_path = str(result.get("log") or "").strip()
     log_tail = _read_job_log(result)
     problems: list[str] = []
     improvements: list[str] = []
-    followups: list[str] = []
-    artifacts: list[str] = []
 
     if result["status"] != "ok":
         problems.append(_bullet(f"Job ended with status `{result['status']}`."))
 
-    for artifact in JOB_ARTIFACTS.get(name, []):
-        if artifact.exists():
-            artifacts.append(str(artifact))
-
-    if name == "Dead Code Auditor":
-        p, i = _summarize_dead_code(_read_text(JOB_ARTIFACTS[name][0]), log_tail)
-    elif name == "Pipeline Audit (30 prompts)":
-        p, i = _summarize_pipeline(_read_text(JOB_ARTIFACTS[name][0]), log_tail)
-    elif name == "Doc Drift Auditor":
-        p, i = _summarize_doc_drift(_read_text(JOB_ARTIFACTS[name][0]), log_tail)
-    elif name == "Transcript Quality Review":
-        transcript_report = _read_text(JOB_ARTIFACTS[name][0])
-        p, i = _summarize_transcript_review(transcript_report, log_tail)
-        followups = _extract_field(transcript_report, "Suggested fix", limit=4)
-    else:
-        p, i = _summarize_generic_log(log_tail)
-
+    artifacts = existing_job_artifacts(name)
+    report_text = primary_job_report_text(name) if name in REPORT_SUMMARY_JOBS else ""
+    p, i, followups = job_output_summary(name, report_text, log_tail)
     problems.extend(p)
     improvements.extend(i)
     if raw_log_path:

@@ -189,3 +189,48 @@ def prompt_summary(text: str, max_chars: int = 400) -> str:
         if idx > max_chars // 2:
             return cut[:idx + len(sep)].strip() + "\n_(prompt continues…)_"
     return cut.rstrip() + "…"
+
+
+def queue_prompt_run_text(prompt_text: str, is_retry: bool) -> str:
+    if not is_retry:
+        return prompt_text
+    return (
+        "This prompt previously ran but was marked INCOMPLETE (empty or failed result). "
+        "Please investigate why it may have failed, then complete it properly.\n\n"
+        f"Original prompt:\n{prompt_text}"
+    )
+
+
+def prompt_result_status(success: bool) -> str:
+    return "complete" if success else "incomplete"
+
+
+def prompt_result_note(result: str, max_chars: int = 200) -> str:
+    return result[:max_chars].replace("\n", " ").strip()
+
+
+def prompt_failure_detail(result: str) -> str:
+    return (
+        result.strip()
+        if result.strip()
+        else "_(No output returned — possible timeout, permission error, or execution failure.)_"
+    )
+
+
+def prompt_result_discord_message(
+    index: int,
+    prompt_text: str,
+    result: str,
+    success: bool,
+) -> str:
+    if success:
+        return (
+            f"✅ **Prompt #{index} COMPLETE**\n\n"
+            f"**Result:**\n{result}"
+        )
+    return (
+        f"⚠️ **Prompt #{index} INCOMPLETE**\n\n"
+        f"**Prompt was:**\n{prompt_summary(prompt_text)}\n\n"
+        f"**What went wrong:**\n{prompt_failure_detail(result)}\n\n"
+        f"_Review the above and edit the prompt or fix the underlying issue before the next retry._"
+    )

@@ -31,6 +31,7 @@ from agent_skills.nightly_code_audit_helpers import (
     audit_branch_name as _audit_branch_name,
     audit_fix_prompt as _audit_fix_prompt,
     audit_report_stash_name as _audit_report_stash_name,
+    audit_sleep_window_allowed as _audit_sleep_window_allowed,
     audit_test_generation_prompt as _audit_test_generation_prompt,
     auto_audit_test_path as _auto_audit_test_path,
     default_auditor_state as _default_auditor_state,
@@ -244,14 +245,13 @@ def append_to_log(path: Path, entry: str) -> None:
 
 def main() -> int:
     started = time.time()
-    timestamp = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    now = dt.datetime.now()
+    timestamp = now.strftime("%Y-%m-%d %H:%M")
 
     # Sleep-window check: only run during 2-6 AM unless forced
-    if "--force" not in sys.argv:
-        hour = dt.datetime.now().hour
-        if not (1 <= hour < 7):
-            logger.info("Outside sleep window (hour=%d), skipping. Use --force to override.", hour)
-            return 0
+    if not _audit_sleep_window_allowed(sys.argv, now):
+        logger.info("Outside sleep window (hour=%d), skipping. Use --force to override.", now.hour)
+        return 0
 
     # Pre-flight: clean working tree
     if not is_clean_working_tree():

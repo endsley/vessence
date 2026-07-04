@@ -1,6 +1,29 @@
 from pathlib import Path
 
-from agent_skills.ra_research_html import build_report_html, markdown_to_report_html, report_id_from_path
+from agent_skills.ra_research_html import (
+    build_report_html,
+    inline_report_markdown_html,
+    markdown_to_report_html,
+    report_id_from_path,
+    report_list_html,
+    report_paragraph_html,
+)
+
+
+def test_report_inline_and_block_helpers_escape_and_format_supported_markdown():
+    assert inline_report_markdown_html(
+        "Raw <b>bold</b> plus **strong**, `code`, and [link](https://example.com)."
+    ) == (
+        "Raw &lt;b&gt;bold&lt;/b&gt; plus <strong>strong</strong>, "
+        '<code>code</code>, and <a href="https://example.com">link</a>.'
+    )
+    assert report_paragraph_html(["one", "two"]) == "<p>one two</p>"
+    assert report_paragraph_html([]) == ""
+    assert report_list_html([("ul", "one"), ("ul", "two")]) == (
+        "<ul><li>one</li><li>two</li></ul>"
+    )
+    assert report_list_html([("ol", "first")]) == "<ol><li>first</li></ol>"
+    assert report_list_html([]) == ""
 
 
 def test_markdown_to_report_html_renders_supported_blocks_and_inline_markup():

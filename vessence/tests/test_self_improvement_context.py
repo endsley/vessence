@@ -1,7 +1,11 @@
 from jane_web.self_improvement_context import (
+    SELF_IMPROVEMENT_CONTEXT_END,
     _context_header_lines,
+    _empty_context_lines,
     _entry_reference_line,
     _job_category_summary,
+    _numbered_entry_reference_lines,
+    _voice_response_style_message,
     build_self_improvement_context_block,
 )
 
@@ -33,6 +37,40 @@ def test_self_improvement_context_helpers_preserve_header_summary_and_entry_shap
             "summary": " Cleaned a timer edge case. ",
         },
     ) == "2. [2026-07-02T01:00:00Z | Timer Audit | info] Cleaned a timer edge case."
+
+
+def test_self_improvement_context_section_helpers_preserve_empty_and_numbered_shapes():
+    entries = [
+        {"timestamp": "2026-07-02T02:00:00Z", "job": "Transcript Review", "summary": "Fixed one."},
+        {"timestamp": "2026-07-02T01:00:00Z", "job": "Timer Audit", "severity": "low", "summary": "Cleaned."},
+    ]
+
+    assert _empty_context_lines(
+        log_path="/tmp/vocal.jsonl",
+        tech_logs="/tmp/*.log",
+        latest_report="/tmp/latest.md",
+    ) == [
+        "\n\n[SELF IMPROVEMENT CONTEXT]",
+        "Readable latest report: /tmp/latest.md",
+        "Vocal summary log file: /tmp/vocal.jsonl",
+        "Technical job logs: /tmp/*.log",
+        (
+            "No recent self-improvement entries found (empty log or older than 14 days). "
+            "Tell the user nothing's been logged yet and the nightly job may not have run recently."
+        ),
+        SELF_IMPROVEMENT_CONTEXT_END,
+    ]
+    style = _voice_response_style_message(entries)
+    assert "RESPONSE STYLE" in style
+    assert "Total entries in context window: 2 (most recent first)." in style
+    assert "Job categories: Transcript Review (1), Timer Audit (1)." in style
+    assert _numbered_entry_reference_lines(entries) == [
+        "",
+        "Entries (numbered for drill-down reference):",
+        "1. [2026-07-02T02:00:00Z | Transcript Review | info] Fixed one.",
+        "2. [2026-07-02T01:00:00Z | Timer Audit | low] Cleaned.",
+        SELF_IMPROVEMENT_CONTEXT_END,
+    ]
 
 
 def test_build_self_improvement_context_block_empty_log_shape():

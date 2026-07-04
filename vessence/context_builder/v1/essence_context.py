@@ -92,66 +92,91 @@ def extract_tool_signatures(tools_path: str) -> list[str]:
     return tools
 
 
-def get_essence_tools_description() -> str:
-    """Scan loaded essences/tools and build a description for Jane's context."""
-    ambient_base = os.environ.get("AMBIENT_BASE", os.path.expanduser("~/ambient"))
-    tools_dir, essences_dir = essence_search_dirs(ambient_base, os.environ.get("TOOLS_DIR"))
-
+def essence_scan_entries(tools_dir: str, essences_dir: str) -> list[str]:
     scan_entries: list[str] = []
     for scan_dir in [tools_dir, essences_dir]:
         if os.path.isdir(scan_dir):
             for entry in sorted(os.listdir(scan_dir)):
                 scan_entries.append(os.path.join(scan_dir, entry))
+    return scan_entries
 
+
+def load_essence_manifest(manifest_path: str) -> dict | None:
+    try:
+        with open(manifest_path) as handle:
+            return json.load(handle)
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def essence_tool_description_section(
+    entry_path: str,
+    *,
+    python_bin: str | None = None,
+) -> tuple[str, str] | None:
+    entry = os.path.basename(entry_path)
+    manifest_path = os.path.join(entry_path, "manifest.json")
+    tools_path = os.path.join(entry_path, "functions", "custom_tools.py")
+    if not os.path.isfile(manifest_path):
+        return None
+
+    manifest = load_essence_manifest(manifest_path)
+    if not manifest:
+        return None
+
+    name = manifest.get("essence_name", entry)
+    item_type = manifest.get("type", "tool")
+    description = manifest.get("description", "")
+
+    if item_type == "essence":
+        section = f"### {name} (Essence — AI Agent)\n"
+        section += f"Description: {description}\n"
+        section += "Interaction: Delegate conversation to this essence. It has its own LLM brain and handles multi-step workflows autonomously.\n"
+        if os.path.isfile(tools_path):
+            tools = extract_tool_signatures(tools_path)
+            if tools:
+                python_bin = python_bin or os.environ.get("PYTHON_BIN", sys.executable)
+                section += f"Direct tool invoke (optional): `{python_bin} {tools_path} <function_name> '<json_args>'`\n"
+                section += "Available functions:\n"
+                for tool in tools:
+                    section += f"- `{tool}`\n"
+        return "essence", section
+
+    if not os.path.isfile(tools_path):
+        return None
+    tools = extract_tool_signatures(tools_path)
+    if not tools:
+        return None
+
+    python_bin = python_bin or os.environ.get("PYTHON_BIN", sys.executable)
+    section = f"### {name} (Tool)\n"
+    section += f"Invoke: `{python_bin} {tools_path} <function_name> '<json_args>'`\n"
+    section += "Available tools:\n"
+    for tool in tools:
+        section += f"- `{tool}`\n"
+    return "tool", section
+
+
+def get_essence_tools_description() -> str:
+    """Scan loaded essences/tools and build a description for Jane's context."""
+    ambient_base = os.environ.get("AMBIENT_BASE", os.path.expanduser("~/ambient"))
+    tools_dir, essences_dir = essence_search_dirs(ambient_base, os.environ.get("TOOLS_DIR"))
+
+    scan_entries = essence_scan_entries(tools_dir, essences_dir)
     if not scan_entries:
         return ""
 
     tool_sections = []
     essence_sections = []
     for entry_path in scan_entries:
-        entry = os.path.basename(entry_path)
-        manifest_path = os.path.join(entry_path, "manifest.json")
-        tools_path = os.path.join(entry_path, "functions", "custom_tools.py")
-        if not os.path.isfile(manifest_path):
+        section = essence_tool_description_section(entry_path)
+        if not section:
             continue
-
-        try:
-            with open(manifest_path) as handle:
-                manifest = json.load(handle)
-        except (json.JSONDecodeError, OSError):
-            continue
-
-        name = manifest.get("essence_name", entry)
-        item_type = manifest.get("type", "tool")
-        description = manifest.get("description", "")
-
-        if item_type == "essence":
-            section = f"### {name} (Essence — AI Agent)\n"
-            section += f"Description: {description}\n"
-            section += "Interaction: Delegate conversation to this essence. It has its own LLM brain and handles multi-step workflows autonomously.\n"
-            if os.path.isfile(tools_path):
-                tools = extract_tool_signatures(tools_path)
-                if tools:
-                    python_bin = os.environ.get("PYTHON_BIN", sys.executable)
-                    section += f"Direct tool invoke (optional): `{python_bin} {tools_path} <function_name> '<json_args>'`\n"
-                    section += "Available functions:\n"
-                    for tool in tools:
-                        section += f"- `{tool}`\n"
-            essence_sections.append(section)
+        section_type, section_text = section
+        if section_type == "essence":
+            essence_sections.append(section_text)
         else:
-            if not os.path.isfile(tools_path):
-                continue
-            tools = extract_tool_signatures(tools_path)
-            if not tools:
-                continue
-
-            python_bin = os.environ.get("PYTHON_BIN", sys.executable)
-            section = f"### {name} (Tool)\n"
-            section += f"Invoke: `{python_bin} {tools_path} <function_name> '<json_args>'`\n"
-            section += "Available tools:\n"
-            for tool in tools:
-                section += f"- `{tool}`\n"
-            tool_sections.append(section)
+            tool_sections.append(section_text)
 
     parts = []
     if tool_sections:

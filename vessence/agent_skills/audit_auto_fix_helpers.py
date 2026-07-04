@@ -105,6 +105,28 @@ def fix_issue_preflight_result(
     return None
 
 
+def fix_content_preflight_result(
+    issue: dict[str, Any],
+    content: str,
+    *,
+    dry_run: bool,
+) -> dict[str, str] | None:
+    search_text = issue.get("search_text", "")
+    if search_text not in content:
+        return {
+            "status": "not_applicable",
+            "reason": "Search text not found in file (may already be fixed)",
+        }
+
+    if dry_run:
+        return {
+            "status": "would_fix",
+            "reason": issue.get("fix_description", ""),
+        }
+
+    return None
+
+
 def audit_report_candidates(audit_dir: str | Path, pattern: str = "audit_*.md") -> list[Path]:
     root = Path(audit_dir)
     if not root.exists():
@@ -146,6 +168,24 @@ def result_status_counts(results: list[dict[str, Any]]) -> dict[str, int]:
     }
 
 
+def circuit_breaker_skip_results(
+    issues: list[dict[str, Any]],
+    *,
+    result_count: int,
+    max_fixes_per_run: int,
+) -> list[dict[str, str]]:
+    return [
+        {
+            "issue": issue.get("issue", "Unknown"),
+            "file": issue.get("file", "Unknown"),
+            "category": issue.get("category", "unknown"),
+            "status": "skipped",
+            "reason": f"Circuit breaker: max {max_fixes_per_run} fixes per run",
+        }
+        for issue in issues[result_count:]
+    ]
+
+
 def _fix_result_file_name(result: dict[str, Any]) -> str:
     return Path(result["file"]).name if result["file"] != "Unknown" else "?"
 
@@ -164,6 +204,59 @@ def _not_applicable_result_line(result: dict[str, Any]) -> str:
 
 def _reverted_result_line(result: dict[str, Any]) -> str:
     return f"- **{result['issue'][:80]}** — {result['reason']}"
+
+
+def _fixed_results_section_lines(results: list[dict[str, Any]], *, dry_run: bool) -> list[str]:
+    if not results:
+        return []
+    verb = "Would Fix" if dry_run else "Fixed"
+    lines = [
+        f"## {verb} ({len(results)})",
+        "",
+        "| Issue | File | Fix Applied |",
+        "|-------|------|-------------|",
+    ]
+    lines.extend(_fixed_result_row(result) for result in results)
+    lines.append("")
+    return lines
+
+
+def _skipped_results_section_lines(results: list[dict[str, Any]]) -> list[str]:
+    if not results:
+        return []
+    lines = [
+        f"## Skipped ({len(results)})",
+        "",
+        "| Issue | Reason |",
+        "|-------|--------|",
+    ]
+    lines.extend(_skipped_result_row(result) for result in results)
+    lines.append("")
+    return lines
+
+
+def _not_applicable_results_section_lines(results: list[dict[str, Any]]) -> list[str]:
+    if not results:
+        return []
+    lines = [
+        f"## Already Fixed / Not Applicable ({len(results)})",
+        "",
+    ]
+    lines.extend(_not_applicable_result_line(result) for result in results)
+    lines.append("")
+    return lines
+
+
+def _reverted_results_section_lines(results: list[dict[str, Any]]) -> list[str]:
+    if not results:
+        return []
+    lines = [
+        f"## Reverted ({len(results)})",
+        "",
+    ]
+    lines.extend(_reverted_result_line(result) for result in results)
+    lines.append("")
+    return lines
 
 
 def generate_fix_report_markdown(
@@ -189,37 +282,9 @@ def generate_fix_report_markdown(
     not_applicable = partitions["not_applicable"]
     reverted = partitions["reverted"]
 
-    if fixed:
-        verb = "Would Fix" if dry_run else "Fixed"
-        lines.append(f"## {verb} ({len(fixed)})")
-        lines.append("")
-        lines.append("| Issue | File | Fix Applied |")
-        lines.append("|-------|------|-------------|")
-        for r in fixed:
-            lines.append(_fixed_result_row(r))
-        lines.append("")
-
-    if skipped:
-        lines.append(f"## Skipped ({len(skipped)})")
-        lines.append("")
-        lines.append("| Issue | Reason |")
-        lines.append("|-------|--------|")
-        for r in skipped:
-            lines.append(_skipped_result_row(r))
-        lines.append("")
-
-    if not_applicable:
-        lines.append(f"## Already Fixed / Not Applicable ({len(not_applicable)})")
-        lines.append("")
-        for r in not_applicable:
-            lines.append(_not_applicable_result_line(r))
-        lines.append("")
-
-    if reverted:
-        lines.append(f"## Reverted ({len(reverted)})")
-        lines.append("")
-        for r in reverted:
-            lines.append(_reverted_result_line(r))
-        lines.append("")
+    lines.extend(_fixed_results_section_lines(fixed, dry_run=dry_run))
+    lines.extend(_skipped_results_section_lines(skipped))
+    lines.extend(_not_applicable_results_section_lines(not_applicable))
+    lines.extend(_reverted_results_section_lines(reverted))
 
     return "\n".join(lines)

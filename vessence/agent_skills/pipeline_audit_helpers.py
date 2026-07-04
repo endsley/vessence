@@ -50,6 +50,33 @@ def recent_prompt_rows_from_jsonl(lines: Iterable[str], n: int) -> list[dict[str
     return unique[-n:]
 
 
+def pipeline_tool_call_name(data: Any) -> str | None:
+    try:
+        tool_call = json.loads(data) if isinstance(data, str) else data
+        return tool_call.get("tool", "?")
+    except Exception:
+        return None
+
+
+def pipeline_response_text(event_type: str | None, data: Any, current: str) -> str:
+    if event_type in ("delta", "done") and isinstance(data, str):
+        return data
+    return current
+
+
+def infer_pipeline_stage(
+    events: list[dict[str, Any]],
+    *,
+    tool_calls: list[str],
+    response_text: str,
+) -> str | None:
+    if any(event.get("type") == "start" for event in events):
+        return "stage3"
+    if tool_calls or response_text:
+        return "stage2"
+    return None
+
+
 def summarize_pipeline_events(events: list[dict[str, Any]]) -> dict[str, Any]:
     classification = None
     stage = None
@@ -63,15 +90,10 @@ def summarize_pipeline_events(events: list[dict[str, Any]]) -> dict[str, Any]:
         if event_type == "ack":
             ack_text = data
         elif event_type == "client_tool_call":
-            try:
-                tool_call = json.loads(data) if isinstance(data, str) else data
-                tool_calls.append(tool_call.get("tool", "?"))
-            except Exception:
-                pass
-        elif event_type == "delta":
-            response_text = data if isinstance(data, str) else response_text
-        elif event_type == "done":
-            response_text = data if isinstance(data, str) else response_text
+            tool_name = pipeline_tool_call_name(data)
+            if tool_name is not None:
+                tool_calls.append(tool_name)
+        response_text = pipeline_response_text(event_type, data, response_text)
 
         if "classification" in event:
             classification = event["classification"]
@@ -79,10 +101,11 @@ def summarize_pipeline_events(events: list[dict[str, Any]]) -> dict[str, Any]:
             stage = event["stage"]
 
     if not stage:
-        if any(event.get("type") == "start" for event in events):
-            stage = "stage3"
-        elif tool_calls or response_text:
-            stage = "stage2"
+        stage = infer_pipeline_stage(
+            events,
+            tool_calls=tool_calls,
+            response_text=response_text,
+        )
 
     return {
         "classification": classification,

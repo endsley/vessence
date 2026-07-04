@@ -81,13 +81,8 @@ def build_deterministic_compressed_context(
     return "\n".join(lines).strip() + "\n"
 
 
-def build_deterministic_action_plan(
-    summaries: list[dict[str, Any]],
-    *,
-    updated_label: str,
-) -> str:
-    evidence_rows = action_plan_evidence_rows(summaries)
-    header = textwrap.dedent(
+def deterministic_action_plan_header(updated_label: str) -> str:
+    return textwrap.dedent(
         f"""\
         # RA Recommendation Plan
 
@@ -176,7 +171,9 @@ def build_deterministic_action_plan(
         """
     ).strip()
 
-    footer = textwrap.dedent(
+
+def deterministic_action_plan_footer() -> str:
+    return textwrap.dedent(
         """\
         ## What Would Change This Plan
 
@@ -189,16 +186,25 @@ def build_deterministic_action_plan(
           recommendation.
         """
     ).strip() + "\n"
-    return header + "\n" + "\n".join(evidence_rows) + "\n\n" + footer
 
 
-def build_deterministic_recommendation_scheme(
+def build_deterministic_action_plan(
     summaries: list[dict[str, Any]],
     *,
     updated_label: str,
 ) -> str:
-    evidence_rows = recommendation_scheme_evidence_rows(summaries)
-    header = textwrap.dedent(
+    evidence_rows = action_plan_evidence_rows(summaries)
+    return (
+        deterministic_action_plan_header(updated_label)
+        + "\n"
+        + "\n".join(evidence_rows)
+        + "\n\n"
+        + deterministic_action_plan_footer()
+    )
+
+
+def deterministic_recommendation_scheme_header(updated_label: str) -> str:
+    return textwrap.dedent(
         f"""\
         # RA Remission / Asymptomatic-State Research Scheme
 
@@ -250,7 +256,9 @@ def build_deterministic_recommendation_scheme(
         """
     ).strip()
 
-    footer = textwrap.dedent(
+
+def deterministic_recommendation_scheme_footer() -> str:
+    return textwrap.dedent(
         """\
         ## Next Research Questions
 
@@ -265,7 +273,21 @@ def build_deterministic_recommendation_scheme(
           avoiding overtreatment?
         """
     ).strip() + "\n"
-    return header + "\n" + "\n".join(evidence_rows) + "\n\n" + footer
+
+
+def build_deterministic_recommendation_scheme(
+    summaries: list[dict[str, Any]],
+    *,
+    updated_label: str,
+) -> str:
+    evidence_rows = recommendation_scheme_evidence_rows(summaries)
+    return (
+        deterministic_recommendation_scheme_header(updated_label)
+        + "\n"
+        + "\n".join(evidence_rows)
+        + "\n\n"
+        + deterministic_recommendation_scheme_footer()
+    )
 
 
 def useful_report_summary_groups(
@@ -321,6 +343,127 @@ def source_trace_line(summary: dict[str, Any]) -> str:
     return f"- {source_heading(summary, 120)} | {evidence_label(summary)} | {summary.get('url', '')}"
 
 
+def useful_report_bottom_line_lines(
+    unique_new: list[dict[str, Any]],
+    *,
+    source_count: int,
+    themes: list[str],
+    high_signal: list[dict[str, Any]],
+) -> list[str]:
+    lines = [
+        "## Bottom Line",
+        f"- This run processed {len(unique_new)} unique new or upgraded source summar{'y' if len(unique_new) == 1 else 'ies'}; the cache now has {source_count} sources.",
+    ]
+    if themes:
+        lines.append(f"- Main themes this run: {', '.join(themes)}.")
+    if high_signal:
+        best = high_signal[0]
+        lines.append(
+            f"- Highest-value item: {source_heading(best, 95)}. Practical read: "
+            f"{text_value(best.get('remission_relevance'), 260) or 'use as background evidence only.'}"
+        )
+    else:
+        lines.append("- No new source rose above the high-signal threshold; treat this run mostly as cache-building.")
+    lines.append(
+        "- The standing practical path remains clinician-led treat-to-target care, objective disease-activity scoring, symptom tracking, and no unsupervised medication/supplement changes."
+    )
+    return lines
+
+
+def useful_report_changed_lines(
+    discoveries: list[str],
+    high_signal: list[dict[str, Any]],
+) -> list[str]:
+    lines = ["", "## What Changed This Run"]
+    if discoveries:
+        lines.extend(f"- {item}" for item in discoveries)
+    elif high_signal:
+        for summary in high_signal[:4]:
+            lines.append(
+                f"- {source_heading(summary, 90)}: {text_value(summary.get('remission_relevance'), 260)}"
+            )
+    else:
+        lines.append("- Nothing strong enough to change the current plan; the run mostly added background sources.")
+    return lines
+
+
+def useful_report_safety_lines(safety_flags: list[str]) -> list[str]:
+    lines = ["", "## Safety Flags"]
+    if safety_flags:
+        lines.extend(f"- {item}" for item in safety_flags)
+    else:
+        lines.append("- No new specific safety flag was extracted, but medication, supplement, steroid, biologic, JAK inhibitor, NSAID, or device decisions still require the rheumatologist.")
+    return lines
+
+
+def useful_report_low_signal_lines(low_signal: list[dict[str, Any]]) -> list[str]:
+    lines = ["", "## Low-Value Or Noisy Sources"]
+    if low_signal:
+        for summary in low_signal:
+            lines.append(f"- {source_heading(summary, 100)}: {low_value_reason(summary)}.")
+    else:
+        lines.append("- No obvious low-value/noisy source was added this run.")
+    return lines
+
+
+def useful_report_next_focus_items(open_questions: list[str]) -> list[str]:
+    return open_questions or [
+        "Prioritize evidence that changes a practical decision for Kathia, not broad background reviews.",
+        "Keep separating objective inflammatory activity from residual pain, fatigue, function, and medication side effects.",
+        "Prefer guidelines, randomized trials, systematic reviews, and directly RA-focused monitoring evidence over speculative future-tech articles.",
+    ]
+
+
+def useful_report_file_lines(
+    *,
+    recommendation_path: Any = "",
+    action_plan_path: Any = "",
+    compressed_context_path: Any = "",
+    discoveries_path: Any = "",
+) -> list[str]:
+    return [
+        "",
+        "## Full Files",
+        f"- Living recommendation scheme: `{recommendation_path}`",
+        f"- Action plan: `{action_plan_path}`",
+        f"- Compressed context for future runs: `{compressed_context_path}`",
+        f"- Discoveries log: `{discoveries_path}`",
+    ]
+
+
+def useful_report_source_trace_lines(unique_new: list[dict[str, Any]]) -> list[str]:
+    lines = ["", "## Source Trace"]
+    if unique_new:
+        lines.extend(source_trace_line(summary) for summary in unique_new)
+    else:
+        lines.append("- No new source trace for this run.")
+    return lines
+
+
+def run_report_source_detail_lines(summary: dict[str, Any]) -> list[str]:
+    return [
+        f"### {summary.get('title', 'Untitled')}",
+        f"- Source ID: `{summary.get('source_id', '')}`",
+        f"- URL: {summary.get('url', '')}",
+        f"- Scope: {summary.get('evidence_scope', '')}",
+        f"- Evidence type: {summary.get('study_type', '')}",
+        f"- Saved artifact: `{summary.get('artifact_dir', '')}`",
+        f"- Remission relevance: {summary.get('remission_relevance', '')}",
+        f"- Usefulness label: {'low-value/noisy - ' + low_value_reason(summary) if is_low_value_summary(summary) else 'useful signal'}",
+        f"- Signal score: {summary_signal_score(summary)}",
+        "",
+    ]
+
+
+def run_report_source_details_lines(unique_new: list[dict[str, Any]]) -> list[str]:
+    lines = ["## New Source Details"]
+    if not unique_new:
+        lines.append("- No new sources processed this run; cached recommendation scheme was refreshed.")
+    for summary in unique_new:
+        lines.extend(run_report_source_detail_lines(summary))
+    return lines
+
+
 def build_useful_report_markdown(
     new_summaries: list[dict[str, Any]],
     all_summaries: list[dict[str, Any]],
@@ -343,35 +486,14 @@ def build_useful_report_markdown(
     useful_for_questions = high_signal or [summary for summary in ranked_new if not is_low_value_summary(summary)]
     safety_flags = collect_report_items(useful_for_questions, ("safety_concerns",), max_items=4)
 
-    lines = [
-        "## Bottom Line",
-        f"- This run processed {len(unique_new)} unique new or upgraded source summar{'y' if len(unique_new) == 1 else 'ies'}; the cache now has {source_count} sources.",
-    ]
-    if themes:
-        lines.append(f"- Main themes this run: {', '.join(themes)}.")
-    if high_signal:
-        best = high_signal[0]
-        lines.append(
-            f"- Highest-value item: {source_heading(best, 95)}. Practical read: "
-            f"{text_value(best.get('remission_relevance'), 260) or 'use as background evidence only.'}"
-        )
-    else:
-        lines.append("- No new source rose above the high-signal threshold; treat this run mostly as cache-building.")
-    lines.append(
-        "- The standing practical path remains clinician-led treat-to-target care, objective disease-activity scoring, symptom tracking, and no unsupervised medication/supplement changes."
+    lines = useful_report_bottom_line_lines(
+        unique_new,
+        source_count=source_count,
+        themes=themes,
+        high_signal=high_signal,
     )
 
-    if discoveries:
-        lines.extend(["", "## What Changed This Run"])
-        lines.extend(f"- {item}" for item in discoveries)
-    elif high_signal:
-        lines.extend(["", "## What Changed This Run"])
-        for summary in high_signal[:4]:
-            lines.append(
-                f"- {source_heading(summary, 90)}: {text_value(summary.get('remission_relevance'), 260)}"
-            )
-    else:
-        lines.extend(["", "## What Changed This Run", "- Nothing strong enough to change the current plan; the run mostly added background sources."])
+    lines.extend(useful_report_changed_lines(discoveries, high_signal))
 
     lines.extend(["", "## Most Useful Findings"])
     if not high_signal:
@@ -395,44 +517,22 @@ def build_useful_report_markdown(
     lines.extend(["", "## What To Track"])
     lines.extend(f"- {item}" for item in tracking)
 
-    lines.extend(["", "## Safety Flags"])
-    if safety_flags:
-        lines.extend(f"- {item}" for item in safety_flags)
-    else:
-        lines.append("- No new specific safety flag was extracted, but medication, supplement, steroid, biologic, JAK inhibitor, NSAID, or device decisions still require the rheumatologist.")
+    lines.extend(useful_report_safety_lines(safety_flags))
+    lines.extend(useful_report_low_signal_lines(low_signal))
 
-    lines.extend(["", "## Low-Value Or Noisy Sources"])
-    if low_signal:
-        for summary in low_signal:
-            lines.append(f"- {source_heading(summary, 100)}: {low_value_reason(summary)}.")
-    else:
-        lines.append("- No obvious low-value/noisy source was added this run.")
-
-    next_focus = open_questions or [
-        "Prioritize evidence that changes a practical decision for Kathia, not broad background reviews.",
-        "Keep separating objective inflammatory activity from residual pain, fatigue, function, and medication side effects.",
-        "Prefer guidelines, randomized trials, systematic reviews, and directly RA-focused monitoring evidence over speculative future-tech articles.",
-    ]
+    next_focus = useful_report_next_focus_items(open_questions)
     lines.extend(["", "## Next Run Focus"])
     lines.extend(f"- {item}" for item in next_focus[:5])
 
     lines.extend(
-        [
-            "",
-            "## Full Files",
-            f"- Living recommendation scheme: `{recommendation_path}`",
-            f"- Action plan: `{action_plan_path}`",
-            f"- Compressed context for future runs: `{compressed_context_path}`",
-            f"- Discoveries log: `{discoveries_path}`",
-        ]
+        useful_report_file_lines(
+            recommendation_path=recommendation_path,
+            action_plan_path=action_plan_path,
+            compressed_context_path=compressed_context_path,
+            discoveries_path=discoveries_path,
+        )
     )
-
-    lines.extend(["", "## Source Trace"])
-    if unique_new:
-        for summary in unique_new:
-            lines.append(source_trace_line(summary))
-    else:
-        lines.append("- No new source trace for this run.")
+    lines.extend(useful_report_source_trace_lines(unique_new))
 
     return "\n".join(lines).strip() + "\n"
 
@@ -475,26 +575,9 @@ def build_run_report_markdown(
         "",
         useful_report,
         "",
-        "## New Source Details",
     ]
     unique_new = dedupe_summaries(new_summaries)
-    if not unique_new:
-        lines.append("- No new sources processed this run; cached recommendation scheme was refreshed.")
-    for summary in unique_new:
-        lines.extend(
-            [
-                f"### {summary.get('title', 'Untitled')}",
-                f"- Source ID: `{summary.get('source_id', '')}`",
-                f"- URL: {summary.get('url', '')}",
-                f"- Scope: {summary.get('evidence_scope', '')}",
-                f"- Evidence type: {summary.get('study_type', '')}",
-                f"- Saved artifact: `{summary.get('artifact_dir', '')}`",
-                f"- Remission relevance: {summary.get('remission_relevance', '')}",
-                f"- Usefulness label: {'low-value/noisy - ' + low_value_reason(summary) if is_low_value_summary(summary) else 'useful signal'}",
-                f"- Signal score: {summary_signal_score(summary)}",
-                "",
-            ]
-        )
+    lines.extend(run_report_source_details_lines(unique_new))
     lines.extend(
         [
             "## Standing Action Plan Snapshot",

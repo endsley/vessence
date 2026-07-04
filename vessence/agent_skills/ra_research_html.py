@@ -11,35 +11,48 @@ from zoneinfo import ZoneInfo
 TZ = ZoneInfo("America/New_York")
 
 
+def inline_report_markdown_html(text: str) -> str:
+    escaped = html.escape(text)
+    escaped = re.sub(r"`([^`]+)`", lambda m: f"<code>{m.group(1)}</code>", escaped)
+    escaped = re.sub(r"\*\*([^*]+)\*\*", lambda m: f"<strong>{m.group(1)}</strong>", escaped)
+    escaped = re.sub(
+        r"\[([^\]]+)\]\((https?://[^)]+)\)",
+        lambda m: f'<a href="{m.group(2)}">{m.group(1)}</a>',
+        escaped,
+    )
+    return escaped
+
+
+def report_paragraph_html(lines: list[str]) -> str:
+    return f"<p>{inline_report_markdown_html(' '.join(lines))}</p>" if lines else ""
+
+
+def report_list_html(list_lines: list[tuple[str, str]]) -> str:
+    if not list_lines:
+        return ""
+    tag = "ol" if list_lines[0][0] == "ol" else "ul"
+    items = "".join(f"<li>{inline_report_markdown_html(item)}</li>" for _, item in list_lines)
+    return f"<{tag}>{items}</{tag}>"
+
+
 def markdown_to_report_html(markdown: str) -> str:
     """Small Markdown subset renderer for app-facing research reports."""
     blocks: list[str] = []
     list_lines: list[tuple[str, str]] = []
     para_lines: list[str] = []
 
-    def inline_html(text: str) -> str:
-        escaped = html.escape(text)
-        escaped = re.sub(r"`([^`]+)`", lambda m: f"<code>{m.group(1)}</code>", escaped)
-        escaped = re.sub(r"\*\*([^*]+)\*\*", lambda m: f"<strong>{m.group(1)}</strong>", escaped)
-        escaped = re.sub(
-            r"\[([^\]]+)\]\((https?://[^)]+)\)",
-            lambda m: f'<a href="{m.group(2)}">{m.group(1)}</a>',
-            escaped,
-        )
-        return escaped
-
     def flush_paragraph() -> None:
         nonlocal para_lines
-        if para_lines:
-            blocks.append(f"<p>{inline_html(' '.join(para_lines))}</p>")
+        paragraph_html = report_paragraph_html(para_lines)
+        if paragraph_html:
+            blocks.append(paragraph_html)
             para_lines = []
 
     def flush_list() -> None:
         nonlocal list_lines
-        if list_lines:
-            tag = "ol" if list_lines[0][0] == "ol" else "ul"
-            items = "".join(f"<li>{inline_html(item)}</li>" for _, item in list_lines)
-            blocks.append(f"<{tag}>{items}</{tag}>")
+        list_html = report_list_html(list_lines)
+        if list_html:
+            blocks.append(list_html)
             list_lines = []
 
     for raw in markdown.splitlines():

@@ -1,5 +1,1408 @@
 # Vessence Refactor Journal
 
+## 2026-07-04 - TTS Spoken Source Parsing Helper
+
+Goal/scope:
+- Extract spoken-block source/trailing parsing from TTS contract enforcement.
+- Preserve text normalization, sentence limiting, detail movement, fallback spoken text, and logging behavior.
+
+Files/modules changed:
+- `jane_web/tts_contract.py`
+- `tests/test_tts_contract.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Responses without `<spoken>` still treat the whole response as spoken source.
+- Preface text before `<spoken>` still prepends to the spoken source.
+- Text after `</spoken>` still becomes trailing detail and is normalized later.
+- Enforced responses still wrap short spoken text in `<spoken>` and move extra sentences/detail after it.
+
+Boundary chosen:
+- `tts_spoken_source_and_trailing()` owns block parsing, preface merging, and no-block fallback.
+- `enforce_tts_output_contract()` now coordinates short spoken extraction, trailing-detail normalization, fallback, and logging.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/tts_contract.py tests/test_tts_contract.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_tts_contract.py -q` passed (`6 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1806 passed`).
+
+Remaining follow-up slices:
+- Keep max words/chars and abbreviation policy unchanged unless product voice behavior is intentionally revised.
+- If more tags are added, extend normalization tests before changing regexes.
+
+## 2026-07-04 - Broadcast Summary Prompt And Log Helpers
+
+Goal/scope:
+- Extract pure broadcast summary prompt, Haiku log-entry, and log-tail trimming helpers.
+- Preserve subprocess invocation, async broadcaster flow, event publishing, and summary log location.
+
+Files/modules changed:
+- `jane_web/broadcast.py`
+- `tests/test_broadcast.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Summary prompts still include the same system instruction, 200-character user-message cap, and 1500-character partial-response cap.
+- Haiku summary logs still include timestamp, model, source, truncated user message, partial length, and summary.
+- Oversized summary logs still keep only the last 500 lines.
+- Broadcast event JSON still truncates source session IDs to 12 characters.
+
+Boundary chosen:
+- `broadcast_summary_prompt()` owns prompt construction and truncation.
+- `haiku_summary_log_entry()` owns JSONL entry shape.
+- `truncate_summary_log_lines()` owns log tail retention.
+- `_summarize_sync()` now coordinates CLI execution and filesystem logging.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/broadcast.py tests/test_broadcast.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_broadcast.py -q` passed (`4 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1805 passed`).
+
+Remaining follow-up slices:
+- Do not change CLI timeout/subprocess behavior without fake subprocess tests.
+- Async publish/subscribe behavior can be covered separately if the broadcaster grows more policy.
+
+## 2026-07-04 - Context Memory Summary URL Helpers
+
+Goal/scope:
+- Extract pure memory-section joining and memory-daemon URL construction from context-builder retrieval.
+- Preserve managed-user memory lookup, daemon fast path, slow Chroma fallback, and normalization behavior.
+
+Files/modules changed:
+- `context_builder/v1/context_builder.py`
+- `tests/test_context_sources.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Empty memory section lists still become `No relevant context found.` before normalization.
+- Non-empty memory sections still join with blank lines.
+- Memory daemon queries still use `q=` and optional `essence_path=` query parameters with `urllib.parse.quote`.
+- Managed-user and direct Chroma fallback retrieval still call `build_memory_sections()` with the same arguments.
+
+Boundary chosen:
+- `_memory_sections_summary()` owns section-list to fallback-string conversion.
+- `_memory_daemon_query_url()` owns daemon URL/query assembly.
+- `_safe_get_memory_summary()` remains the coordinator for live managed, daemon, and fallback retrieval.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile context_builder/v1/context_builder.py tests/test_context_sources.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_context_sources.py -q` passed (`5 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1801 passed`).
+
+Remaining follow-up slices:
+- Do not split live daemon/direct Chroma retrieval further without fakes for `urllib.request.urlopen()` and `build_memory_sections()`.
+- Future memory-daemon parameter changes now have a small helper-level test.
+
+## 2026-07-04 - Web Automation Keyword Risk Helpers
+
+Goal/scope:
+- Extract web automation keyword risk and action text blob helpers from `classify_action()`.
+- Add focused coverage for security-adjacent risk classification rules that previously had no direct tests.
+
+Files/modules changed:
+- `agent_skills/web_automation/safety.py`
+- `tests/test_web_automation_safety.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Snapshot/status/wait/screenshot/extract actions still classify as `low`.
+- Navigation still checks only URL path and query, not hostnames, for high/critical keywords.
+- Action text risk still combines text, value, key, resolved element name, and resolved role.
+- Critical keywords still win before high-risk keywords.
+- `requires_confirmation()` still gates only `high` and `critical`.
+
+Boundary chosen:
+- `LOW_RISK_ACTIONS` owns the low-risk action set.
+- `action_text_blob()` owns action/ref text aggregation.
+- `keyword_risk()` owns critical-before-high keyword classification.
+- `classify_action()` now coordinates action type, optional element resolution, and default risk fallback.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile agent_skills/web_automation/safety.py tests/test_web_automation_safety.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_web_automation_safety.py -q` passed (`4 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1800 passed`).
+
+Remaining follow-up slices:
+- Browser snapshot ref resolution is still untested here; add fake snapshot-store tests before changing it.
+- Domain block-list updates should remain data-only unless the matching policy changes.
+
+## 2026-07-04 - Audit Auto-Fix Content Preflight Helper
+
+Goal/scope:
+- Extract the file-content search and dry-run terminal decisions from `apply_fix()`.
+- Preserve backup, replacement, syntax verification, rollback, and report generation behavior.
+
+Files/modules changed:
+- `agent_skills/audit_auto_fix_helpers.py`
+- `agent_skills/audit_auto_fixer.py`
+- `tests/test_audit_auto_fix_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Missing search text still returns `not_applicable` with the existing reason.
+- Dry-run fixes still return `would_fix` with the LLM fix description.
+- Live fixes still proceed to backup creation, replacement, Python syntax verification, and rollback on failure.
+- `audit_auto_fixer` still exposes helper aliases used by existing tests and callers.
+
+Boundary chosen:
+- `fix_content_preflight_result()` owns content-level terminal decisions after file read.
+- `fix_issue_preflight_result()` continues to own category/path/search/replacement validation before file read.
+- `apply_fix()` now coordinates mutation-only steps after both preflight phases pass.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile agent_skills/audit_auto_fix_helpers.py agent_skills/audit_auto_fixer.py tests/test_audit_auto_fix_helpers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_audit_auto_fix_helpers.py -q` passed (`13 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1796 passed`).
+
+Remaining follow-up slices:
+- File backup/write/restore behavior is still intentionally in `audit_auto_fixer.py`; split only with tmp-file apply-fix tests.
+- LLM audit analysis remains outside pure helpers because it depends on the Claude CLI adapter.
+
+## 2026-07-04 - Weather Topic Slice Builders
+
+Goal/scope:
+- Extract topic-specific weather payload builders from the `slice_for()` router.
+- Preserve day normalization, multi-day handling, debug-field stripping, and topic payload shapes.
+
+Files/modules changed:
+- `jane_web/jane_v2/classes/weather/slices.py`
+- `tests/test_weather_slices.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Pollen still returns `None` when no pollen block is present.
+- Air quality, wind, precipitation, forecast, current, and overview topics still emit the same dictionaries.
+- Forecast and current/overview slices still strip `debug_*` fields from day/current payloads.
+- Multi-day forecasts still include seven days; precipitation without a specific day still includes three days.
+- Unknown topics still fall through to overview behavior.
+
+Boundary chosen:
+- `pollen_slice()`, `air_quality_slice()`, `wind_slice()`, `precipitation_slice()`, `forecast_slice()`, `current_weather_slice()`, and `overview_weather_slice()` now own topic payload construction.
+- `slice_for()` now coordinates data extraction, day lookup, multi-day detection, and topic dispatch.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v2/classes/weather/slices.py tests/test_weather_slices.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_weather_slices.py -q` passed (`11 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1795 passed`).
+
+Remaining follow-up slices:
+- Weather LLM phrasing and live fetch behavior were intentionally left unchanged; they need separate fixtures if refactored.
+- New topic payloads can now be tested directly without widening the `slice_for()` router test.
+
+## 2026-07-04 - Nightly Job Details Summary Helpers
+
+Goal/scope:
+- Extract nightly self-improvement job detail assembly into named artifact and summary-dispatch helpers.
+- Preserve readable report content, artifact ordering, status problem bullets, TL;DR condensation, and follow-up extraction.
+
+Files/modules changed:
+- `agent_skills/nightly_self_improve.py`
+- `tests/test_nightly_report_summaries.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Non-`ok` jobs still prepend a status problem bullet.
+- Existing job artifacts still appear before the raw job log path in stage details.
+- Dead code, pipeline, doc drift, transcript review, and generic jobs still use the same summarizers.
+- Transcript quality review still extracts up to four `Suggested fix` fields as follow-ups.
+- TL;DR problem/fix lists still skip the same placeholder prefixes.
+
+Boundary chosen:
+- `existing_job_artifacts()` owns filtering configured artifacts to files that currently exist.
+- `primary_job_report_text()` owns first-artifact report loading for report-backed job summaries.
+- `job_output_summary()` owns job-name dispatch to the appropriate summarizer and follow-up extractor.
+- `_job_details()` now coordinates status, artifacts, defaults, and TL;DR condensation.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile agent_skills/nightly_self_improve.py tests/test_nightly_report_summaries.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_nightly_report_summaries.py tests/test_nightly_report_rendering.py tests/test_nightly_log_reader.py -q` passed (`25 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1795 passed`).
+
+Remaining follow-up slices:
+- Leave `run_job()` subprocess orchestration unchanged without fake process/log fixtures.
+- `write_readable_report()` already delegates most rendering to tested helpers; split further only if new report sections are added.
+
+## 2026-07-04 - RA Summary Cache Markdown Helpers
+
+Goal/scope:
+- Split RA source summary markdown rendering into trace, section, and list helpers.
+- Preserve generated markdown shape, source metadata labels, list cleanup, and missing-field fallbacks.
+
+Files/modules changed:
+- `agent_skills/ra_research_summary_cache.py`
+- `tests/test_ra_research_summary_cache.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Source summary markdown still starts with title, source ID, citation, URL, evidence scope, study type, and artifact directory.
+- Plain-text sections still render the raw summary field value.
+- List sections still clean each populated list item, preserve empty strings as omitted items, and return `- None captured.` for missing values.
+- The final clinician discussion section still ends with a single trailing newline.
+
+Boundary chosen:
+- `summary_trace_markdown()` owns source metadata rendering.
+- `summary_section_markdown()` owns heading/body spacing and final-section newline behavior.
+- `summary_list_markdown()` owns list and fallback semantics.
+- `summary_to_markdown()` now coordinates the ordered RA summary sections.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile agent_skills/ra_research_summary_cache.py tests/test_ra_research_summary_cache.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_ra_research_summary_cache.py -q` passed (`6 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1794 passed`).
+
+Remaining follow-up slices:
+- Keep RA summary cache file I/O unchanged; it is already small and covered by tmp-path tests.
+- Future section additions can now reuse the trace/list/section helpers without touching file cache behavior.
+
+## 2026-07-04 - Music Playlist Matching Tier Helpers
+
+Goal/scope:
+- Extract playlist and file matching tiers into named helpers while preserving music playlist query behavior.
+- Keep the public playlist APIs, marker helpers, temporary playlist cleanup, and create/reuse flow unchanged.
+
+Files/modules changed:
+- `jane_web/music_playlists.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Existing playlist matching still checks exact normalized name, then substring containment, then fuzzy score threshold.
+- File selection still checks query-in-filename, all content words, any content word, then fuzzy filename fallback.
+- Fuzzy playlist and file scoring still ignore `None` scores and preserve descending score order.
+- Created temporary playlists still use the same names, relative track paths, and `temporary` marker.
+
+Boundary chosen:
+- `_exact_playlist_match()` and `_substring_playlist_match()` own deterministic playlist tiers.
+- `_scored_playlist_matches()` owns playlist fuzzy ranking.
+- `_files_with_query_in_filename()`, `_files_with_all_words()`, `_files_with_any_word()`, and `_scored_music_files()` own file-selection tiers.
+- `find_matching_playlist()` and `select_music_files()` now coordinate named tiers instead of embedding all matching policy inline.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/music_playlists.py tests/test_music_playlists.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_music_playlists.py -q` passed (`13 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1793 passed`).
+
+Remaining follow-up slices:
+- Keep music playback integration and Android fetch behavior unchanged without end-to-end device/API fixtures.
+- Future matching policy changes can now be tested at helper-tier boundaries.
+
+## 2026-07-04 - Gmail Calendar Subject Parser Helpers
+
+Goal/scope:
+- Extract Google Calendar invite subject matching, date parsing, and start/end time parsing from event-end detection.
+- Preserve calendar cleanup date semantics, all-day fallback behavior, AM/PM fallback, and overnight event handling.
+
+Files/modules changed:
+- `agent_skills/gmail_message_utils.py`
+- `tests/test_gmail_message_utils.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Subjects without calendar date details still return `None`.
+- Date-only subjects still return the end of the parsed day in `America/New_York`.
+- Timed subjects still parse start and end times, using the start period as fallback for period-less end/start values.
+- Events whose parsed end precedes start still roll the end into the next day.
+
+Boundary chosen:
+- `google_calendar_subject_match()` owns the compiled subject regex.
+- `google_calendar_subject_date()` owns `Mon DD YYYY` parsing and invalid-date rejection.
+- `google_calendar_subject_times()` owns start/end text parsing and AM/PM fallback.
+- `google_calendar_event_end_from_subject()` now coordinates date, optional times, and overnight adjustment.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile agent_skills/gmail_message_utils.py tests/test_gmail_message_utils.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_gmail_message_utils.py tests/test_gmail_cleanup_monitor.py -q` passed (`18 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1793 passed`).
+
+Remaining follow-up slices:
+- Gmail cleanup decision policy already calls the parsed event-end helper; leave live Gmail API loops unchanged without connector fakes.
+- Future invite subject formats can now be tested at the regex/date/time helper level.
+
+## 2026-07-04 - Pipeline Audit Event Summary Helpers
+
+Goal/scope:
+- Extract client-tool call parsing, response text selection, and fallback stage inference from pipeline audit event summarization.
+- Preserve ack capture, classification/stage passthrough, tool-call names, response truncation, and stage fallback rules.
+
+Files/modules changed:
+- `agent_skills/pipeline_audit_helpers.py`
+- `tests/test_pipeline_audit_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- `ack` events still set the summary ack text.
+- `client_tool_call` events still parse JSON-string or dict payloads and append the `tool` value, falling back to `?` when missing.
+- `delta` and `done` events still replace response text only when the payload is a string.
+- Explicit event `classification` and `stage` fields still win.
+- Missing stage still falls back to `stage3` when a `start` event exists, otherwise `stage2` when tool calls or response text exist.
+
+Boundary chosen:
+- `pipeline_tool_call_name()` owns client-tool payload parsing.
+- `pipeline_response_text()` owns delta/done response replacement.
+- `infer_pipeline_stage()` owns the fallback stage policy.
+- `summarize_pipeline_events()` now coordinates event traversal and summary shape.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile agent_skills/pipeline_audit_helpers.py tests/test_pipeline_audit_helpers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_pipeline_audit_helpers.py -q` passed (`10 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1793 passed`).
+
+Remaining follow-up slices:
+- `pipeline_audit_100.py` remains live prompt replay/judge orchestration; split further only with fake Jane API and judge fixtures.
+- Future event summarization rules can now be adjusted at helper level.
+
+## 2026-07-04 - RA Report Signal Score Components
+
+Goal/scope:
+- Split RA summary signal scoring into evidence-strength, usefulness, and noise-penalty components.
+- Preserve total score behavior, low-value classification, and report ranking.
+
+Files/modules changed:
+- `agent_skills/ra_research_report_items.py`
+- `tests/test_ra_research_report_items.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Guidelines, randomized/RCT studies, systematic/meta evidence, cohorts, reviews, full-text/guideline scope, and abstract-only scope still contribute the same score weights.
+- Findings, actionable/clinician points, monitoring, diet/lifestyle, and technology implications still add the same usefulness bonuses.
+- LLM/manual-review flags, indirect relevance, psoriatic-only focus, and speculative/scenario text still apply the same penalties.
+- `summary_signal_score()` still returns the same combined score used by useful report ranking.
+
+Boundary chosen:
+- `evidence_strength_score()` owns study/scope weights.
+- `summary_usefulness_score()` owns actionable-content bonuses.
+- `summary_noise_penalty()` owns low-signal penalties.
+- `summary_signal_score()` now composes the three components.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile agent_skills/ra_research_report_items.py tests/test_ra_research_report_items.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_ra_research_report_items.py tests/test_ra_research_report_markdown.py -q` passed (`21 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1792 passed`).
+
+Remaining follow-up slices:
+- Theme inference is still pure and tested; split only if new theme rules are added or the rules table grows further.
+- Future score tuning can now adjust a component helper with direct tests.
+
+## 2026-07-04 - Janitor Report Derived Field Helpers
+
+Goal/scope:
+- Extract derived field helpers from memory janitor report and history payload builders.
+- Preserve payload keys, merge counts, forgettable purge totals, topic summaries, and append-only history shape.
+
+Files/modules changed:
+- `memory/v1/janitor_report.py`
+- `tests/test_janitor_report.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- `forgettable_memories_purged` and history `forgettable_purged` still sum TTL-expired and age-expired forgettable memory counts.
+- `topics_processed` still maps user and long-term collection names to topic key lists.
+- `topics_with_merges` still de-duplicates merge topic labels as `{collection}::{topic}`.
+- Report and history payloads still retain merge log object identity for `merge_details`/`merges`.
+
+Boundary chosen:
+- `forgettable_purged_count()` owns purge total math.
+- `topics_processed_payload()` owns report topic map construction.
+- `topics_with_merges()` owns history merge-topic summarization.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile memory/v1/janitor_report.py tests/test_janitor_report.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_janitor_report.py -q` passed (`3 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1791 passed`).
+
+Remaining follow-up slices:
+- `memory/v1/janitor_memory.py` remains live Chroma/filesystem/LLM orchestration and should be split only behind broader janitor fakes.
+- Future janitor report field changes can now target helpers directly.
+
+## 2026-07-04 - Self-Heal Job Markdown Sections
+
+Goal/scope:
+- Extract self-heal job title, context lines, steps section, and verification section from the generated job Markdown template.
+- Preserve generated job contract, incident evidence references, default project-root fallback, and verification wording.
+
+Files/modules changed:
+- `agent_skills/self_healing_helpers.py`
+- `tests/test_self_healing_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Job title still uses source plus `incident_title_text()`.
+- Context still includes source, category, project root, fingerprint, and request path.
+- Steps still require reading the incident JSON/logs, inspecting source before diagnosis, focused reproduction, minimal patching, preserving dirty work, verification, and outcome logging.
+- Verification still requires the captured route/action to stop failing and a focused check or blocker report.
+
+Boundary chosen:
+- `self_heal_job_title()` owns the generated job title.
+- `self_heal_job_context_lines()` owns incident metadata rendering.
+- `self_heal_job_steps_section()` owns the operational checklist.
+- `self_heal_job_verification_section()` owns verification guidance.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile agent_skills/self_healing_helpers.py tests/test_self_healing_helpers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_self_healing_helpers.py -q` passed (`12 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1790 passed`).
+
+Remaining follow-up slices:
+- `self_healing.py` remains live incident recording, dedupe, and optional repair orchestration; split further only with filesystem/process fakes.
+- Future self-heal job template changes can now be tested section by section.
+
+## 2026-07-04 - CLI Auth Status Cache And Refresh Helpers
+
+Goal/scope:
+- Extract provider auth-status cache lookup, refresh eligibility, and Claude recheck parsing from CLI login auth-status details.
+- Preserve supported-provider handling, cache TTL behavior, failure non-caching, stderr tail capture, and Claude refresh retry behavior.
+
+Files/modules changed:
+- `jane_web/cli_login_helpers.py`
+- `tests/test_cli_login_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Fresh cache entries under 5 seconds still return without running a command.
+- Unsupported providers still return `{supported: False, logged_in: False}`.
+- Status command exceptions still return a supported error detail.
+- Non-zero status command results still include the stderr tail and are not cached.
+- Logged-out Claude status still attempts refresh once, then reruns status and parses the second output.
+
+Boundary chosen:
+- `cached_provider_auth_status()` owns cache freshness policy.
+- `should_refresh_provider_auth_status()` owns the Claude-only logged-out refresh gate.
+- `refresh_provider_auth_status_details()` owns the best-effort rerun and parse step.
+- `provider_auth_status_details()` now coordinates command execution, parsing, refresh, and caching.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/cli_login_helpers.py tests/test_cli_login_helpers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_cli_login_helpers.py tests/test_cli_login_token_errors.py -q` passed (`49 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1789 passed`).
+
+Remaining follow-up slices:
+- The larger CLI login route handlers in `jane_web/main.py` remain browser/process orchestration; split further only with route-level fakes.
+- Future provider auth status behavior can now be adjusted in isolated helpers.
+
+## 2026-07-04 - Fallback Persona Section Helpers
+
+Goal/scope:
+- Extract Amber capability text rendering and optional persona essay sections from fallback persona builders.
+- Preserve Amber/Jane fallback persona wording, manifest capability tags, distinct user essay labels, and optional essay omission.
+
+Files/modules changed:
+- `agent_skills/fallback_personas.py`
+- `tests/test_fallback_personas.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Amber manifest capabilities still render tool lists and fallback tag instructions in the same text shape.
+- Amber identity rules and visuals text are unchanged.
+- Jane and Amber optional essay blocks still use the same headings and only appear when non-empty.
+- `essay_user_name` still overrides the display label only for the user essay heading.
+
+Boundary chosen:
+- `amber_capability_text()` owns manifest capability rendering.
+- `persona_essay_section()` owns optional `## ...` essay block rendering.
+- `user_essay_title()` owns the uppercased user essay heading.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile agent_skills/fallback_personas.py tests/test_fallback_personas.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_fallback_personas.py -q` passed (`6 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1788 passed`).
+
+Remaining follow-up slices:
+- `fallback_query.py` remains provider/manifest selection orchestration and should stay behind these persona builders unless fake filesystem/provider fixtures are added.
+- Future fallback persona wording changes can now be tested at helper level.
+
+## 2026-07-04 - Memory Section Formatting Helpers
+
+Goal/scope:
+- Extract memory section string formatting and ordered cross-section dedupe from retrieved memory context assembly.
+- Preserve memory section order, labels, shared-vs-user long-term label selection, and dedupe priority.
+
+Files/modules changed:
+- `memory/v1/memory_sections.py`
+- `tests/test_memory_sections.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Permanent, current/shared long-term, Jane archived, short-term, file index, legacy forgettable, and essence memory still render in the same priority order.
+- Duplicate facts are still removed across sections using the same `dedupe_fact_lines()` normalization and priority order.
+- Empty fact groups still produce no section.
+
+Boundary chosen:
+- `memory_section()` owns `label + newline + fact lines` formatting.
+- `dedupe_memory_fact_groups()` owns shared `global_seen` dedupe across ordered fact groups.
+- `build_memory_sections_from_facts()` now coordinates ordered labels and optional sections.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile memory/v1/memory_sections.py tests/test_memory_sections.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_memory_sections.py tests/test_memory_retrieval_sections.py -q` passed (`18 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1787 passed`).
+
+Remaining follow-up slices:
+- `memory_retrieval.build_memory_sections()` is now mostly orchestration over query planning, parallel collection, and these section helpers; split further only with broader Chroma/future fixtures.
+- Future memory section label changes can now be tested independently.
+
+## 2026-07-04 - Prompt Profile Category Predicates
+
+Goal/scope:
+- Extract file-lookup, project-work, and simple-factual request predicates from prompt profile selection.
+- Preserve prompt profile ordering and all context-inclusion flags.
+
+Files/modules changed:
+- `context_builder/v1/prompt_profiles.py`
+- `tests/test_prompt_profiles.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Explicit intent-level profiles still take precedence over message category profiles.
+- File/vault/path/document/PDF requests and uploaded file context still select `file_lookup`.
+- Task/coding/AI-development requests still select `project_work`.
+- Simple factual questions still select `factual_personal`.
+- Everything else still falls through to `casual_followup`.
+
+Boundary chosen:
+- `_is_file_lookup_request()` owns file-context and file-keyword detection.
+- `_is_project_work_request()` owns task and AI/coding keyword detection.
+- `_is_simple_factual_request()` owns factual-prefix and short-question detection.
+- `_profile_for_message_category()` now shows profile priority clearly.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile context_builder/v1/prompt_profiles.py tests/test_prompt_profiles.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_prompt_profiles.py -q` passed (`8 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1786 passed`).
+
+Remaining follow-up slices:
+- Full context assembly in `context_builder.py` is mostly coordination over these helpers and should only be split further around independently tested section builders.
+- Future prompt profile tuning can now target predicates directly.
+
+## 2026-07-04 - Task Classifier Decision Helpers
+
+Goal/scope:
+- Extract explicit background prefix detection, follow-up starter detection, sentence counting, and final big-task threshold logic from the chat task classifier.
+- Preserve foreground/background offload decisions and `background:`/`bg:` prefix stripping behavior.
+
+Files/modules changed:
+- `jane_web/task_classifier.py`
+- `tests/test_task_classifier.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Empty messages still classify as `quick`.
+- `background:` and `bg:` prefixes still force `big`.
+- Short messages still stay `quick`.
+- Follow-up starters like "please go ahead" still stay foreground to preserve conversation history.
+- Long question-style messages still stay `quick` when quick-query score is high.
+- Big-task decisions still use the same `big_score`, sentence-count, code-reference, and length thresholds.
+
+Boundary chosen:
+- `_has_background_prefix()` owns explicit user offload signals.
+- `_is_followup_starter()` owns foreground follow-up detection.
+- `_task_sentence_count()` owns sentence splitting for compound-task detection.
+- `_is_big_task_by_features()` owns the final threshold policy.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/task_classifier.py tests/test_task_classifier.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_task_classifier.py -q` passed (`7 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1785 passed`).
+
+Remaining follow-up slices:
+- Offload execution in `jane_web/task_offloader.py` is thread/automation orchestration and should stay behind existing helper seams unless fake runner fixtures are expanded.
+- Future task-classifier threshold changes can now be tested directly.
+
+## 2026-07-04 - Saved Articles Context Selection Helpers
+
+Goal/scope:
+- Extract saved Daily Briefing article index loading, candidate scoring/ranking, and context-section budgeting from the top-level context builder.
+- Preserve article-trigger detection, relevance scoring, recency tie-breaks, section limits, and context wording.
+
+Files/modules changed:
+- `context_builder/v1/saved_articles_context.py`
+- `tests/test_saved_articles_context.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Saved article context is still included only when the user message references articles/news/briefings.
+- Invalid or missing `saved.json` data still returns no context.
+- Candidate scoring still uses title/source/category/url at higher weight than body text.
+- When query terms match any article, zero-score articles are still filtered out.
+- At most three article sections are rendered within `MAX_SAVED_ARTICLE_CONTEXT_CHARS`.
+
+Boundary chosen:
+- `load_saved_articles_index()` owns saved-index JSON loading.
+- `saved_article_candidates()` owns entry validation, article hydration, scoring, and saved-at capture.
+- `ranked_saved_article_candidates()` owns positive-score filtering and score/date sorting.
+- `saved_article_context_sections()` owns excerpt budgeting and section limits.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile context_builder/v1/saved_articles_context.py tests/test_saved_articles_context.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_saved_articles_context.py tests/test_context_builder_async_saved_articles.py -q` passed (`7 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1784 passed`).
+
+Remaining follow-up slices:
+- Context builder async orchestration already wraps saved-article loading separately; keep that path unchanged unless adding broader async-context fixtures.
+- Future saved-article ranking changes can now be tested without filesystem setup.
+
+## 2026-07-04 - Transcript Review Codex Report Sections
+
+Goal/scope:
+- Extract Codex transcript-review report header and per-issue Markdown section rendering from the top-level report builder.
+- Preserve report timestamps, empty-report wording, issue fields, log-evidence fences, and issue separators.
+
+Files/modules changed:
+- `agent_skills/transcript_review_format.py`
+- `tests/test_transcript_review_format.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Empty issue lists still return the same "No issues found" report.
+- Issue sections still default missing fields to `?`.
+- Relevant log lines still render as individual fenced code blocks.
+- `build_codex_report_markdown()` still concatenates header plus numbered issue sections in order.
+
+Boundary chosen:
+- `codex_report_header()` owns report title and generated timestamp formatting.
+- `codex_issue_section()` owns one issue's Markdown block.
+- `build_codex_report_markdown()` now coordinates empty-vs-issue reports.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile agent_skills/transcript_review_format.py tests/test_transcript_review_format.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_transcript_review_format.py -q` passed (`8 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1783 passed`).
+
+Remaining follow-up slices:
+- `transcript_quality_review.main()` remains live log reading and Codex orchestration; split only with log/provider fixtures.
+- Future transcript issue report changes can now be tested per issue.
+
+## 2026-07-04 - RA Codex Payload Contract Helpers
+
+Goal/scope:
+- Extract the RA Codex synthesis payload's safety boundary, model policy, instruction list, and required-output schema into named helpers.
+- Preserve the strict JSON prompt contract, source-summary payload shape, and non-JSON fallback behavior.
+
+Files/modules changed:
+- `agent_skills/ra_research_codex_prompt.py`
+- `tests/test_ra_research_codex_prompt.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- `codex_synthesis_payload()` still returns the same top-level keys and values for mission, safety boundary, model policy, instructions, previous context, new source IDs, cached summaries, and required output.
+- `codex_synthesis_prompt()` still prefixes the JSON payload with `CODEX_PROMPT_PREFIX` and preserves non-ASCII JSON.
+- Non-JSON Codex results still truncate raw response text to 12000 characters.
+
+Boundary chosen:
+- `codex_safety_boundary()` owns the medical-safety instruction.
+- `codex_model_policy()` owns frontier model/provider wording.
+- `codex_synthesis_instructions()` owns the ordered synthesis task list.
+- `codex_required_output_contract()` owns the required strict-JSON schema description.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile agent_skills/ra_research_codex_prompt.py tests/test_ra_research_codex_prompt.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_ra_research_codex_prompt.py -q` passed (`5 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1782 passed`).
+
+Remaining follow-up slices:
+- `ra_research_cron.py` remains live cron/provider/filesystem orchestration and should only be split further behind fake provider and cache fixtures.
+- Future changes to RA prompt policy can now be tested without scanning the whole payload literal.
+
+## 2026-07-04 - Dead Code Report Section Builders
+
+Goal/scope:
+- Extract auto-deleted, dead-file, dead-function, and duplicate-function Markdown section builders from the dead-code report renderer.
+- Preserve report headings, explanatory text, blank-line shape, duplicate-group limits, and dead-function truncation.
+
+Files/modules changed:
+- `agent_skills/dead_code_report.py`
+- `tests/test_dead_code_report.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Clean reports still render the same "Codebase clean" body.
+- Auto-deleted, dead-file, dead-function, and duplicate sections still appear in the same order.
+- Possibly-dead functions are still capped at 50 rows with a remaining-count line.
+- Duplicate function groups still show at most 20 groups through `_duplicate_group_lines()`.
+
+Boundary chosen:
+- `_auto_deleted_section_lines()`, `_dead_files_section_lines()`, `_dead_functions_section_lines()`, and `_duplicate_functions_section_lines()` now own section-specific headings and body lines.
+- `build_dead_code_report_markdown()` now coordinates timestamp, section ordering, and the clean-report fallback.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile agent_skills/dead_code_report.py tests/test_dead_code_report.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_dead_code_report.py -q` passed (`5 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1781 passed`).
+
+Remaining follow-up slices:
+- `dead_code_auditor.py` remains filesystem scanning and deletion policy orchestration; split only with fake filesystem fixtures.
+- Report wording changes can now be tested section by section.
+
+## 2026-07-04 - Audit Auto-Fix Report Section Builders
+
+Goal/scope:
+- Extract fixed, skipped, not-applicable, and reverted Markdown section assembly from auto-fix report generation.
+- Preserve report title, source audit metadata, section order, table shape, row truncation, and dry-run/live wording.
+
+Files/modules changed:
+- `agent_skills/audit_auto_fix_helpers.py`
+- `tests/test_audit_auto_fix_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- `would_fix` and `fixed` results still share the fixed-results table and use `Would Fix` only in dry-run mode.
+- Skipped results still render as an issue/reason table.
+- Not-applicable and reverted results still render as bullet sections.
+- Empty partitions still produce no section.
+
+Boundary chosen:
+- `_fixed_results_section_lines()`, `_skipped_results_section_lines()`, `_not_applicable_results_section_lines()`, and `_reverted_results_section_lines()` own the repeated section scaffolding.
+- `generate_fix_report_markdown()` now builds the report header, partitions results, and appends each section helper in order.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile agent_skills/audit_auto_fix_helpers.py tests/test_audit_auto_fix_helpers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_audit_auto_fix_helpers.py -q` passed (`12 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1780 passed`).
+
+Remaining follow-up slices:
+- `audit_auto_fixer.main()` remains live filesystem/LLM orchestration and should stay behind existing helper boundaries unless fake LLM/file fixtures are added.
+- Future report section wording can now be changed or tested without editing the top-level report generator.
+
+## 2026-07-04 - Self-Improvement Context Section Helpers
+
+Goal/scope:
+- Split Stage 3 self-improvement context rendering into empty-state, voice-response instruction, and numbered-entry helpers.
+- Preserve injected context wording, job category summary, numbering, and end-marker shape.
+
+Files/modules changed:
+- `jane_web/self_improvement_context.py`
+- `tests/test_self_improvement_context.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Empty logs still render the same header, explanatory message, and `[END SELF IMPROVEMENT CONTEXT]` marker.
+- Non-empty logs still include the same voice-response rules, entry count, job category summary, and numbered references.
+- Entry lines still default missing severity to `info` and strip summary whitespace.
+
+Boundary chosen:
+- `_empty_context_lines()` owns the no-recent-entries context block.
+- `_voice_response_style_message()` owns the long conversational-response instruction text.
+- `_numbered_entry_reference_lines()` owns drill-down numbering and the closing marker.
+- `build_self_improvement_context_block()` now coordinates these pieces.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/self_improvement_context.py tests/test_self_improvement_context.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_self_improvement_context.py -q` passed (`4 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1779 passed`).
+
+Remaining follow-up slices:
+- Stage 3 injection in `jane_web/jane_v2/pipeline.py` should stay unchanged until broader pipeline characterization exists.
+- Future changes to the voice instruction text can now be tested without rebuilding the full context block.
+
+## 2026-07-04 - Essence Context Entry Rendering Helpers
+
+Goal/scope:
+- Split essence/tool context description assembly into scan, manifest loading, and per-entry rendering helpers.
+- Preserve Jane prompt context wording, tools-before-essences ordering, manifest fallbacks, and direct tool invocation text.
+
+Files/modules changed:
+- `context_builder/v1/essence_context.py`
+- `tests/test_essence_context.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Scan order remains sorted entries from `skills/` first, then sorted entries from `essences/`.
+- Invalid or missing manifests are still skipped.
+- Tool entries without `functions/custom_tools.py` or public functions are still omitted.
+- Essence entries still render even without tools, and still include optional direct invocation details when public custom tools exist.
+
+Boundary chosen:
+- `essence_scan_entries()` owns directory scanning and ordering.
+- `load_essence_manifest()` owns manifest JSON loading and failure handling.
+- `essence_tool_description_section()` owns one manifest-backed entry's rendered section and classification as `tool` or `essence`.
+- `get_essence_tools_description()` now coordinates grouped section ordering.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile context_builder/v1/essence_context.py tests/test_essence_context.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_essence_context.py -q` passed (`7 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1778 passed`).
+
+Remaining follow-up slices:
+- `get_active_essence_personality()` and `get_active_essence_chromadb_path()` are already short and mostly filesystem lookup.
+- If essence context grows again, extract shared active-essence search path iteration behind fixtures.
+
+## 2026-07-04 - Client Tool Result Marker Parser
+
+Goal/scope:
+- Extract parsing of one leading `[TOOL_RESULT:{json}]` marker from the loop that strips client tool results before sending user text to Jane's brain.
+- Preserve leading-marker-only behavior, nested JSON handling, malformed-marker fallbacks, and formatted tool-result context output.
+
+Files/modules changed:
+- `jane_web/client_tool_markers.py`
+- `tests/test_client_tool_markers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Only leading `[TOOL_RESULT:...]` markers are consumed; marker-like text later in the user message remains visible.
+- Nested JSON and marker-like substrings inside JSON strings are still parsed using `find_json_object_end()`.
+- Malformed markers, non-dict payloads, and missing close brackets still leave the original message untouched.
+- CLIENT_TOOL streaming extraction and sanitizer behavior are unchanged.
+
+Boundary chosen:
+- `_leading_tool_result_marker()` owns parsing and consumed-length calculation for one result marker.
+- `extract_tool_results()` now loops over that helper and focuses on repeated consumption plus result collection.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/client_tool_markers.py tests/test_client_tool_markers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_client_tool_markers.py tests/test_client_tool_sanitizer.py -q` passed (`15 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1776 passed`).
+
+Remaining follow-up slices:
+- `ToolMarkerExtractor._drain()` is still the largest pure parser in this module, but it is a streaming state machine and should be split only with more edge-case tests around partial fences, incomplete markers, and overflow.
+- `format_tool_results_for_brain()` is small enough after this pass; future work can extract per-result line formatting if tool-result payloads grow.
+
+## 2026-07-04 - RA Deterministic Document Section Helpers
+
+Goal/scope:
+- Extract deterministic RA action-plan and recommendation-scheme headers/footers from the evidence-row assembly functions.
+- Preserve the generated Markdown documents, evidence table placement, timestamps, safety language, and empty-evidence fallbacks.
+
+Files/modules changed:
+- `agent_skills/ra_research_report_markdown.py`
+- `tests/test_ra_research_report_markdown.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- `build_deterministic_action_plan()` still renders the same title, timestamp, standing guidance, evidence matrix, and "What Would Change This Plan" footer.
+- `build_deterministic_recommendation_scheme()` still renders the same status, safety boundary, working model, evidence register, and next-research-questions footer.
+- Evidence rows still come from `action_plan_evidence_rows()` and `recommendation_scheme_evidence_rows()`, including the no-source fallback row.
+
+Boundary chosen:
+- `deterministic_action_plan_header()` and `deterministic_action_plan_footer()` isolate the standing action-plan copy.
+- `deterministic_recommendation_scheme_header()` and `deterministic_recommendation_scheme_footer()` isolate the standing scheme copy.
+- The two public builders now only coordinate header, table rows, and footer.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile agent_skills/ra_research_report_markdown.py tests/test_ra_research_report_markdown.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_ra_research_report_markdown.py -q` passed (`13 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1775 passed`).
+
+Remaining follow-up slices:
+- `build_deterministic_compressed_context()` is already small enough; further changes would mostly rename list assembly.
+- The remaining RA cron/research runner functions are provider and filesystem orchestration and should only be split behind fakes.
+
+## 2026-07-04 - Chat Error Audit Markdown Sections
+
+Goal/scope:
+- Split Android `chat_error` audit job Markdown rendering into section-level pure helpers.
+- Preserve generated job metadata, section wording, truncation limits, and the `chat_error_audit` facade imports.
+
+Files/modules changed:
+- `agent_skills/chat_error_audit_helpers.py`
+- `tests/test_chat_error_audit_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Job filenames, slugification, first-frame parsing, source-location rendering, and incident defaults are unchanged.
+- Generated job Markdown still starts with the same front matter and includes the same Problem, Incident, Stack trace, Scope, Verification, and Notes sections.
+- Exception messages still truncate to 400 characters and stack traces still truncate to 1800 characters.
+
+Boundary chosen:
+- `chat_error_front_matter()`, `chat_error_problem_section()`, `chat_error_incident_section()`, `chat_error_stack_section()`, `chat_error_scope_section()`, `chat_error_verification_section()`, and `chat_error_notes_section()` isolate the static and incident-specific Markdown pieces.
+- `chat_error_job_markdown()` now coordinates incident extraction and section ordering, leaving the long policy text out of the orchestration.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile agent_skills/chat_error_audit_helpers.py tests/test_chat_error_audit_helpers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_chat_error_audit_helpers.py -q` passed (`7 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1774 passed`).
+
+Remaining follow-up slices:
+- `chat_error_audit.create_audit_job()` remains small I/O orchestration for filesystem writes and source-path lookup; split further only if job creation grows or gets more fixture coverage.
+- The Markdown section helpers now provide a stable place to test future priority/escalation wording without editing the full template.
+
+## 2026-07-04 - Ambient Heartbeat Idle Gate Helpers
+
+Goal/scope:
+- Extract the ambient heartbeat sleep-window and idle-run decision from `main()`.
+- Preserve the existing `1 <= hour < 7` sleep override and active-user skip behavior.
+
+Files/modules changed:
+- `agent_skills/ambient_heartbeat.py`
+- `agent_skills/ambient_heartbeat_rules.py`
+- `tests/test_ambient_heartbeat_rules.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- The heartbeat still skips when the user is active outside the sleep window.
+- The heartbeat still runs during the sleep window even if the user is active.
+- Idle users still allow heartbeat execution at any hour.
+- The sleep-window log message still reports the current hour.
+
+Boundary chosen:
+- `heartbeat_sleep_window()` owns the hour-bound predicate.
+- `heartbeat_should_run()` owns the active-user/sleep-window policy.
+- `main()` now keeps system-load gating, research, implementation, cache writes, and notification side effects.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile agent_skills/ambient_heartbeat.py agent_skills/ambient_heartbeat_rules.py tests/test_ambient_heartbeat_rules.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_ambient_heartbeat_rules.py -q` passed (`10 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1773 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- The heartbeat research and implementation loops are live web/automation orchestration; split further only with fake search/automation/cache fixtures.
+- The spec mutation helpers are already isolated in `ambient_heartbeat_rules.py`.
+
+## 2026-07-04 - Transcript Review Vocal Summary Helpers
+
+Goal/scope:
+- Extract severity counting, spoken severity selection, issue breakdown, top-issue selection, and "what was wrong" text from transcript review vocal summary payload assembly.
+- Preserve the vocal summary payload shape and existing wording.
+
+Files/modules changed:
+- `agent_skills/transcript_review_vocal.py`
+- `tests/test_transcript_review_vocal.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Empty reviews still return the same `summary` payload with `severity="info"`.
+- Critical issues still dominate spoken severity and top-issue selection, then medium, then the first issue.
+- Unknown severities still count outside the critical/medium/low breakdown and fall back to `{n} items`.
+- The generated "what was wrong", "why it mattered", and "what was done" text remains unchanged.
+
+Boundary chosen:
+- `vocal_severity_counts()`, `spoken_vocal_severity()`, `vocal_issue_breakdown()`, `top_vocal_issue()`, and `vocal_what_was_wrong()` own the independent formatting decisions.
+- `build_vocal_summary_payload()` now coordinates the payload shape.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile agent_skills/transcript_review_vocal.py tests/test_transcript_review_vocal.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_transcript_review_vocal.py -q` passed (`5 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1772 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- The transcript quality review runner remains provider/report orchestration; split only with fake provider fixtures.
+- Future vocal-summary changes can now be tested at helper granularity without altering payload assembly.
+
+## 2026-07-04 - Homework Prompt Lint Helpers
+
+Goal/scope:
+- Extract shared issue construction, typo scanning, and math-stripping helpers from the education homework prompt linter.
+- Preserve lint issue order, severity/kind/message shapes, and all existing prompt checks.
+
+Files/modules changed:
+- `agent_skills/edu_homework_lint.py`
+- `tests/test_edu_homework_lint.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Unrendered Jinja, unbalanced inline math, brace imbalance, typos, short prompts, TODO/FIXME markers, unwrapped LaTeX, and `Fraction(a, b)` repr leaks still emit the same issue dictionaries.
+- Typo scanning still follows `_TYPOS` insertion order.
+- Display math blocks are still ignored for dollar-count checks.
+- Inline math and LaTeX environments are still stripped before checking for unwrapped LaTeX commands.
+
+Boundary chosen:
+- `lint_issue()` owns the common issue dictionary shape.
+- `prompt_without_display_math()` and `prompt_without_inline_or_environment_math()` own the regex cleanup steps.
+- `typo_lint_issues()` owns typo scanning, leaving `lint_prompt()` as an ordered coordinator of independent checks.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile agent_skills/edu_homework_lint.py tests/test_edu_homework_lint.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_edu_homework_lint.py -q` passed (`4 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1771 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- The homework audit runner remains live HTTP/database orchestration and should stay unchanged until it has fake teaching-app fixtures.
+- Additional lints can now be added as individual helpers without disturbing the existing check order.
+
+## 2026-07-04 - Marketplace Age Parser Helpers
+
+Goal/scope:
+- Split Facebook Marketplace relative-age parsing into unit, month-label, and weekday-label helpers.
+- Preserve cleanup classification behavior and existing Facebook-style timestamp semantics.
+
+Files/modules changed:
+- `agent_skills/facebook_marketplace_rules.py`
+- `tests/test_facebook_marketplace_message_cleanup.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Minute and hour labels still count as `0` days.
+- Day, week, month, and year labels still convert using the existing `1/7/30/365` multipliers and return the maximum parsed age when multiple labels appear.
+- Month-day labels still infer the current year and roll back one year when the inferred date is in the future.
+- Weekday labels still use the existing abbreviated Facebook label rule and return `None` for today.
+- Conversation classification, protected-title precedence, sold/gone detection, stale deletion, and delete-candidate ordering are unchanged.
+
+Boundary chosen:
+- `_relative_unit_age_days()` and `_relative_unit_matches_age_days()` own compact unit labels such as `13m`, `4d`, and `1w`.
+- `_month_label_age_days()` owns month/day labels such as `Jun 25`.
+- `_weekday_label_age_days()` owns abbreviated weekday labels such as `Sat`.
+- `parse_relative_age_days()` now reads as a branch coordinator over those parsing strategies.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile agent_skills/facebook_marketplace_rules.py tests/test_facebook_marketplace_message_cleanup.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_facebook_marketplace_message_cleanup.py -q` passed (`9 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1765 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Browser cleanup orchestration remains Playwright-heavy; avoid splitting it further without page/action fakes.
+- The pure classification rules are now small enough for future changes to target individual predicates.
+
+## 2026-07-04 - V3 Classifier Prompt Section Helpers
+
+Goal/scope:
+- Extract prompt-section assembly from the v3 classifier's qwen prompt builder.
+- Preserve default and pending prompt modes, class option text, near-identical callouts, FIFO/Jane question callouts, and params extraction instructions.
+
+Files/modules changed:
+- `intent_classifier/v3/classifier.py`
+- `tests/test_v3_classifier_response.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Pending follow-ups still use the surface-text warning header and suppress the near-identical embedding callout.
+- Default prompts still mention the embedding winner and runner-up when present.
+- Class blocks still include the primary class, optional alternate class, `others`, and the detailed `unclear` guidance.
+- Recent FIFO text and Jane's last question still render the same way, including pending-question fallback.
+- Classes with params schemas still receive the same JSON-with-`params` instruction; classes without schemas still receive the same bare JSON instruction.
+
+Boundary chosen:
+- `_prompt_header()`, `_prompt_class_blocks()`, `_near_identical_prompt_callout()`, `_fifo_section()`, `_jane_question_callout()`, and `_params_instruction_block()` now own individual prompt sections.
+- `_build_prompt()` now coordinates candidate selection and final prompt layout without carrying all prompt text branches inline.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile intent_classifier/v3/classifier.py tests/test_v3_classifier_response.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_v3_classifier_response.py -q` passed (`17 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1764 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- The tail of `classify()` still combines parse validation, delete-intent guarding, distance flooring, and final routing; split only with full classify fakes around qwen and registry validation.
+- Prompt wording should stay stable unless classifier behavior is intentionally retuned.
+
+## 2026-07-04 - RA Report HTML Rendering Helpers
+
+Goal/scope:
+- Extract inline Markdown and block HTML formatting from the RA research report renderer loop.
+- Preserve the app-facing report HTML, supported Markdown subset, escaping behavior, and metadata wrapper.
+
+Files/modules changed:
+- `agent_skills/ra_research_html.py`
+- `tests/test_ra_research_html.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Raw HTML in report Markdown is still escaped.
+- Supported inline Markdown still renders for links, bold spans, and inline code.
+- Paragraphs still join wrapped lines with spaces.
+- Ordered and unordered lists still flush as compact `<ol>`/`<ul>` blocks.
+- `build_report_html()` still wraps the rendered body with the same title, metadata pills, safety note, and CSS.
+
+Boundary chosen:
+- `inline_report_markdown_html()` owns escaping plus supported inline Markdown transforms.
+- `report_paragraph_html()` and `report_list_html()` own block-level HTML assembly.
+- `markdown_to_report_html()` now focuses on scanning lines, managing block transitions, and preserving the small Markdown subset.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile agent_skills/ra_research_html.py tests/test_ra_research_html.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_ra_research_html.py -q` passed (`5 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1762 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- The large static HTML template in `build_report_html()` is intentionally left intact; splitting CSS and shell markup would add indirection without much behavioral payoff.
+- Further report changes should focus on content generation helpers rather than template churn.
+
+## 2026-07-04 - V3 Classifier State Helpers
+
+Goal/scope:
+- Extract candidate vote normalization and prompt-context loading from the v3 classifier's `classify()` orchestration.
+- Preserve Chroma vote ranking, pending-action primary swaps, qwen prompt inputs, params-schema selection, and distance-gate behavior.
+
+Files/modules changed:
+- `intent_classifier/v3/classifier.py`
+- `tests/test_v3_classifier_response.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Empty prompts and empty candidate lists still return `("others", "Low", {})`.
+- Chroma candidates are still ranked by vote count and best distance, with labels normalized to handler names before prompt construction.
+- Pending `STAGE2_FOLLOWUP` state still swaps the pending class into the primary qwen slot and uses that class's params schema.
+- Params are still dropped when qwen chooses a class different from the schema class.
+- The Stage 2 distance floor still uses the chosen class's Chroma distance and keeps the existing pending and `send message` exemptions.
+
+Boundary chosen:
+- `_candidate_state()` owns Chroma vote ranking plus winner/runner-up handler normalization.
+- `_load_prompt_state()` owns FIFO loading, class-definition lookup, pending-action lookup, and params-schema selection.
+- `classify()` now stays focused on orchestration: candidate lookup, prompt build, qwen call, parse/validation, distance gate, and final routing decision.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile intent_classifier/v3/classifier.py tests/test_v3_classifier_response.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_v3_classifier_response.py -q` passed (`15 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1760 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- `_build_prompt()` still has inline prompt-section construction; split only with prompt snapshot assertions to avoid accidental classifier prompt drift.
+- The parse/validation/distance-gate tail in `classify()` is still dense, but it is central routing behavior and should be split only with full classify fakes around qwen and registry validation.
+
+## 2026-07-04 - Context Runtime Loader Helpers
+
+Goal/scope:
+- Extract duplicated task-state and personal-facts loading from sync and async Jane context builders.
+- Preserve prompt-profile gating, managed-user behavior, cache keys, and cache TTLs.
+
+Files/modules changed:
+- `context_builder/v1/context_builder.py`
+- `tests/test_context_sources.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Task state is still loaded only when the prompt profile includes task state.
+- Task state still reads `configs/project_specs/current_task_state.json` through the existing cached JSON summary path with a 30-second TTL.
+- Managed users still skip Chieh personal-fact loading and receive an empty personal facts dict.
+- Unmanaged users still load personal facts through the existing cache key with a 300-second TTL.
+- Sync and async context builders still emit the same status messages and assemble the same context sections.
+
+Boundary chosen:
+- `_current_task_state_for_profile()` owns profile-gated task-state loading.
+- `_personal_facts_for_context()` owns managed-user gating for personal facts.
+- Both sync and async builders now share those runtime-loading policies before building the memory plan.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile context_builder/v1/context_builder.py tests/test_context_sources.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_context_sources.py tests/test_context_builder_async_saved_articles.py -q` passed (`6 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1758 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Async memory/research/saved-article task startup still has orchestration complexity; split only with task/future fakes.
+- `_safe_get_memory_summary()` still mixes daemon and Chroma fallback paths and should be split only with network/retrieval stubs.
+
+## 2026-07-04 - Gmail Monitor Count Wrappers
+
+Goal/scope:
+- Extract remaining per-scan outcome counters from the Nutricost deal monitor's main loop.
+- Preserve Nutricost, CrunchLabs, and Google Calendar processing behavior and failure-count outcomes.
+
+Files/modules changed:
+- `agent_skills/nutricost_deal_monitor.py`
+- `tests/test_gmail_cleanup_monitor.py`
+- `tests/test_nutricost_deal_utils.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Nutricost scan counting still applies the local-day check, discount threshold, dry-run alert/trash behavior, and alert-state rules.
+- CrunchLabs scan counting still applies the local-day check and dry-run trash outcome.
+- Google Calendar scan counting still applies sender validation, event-date parsing, passed/future-event decisions, and dry-run trash outcome.
+- Missing or failing messages still count as `failed`, `crunchlabs_failed`, or `google_calendar_failed` and call the provided failure logger.
+
+Boundary chosen:
+- `count_nutricost_messages()`, `count_crunchlabs_messages()`, and `count_google_calendar_messages()` mirror the existing unread and sender cleanup count-wrapper pattern.
+- `main()` now owns query construction, message listing, logging, and merging, while wrappers own per-message outcome counting.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile agent_skills/nutricost_deal_monitor.py tests/test_gmail_cleanup_monitor.py tests/test_nutricost_deal_utils.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_gmail_cleanup_monitor.py tests/test_nutricost_deal_utils.py -q` passed (`23 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1757 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- The monitor's `main()` is still long because it coordinates multiple Gmail searches; further reduction should wait for a fake service harness around `list_message_ids()` and query logging.
+- Per-message cleanup decisions are already split into dedicated decision helpers.
+
+## 2026-07-04 - Gmail Sender Cleanup Count Helper
+
+Goal/scope:
+- Extract sender-cleanup message counting from the Nutricost deal monitor's main loop.
+- Reconcile the current code with this documented boundary after the helper was absent from the checked source during this continuation.
+- Preserve the cleanup spec policy, dry-run behavior, failure outcomes, and count aggregation shape.
+
+Files/modules changed:
+- `agent_skills/nutricost_deal_monitor.py`
+- `tests/test_gmail_cleanup_monitor.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Sender cleanup still uses each `SenderCleanupSpec` label, fragments, domains, retention days, subject fragments, required labels, and query terms.
+- Dry-run sender cleanup still returns `*_would_trash` without trashing messages.
+- Processing failures still count as `{sender_cleanup_prefix(label)}_failed` and call the provided failure logger.
+- The main monitor still builds the same Gmail queries and merges counts into the shared totals.
+
+Boundary chosen:
+- `count_sender_cleanup_messages()` mirrors the existing `count_unread_cleanup_messages()` wrapper pattern.
+- The monitor `main()` loop now owns query/list/log orchestration while the helper owns per-message counting policy.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile agent_skills/nutricost_deal_monitor.py tests/test_gmail_cleanup_monitor.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_gmail_cleanup_monitor.py -q` passed (`13 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1770 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Nutricost and CrunchLabs daily-window counting could get matching wrappers, but the sender-spec loop had the clearest duplicated shape.
+- Broader monitor `main()` changes should use fake Gmail service list/query fixtures before moving more orchestration.
+
+## 2026-07-04 - Prompt Queue Result Message Helpers
+
+Goal/scope:
+- Extract retry prompt text, result status/note, failure detail, and final notification text from `prompt_queue_runner.main()`.
+- Reconcile the current code with this documented boundary after the helpers were absent from the checked source during this continuation.
+- Preserve prompt queue retry behavior and visible complete/incomplete messages.
+
+Files/modules changed:
+- `agent_skills/prompt_queue_runner.py`
+- `agent_skills/prompt_queue_docs.py`
+- `tests/test_prompt_queue_docs.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Incomplete prompts still receive the same retry prelude before being sent back to Jane.
+- Success still marks prompts `complete`; failure still marks them `incomplete`.
+- Prompt notes still use the first 200 characters with newlines flattened.
+- Empty failure output still expands to the same explanatory fallback.
+- Completion and incomplete notification strings keep their existing Markdown and prompt summary behavior.
+
+Boundary chosen:
+- `queue_prompt_run_text()`, `prompt_result_status()`, `prompt_result_note()`, `prompt_failure_detail()`, and `prompt_result_discord_message()` now own pure result formatting.
+- `main()` keeps the loop, idle checks, system-load gate, Jane call, memory logging, prompt mutation, and archive trigger.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile agent_skills/prompt_queue_runner.py agent_skills/prompt_queue_docs.py tests/test_prompt_queue_docs.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_prompt_queue_docs.py -q` passed (`9 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1761 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- `archive_completed_prompts()` still mixes document mutation and Chroma purge side effects; split only with temp-file and subprocess fakes.
+- The queue run loop could be reduced further once idle/load/run/mark dependencies have a fake harness.
+
+## 2026-07-04 - Nightly Code Auditor Sleep Window Helper
+
+Goal/scope:
+- Extract the nightly code auditor's sleep-window/force decision from `main()`.
+- Reconcile the current code with this documented boundary after the helper was absent from the checked source during this continuation.
+- Preserve autonomous run gating and the `--force` override.
+
+Files/modules changed:
+- `agent_skills/nightly_code_auditor.py`
+- `agent_skills/nightly_code_audit_helpers.py`
+- `tests/test_nightly_code_audit_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Runs are still allowed from hour 1 through before hour 7.
+- `--force` still allows a run outside that window.
+- Outside-window logging still reports the current hour and exits successfully.
+- Git, branch, generated-test, fix-attempt, commit, merge, revert, and failure-log flows are unchanged.
+
+Boundary chosen:
+- `audit_sleep_window_allowed()` owns the pure schedule predicate.
+- `main()` now calculates one `now` value for timestamp and schedule checks, then keeps orchestration unchanged.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile agent_skills/nightly_code_auditor.py agent_skills/nightly_code_audit_helpers.py tests/test_nightly_code_audit_helpers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_nightly_code_audit_helpers.py -q` passed (`10 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1768 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Failure-log entry construction could be extracted, but the main risk is still git/branch side effects and should be tested with command fakes before broader changes.
+- The comment still says "2-6 AM" while behavior is `1 <= hour < 7`; I preserved behavior and did not treat that as a refactor target.
+
+## 2026-07-04 - Audit Auto-Fix Circuit Breaker Results
+
+Goal/scope:
+- Extract circuit-breaker skipped-result construction from `audit_auto_fixer.main()`.
+- Reconcile the current code with this documented boundary after the helper was absent from the checked source during this continuation.
+- Preserve the auto-fixer's max-fixes stop behavior and result report shape.
+
+Files/modules changed:
+- `agent_skills/audit_auto_fixer.py`
+- `agent_skills/audit_auto_fix_helpers.py`
+- `tests/test_audit_auto_fix_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Once the max-fixes circuit breaker trips, remaining issues are still appended as skipped results.
+- Skipped records still include issue, file, category, status, and the exact max-fixes reason.
+- Missing issue fields still fall back to `Unknown`/`unknown`.
+- Fix counting and report generation in `main()` are unchanged.
+
+Boundary chosen:
+- `circuit_breaker_skip_results()` owns the pure skipped-result shape.
+- `main()` now only decides when the circuit breaker trips and appends the helper output.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile agent_skills/audit_auto_fixer.py agent_skills/audit_auto_fix_helpers.py tests/test_audit_auto_fix_helpers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_audit_auto_fix_helpers.py -q` passed (`11 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1767 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- Report selection and output-path decisions in `main()` could be extracted, but they are low-risk and less valuable than the already-covered safety/result policy.
+- Broader auto-fixer changes should use fake file trees because the live script can modify source files.
+
+## 2026-07-04 - RA Run Report Source Detail Helpers
+
+Goal/scope:
+- Extract the new-source detail block from `build_run_report_markdown()`.
+- Reconcile the current code with this documented boundary after the helpers were absent from the checked source during this continuation.
+- Preserve the run report header, useful-report embedding, detail block wording, usefulness labels, signal scores, and empty-source fallback.
+
+Files/modules changed:
+- `agent_skills/ra_research_report_markdown.py`
+- `tests/test_ra_research_report_markdown.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Each processed source still renders title, source id, URL, scope, evidence type, saved artifact, remission relevance, usefulness label, signal score, and a blank separator.
+- Low-value summaries still use `low-value/noisy - {reason}` while usable summaries still render `useful signal`.
+- Empty runs still say the cached recommendation scheme was refreshed.
+- `build_run_report_markdown()` still deduplicates new summaries before detail rendering.
+
+Boundary chosen:
+- `run_report_source_detail_lines()` owns the per-source Markdown detail block.
+- `run_report_source_details_lines()` owns the section header and empty-run fallback.
+- The run-report builder now coordinates high-level sections instead of carrying detail-line formatting inline.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile agent_skills/ra_research_report_markdown.py tests/test_ra_research_report_markdown.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_ra_research_report_markdown.py -q` passed (`12 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1769 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- The RA Markdown module is now mostly static document templates plus small section helpers.
+- Further RA report refactors should target data extraction/scoring helpers only if new behavior needs stronger fixtures.
+
+## 2026-07-04 - RA Useful Report Section Builders
+
+Goal/scope:
+- Extract pure section builders from `build_useful_report_markdown()`.
+- Reconcile the current code with this documented boundary after the helpers were absent from the checked source during this continuation.
+- Preserve the app-facing RA run report text, source ordering, fallback questions/tracking, safety language, and file-link sections.
+
+Files/modules changed:
+- `agent_skills/ra_research_report_markdown.py`
+- `tests/test_ra_research_report_markdown.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Bottom-line pluralization, theme display, high-signal source callout, and standing clinician-led safety path are unchanged.
+- "What Changed This Run" still prefers Codex discoveries, then high-signal summary relevance, then the no-change fallback.
+- Safety flags, low-value/noisy source notes, default next-run focus, full-file links, and source trace lines keep the same wording and order.
+- `build_useful_report_markdown()` still returns a stripped Markdown document with one trailing newline.
+
+Boundary chosen:
+- `useful_report_bottom_line_lines()`, `useful_report_changed_lines()`, `useful_report_safety_lines()`, `useful_report_low_signal_lines()`, `useful_report_next_focus_items()`, `useful_report_file_lines()`, and `useful_report_source_trace_lines()` isolate section assembly.
+- The top-level useful report builder now handles summary grouping and section ordering rather than owning every line-level branch inline.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile agent_skills/ra_research_report_markdown.py tests/test_ra_research_report_markdown.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_ra_research_report_markdown.py -q` passed (`11 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1766 passed`).
+- `git diff --check` passed.
+
+Remaining follow-up slices:
+- `build_run_report_markdown()` still assembles new-source details inline; a small helper could cover that once a direct test pins the exact detail block.
+- The deterministic action-plan and recommendation-scheme builders are long static templates; extracting constants would be low value unless those sections need shared rendering.
+
 ## 2026-07-04 - Conversation Key Safe Resolver Helpers
 
 Goal/scope:

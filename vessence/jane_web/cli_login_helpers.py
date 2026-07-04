@@ -318,6 +318,41 @@ def append_status_stderr_tail(details: dict, stderr: str) -> dict:
     return details
 
 
+def cached_provider_auth_status(
+    provider: str,
+    cache: MutableMapping[str, tuple[float, dict]],
+    now: float,
+    *,
+    ttl_seconds: float = 5,
+) -> dict | None:
+    if provider not in cache:
+        return None
+    ts, details = cache[provider]
+    if now - ts < ttl_seconds:
+        return details
+    return None
+
+
+def should_refresh_provider_auth_status(provider: str, details: dict) -> bool:
+    return not details.get("logged_in") and provider == "claude"
+
+
+def refresh_provider_auth_status_details(
+    details: dict,
+    cmd: list[str],
+    *,
+    run_command_fn: Callable[[list[str]], Any],
+) -> dict:
+    try:
+        result = run_command_fn(cmd)
+        if result.returncode == 0:
+            output = (result.stdout or "").strip()
+            parse_provider_auth_status_output(details, output)
+    except Exception:
+        pass
+    return details
+
+
 def provider_auth_status_details(
     provider: str,
     *,
@@ -328,10 +363,9 @@ def provider_auth_status_details(
 ) -> dict:
     provider = normalize_frontier_provider(provider)
     now = now_fn()
-    if provider in cache:
-        ts, details = cache[provider]
-        if now - ts < 5:
-            return details
+    cached = cached_provider_auth_status(provider, cache, now)
+    if cached is not None:
+        return cached
 
     cmd = provider_auth_status_command(provider)
     if not cmd:
@@ -352,14 +386,12 @@ def provider_auth_status_details(
 
     parse_provider_auth_status_output(details, output)
 
-    if not details.get("logged_in") and provider == "claude" and attempt_refresh_fn():
-        try:
-            result = run_command_fn(cmd)
-            if result.returncode == 0:
-                output = (result.stdout or "").strip()
-                parse_provider_auth_status_output(details, output)
-        except Exception:
-            pass
+    if should_refresh_provider_auth_status(provider, details) and attempt_refresh_fn():
+        refresh_provider_auth_status_details(
+            details,
+            cmd,
+            run_command_fn=run_command_fn,
+        )
 
     cache[provider] = (now, details)
     return details

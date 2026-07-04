@@ -42,6 +42,17 @@ def pick_next_module_in_rotation(modules: list[dict], state: dict) -> dict:
     return modules[next_idx]
 
 
+def audit_sleep_window_allowed(
+    argv: list[str],
+    now: dt.datetime,
+    *,
+    force_flag: str = "--force",
+    start_hour: int = 1,
+    end_hour: int = 7,
+) -> bool:
+    return force_flag in argv or start_hour <= now.hour < end_hour
+
+
 def nonblank_porcelain_lines(status_stdout: str) -> list[str]:
     return [line for line in status_stdout.splitlines() if line.strip()]
 

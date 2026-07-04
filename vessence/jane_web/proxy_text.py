@@ -42,18 +42,23 @@ def message_for_persistence(message: str, file_context: str | None) -> str:
     return f"{base}\n\n{file_context}".strip()
 
 
-def progress_snapshot(request_ctx: Any, summary_text: str, file_context: str | None) -> str:
+def progress_context_findings(system_prompt: str, summary_text: str, file_context: str | None) -> list[str]:
     findings: list[str] = []
     if summary_text:
         findings.append("loaded prior conversation summary")
-    if "## Retrieved Memory\n" in request_ctx.system_prompt:
+    if "## Retrieved Memory\n" in system_prompt:
         findings.append("found relevant memory")
-    if "## Current Task State\n" in request_ctx.system_prompt:
+    if "## Current Task State\n" in system_prompt:
         findings.append("loaded task state")
-    if "## Research Brief\n" in request_ctx.system_prompt:
+    if "## Research Brief\n" in system_prompt:
         findings.append("prepared research brief")
     if file_context:
         findings.append("attached file context")
+    return findings
+
+
+def progress_snapshot(request_ctx: Any, summary_text: str, file_context: str | None) -> str:
+    findings = progress_context_findings(request_ctx.system_prompt, summary_text, file_context)
     if not findings:
         return "Context is ready."
     return "Context is ready: " + ", ".join(findings) + "."

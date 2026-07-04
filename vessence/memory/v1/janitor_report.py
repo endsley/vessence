@@ -5,6 +5,27 @@ from __future__ import annotations
 from typing import Any
 
 
+def forgettable_purged_count(expired_purged: int, old_forgettable_purged: int) -> int:
+    return expired_purged + old_forgettable_purged
+
+
+def topics_processed_payload(
+    *,
+    user_collection_name: str,
+    user_topics: dict[str, Any],
+    long_term_collection_name: str,
+    long_term_topics: dict[str, Any],
+) -> dict[str, list[str]]:
+    return {
+        user_collection_name: list(user_topics.keys()),
+        long_term_collection_name: list(long_term_topics.keys()),
+    }
+
+
+def topics_with_merges(merge_log: list[dict[str, Any]]) -> list[str]:
+    return list({f"{merge['collection']}::{merge['topic']}" for merge in merge_log})
+
+
 def janitor_report_payload(
     *,
     run_timestamp: str,
@@ -30,15 +51,17 @@ def janitor_report_payload(
         "last_run": run_timestamp,
         "vectors_reduced": total_reduced,
         "merges_performed": len(merge_log),
-        "forgettable_memories_purged": expired_purged + old_forgettable_purged,
+        "forgettable_memories_purged": forgettable_purged_count(expired_purged, old_forgettable_purged),
         "forgettable_expired_by_ttl": expired_purged,
         "forgettable_expired_by_age": old_forgettable_purged,
         "permanent_memories_protected": permanent_count,
         "conversation_archival": conversation_archival,
-        "topics_processed": {
-            user_collection_name: list(user_topics.keys()),
-            long_term_collection_name: list(long_term_topics.keys()),
-        },
+        "topics_processed": topics_processed_payload(
+            user_collection_name=user_collection_name,
+            user_topics=user_topics,
+            long_term_collection_name=long_term_collection_name,
+            long_term_topics=long_term_topics,
+        ),
         "known_junk_deleted": known_junk_deleted,
         "exact_duplicate_deleted": exact_duplicate_deleted,
         "long_term_normalization": normalization_result,
@@ -66,8 +89,8 @@ def janitor_history_entry(
         "timestamp": run_timestamp,
         "vectors_reduced": total_reduced,
         "merges_performed": len(merge_log),
-        "forgettable_purged": expired_purged + old_forgettable_purged,
-        "topics_with_merges": list({f"{merge['collection']}::{merge['topic']}" for merge in merge_log}),
+        "forgettable_purged": forgettable_purged_count(expired_purged, old_forgettable_purged),
+        "topics_with_merges": topics_with_merges(merge_log),
         "conversation_archival": conversation_archival,
         "known_junk_deleted": known_junk_deleted,
         "exact_duplicate_deleted": exact_duplicate_deleted,

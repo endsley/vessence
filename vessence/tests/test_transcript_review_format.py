@@ -5,6 +5,8 @@ from agent_skills.transcript_review_format import (
     android_event_line,
     build_codex_report_markdown,
     build_condensed_context,
+    codex_issue_section,
+    codex_report_header,
     extract_json_array_text,
     parse_codex_issues,
     pipeline_event_line,
@@ -110,6 +112,37 @@ def test_build_condensed_context_truncates_at_max_chars():
     )
 
     assert context.endswith("[TRUNCATED]")
+
+
+def test_codex_report_section_helpers_preserve_header_and_issue_shape():
+    generated_at = dt.datetime(2026, 7, 2, 13, 14, 15)
+    issue = {
+        "severity": "MEDIUM",
+        "turn_time": "2026-07-01 09:01:00",
+        "user_msg_snippet": "set a timer",
+        "issue": "Timer failed",
+        "root_cause": "Parser rejected duration",
+        "suggested_fix": "Adjust parser",
+        "relevant_log_lines": ["timer handler warning"],
+    }
+
+    assert codex_report_header("2026-07-01", generated_at) == (
+        "# Transcript Quality Review — 2026-07-01\n\n"
+        "Generated: 2026-07-02 13:14:15\n\n"
+    )
+    assert codex_issue_section(1, issue) == (
+        "## Issue 1 [MEDIUM]\n\n"
+        "**Turn:** 2026-07-01 09:01:00\n"
+        "**User said:** set a timer\n\n"
+        "**Problem:** Timer failed\n\n"
+        "**Root cause:** Parser rejected duration\n\n"
+        "**Suggested fix:** Adjust parser\n\n"
+        "**Log evidence:**\n"
+        "```\n"
+        "timer handler warning\n"
+        "```\n"
+        "\n---\n\n"
+    )
 
 
 def test_build_codex_report_markdown_for_empty_and_issues():

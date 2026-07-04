@@ -6,6 +6,7 @@ from agent_skills.nightly_code_audit_helpers import (
     audit_branch_name,
     audit_fix_prompt,
     audit_report_stash_name,
+    audit_sleep_window_allowed,
     audit_test_generation_prompt,
     auto_audit_test_path,
     default_auditor_state,
@@ -25,6 +26,7 @@ def test_nightly_code_auditor_uses_extracted_helpers():
     assert nightly_code_auditor._audit_test_generation_prompt is audit_test_generation_prompt
     assert nightly_code_auditor._audit_fix_prompt is audit_fix_prompt
     assert nightly_code_auditor._fix_attempt_declined is fix_attempt_declined
+    assert nightly_code_auditor._audit_sleep_window_allowed is audit_sleep_window_allowed
 
 
 def test_parse_whitelist_modules_keeps_safe_and_careful_rows_only():
@@ -52,6 +54,14 @@ def test_default_state_and_rotation_mutates_last_index_with_wraparound():
     assert state["last_index"] == 1
     assert pick_next_module_in_rotation(modules, state) == {"path": "a.py"}
     assert state["last_index"] == 0
+
+
+def test_audit_sleep_window_allowed_preserves_force_and_hour_bounds():
+    assert audit_sleep_window_allowed([], dt.datetime(2026, 7, 2, 1, 0))
+    assert audit_sleep_window_allowed([], dt.datetime(2026, 7, 2, 6, 59))
+    assert not audit_sleep_window_allowed([], dt.datetime(2026, 7, 2, 7, 0))
+    assert not audit_sleep_window_allowed([], dt.datetime(2026, 7, 2, 0, 59))
+    assert audit_sleep_window_allowed(["--force"], dt.datetime(2026, 7, 2, 12, 0))
 
 
 def test_porcelain_helpers_ignore_expected_outputs_and_git_backups_only():

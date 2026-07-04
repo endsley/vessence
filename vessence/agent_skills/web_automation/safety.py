@@ -50,6 +50,8 @@ _CRITICAL_KEYWORDS = (
     "transfer-all", "close-account",
 )
 
+LOW_RISK_ACTIONS = frozenset({"snapshot", "status", "wait", "screenshot", "extract"})
+
 
 def domain_of(url: str) -> str:
     """Return the host (no port) of ``url``, or empty on parse failure."""
@@ -91,9 +93,7 @@ def classify_action(
     as ``high``, even though the ref string itself is opaque.
     """
     action = (action or "").lower()
-    if action in {"snapshot", "status", "wait", "screenshot"}:
-        return "low"
-    if action == "extract":
+    if action in LOW_RISK_ACTIONS:
         return "low"
     if action == "navigate":
         url = args.get("url") or ""
@@ -112,21 +112,9 @@ def classify_action(
             resolved_name = (el.name or "").lower()
             resolved_role = (el.role or "").lower()
 
-    blob = " ".join(
-        [
-            str(args.get("text", "")),
-            str(args.get("value", "")),
-            str(args.get("key", "")),
-            resolved_name,
-            resolved_role,
-        ]
-    ).lower()
+    blob = action_text_blob(args, resolved_name=resolved_name, resolved_role=resolved_role)
 
-    if _keyword_in(blob, _CRITICAL_KEYWORDS):
-        return "critical"
-    if _keyword_in(blob, _HIGH_RISK_KEYWORDS):
-        return "high"
-    return "medium"
+    return keyword_risk(blob) or "medium"
 
 
 def _classify_url(url: str) -> Risk:
@@ -141,11 +129,32 @@ def _classify_url(url: str) -> Risk:
         (parsed.path or "").lower(),
         (parsed.query or "").lower(),
     ])
-    if _keyword_in(path_blob, _CRITICAL_KEYWORDS):
+    return keyword_risk(path_blob) or "low"
+
+
+def action_text_blob(
+    args: dict[str, Any],
+    *,
+    resolved_name: str = "",
+    resolved_role: str = "",
+) -> str:
+    return " ".join(
+        [
+            str(args.get("text", "")),
+            str(args.get("value", "")),
+            str(args.get("key", "")),
+            resolved_name,
+            resolved_role,
+        ]
+    ).lower()
+
+
+def keyword_risk(haystack: str) -> Risk | None:
+    if _keyword_in(haystack, _CRITICAL_KEYWORDS):
         return "critical"
-    if _keyword_in(path_blob, _HIGH_RISK_KEYWORDS):
+    if _keyword_in(haystack, _HIGH_RISK_KEYWORDS):
         return "high"
-    return "low"
+    return None
 
 
 def requires_confirmation(risk: Risk) -> bool:
@@ -175,9 +184,12 @@ def _keyword_in(haystack: str, needles: tuple[str, ...]) -> bool:
 
 __all__ = [
     "BLOCKED_DOMAINS",
+    "LOW_RISK_ACTIONS",
     "Risk",
+    "action_text_blob",
     "classify_action",
     "domain_of",
     "is_blocked",
+    "keyword_risk",
     "requires_confirmation",
 ]

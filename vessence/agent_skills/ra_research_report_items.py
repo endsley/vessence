@@ -21,10 +21,9 @@ def summary_text_blob(summary: dict[str, Any]) -> str:
     return " ".join(str(field) for field in fields if field).lower()
 
 
-def summary_signal_score(summary: dict[str, Any]) -> int:
-    text = summary_text_blob(summary)
-    study_type = str(summary.get("study_type") or "").lower()
-    scope = str(summary.get("evidence_scope") or "").lower()
+def evidence_strength_score(study_type: str, scope: str) -> int:
+    study_type = study_type.lower()
+    scope = scope.lower()
     score = 0
     if "guideline" in study_type or "guideline" in scope:
         score += 6
@@ -40,6 +39,11 @@ def summary_signal_score(summary: dict[str, Any]) -> int:
         score += 2
     if "abstract_only" in scope:
         score -= 1
+    return score
+
+
+def summary_usefulness_score(summary: dict[str, Any]) -> int:
+    score = 0
     if list_values(summary.get("main_findings")):
         score += 1
     if list_values(summary.get("actionable_implications")) or list_values(summary.get("clinician_discussion_points")):
@@ -50,6 +54,11 @@ def summary_signal_score(summary: dict[str, Any]) -> int:
         score += 1
     if list_values(summary.get("technology_implications")):
         score += 1
+    return score
+
+
+def summary_noise_penalty(summary: dict[str, Any], text: str) -> int:
+    score = 0
     if summary.get("needs_llm_review"):
         score -= 5
     if "needs manual/llm review" in text:
@@ -61,6 +70,17 @@ def summary_signal_score(summary: dict[str, Any]) -> int:
     if "scenario" in text or "speculative" in text:
         score -= 2
     return score
+
+
+def summary_signal_score(summary: dict[str, Any]) -> int:
+    text = summary_text_blob(summary)
+    study_type = str(summary.get("study_type") or "").lower()
+    scope = str(summary.get("evidence_scope") or "").lower()
+    return (
+        evidence_strength_score(study_type, scope)
+        + summary_usefulness_score(summary)
+        + summary_noise_penalty(summary, text)
+    )
 
 
 def low_value_reason(summary: dict[str, Any]) -> str:

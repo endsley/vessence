@@ -67,6 +67,74 @@ def conversation_from_row(row: dict) -> Conversation | None:
     )
 
 
+RECENT_UNIT_AGE_DAYS = {
+    "m": 0,
+    "min": 0,
+    "mins": 0,
+    "minute": 0,
+    "minutes": 0,
+    "h": 0,
+    "hr": 0,
+    "hrs": 0,
+    "hour": 0,
+    "hours": 0,
+    "d": 1,
+    "day": 1,
+    "days": 1,
+    "w": 7,
+    "wk": 7,
+    "wks": 7,
+    "week": 7,
+    "weeks": 7,
+    "mo": 30,
+    "mon": 30,
+    "month": 30,
+    "months": 30,
+    "y": 365,
+    "yr": 365,
+    "yrs": 365,
+    "year": 365,
+    "years": 365,
+}
+MONTH_LABELS = ("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec")
+WEEKDAY_LABELS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+
+
+def _relative_unit_age_days(amount_text: str, unit: str) -> int:
+    return int(amount_text) * RECENT_UNIT_AGE_DAYS[unit]
+
+
+def _relative_unit_matches_age_days(matches: list[tuple[str, str]]) -> int | None:
+    parsed = [_relative_unit_age_days(amount_text, unit) for amount_text, unit in matches]
+    return max(parsed) if parsed else None
+
+
+def _month_label_age_days(cleaned: str, now: dt.datetime) -> int | None:
+    for month_name in MONTH_LABELS:
+        match = re.search(rf"\b{month_name}\s+(\d{{1,2}})(?:,\s*(\d{{4}}))?\b", cleaned)
+        if not match:
+            continue
+        month = dt.datetime.strptime(month_name, "%b").month
+        year = int(match.group(2) or now.year)
+        seen = dt.date(year, month, int(match.group(1)))
+        if seen > now.date():
+            seen = dt.date(year - 1, month, int(match.group(1)))
+        return max((now.date() - seen).days, 0)
+    return None
+
+
+def _weekday_label_age_days(cleaned: str, now: dt.datetime) -> int | None:
+    weekday_match = re.search(
+        r"\b(mon|tue|wed|thu|fri|sat|sun)(?:day)?\b",
+        cleaned,
+    )
+    if not weekday_match:
+        return None
+    weekday = WEEKDAY_LABELS.index(weekday_match.group(1)[:3])
+    age = (now.weekday() - weekday) % 7
+    return age or None
+
+
 def parse_relative_age_days(text: str, *, now: dt.datetime | None = None) -> int | None:
     """Parse Facebook list timestamps such as 4d, 1w, Yesterday, or Jun 25."""
     cleaned = _clean_text(text).casefold()
@@ -85,59 +153,16 @@ def parse_relative_age_days(text: str, *, now: dt.datetime | None = None) -> int
         r"\b",
         cleaned,
     )
-    parsed: list[int] = []
-    for amount_text, unit in matches:
-        amount = int(amount_text)
-        if unit in {"m", "min", "mins", "minute", "minutes", "h", "hr", "hrs", "hour", "hours"}:
-            parsed.append(0)
-        elif unit in {"d", "day", "days"}:
-            parsed.append(amount)
-        elif unit in {"w", "wk", "wks", "week", "weeks"}:
-            parsed.append(amount * 7)
-        elif unit in {"mo", "mon", "month", "months"}:
-            parsed.append(amount * 30)
-        elif unit in {"y", "yr", "yrs", "year", "years"}:
-            parsed.append(amount * 365)
-    if parsed:
-        return max(parsed)
+    unit_age_days = _relative_unit_matches_age_days(matches)
+    if unit_age_days is not None:
+        return unit_age_days
 
     now = now or dt.datetime.now()
-    for month_name in (
-        "jan",
-        "feb",
-        "mar",
-        "apr",
-        "may",
-        "jun",
-        "jul",
-        "aug",
-        "sep",
-        "oct",
-        "nov",
-        "dec",
-    ):
-        match = re.search(rf"\b{month_name}\s+(\d{{1,2}})(?:,\s*(\d{{4}}))?\b", cleaned)
-        if not match:
-            continue
-        month = dt.datetime.strptime(month_name, "%b").month
-        year = int(match.group(2) or now.year)
-        seen = dt.date(year, month, int(match.group(1)))
-        if seen > now.date():
-            seen = dt.date(year - 1, month, int(match.group(1)))
-        return max((now.date() - seen).days, 0)
+    month_age_days = _month_label_age_days(cleaned, now)
+    if month_age_days is not None:
+        return month_age_days
 
-    weekday_match = re.search(
-        r"\b(mon|tue|wed|thu|fri|sat|sun)(?:day)?\b",
-        cleaned,
-    )
-    if weekday_match:
-        weekday = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"].index(
-            weekday_match.group(1)[:3]
-        )
-        age = (now.weekday() - weekday) % 7
-        return age or None
-
-    return None
+    return _weekday_label_age_days(cleaned, now)
 
 
 SOLD_OR_GONE_PATTERNS = (

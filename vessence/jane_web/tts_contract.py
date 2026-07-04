@@ -95,22 +95,25 @@ def combine_tts_detail(*parts: str) -> str:
     return "\n\n".join(p for p in parts if p).strip()
 
 
+def tts_spoken_source_and_trailing(raw: str) -> tuple[str, str]:
+    spoken_match = _TTS_SPOKEN_BLOCK_RE.search(raw)
+    if not spoken_match:
+        return raw, ""
+
+    spoken_source = spoken_match.group(1) or ""
+    preface = raw[:spoken_match.start()].strip()
+    trailing = raw[spoken_match.end() :].strip()
+    if preface:
+        spoken_source = f"{preface} {spoken_source}"
+    return spoken_source, trailing
+
+
 def enforce_tts_output_contract(response: str, session_id: str, source: str) -> str:
     raw = (response or "").strip()
     if not raw:
         return raw
 
-    spoken_match = _TTS_SPOKEN_BLOCK_RE.search(raw)
-    if spoken_match:
-        spoken_source = spoken_match.group(1) or ""
-        preface = raw[:spoken_match.start()].strip()
-        trailing = raw[spoken_match.end() :].strip()
-        if preface:
-            spoken_source = f"{preface} {spoken_source}"
-    else:
-        spoken_source = raw
-        trailing = ""
-
+    spoken_source, trailing = tts_spoken_source_and_trailing(raw)
     spoken_text, trailing_from_spoken = take_short_tts_spoken(spoken_source)
     trailing = combine_tts_detail(trailing_from_spoken, trailing)
     trailing = normalize_tts_text(trailing)

@@ -152,6 +152,34 @@ def _managed_user_runtime_context(user_id: str | None) -> tuple[dict, str | None
     return config, user_context.memory_path, user_context.context_block
 
 
+def _current_task_state_for_profile(profile: PromptProfile, vessence_root: Path) -> str:
+    if not profile.include_task_state:
+        return ""
+    return _cached(
+        "task_state",
+        lambda: _read_json_summary(vessence_root / "configs" / "project_specs" / "current_task_state.json"),
+        ttl=30,
+    )
+
+
+def _personal_facts_for_context(managed_user_config: dict, data_root: Path) -> dict:
+    if managed_user_config:
+        return {}
+    return _cached("personal_facts", lambda: _load_personal_facts(data_root), ttl=300)
+
+
+def _memory_sections_summary(sections: list[str]) -> str:
+    return "\n\n".join(sections) if sections else "No relevant context found."
+
+
+def _memory_daemon_query_url(message: str, essence_chromadb: str | None) -> str:
+    import urllib.parse
+    params = f"q={urllib.parse.quote(message)}"
+    if essence_chromadb:
+        params += f"&essence_path={urllib.parse.quote(essence_chromadb)}"
+    return f"http://127.0.0.1:8083/query?{params}"
+
+
 def _safe_get_memory_summary(
     message: str,
     conversation_summary: str,
@@ -170,7 +198,7 @@ def _safe_get_memory_summary(
                 user_memory_path=user_memory_path,
                 user_id=user_id,
             )
-            memory_summary = "\n\n".join(sections) if sections else "No relevant context found."
+            memory_summary = _memory_sections_summary(sections)
         except Exception:
             logger.exception("Managed user memory retrieval failed for %s", user_id)
             return _normalize_memory_summary("", fallback_summary)
@@ -178,12 +206,9 @@ def _safe_get_memory_summary(
 
     # Fast path: use the memory daemon (port 8083) if available
     try:
-        import urllib.parse, urllib.request, json as _json
+        import urllib.request, json as _json
         essence_chromadb = _get_active_essence_chromadb_path()
-        params = f"q={urllib.parse.quote(message)}"
-        if essence_chromadb:
-            params += f"&essence_path={urllib.parse.quote(essence_chromadb)}"
-        url = f"http://127.0.0.1:8083/query?{params}"
+        url = _memory_daemon_query_url(message, essence_chromadb)
         req = urllib.request.Request(url, method="GET")
         with urllib.request.urlopen(req, timeout=10) as resp:
             data = _json.loads(resp.read())
@@ -206,7 +231,7 @@ def _safe_get_memory_summary(
             essence_chromadb_path=essence_chromadb,
             user_id=user_id,
         )
-        memory_summary = "\n\n".join(sections) if sections else "No relevant context found."
+        memory_summary = _memory_sections_summary(sections)
     except Exception:
         logger.exception("Jane memory retrieval failed")
         return _normalize_memory_summary("", fallback_summary)
@@ -368,12 +393,8 @@ def build_jane_context(
     vessence_root = Path(VESSENCE_HOME)
     profile = _classify_prompt_profile(message, file_context, intent_level=intent_level, tool_context=tool_context)
     managed_user_config, _user_memory_path, managed_user_block = _managed_user_runtime_context(user_id)
-    current_task_state = _cached("task_state",
-        lambda: _read_json_summary(vessence_root / "configs" / "project_specs" / "current_task_state.json"),
-        ttl=30) if profile.include_task_state else ""
-    personal_facts = {} if managed_user_config else _cached("personal_facts",
-        lambda: _load_personal_facts(data_root),
-        ttl=300)  # 5 min — rarely changes
+    current_task_state = _current_task_state_for_profile(profile, vessence_root)
+    personal_facts = _personal_facts_for_context(managed_user_config, data_root)
     memory_plan = _build_memory_summary_plan(
         message,
         include_memory_summary=profile.include_memory_summary,
@@ -446,14 +467,10 @@ async def build_jane_context_async(
     managed_user_config, _user_memory_path, managed_user_block = _managed_user_runtime_context(user_id)
 
     _status("Loading task state...")
-    current_task_state = _cached("task_state",
-        lambda: _read_json_summary(vessence_root / "configs" / "project_specs" / "current_task_state.json"),
-        ttl=30) if profile.include_task_state else ""
+    current_task_state = _current_task_state_for_profile(profile, vessence_root)
 
     _status("Loading personal facts...")
-    personal_facts = {} if managed_user_config else _cached("personal_facts",
-        lambda: _load_personal_facts(data_root),
-        ttl=300)  # 5 min — rarely changes
+    personal_facts = _personal_facts_for_context(managed_user_config, data_root)
 
     memory_plan = _build_memory_summary_plan(
         message,

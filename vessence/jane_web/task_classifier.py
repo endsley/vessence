@@ -51,6 +51,34 @@ def _has_code_references(text: str) -> bool:
     return bool(re.search(r'`[^`]+`|\.py|\.js|\.ts|\.html|\.css', text))
 
 
+def _has_background_prefix(text: str) -> bool:
+    return bool(re.match(r"^(?:background|bg)\s*:\s*", text, re.IGNORECASE))
+
+
+def _is_followup_starter(text: str) -> bool:
+    return bool(_FOLLOWUP_STARTERS_RE.match(text))
+
+
+def _task_sentence_count(text: str) -> int:
+    return len(re.split(r'[.!]\s+', text))
+
+
+def _is_big_task_by_features(
+    *,
+    big_score: int,
+    sentence_count: int,
+    has_code_refs: bool,
+    text_len: int,
+) -> bool:
+    if big_score >= 2:
+        return True
+    if big_score >= 1 and sentence_count >= 4:
+        return True
+    if big_score >= 1 and has_code_refs and text_len > 200:
+        return True
+    return False
+
+
 def classify_task(message: str) -> str:
     """Return 'big' if the message looks like a multi-step implementation task, else 'quick'.
 
@@ -63,7 +91,7 @@ def classify_task(message: str) -> str:
     stripped = message.strip()
 
     # Explicit user signal: "background:" or "bg:" prefix
-    if re.match(r"^(?:background|bg)\s*:\s*", stripped, re.IGNORECASE):
+    if _has_background_prefix(stripped):
         return "big"
 
     # Too short to be a big task
@@ -75,7 +103,7 @@ def classify_task(message: str) -> str:
     # their antecedent. If the message STARTS with a follow-up cue, keep it
     # on the foreground path so the standing brain has history. (Does NOT
     # match bare "please X" since many big tasks start politely with please.)
-    if _FOLLOWUP_STARTERS_RE.match(stripped):
+    if _is_followup_starter(stripped):
         return "quick"
 
     # Check for quick-query patterns first (questions are rarely big tasks)
@@ -87,14 +115,15 @@ def classify_task(message: str) -> str:
     big_score = _pattern_score(_big_re, stripped)
 
     # Compound signals: long message + multiple sentences + imperative verbs
-    sentence_count = len(re.split(r'[.!]\s+', stripped))
+    sentence_count = _task_sentence_count(stripped)
     has_code_refs = _has_code_references(stripped)
 
-    if big_score >= 2:
-        return "big"
-    if big_score >= 1 and sentence_count >= 4:
-        return "big"
-    if big_score >= 1 and has_code_refs and len(stripped) > 200:
+    if _is_big_task_by_features(
+        big_score=big_score,
+        sentence_count=sentence_count,
+        has_code_refs=has_code_refs,
+        text_len=len(stripped),
+    ):
         return "big"
 
     return "quick"

@@ -75,6 +75,23 @@ def _should_include_conversation_summary(message: str) -> bool:
     return True
 
 
+def _is_file_lookup_request(lowered_message: str, file_context: str | None = None) -> bool:
+    return bool(file_context) or any(
+        marker in lowered_message
+        for marker in ("file", "folder", "document", "pdf", "vault", "path")
+    )
+
+
+def _is_project_work_request(message: str, lowered_message: str) -> bool:
+    return _is_task_related(message) or any(keyword in lowered_message for keyword in AI_CODING_KEYWORDS)
+
+
+def _is_simple_factual_request(lowered_message: str) -> bool:
+    return lowered_message.startswith(SIMPLE_FACTUAL_PREFIXES) or (
+        len(lowered_message) <= 40 and "?" in lowered_message
+    )
+
+
 def _profile_for_intent_level(
     intent_level: str | None,
     *,
@@ -137,7 +154,7 @@ def _profile_for_message_category(
     research_decider=should_offload_research,
 ) -> PromptProfile:
     lowered = _message_lower(message)
-    if file_context or any(marker in lowered for marker in ("file", "folder", "document", "pdf", "vault", "path")):
+    if _is_file_lookup_request(lowered, file_context):
         return PromptProfile(
             name="file_lookup",
             include_user_background=False,
@@ -148,7 +165,7 @@ def _profile_for_message_category(
             include_file_context=True,
             include_code_map=True,
         )
-    if _is_task_related(message) or any(keyword in lowered for keyword in AI_CODING_KEYWORDS):
+    if _is_project_work_request(message, lowered):
         return PromptProfile(
             name="project_work",
             include_user_background=True,
@@ -159,7 +176,7 @@ def _profile_for_message_category(
             include_file_context=bool(file_context),
             include_code_map=True,
         )
-    if lowered.startswith(SIMPLE_FACTUAL_PREFIXES) or (len(lowered) <= 40 and "?" in lowered):
+    if _is_simple_factual_request(lowered):
         return PromptProfile(
             name="factual_personal",
             include_user_background=True,

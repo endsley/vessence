@@ -165,3 +165,28 @@ Auditor crashed: Command '['git', 'commit', '-m', 'auto-audit: add tests for vau
 ## 2026-06-27 01:00 — vault_web/recent_turns.py
 Auditor crashed: Command '['git', 'commit', '-m', 'auto-audit: add tests for vault_web/recent_turns.py', '--no-verify']' returned non-zero exit status 1.
 
+## 2026-07-04 01:00 — jane_web/jane_v2/classes/music_play/handler.py
+Tests failing after 3 fix attempts. Reverted.
+
+Last test output:
+```
+============================= test session starts ==============================
+platform linux -- Python 3.13.7, pytest-9.0.2, pluggy-1.6.0 -- /home/chieh/google-adk-env/adk-venv/bin/python
+cachedir: .pytest_cache
+rootdir: /home/chieh/ambient/vessence
+plugins: asyncio-1.3.0, anyio-4.12.1, typeguard-4.5.1
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 72 items
+
+test_code/auto_audit_handler.py::test_docstring_is_the_weather_stage2_spec PASSED [  1%]
+test_code/auto_audit_handler.py::test_public_handler_contract_is_async_and_stage2_shaped PASSED [  2%]
+test_code/auto_audit_handler.py::test_success_uses_params_slice_cache_and_mocked_llm PASSED [  4%]
+test_code/auto_audit_handler.py::test_unknown_topic_falls_back_to_overview PASSED [  5%]
+test_code/auto_audit_handler.py::test_params_none_defaults_to_overview PASSED [  6%]
+test_code/auto_audit_handler.py::test_non_medford_location_escalates_without_cache_or_llm PASSED [  8%]
+test_code/auto_audit_handler.py::test_research_or_online_phrases_escalate_before_cache_or_llm[can you look up the weather online?] PASSED [  9%]
+test_code/auto_audit_handler.py::test_research_or_online_phrases_escalate_before_cache_or_llm[do a search for the latest on the storm] PASSED [ 11%]
+test_code/auto_audit_handler.py::test_research_or_online_phrases_escalate_before_cache_or_llm[what's causing the haze?] PASSED [ 12%]
+test_code/auto_audit_handler.py::test_r
+```
+

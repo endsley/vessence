@@ -1,5 +1,6 @@
 from agent_skills.ra_research_report_items import (
     collect_report_items,
+    evidence_strength_score,
     evidence_label,
     filter_report_items,
     infer_report_themes,
@@ -7,8 +8,10 @@ from agent_skills.ra_research_report_items import (
     is_strong_evidence_type,
     is_usable_report_item,
     low_value_reason,
+    summary_noise_penalty,
     summary_signal_score,
     summary_text_blob,
+    summary_usefulness_score,
 )
 
 
@@ -28,6 +31,22 @@ def test_summary_text_blob_and_signal_score_rewards_actionable_evidence():
     assert summary_signal_score(summary) == 15
     assert is_strong_evidence_type(summary)
     assert not is_low_value_summary(summary)
+
+
+def test_summary_signal_score_components_preserve_strength_usefulness_and_noise_rules():
+    summary = {
+        "main_findings": ["Finding"],
+        "actionable_implications": ["Action"],
+        "tests_or_monitoring": ["Track CRP."],
+        "food_diet_implications": ["Diet is adjunctive."],
+        "technology_implications": ["Wearable tracking."],
+        "needs_llm_review": True,
+    }
+    text = "needs manual/llm review and does not directly address speculative scenario"
+
+    assert evidence_strength_score("guideline randomized systematic cohort review", "abstract_only") == 19
+    assert summary_usefulness_score(summary) == 7
+    assert summary_noise_penalty(summary, text) == -15
 
 
 def test_low_value_reason_and_score_penalties_match_noisy_evidence_rules():

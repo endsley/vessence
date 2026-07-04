@@ -4,6 +4,10 @@ from agent_skills import ra_research_cron
 from agent_skills.ra_research_codex_prompt import (
     CODEX_AUTOMATION_SYSTEM_PROMPT,
     CODEX_PROMPT_PREFIX,
+    codex_model_policy,
+    codex_required_output_contract,
+    codex_safety_boundary,
+    codex_synthesis_instructions,
     codex_synthesis_payload,
     codex_synthesis_prompt,
     non_json_codex_result,
@@ -42,6 +46,19 @@ def test_codex_synthesis_payload_preserves_contract_shape():
     assert payload["all_cached_source_summaries"][0]["source_id"] == "s1"
     assert payload["required_output"]["format"] == "strict JSON object only"
     assert "useful_report_markdown" in payload["required_output"]["keys"]
+
+
+def test_codex_payload_contract_helpers_preserve_safety_policy_and_required_keys():
+    assert "not giving medical advice" in codex_safety_boundary()
+    assert "frontier" in codex_model_policy("frontier", "codex")
+    assert "codex" in codex_model_policy("frontier", "codex")
+    instructions = codex_synthesis_instructions()
+    assert instructions[0].startswith("Re-read everything found so far")
+    assert instructions[-1].startswith("Do not make the report a source dump")
+    contract = codex_required_output_contract()
+    assert contract["format"] == "strict JSON object only"
+    assert "recommendation_scheme_markdown" in contract["keys"]
+    assert contract["keys"]["discoveries"] == ["high-signal discoveries or changed beliefs this run"]
 
 
 def test_codex_synthesis_prompt_preserves_prefix_and_non_ascii_json():

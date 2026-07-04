@@ -5,6 +5,8 @@ from agent_skills.ambient_heartbeat_rules import (
     apply_research_note_to_spec,
     automation_synthesis_prompt,
     heartbeat_discord_summary,
+    heartbeat_should_run,
+    heartbeat_sleep_window,
     implementation_prompt,
     implementation_ready_tasks_from_text,
     is_cache_stale,
@@ -18,6 +20,8 @@ def test_ambient_heartbeat_exposes_rule_helpers():
     assert ambient_heartbeat._is_cache_stale is is_cache_stale
     assert ambient_heartbeat._apply_research_note_to_spec is apply_research_note_to_spec
     assert ambient_heartbeat._automation_synthesis_prompt is automation_synthesis_prompt
+    assert ambient_heartbeat._heartbeat_sleep_window is heartbeat_sleep_window
+    assert ambient_heartbeat._heartbeat_should_run is heartbeat_should_run
     assert ambient_heartbeat._implementation_prompt is implementation_prompt
     assert ambient_heartbeat._unanswered_open_questions is unanswered_open_questions
     assert ambient_heartbeat._phase1_unchecked_tasks is phase1_unchecked_tasks
@@ -40,6 +44,16 @@ def test_is_cache_stale_preserves_valid_cache_behavior():
         days=7,
         now=now,
     )
+
+
+def test_heartbeat_sleep_window_and_idle_policy_preserve_hour_bounds():
+    assert heartbeat_sleep_window(datetime.datetime(2026, 7, 2, 1, 0))
+    assert heartbeat_sleep_window(datetime.datetime(2026, 7, 2, 6, 59))
+    assert not heartbeat_sleep_window(datetime.datetime(2026, 7, 2, 7, 0))
+    assert not heartbeat_sleep_window(datetime.datetime(2026, 7, 2, 0, 59))
+    assert heartbeat_should_run(False, datetime.datetime(2026, 7, 2, 12, 0))
+    assert not heartbeat_should_run(True, datetime.datetime(2026, 7, 2, 12, 0))
+    assert heartbeat_should_run(True, datetime.datetime(2026, 7, 2, 2, 0))
 
 
 def test_apply_research_note_to_spec_inserts_skips_duplicates_and_appends():

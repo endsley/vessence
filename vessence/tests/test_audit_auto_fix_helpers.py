@@ -9,12 +9,18 @@ from agent_skills.audit_auto_fix_helpers import (
     FORBIDDEN_PATTERNS,
     SAFE_EXTENSIONS,
     _fixed_result_row,
+    _fixed_results_section_lines,
     _fix_result_file_name,
     _not_applicable_result_line,
+    _not_applicable_results_section_lines,
     _reverted_result_line,
+    _reverted_results_section_lines,
     _skipped_result_row,
+    _skipped_results_section_lines,
     audit_report_candidates,
+    circuit_breaker_skip_results,
     extract_json_array_text,
+    fix_content_preflight_result,
     fix_issue_preflight_result,
     generate_fix_report_markdown,
     initial_fix_result,
@@ -35,6 +41,8 @@ def test_audit_auto_fixer_exposes_policy_constants_and_helpers():
     assert audit_auto_fixer._todays_audit_report is todays_audit_report
     assert audit_auto_fixer._initial_fix_result is initial_fix_result
     assert audit_auto_fixer._fix_issue_preflight_result is fix_issue_preflight_result
+    assert audit_auto_fixer._fix_content_preflight_result is fix_content_preflight_result
+    assert audit_auto_fixer._circuit_breaker_skip_results is circuit_breaker_skip_results
 
 
 def test_build_audit_fix_analysis_prompt_preserves_safety_contract():
@@ -139,6 +147,24 @@ def test_fix_issue_preflight_result_returns_terminal_validation_results():
     ) is None
 
 
+def test_fix_content_preflight_result_preserves_not_applicable_and_dry_run_statuses():
+    issue = {
+        "search_text": "old text",
+        "replacement_text": "new text",
+        "fix_description": "Replace old text",
+    }
+
+    assert fix_content_preflight_result(issue, "already new", dry_run=False) == {
+        "status": "not_applicable",
+        "reason": "Search text not found in file (may already be fixed)",
+    }
+    assert fix_content_preflight_result(issue, "old text", dry_run=True) == {
+        "status": "would_fix",
+        "reason": "Replace old text",
+    }
+    assert fix_content_preflight_result(issue, "old text", dry_run=False) is None
+
+
 def test_audit_report_discovery_ignores_auto_fix_reports_and_prefers_latest(tmp_path):
     assert audit_report_candidates(tmp_path / "missing") == []
 
@@ -175,6 +201,35 @@ def test_partition_and_count_fix_results():
     }
 
 
+def test_circuit_breaker_skip_results_preserve_remaining_issue_shape():
+    issues = [
+        {"issue": "already processed", "file": "/repo/a.py", "category": "code_fix"},
+        {"issue": "skip me", "file": "/repo/b.py", "category": "doc_update"},
+        {"file": "/repo/c.py"},
+    ]
+
+    assert circuit_breaker_skip_results(
+        issues,
+        result_count=1,
+        max_fixes_per_run=10,
+    ) == [
+        {
+            "issue": "skip me",
+            "file": "/repo/b.py",
+            "category": "doc_update",
+            "status": "skipped",
+            "reason": "Circuit breaker: max 10 fixes per run",
+        },
+        {
+            "issue": "Unknown",
+            "file": "/repo/c.py",
+            "category": "unknown",
+            "status": "skipped",
+            "reason": "Circuit breaker: max 10 fixes per run",
+        },
+    ]
+
+
 def test_fix_report_result_line_helpers_preserve_truncation_and_filename_policy():
     fixed = {
         "issue": "x" * 90,
@@ -191,6 +246,51 @@ def test_fix_report_result_line_helpers_preserve_truncation_and_filename_policy(
     assert _skipped_result_row(skipped) == "| Needs review | Human judgment |"
     assert _not_applicable_result_line(not_applicable) == f"- {'a' * 100}"
     assert _reverted_result_line(reverted) == f"- **{'b' * 80}** — Fix introduced syntax error"
+
+
+def test_fix_report_section_helpers_preserve_tables_and_empty_sections():
+    fixed = {
+        "issue": "Fix me",
+        "file": "/repo/configs/README.md",
+        "reason": "Updated wording",
+    }
+    skipped = {"issue": "Needs review", "reason": "Human judgment"}
+    not_applicable = {"issue": "Already done"}
+    reverted = {"issue": "Syntax broke", "reason": "Fix introduced syntax error"}
+
+    assert _fixed_results_section_lines([fixed], dry_run=True) == [
+        "## Would Fix (1)",
+        "",
+        "| Issue | File | Fix Applied |",
+        "|-------|------|-------------|",
+        "| Fix me | `README.md` | Updated wording |",
+        "",
+    ]
+    assert _fixed_results_section_lines([fixed], dry_run=False)[0] == "## Fixed (1)"
+    assert _fixed_results_section_lines([], dry_run=False) == []
+    assert _skipped_results_section_lines([skipped]) == [
+        "## Skipped (1)",
+        "",
+        "| Issue | Reason |",
+        "|-------|--------|",
+        "| Needs review | Human judgment |",
+        "",
+    ]
+    assert _skipped_results_section_lines([]) == []
+    assert _not_applicable_results_section_lines([not_applicable]) == [
+        "## Already Fixed / Not Applicable (1)",
+        "",
+        "- Already done",
+        "",
+    ]
+    assert _not_applicable_results_section_lines([]) == []
+    assert _reverted_results_section_lines([reverted]) == [
+        "## Reverted (1)",
+        "",
+        "- **Syntax broke** — Fix introduced syntax error",
+        "",
+    ]
+    assert _reverted_results_section_lines([]) == []
 
 
 def test_generate_fix_report_markdown_preserves_sections_and_truncation():

@@ -146,12 +146,43 @@ def _playlist_name_norm(playlist: dict[str, Any]) -> str:
     return re.sub(r"\s+", " ", playlist.get("name", "").lower())
 
 
+def _exact_playlist_match(q_core: str, playlists: list[dict[str, Any]]) -> dict[str, Any] | None:
+    for playlist in playlists:
+        if _playlist_name_norm(playlist) == q_core:
+            return playlist
+    return None
+
+
+def _substring_playlist_match(q_core: str, playlists: list[dict[str, Any]]) -> dict[str, Any] | None:
+    for playlist in playlists:
+        name_norm = _playlist_name_norm(playlist)
+        if not name_norm:
+            continue
+        if q_core in name_norm or name_norm in q_core:
+            return playlist
+    return None
+
+
 def _token_set_ratio(left: str, right: str) -> int | None:
     try:
         from rapidfuzz import fuzz
     except ImportError:
         return None
     return int(fuzz.token_set_ratio(left, right))
+
+
+def _scored_playlist_matches(
+    q_core: str,
+    playlists: list[dict[str, Any]],
+    score_fn: Callable[[str, str], int | float | None],
+) -> list[tuple[int | float, dict[str, Any]]]:
+    scored = [
+        (score_fn(q_core, _playlist_name_norm(playlist)), playlist)
+        for playlist in playlists
+        if playlist.get("name", "")
+    ]
+    scored = [(score, playlist) for score, playlist in scored if score is not None]
+    return sorted(scored, key=lambda item: item[0], reverse=True)
 
 
 def find_matching_playlist(
@@ -164,23 +195,14 @@ def find_matching_playlist(
     if not q_core:
         return None
     real = list(playlists)
-    for playlist in real:
-        if _playlist_name_norm(playlist) == q_core:
-            return playlist
-    for playlist in real:
-        name_norm = _playlist_name_norm(playlist)
-        if not name_norm:
-            continue
-        if q_core in name_norm or name_norm in q_core:
-            return playlist
+    exact = _exact_playlist_match(q_core, real)
+    if exact is not None:
+        return exact
+    substring = _substring_playlist_match(q_core, real)
+    if substring is not None:
+        return substring
     score_fn = scorer or _token_set_ratio
-    scored = [
-        (score_fn(q_core, _playlist_name_norm(playlist)), playlist)
-        for playlist in real
-        if playlist.get("name", "")
-    ]
-    scored = [(score, playlist) for score, playlist in scored if score is not None]
-    scored.sort(key=lambda item: item[0], reverse=True)
+    scored = _scored_playlist_matches(q_core, real, score_fn)
     if scored and scored[0][0] >= threshold:
         return scored[0][1]
     return None
@@ -194,42 +216,65 @@ def _filename_lower(path: str) -> str:
     return path.lower().split("/")[-1].lower()
 
 
+def _files_with_query_in_filename(query: str, all_files: list[str]) -> list[str]:
+    return [path for path in all_files if query in _filename_lower(path)]
+
+
+def _files_with_all_words(words: list[str], all_files: list[str]) -> list[str]:
+    return [
+        path for path in all_files
+        if all(word in _filename_lower(path) for word in words)
+    ]
+
+
+def _files_with_any_word(words: list[str], all_files: list[str]) -> list[str]:
+    return [
+        path for path in all_files
+        if any(word in _filename_lower(path) for word in words)
+    ]
+
+
+def _scored_music_files(
+    query: str,
+    all_files: list[str],
+    score_fn: Callable[[str, str], int | float | None],
+    *,
+    threshold: int = 60,
+    limit: int = 10,
+) -> list[str]:
+    scored = []
+    for path in all_files:
+        filename = Path(path).stem.lower()
+        score = score_fn(query, filename)
+        if score is not None and score >= threshold:
+            scored.append((score, path))
+    scored.sort(key=lambda item: item[0], reverse=True)
+    return [path for _, path in scored[:limit]]
+
+
 def select_music_files(
     query: str,
     all_files: list[str],
     *,
     scorer: Callable[[str, str], int | float | None] | None = None,
 ) -> list[str]:
-    selected = [path for path in all_files if query in _filename_lower(path)]
+    selected = _files_with_query_in_filename(query, all_files)
     if selected:
         return selected
 
     words = content_words(query)
     if words:
-        selected = [
-            path for path in all_files
-            if all(word in _filename_lower(path) for word in words)
-        ]
+        selected = _files_with_all_words(words, all_files)
     if selected:
         return selected
 
     if words:
-        selected = [
-            path for path in all_files
-            if any(word in _filename_lower(path) for word in words)
-        ]
+        selected = _files_with_any_word(words, all_files)
     if selected:
         return selected
 
     score_fn = scorer or _token_set_ratio
-    scored = []
-    for path in all_files:
-        filename = Path(path).stem.lower()
-        score = score_fn(query, filename)
-        if score is not None and score >= 60:
-            scored.append((score, path))
-    scored.sort(key=lambda item: item[0], reverse=True)
-    return [path for _, path in scored[:10]]
+    return _scored_music_files(query, all_files, score_fn)
 
 
 def playlist_name_for_query(parts: MusicQueryParts) -> str:

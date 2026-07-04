@@ -25,6 +25,19 @@ def is_cache_stale(
     return (current - last).days >= days
 
 
+def heartbeat_sleep_window(
+    now: datetime.datetime,
+    *,
+    start_hour: int = 1,
+    end_hour: int = 7,
+) -> bool:
+    return start_hour <= now.hour < end_hour
+
+
+def heartbeat_should_run(user_active: bool, now: datetime.datetime) -> bool:
+    return not user_active or heartbeat_sleep_window(now)
+
+
 def research_note_block(note: str, date_str: str) -> str:
     return (
         f"\n\n> **🔬 Research Note ({date_str} — auto):**\n"

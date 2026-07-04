@@ -20,16 +20,23 @@ from jane_web.jane_v2.classes.weather.slices import (
     NEUTRAL_DAY_REFS,
     VALID_TOPICS,
     WEEKDAYS,
+    air_quality_slice,
+    current_weather_slice,
     day_from_followup,
     day_reference,
     ensure_day_reference,
+    forecast_slice,
     is_multi_day_spec,
     normalize_day,
     precipitation_day_payload,
     precipitation_entries,
+    precipitation_slice,
+    pollen_slice,
     slice_for,
+    overview_weather_slice,
     weekly_forecast_day_payload,
     without_debug_fields,
+    wind_slice,
 )
 from jane_web.jane_v2.ollama_client import post_local_llm_response
 
@@ -217,7 +224,34 @@ def test_weather_multi_day_and_slim_day_payload_helpers() -> None:
 def test_slice_for_builds_minimal_forecast_precipitation_and_overview_payloads() -> None:
     data = _weather_data()
 
+    assert pollen_slice(data["pollen"]) == {"topic": "pollen", "pollen": {"tree": "low"}}
+    assert pollen_slice(None) is None
+    assert air_quality_slice(data["air_quality"]) == {
+        "topic": "air_quality",
+        "air_quality": {"us_aqi": 35, "aqi": 40},
+    }
+    assert wind_slice(data["forecast"][1], data["current"]) == {
+        "topic": "wind",
+        "day": "Friday",
+        "wind": {"speed": 6},
+    }
+    assert wind_slice(None, {"wind": {"speed": 5}}) == {
+        "topic": "wind",
+        "current_wind": {"speed": 5},
+    }
     assert slice_for("forecast", "2026-07-03", data) == {
+        "topic": "day_forecast",
+        "day": {
+            "date": "2026-07-03",
+            "weekday": "Friday",
+            "high": 81,
+            "low": 61,
+            "condition": "Friday clear",
+            "precipitation": {"chance": 10},
+            "wind": {"speed": 6},
+        },
+    }
+    assert forecast_slice(data["forecast"][1], data["forecast"], multi_day=False) == {
         "topic": "day_forecast",
         "day": {
             "date": "2026-07-03",
@@ -236,6 +270,7 @@ def test_slice_for_builds_minimal_forecast_precipitation_and_overview_payloads()
             for entry in data["forecast"][:7]
         ],
     }
+    assert forecast_slice(None, data["forecast"], multi_day=True) == slice_for("forecast", "this_week", data)
     assert slice_for("precipitation", None, data) == {
         "topic": "precipitation",
         "days": [
@@ -248,6 +283,7 @@ def test_slice_for_builds_minimal_forecast_precipitation_and_overview_payloads()
             for entry in data["forecast"][:3]
         ],
     }
+    assert precipitation_slice(None, data["forecast"], multi_day=False) == slice_for("precipitation", None, data)
     assert slice_for("overview", None, data) == {
         "topic": "overview",
         "current": {"temperature": 75, "condition": "clear"},
@@ -262,6 +298,22 @@ def test_slice_for_builds_minimal_forecast_precipitation_and_overview_payloads()
         },
         "air_quality_aqi": 35,
     }
+    assert current_weather_slice(data["current"], data["forecast"]) == {
+        "topic": "current",
+        "current": {"temperature": 75, "condition": "clear"},
+        "today": {
+            "date": "2026-07-02",
+            "weekday": "Thursday",
+            "high": 80,
+            "low": 60,
+            "condition": "Thursday clear",
+            "precipitation": {"chance": 0},
+            "wind": {"speed": 5},
+        },
+    }
+    assert overview_weather_slice(data["current"], data["forecast"], data["air_quality"]) == (
+        slice_for("overview", None, data)
+    )
     assert slice_for("pollen", None, {**data, "pollen": None}) is None
 
 

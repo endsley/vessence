@@ -1,4 +1,10 @@
-from memory.v1.janitor_report import janitor_history_entry, janitor_report_payload
+from memory.v1.janitor_report import (
+    forgettable_purged_count,
+    janitor_history_entry,
+    janitor_report_payload,
+    topics_processed_payload,
+    topics_with_merges,
+)
 
 
 def _common():
@@ -17,6 +23,25 @@ def _common():
         "exact_duplicate_deleted": {"user": {"deleted": 2}},
         "normalization_result": {"rewritten": 1},
     }
+
+
+def test_janitor_report_derived_field_helpers_preserve_shapes():
+    values = _common()
+
+    assert forgettable_purged_count(2, 4) == 6
+    assert topics_processed_payload(
+        user_collection_name="user_collection",
+        user_topics={"alpha": [], "beta": []},
+        long_term_collection_name="long_collection",
+        long_term_topics={"decision": []},
+    ) == {
+        "user_collection": ["alpha", "beta"],
+        "long_collection": ["decision"],
+    }
+    assert sorted(topics_with_merges(values["merge_log"])) == [
+        "long_term::Decision",
+        "user_memories::Project",
+    ]
 
 
 def test_janitor_report_payload_preserves_existing_report_shape():

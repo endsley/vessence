@@ -244,3 +244,36 @@ def test_process_message_dry_run_alert_does_not_mutate_state_or_trash():
     assert outcome == "would_alert"
     assert service.trashed == []
     assert state == {"alerted_message_ids": []}
+
+
+def test_count_nutricost_messages_uses_threshold_state_and_failure_outcome():
+    day = dt.date(2026, 6, 29)
+    state = {"alerted_message_ids": []}
+    service = _Service({
+        "low-deal": _nutricost_message(
+            dt.datetime(2026, 6, 29, 9, 0, tzinfo=NY),
+            "15% off",
+            snippet="15% off today",
+        ),
+        "high-deal": _nutricost_message(
+            dt.datetime(2026, 6, 29, 9, 0, tzinfo=NY),
+            "40% off",
+            snippet="40% off https://www.nutricost.com/products/creatine",
+        ),
+    })
+    failures = []
+
+    counts = nutricost_deal_monitor.count_nutricost_messages(
+        service,
+        ["low-deal", "high-deal", "missing"],
+        day,
+        threshold=30,
+        dry_run=True,
+        state=state,
+        log_failure=lambda message_id, exc: failures.append((message_id, type(exc).__name__)),
+    )
+
+    assert counts == {"would_trash": 1, "would_alert": 1, "failed": 1}
+    assert failures == [("missing", "KeyError")]
+    assert service.trashed == []
+    assert state == {"alerted_message_ids": []}

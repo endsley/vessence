@@ -224,35 +224,43 @@ _TOOL_RESULT_OPEN = "[TOOL_RESULT:"
 _TOOL_RESULT_CLOSE = "]"
 
 
+def _leading_tool_result_marker(user_message: str) -> tuple[dict, int] | None:
+    stripped = user_message.lstrip()
+    if not stripped.startswith(_TOOL_RESULT_OPEN):
+        return None
+    json_start = len(user_message) - len(stripped) + len(_TOOL_RESULT_OPEN)
+    while json_start < len(user_message) and user_message[json_start] in " \t":
+        json_start += 1
+    if json_start >= len(user_message) or user_message[json_start] != "{":
+        return None
+    json_end = find_json_object_end(user_message, json_start)
+    if json_end is None:
+        return None
+    marker_end = json_end
+    while marker_end < len(user_message) and user_message[marker_end] in " \t":
+        marker_end += 1
+    if marker_end >= len(user_message) or user_message[marker_end] != _TOOL_RESULT_CLOSE:
+        return None
+    try:
+        payload = json.loads(user_message[json_start:json_end])
+    except Exception:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    return payload, marker_end + len(_TOOL_RESULT_CLOSE)
+
+
 def extract_tool_results(user_message: str) -> tuple[str, list[dict]]:
     """Strip leading [TOOL_RESULT:{json}] markers from a user message."""
     results: list[dict] = []
     cleaned = user_message
     while True:
-        stripped = cleaned.lstrip()
-        if not stripped.startswith(_TOOL_RESULT_OPEN):
+        marker = _leading_tool_result_marker(cleaned)
+        if marker is None:
             break
-        json_start = len(cleaned) - len(stripped) + len(_TOOL_RESULT_OPEN)
-        while json_start < len(cleaned) and cleaned[json_start] in " \t":
-            json_start += 1
-        if json_start >= len(cleaned) or cleaned[json_start] != "{":
-            break
-        json_end = find_json_object_end(cleaned, json_start)
-        if json_end is None:
-            break
-        j = json_end
-        while j < len(cleaned) and cleaned[j] in " \t":
-            j += 1
-        if j >= len(cleaned) or cleaned[j] != _TOOL_RESULT_CLOSE:
-            break
-        try:
-            payload = json.loads(cleaned[json_start:json_end])
-        except Exception:
-            break
-        if not isinstance(payload, dict):
-            break
+        payload, marker_end = marker
         results.append(payload)
-        cleaned = cleaned[j + 1 :].lstrip()
+        cleaned = cleaned[marker_end:].lstrip()
     return cleaned, results
 
 

@@ -112,6 +112,62 @@ def precipitation_entries(day_entry: dict | None, forecast: list[dict], *, multi
     return forecast[:3]
 
 
+def pollen_slice(pollen: object) -> dict | None:
+    if not pollen:
+        return None
+    return {"topic": "pollen", "pollen": pollen}
+
+
+def air_quality_slice(air_quality: dict) -> dict:
+    return {"topic": "air_quality", "air_quality": air_quality}
+
+
+def wind_slice(day_entry: dict | None, current: dict) -> dict:
+    if day_entry:
+        return {
+            "topic": "wind",
+            "day": day_entry.get("weekday"),
+            "wind": day_entry.get("wind"),
+        }
+    return {"topic": "wind", "current_wind": current.get("wind")}
+
+
+def precipitation_slice(day_entry: dict | None, forecast: list[dict], *, multi_day: bool) -> dict:
+    days = precipitation_entries(day_entry, forecast, multi_day=multi_day)
+    slim = [precipitation_day_payload(entry) for entry in days]
+    return {"topic": "precipitation", "days": slim}
+
+
+def forecast_slice(day_entry: dict | None, forecast: list[dict], *, multi_day: bool) -> dict:
+    if multi_day:
+        days = forecast[:7]
+        slim = [weekly_forecast_day_payload(entry) for entry in days]
+        return {"topic": "weekly_forecast", "days": slim}
+    if day_entry:
+        return {"topic": "day_forecast", "day": without_debug_fields(day_entry)}
+    return {
+        "topic": "day_forecast",
+        "day": without_debug_fields(forecast[0]) if forecast else {},
+    }
+
+
+def current_weather_slice(current: dict, forecast: list[dict]) -> dict:
+    return {
+        "topic": "current",
+        "current": without_debug_fields(current),
+        "today": without_debug_fields(forecast[0]) if forecast else {},
+    }
+
+
+def overview_weather_slice(current: dict, forecast: list[dict], air_quality: dict) -> dict:
+    return {
+        "topic": "overview",
+        "current": without_debug_fields(current),
+        "today": without_debug_fields(forecast[0]) if forecast else {},
+        "air_quality_aqi": air_quality.get("us_aqi") or air_quality.get("aqi"),
+    }
+
+
 def slice_for(topic: str, day: str | None, data: dict) -> dict | None:
     """Build the smallest dict that answers the topic/day combo."""
     forecast = data.get("forecast") or []
@@ -123,52 +179,24 @@ def slice_for(topic: str, day: str | None, data: dict) -> dict | None:
     multi_day = is_multi_day_spec(day)
 
     if topic == "pollen":
-        if not pollen:
-            return None
-        return {"topic": "pollen", "pollen": pollen}
+        return pollen_slice(pollen)
 
     if topic == "air_quality":
-        return {"topic": "air_quality", "air_quality": air}
+        return air_quality_slice(air)
 
     if topic == "wind":
-        if day_entry:
-            return {
-                "topic": "wind",
-                "day": day_entry.get("weekday"),
-                "wind": day_entry.get("wind"),
-            }
-        return {"topic": "wind", "current_wind": current.get("wind")}
+        return wind_slice(day_entry, current)
 
     if topic == "precipitation":
-        days = precipitation_entries(day_entry, forecast, multi_day=multi_day)
-        slim = [precipitation_day_payload(entry) for entry in days]
-        return {"topic": "precipitation", "days": slim}
+        return precipitation_slice(day_entry, forecast, multi_day=multi_day)
 
     if topic == "forecast":
-        if multi_day:
-            days = forecast[:7]
-            slim = [weekly_forecast_day_payload(entry) for entry in days]
-            return {"topic": "weekly_forecast", "days": slim}
-        if day_entry:
-            return {"topic": "day_forecast", "day": without_debug_fields(day_entry)}
-        return {
-            "topic": "day_forecast",
-            "day": without_debug_fields(forecast[0]) if forecast else {},
-        }
+        return forecast_slice(day_entry, forecast, multi_day=multi_day)
 
     if topic == "current":
-        return {
-            "topic": "current",
-            "current": without_debug_fields(current),
-            "today": without_debug_fields(forecast[0]) if forecast else {},
-        }
+        return current_weather_slice(current, forecast)
 
-    return {
-        "topic": "overview",
-        "current": without_debug_fields(current),
-        "today": without_debug_fields(forecast[0]) if forecast else {},
-        "air_quality_aqi": air.get("us_aqi") or air.get("aqi"),
-    }
+    return overview_weather_slice(current, forecast, air)
 
 
 def day_reference(slice_obj: dict, today: date | None = None) -> str:

@@ -8,7 +8,10 @@ from agent_skills.pipeline_audit_helpers import (
     build_pipeline_audit_report_markdown,
     classification_failure_table_lines,
     count_section_lines,
+    infer_pipeline_stage,
     parse_judge_response,
+    pipeline_response_text,
+    pipeline_tool_call_name,
     recent_prompt_rows_from_jsonl,
     response_failure_lines,
     strip_system_context,
@@ -72,6 +75,20 @@ def test_summarize_pipeline_events_preserves_ack_tools_stage_and_response_rules(
     assert summary["tool_calls"] == ["weather", "calendar"]
     assert summary["response"] == ("final" * 200)[:500]
     assert summary["events"] is events
+
+
+def test_pipeline_event_summary_helpers_preserve_tool_response_and_stage_rules():
+    assert pipeline_tool_call_name('{"tool": "weather"}') == "weather"
+    assert pipeline_tool_call_name({"tool": "calendar"}) == "calendar"
+    assert pipeline_tool_call_name({"args": {}}) == "?"
+    assert pipeline_tool_call_name("{bad json") is None
+    assert pipeline_response_text("delta", "partial", "") == "partial"
+    assert pipeline_response_text("done", "final", "partial") == "final"
+    assert pipeline_response_text("done", {"text": "ignored"}, "partial") == "partial"
+    assert infer_pipeline_stage([{"type": "start"}], tool_calls=[], response_text="") == "stage3"
+    assert infer_pipeline_stage([], tool_calls=["weather"], response_text="") == "stage2"
+    assert infer_pipeline_stage([], tool_calls=[], response_text="answer") == "stage2"
+    assert infer_pipeline_stage([], tool_calls=[], response_text="") is None
 
 
 def test_summarize_pipeline_events_uses_start_as_stage3_fallback():

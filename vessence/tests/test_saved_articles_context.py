@@ -23,6 +23,49 @@ def test_score_saved_article_weights_title_and_metadata_above_body():
     assert saved.score_saved_article({"remission", "monitoring"}, entry, article) == 5
 
 
+def test_saved_article_candidate_helpers_load_rank_and_budget_sections(tmp_path):
+    index = tmp_path / "saved.json"
+    index.write_text(
+        json.dumps(
+            {
+                "a1": {
+                    "article_id": "a1",
+                    "category": "Health",
+                    "saved_at": "2026-07-02T10:00:00",
+                    "article": {"title": "RA remission", "brief_summary": "Track CDAI."},
+                },
+                "a2": {
+                    "article_id": "a2",
+                    "category": "Sports",
+                    "saved_at": "2026-07-02T11:00:00",
+                    "article": {"title": "Soccer", "brief_summary": "Scores."},
+                },
+                "bad": "not a dict",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = saved.load_saved_articles_index(index)
+    candidates = saved.saved_article_candidates(loaded, {"remission"})
+    ranked = saved.ranked_saved_article_candidates(candidates, {"remission"})
+    sections = saved.saved_article_context_sections(ranked, max_chars=900, limit=3)
+
+    assert saved.load_saved_articles_index(tmp_path / "missing.json") == {}
+    invalid = tmp_path / "invalid.json"
+    invalid.write_text("[1, 2]", encoding="utf-8")
+    assert saved.load_saved_articles_index(invalid) == {}
+    assert len(candidates) == 2
+    assert ranked[0][2]["article_id"] == "a1"
+    assert [candidate[2]["article_id"] for candidate in ranked] == ["a1"]
+    assert sections == [
+        "Title: RA remission\n"
+        "Category: Health\n"
+        "Saved at: 2026-07-02T10:00:00\n"
+        "Context excerpt: Track CDAI."
+    ]
+
+
 def test_build_saved_articles_context_selects_relevant_inline_article(tmp_path, monkeypatch):
     data_home = tmp_path / "data"
     index_dir = data_home / "briefing_saved"

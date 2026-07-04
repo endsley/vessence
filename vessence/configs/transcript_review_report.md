@@ -1,126 +1,72 @@
-# Transcript Quality Review — 2026-07-02
+# Transcript Quality Review — 2026-07-03
 
-Generated: 2026-07-03 01:50:18
+Generated: 2026-07-04 01:46:52
 
 ## Issue 1 [LOW]
 
-**Turn:** 2026-07-02 01:15:27
+**Turn:** 2026-07-03 01:26:12
 **User said:** right now, you are using the same codex process for each prompt instead of spawning
 
-**Problem:** Stage 1 emitted an unsupported classifier label before falling back to Stage 3
+**Problem:** No correlated Stage 1/2/3 or Android telemetry exists for this turn, so the turn cannot be audited.
 
-**Root cause:** The v3 classifier accepted qwen free-form output, got 'force stage3', failed registry validation, and demoted it to others:Low. The final Stage 3 route was acceptable, but alias handling for explicit escalation labels is broken.
+**Root cause:** The user turn is tagged audit-178305 at 01:26, but the provided server logs begin at 23:41 and contain unrelated repeated canned prompts; no pipeline lines include the audit id or the user's text.
 
-**Suggested fix:** In intent_classifier/v3/classifier.py, canonicalize aliases such as 'force stage3', 'delegate opus', and 'DELEGATE_OPUS' before registry validation, then add a regression test for explicit Stage 3/meta requests.
+**Suggested fix:** Add audit_id/session_id and normalized user text to every resolver, stage1_classifier, stage2_dispatcher, Stage 3, and Android diagnostic log line; export logs from the actual user-turn time window.
 
 **Log evidence:**
 ```
-2026-07-02 01:15:22 WARNING [intent_classifier.v3.classifier] v3: qwen returned unknown class 'force stage3' → others
+[2026-07-03 01:26:12] (audit-178305) right now, you are using the same codex process for each prompt instead of spawning a new one each time right for the stage 3 brain?
 ```
 ```
-2026-07-02 01:15:22 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (1173ms) params={}
-```
-```
-2026-07-02 01:15:25 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=132 sid_override=True class_protocol=n/a
+2026-07-03 23:41:29 WARNING [jane_web.jane_v3.pipeline] jane_v3: no_stage3 class 'clinic schedules info' — handler returned invalid shape, returning safe deflection
 ```
 
 ---
 
-## Issue 2 [MEDIUM]
+## Issue 2 [LOW]
 
-**Turn:** 2026-07-02 01:21:33
-**User said:** currently, the waterlily site is web only meant for browsers on laptops and
+**Turn:** 2026-07-03 01:31:12
+**User said:** use the source code as your guide
 
-**Problem:** Stage 1 was slow and rejected a class label because of space/underscore normalization
+**Problem:** Follow-up behavior cannot be verified because there is no resolver or Stage 3 log tied to this turn.
 
-**Root cause:** qwen returned 'web automation', but the registered class is named 'web_automation'. The exact-match validator demoted it to others:Low after a 19.5s classifier call. The final escalation was usable, but the classifier path added noticeable delay.
+**Root cause:** This is a contextual follow-up to the previous Stage 3 question, but the available resolver logs are unrelated and unkeyed; they show generic follow-up routing problems, not this audit-178305 turn.
 
-**Suggested fix:** Normalize class IDs consistently in intent_classifier/v3/classifier.py by treating spaces and underscores equivalently, or separate display labels from canonical IDs. Add a fast bypass for long code/project prompts that should obviously go to Stage 3.
+**Suggested fix:** Log pending_action state, resolver decision, selected handler, and Stage 3 conversation id with the same audit_id for each user turn.
 
 **Log evidence:**
 ```
-2026-07-02 01:21:32 WARNING [intent_classifier.v3.classifier] v3: qwen returned unknown class 'web automation' → others
+[2026-07-03 01:31:12] (audit-178305) use the source code as your guide
 ```
 ```
-2026-07-02 01:21:32 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (19465ms) params={}
+2026-07-03 23:41:29 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: resolver → followup (handler=- awaiting=-)
 ```
 ```
-2026-07-02 01:21:33 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=750 sid_override=True class_protocol=n/a
+2026-07-03 23:41:29 WARNING [jane_web.jane_v3.pipeline] jane_v3: resolver followup target '' missing handler → Stage 3
 ```
 
 ---
 
 ## Issue 3 [LOW]
 
-**Turn:** 2026-07-02 01:21:33
-**User said:** currently, the waterlily site is web only meant for browsers on laptops and
+**Turn:** 2026-07-03 01:34:13
+**User said:** please familiarize yourself with the waterlily project
 
-**Problem:** Short-term memory extraction failed during the Stage 3 workflow
+**Problem:** Stage 3 quality cannot be evaluated because the logs do not include the Stage 3 request, response, tool use, or source-inspection evidence for this turn.
 
-**Root cause:** The memory extractor called the CLI LLM fallback chain; the primary CLI timed out, Gemini timed out, and Claude failed with 401 invalid credentials. The turn could still complete, but memory/writeback for future context was skipped.
+**Root cause:** The transcript contains the user request, but the server log excerpt only has repeated unrelated classifier/handler/test lines and no matching Stage 3 output for audit-178305.
 
-**Suggested fix:** Make memory/v1/short_term_extractor.py use the configured available brain/provider, or health-check CLI providers at startup and disable unavailable fallbacks instead of retrying timed-out/auth-broken CLIs.
-
-**Log evidence:**
-```
-2026-07-02 01:21:53 WARNING [agent_skills.claude_cli_llm] Primary LLM failed: CLI timed out after 45s... Attempting fallback.
-```
-```
-2026-07-02 01:22:38 WARNING [agent_skills.claude_cli_llm] Fallback to gemini failed: CLI timed out after 45s...
-```
-```
-2026-07-02 01:22:45 WARNING [agent_skills.claude_cli_llm] Fallback to claude failed: CLI (claude) failed (exit 1): Failed to authenticate. API Error: 401 Invalid authentication credenti...
-```
-```
-2026-07-02 01:22:45 WARNING [memory.v1.short_term_extractor] short_term_extractor: LLM call failed: CLI (claude) failed (exit 1): Failed to authenticate. API Error: 401 Invalid authentication credentials
-```
-
----
-
-## Issue 4 [MEDIUM]
-
-**Turn:** 2026-07-02 01:29:55
-**User said:** # Task: Self-heal android_crash_report: === VESSENCE CRASH REPORT ===
-
-**Problem:** Stage 1 added a 23.1s delay before obvious Stage 3 escalation
-
-**Root cause:** The crash-report/code-repair prompt was always sent through the qwen classifier even though it was clearly too complex for a deterministic handler. The classifier eventually returned others:Low.
-
-**Suggested fix:** In jane_web/jane_v3/pipeline.py, directly route long markdown/log/crash-report/code-edit prompts to Stage 3 before v3_classifier.classify, and keep qwen classification for short actionable voice intents.
+**Suggested fix:** Persist Stage 3 input, selected backend/process id, tool calls, final response summary, and error status under the turn audit_id.
 
 **Log evidence:**
 ```
-2026-07-02 01:29:52 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (23136ms) params={}
+[2026-07-03 01:34:13] (audit-178305) please familiarize yourself with the waterlily project
 ```
 ```
-2026-07-02 01:29:53 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=1622 sid_override=True class_protocol=n/a
-```
-
----
-
-## Issue 5 [CRITICAL]
-
-**Turn:** 2026-07-02 01:29:55
-**User said:** # Task: Self-heal android_crash_report: === VESSENCE CRASH REPORT ===
-
-**Problem:** Stage 3 was cancelled after client disconnect and produced no final response payload
-
-**Root cause:** The client disconnected while the brain was still working; the stream task then received CancelledError after 329676ms and finished without a final payload. Source inspection shows the disconnect cleanup awaits wait_for(task) without asyncio.shield, so outer cancellation can still cancel the adapter task despite the intended 'let it finish' behavior.
-
-**Suggested fix:** In jane_web/jane_proxy.py, wrap the adapter task with asyncio.shield inside the disconnect cleanup, persist the eventual final response to session history/job state, and return a resumable job id for long Stage 3 work.
-
-**Log evidence:**
-```
-2026-07-02 01:35:25 INFO [jane.proxy] [audit-178296] Client disconnected — waiting for adapter task to finish (brain still working)
+2026-07-03 23:42:56 WARNING [jane.offloader] Context build failed for offloaded task task-1, running without context
 ```
 ```
-2026-07-02 01:35:26 WARNING [jane.proxy] [audit-178296] Brain execution cancelled (stream) after 329676ms — likely client disconnect or timeout. Stack:
-```
-```
-2026-07-02 01:35:26 INFO [jane.proxy] [audit-178296] Jane stream pipeline task finished
-```
-```
-2026-07-02 01:35:26 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage3 end-to-end (332634ms)
+2026-07-03 23:42:56 WARNING [jane.offloader] Offloaded task task-1 attempt 1/2 failed: backend not found
 ```
 
 ---

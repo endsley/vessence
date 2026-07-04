@@ -9,6 +9,7 @@ from jane_web.cli_login_helpers import (
     append_status_stderr_tail,
     apply_claude_refresh_tokens,
     base64url_no_padding,
+    cached_provider_auth_status,
     claude_auth_code_from_callback,
     claude_credentials_payload,
     claude_oauth_authorization_url,
@@ -45,9 +46,11 @@ from jane_web.cli_login_helpers import (
     provider_auth_status_command,
     provider_auth_status_details,
     provider_auth_status_error,
+    refresh_provider_auth_status_details,
     read_cli_transcript_lines,
     ss_login_callback_port,
     submit_cli_login_code_to_stdin,
+    should_refresh_provider_auth_status,
     unsupported_provider_auth_status,
     write_cli_credentials,
 )
@@ -506,6 +509,31 @@ def test_append_status_stderr_tail_uses_last_nonempty_stderr_line():
     assert append_status_stderr_tail(details, "first\nsecond") is details
     assert details == {"status_stderr_tail": "second"}
     assert append_status_stderr_tail(details, "   ") == {"status_stderr_tail": "second"}
+
+
+def test_provider_auth_status_cache_and_refresh_helpers_preserve_policy():
+    class Result:
+        returncode = 0
+        stdout = "Logged in as user@example.com"
+
+    cached_details = {"provider": "claude", "logged_in": True}
+    cache = {"claude": (10.0, cached_details)}
+    details = {"provider": "claude", "logged_in": False}
+    calls = []
+
+    assert cached_provider_auth_status("claude", cache, 14.9) is cached_details
+    assert cached_provider_auth_status("claude", cache, 15.0) is None
+    assert cached_provider_auth_status("gemini", cache, 14.0) is None
+    assert should_refresh_provider_auth_status("claude", details)
+    assert not should_refresh_provider_auth_status("gemini", details)
+    assert not should_refresh_provider_auth_status("claude", {"logged_in": True})
+    assert refresh_provider_auth_status_details(
+        details,
+        ["claude", "auth", "status"],
+        run_command_fn=lambda cmd: calls.append(cmd) or Result(),
+    ) is details
+    assert details["logged_in"] is True
+    assert calls == [["claude", "auth", "status"]]
 
 
 def test_provider_auth_status_details_uses_fresh_cache_without_running_command():

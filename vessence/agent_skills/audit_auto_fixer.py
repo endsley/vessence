@@ -37,7 +37,9 @@ from agent_skills.audit_auto_fix_prompt import (
 from agent_skills.audit_auto_fix_helpers import (
     FORBIDDEN_PATTERNS,
     SAFE_EXTENSIONS,
+    circuit_breaker_skip_results as _circuit_breaker_skip_results,
     extract_json_array_text as _extract_json_array_text,
+    fix_content_preflight_result as _fix_content_preflight_result,
     fix_issue_preflight_result as _fix_issue_preflight_result,
     generate_fix_report_markdown as _generate_fix_report_markdown,
     initial_fix_result as _initial_fix_result,
@@ -177,15 +179,9 @@ def apply_fix(issue: dict, dry_run: bool = False) -> dict:
         result["reason"] = f"Cannot read file: {e}"
         return result
 
-    # Check if the search text actually exists in the file
-    if search_text not in content:
-        result["status"] = "not_applicable"
-        result["reason"] = "Search text not found in file (may already be fixed)"
-        return result
-
-    if dry_run:
-        result["status"] = "would_fix"
-        result["reason"] = issue.get("fix_description", "")
+    content_preflight = _fix_content_preflight_result(issue, content, dry_run=dry_run)
+    if content_preflight is not None:
+        result.update(content_preflight)
         return result
 
     # Create backup
@@ -316,15 +312,13 @@ def main():
     for issue in issues:
         if fix_count >= MAX_FIXES_PER_RUN:
             logger.warning("Circuit breaker: reached %d fixes, stopping.", MAX_FIXES_PER_RUN)
-            remaining = issues[len(results):]
-            for r in remaining:
-                results.append({
-                    "issue": r.get("issue", "Unknown"),
-                    "file": r.get("file", "Unknown"),
-                    "category": r.get("category", "unknown"),
-                    "status": "skipped",
-                    "reason": f"Circuit breaker: max {MAX_FIXES_PER_RUN} fixes per run",
-                })
+            results.extend(
+                _circuit_breaker_skip_results(
+                    issues,
+                    result_count=len(results),
+                    max_fixes_per_run=MAX_FIXES_PER_RUN,
+                )
+            )
             break
 
         result = apply_fix(issue, dry_run=args.dry_run)
