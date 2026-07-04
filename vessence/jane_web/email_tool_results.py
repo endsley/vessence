@@ -15,6 +15,15 @@ class EmailSendRequest:
     from_email: str | None
 
 
+def requested_sender_email(args: Mapping[str, Any]) -> str | None:
+    return (
+        args.get("from_email")
+        or args.get("from")
+        or args.get("sender")
+        or ""
+    ).strip() or None
+
+
 def format_inbox_emails(emails: Sequence[Mapping[str, Any]]) -> str:
     if not emails:
         return "\n\nNo unread emails found."
@@ -55,12 +64,7 @@ def prepare_send_email_args(args: Mapping[str, Any]) -> tuple[EmailSendRequest |
     to = (args.get("to") or "").strip()
     subject = (args.get("subject") or "").strip()
     body = (args.get("body") or "").strip()
-    from_email = (
-        args.get("from_email")
-        or args.get("from")
-        or args.get("sender")
-        or ""
-    ).strip() or None
+    from_email = requested_sender_email(args)
 
     if not to:
         return None, "\n\nEmail not sent: no recipient address provided."

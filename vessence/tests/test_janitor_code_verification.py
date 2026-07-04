@@ -3,13 +3,17 @@ import types
 
 from memory.v1 import janitor_memory
 from memory.v1.janitor_code_verification import (
+    code_verification_detail_lines,
     code_memory_records_from_collection,
     code_memory_verification_sort_key,
+    code_verification_metadata,
     code_verification_report_markdown,
     code_verification_prompt,
     code_verification_result,
+    code_verification_summary_line,
     frontier_fix_prompt,
     is_code_memory,
+    json_object_from_text,
     split_reverification_candidates,
 )
 
@@ -80,6 +84,15 @@ def test_reverification_candidate_helpers_partition_and_sort_oldest_first():
     assert skipped == 1
 
 
+def test_json_object_parser_preserves_model_output_error_categories():
+    assert json_object_from_text('prefix {"verdict": "ACCURATE"} suffix') == (
+        {"verdict": "ACCURATE"},
+        None,
+    )
+    assert json_object_from_text("no json here") == (None, "parse_fail")
+    assert json_object_from_text("prefix {not json} suffix") == (None, "json_decode")
+
+
 def test_code_verification_prompt_preserves_codex_contract():
     prompt = code_verification_prompt(_memory())
 
@@ -135,6 +148,14 @@ def test_code_verification_result_and_report_preserve_summary_shape():
             {"id": "deleted-123456", "action": "deleted", "reason": "obsolete"},
         ],
     }
+    assert (
+        code_verification_summary_line(result)
+        == "Checked: 3 | Stale: 2 | Fixed: 1 | Deleted: 1 | Errors: 0 | Skipped recent: 4"
+    )
+    assert code_verification_detail_lines(result["details"]) == [
+        "- **UPDATED** `updated-1234` — rewrote",
+        "- **DELETED** `deleted-1234` — obsolete",
+    ]
     assert code_verification_report_markdown(
         timestamp="2026-07-03 12:00",
         result=result,
@@ -144,6 +165,30 @@ def test_code_verification_result_and_report_preserve_summary_shape():
         "- **UPDATED** `updated-1234` — rewrote\n"
         "- **DELETED** `deleted-1234` — obsolete\n"
     )
+
+
+def test_code_verification_metadata_preserves_stamp_policy():
+    metadata = code_verification_metadata(
+        {"topic": "Project", "code_verification_note": "old"},
+        status="accurate",
+        verified_at="2026-07-04T12:00:00Z",
+        explanation="x" * 260,
+    )
+
+    assert metadata == {
+        "topic": "Project",
+        "code_verified_at": "2026-07-04T12:00:00Z",
+        "code_verification_status": "accurate",
+        "code_verification_note": "x" * 240,
+    }
+    assert code_verification_metadata(
+        {"code_verification_note": "old"},
+        status="kept",
+        verified_at="2026-07-04T13:00:00Z",
+    ) == {
+        "code_verified_at": "2026-07-04T13:00:00Z",
+        "code_verification_status": "kept",
+    }
 
 
 def test_verify_code_memories_uses_split_candidates_without_undefined_name(tmp_path, monkeypatch):

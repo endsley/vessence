@@ -64,6 +64,10 @@ def _expires_at(minutes: int = 2) -> str:
     )
 
 
+def pending_continuation_data(data: dict | None, awaiting: str) -> dict:
+    return {**(data or {}), "awaiting": awaiting}
+
+
 def pending_continuation(
     handler_class: str,
     awaiting: str,
@@ -92,7 +96,7 @@ def pending_continuation(
         "handler_class": handler_class,
         "status": "awaiting_user",
         "awaiting": awaiting,
-        "data": {**(data or {}), "awaiting": awaiting},
+        "data": pending_continuation_data(data, awaiting),
         "question": question,
         "expires_at": _expires_at(minutes),
     }

@@ -35,6 +35,14 @@ def citation_for(record: dict[str, Any]) -> str:
     )
 
 
+def fallback_first_sentence(text: str) -> str:
+    return clean_text(text).split(". ")[0][:500]
+
+
+def fallback_study_type(record: dict[str, Any]) -> str:
+    return ", ".join(record.get("publication_types", [])[:4]) or record.get("kind", "unknown")
+
+
 def fallback_summary_payload(
     record: dict[str, Any],
     evidence_scope: str,
@@ -43,14 +51,14 @@ def fallback_summary_payload(
     *,
     summarized_at: str,
 ) -> dict[str, Any]:
-    first_sentence = clean_text(text).split(". ")[0][:500]
+    first_sentence = fallback_first_sentence(text)
     return {
         "source_id": record["source_id"],
         "title": record.get("title", ""),
         "citation": citation_for(record),
         "url": record.get("url", ""),
         "evidence_scope": evidence_scope,
-        "study_type": ", ".join(record.get("publication_types", [])[:4]) or record.get("kind", "unknown"),
+        "study_type": fallback_study_type(record),
         "population": "Not extracted by fallback summarizer.",
         "intervention_or_exposure": "Not extracted by fallback summarizer.",
         "main_findings": [first_sentence] if first_sentence else [],

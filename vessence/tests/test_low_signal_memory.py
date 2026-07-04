@@ -1,4 +1,9 @@
-from memory.v1.low_signal_memory import is_low_signal_shared_memory, is_low_signal_short_term_memory
+from memory.v1.low_signal_memory import (
+    has_inline_protocol_marker,
+    is_low_signal_shared_memory,
+    is_low_signal_short_term_memory,
+    is_low_signal_short_term_protocol_text,
+)
 
 
 def test_shared_memory_filter_drops_empty_prefix_and_noise_topics():
@@ -23,6 +28,20 @@ def test_short_term_filter_drops_protocol_metadata_chatter():
     assert is_low_signal_short_term_memory(
         "User message [EXTRACTED PARAMS] class=read_calendar",
         {"memory_type": "short_term"},
+    )
+
+
+def test_short_term_protocol_predicates_preserve_marker_boundaries():
+    assert has_inline_protocol_marker("User message [EXTRACTED PARAMS] class=read_calendar")
+    assert has_inline_protocol_marker("<class_protocol name='x'>metadata</class_protocol>")
+    assert not has_inline_protocol_marker("We discussed class protocol metadata.")
+
+    assert is_low_signal_short_term_protocol_text("**Class Protocol:** read_calendar")
+    assert is_low_signal_short_term_protocol_text(
+        "I need clarification. The new turn includes class protocol metadata."
+    )
+    assert not is_low_signal_short_term_protocol_text(
+        "We discussed class protocol metadata as a documentation cleanup task."
     )
 
 

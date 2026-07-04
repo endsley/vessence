@@ -2,6 +2,7 @@ from agent_skills import cron_utils
 from agent_skills.cron_notification_helpers import (
     cron_env_payload,
     discord_webhook_payload,
+    strip_work_log_notification_markup,
     work_log_notification_text,
 )
 
@@ -18,6 +19,7 @@ def test_discord_webhook_payload_truncates_content_to_discord_limit():
 
 
 def test_work_log_notification_text_strips_markdown_fences_and_truncates():
+    assert strip_work_log_notification_markup(" **hello** ```code``` ") == "hello code"
     assert work_log_notification_text(" **hello** ```code``` ") == "hello code"
     assert work_log_notification_text("x" * 301) == "x" * 300
 

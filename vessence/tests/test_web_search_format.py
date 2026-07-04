@@ -1,6 +1,7 @@
 from agent_skills import web_search_utils
 from agent_skills.web_search_format import (
     format_ddg_results,
+    format_search_results,
     format_tavily_results,
     is_tavily_quota_status,
     tavily_request_payload,
@@ -30,6 +31,11 @@ def test_is_tavily_quota_status_matches_quota_and_payment_errors():
 
 
 def test_format_tavily_results_preserves_markdown_shape_and_defaults():
+    assert format_search_results(
+        [{"title": "One", "href": "https://one", "body": "First"}],
+        url_key="href",
+        body_key="body",
+    ) == "[One](https://one)\nFirst"
     assert format_tavily_results([]) == ""
     assert format_tavily_results(
         [

@@ -17,6 +17,13 @@ def test_pending_action_resolver_uses_extracted_resolution_helper():
     assert pending_action_resolver._resolve_pending_action_response is resolve_pending_action_response
 
 
+def test_pending_action_resolver_blank_reply_guard_preserves_stt_debounce_rule():
+    assert pending_action_resolver._is_blank_pending_reply("")
+    assert pending_action_resolver._is_blank_pending_reply(" ")
+    assert pending_action_resolver._is_blank_pending_reply("a")
+    assert not pending_action_resolver._is_blank_pending_reply("ok")
+
+
 def test_pending_resolution_helpers_preserve_common_payload_shape():
     pending = {"type": "STAGE2_FOLLOWUP", "data": {"awaiting": "duration"}}
 

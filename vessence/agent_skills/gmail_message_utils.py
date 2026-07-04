@@ -8,6 +8,9 @@ from email.utils import getaddresses, parsedate_to_datetime
 from zoneinfo import ZoneInfo
 
 
+NY_TZ = ZoneInfo("America/New_York")
+
+
 def header_map(message: dict) -> dict[str, str]:
     headers = message.get("payload", {}).get("headers", [])
     return {h.get("name", "").lower(): h.get("value", "") for h in headers}
@@ -89,7 +92,7 @@ def message_local_date(message: dict) -> dt.date | None:
         timestamp = int(raw) / 1000
     except (TypeError, ValueError):
         return None
-    return dt.datetime.fromtimestamp(timestamp, tz=ZoneInfo("America/New_York")).date()
+    return dt.datetime.fromtimestamp(timestamp, tz=NY_TZ).date()
 
 
 def message_local_datetime(message: dict) -> dt.datetime | None:
@@ -100,7 +103,15 @@ def message_local_datetime(message: dict) -> dt.datetime | None:
         timestamp = int(raw) / 1000
     except (TypeError, ValueError):
         return None
-    return dt.datetime.fromtimestamp(timestamp, tz=ZoneInfo("America/New_York"))
+    return dt.datetime.fromtimestamp(timestamp, tz=NY_TZ)
+
+
+def ny_aware_datetime(value: dt.datetime | None = None) -> dt.datetime:
+    if value is None:
+        return dt.datetime.now(NY_TZ)
+    if value.tzinfo is None:
+        return value.replace(tzinfo=NY_TZ)
+    return value.astimezone(NY_TZ)
 
 
 def sender_matches_fragments(sender: str, fragments: tuple[str, ...]) -> bool:
@@ -142,18 +153,14 @@ def message_is_older_than_days(
     message_dt = message_local_datetime(message)
     if not message_dt:
         return False
-    tz = ZoneInfo("America/New_York")
-    now = now or dt.datetime.now(tz)
-    if now.tzinfo is None:
-        now = now.replace(tzinfo=tz)
-    return message_dt < now.astimezone(tz) - dt.timedelta(days=days)
+    return message_dt < ny_aware_datetime(now) - dt.timedelta(days=days)
 
 
 def parse_ics_datetime(value: str, params: str = "") -> dt.datetime | None:
     raw = str(value or "").strip()
     if not raw:
         return None
-    tz = ZoneInfo("America/New_York")
+    tz = NY_TZ
     value_is_date = "VALUE=DATE" in str(params or "").upper()
     if re.fullmatch(r"\d{8}", raw):
         try:
@@ -275,11 +282,11 @@ def google_calendar_event_end_from_subject(subject: str) -> dt.datetime | None:
 
     times = google_calendar_subject_times(match)
     if not times:
-        return dt.datetime.combine(event_date, dt.time.max, tzinfo=ZoneInfo("America/New_York"))
+        return dt.datetime.combine(event_date, dt.time.max, tzinfo=NY_TZ)
 
     start_time, end_time = times
-    event_end = dt.datetime.combine(event_date, end_time, tzinfo=ZoneInfo("America/New_York"))
-    event_start = dt.datetime.combine(event_date, start_time, tzinfo=ZoneInfo("America/New_York"))
+    event_end = dt.datetime.combine(event_date, end_time, tzinfo=NY_TZ)
+    event_start = dt.datetime.combine(event_date, start_time, tzinfo=NY_TZ)
     if event_end < event_start:
         event_end += dt.timedelta(days=1)
     return event_end
@@ -291,8 +298,4 @@ def google_calendar_event_has_passed(message: dict, *, now: dt.datetime | None =
     event_end = calendar_event_end_from_ics(calendar_text) or google_calendar_event_end_from_subject(subject)
     if not event_end:
         return None
-    tz = ZoneInfo("America/New_York")
-    now = now or dt.datetime.now(tz)
-    if now.tzinfo is None:
-        now = now.replace(tzinfo=tz)
-    return event_end < now.astimezone(tz)
+    return event_end < ny_aware_datetime(now)

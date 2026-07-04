@@ -63,8 +63,8 @@ from agent_skills.google_cloud_receipt_utils import (
     parse_receipt_date,
     receipt_candidate_from_control,
     sanitize_filename_piece,
+    select_requested_receipt_candidates,
     select_open_billing_accounts,
-    sort_receipt_candidates,
     unique_dest_path as _unique_dest_path,
     validate_receipt_request,
 )
@@ -594,21 +594,12 @@ async def download_recent_receipts(
                 "Refresh the profile or inspect the Transactions page manually."
             )
 
-        ranked = sort_receipt_candidates(all_candidates)
-        if start_date is not None or end_date is not None:
-            ranked = filter_receipt_candidates_by_date(
-                ranked,
-                start_date=start_date,
-                end_date=end_date,
-            )
-        if count is not None:
-            ranked = ranked[:count]
-        if not ranked:
-            start_label = start_date.isoformat() if start_date else "the beginning"
-            end_label = end_date.isoformat() if end_date else "today"
-            raise RuntimeError(
-                f"No receipts matched the requested date range ({start_label} to {end_label})."
-            )
+        ranked = select_requested_receipt_candidates(
+            all_candidates,
+            count=count,
+            start_date=start_date,
+            end_date=end_date,
+        )
         downloads: list[DownloadedReceipt] = []
         for idx, candidate in enumerate(ranked, start=1):
             print(f"Downloading receipt {idx}/{len(ranked)}...", flush=True)

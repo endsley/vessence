@@ -1,6 +1,15 @@
 from jane_web.jane_v2.classes.delete_email import metadata
 
 
+def test_delete_email_instruction_lines_preserve_tool_and_confirmation_contract() -> None:
+    text = "\n".join(metadata._delete_email_instruction_lines())
+
+    assert '[[CLIENT_TOOL:email.delete:{"message_id":"<id>"}]]' in text
+    assert "One marker per email" in text
+    assert "Confirm BEFORE deleting unless the user was explicit" in text
+    assert "DO NOT delete personal/contact emails without explicit confirmation" in text
+
+
 def test_delete_email_block_uses_id_fallback_for_delete_tool() -> None:
     block = metadata._format_email_block(
         "[EMAIL INBOX - unread]",

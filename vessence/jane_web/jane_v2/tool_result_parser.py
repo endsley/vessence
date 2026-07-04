@@ -25,6 +25,26 @@ _TOOL_RESULT_OPEN = "[TOOL_RESULT:"
 _TOOL_RESULT_CLOSE = "]"
 
 
+def _leading_tool_result_marker_bounds(cleaned: str) -> tuple[int, int, int] | None:
+    stripped = cleaned.lstrip()
+    if not stripped.startswith(_TOOL_RESULT_OPEN):
+        return None
+    json_start = len(cleaned) - len(stripped) + len(_TOOL_RESULT_OPEN)
+    while json_start < len(cleaned) and cleaned[json_start] in " \t":
+        json_start += 1
+    if json_start >= len(cleaned) or cleaned[json_start] != "{":
+        return None
+    json_end = find_json_object_end(cleaned, json_start)
+    if json_end is None:
+        return None
+    marker_end = json_end
+    while marker_end < len(cleaned) and cleaned[marker_end] in " \t":
+        marker_end += 1
+    if marker_end >= len(cleaned) or cleaned[marker_end] != _TOOL_RESULT_CLOSE:
+        return None
+    return json_start, json_end, marker_end
+
+
 def extract_tool_results(user_message: str) -> tuple[str, list[dict]]:
     """Strip leading `[TOOL_RESULT:{json}]` markers from a user message.
 
@@ -33,22 +53,10 @@ def extract_tool_results(user_message: str) -> tuple[str, list[dict]]:
     results: list[dict] = []
     cleaned = user_message or ""
     while True:
-        stripped = cleaned.lstrip()
-        if not stripped.startswith(_TOOL_RESULT_OPEN):
+        bounds = _leading_tool_result_marker_bounds(cleaned)
+        if bounds is None:
             break
-        json_start = len(cleaned) - len(stripped) + len(_TOOL_RESULT_OPEN)
-        while json_start < len(cleaned) and cleaned[json_start] in " \t":
-            json_start += 1
-        if json_start >= len(cleaned) or cleaned[json_start] != "{":
-            break
-        json_end = find_json_object_end(cleaned, json_start)
-        if json_end is None:
-            break
-        j = json_end
-        while j < len(cleaned) and cleaned[j] in " \t":
-            j += 1
-        if j >= len(cleaned) or cleaned[j] != _TOOL_RESULT_CLOSE:
-            break
+        json_start, json_end, marker_end = bounds
         try:
             payload = json.loads(cleaned[json_start:json_end])
         except Exception:
@@ -56,7 +64,7 @@ def extract_tool_results(user_message: str) -> tuple[str, list[dict]]:
         if not isinstance(payload, dict):
             break
         results.append(payload)
-        cleaned = cleaned[j + 1:].lstrip()
+        cleaned = cleaned[marker_end + 1:].lstrip()
     return cleaned, results
 
 

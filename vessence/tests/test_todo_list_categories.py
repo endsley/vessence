@@ -1,5 +1,6 @@
 from jane_web.jane_v2.classes.todo_list import handler
 from jane_web.jane_v2.classes.todo_list.categories import (
+    category_list_label,
     category_by_name_or_alias,
     direct_category_query,
     friendly_category_name,
@@ -69,6 +70,10 @@ def test_direct_category_query_reuses_category_matching() -> None:
 def test_friendly_category_name_and_item_speech() -> None:
     assert friendly_category_name("Do it Immediately") == "your urgent list"
     assert friendly_category_name("For the clinic") == "the clinic"
+    assert category_list_label("Do it Immediately") == "the urgent stuff"
+    assert category_list_label("For the clinic") == "the clinic"
+    assert category_list_label("For our Home") == "home"
+    assert category_list_label("For my Students") == "students"
 
     assert speak_items({"name": "For our Home", "items": []}) == "Nothing logged under home yet."
     assert speak_items({"name": "For my students", "items": ["Grade essays."]}) == (

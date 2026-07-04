@@ -1,5 +1,7 @@
 import re
 
+from agent_skills.private_handler_utils import pending_continuation_data
+
 from jane_web.jane_v2.classes.todo_list import handler
 from jane_web.jane_v2.classes.todo_list.responses import (
     ask_add_category_response,
@@ -35,6 +37,7 @@ def test_todo_handler_uses_extracted_response_helpers() -> None:
 
 
 def test_build_todo_pending_preserves_followup_shape() -> None:
+    assert build_todo_pending.__globals__["pending_continuation_data"] is pending_continuation_data
     assert build_todo_pending(
         "category",
         {"already_read": ["For our Home"]},

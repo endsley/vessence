@@ -17,6 +17,7 @@ from jane_web.jane_v2.classes.timer.intent_rules import (
 from jane_web.jane_v2.classes.timer.parsing import (
     extract_delete_target,
     extract_label,
+    is_delete_label_candidate,
     label_from_reply,
     looks_like_new_timer,
     ordinal_timer_index,
@@ -35,6 +36,7 @@ from jane_web.jane_v2.classes.timer.responses import (
     build_list_response,
     build_set_marker,
     build_set_response,
+    build_simple_action_response,
     delete_target_description,
     spoken_set_confirmation,
 )
@@ -157,6 +159,10 @@ def test_delete_target_parsers_handle_id_index_label_and_all():
     assert ordinal_timer_index("delete the third timer", timer_required=True) == 3
     assert ordinal_timer_index("third", timer_required=True) is None
     assert ordinal_timer_index("third", timer_required=False) == 3
+    assert is_delete_label_candidate("pasta")
+    assert not is_delete_label_candidate("that")
+    assert is_delete_label_candidate("timer")
+    assert not is_delete_label_candidate("timer", allow_timer_label=False)
 
     assert extract_delete_target("delete timer 3") == {"id": 3}
     assert extract_delete_target("delete the third timer") == {"index": 3}
@@ -230,6 +236,10 @@ def test_timer_pending_question_responses_preserve_shapes():
 
 
 def test_timer_simple_action_responses_preserve_markers_and_entities():
+    assert build_simple_action_response("Checking.", "[[CLIENT_TOOL:timer.list:{}]]", "list") == {
+        "text": "Checking. [[CLIENT_TOOL:timer.list:{}]]",
+        "structured": {"intent": "timer", "entities": {"action": "list"}},
+    }
     assert build_count_response() == {
         "text": "Let me check. [[CLIENT_TOOL:timer.list:{}]]",
         "structured": {"intent": "timer", "entities": {"action": "count"}},

@@ -17,6 +17,13 @@ def test_tell_joke_handler_uses_extracted_helpers() -> None:
     assert handler._post_local_llm_response is post_local_llm_response
 
 
+def test_joke_success_response_preserves_text_and_thought_shape() -> None:
+    assert handler.joke_success_response("A short joke.", "avoid repeats") == {
+        "text": "A short joke.",
+        "thought": "avoid repeats",
+    }
+
+
 def test_build_joke_prompt_includes_context_when_present() -> None:
     assert context_block(" Jane told one. ") == "Recent conversation:\nJane told one.\n\n"
     assert context_block(" ") == ""

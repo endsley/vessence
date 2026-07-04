@@ -17,6 +17,7 @@ from jane_web.jane_v2.classes.shopping_list.responses import (
     build_clear_response,
     build_remove_response,
     build_view_response,
+    shopping_text_response,
 )
 
 
@@ -31,6 +32,7 @@ def test_handler_uses_extracted_shopping_list_helpers() -> None:
     assert handler._build_remove_response is build_remove_response
     assert handler._build_clear_response is build_clear_response
     assert handler._build_check_response is build_check_response
+    assert shopping_text_response("Done.") == {"text": "Done."}
 
 
 def _fake_shopping_api(initial=None):

@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from jane_web.proxy_text import (
     message_for_persistence,
     prepare_phone_tool_message,
+    progress_context_findings,
     progress_snapshot,
 )
 
@@ -69,5 +70,18 @@ def test_progress_snapshot_lists_findings_in_existing_order():
 
     assert progress_snapshot(request_ctx, "summary", "file") == (
         "Context is ready: loaded prior conversation summary, found relevant memory, "
-        "loaded task state, prepared research brief, attached file context."
+            "loaded task state, prepared research brief, attached file context."
     )
+
+
+def test_progress_context_findings_preserves_detection_order():
+    assert progress_context_findings(
+        "## Current Task State\nstate\n## Retrieved Memory\nfacts",
+        "summary",
+        "file",
+    ) == [
+        "loaded prior conversation summary",
+        "found relevant memory",
+        "loaded task state",
+        "attached file context",
+    ]

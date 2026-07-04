@@ -1,6 +1,7 @@
 from jane_web import task_offloader
 from jane_web.task_offloader_messages import (
     automation_error_announcement_message,
+    automation_error_category,
     empty_response_retry_message,
     final_result_message,
     heartbeat_progress_message,
@@ -34,6 +35,12 @@ def test_retry_and_final_result_messages_preserve_visible_text():
 
 
 def test_automation_error_messages_preserve_category_precedence():
+    assert automation_error_category("timed out and empty response") == "timeout"
+    assert automation_error_category("empty response from model") == "empty_response"
+    assert automation_error_category("backend not found") == "not_found"
+    assert automation_error_category("exit code 1") == "exit_code"
+    assert automation_error_category("other failure") == "generic"
+
     assert automation_error_announcement_message("timed out after 10s") == (
         "⚠️ The request timed out — the AI took too long to respond. Try a simpler request or try again later."
     )

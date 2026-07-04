@@ -1,4 +1,19 @@
-from jane_web.jane_v2.tool_result_parser import extract_tool_results, strip_tool_result_prefix
+from jane_web.jane_v2.tool_result_parser import (
+    _leading_tool_result_marker_bounds,
+    extract_tool_results,
+    strip_tool_result_prefix,
+)
+
+
+def test_leading_tool_result_marker_bounds_handles_spaces_and_malformed_markers():
+    message = '  [TOOL_RESULT: {"tool":"x","data":{"ok":true}} ] ask'
+
+    json_start, json_end, marker_end = _leading_tool_result_marker_bounds(message)
+
+    assert message[json_start:json_end] == '{"tool":"x","data":{"ok":true}}'
+    assert message[marker_end] == "]"
+    assert _leading_tool_result_marker_bounds("ask jane") is None
+    assert _leading_tool_result_marker_bounds('[TOOL_RESULT:{"tool":"x"} missing close]') is None
 
 
 def test_extract_tool_results_uses_shared_scanner_for_nested_json_and_string_markers():

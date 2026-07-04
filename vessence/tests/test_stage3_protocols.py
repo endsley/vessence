@@ -2,6 +2,11 @@ from jane_web.jane_v2 import stage3_protocols as protocols
 
 
 def test_reason_to_class_normalizes_reason_and_rejects_unsafe_values():
+    assert protocols.strip_escalation_reason_suffix("weather_fallback") == "weather"
+    assert protocols.strip_escalation_reason_suffix("weather_declined") == "weather"
+    assert protocols.strip_escalation_reason_suffix("weather_decline") == "weather"
+    assert protocols.strip_escalation_reason_suffix("weather") == "weather"
+
     assert protocols.reason_to_class("send message:High") == "send_message"
     assert protocols.reason_to_class("weather_fallback:Low") == "weather"
     assert protocols.reason_to_class("weather_declined") == "weather"

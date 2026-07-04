@@ -23,6 +23,17 @@ def sender_cleanup_prefix(label: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", label.lower()).strip("_") or "sender_cleanup"
 
 
+def cleanup_query_parts(include_trash: bool, *terms: str) -> list[str]:
+    parts = ["in:anywhere" if include_trash else "", *terms, "-in:spam"]
+    if not include_trash:
+        parts.append("-in:trash")
+    return [part for part in parts if part]
+
+
+def join_query_parts(parts: list[str]) -> str:
+    return " ".join(part for part in parts if part)
+
+
 def build_sender_query(
     *,
     recipient: str,
@@ -32,17 +43,14 @@ def build_sender_query(
 ) -> str:
     query_start = day - dt.timedelta(days=1)
     query_end = day + dt.timedelta(days=2)
-    parts = [
-        "in:anywhere" if include_trash else "",
+    parts = cleanup_query_parts(
+        include_trash,
         f"to:{recipient}",
         f"from:{from_query}",
         f"after:{gmail_date(query_start)}",
         f"before:{gmail_date(query_end)}",
-        "-in:spam",
-    ]
-    if not include_trash:
-        parts.append("-in:trash")
-    return " ".join(part for part in parts if part)
+    )
+    return join_query_parts(parts)
 
 
 def build_older_sender_query(
@@ -53,17 +61,14 @@ def build_older_sender_query(
     include_trash: bool,
     extra_terms: tuple[str, ...] = (),
 ) -> str:
-    parts = [
-        "in:anywhere" if include_trash else "",
+    parts = cleanup_query_parts(
+        include_trash,
         f"to:{recipient}",
         f"from:{from_query}",
         *extra_terms,
         f"older_than:{int(older_than_days)}d",
-        "-in:spam",
-    ]
-    if not include_trash:
-        parts.append("-in:trash")
-    return " ".join(part for part in parts if part)
+    )
+    return join_query_parts(parts)
 
 
 def build_google_calendar_query(
@@ -72,15 +77,12 @@ def build_google_calendar_query(
     from_query: str,
     include_trash: bool,
 ) -> str:
-    parts = [
-        "in:anywhere" if include_trash else "",
+    parts = cleanup_query_parts(
+        include_trash,
         f"to:{recipient}",
         f"from:{from_query}",
-        "-in:spam",
-    ]
-    if not include_trash:
-        parts.append("-in:trash")
-    return " ".join(part for part in parts if part)
+    )
+    return join_query_parts(parts)
 
 
 def build_unread_cleanup_query(
@@ -88,12 +90,9 @@ def build_unread_cleanup_query(
     older_than_days: int,
     include_trash: bool,
 ) -> str:
-    parts = [
-        "in:anywhere" if include_trash else "",
+    parts = cleanup_query_parts(
+        include_trash,
         "is:unread",
         f"older_than:{int(older_than_days)}d",
-        "-in:spam",
-    ]
-    if not include_trash:
-        parts.append("-in:trash")
-    return " ".join(part for part in parts if part)
+    )
+    return join_query_parts(parts)

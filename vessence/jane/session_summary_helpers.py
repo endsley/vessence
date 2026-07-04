@@ -25,6 +25,19 @@ TRIVIAL_USER_PATTERNS = (
     "ok", "yes", "no", "sure", "yeah", "nope",
 )
 
+SUMMARY_TOPIC_KEYWORDS = (
+    ("ambient migration", "Ambient Migration"),
+    ("vessences.com", "Public Site"),
+    ("jane.vessences.com", "Jane Public Site"),
+    ("memory", "Memory Retrieval"),
+    ("token", "Token Saving"),
+    ("discord", "Discord"),
+    ("vault", "Vault Website"),
+    ("amber", "Amber"),
+    ("jane", "Jane"),
+    ("cron", "Cron Automation"),
+)
+
 
 def summary_path(base_dir: str | Path, session_id: str) -> Path:
     safe_id = re.sub(r"[^a-zA-Z0-9._-]+", "_", session_id).strip("._") or "default"
@@ -191,19 +204,7 @@ def fallback_summary(current: dict, user_message: str, assistant_message: str) -
 
 def guess_topic_label(user_message: str, assistant_message: str) -> str:
     text = f"{user_message} {assistant_message}".lower()
-    keyword_map = [
-        ("ambient migration", "Ambient Migration"),
-        ("vessences.com", "Public Site"),
-        ("jane.vessences.com", "Jane Public Site"),
-        ("memory", "Memory Retrieval"),
-        ("token", "Token Saving"),
-        ("discord", "Discord"),
-        ("vault", "Vault Website"),
-        ("amber", "Amber"),
-        ("jane", "Jane"),
-        ("cron", "Cron Automation"),
-    ]
-    for needle, label in keyword_map:
+    for needle, label in SUMMARY_TOPIC_KEYWORDS:
         if needle in text:
             return label
     words = re.findall(r"[A-Za-z][A-Za-z0-9_-]*", user_message)

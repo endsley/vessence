@@ -42,6 +42,28 @@ def _redact_summary_for_cloud(record: dict) -> str:
     return record.get("summary") or ""
 
 
+def _recent_context_lines_within_budget(turns: list, max_chars: int) -> list[str]:
+    # Build from newest-backward so that when we trim for the budget we
+    # drop the OLDEST entries first, preserving the most recent context.
+    kept: list[str] = []
+    running_chars = 0
+    for line in reversed(turns):
+        if not isinstance(line, str):
+            continue
+        line = line.strip()
+        if not line:
+            continue
+        cost = len(line) + 1  # +1 for the joining newline
+        if running_chars + cost > max_chars and kept:
+            break
+        kept.append(line)
+        running_chars += cost
+
+    # kept is newest-first; reverse to oldest-first (natural reading order)
+    kept.reverse()
+    return kept
+
+
 def get_recent_context(
     session_id: str | None,
     max_turns: int = DEFAULT_MAX_TURNS,
@@ -92,24 +114,7 @@ def get_recent_context(
         logger.warning("recent_context: invalid max_tokens: %s", e)
         return ""
 
-    # Build from newest-backward so that when we trim for the budget we
-    # drop the OLDEST entries first, preserving the most recent context.
-    kept: list[str] = []
-    running_chars = 0
-    for line in reversed(turns):
-        if not isinstance(line, str):
-            continue
-        line = line.strip()
-        if not line:
-            continue
-        cost = len(line) + 1  # +1 for the joining newline
-        if running_chars + cost > max_chars and kept:
-            break
-        kept.append(line)
-        running_chars += cost
-
-    # kept is newest-first; reverse to oldest-first (natural reading order)
-    kept.reverse()
+    kept = _recent_context_lines_within_budget(turns, max_chars)
     return "\n".join(kept)
 
 

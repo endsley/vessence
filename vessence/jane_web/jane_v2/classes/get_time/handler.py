@@ -45,6 +45,10 @@ async def _call_local_llm(prompt_text: str) -> str:
     return await _post_local_llm_response(prompt_text, _time_llm_payload)
 
 
+def time_answer_response(text: str, thought: str) -> dict:
+    return {"text": text, "thought": thought, "conversation_end": True}
+
+
 async def handle(prompt: str, context: str = "") -> dict:
     """Generate a time/date answer via the local LLM with the current
     time injected into the prompt.
@@ -56,11 +60,7 @@ async def handle(prompt: str, context: str = "") -> dict:
     fast = _fast_time_reply(prompt)
     if fast is not None:
         logger.info("get_time: fast path → %r", fast)
-        return {
-            "text": fast,
-            "thought": "fast-path: simple time/date query",
-            "conversation_end": True,
-        }
+        return time_answer_response(fast, "fast-path: simple time/date query")
 
     time_info = _format_time_info()
     llm_prompt = _build_prompt(prompt, context or "", time_info)
@@ -79,4 +79,4 @@ async def handle(prompt: str, context: str = "") -> dict:
         "get_time: LLM %dms — thought=%r reply=%r",
         latency_ms, thought[:80], reply[:80],
     )
-    return {"text": reply, "thought": thought, "conversation_end": True}
+    return time_answer_response(reply, thought)

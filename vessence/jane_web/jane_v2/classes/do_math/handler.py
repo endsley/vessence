@@ -43,6 +43,10 @@ async def _call_local_llm(prompt_text: str) -> str:
     return await _post_local_llm_response(prompt_text, _math_llm_payload)
 
 
+def math_success_response(expr: str, answer: str) -> dict:
+    return {"text": f"{answer}.", "thought": f"computed {expr} = {answer}"}
+
+
 # ── Entry point ─────────────────────────────────────────────────────────────
 
 async def handle(prompt: str, context: str = "") -> dict | None:
@@ -69,10 +73,9 @@ async def handle(prompt: str, context: str = "") -> dict | None:
         return None
 
     answer = _format_number(value)
-    reply = f"{answer}."
 
     logger.info(
         "do_math: parse %dms — prompt=%r → expr=%r → %s",
         parse_ms, prompt[:60], expr[:80], answer,
     )
-    return {"text": reply, "thought": f"computed {expr} = {answer}"}
+    return math_success_response(expr, answer)

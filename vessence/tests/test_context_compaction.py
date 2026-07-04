@@ -1,4 +1,23 @@
-from memory.v1.context_compaction import compaction_split_index
+from memory.v1.context_compaction import (
+    clamp_compaction_split_index,
+    compaction_split_index,
+    compaction_token_target,
+)
+
+
+def test_compaction_token_target_preserves_threshold_overage_plus_buffer():
+    assert compaction_token_target(
+        current_tokens=100,
+        compaction_threshold=70,
+        max_tokens=100,
+    ) == 55
+
+
+def test_clamp_compaction_split_index_preserves_remaining_message_policy():
+    assert clamp_compaction_split_index(2, 5) == 2
+    assert clamp_compaction_split_index(4, 5) == 3
+    assert clamp_compaction_split_index(1, 2) is None
+    assert clamp_compaction_split_index(0, 5) is None
 
 
 def test_compaction_split_index_returns_none_below_threshold():

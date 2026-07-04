@@ -5,6 +5,7 @@ from memory.v1.janitor_log_retention import (
     is_log_retention_candidate,
     is_protected_log,
     is_self_improve_report,
+    retention_seconds,
     should_delete_log_file,
     should_delete_self_improve_report,
 )
@@ -21,6 +22,7 @@ def test_log_retention_candidates_and_protected_names():
 
 def test_should_delete_log_file_uses_default_and_protected_cutoffs():
     now_ts = 1_000_000.0
+    assert retention_seconds(LOG_MAX_AGE_DAYS) == LOG_MAX_AGE_DAYS * 86400
     old_default = now_ts - ((LOG_MAX_AGE_DAYS + 1) * 86400)
     old_protected = now_ts - ((PROTECTED_LOG_RETENTION_DAYS + 1) * 86400)
     protected_under_default_cutoff = now_ts - ((LOG_MAX_AGE_DAYS + 1) * 86400)

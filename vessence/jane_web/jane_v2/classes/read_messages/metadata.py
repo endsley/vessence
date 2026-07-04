@@ -26,6 +26,18 @@ def _readback_body(row: dict, max_chars: int = 800) -> str:
         return body[:max_chars]
 
 
+def _read_messages_instruction_text() -> str:
+    return (
+        "Interpret and summarize these messages for the user. "
+        "SENT = user's outgoing messages, RECEIVED = incoming. "
+        "Classify each as important (personal/contact) or spam/promo. "
+        "Quote contact messages verbatim; summarize spam briefly."
+        " Use body text from resolved links when available. If a message says "
+        "the linked TalkingPoints content could not be opened automatically, "
+        "say that instead of reading the wrapper notification as the message."
+    )
+
+
 def _escalation_context() -> str:
     """Inject recent synced messages so Stage 3 (Opus) can analyze them
     without re-querying the database."""
@@ -55,15 +67,7 @@ def _escalation_context() -> str:
         lines.append(_format_synced_message_line(i, r, body))
 
     lines.append("")
-    lines.append(
-        "Interpret and summarize these messages for the user. "
-        "SENT = user's outgoing messages, RECEIVED = incoming. "
-        "Classify each as important (personal/contact) or spam/promo. "
-        "Quote contact messages verbatim; summarize spam briefly."
-        " Use body text from resolved links when available. If a message says "
-        "the linked TalkingPoints content could not be opened automatically, "
-        "say that instead of reading the wrapper notification as the message."
-    )
+    lines.append(_read_messages_instruction_text())
     return "\n".join(lines)
 
 

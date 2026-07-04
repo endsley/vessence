@@ -37,6 +37,29 @@ def _anchor_doc_set(exact_anchor_docs: Iterable[str] | None) -> set[str]:
     return {doc for doc in exact_anchor_docs or ()}
 
 
+def user_memory_tier(memory_type: object) -> str:
+    if memory_type == "permanent":
+        return "permanent"
+    if memory_type in {"forgettable", "short_term"}:
+        return "legacy_short_term"
+    return "long_term"
+
+
+def include_long_term_user_memory_fact(
+    doc: str,
+    meta: dict,
+    distance: float | None,
+    *,
+    max_distance: float | None,
+    anchor_docs: set[str],
+) -> bool:
+    if not within_distance(distance, max_distance):
+        return False
+    if meta.get("topic") == "prompt_queue":
+        return False
+    return not (meta.get("topic") == "ds3000_lecture_notes" and doc in anchor_docs)
+
+
 def _collect_expiring_distance_facts(
     docs: list[str],
     metas: list[dict],
@@ -68,15 +91,15 @@ def collect_user_memory_facts(
 
     for doc, raw_meta, distance in zip(docs, metas, distances):
         meta = _meta_with_distance(raw_meta, distance)
-        memory_type = meta.get("memory_type", "long_term")
+        tier = user_memory_tier(meta.get("memory_type", "long_term"))
         if is_file_index_record(doc, meta):
             continue
         if is_low_signal_shared_memory(doc, meta):
             continue
-        if memory_type == "permanent":
+        if tier == "permanent":
             if within_distance(distance, permanent_max_distance):
                 permanent_facts.append(fmt_memory(doc, meta))
-        elif memory_type in {"forgettable", "short_term"}:
+        elif tier == "legacy_short_term":
             if (
                 within_distance(distance, short_term_max_distance)
                 and not is_expired(meta)
@@ -84,13 +107,14 @@ def collect_user_memory_facts(
             ):
                 legacy_short_term_facts.append(fmt_memory(doc, meta))
         else:
-            if not within_distance(distance, user_max_distance):
-                continue
-            if meta.get("topic") == "prompt_queue":
-                continue
-            if meta.get("topic") == "ds3000_lecture_notes" and doc in anchor_docs:
-                continue
-            long_term_facts.append(fmt_memory(doc, meta))
+            if include_long_term_user_memory_fact(
+                doc,
+                meta,
+                distance,
+                max_distance=user_max_distance,
+                anchor_docs=anchor_docs,
+            ):
+                long_term_facts.append(fmt_memory(doc, meta))
 
     return UserMemoryFacts(
         permanent=permanent_facts,
@@ -124,16 +148,36 @@ def collect_short_term_semantic_facts(
     return [
         fmt_memory(doc, _meta_with_distance(meta, distance))
         for doc, meta, distance in zip(docs, metas, distances)
-        if not is_expired(meta or {})
-        and not is_too_old(meta or {})
-        and not is_none_content(doc)
-        and not is_low_signal_short_term_memory(doc, meta or {})
+        if is_usable_short_term_fact(doc, meta)
         and within_distance(distance, max_distance)
     ]
 
 
+def is_usable_short_term_fact(doc: str, meta: dict | None) -> bool:
+    meta = meta or {}
+    return (
+        not is_expired(meta)
+        and not is_too_old(meta)
+        and not is_none_content(doc)
+        and not is_low_signal_short_term_memory(doc, meta)
+    )
+
+
 def _fact_preview_key(formatted_fact: str) -> str:
     return formatted_fact.split(") ", 1)[-1][:80]
+
+
+def recent_short_term_rows(
+    docs: list[str],
+    metas: list[dict | None],
+    *,
+    limit: int,
+) -> list[tuple[str, dict | None]]:
+    return sorted(
+        zip(docs, metas),
+        key=lambda row: row[1].get("timestamp", "") if row[1] else "",
+        reverse=True,
+    )[:limit]
 
 
 def collect_short_term_with_recency_boost(
@@ -145,19 +189,9 @@ def collect_short_term_with_recency_boost(
 ) -> list[str]:
     facts = list(semantic_facts)
     existing_texts = {_fact_preview_key(fact) for fact in facts}
-    recent_rows = sorted(
-        zip(docs, metas),
-        key=lambda row: row[1].get("timestamp", "") if row[1] else "",
-        reverse=True,
-    )[:limit]
-    for doc, meta in recent_rows:
+    for doc, meta in recent_short_term_rows(docs, metas, limit=limit):
         meta = meta or {}
-        if (
-            is_expired(meta)
-            or is_too_old(meta)
-            or is_none_content(doc)
-            or is_low_signal_short_term_memory(doc, meta)
-        ):
+        if not is_usable_short_term_fact(doc, meta):
             continue
         formatted = fmt_memory(doc, meta)
         key = _fact_preview_key(formatted)

@@ -11,6 +11,7 @@ from agent_skills.gmail_message_utils import (
     header_map,
     message_is_older_than_days,
     message_text,
+    ny_aware_datetime,
     parse_subject_time,
     sender_matches_domains,
 )
@@ -87,6 +88,15 @@ def test_message_is_older_than_days_uses_new_york_internal_date():
     assert message_is_older_than_days(old_message, 3, now=now)
     assert not message_is_older_than_days(young_message, 3, now=now)
     assert not message_is_older_than_days({"internalDate": "bad"}, 3, now=now)
+
+
+def test_ny_aware_datetime_normalizes_naive_and_aware_values():
+    naive = dt.datetime(2026, 6, 29, 12, 0)
+    utc = dt.datetime(2026, 6, 29, 16, 0, tzinfo=dt.timezone.utc)
+
+    assert ny_aware_datetime(naive) == dt.datetime(2026, 6, 29, 12, 0, tzinfo=NY)
+    assert ny_aware_datetime(utc) == dt.datetime(2026, 6, 29, 12, 0, tzinfo=NY)
+    assert ny_aware_datetime().tzinfo == NY
 
 
 def test_google_calendar_subject_parser_uses_end_time_and_period_fallback():

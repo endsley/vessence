@@ -1,10 +1,16 @@
 from memory.v1.conversation_text import (
+    ASSISTANT_FILLER_PATTERNS,
+    LOW_VALUE_EXACT_TURNS,
+    USER_LOW_VALUE_PATTERNS,
     _code_change_summary_prompt,
     _generic_turn_summary_prompt,
     build_short_term_summary_plan,
     compact_whitespace,
+    is_low_value_short_question,
     looks_like_bad_thematic_output,
     looks_like_code_edit,
+    matches_any_pattern,
+    normalize_summary_bullet_line,
     normalize_short_term_summary,
     prepare_thematic_turn,
     should_store_short_term_turn,
@@ -48,6 +54,13 @@ def test_prepare_thematic_turn_skips_metadata_only_and_labels_real_turns():
 
 
 def test_should_store_short_term_turn_filters_low_value_chatter():
+    assert "thanks" in LOW_VALUE_EXACT_TURNS
+    assert is_low_value_short_question("user", "why?")
+    assert not is_low_value_short_question("assistant", "why?")
+    assert not is_low_value_short_question("user", "why did this fail?")
+    assert matches_any_pattern("hey jane, testing?", USER_LOW_VALUE_PATTERNS)
+    assert matches_any_pattern("i'm here. what do you need?", ASSISTANT_FILLER_PATTERNS)
+
     assert not should_store_short_term_turn("user", "thanks")
     assert not should_store_short_term_turn("user", "why?")
     assert should_store_short_term_turn("user", "MEMORY_SYSTEM_OK")
@@ -72,6 +85,12 @@ def test_short_term_summary_prompt_helpers_preserve_prompt_contracts():
 def test_code_edit_detection_and_summary_normalization():
     assert looks_like_code_edit("*** Begin Patch\n*** Update File: memory/v1/file.py")
     assert not looks_like_code_edit("Discussed project priorities.")
+
+    assert normalize_summary_bullet_line("  * added test ") == "- added test"
+    assert normalize_summary_bullet_line("1. changed file") == "- changed file"
+    assert normalize_summary_bullet_line("- kept bullet") == "- kept bullet"
+    assert normalize_summary_bullet_line("plain line") == "plain line"
+    assert normalize_summary_bullet_line(" \n ") == ""
 
     assert normalize_short_term_summary("line one\n line two", preserve_bullets=False) == "line one line two"
     assert normalize_short_term_summary("1. changed file\n* added test", preserve_bullets=True) == (

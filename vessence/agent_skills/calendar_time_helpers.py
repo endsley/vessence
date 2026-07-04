@@ -23,10 +23,14 @@ def day_range(day, tz) -> tuple[datetime, datetime]:
     return start, end
 
 
+def normalized_range_hint(range_hint: str | None) -> str:
+    return (range_hint or "today").strip().lower().replace(" ", "_")
+
+
 def resolve_range_for_now(range_hint: str | None, now: datetime) -> tuple[datetime, datetime]:
     tz = now.tzinfo
     today = now.date()
-    hint = (range_hint or "today").strip().lower().replace(" ", "_")
+    hint = normalized_range_hint(range_hint)
 
     if hint == "today":
         return day_range(today, tz)

@@ -7,6 +7,7 @@ from agent_skills.ra_research_delivery import (
     email_report_subject,
     mark_email_report_sent,
     mark_app_report_sent,
+    mark_report_sent_base,
     normalize_report_channel,
     parse_iso_datetime,
     should_send_report,
@@ -122,6 +123,20 @@ def test_mark_app_report_sent_updates_existing_state_in_place():
         "last_report_error": None,
         "last_report_channel": "app",
         "last_html_report_path": "/vault/report.html",
+    }
+
+
+def test_mark_report_sent_base_updates_common_report_state_only():
+    state = {"last_report_channel": "email", "last_report_error": "old"}
+
+    mark_report_sent_base(state, sent_at="2026-07-02T12:00:00+00:00", source_count=9)
+
+    assert state == {
+        "last_report_channel": "email",
+        "last_report_error": None,
+        "last_report_sent_at": "2026-07-02T12:00:00+00:00",
+        "last_report_source_count": 9,
+        "initial_report_sent": True,
     }
 
 

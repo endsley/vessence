@@ -107,10 +107,14 @@ def select_shared_skills(skills_answer: str) -> list[str]:
     return [skill for skill in KNOWN_SHARED_SKILLS if skill in normalized]
 
 
+def candidate_mentioned(answer: str, candidate: str) -> bool:
+    return candidate.replace("_", " ") in answer or candidate in answer
+
+
 def select_ui_type(ui_answer: str) -> str:
     answer = ui_answer.lower()
     for candidate in UI_TYPE_CANDIDATES:
-        if candidate.replace("_", " ") in answer or candidate in answer:
+        if candidate_mentioned(answer, candidate):
             return candidate
     return "chat"
 
@@ -120,7 +124,7 @@ def select_permissions(permissions_answer: str) -> list[str]:
     return [
         permission
         for permission in KNOWN_PERMISSIONS
-        if permission.replace("_", " ") in answer or permission in answer
+        if candidate_mentioned(answer, permission)
     ]
 
 

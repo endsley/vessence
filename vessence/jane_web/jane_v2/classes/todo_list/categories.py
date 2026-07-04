@@ -109,6 +109,21 @@ def friendly_category_name(raw: str) -> str:
     return name
 
 
+def category_list_label(raw: str) -> str:
+    """Return the short spoken label used when listing categories."""
+    name = raw.strip()
+    lowered = name.lower()
+    if "immediately" in lowered:
+        return "the urgent stuff"
+    if lowered.startswith("for the "):
+        return "the " + name[len("For the "):].lower()
+    if lowered.startswith("for our "):
+        return name[len("For our "):].lower()
+    if lowered.startswith("for my "):
+        return name[len("For my "):].lower()
+    return name.lower()
+
+
 def speak_items(category: dict) -> str:
     name = friendly_category_name(category.get("name", "that"))
     items = [item for item in (category.get("items") or []) if item.strip()]
@@ -132,19 +147,7 @@ def speak_items(category: dict) -> str:
 def speak_category_list(categories: list[dict]) -> str:
     categories = visible_categories(categories)
     names = [category.get("name", "").strip() for category in categories if category.get("items")]
-    friendly = []
-    for name in names:
-        lowered = name.lower()
-        if "immediately" in lowered:
-            friendly.append("the urgent stuff")
-        elif lowered.startswith("for the "):
-            friendly.append("the " + name[len("For the "):].lower())
-        elif lowered.startswith("for our "):
-            friendly.append(name[len("For our "):].lower())
-        elif lowered.startswith("for my "):
-            friendly.append(name[len("For my "):].lower())
-        else:
-            friendly.append(name.lower())
+    friendly = [category_list_label(name) for name in names]
     if not friendly:
         return "Your list is empty right now."
     if len(friendly) == 1:

@@ -1,4 +1,10 @@
-from jane_web.sms_classification import classify_synced_message
+from jane_web.sms_classification import _contains_any_keyword, classify_synced_message
+
+
+def test_keyword_predicate_matches_substrings_and_empty_lists():
+    assert _contains_any_keyword("payment due", ("due", "reminder"))
+    assert not _contains_any_keyword("plain text", ("promo", "sale"))
+    assert not _contains_any_keyword("plain text", ())
 
 
 def test_contact_messages_are_personal_regardless_of_body_keywords():

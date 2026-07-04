@@ -1,7 +1,12 @@
 import datetime
 
 from jane_web import turn_dedupe
-from jane_web.turn_dedupe import DedupeRow, _age_seconds_since, _existing_row_blocks_begin
+from jane_web.turn_dedupe import (
+    DedupeRow,
+    _age_seconds_since,
+    _dedupe_status_blocks_begin,
+    _existing_row_blocks_begin,
+)
 
 
 def test_age_seconds_since_preserves_sqlite_timestamp_parsing():
@@ -49,6 +54,10 @@ def test_dedupe_row_age_seconds_falls_back_to_zero_for_bad_timestamps():
 
 def test_existing_row_blocks_begin_for_pending_or_completed_rows_inside_ttl():
     now = datetime.datetime(2026, 7, 3, 12, 5, 0)
+
+    assert _dedupe_status_blocks_begin("pending")
+    assert _dedupe_status_blocks_begin("completed")
+    assert not _dedupe_status_blocks_begin("failed")
 
     assert _existing_row_blocks_begin(
         "pending",

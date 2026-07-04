@@ -9,8 +9,12 @@ def discord_webhook_payload(message: str, *, max_chars: int = 2000) -> dict:
     return {"content": message[:max_chars]}
 
 
+def strip_work_log_notification_markup(message: str) -> str:
+    return message.replace("**", "").replace("```", "").strip()
+
+
 def work_log_notification_text(message: str, *, max_chars: int = 300) -> str:
-    return message.replace("**", "").replace("```", "").strip()[:max_chars]
+    return strip_work_log_notification_markup(message)[:max_chars]
 
 
 def cron_env_payload(

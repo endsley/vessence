@@ -1,7 +1,20 @@
 import re
 import warnings
 
-from agent_skills.private_handler_utils import _expires_at, pending_continuation
+from agent_skills.private_handler_utils import (
+    _expires_at,
+    pending_continuation,
+    pending_continuation_data,
+)
+
+
+def test_pending_continuation_data_adds_or_overrides_awaiting() -> None:
+    assert pending_continuation_data({"label": "tea"}, "duration") == {
+        "label": "tea",
+        "awaiting": "duration",
+    }
+    assert pending_continuation_data({"awaiting": "old"}, "new") == {"awaiting": "new"}
+    assert pending_continuation_data(None, "duration") == {"awaiting": "duration"}
 
 
 def test_pending_continuation_uses_warning_free_utc_expiry() -> None:

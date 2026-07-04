@@ -29,16 +29,20 @@ _SPAM_KEYWORDS = (
 _NOTIFICATION_KEYWORDS = ("shipped", "deliver", "tracking", "order", "package")
 
 
+def _contains_any_keyword(text: str, keywords: tuple[str, ...]) -> bool:
+    return any(keyword in text for keyword in keywords)
+
+
 def classify_synced_message(body: str, *, is_contact: bool) -> str:
     """Return the synced_messages.msg_type value used by the Android SMS sync route."""
     if is_contact:
         return "personal"
 
     body_lower = (body or "").lower()
-    if any(keyword in body_lower for keyword in _REMINDER_KEYWORDS):
+    if _contains_any_keyword(body_lower, _REMINDER_KEYWORDS):
         return "reminder"
-    if any(keyword in body_lower for keyword in _SPAM_KEYWORDS):
+    if _contains_any_keyword(body_lower, _SPAM_KEYWORDS):
         return "spam"
-    if any(keyword in body_lower for keyword in _NOTIFICATION_KEYWORDS):
+    if _contains_any_keyword(body_lower, _NOTIFICATION_KEYWORDS):
         return "notification"
     return "unknown"

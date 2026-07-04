@@ -5,6 +5,7 @@ from fastapi import HTTPException
 
 from jane_web.user_access import (
     clean_seed_memories,
+    has_user_admin_capability,
     is_user_admin,
     managed_user_display_name,
     normalize_managed_user_email,
@@ -152,6 +153,12 @@ def test_managed_user_create_helpers_normalize_route_inputs():
         "remember this",
         "second",
     ]
+
+
+def test_has_user_admin_capability_checks_config_capability_list():
+    assert has_user_admin_capability({"capabilities": ["vault_read", "user_admin"]})
+    assert not has_user_admin_capability({"capabilities": ["vault_read"]})
+    assert not has_user_admin_capability({})
 
 
 def test_normalize_managed_user_email_rejects_invalid_values():

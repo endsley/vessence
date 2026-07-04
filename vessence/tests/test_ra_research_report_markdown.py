@@ -15,6 +15,7 @@ from agent_skills.ra_research_report_markdown import (
     run_report_source_details_lines,
     source_heading,
     source_trace_line,
+    usable_summary_items,
     useful_finding_lines,
     useful_report_bottom_line_lines,
     useful_report_changed_lines,
@@ -175,6 +176,18 @@ def test_useful_report_source_render_helpers_preserve_high_signal_shapes():
         "safety_concerns": ["Discuss infection risk before medication changes."],
         "url": "https://example.test/high",
     }
+
+    assert usable_summary_items(
+        {
+            "actionable_implications": [
+                " Ask whether CDAI is the active target. ",
+                "No safety concerns were noted.",
+            ]
+        },
+        "actionable_implications",
+        max_items=3,
+        max_chars=240,
+    ) == ["Ask whether CDAI is the active target."]
 
     assert useful_finding_lines(summary) == [
         "### `pmid-1` Treat to target CDAI remission guidance",

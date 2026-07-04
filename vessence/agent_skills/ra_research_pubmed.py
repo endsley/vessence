@@ -58,17 +58,21 @@ def parse_article_ids(article: ET.Element) -> dict[str, str]:
     return ids
 
 
-def parse_pubmed_article(article: ET.Element) -> dict[str, Any] | None:
-    pmid = text_of(article.find(".//PMID"))
-    if not pmid:
-        return None
-    ids = parse_article_ids(article)
+def parse_abstract_text(article: ET.Element) -> str:
     abstract_parts = []
     for node in article.findall(".//Abstract/AbstractText"):
         label = node.attrib.get("Label") or node.attrib.get("NlmCategory") or ""
         content = text_of(node)
         if content:
             abstract_parts.append(f"{label}: {content}" if label else content)
+    return "\n".join(abstract_parts)
+
+
+def parse_pubmed_article(article: ET.Element) -> dict[str, Any] | None:
+    pmid = text_of(article.find(".//PMID"))
+    if not pmid:
+        return None
+    ids = parse_article_ids(article)
     title = text_of(article.find(".//ArticleTitle"))
     journal = text_of(article.find(".//Journal/Title")) or text_of(article.find(".//Journal/ISOAbbreviation"))
     publication_types = [text_of(node) for node in article.findall(".//PublicationTypeList/PublicationType")]
@@ -83,7 +87,7 @@ def parse_pubmed_article(article: ET.Element) -> dict[str, Any] | None:
         "journal": journal,
         "published": parse_pub_date(article),
         "authors": parse_authors(article),
-        "abstract": "\n".join(abstract_parts),
+        "abstract": parse_abstract_text(article),
         "publication_types": [p for p in publication_types if p],
         "mesh_terms": [m for m in mesh_terms if m],
         "url": f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/",

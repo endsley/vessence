@@ -20,6 +20,8 @@ from jane_web.jane_v2.classes.read_calendar.responses import (
     build_event_choice_response,
     build_event_detail_response,
     build_range_followup_response,
+    last_range_pending_data,
+    range_events_pending_data,
     serialize_events_for_pending,
 )
 
@@ -241,6 +243,11 @@ def test_calendar_range_followup_response_serializes_events_for_pending() -> Non
             "html_link": "https://example.test/event",
         }
     ]
+    assert last_range_pending_data("today") == {"last_range": "today"}
+    assert range_events_pending_data("today", [{"id": "e1"}]) == {
+        "last_range": "today",
+        "events": [{"id": "e1"}],
+    }
     assert response["text"] == f"You have one thing. {DETAIL_FOLLOWUP}"
     assert response["structured"]["entities"] == {"range": "today"}
     assert pending["handler_class"] == "read calendar"

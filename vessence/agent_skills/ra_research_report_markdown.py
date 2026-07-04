@@ -314,12 +314,22 @@ def useful_report_summary_groups(
     }
 
 
+def usable_summary_items(
+    summary: dict[str, Any],
+    field: str,
+    *,
+    max_items: int,
+    max_chars: int,
+) -> list[str]:
+    return filter_report_items(list_values(summary.get(field), max_items=max_items, max_chars=max_chars))
+
+
 def useful_finding_lines(summary: dict[str, Any]) -> list[str]:
     findings = list_values(summary.get("main_findings"), max_items=2, max_chars=260)
-    actions = filter_report_items(list_values(summary.get("actionable_implications"), max_items=2, max_chars=240))
-    questions = filter_report_items(list_values(summary.get("clinician_discussion_points"), max_items=2, max_chars=240))
-    caveats = filter_report_items(list_values(summary.get("limitations"), max_items=1, max_chars=240))
-    safety = filter_report_items(list_values(summary.get("safety_concerns"), max_items=1, max_chars=240))
+    actions = usable_summary_items(summary, "actionable_implications", max_items=2, max_chars=240)
+    questions = usable_summary_items(summary, "clinician_discussion_points", max_items=2, max_chars=240)
+    caveats = usable_summary_items(summary, "limitations", max_items=1, max_chars=240)
+    safety = usable_summary_items(summary, "safety_concerns", max_items=1, max_chars=240)
     lines = [
         f"### {source_heading(summary)}",
         f"- Evidence: {evidence_label(summary)}.",

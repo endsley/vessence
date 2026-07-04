@@ -14,6 +14,7 @@ from agent_skills.cron_utils import load_cron_env
 from agent_skills.model_update_helpers import (
     discord_bot_headers as _discord_bot_headers,
     discord_channel_messages_url as _discord_channel_messages_url,
+    discord_message_payload as _discord_message_payload,
     model_update_notification_message as _model_update_notification_message,
 )
 
@@ -38,7 +39,7 @@ async def send_notification():
         headers = _discord_bot_headers(DISCORD_TOKEN)
         
         async with httpx.AsyncClient() as client:
-            resp = await client.post(url, headers=headers, json={"content": message})
+            resp = await client.post(url, headers=headers, json=_discord_message_payload(message))
             if resp.status_code == 200:
                 print("Notification sent to Discord.")
                 # Clear the notification so we don't spam

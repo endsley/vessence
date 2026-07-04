@@ -90,6 +90,10 @@ def report_id_from_path(report_path: Path) -> str:
     return report_path.stem.removeprefix("ra_research_run_")
 
 
+def count_label(count: int, singular: str) -> str:
+    return f"{count} {singular}{'' if count == 1 else 's'}"
+
+
 def build_report_html(
     report_markdown: str,
     report_id: str,
@@ -157,8 +161,8 @@ def build_report_html(
       <p class="eyebrow">Rheumatoid Arthritis Research</p>
       <h1>RA remission research update</h1>
       <div class="meta">
-        <span class="pill">{new_count} new source{'' if new_count == 1 else 's'}</span>
-        <span class="pill">{source_count} cached source{'' if source_count == 1 else 's'}</span>
+        <span class="pill">{count_label(new_count, 'new source')}</span>
+        <span class="pill">{count_label(source_count, 'cached source')}</span>
         <span>{html.escape(generated)}</span>
         <span>Report {html.escape(report_id)}</span>
       </div>

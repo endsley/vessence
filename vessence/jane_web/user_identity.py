@@ -9,8 +9,12 @@ from vault_web.auth import default_user_id as auth_default_user_id
 from vault_web.auth import user_id_from_email
 
 
+def env_csv_values(environ: Mapping[str, str], name: str) -> list[str]:
+    return [value.strip() for value in environ.get(name, "").split(",") if value.strip()]
+
+
 def default_user_id(environ: Mapping[str, str] = os.environ) -> str:
-    allowed = [email.strip() for email in environ.get("ALLOWED_GOOGLE_EMAILS", "").split(",") if email.strip()]
+    allowed = env_csv_values(environ, "ALLOWED_GOOGLE_EMAILS")
     if allowed:
         return allowed[0]
     user_name = environ.get("USER_NAME", "").strip().lower()
@@ -39,8 +43,8 @@ def configured_admin_variants(
 ) -> set[str]:
     configured = []
     for env_name in ("VESSENCE_ADMIN_USERS", "ADMIN_EMAILS"):
-        configured.extend([value.strip() for value in environ.get(env_name, "").split(",") if value.strip()])
-    allowed = [email.strip() for email in environ.get("ALLOWED_GOOGLE_EMAILS", "").split(",") if email.strip()]
+        configured.extend(env_csv_values(environ, env_name))
+    allowed = env_csv_values(environ, "ALLOWED_GOOGLE_EMAILS")
     if not configured and allowed:
         configured.append(allowed[0])
     if not configured:

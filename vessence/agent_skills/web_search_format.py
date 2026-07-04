@@ -21,25 +21,26 @@ def is_tavily_quota_status(status_code: int) -> bool:
     return status_code in TAVILY_QUOTA_STATUSES
 
 
-def format_tavily_results(results: list[dict[str, Any]]) -> str:
+def format_search_results(
+    results: list[dict[str, Any]],
+    *,
+    url_key: str,
+    body_key: str,
+) -> str:
     if not results:
         return ""
     parts = []
     for result in results:
         title = result.get("title", "")
-        url = result.get("url", "")
-        content = result.get("content", "")
-        parts.append(f"[{title}]({url})\n{content}")
+        url = result.get(url_key, "")
+        body = result.get(body_key, "")
+        parts.append(f"[{title}]({url})\n{body}")
     return "\n\n".join(parts)
+
+
+def format_tavily_results(results: list[dict[str, Any]]) -> str:
+    return format_search_results(results, url_key="url", body_key="content")
 
 
 def format_ddg_results(results: list[dict[str, Any]]) -> str:
-    if not results:
-        return ""
-    parts = []
-    for result in results:
-        title = result.get("title", "")
-        href = result.get("href", "")
-        body = result.get("body", "")
-        parts.append(f"[{title}]({href})\n{body}")
-    return "\n\n".join(parts)
+    return format_search_results(results, url_key="href", body_key="body")

@@ -13,6 +13,8 @@ from jane_web.jane_v2.classes.weather.phrasing import (
 from jane_web.jane_v2.classes.weather.responses import (
     WEATHER_FOLLOWUP_QUESTION,
     build_weather_followup_response,
+    weather_followup_data,
+    weather_followup_text,
 )
 from jane_web.jane_v2.classes.weather.slices import (
     DAY_PHRASE_MAP,
@@ -95,7 +97,23 @@ def test_handler_uses_extracted_weather_slice_helpers() -> None:
     assert handler._post_local_llm_response is post_local_llm_response
 
 
+def test_weather_route_policy_helpers_preserve_online_and_location_rules() -> None:
+    assert handler._requires_online_weather_lookup("look up why it is so humid")
+    assert handler._requires_online_weather_lookup("what's causing the smoke?")
+    assert not handler._requires_online_weather_lookup("will it rain tomorrow?")
+
+    assert handler._normalize_weather_location(" Medford, MA ") == "medford, ma"
+    assert handler._is_supported_weather_location("")
+    assert handler._is_supported_weather_location("medford")
+    assert handler._is_supported_weather_location("medford ma")
+    assert not handler._is_supported_weather_location("boston")
+
+
 def test_weather_followup_uses_shared_pending_continuation_shape() -> None:
+    assert weather_followup_text("It's clear.") == f"It's clear. {WEATHER_FOLLOWUP_QUESTION}"
+    assert weather_followup_data("overview", None) == {"topic": "overview", "location": ""}
+    assert weather_followup_data("forecast", "medford") == {"topic": "forecast", "location": "medford"}
+
     assert build_weather_followup_response.__globals__["_pending_continuation"] is pending_continuation
     result = build_weather_followup_response("It's clear.", "overview", None)
 

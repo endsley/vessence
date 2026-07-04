@@ -57,6 +57,13 @@ def defer_reason_for_load(
     return None
 
 
+def gpu_vram_used_percent(load: dict) -> float:
+    gpu_total = load.get("gpu_memory_total_mb", 0)
+    if gpu_total <= 0:
+        return 0.0
+    return (load.get("gpu_memory_used_mb", 0) / gpu_total) * 100
+
+
 def has_ample_resources_for_load(load: dict, threshold_pct: float = 60) -> bool:
     if load["cpu_percent"] > threshold_pct:
         return False
@@ -64,10 +71,9 @@ def has_ample_resources_for_load(load: dict, threshold_pct: float = 60) -> bool:
         return False
     gpu_total = load.get("gpu_memory_total_mb", 0)
     if gpu_total > 0:
-        vram_pct = (load.get("gpu_memory_used_mb", 0) / gpu_total) * 100
         if load.get("gpu_percent", 0) > threshold_pct:
             return False
-        if vram_pct > threshold_pct:
+        if gpu_vram_used_percent(load) > threshold_pct:
             return False
     return True
 

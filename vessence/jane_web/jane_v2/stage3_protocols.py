@@ -14,14 +14,19 @@ CLASS_NAME_RE = re.compile(r"^[a-z0-9_]+$")
 PROTOCOL_CACHE: dict[str, tuple[int, str | None]] = {}
 
 
+def strip_escalation_reason_suffix(base: str) -> str:
+    for suffix in ("_fallback", "_declined", "_decline"):
+        if base.endswith(suffix):
+            return base[: -len(suffix)]
+    return base
+
+
 def reason_to_class(reason: str) -> str | None:
     """Map a Stage 3 escalation reason to a class folder name."""
     if not reason:
         return None
     base = reason.split(":", 1)[0].strip().lower().replace(" ", "_")
-    for suffix in ("_fallback", "_declined", "_decline"):
-        if base.endswith(suffix):
-            base = base[: -len(suffix)]
+    base = strip_escalation_reason_suffix(base)
     if not base or base == "others":
         return None
     if not CLASS_NAME_RE.match(base):

@@ -66,6 +66,10 @@ def codex_required_output_contract() -> dict[str, Any]:
     }
 
 
+def source_ids_from_summaries(summaries: list[dict[str, Any]]) -> list[str]:
+    return [summary.get("source_id", "") for summary in summaries]
+
+
 def codex_synthesis_payload(
     *,
     mission_statement: str,
@@ -81,7 +85,7 @@ def codex_synthesis_payload(
         "model_policy": codex_model_policy(smart_model_label, smart_provider),
         "instructions": codex_synthesis_instructions(),
         "previous_compressed_context": previous_compressed_context,
-        "new_source_ids_this_run": [s.get("source_id", "") for s in new_summaries],
+        "new_source_ids_this_run": source_ids_from_summaries(new_summaries),
         "all_cached_source_summaries": compact_summary_payload(summaries, limit=90),
         "required_output": codex_required_output_contract(),
     }

@@ -78,28 +78,27 @@ def parse_json_from_text(text: str) -> dict[str, Any] | None:
         return None
 
 
+def compact_summary_record(summary: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "source_id": text_value(summary.get("source_id", ""), 80),
+        "title": text_value(summary.get("title", ""), 220),
+        "citation": text_value(summary.get("citation", ""), 300),
+        "url": text_value(summary.get("url", ""), 180),
+        "scope": text_value(summary.get("evidence_scope", ""), 80),
+        "type": text_value(summary.get("study_type", ""), 80),
+        "findings": list_values(summary.get("main_findings"), max_items=4, max_chars=260),
+        "relevance": text_value(summary.get("remission_relevance", ""), 320),
+        "actions": list_values(summary.get("actionable_implications"), max_items=4, max_chars=240),
+        "tests_or_monitoring": list_values(summary.get("tests_or_monitoring"), max_items=4, max_chars=220),
+        "food_diet": list_values(summary.get("food_diet_implications"), max_items=3, max_chars=220),
+        "lifestyle": list_values(summary.get("lifestyle_implications"), max_items=3, max_chars=220),
+        "technology": list_values(summary.get("technology_implications"), max_items=3, max_chars=220),
+        "safety": list_values(summary.get("safety_concerns"), max_items=4, max_chars=240),
+        "limitations": list_values(summary.get("limitations"), max_items=4, max_chars=240),
+        "clinician_questions": list_values(summary.get("clinician_discussion_points"), max_items=4, max_chars=240),
+        "artifact_dir": text_value(summary.get("artifact_dir", ""), 240),
+    }
+
+
 def compact_summary_payload(summaries: list[dict[str, Any]], limit: int = 120) -> list[dict[str, Any]]:
-    payload = []
-    for summary in summaries[:limit]:
-        payload.append(
-            {
-                "source_id": text_value(summary.get("source_id", ""), 80),
-                "title": text_value(summary.get("title", ""), 220),
-                "citation": text_value(summary.get("citation", ""), 300),
-                "url": text_value(summary.get("url", ""), 180),
-                "scope": text_value(summary.get("evidence_scope", ""), 80),
-                "type": text_value(summary.get("study_type", ""), 80),
-                "findings": list_values(summary.get("main_findings"), max_items=4, max_chars=260),
-                "relevance": text_value(summary.get("remission_relevance", ""), 320),
-                "actions": list_values(summary.get("actionable_implications"), max_items=4, max_chars=240),
-                "tests_or_monitoring": list_values(summary.get("tests_or_monitoring"), max_items=4, max_chars=220),
-                "food_diet": list_values(summary.get("food_diet_implications"), max_items=3, max_chars=220),
-                "lifestyle": list_values(summary.get("lifestyle_implications"), max_items=3, max_chars=220),
-                "technology": list_values(summary.get("technology_implications"), max_items=3, max_chars=220),
-                "safety": list_values(summary.get("safety_concerns"), max_items=4, max_chars=240),
-                "limitations": list_values(summary.get("limitations"), max_items=4, max_chars=240),
-                "clinician_questions": list_values(summary.get("clinician_discussion_points"), max_items=4, max_chars=240),
-                "artifact_dir": text_value(summary.get("artifact_dir", ""), 240),
-            }
-        )
-    return payload
+    return [compact_summary_record(summary) for summary in summaries[:limit]]

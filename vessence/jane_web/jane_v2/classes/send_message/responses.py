@@ -39,36 +39,40 @@ def build_sent_response(
     }
 
 
-def build_revision_request_response(phone: str, display: str) -> dict:
-    ask = "Please give me the updated message."
+def draft_pending_data(phone: str, display: str, body: str | None = None) -> dict:
+    draft = {"phone": phone, "display": display}
+    if body is not None:
+        draft["body"] = body
+    return {"draft": draft}
+
+
+def build_pending_message_response(ask: str, awaiting: str, data: dict) -> dict:
     return {
         "text": ask,
         "structured": {
             "intent": INTENT,
             "pending_action": pending_continuation(
                 handler_class=INTENT,
-                awaiting="revised_body",
+                awaiting=awaiting,
                 question=ask,
-                data={"draft": {"phone": phone, "display": display}},
+                data=data,
             ),
         },
     }
+
+
+def build_revision_request_response(phone: str, display: str) -> dict:
+    ask = "Please give me the updated message."
+    return build_pending_message_response(ask, "revised_body", draft_pending_data(phone, display))
 
 
 def build_confirmation_response(phone: str, display: str, body: str) -> dict:
     ask = f"Message to {display}: {body}. Should I send it?"
-    return {
-        "text": ask,
-        "structured": {
-            "intent": INTENT,
-            "pending_action": pending_continuation(
-                handler_class=INTENT,
-                awaiting="send_confirmation",
-                question=ask,
-                data={"draft": {"phone": phone, "display": display, "body": body}},
-            ),
-        },
-    }
+    return build_pending_message_response(
+        ask,
+        "send_confirmation",
+        draft_pending_data(phone, display, body),
+    )
 
 
 def build_open_draft_send_response(draft_id: str, query: str, body: str) -> dict:

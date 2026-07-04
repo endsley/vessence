@@ -5,6 +5,7 @@ from agent_skills.essence_validation import (
     REQUIRED_MODEL_FIELDS,
     REQUIRED_PATHS,
     REQUIRED_UI_FIELDS,
+    missing_nested_field_errors,
     validate_manifest,
 )
 
@@ -35,6 +36,12 @@ def test_validate_essence_reexports_schema_constants_and_validator():
 
 def test_validate_manifest_accepts_minimal_valid_manifest():
     assert validate_manifest(minimal_manifest()) == []
+
+
+def test_missing_nested_field_errors_preserves_message_shape_and_order():
+    assert missing_nested_field_errors("preferred_model", {"model_id": "gpt"}, ["model_id", "reasoning"]) == [
+        "preferred_model missing field: 'reasoning'",
+    ]
 
 
 def test_validate_manifest_reports_missing_top_level_fields_in_order():

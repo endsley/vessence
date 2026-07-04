@@ -3,7 +3,9 @@ from pathlib import Path
 from agent_skills import ra_research_cron
 from agent_skills.ra_research_source_utils import (
     citation_for,
+    fallback_first_sentence,
     fallback_summary_payload,
+    fallback_study_type,
     source_cache_key,
 )
 
@@ -35,6 +37,15 @@ def test_citation_for_preserves_author_limit_and_optional_fields():
         "A, B, C et al. (2026-07-02) RA remission Journal PMID:123 DOI:10.1/example"
     )
     assert citation_for({"title": "Untitled"}) == "Untitled"
+
+
+def test_fallback_summary_payload_helpers_preserve_text_and_type_rules():
+    assert fallback_first_sentence(" First sentence.\n\nSecond sentence. " + "x" * 600) == "First sentence"
+    assert fallback_study_type({"publication_types": ["A", "B", "C", "D", "E"], "kind": "fallback"}) == (
+        "A, B, C, D"
+    )
+    assert fallback_study_type({"kind": "guideline"}) == "guideline"
+    assert fallback_study_type({}) == "unknown"
 
 
 def test_fallback_summary_payload_preserves_existing_defaults_and_truncation():

@@ -22,6 +22,10 @@ class CleanupDecision:
     sender: str = ""
 
 
+def trash_outcome(prefix: str, dry_run: bool) -> str:
+    return f"{prefix}_would_trash" if dry_run else f"{prefix}_trashed"
+
+
 def evaluate_sender_cleanup_message(
     message: dict,
     *,
@@ -48,8 +52,7 @@ def evaluate_sender_cleanup_message(
     if not message_is_older_than_days(message, older_than_days, now=now):
         return CleanupDecision(f"{prefix}_too_recent", False, subject, sender)
 
-    outcome = f"{prefix}_would_trash" if dry_run else f"{prefix}_trashed"
-    return CleanupDecision(outcome, True, subject, sender)
+    return CleanupDecision(trash_outcome(prefix, dry_run), True, subject, sender)
 
 
 def evaluate_google_calendar_cleanup_message(
@@ -71,8 +74,7 @@ def evaluate_google_calendar_cleanup_message(
     if not event_has_passed:
         return CleanupDecision("google_calendar_future_event", False, subject, sender)
 
-    outcome = "google_calendar_would_trash" if dry_run else "google_calendar_trashed"
-    return CleanupDecision(outcome, True, subject, sender)
+    return CleanupDecision(trash_outcome("google_calendar", dry_run), True, subject, sender)
 
 
 def evaluate_unread_cleanup_message(
@@ -90,5 +92,4 @@ def evaluate_unread_cleanup_message(
     if not message_is_older_than_days(message, older_than_days, now=now):
         return CleanupDecision("old_unread_too_recent", False, subject, sender)
 
-    outcome = "old_unread_would_trash" if dry_run else "old_unread_trashed"
-    return CleanupDecision(outcome, True, subject, sender)
+    return CleanupDecision(trash_outcome("old_unread", dry_run), True, subject, sender)

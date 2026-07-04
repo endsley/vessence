@@ -7,7 +7,9 @@ from agent_skills.gmail_cleanup_queries import (
     build_older_sender_query,
     build_sender_query,
     build_unread_cleanup_query,
+    cleanup_query_parts,
     gmail_date,
+    join_query_parts,
     previous_local_day,
     sender_cleanup_prefix,
 )
@@ -30,6 +32,22 @@ def test_sender_cleanup_prefix_and_gmail_date():
     assert gmail_date(dt.date(2026, 7, 2)) == "2026/07/02"
     assert sender_cleanup_prefix("Discord Missed Messages") == "discord_missed_messages"
     assert sender_cleanup_prefix("!!!") == "sender_cleanup"
+
+
+def test_cleanup_query_parts_preserve_scope_and_exclusion_order():
+    assert cleanup_query_parts(False, "to:user@example.com") == [
+        "to:user@example.com",
+        "-in:spam",
+        "-in:trash",
+    ]
+    assert cleanup_query_parts(True, "is:unread") == [
+        "in:anywhere",
+        "is:unread",
+        "-in:spam",
+    ]
+    assert join_query_parts(["", "to:user@example.com", "-in:spam"]) == (
+        "to:user@example.com -in:spam"
+    )
 
 
 def test_sender_query_uses_wide_local_day_window_and_trash_flag():

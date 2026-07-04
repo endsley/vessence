@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, MutableMapping
+from collections.abc import Callable, Mapping, MutableMapping
 from typing import Any
 
 
@@ -27,7 +27,7 @@ def required_session_id_for_request(
     get_trusted_device_cookie_id_fn: Callable[[Any], str | None],
     device_fingerprint_fn: Callable[[Any], str],
     validate_session_fn: Callable[[str | None, str], bool],
-    get_trusted_device_by_id_fn: Callable[[str | None], dict[str, Any] | None],
+    get_trusted_device_by_id_fn: Callable[[str | None], Any | None],
     create_session_fn: Callable[..., str],
     default_user_id_fn: Callable[[], str],
     is_single_user_no_auth_mode_fn: Callable[[], bool],
@@ -36,10 +36,9 @@ def required_session_id_for_request(
     if is_single_user_no_auth_mode_fn() and is_local_request_fn(request):
         return "single_user_local"
 
-    if not request.headers.get("cf-connecting-ip"):
-        client_host = request.client.host if request.client else ""
-        if client_host in ("127.0.0.1", "::1"):
-            return request.query_params.get("session_id") or "internal"
+    internal_session_id = _local_internal_session_id(request)
+    if internal_session_id:
+        return internal_session_id
 
     session_id = get_session_id_fn(request)
     fingerprint = device_fingerprint_fn(request)
@@ -56,11 +55,20 @@ def required_session_id_for_request(
             new_session = create_session_fn(
                 fingerprint,
                 trusted=True,
-                user_id=trusted_row["label"] or default_user_id_fn(),
+                user_id=_bootstrap_user_id(trusted_row, default_user_id_fn),
             )
             trusted_device_session_cache[trusted_cookie] = new_session
             return new_session
     return None
+
+
+def _local_internal_session_id(request: Any) -> str | None:
+    if request.headers.get("cf-connecting-ip"):
+        return None
+    client_host = request.client.host if request.client else ""
+    if client_host not in ("127.0.0.1", "::1"):
+        return None
+    return request.query_params.get("session_id") or "internal"
 
 
 def request_has_share_or_auth(
@@ -71,7 +79,7 @@ def request_has_share_or_auth(
     get_trusted_device_cookie_id_fn: Callable[[Any], str | None],
     device_fingerprint_fn: Callable[[Any], str],
     validate_session_fn: Callable[[str | None, str], bool],
-    get_trusted_device_by_id_fn: Callable[[str | None], dict[str, Any] | None],
+    get_trusted_device_by_id_fn: Callable[[str | None], Any | None],
     validate_share_fn: Callable[[str | None], dict[str, Any] | None],
     is_single_user_no_auth_mode_fn: Callable[[], bool],
     is_local_request_fn: Callable[[Any], bool],
@@ -103,8 +111,19 @@ def _share_allows_path(share: dict[str, Any] | None, path: str) -> bool:
     return path.startswith(share_path) or share_path == "/"
 
 
-def _bootstrap_user_id(row: dict[str, Any] | None, default_user_id_fn: Callable[[], str]) -> str:
-    return (row or {}).get("label") or default_user_id_fn()
+def _row_value(row: Any, key: str) -> Any:
+    if row is None:
+        return None
+    if isinstance(row, Mapping):
+        return row.get(key)
+    try:
+        return row[key]
+    except (IndexError, KeyError, TypeError):
+        return None
+
+
+def _bootstrap_user_id(row: Any, default_user_id_fn: Callable[[], str]) -> str:
+    return _row_value(row, "label") or default_user_id_fn()
 
 
 def _create_and_prewarm_session(
@@ -121,7 +140,7 @@ def _create_and_prewarm_session(
 
 
 def _create_trusted_row_session(
-    trusted_row: dict[str, Any],
+    trusted_row: Any,
     *,
     fingerprint: str,
     create_session_fn: Callable[..., str],
@@ -136,16 +155,16 @@ def _create_trusted_row_session(
         create_session_fn=create_session_fn,
         prewarm_session_fn=prewarm_session_fn,
     )
-    return session_id, trusted_row["id"]
+    return session_id, _row_value(trusted_row, "id")
 
 
 def _trusted_bootstrap_row(
     *,
     trusted_cookie_id: str | None,
     fingerprint: str,
-    get_trusted_device_by_id_fn: Callable[[str | None], dict[str, Any] | None],
-    get_trusted_device_by_fingerprint_fn: Callable[[str], dict[str, Any] | None],
-) -> tuple[dict[str, Any] | None, str | None]:
+    get_trusted_device_by_id_fn: Callable[[str | None], Any | None],
+    get_trusted_device_by_fingerprint_fn: Callable[[str], Any | None],
+) -> tuple[Any | None, str | None]:
     if trusted_cookie_id:
         trusted_row = get_trusted_device_by_id_fn(trusted_cookie_id)
         if trusted_row:
@@ -167,8 +186,8 @@ def bootstrap_session_for_request(
     create_session_fn: Callable[..., str],
     get_session_user_fn: Callable[[str | None], str | None],
     default_user_id_fn: Callable[[], str],
-    get_trusted_device_by_id_fn: Callable[[str | None], dict[str, Any] | None],
-    get_trusted_device_by_fingerprint_fn: Callable[[str], dict[str, Any] | None],
+    get_trusted_device_by_id_fn: Callable[[str | None], Any | None],
+    get_trusted_device_by_fingerprint_fn: Callable[[str], Any | None],
     is_single_user_no_auth_mode_fn: Callable[[], bool],
     is_local_request_fn: Callable[[Any], bool],
     is_local_browser_access_fn: Callable[[Any], bool],

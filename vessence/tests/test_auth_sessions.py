@@ -1,7 +1,9 @@
+import sqlite3
 from types import SimpleNamespace
 
 from jane_web.auth_sessions import (
     _create_trusted_row_session,
+    _local_internal_session_id,
     _share_allows_path,
     _trusted_bootstrap_row,
     bootstrap_session_for_request,
@@ -18,6 +20,20 @@ def _request(*, headers=None, cookies=None, query=None, host="203.0.113.5"):
         query_params=query or {},
         client=SimpleNamespace(host=host) if host is not None else None,
     )
+
+
+def _sqlite_trusted_device_row(device_id: str, label: str | None):
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    try:
+        conn.execute("CREATE TABLE trusted_devices (id TEXT, label TEXT)")
+        conn.execute(
+            "INSERT INTO trusted_devices (id, label) VALUES (?, ?)",
+            (device_id, label),
+        )
+        return conn.execute("SELECT * FROM trusted_devices").fetchone()
+    finally:
+        conn.close()
 
 
 def _resolve(request, **overrides):
@@ -100,6 +116,17 @@ def test_required_session_allows_localhost_bypass_when_not_cloudflare() -> None:
     assert proxied is None
 
 
+def test_local_internal_session_id_preserves_localhost_and_cloudflare_policy() -> None:
+    assert _local_internal_session_id(
+        _request(host="127.0.0.1", query={"session_id": "query-session"})
+    ) == "query-session"
+    assert _local_internal_session_id(_request(host="::1")) == "internal"
+    assert _local_internal_session_id(
+        _request(headers={"cf-connecting-ip": "198.51.100.1"}, host="127.0.0.1")
+    ) is None
+    assert _local_internal_session_id(_request(host="198.51.100.5")) is None
+
+
 def test_required_session_uses_valid_session_cookie() -> None:
     session_id, _, _ = _resolve(_request(cookies={"jane_session": "valid-session"}))
 
@@ -125,6 +152,20 @@ def test_required_session_creates_and_caches_session_for_trusted_device_cookie()
     assert session_id == "new-session"
     assert cache == {"trusted-device": "new-session"}
     assert created == [("fingerprint", True, "default-user")]
+
+
+def test_required_session_creates_session_for_sqlite_trusted_device_row() -> None:
+    session_id, cache, created = _resolve(
+        _request(cookies={"jane_trusted_device": "trusted-device"}),
+        get_trusted_device_by_id_fn=lambda device_id: _sqlite_trusted_device_row(
+            device_id,
+            "trusted-user",
+        ),
+    )
+
+    assert session_id == "new-session"
+    assert cache == {"trusted-device": "new-session"}
+    assert created == [("fingerprint", True, "trusted-user")]
 
 
 def _has_share_or_auth(request, path="/vault/file.txt", **overrides):
@@ -248,6 +289,20 @@ def test_bootstrap_session_creates_from_trusted_cookie_row() -> None:
     assert prewarmed == [("created-1", "trusted-user")]
 
 
+def test_bootstrap_session_creates_from_sqlite_trusted_cookie_row() -> None:
+    result, created, prewarmed = _bootstrap(
+        _request(cookies={"jane_trusted_device": "trusted"}),
+        get_trusted_device_by_id_fn=lambda device_id: _sqlite_trusted_device_row(
+            device_id,
+            "trusted-user",
+        ),
+    )
+
+    assert result == ("created-1", "trusted")
+    assert created == [("fingerprint", True, "trusted-user")]
+    assert prewarmed == [("created-1", "trusted-user")]
+
+
 def test_create_trusted_row_session_uses_label_or_default_user() -> None:
     created = []
     prewarmed = []
@@ -265,6 +320,26 @@ def test_create_trusted_row_session_uses_label_or_default_user() -> None:
     assert result == ("session-1", "trusted-1")
     assert created == [("fingerprint", True, "default-user")]
     assert prewarmed == [("session-1", "default-user")]
+
+
+def test_create_trusted_row_session_accepts_sqlite_row() -> None:
+    row = _sqlite_trusted_device_row("trusted-1", "trusted-user")
+    created = []
+    prewarmed = []
+
+    result = _create_trusted_row_session(
+        row,
+        fingerprint="fingerprint",
+        create_session_fn=lambda fingerprint, trusted, user_id: (
+            created.append((fingerprint, trusted, user_id)) or "session-1"
+        ),
+        default_user_id_fn=lambda: "default-user",
+        prewarm_session_fn=lambda session_id, user_id: prewarmed.append((session_id, user_id)),
+    )
+
+    assert result == ("session-1", "trusted-1")
+    assert created == [("fingerprint", True, "trusted-user")]
+    assert prewarmed == [("session-1", "trusted-user")]
 
 
 def test_trusted_bootstrap_row_prefers_cookie_row_before_fingerprint() -> None:

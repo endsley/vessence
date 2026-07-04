@@ -1,6 +1,19 @@
 from jane_web.jane_v2.classes.read_calendar import metadata
 
 
+def test_calendar_metadata_event_day_and_time_range_parsing() -> None:
+    assert metadata._event_day_and_time_range(
+        "2026-07-02T09:00:00",
+        "2026-07-02T10:30:00",
+    ) == ("Thu Jul 2", "9:00am–10:30am")
+    assert metadata._event_day_and_time_range("2026-07-02T09:00:00", "bad") == (
+        "Thu Jul 2",
+        "9:00am",
+    )
+    assert metadata._event_day_and_time_range("badTvalue", "") == ("badTvalue", "")
+    assert metadata._event_day_and_time_range("2026-07-02", "") is None
+
+
 def test_calendar_metadata_event_and_block_formatting() -> None:
     assert metadata._format_event_line(
         1,

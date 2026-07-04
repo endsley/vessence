@@ -20,6 +20,37 @@ def test_email_tools_uses_extracted_payload_helpers():
     assert email_tools._extract_attachments is extract_attachments
 
 
+def test_email_tools_mime_builder_preserves_headers_and_plain_body() -> None:
+    message = email_tools._build_mime_email(
+        body="Hello Bob",
+        sender="sender@example.com",
+        to="bob@example.com",
+        subject="Meeting",
+        cc="cc@example.com",
+        bcc="bcc@example.com",
+    )
+
+    assert message["from"] == "sender@example.com"
+    assert message["to"] == "bob@example.com"
+    assert message["subject"] == "Meeting"
+    assert message["cc"] == "cc@example.com"
+    assert message["bcc"] == "bcc@example.com"
+    assert message.get_payload(decode=True).decode() == "Hello Bob"
+
+
+def test_email_tools_mime_builder_omits_empty_optional_headers() -> None:
+    message = email_tools._build_mime_email(
+        body="Hello",
+        sender="",
+        to="bob@example.com",
+        subject="Meeting",
+    )
+
+    assert "from" not in message
+    assert "cc" not in message
+    assert "bcc" not in message
+
+
 def test_parse_headers_keeps_common_headers_case_insensitively():
     headers = [
         {"name": "From", "value": "a@example.com"},

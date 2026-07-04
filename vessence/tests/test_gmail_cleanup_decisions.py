@@ -6,6 +6,7 @@ from agent_skills.gmail_cleanup_decisions import (
     evaluate_google_calendar_cleanup_message,
     evaluate_sender_cleanup_message,
     evaluate_unread_cleanup_message,
+    trash_outcome,
 )
 
 
@@ -32,6 +33,11 @@ def _message(message_dt, sender, subject, *, labels=None, calendar_text=""):
         "labelIds": labels or [],
         "payload": payload,
     }
+
+
+def test_trash_outcome_preserves_dry_run_suffix_policy() -> None:
+    assert trash_outcome("google_calendar", True) == "google_calendar_would_trash"
+    assert trash_outcome("google_calendar", False) == "google_calendar_trashed"
 
 
 def test_sender_cleanup_decision_applies_sender_subject_label_age_and_dry_run():

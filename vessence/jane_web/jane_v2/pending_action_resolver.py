@@ -83,6 +83,11 @@ def _is_expired(pending: dict) -> bool:
     except Exception:
         return False
 
+
+def _is_blank_pending_reply(user_text: str) -> bool:
+    return len((user_text or "").strip()) < 2
+
+
 def resolve(session_id: str | None, user_text: str) -> dict | None:
     """Check whether the user's reply deterministically resolves a pending action.
 
@@ -101,8 +106,7 @@ def resolve(session_id: str | None, user_text: str) -> dict | None:
     # handlers like todo_list's _match_category (no match → abandon). See
     # transcript review 2026-04-18 Issue 10: debounced STT relaunch
     # produced a blank follow-up that silently killed a good pending slot.
-    _stripped = (user_text or "").strip()
-    if len(_stripped) < 2:
+    if _is_blank_pending_reply(user_text):
         return None
     try:
         from vault_web.recent_turns import get_active_state

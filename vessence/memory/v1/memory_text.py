@@ -58,14 +58,7 @@ def is_none_content(doc: str) -> bool:
     return stripped in ("None", "none", "", "null", "N/A")
 
 
-def recency_label(ts_str: str) -> str:
-    if not ts_str or ts_str == "Unknown Time":
-        return "unknown age"
-    ts = parse_memory_datetime(ts_str)
-    if ts is None:
-        return "unknown age"
-    delta = datetime.datetime.now(datetime.timezone.utc) - ts
-    secs = delta.total_seconds()
+def recency_label_from_seconds(secs: float) -> str:
     if secs < 0:
         return "just now"
     if secs < 3600:
@@ -73,6 +66,16 @@ def recency_label(ts_str: str) -> str:
     if secs < 86400:
         return f"{int(secs // 3600)}h ago"
     return f"{int(secs // 86400)}d ago"
+
+
+def recency_label(ts_str: str) -> str:
+    if not ts_str or ts_str == "Unknown Time":
+        return "unknown age"
+    ts = parse_memory_datetime(ts_str)
+    if ts is None:
+        return "unknown age"
+    delta = datetime.datetime.now(datetime.timezone.utc) - ts
+    return recency_label_from_seconds(delta.total_seconds())
 
 
 def fmt_memory(doc: str, meta: dict | None) -> str:

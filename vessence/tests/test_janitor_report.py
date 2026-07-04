@@ -2,6 +2,7 @@ from memory.v1.janitor_report import (
     forgettable_purged_count,
     janitor_history_entry,
     janitor_report_payload,
+    merge_count,
     topics_processed_payload,
     topics_with_merges,
 )
@@ -29,6 +30,7 @@ def test_janitor_report_derived_field_helpers_preserve_shapes():
     values = _common()
 
     assert forgettable_purged_count(2, 4) == 6
+    assert merge_count(values["merge_log"]) == 3
     assert topics_processed_payload(
         user_collection_name="user_collection",
         user_topics={"alpha": [], "beta": []},

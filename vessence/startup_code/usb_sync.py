@@ -223,38 +223,34 @@ def run(cmd, fallback='(unavailable)'):
         return fallback
 
 
-def write_restore_docs(usb_root: str, sync_state: dict):
-    now = datetime.now().isoformat()
-
-    manifest = {
-        'generated_at': now,
+def build_restore_manifest(
+    sync_state: dict,
+    *,
+    generated_at: str | None = None,
+    command_runner=run,
+) -> dict:
+    """Build the restore manifest without writing it to disk."""
+    return {
+        'generated_at': generated_at or datetime.now().isoformat(),
         'system': {
-            'os': run(['lsb_release', '-ds']),
-            'kernel': run(['uname', '-r']),
-            'python_adk_venv': run([ADK_PYTHON, '--version']),
+            'os': command_runner(['lsb_release', '-ds']),
+            'kernel': command_runner(['uname', '-r']),
+            'python_adk_venv': command_runner([ADK_PYTHON, '--version']),
         },
         'claude_code': {
-            'version': run([os.path.join(HOME, '.local', 'bin', 'claude'), '--version']),
+            'version': command_runner([os.path.join(HOME, '.local', 'bin', 'claude'), '--version']),
         },
-        'ollama_models': run(['ollama', 'list']),
-        'crontab': run(['crontab', '-l']),
-        'pip_freeze_adk_venv': run([ADK_PIP, 'freeze']),
+        'ollama_models': command_runner(['ollama', 'list']),
+        'crontab': command_runner(['crontab', '-l']),
+        'pip_freeze_adk_venv': command_runner([ADK_PIP, 'freeze']),
         'sync_state': sync_state,
     }
 
-    manifest_path = os.path.join(usb_root, 'restore_manifest.json')
-    with open(manifest_path, 'w') as f:
-        json.dump(manifest, f, indent=2)
 
-    # Update crontab_backup.txt
-    crontab_txt = os.path.join(VESSENCE_HOME, 'configs', 'crontab_backup.txt')
-    try:
-        Path(crontab_txt).write_text(manifest['crontab'] + '\n')
-    except Exception:
-        pass
-
-    restore_md = f"""# Project Ambient — Full Restore Instructions
-Generated: {now}
+def restore_docs_markdown(manifest: dict, sync_state: dict) -> str:
+    """Build RESTORE.md content for a USB sync manifest."""
+    return f"""# Project Ambient — Full Restore Instructions
+Generated: {manifest['generated_at']}
 
 ## Overview
 Restore Jane and Amber from this USB backup.
@@ -337,6 +333,22 @@ bash $HOME/ambient/vessence/startup_code/reliable_start.sh
 {chr(10).join('- ' + s for s in sync_state.get('snapshots', []))}
 """
 
+
+def write_restore_docs(usb_root: str, sync_state: dict):
+    manifest = build_restore_manifest(sync_state)
+
+    manifest_path = os.path.join(usb_root, 'restore_manifest.json')
+    with open(manifest_path, 'w') as f:
+        json.dump(manifest, f, indent=2)
+
+    # Update crontab_backup.txt
+    crontab_txt = os.path.join(VESSENCE_HOME, 'configs', 'crontab_backup.txt')
+    try:
+        Path(crontab_txt).write_text(manifest['crontab'] + '\n')
+    except Exception:
+        pass
+
+    restore_md = restore_docs_markdown(manifest, sync_state)
     restore_path = os.path.join(usb_root, 'RESTORE.md')
     Path(restore_path).write_text(restore_md)
     print(f"  → restore_manifest.json and RESTORE.md written")

@@ -60,16 +60,8 @@ def _delete_email_bucket(
     )
 
 
-def _escalation_context() -> str:
-    """Inject inbox + spam so Opus can match the user's reference
-    ("delete that spam from Macy's", "trash the promos") against actual
-    Gmail rows and pull the right message_ids."""
-    try:
-        from agent_skills.email_tools import read_inbox
-    except Exception as e:
-        return f"[EMAIL ERROR]\nEmail tools failed to import: {e}\n[END]"
-
-    parts = [
+def _delete_email_instruction_lines() -> list[str]:
+    return [
         "[delete email escalation context]",
         "",
         'Tool: [[CLIENT_TOOL:email.delete:{"message_id":"<id>"}]]',
@@ -93,6 +85,18 @@ def _escalation_context() -> str:
         "clear order like \"delete the spam\" or \"trash all the promos\".",
         "",
     ]
+
+
+def _escalation_context() -> str:
+    """Inject inbox + spam so Opus can match the user's reference
+    ("delete that spam from Macy's", "trash the promos") against actual
+    Gmail rows and pull the right message_ids."""
+    try:
+        from agent_skills.email_tools import read_inbox
+    except Exception as e:
+        return f"[EMAIL ERROR]\nEmail tools failed to import: {e}\n[END]"
+
+    parts = _delete_email_instruction_lines()
 
     creds_failed = False
     blocks = []

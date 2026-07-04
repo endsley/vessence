@@ -1,5 +1,2796 @@
 # Vessence Refactor Journal
 
+## 2026-07-04 - Context Compaction Token Target Helper
+
+Goal/scope:
+- Extract context-compaction token removal target calculation.
+- Preserve the over-threshold plus 25% max-window buffer policy.
+
+Files/modules changed:
+- `memory/v1/context_compaction.py`
+- `tests/test_context_compaction.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Context compaction still does nothing at or below the compaction threshold.
+- When compaction is needed, the target still removes the threshold overage plus `int(max_tokens * 0.25)`.
+- Split index selection and remaining-message clamp behavior are unchanged.
+
+Boundary chosen:
+- `compaction_token_target()` owns the token-removal target calculation.
+- `compaction_split_index()` now uses that target while retaining split selection.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile memory/v1/context_compaction.py tests/test_context_compaction.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_context_compaction.py -q` passed (`5 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1872 passed`).
+
+Remaining follow-up slices:
+- Split selection and final clamp can be separated if compaction policy changes.
+- Runtime compaction remains in `conversation_manager.py`.
+
+## 2026-07-04 - Conversation Metadata Timestamp Helper
+
+Goal/scope:
+- Extract metadata timestamp precedence from latest archived-window timestamp selection.
+- Preserve the archived/timestamp/created/updated field priority.
+
+Files/modules changed:
+- `memory/v1/conversation_windows.py`
+- `tests/test_conversation_windows.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- `archived_at` still wins over `timestamp`, `created_at`, and `updated_at` within one metadata row.
+- Empty or missing metadata still contributes no timestamp.
+- Latest timestamp selection still uses the first available timestamp from each row.
+
+Boundary chosen:
+- `first_metadata_timestamp()` owns per-row timestamp precedence.
+- `latest_metadata_timestamp()` now only collects row timestamps and returns the max.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile memory/v1/conversation_windows.py tests/test_conversation_windows.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_conversation_windows.py -q` passed (`8 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1871 passed`).
+
+Remaining follow-up slices:
+- Window splitting and transcript rendering are already isolated.
+- Database watermark side effects remain in `conversation_manager.py`.
+
+## 2026-07-04 - Conversation Window Break Helper
+
+Goal/scope:
+- Extract ledger-window split decisions from the archival grouping loop.
+- Preserve idle-gap and max-turn window boundaries.
+
+Files/modules changed:
+- `memory/v1/conversation_windows.py`
+- `tests/test_conversation_windows.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Empty current windows never trigger a split.
+- A turn starts a new window when the previous timestamp exists and the idle gap is exceeded.
+- A turn starts a new window when the current window has reached `max_turns`.
+- Missing timestamps still do not trigger idle-gap splits.
+
+Boundary chosen:
+- `should_start_new_ledger_window()` owns the gap/size predicate.
+- `group_ledger_turns()` now focuses on parsing timestamps and appending windows.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile memory/v1/conversation_windows.py tests/test_conversation_windows.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_conversation_windows.py -q` passed (`7 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1870 passed`).
+
+Remaining follow-up slices:
+- Transcript line cleaning is already isolated.
+- Watermark and archival side effects remain in `conversation_manager.py`.
+
+## 2026-07-04 - Conversation Low-Value Question Helper
+
+Goal/scope:
+- Extract the short user follow-up question filter from short-term turn storage policy.
+- Preserve low-value question suppression behavior.
+
+Files/modules changed:
+- `memory/v1/conversation_text.py`
+- `tests/test_conversation_text.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- User turns like `why?` still do not store as short-term memories.
+- Assistant turns with the same text are not filtered by this user-only rule.
+- Longer substantive questions still pass this specific filter.
+- Exact low-value turns and regex-based chatter filters are unchanged.
+
+Boundary chosen:
+- `is_low_value_short_question()` owns the role, length, question-mark, and whitelist check.
+- `should_store_short_term_turn()` now delegates that specific policy.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile memory/v1/conversation_text.py tests/test_conversation_text.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_conversation_text.py -q` passed (`10 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1869 passed`).
+
+Remaining follow-up slices:
+- Low-value exact turns and regex chatter patterns are already extracted.
+- Uppercase/status-token filtering remains inline to avoid altering legacy behavior.
+
+## 2026-07-04 - Conversation Summary Bullet Line Helper
+
+Goal/scope:
+- Extract single-line bullet normalization from short-term summary normalization.
+- Preserve bullet, numbered-list, plain-line, and blank-line behavior.
+
+Files/modules changed:
+- `memory/v1/conversation_text.py`
+- `tests/test_conversation_text.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- `* item` and `- item` still normalize to `- item`.
+- Numbered list lines still normalize to `- item`.
+- Plain lines still pass through compacted.
+- Blank lines still drop from preserved-bullet summaries.
+- `No durable context.` cleanup behavior is unchanged.
+
+Boundary chosen:
+- `normalize_summary_bullet_line()` owns one-line bullet normalization.
+- `normalize_short_term_summary()` now handles list filtering and final summary assembly.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile memory/v1/conversation_text.py tests/test_conversation_text.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_conversation_text.py -q` passed (`10 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1869 passed`).
+
+Remaining follow-up slices:
+- Summary prompt builders are already split and tested.
+- Low-value turn filtering can be split further if its policy changes.
+
+## 2026-07-04 - Retrieved Long-Term User Fact Policy Helper
+
+Goal/scope:
+- Extract long-term user-memory inclusion policy from fact collection.
+- Preserve max-distance, prompt-queue, and exact-anchor suppression behavior.
+
+Files/modules changed:
+- `memory/v1/retrieved_memory_facts.py`
+- `tests/test_retrieved_memory_facts.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Long-term user facts still require the configured max-distance check.
+- `prompt_queue` memories still do not enter retrieved memory sections.
+- DS3000 lecture memories already included as exact anchors are still suppressed from the general long-term bucket.
+- Normal long-term memories still format and append as before.
+
+Boundary chosen:
+- `include_long_term_user_memory_fact()` owns long-term user-memory inclusion policy.
+- `collect_user_memory_facts()` now handles tier routing and bucket appends.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile memory/v1/retrieved_memory_facts.py tests/test_retrieved_memory_facts.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_retrieved_memory_facts.py -q` passed (`9 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1869 passed`).
+
+Remaining follow-up slices:
+- Long-term user-memory policy is now directly testable.
+- Permanent and legacy short-term inclusion rules can be split later if they change.
+
+## 2026-07-04 - Retrieved User Memory Tier Helper
+
+Goal/scope:
+- Extract user-memory tier routing from retrieved fact collection.
+- Preserve permanent, legacy short-term, and long-term fact buckets.
+
+Files/modules changed:
+- `memory/v1/retrieved_memory_facts.py`
+- `tests/test_retrieved_memory_facts.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- `memory_type="permanent"` still routes to permanent facts.
+- `memory_type="forgettable"` and `memory_type="short_term"` still route to legacy short-term facts.
+- Missing or unknown memory types still route to long-term facts.
+- File-index, low-signal, prompt-queue, anchor, expiry, and distance filters are unchanged.
+
+Boundary chosen:
+- `user_memory_tier()` owns memory-type-to-bucket classification.
+- `collect_user_memory_facts()` now applies filters and appends to the selected bucket.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile memory/v1/retrieved_memory_facts.py tests/test_retrieved_memory_facts.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_retrieved_memory_facts.py -q` passed (`8 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1868 passed`).
+
+Remaining follow-up slices:
+- User-memory bucket classification is now explicit and covered.
+- The remaining user-memory filters can be split later if they need independent policy tests.
+
+## 2026-07-04 - Retrieved Memory Recency Rows Helper
+
+Goal/scope:
+- Extract recent short-term row ordering from recency-boost fact insertion.
+- Preserve short-term boost sorting, filtering, and dedupe behavior.
+
+Files/modules changed:
+- `memory/v1/retrieved_memory_facts.py`
+- `tests/test_retrieved_memory_facts.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Short-term rows are still sorted by metadata `timestamp` descending.
+- Rows without metadata still sort behind timestamped rows.
+- The boost still only adds usable short-term facts.
+- Existing semantic fact preview keys still prevent duplicate boosted facts.
+
+Boundary chosen:
+- `recent_short_term_rows()` owns row ordering and limit selection.
+- `collect_short_term_with_recency_boost()` now focuses on usability checks, formatting, and dedupe.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile memory/v1/retrieved_memory_facts.py tests/test_retrieved_memory_facts.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_retrieved_memory_facts.py -q` passed (`7 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1867 passed`).
+
+Remaining follow-up slices:
+- Short-term usability and distance filtering are already isolated.
+- User-memory tier routing remains in `collect_user_memory_facts()`.
+
+## 2026-07-04 - Nearest Memory Row Candidate Helper
+
+Goal/scope:
+- Extract pure row-to-candidate conversion from nearest-memory Chroma query execution.
+- Preserve candidate filtering and selection behavior.
+
+Files/modules changed:
+- `memory/v1/nearest_memory.py`
+- `memory/v1/memory_retrieval.py`
+- `tests/test_nearest_memory.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Chroma query failures are still skipped by `_nearest_candidates_from_query_specs()`.
+- Valid row triples still become nearest-memory candidates through the same distance, lexical, and source-policy filters.
+- Rejected rows still drop before selection.
+- Final line selection and deduping are unchanged.
+
+Boundary chosen:
+- `nearest_candidates_from_rows()` owns converting retrieved docs/metadatas/distances into filtered candidates.
+- `_nearest_candidates_from_query_specs()` now focuses on executing query specs and extending candidate batches.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile memory/v1/nearest_memory.py memory/v1/memory_retrieval.py tests/test_nearest_memory.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_nearest_memory.py -q` passed (`15 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1866 passed`).
+
+Remaining follow-up slices:
+- Nearest-memory candidate filtering is now isolated from query execution.
+- Chroma lookup sequencing remains in `memory_retrieval.py` because it owns lazy-load noise control.
+
+## 2026-07-04 - Nearest Memory Blocking Policy Helpers
+
+Goal/scope:
+- Extract source-specific nearest-memory rejection policy from candidate construction.
+- Preserve file-index, low-signal, prompt-queue, stale short-term, and protocol-noise filtering.
+
+Files/modules changed:
+- `memory/v1/nearest_memory.py`
+- `tests/test_nearest_memory.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- User-memory candidates still reject file-index records and low-signal shared rows.
+- Forgettable and short-term user-memory rows still reject low-signal short-term content.
+- Prompt-queue rows still do not preload as nearest memories.
+- Stale short-term rows still drop unless promoted by recency/lexical overlap.
+- Low-signal protocol short-term rows still drop even if otherwise promotable.
+
+Boundary chosen:
+- `_blocks_user_memory_candidate()` owns user-memory-only filtering policy.
+- `_blocks_short_term_candidate()` owns short-term staleness and noise filtering.
+- `nearest_memory_candidate()` now coordinates distance, lexical overlap, and tuple construction.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile memory/v1/nearest_memory.py tests/test_nearest_memory.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_nearest_memory.py -q` passed (`14 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1865 passed`).
+
+Remaining follow-up slices:
+- Candidate distance coercion, promotion, and selection are already split and tested.
+- Query execution remains in `memory_retrieval.py` because it owns Chroma calls.
+
+## 2026-07-04 - Code Verification Metadata Helper
+
+Goal/scope:
+- Split pure verification metadata construction from the Chroma update side effect.
+- Preserve code-memory stamp fields and note truncation behavior.
+
+Files/modules changed:
+- `memory/v1/janitor_code_verification.py`
+- `memory/v1/janitor_memory.py`
+- `tests/test_janitor_code_verification.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- `code_verified_at` and `code_verification_status` are still written for every stamp.
+- Explanations are still truncated to 240 characters in `code_verification_note`.
+- Empty explanations still remove any stale `code_verification_note`.
+- `_stamp_code_verification()` still performs the same collection update and optional corrected document write.
+
+Boundary chosen:
+- `code_verification_metadata()` owns stamp metadata shaping.
+- `_stamp_code_verification()` now focuses on writing that metadata to Chroma.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile memory/v1/janitor_code_verification.py memory/v1/janitor_memory.py tests/test_janitor_code_verification.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_janitor_code_verification.py -q` passed (`9 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1863 passed`).
+
+Remaining follow-up slices:
+- Verification metadata, JSON parsing, and report formatting are now covered in pure helpers.
+- Frontier update/delete side effects still remain in `janitor_memory.py`.
+
+## 2026-07-04 - Code Verification JSON Parser Helper
+
+Goal/scope:
+- Deduplicate noisy-model-output JSON extraction used by Codex verification and frontier validation.
+- Preserve caller-specific error payload shapes.
+
+Files/modules changed:
+- `memory/v1/janitor_code_verification.py`
+- `memory/v1/janitor_memory.py`
+- `tests/test_janitor_code_verification.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Successful parser output still returns the first JSON object embedded in model text.
+- Missing JSON still maps to `parse_fail` in caller error messages.
+- Malformed JSON still maps to `json_decode` in caller error messages.
+- Codex verification still returns `{"verdict": "ERROR", "explanation": ...}` on parse failures.
+- Frontier validation still returns `{"action": "error", "reason": ...}` on parse failures.
+
+Boundary chosen:
+- `json_object_from_text()` owns JSON-object extraction and parse categorization.
+- `_verify_one_memory()` and `_apply_fix_via_frontier()` retain their domain-specific error envelopes.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile memory/v1/janitor_code_verification.py memory/v1/janitor_memory.py tests/test_janitor_code_verification.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_janitor_code_verification.py -q` passed (`8 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1862 passed`).
+
+Remaining follow-up slices:
+- Verification report rendering is now pure and covered.
+- Frontier update/delete side effects remain in `janitor_memory.py`.
+
+## 2026-07-04 - Code Verification Detail Line Helpers
+
+Goal/scope:
+- Extract non-accurate detail filtering and detail-line formatting from memory verification report assembly.
+- Preserve markdown output for updated/deleted/error verification details.
+
+Files/modules changed:
+- `memory/v1/janitor_code_verification.py`
+- `tests/test_janitor_code_verification.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Accurate details are still omitted from the report detail list.
+- Non-accurate detail lines still uppercase the action, truncate IDs to 12 characters, and keep the same reason text.
+- The complete report markdown remains byte-for-byte equivalent for covered cases.
+
+Boundary chosen:
+- `code_verification_detail_line()` owns one markdown list item.
+- `code_verification_detail_lines()` owns accurate-entry filtering and detail list construction.
+- `code_verification_report_markdown()` now delegates both summary and detail formatting.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile memory/v1/janitor_code_verification.py tests/test_janitor_code_verification.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_janitor_code_verification.py -q` passed (`7 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1861 passed`).
+
+Remaining follow-up slices:
+- Report markdown assembly is now split into pure summary and detail helpers.
+- Live verification and frontier application remain in `janitor_memory.py`.
+
+## 2026-07-04 - Code Verification Summary Helper
+
+Goal/scope:
+- Extract the memory code-verification report summary line from markdown assembly.
+- Preserve the verification report text shape.
+
+Files/modules changed:
+- `memory/v1/janitor_code_verification.py`
+- `tests/test_janitor_code_verification.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Report headings, summary fields, and non-accurate detail lines are unchanged.
+- Accurate details remain omitted from the markdown detail list.
+- Result dictionary construction is unchanged.
+
+Boundary chosen:
+- `code_verification_summary_line()` owns the compact checked/stale/fixed/deleted/errors/skipped summary.
+- `code_verification_report_markdown()` now focuses on report assembly.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile memory/v1/janitor_code_verification.py tests/test_janitor_code_verification.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_janitor_code_verification.py -q` passed (`7 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1861 passed`).
+
+Remaining follow-up slices:
+- Prompt contracts and candidate partitioning are already isolated.
+- Runtime verification orchestration remains in `janitor_memory.py`.
+
+## 2026-07-04 - Janitor Retention Seconds Helper
+
+Goal/scope:
+- Extract day-to-seconds conversion used by janitor log and self-improvement report retention.
+- Preserve deletion cutoff behavior.
+
+Files/modules changed:
+- `memory/v1/janitor_log_retention.py`
+- `tests/test_janitor_log_retention.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Ordinary `.log` and `.jsonl` files still use the configured max-age cutoff.
+- Protected logs still use the longer protected-retention cutoff.
+- Self-improvement reports still require the report filename shape and age cutoff before deletion.
+
+Boundary chosen:
+- `retention_seconds()` owns the days-to-seconds conversion.
+- Log and self-improvement retention helpers now share that conversion.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile memory/v1/janitor_log_retention.py tests/test_janitor_log_retention.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_janitor_log_retention.py -q` passed (`3 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1861 passed`).
+
+Remaining follow-up slices:
+- Filename classification and protected-log matching are already isolated.
+- Filesystem deletion remains in `janitor_memory.py`.
+
+## 2026-07-04 - Janitor Report Merge Count Helper
+
+Goal/scope:
+- Extract the derived merge-count field used by janitor report and history payloads.
+- Preserve report/history JSON shapes.
+
+Files/modules changed:
+- `memory/v1/janitor_report.py`
+- `tests/test_janitor_report.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- `merges_performed` still equals the number of merge-log entries in both report and history payloads.
+- Forgettable purge counts still sum TTL-expired and age-expired purges.
+- Topics processed, merge details, and append-only history fields are unchanged.
+
+Boundary chosen:
+- `merge_count()` owns the shared derived count.
+- Report/history builders now delegate both shared count derivations to helpers.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile memory/v1/janitor_report.py tests/test_janitor_report.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_janitor_report.py -q` passed (`3 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1861 passed`).
+
+Remaining follow-up slices:
+- Janitor report payload construction is now mostly direct field mapping.
+- Runtime janitor orchestration remains in `janitor_memory.py`.
+
+## 2026-07-04 - Janitor Normalization Raw Length Helper
+
+Goal/scope:
+- Extract raw document character counting from long-term memory normalization metadata builders.
+- Preserve split and rewrite metadata shapes.
+
+Files/modules changed:
+- `memory/v1/janitor_normalization.py`
+- `tests/test_janitor_normalization.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Raw character counts still use the stripped original `doc` value.
+- Missing docs still count as zero.
+- Split metadata still carries normalized part numbers and total counts.
+- Rewrite metadata still carries the same normalized style and timestamp fields.
+
+Boundary chosen:
+- `raw_doc_chars()` owns source document length normalization.
+- Split/rewrite metadata builders now share that rule.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile memory/v1/janitor_normalization.py tests/test_janitor_normalization.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_janitor_normalization.py -q` passed (`6 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1861 passed`).
+
+Remaining follow-up slices:
+- Prompt construction and plan cleanup are already pure and covered.
+- Live Chroma mutation remains in `janitor_memory.py`.
+
+## 2026-07-04 - Local Vector Memory Fact Formatting Helpers
+
+Goal/scope:
+- Extract timestamp fallback and expiry-suffix formatting from local vector memory fact rendering.
+- Preserve tiered memory fact text.
+
+Files/modules changed:
+- `memory/v1/local_vector_memory_helpers.py`
+- `tests/test_local_vector_memory_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Fact timestamps still prefer `timestamp`, then `created_at`, then `Unknown Time`.
+- Timestamp display is still capped to 19 characters.
+- Expiry suffixes still show only the first 10 characters of `expires_at`.
+- Formatted memory facts keep the same `[timestamp] (topic, expires date): doc` shape.
+
+Boundary chosen:
+- `memory_fact_timestamp()` owns timestamp fallback and display truncation.
+- `memory_fact_expiry_suffix()` owns optional expiry rendering.
+- `format_memory_fact()` now coordinates topic fallback and final line assembly.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile memory/v1/local_vector_memory_helpers.py tests/test_local_vector_memory_helpers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_local_vector_memory_helpers.py -q` passed (`6 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1861 passed`).
+
+Remaining follow-up slices:
+- Tier bucketing and section assembly are already split and directly tested.
+- Chroma access remains in `local_vector_memory.py`.
+
+## 2026-07-04 - TODO Pending Data Shared Merge
+
+Goal/scope:
+- Route TODO-list pending-action data through the shared pending-continuation merge helper.
+- Preserve TODO-specific pending envelope and expiry override behavior.
+
+Files/modules changed:
+- `jane_web/jane_v2/classes/todo_list/responses.py`
+- `tests/test_todo_list_responses.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- TODO pending actions still use handler class `todo list`, status `awaiting_user`, and the same awaiting/question/expiry fields.
+- Existing data fields still carry through.
+- The awaiting tag is still added to nested pending data.
+- Explicit `expires_at` test overrides still work.
+
+Boundary chosen:
+- `pending_continuation_data()` now owns the data merge across shared and TODO-specific pending builders.
+- `build_todo_pending()` retains TODO-specific outer envelope and expiration behavior.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v2/classes/todo_list/responses.py tests/test_todo_list_responses.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_todo_list_responses.py -q` passed (`7 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1861 passed`).
+
+Remaining follow-up slices:
+- TODO response builders are already split by prompt type.
+- Full `pending_continuation()` cannot replace `build_todo_pending()` without adding expiry injection support.
+
+## 2026-07-04 - Send Message Pending Response Helpers
+
+Goal/scope:
+- Extract shared draft pending-data and pending-response envelope construction for send-message follow-ups.
+- Preserve revised-body and send-confirmation pending-action shapes.
+
+Files/modules changed:
+- `jane_web/jane_v2/classes/send_message/responses.py`
+- `tests/test_send_message_parsing.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Revision requests still ask for the updated message and await `revised_body`.
+- Confirmation prompts still include recipient display and body and await `send_confirmation`.
+- Draft payloads still carry phone/display and include body only for send confirmation.
+- Direct-send and open-draft SMS marker responses are unchanged.
+
+Boundary chosen:
+- `draft_pending_data()` owns draft state construction.
+- `build_pending_message_response()` owns the shared `pending_continuation()` response envelope.
+- Specific response builders now only choose prompt text and awaiting state.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v2/classes/send_message/responses.py tests/test_send_message_parsing.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_send_message_parsing.py -q` passed (`29 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1861 passed`).
+
+Remaining follow-up slices:
+- Direct send and open draft responses have different side-effect metadata and should stay separate.
+- Handler recipient resolution and alias learning remain separately tested.
+
+## 2026-07-04 - Timer Simple Action Response Helper
+
+Goal/scope:
+- Extract shared timer response construction for simple count/list/cancel actions.
+- Preserve timer client-tool markers and structured entities.
+
+Files/modules changed:
+- `jane_web/jane_v2/classes/timer/responses.py`
+- `tests/test_timer_parsing.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Count and list still emit `timer.list` markers with their existing spoken text.
+- Cancel still emits the `timer.cancel` marker.
+- Structured intent remains `timer` and entities keep the same action values.
+- Set, delete, and pending follow-up responses are unchanged.
+
+Boundary chosen:
+- `build_simple_action_response()` owns the repeated spoken-marker text and structured action envelope.
+- Specific count/list/cancel builders now supply only their spoken lead, marker, and action.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v2/classes/timer/responses.py tests/test_timer_parsing.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_timer_parsing.py -q` passed (`14 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1860 passed`).
+
+Remaining follow-up slices:
+- Timer set/delete response shapes have different metadata and should stay separate.
+- Parsing and intent rules are already split into dedicated modules.
+
+## 2026-07-04 - Pending Continuation Data Helper
+
+Goal/scope:
+- Extract the shared pending-action data merge used by Stage 2 continuation payloads.
+- Preserve the `awaiting` field override behavior.
+
+Files/modules changed:
+- `agent_skills/private_handler_utils.py`
+- `tests/test_private_handler_utils.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- `pending_continuation()` still returns `STAGE2_FOLLOWUP` records with the same handler class, status, awaiting, question, expiry, and data shape.
+- Existing data fields are preserved.
+- Existing `data["awaiting"]` values are overwritten by the current awaiting tag.
+- `None` data still becomes `{"awaiting": awaiting}`.
+
+Boundary chosen:
+- `pending_continuation_data()` owns the nested data merge contract.
+- `pending_continuation()` remains responsible for the outer pending-action envelope and expiry.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile agent_skills/private_handler_utils.py tests/test_private_handler_utils.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_private_handler_utils.py -q` passed (`2 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1860 passed`).
+
+Remaining follow-up slices:
+- Expiry formatting is already isolated in `_expires_at()`.
+- Handler-specific pending payload construction stays with each response module.
+
+## 2026-07-04 - Read Calendar Pending Data Helpers
+
+Goal/scope:
+- Extract repeated read-calendar pending-action data payloads for last-range and event-list state.
+- Preserve follow-up, event-detail, event-choice, and day-choice response shapes.
+
+Files/modules changed:
+- `jane_web/jane_v2/classes/read_calendar/responses.py`
+- `tests/test_read_calendar_formatting.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Event-list follow-ups still serialize only the allowed event keys.
+- No-event and event-detail follow-ups still carry `last_range`.
+- Event-choice follow-ups still carry `last_range` plus the event list.
+- `pending_continuation()` still adds the `awaiting` field to pending data.
+
+Boundary chosen:
+- `last_range_pending_data()` owns the single-range payload shape.
+- `range_events_pending_data()` owns the range-plus-events payload shape.
+- Response builders continue to own text, questions, and pending-action type selection.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v2/classes/read_calendar/responses.py tests/test_read_calendar_formatting.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_read_calendar_formatting.py -q` passed (`12 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1859 passed`).
+
+Remaining follow-up slices:
+- Calendar resume routing remains in the handler and is already covered with async fakes.
+- Calendar formatting and response construction are split enough for now.
+
+## 2026-07-04 - Clinic Response Structured Helper
+
+Goal/scope:
+- Extract clinic schedule response structured-payload construction from the response builder.
+- Preserve clinic follow-up pending-action shape.
+
+Files/modules changed:
+- `jane_web/jane_v2/classes/clinic_schedules_info/responses.py`
+- `tests/test_clinic_schedule_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Clinic responses still return the spoken reply under `text`.
+- Structured intent remains `clinic schedules info`.
+- Follow-up pending actions still await `clinic_followup` and use the shared pending-continuation helper.
+
+Boundary chosen:
+- `clinic_response_structured()` owns the structured response payload.
+- `build_clinic_response()` now only combines spoken text with that payload.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v2/classes/clinic_schedules_info/responses.py tests/test_clinic_schedule_helpers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_clinic_schedule_helpers.py -q` passed (`11 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1859 passed`).
+
+Remaining follow-up slices:
+- Clinic schedule fact-building remains separate from phrasing and response construction.
+- Database reads stay in the handler until broader fake-DB tests are added.
+
+## 2026-07-04 - Weather Follow-Up Response Helpers
+
+Goal/scope:
+- Extract weather follow-up text and pending-action data shaping from the response builder.
+- Preserve weather follow-up prompt and pending payload shape.
+
+Files/modules changed:
+- `jane_web/jane_v2/classes/weather/responses.py`
+- `tests/test_weather_slices.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Weather answers still append `Want the weather for another day?`.
+- Follow-up pending actions still use handler class `weather`, awaiting `another_day_or_stop`, and the same topic/location data.
+- Missing location still serializes as an empty string.
+
+Boundary chosen:
+- `weather_followup_text()` owns the spoken suffix formatting.
+- `weather_followup_data()` owns the pending-action data payload.
+- `build_weather_followup_response()` now coordinates the envelope and shared pending-continuation helper.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v2/classes/weather/responses.py tests/test_weather_slices.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_weather_slices.py -q` passed (`12 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1859 passed`).
+
+Remaining follow-up slices:
+- Weather route policy and slice builders are already split.
+- Phrasing remains local-LLM orchestration and should stay in the handler.
+
+## 2026-07-04 - Shopping List Text Response Helper
+
+Goal/scope:
+- Extract the shared one-field text response envelope for shopping-list Stage 2 responses.
+- Preserve all shopping-list response wording.
+
+Files/modules changed:
+- `jane_web/jane_v2/classes/shopping_list/responses.py`
+- `tests/test_shopping_list_actions.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Empty/view/add/remove/clear/check responses keep the same text.
+- Check responses still delegate wording to `format_check_response()`.
+- Handler action dispatch and shopping-list API calls are unchanged.
+
+Boundary chosen:
+- `shopping_text_response()` owns the `{"text": ...}` envelope.
+- Individual builders continue to own domain-specific phrasing.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v2/classes/shopping_list/responses.py tests/test_shopping_list_actions.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_shopping_list_actions.py -q` passed (`9 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1859 passed`).
+
+Remaining follow-up slices:
+- Shopping-list action validation and response wording are already split and tested.
+- Store mutation remains in the handler through the injected API boundary.
+
+## 2026-07-04 - Greeting Response Wrapper
+
+Goal/scope:
+- Extract the shared greeting response envelope used by canned and LLM-generated greeting paths.
+- Preserve simple Stage 2 greeting response shape.
+
+Files/modules changed:
+- `jane_web/jane_v2/classes/greeting/handler.py`
+- `tests/test_greeting_canned.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Canned greeting matches still return `{"text": <reply>}`.
+- LLM-generated greetings still return `{"text": <cleaned reply>}`.
+- Non-string prompts, LLM failures, empty responses, and `WRONG_CLASS` still escalate.
+
+Boundary chosen:
+- `greeting_response()` owns the one-field response envelope.
+- Canned matching, prompt construction, payload shaping, wrong-class detection, and cleanup remain in existing helpers.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v2/classes/greeting/handler.py tests/test_greeting_canned.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_greeting_canned.py -q` passed (`6 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1859 passed`).
+
+Remaining follow-up slices:
+- Greeting's LLM path is already factored down to orchestration.
+- Further extraction would add indirection without reducing meaningful complexity.
+
+## 2026-07-04 - Tell Joke Success Response Helper
+
+Goal/scope:
+- Extract the tell-joke success response envelope after LLM reply parsing.
+- Preserve spoken joke text and thought metadata shape.
+
+Files/modules changed:
+- `jane_web/jane_v2/classes/tell_joke/handler.py`
+- `tests/test_tell_joke_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- LLM call failures and empty parsed replies still escalate.
+- Successful joke replies still return `{"text": reply, "thought": thought}`.
+- Prompt construction, payload options, and THOUGHT/REPLY parsing are unchanged.
+
+Boundary chosen:
+- `joke_success_response()` owns the handler-visible success envelope.
+- Latency logging and local LLM orchestration remain in the handler.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v2/classes/tell_joke/handler.py tests/test_tell_joke_helpers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_tell_joke_helpers.py -q` passed (`6 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1858 passed`).
+
+Remaining follow-up slices:
+- Joke prompt and response parsing already live in `helpers.py`.
+- The handler is now mostly LLM orchestration plus response dispatch.
+
+## 2026-07-04 - Do Math Success Response Helper
+
+Goal/scope:
+- Extract the do-math success response envelope after safe expression evaluation.
+- Preserve computed answer text and thought formatting.
+
+Files/modules changed:
+- `jane_web/jane_v2/classes/do_math/handler.py`
+- `tests/test_do_math_evaluator.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- LLM parse failures, `NONE` responses, unsafe expressions, and evaluation errors still escalate.
+- Successful computations still return the formatted answer with a trailing period.
+- The thought field still reads `computed <expr> = <answer>`.
+
+Boundary chosen:
+- `math_success_response()` owns the response envelope.
+- Expression parsing, safe AST evaluation, number formatting, and timing/logging remain in their existing boundaries.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v2/classes/do_math/handler.py tests/test_do_math_evaluator.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_do_math_evaluator.py -q` passed (`15 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1857 passed`).
+
+Remaining follow-up slices:
+- The security-sensitive AST evaluator is already isolated and directly tested.
+- Local LLM invocation remains handler orchestration.
+
+## 2026-07-04 - Get Time Response Wrapper
+
+Goal/scope:
+- Extract the shared get-time response envelope used by fast-path and LLM answers.
+- Preserve the conversation-ending Stage 2 response contract.
+
+Files/modules changed:
+- `jane_web/jane_v2/classes/get_time/handler.py`
+- `tests/test_get_time_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Simple time/date questions still use the fast path and return `conversation_end=True`.
+- LLM-generated time answers still return text, thought, and `conversation_end=True`.
+- LLM fallback behavior on errors still uses the formatted current time.
+
+Boundary chosen:
+- `time_answer_response()` owns the common response envelope.
+- Prompt construction, local LLM calls, parsing, and fast-path detection remain in their existing helper boundaries.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v2/classes/get_time/handler.py tests/test_get_time_helpers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_get_time_helpers.py -q` passed (`7 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1856 passed`).
+
+Remaining follow-up slices:
+- Timezone selection still uses server-local time until Android sends client time.
+- LLM call timing/logging stays in the handler because it is orchestration, not pure formatting.
+
+## 2026-07-04 - National Grid Handler Response Helpers
+
+Goal/scope:
+- Extract National Grid bill handler success and error response shapes.
+- Add focused handler tests with fake year inference, fetch, and formatting dependencies.
+
+Files/modules changed:
+- `jane_web/jane_v2/classes/nationalgrid_bills/handler.py`
+- `tests/test_nationalgrid_bills_handler.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Prompts without an inferable year still return `None` before any bill fetch.
+- Successful fetches still return formatted text plus the raw result under `data`.
+- Fetch exceptions still return the same user-visible failure text and `error` field.
+- Live Playwright/browser bill fetching remains untouched.
+
+Boundary chosen:
+- `bill_fetch_success_response()` owns the success payload shape.
+- `bill_fetch_error_response()` owns exception-to-response formatting.
+- `handle()` keeps only year gating, threaded fetch execution, and response dispatch.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v2/classes/nationalgrid_bills/handler.py tests/test_nationalgrid_bills_handler.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_nationalgrid_bills_handler.py -q` passed (`3 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1855 passed`).
+
+Remaining follow-up slices:
+- `agent_skills.nationalgrid_bills.fetch_bills()` remains the browser/I/O boundary and should only be split with Playwright fakes.
+- Handler tests now make future route-shape changes safer.
+
+## 2026-07-04 - Weather Route Policy Helpers
+
+Goal/scope:
+- Extract weather handler route-policy checks for online-research escalation and supported location validation.
+- Preserve cached Medford-weather fast path and Stage 3 fallback behavior.
+
+Files/modules changed:
+- `jane_web/jane_v2/classes/weather/handler.py`
+- `tests/test_weather_slices.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Prompts asking Jane to search, Google, explain causes, or answer latest/news weather questions still escalate to Stage 3.
+- Blank locations and Medford variants still use the cached weather handler.
+- Non-Medford locations still escalate.
+- Pending weather follow-ups still reject malformed or non-Medford state and preserve normalized topic/location output.
+
+Boundary chosen:
+- `_requires_online_weather_lookup()` owns the force-escalate phrase policy.
+- `_normalize_weather_location()` owns location cleanup.
+- `_is_supported_weather_location()` owns the Medford-only cache boundary.
+- Forecast slicing, cache reads, and local LLM phrasing remain unchanged.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v2/classes/weather/handler.py tests/test_weather_slices.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_weather_slices.py -q` passed (`12 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1852 passed`).
+
+Remaining follow-up slices:
+- Cache read/error handling and local LLM phrasing stay in the handler until tests fake those I/O paths together.
+- Weather slice builders are already split and directly covered.
+
+## 2026-07-04 - Shared Message Architecture Guard Helper
+
+Goal/scope:
+- Move duplicated architecture/debug false-positive detection for SMS read/delete handlers into a shared helper.
+- Preserve both handlers' Stage 2 wrong-class and Stage 3 escalation behavior.
+
+Files/modules changed:
+- `jane_web/jane_v2/classes/message_guard_helpers.py`
+- `jane_web/jane_v2/classes/read_messages/handler.py`
+- `jane_web/jane_v2/classes/delete_messages/handler.py`
+- `tests/test_read_messages_handler.py`
+- `tests/test_delete_messages_handler.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Prompts about architecture, infrastructure, pipeline, handler, classifier, or stage still return `{"wrong_class": True}` in read/delete message handlers.
+- Real SMS read requests still escalate to Stage 3.
+- Real SMS delete requests still escalate to Stage 3 for Opus-level inbox matching and confirmation policy.
+- Read-message self-reference/meta phrase rejection remains read-message specific.
+
+Boundary chosen:
+- `message_guard_helpers.contains_architecture_phrase()` owns the shared architecture/debug phrase check.
+- Read/delete message handlers keep their domain-specific logging and escalation decisions.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v2/classes/message_guard_helpers.py jane_web/jane_v2/classes/read_messages/handler.py jane_web/jane_v2/classes/delete_messages/handler.py tests/test_read_messages_handler.py tests/test_delete_messages_handler.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_read_messages_handler.py tests/test_delete_messages_handler.py -q` passed (`4 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1851 passed`).
+
+Remaining follow-up slices:
+- Message metadata context remains separate for read/delete because the Opus instructions differ.
+- A broader shared message-stage guard should wait until more handlers need the same policy.
+
+## 2026-07-04 - Read Messages Misclassification Guard Helpers
+
+Goal/scope:
+- Extract inline read-message misclassification checks into named guard predicates.
+- Add focused coverage for the handler's wrong-class versus Stage 3 escalation behavior.
+
+Files/modules changed:
+- `jane_web/jane_v2/classes/read_messages/handler.py`
+- `tests/test_read_messages_handler.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Architecture/debug prompts that mention classifier, stage, handler, pipeline, or similar terms still return `{"wrong_class": True}`.
+- Meta/self-reference prompts about Jane's previous replies still return `{"wrong_class": True}`.
+- Real message-reading requests still return `None` so Stage 3 handles nuanced message analysis.
+
+Boundary chosen:
+- `contains_architecture_phrase()` owns architecture/debug keyword matching.
+- `contains_meta_self_reference()` owns self-reference phrase matching.
+- `should_reject_read_messages_prompt()` exposes the combined guard for tests and future router use.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v2/classes/read_messages/handler.py tests/test_read_messages_handler.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_read_messages_handler.py -q` passed (`2 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1849 passed`).
+
+Remaining follow-up slices:
+- The read-message handler remains intentionally thin; metadata/context building stays in `metadata.py`.
+- If router override logic needs the same guard, this helper can be reused without duplicating phrase lists.
+
+## 2026-07-04 - Low-Signal Protocol Marker Helpers
+
+Goal/scope:
+- Extract short-term protocol marker detection from low-signal memory filtering.
+- Preserve context-snapshot, short-term theme, and protocol-metadata filtering behavior.
+
+Files/modules changed:
+- `memory/v1/low_signal_memory.py`
+- `tests/test_low_signal_memory.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Empty and known-noise shared memories are still filtered out.
+- Context snapshots and short-term theme records are still filtered out.
+- Class protocol headers, inline protocol tags, extracted params, and clarification metadata chatter are still filtered out.
+- Real content that merely discusses protocol metadata remains retrievable.
+
+Boundary chosen:
+- `has_inline_protocol_marker()` owns lowercased inline marker matching.
+- `is_low_signal_short_term_protocol_text()` owns the broad protocol gate, header fast path, and meta-prefix/inline-marker fallback.
+- `is_low_signal_short_term_memory()` now coordinates metadata checks and delegates protocol-text policy.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile memory/v1/low_signal_memory.py tests/test_low_signal_memory.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_low_signal_memory.py -q` passed (`5 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1847 passed`).
+
+Remaining follow-up slices:
+- Shared-memory noise prefixes remain simple static data.
+- Retrieval-side expiration and distance filtering stay in their separate modules.
+
+## 2026-07-04 - Model Update Discord Payload Helper
+
+Goal/scope:
+- Extract Discord message request body construction from the Gemini model update notifier.
+- Preserve notification text, Discord URL, and bot header behavior.
+
+Files/modules changed:
+- `agent_skills/model_update_helpers.py`
+- `agent_skills/notify_updates.py`
+- `tests/test_model_update_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Notifications still send the generated upgrade message as Discord `content`.
+- Discord channel URL and bot authorization headers are unchanged.
+- Pending update persistence and model update prompt behavior are unchanged.
+
+Boundary chosen:
+- `discord_message_payload()` owns Discord JSON body shape beside the existing URL/header helpers.
+- `notify_updates.py` now handles I/O only after helper-built request pieces are prepared.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile agent_skills/model_update_helpers.py agent_skills/notify_updates.py tests/test_model_update_helpers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_model_update_helpers.py -q` passed (`4 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1846 passed`).
+
+Remaining follow-up slices:
+- Model update scripts are now mostly thin I/O shells around pure helper functions.
+- Live Gemini/Discord calls remain intentionally outside unit tests.
+
+## 2026-07-04 - Model Settings Legacy Env Helper
+
+Goal/scope:
+- Extract legacy model environment variable naming from current model selection.
+- Preserve model provider defaults and environment precedence.
+
+Files/modules changed:
+- `jane_web/model_settings.py`
+- `tests/test_model_settings.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Provider-specific `JANE_MODEL_*` environment variables still win.
+- Legacy `BRAIN_HEAVY_*` variables still act as fallback overrides.
+- Unknown providers still fall back through Claude defaults.
+- Save targets, tier metadata, and provider payload shaping are unchanged.
+
+Boundary chosen:
+- `legacy_model_env_var()` owns legacy variable naming.
+- `current_model_for_provider()` now delegates both current and legacy environment key construction.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/model_settings.py tests/test_model_settings.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_model_settings.py -q` passed (`8 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1846 passed`).
+
+Remaining follow-up slices:
+- Model settings are now small enough to leave in place.
+- Runtime provider reload remains outside this pure helper boundary.
+
+## 2026-07-04 - Essence Output Note Cap Helper
+
+Goal/scope:
+- Extract shared note truncation used by generated essence layout and onboarding payloads.
+- Preserve generated payload shapes.
+
+Files/modules changed:
+- `agent_skills/essence_builder_outputs.py`
+- `tests/test_essence_builder_outputs.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Layout notes and onboarding notes still cap at 500 characters.
+- Short notes are still returned unchanged.
+- Custom function stub and no-custom-function detection are unchanged.
+
+Boundary chosen:
+- `capped_output_note()` owns note length limiting.
+- Layout and onboarding payload builders now share that cap rule.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile agent_skills/essence_builder_outputs.py tests/test_essence_builder_outputs.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_essence_builder_outputs.py -q` passed (`5 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1846 passed`).
+
+Remaining follow-up slices:
+- Output builders are now simple direct payload assembly.
+- File writing remains in the higher-level essence builder.
+
+## 2026-07-04 - Essence Interview Numbered Questions Helper
+
+Goal/scope:
+- Extract numbered question line rendering from essence builder interview formatting.
+- Preserve required and optional question layout.
+
+Files/modules changed:
+- `agent_skills/essence_builder_interview.py`
+- `tests/test_essence_builder_interview.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Required questions still start at 1.
+- Optional questions still continue numbering after required questions.
+- The optional section label and blank-line layout are unchanged.
+- Section intro, progress summary, and spec document output are unchanged.
+
+Boundary chosen:
+- `numbered_questions()` owns numbered list line rendering.
+- `format_questions()` now owns the required/optional section composition.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile agent_skills/essence_builder_interview.py tests/test_essence_builder_interview.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_essence_builder_interview.py -q` passed (`6 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1846 passed`).
+
+Remaining follow-up slices:
+- Essence name extraction remains heuristic and directly covered.
+- Spec document rendering is simple append-only Markdown assembly.
+
+## 2026-07-04 - Essence Builder Candidate Mention Helper
+
+Goal/scope:
+- Extract shared candidate matching used by essence builder UI type and permission selection.
+- Preserve matching of both underscore and space-separated candidate forms.
+
+Files/modules changed:
+- `agent_skills/essence_builder_parsing.py`
+- `tests/test_essence_builder_parsing.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- `screen_control` still matches answers containing either `screen_control` or `screen control`.
+- UI type selection still falls back to `chat`.
+- Permission selection still returns known permissions in configured order.
+- Shared skill and model parsing are unchanged.
+
+Boundary chosen:
+- `candidate_mentioned()` owns the normalized candidate phrase check.
+- `select_ui_type()` and `select_permissions()` now share that matching rule.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile agent_skills/essence_builder_parsing.py tests/test_essence_builder_parsing.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_essence_builder_parsing.py -q` passed (`9 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1846 passed`).
+
+Remaining follow-up slices:
+- Free-text extraction helpers remain intentionally heuristic and locally tested.
+- Manifest assembly already delegates parsing to these helpers.
+
+## 2026-07-04 - Essence Validation Nested Missing Field Helper
+
+Goal/scope:
+- Extract nested required-field message generation from essence manifest validation.
+- Preserve manifest validation error ordering and wording.
+
+Files/modules changed:
+- `agent_skills/essence_validation.py`
+- `tests/test_essence_validation.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Preferred model and UI nested missing-field errors keep the same text.
+- Top-level missing fields still report before nested checks.
+- Capability list type validation remains custom because it checks both presence and array shape.
+- Object type errors still skip nested required-field checks.
+
+Boundary chosen:
+- `missing_nested_field_errors()` owns repeated nested missing-field message formatting.
+- `validate_manifest()` keeps schema-specific type and array validation.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile agent_skills/essence_validation.py tests/test_essence_validation.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_essence_validation.py -q` passed (`6 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1846 passed`).
+
+Remaining follow-up slices:
+- Capability validation combines missing-field and array-type checks and should stay local.
+- Required constants remain static schema data.
+
+## 2026-07-04 - Essence Sort Rank Helper
+
+Goal/scope:
+- Extract the special-case essence ordering policy from the available-essence sort key.
+- Preserve Jane-first and Work Log-last ordering.
+
+Files/modules changed:
+- `agent_skills/essence_loader_helpers.py`
+- `tests/test_essence_loader_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Jane still sorts first.
+- Work Log still sorts after ordinary essences.
+- Ordinary essences still sort alphabetically by lowercase name.
+- Environment directory resolution and available essence record shape are unchanged.
+
+Boundary chosen:
+- `available_essence_sort_rank()` owns special-case rank assignment.
+- `available_essence_sort_key()` now combines rank with the ordinary alphabetical key.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile agent_skills/essence_loader_helpers.py tests/test_essence_loader_helpers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_essence_loader_helpers.py -q` passed (`5 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1845 passed`).
+
+Remaining follow-up slices:
+- Directory resolution helpers are already small and covered.
+- Manifest record assembly is direct mapping.
+
+## 2026-07-04 - Cron Weekday Mapping Helper
+
+Goal/scope:
+- Extract cron weekday conversion from the scheduler field list.
+- Preserve Sunday-as-zero cron matching.
+
+Files/modules changed:
+- `agent_skills/cron_schedule.py`
+- `tests/test_cron_schedule.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Python Monday=0 weekdays are still converted to cron Sunday=0.
+- Wildcard, exact, list, range, and step field matching are unchanged.
+- Invalid schedule specs still return `False` without raising.
+
+Boundary chosen:
+- `cron_weekday()` owns the Python-to-cron weekday mapping.
+- `_cron_fields()` now only assembles the five cron comparison fields.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile agent_skills/cron_schedule.py tests/test_cron_schedule.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_cron_schedule.py -q` passed (`3 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1845 passed`).
+
+Remaining follow-up slices:
+- `_field_matches()` is still compact; splitting exact/list/range/step branches would add little value.
+- Scheduler process orchestration remains separate from this pure matcher.
+
+## 2026-07-04 - Cron Notification Markup Strip Helper
+
+Goal/scope:
+- Extract work-log notification Markdown cleanup from work-log truncation.
+- Preserve Discord webhook and cron environment payload behavior.
+
+Files/modules changed:
+- `agent_skills/cron_notification_helpers.py`
+- `tests/test_cron_notification_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Discord webhook content is still capped at 2000 characters.
+- Work-log notifications still strip bold markers and code fences before truncating.
+- Work-log truncation still caps at 300 characters by default.
+- Cron environment payload defaults are unchanged.
+
+Boundary chosen:
+- `strip_work_log_notification_markup()` owns Markdown marker removal and trimming.
+- `work_log_notification_text()` now owns only cleanup plus length capping.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile agent_skills/cron_notification_helpers.py tests/test_cron_notification_helpers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_cron_notification_helpers.py -q` passed (`4 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1845 passed`).
+
+Remaining follow-up slices:
+- Cron environment payload is a direct mapping and should stay simple.
+- Cron schedule matching is already compact and tested.
+
+## 2026-07-04 - Pending Action Edit Prefix Helper
+
+Goal/scope:
+- Extract normalized edit-prefix matching from pending-action edit intent detection.
+- Preserve confirm/cancel precedence.
+
+Files/modules changed:
+- `jane_web/jane_v2/pending_action_phrases.py`
+- `tests/test_pending_action_phrases.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Confirm and cancel phrases still block edit-intent classification first.
+- Edit prefixes still match after trimming configured prefix whitespace and lowercasing.
+- High-precision interrupt and topic-pivot phrase matching are unchanged.
+
+Boundary chosen:
+- `has_edit_prefix()` owns prefix matching for already-normalized replies.
+- `is_edit_intent()` now owns precedence: normalize, reject confirm/cancel, then test edit prefix.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v2/pending_action_phrases.py tests/test_pending_action_phrases.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_pending_action_phrases.py tests/test_pending_action_resolution.py -q` passed (`14 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1845 passed`).
+
+Remaining follow-up slices:
+- Phrase tables remain static policy data.
+- Pending response routing is already delegated to `pending_action_resolution.py`.
+
+## 2026-07-04 - Pending Action Blank Reply Guard Helper
+
+Goal/scope:
+- Extract the blank/too-short pending reply guard from the pending-action resolver.
+- Preserve the protection against empty STT follow-ups clearing active pending slots.
+
+Files/modules changed:
+- `jane_web/jane_v2/pending_action_resolver.py`
+- `tests/test_pending_action_resolution.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Missing, whitespace-only, and one-character pending replies still fall through without resolving pending actions.
+- Two-character replies still proceed to pending action resolution.
+- Expiry parsing and pending type resolution are unchanged.
+
+Boundary chosen:
+- `_is_blank_pending_reply()` owns the STT debounce/blank-reply threshold.
+- `resolve()` now delegates that pure guard before loading FIFO state.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v2/pending_action_resolver.py tests/test_pending_action_resolution.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_pending_action_resolution.py tests/test_pending_action_expiry.py -q` passed (`14 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1845 passed`).
+
+Remaining follow-up slices:
+- Expiry parsing already has a dedicated helper and tests.
+- Resolution branching is delegated to `pending_action_resolution.py`.
+
+## 2026-07-04 - Web Search Shared Result Formatter
+
+Goal/scope:
+- Extract shared Markdown result formatting for Tavily and DuckDuckGo search results.
+- Preserve provider-specific URL/body field names.
+
+Files/modules changed:
+- `agent_skills/web_search_format.py`
+- `tests/test_web_search_format.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Empty result lists still render as an empty string.
+- Tavily results still read `url` and `content`.
+- DuckDuckGo results still read `href` and `body`.
+- Missing title, URL, or body values still render as empty strings in the same Markdown shape.
+
+Boundary chosen:
+- `format_search_results()` owns provider-neutral Markdown rendering.
+- `format_tavily_results()` and `format_ddg_results()` now provide provider-specific field mapping.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile agent_skills/web_search_format.py tests/test_web_search_format.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_web_search_format.py -q` passed (`5 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1844 passed`).
+
+Remaining follow-up slices:
+- Tavily request payload and quota status helpers are already minimal.
+- Network behavior remains in `web_search_utils.py`, outside this pure formatter.
+
+## 2026-07-04 - RA Recommendation Safety Guard Helper
+
+Goal/scope:
+- Extract the safety-language predicate used before prepending the RA recommendation safety note.
+- Preserve recommendation prompt and generated Markdown guard behavior.
+
+Files/modules changed:
+- `agent_skills/ra_research_recommendation_prompt.py`
+- `tests/test_ra_research_recommendation_prompt.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Generated text mentioning `medical advice` or `rheumatologist` is still treated as already guarded.
+- Generated text missing both phrases still gets the standard safety note prepended.
+- Recommendation prompt JSON payload and non-ASCII handling are unchanged.
+
+Boundary chosen:
+- `has_safety_guard_text()` owns the safety phrase detection.
+- `ensure_safety_note()` now focuses on the prepend decision.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile agent_skills/ra_research_recommendation_prompt.py tests/test_ra_research_recommendation_prompt.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_ra_research_recommendation_prompt.py -q` passed (`3 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1844 passed`).
+
+Remaining follow-up slices:
+- Prompt prefix and system prompt are static contract text.
+- Source ID behavior intentionally preserves `None` for missing IDs in this prompt payload.
+
+## 2026-07-04 - RA Markdown Usable Summary Items Helper
+
+Goal/scope:
+- Extract the repeated list-field normalization and unusable-item filtering used by high-signal RA finding rendering.
+- Preserve useful report Markdown output.
+
+Files/modules changed:
+- `agent_skills/ra_research_report_markdown.py`
+- `tests/test_ra_research_report_markdown.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Main findings still render without the unusable-item filter.
+- Actionable implications, clinician questions, caveats, and safety notes still use the same item caps and text caps.
+- Generic or wrong-disease report items are still filtered before rendering.
+- Static report sections and deterministic plan/scheme copy are unchanged.
+
+Boundary chosen:
+- `usable_summary_items()` owns the `list_values()` plus `filter_report_items()` pipeline for one summary field.
+- `useful_finding_lines()` now focuses on ordering and labeling rendered finding lines.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile agent_skills/ra_research_report_markdown.py tests/test_ra_research_report_markdown.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_ra_research_report_markdown.py -q` passed (`13 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1844 passed`).
+
+Remaining follow-up slices:
+- Large static recommendation text remains intentionally inline for readable report contracts.
+- Summary grouping and source detail helpers are already separately tested.
+
+## 2026-07-04 - RA Report Sent State Helper
+
+Goal/scope:
+- Extract common report-sent state mutation shared by app and email report delivery.
+- Preserve channel-specific side effects.
+
+Files/modules changed:
+- `agent_skills/ra_research_delivery.py`
+- `tests/test_ra_research_delivery.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Both app and email report sends still update sent time, source count, initial-report flag, and clear prior errors.
+- App delivery still records `last_report_channel` as `app` and stores the HTML report path.
+- Email delivery still leaves the existing channel value untouched.
+- Report scheduling, app payload, and email body formatting are unchanged.
+
+Boundary chosen:
+- `mark_report_sent_base()` owns common state mutation for any successful report send.
+- `mark_app_report_sent()` and `mark_email_report_sent()` keep delivery-channel-specific fields.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile agent_skills/ra_research_delivery.py tests/test_ra_research_delivery.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_ra_research_delivery.py -q` passed (`8 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1844 passed`).
+
+Remaining follow-up slices:
+- Channel normalization and report scheduling are already isolated and tested.
+- Email body text is intentionally static copy plus capped snapshots.
+
+## 2026-07-04 - RA Codex Source ID Helper
+
+Goal/scope:
+- Extract source ID collection for the RA Codex synthesis payload.
+- Preserve the existing payload shape, including blank slots for summaries missing `source_id`.
+
+Files/modules changed:
+- `agent_skills/ra_research_codex_prompt.py`
+- `tests/test_ra_research_codex_prompt.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- `new_source_ids_this_run` still mirrors the order and length of `new_summaries`.
+- Missing `source_id` values still become empty strings.
+- Cached summary compaction remains capped at 90 summaries.
+- Prompt prefix, safety policy, and non-JSON fallback shape are unchanged.
+
+Boundary chosen:
+- `source_ids_from_summaries()` owns source-ID extraction from summary dictionaries.
+- `codex_synthesis_payload()` now focuses on assembling the full prompt payload.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile agent_skills/ra_research_codex_prompt.py tests/test_ra_research_codex_prompt.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_ra_research_codex_prompt.py -q` passed (`6 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1843 passed`).
+
+Remaining follow-up slices:
+- Required output contract and instruction list are intentional prompt data.
+- `non_json_codex_result()` preserves a legacy fallback shape and should not be expanded without checking consumers.
+
+## 2026-07-04 - RA PubMed Abstract Text Helper
+
+Goal/scope:
+- Extract PubMed abstract label/content assembly from full article record parsing.
+- Preserve PubMed record shape.
+
+Files/modules changed:
+- `agent_skills/ra_research_pubmed.py`
+- `tests/test_ra_research_pubmed.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Abstract sections still prefer `Label`, then `NlmCategory`, then unlabeled content.
+- Empty abstract sections are still skipped.
+- Labeled sections still render as `Label: content` and join with newlines.
+- PMID, IDs, dates, authors, publication types, MeSH terms, and URL fields are unchanged.
+
+Boundary chosen:
+- `parse_abstract_text()` owns abstract section assembly.
+- `parse_pubmed_article()` now focuses on top-level PubMed record field assembly.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile agent_skills/ra_research_pubmed.py tests/test_ra_research_pubmed.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_ra_research_pubmed.py -q` passed (`9 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1842 passed`).
+
+Remaining follow-up slices:
+- Date, ID, and author parsing already have direct helpers and coverage.
+- Network/cache request code remains in the NCBI orchestration helpers.
+
+## 2026-07-04 - RA Artifact Text Stripping Helper
+
+Goal/scope:
+- Extract shared BeautifulSoup text extraction after removing configured noise tags.
+- Preserve HTML and PMC XML artifact text behavior.
+
+Files/modules changed:
+- `agent_skills/ra_research_artifacts.py`
+- `tests/test_ra_research_artifacts.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- HTML extraction still removes script, style, nav, footer, header, and aside tags.
+- PMC XML extraction still removes references, table wrappers, figures, and permissions.
+- Extracted text still flows through shared whitespace cleanup.
+- Slug, folder, abstract, web-source, and raw suffix helpers are unchanged.
+
+Boundary chosen:
+- `text_without_tags()` owns parser selection, tag removal, and clean text extraction.
+- `html_to_text()` and `pmc_xml_to_text()` now supply their parser and noise-tag sets.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile agent_skills/ra_research_artifacts.py tests/test_ra_research_artifacts.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_ra_research_artifacts.py -q` passed (`9 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1841 passed`).
+
+Remaining follow-up slices:
+- `is_jats_article_xml()` stays separate because it validates structure rather than extracting text.
+- Source naming helpers are already small and directly tested.
+
+## 2026-07-04 - RA Fallback Summary Helper Boundaries
+
+Goal/scope:
+- Extract fallback summary first-sentence and study-type rules from RA source payload construction.
+- Preserve fallback payload shape for sources that cannot be summarized by the local LLM.
+
+Files/modules changed:
+- `agent_skills/ra_research_source_utils.py`
+- `tests/test_ra_research_source_utils.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Fallback findings still use the cleaned first sentence capped at 500 characters.
+- Publication types still take the first four values before falling back to `kind`.
+- Missing publication type and kind still reports `unknown`.
+- Citation, limitations, artifact path, and `needs_llm_review` fields are unchanged.
+
+Boundary chosen:
+- `fallback_first_sentence()` owns text cleaning and first-sentence truncation.
+- `fallback_study_type()` owns publication-type/kind fallback selection.
+- `fallback_summary_payload()` now focuses on payload assembly.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile agent_skills/ra_research_source_utils.py tests/test_ra_research_source_utils.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_ra_research_source_utils.py -q` passed (`6 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1840 passed`).
+
+Remaining follow-up slices:
+- Source cache identity and citation formatting are already compact and tested.
+- Fetching/saving artifacts remains outside this pure helper module.
+
+## 2026-07-04 - RA Compact Summary Record Helper
+
+Goal/scope:
+- Extract per-summary compact payload mapping from RA research report payload construction.
+- Preserve payload field names, truncation caps, and list normalization.
+
+Files/modules changed:
+- `agent_skills/ra_research_text.py`
+- `tests/test_ra_research_text.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- `compact_summary_payload()` still applies the outer list limit before mapping.
+- Title, citation, URL, scope, type, and artifact fields keep the same `text_value()` caps.
+- Findings, actions, safety, limitations, and clinician questions keep the same `list_values()` caps.
+- Deduping and JSON extraction helpers are unchanged.
+
+Boundary chosen:
+- `compact_summary_record()` owns one summary's compact JSON shape.
+- `compact_summary_payload()` now owns only list limiting and mapping.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile agent_skills/ra_research_text.py tests/test_ra_research_text.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_ra_research_text.py -q` passed (`6 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1839 passed`).
+
+Remaining follow-up slices:
+- JSON extraction already uses the balanced object scanner.
+- `list_values()` and `text_value()` are already small and directly covered.
+
+## 2026-07-04 - RA Report Low-Value Text Predicates
+
+Goal/scope:
+- Extract repeated low-value RA report text predicates shared by score penalties and reason generation.
+- Preserve ranking, filtering, and low-value explanation output.
+
+Files/modules changed:
+- `agent_skills/ra_research_report_items.py`
+- `tests/test_ra_research_report_items.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Directness, psoriatic-only, and speculative/scenario penalties are unchanged.
+- `low_value_reason()` still emits the same semicolon-separated reason text.
+- Strong evidence can still override directness-only low-value classification.
+- Report item filtering and theme inference are unchanged.
+
+Boundary chosen:
+- `lacks_direct_remission_relevance()`, `psoriatic_without_rheumatoid_focus()`, and `speculative_summary_text()` own shared text predicates.
+- Scoring and reason functions now express policy by composing those predicates.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile agent_skills/ra_research_report_items.py tests/test_ra_research_report_items.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_ra_research_report_items.py -q` passed (`9 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1839 passed`).
+
+Remaining follow-up slices:
+- Evidence strength and usefulness scores are already compact rule lists.
+- Report theme inference is table-driven and directly tested.
+
+## 2026-07-04 - Structured Short-Term Metadata Join Helper
+
+Goal/scope:
+- Extract capped metadata value joining from structured short-term memory metadata flattening.
+- Preserve Chroma-compatible primitive metadata output.
+
+Files/modules changed:
+- `memory/v1/short_term_structured.py`
+- `tests/test_short_term_structured.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Metadata list values are still trimmed, blank-filtered, capped before joining, and joined with ` | `.
+- Artifact paths, person names, and time references keep the same cap and formatting.
+- Decision/open-loop/artifact flags and counts are unchanged.
+
+Boundary chosen:
+- `metadata_join_items()` owns the reusable list-to-string metadata contract.
+- `flatten_to_metadata()` now focuses on the Chroma metadata shape.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile memory/v1/short_term_structured.py tests/test_short_term_structured.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_short_term_structured.py -q` passed (`9 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1838 passed`).
+
+Remaining follow-up slices:
+- JSON parsing already delegates balanced-object scanning to `jane.json_scanner`.
+- Skip policy remains intentionally narrow around decisions, open loops, and artifacts.
+
+## 2026-07-04 - Conversation Transcript Builder Helper
+
+Goal/scope:
+- Extract shared role/content transcript assembly from conversation session and ledger-window builders.
+- Preserve injected-metadata stripping and protocol-chatter filtering.
+
+Files/modules changed:
+- `memory/v1/conversation_windows.py`
+- `tests/test_conversation_windows.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Empty, metadata-only, and bad thematic-output lines are still skipped.
+- Roles are still uppercased, with missing roles rendering as an empty prefix.
+- Transcript entries still join with blank lines.
+- Ledger window timestamps and turn IDs are ignored for transcript text.
+
+Boundary chosen:
+- `build_role_content_transcript()` owns clean line collection for `(role, content)` rows.
+- `build_session_transcript()` and `build_window_transcript()` now adapt their input shapes to that shared builder.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile memory/v1/conversation_windows.py tests/test_conversation_windows.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_conversation_windows.py -q` passed (`6 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1837 passed`).
+
+Remaining follow-up slices:
+- Ledger grouping is compact and already directly tested.
+- Timestamp normalization remains intentionally simple to match SQLite query shapes.
+
+## 2026-07-04 - System Load VRAM Utilization Helper
+
+Goal/scope:
+- Extract GPU VRAM utilization calculation from the ample-resource predicate.
+- Preserve day/night load recommendations and defer formatting.
+
+Files/modules changed:
+- `agent_skills/system_load_policy.py`
+- `tests/test_system_load_policy.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Systems with no reported GPU memory still treat VRAM utilization as non-blocking.
+- CPU, memory, GPU, and VRAM threshold checks retain the same ordering and thresholds.
+- Load summary and one-line output formats are unchanged.
+
+Boundary chosen:
+- `gpu_vram_used_percent()` owns the denominator guard and utilization calculation.
+- `has_ample_resources_for_load()` remains responsible for threshold decisions.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile agent_skills/system_load_policy.py tests/test_system_load_policy.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_system_load_policy.py -q` passed (`8 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1837 passed`).
+
+Remaining follow-up slices:
+- Defer reason ordering is already direct and covered.
+- Summary formatting has small dedicated helpers; no further split needed right now.
+
+## 2026-07-04 - Memory Summary Cache Session Timestamp Helper
+
+Goal/scope:
+- Extract the per-session "last used" timestamp rule from memory summary cache eviction.
+- Preserve bounded cache eviction behavior.
+
+Files/modules changed:
+- `memory/v1/memory_summary_cache.py`
+- `tests/test_memory_summary_cache.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Cache entries are still pruned by TTL and sorted newest-first.
+- Session eviction still removes the oldest session when the hard session cap is exceeded.
+- Empty session lists still sort using a current UTC timestamp fallback.
+- Lookup and invalidation behavior is unchanged.
+
+Boundary chosen:
+- `session_last_used_at()` owns the timestamp selection for one session's entries.
+- `store_cached_memory_summary()` now describes eviction in terms of session ordering.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile memory/v1/memory_summary_cache.py tests/test_memory_summary_cache.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_memory_summary_cache.py -q` passed (`7 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1836 passed`).
+
+Remaining follow-up slices:
+- Similarity lookup is already simple and direct.
+- Cache locking and mutation boundaries should stay in the store/lookup functions.
+
+## 2026-07-04 - Retrieved Memory Short-Term Eligibility Helper
+
+Goal/scope:
+- Extract shared short-term memory fact eligibility checks used by semantic retrieval and recency boosting.
+- Preserve filtering of expired, stale, `None`, and low-signal short-term memory rows.
+
+Files/modules changed:
+- `memory/v1/retrieved_memory_facts.py`
+- `tests/test_retrieved_memory_facts.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Semantic short-term facts still apply the distance threshold after content eligibility.
+- Recency boosting still skips expired, stale, none-content, and low-signal rows.
+- Legacy preview-key dedupe behavior is unchanged.
+- Formatting still flows through `fmt_memory()`.
+
+Boundary chosen:
+- `is_usable_short_term_fact()` owns content/timestamp/noise eligibility.
+- Distance filtering remains specific to semantic retrieval because the recency boost path does not use vector distances.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile memory/v1/retrieved_memory_facts.py tests/test_retrieved_memory_facts.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_retrieved_memory_facts.py -q` passed (`6 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1835 passed`).
+
+Remaining follow-up slices:
+- User/shared tier splitting is already direct and behavior-sensitive; no additional extraction there without a clearer repeated rule.
+- Non-user collectors share the existing expiring-distance list helper.
+
+## 2026-07-04 - Code Map Route Decorator Helper
+
+Goal/scope:
+- Extract Python HTTP route decorator recognition from the code-map AST traversal.
+- Preserve route, class, function, and constant index output.
+
+Files/modules changed:
+- `agent_skills/code_map_indexers.py`
+- `tests/test_code_map_indexers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Supported route decorators remain `get`, `post`, `put`, `delete`, and `patch`.
+- Route entries still use the decorated function's source line.
+- Non-route decorators still fall through to ordinary function indexing.
+- Code map reexports remain unchanged.
+
+Boundary chosen:
+- `route_entry_from_decorator()` owns the AST decorator shape check.
+- `index_python_file()` now focuses on top-level AST node classification.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile agent_skills/code_map_indexers.py tests/test_code_map_indexers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_code_map_indexers.py -q` passed (`6 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1834 passed`).
+
+Remaining follow-up slices:
+- HTML and Kotlin indexers are already compact; only extract more if another repeated parsing rule appears.
+- `should_skip()` preserves legacy substring matching and should not be changed without regenerating code maps deliberately.
+
+## 2026-07-04 - Google Cloud Receipt Selection Helper
+
+Goal/scope:
+- Extract Google Cloud receipt candidate sorting, date filtering, count limiting, and empty-range error handling.
+- Preserve browser automation behavior while narrowing the async download loop to scanning and downloading.
+
+Files/modules changed:
+- `agent_skills/google_cloud_receipt_utils.py`
+- `agent_skills/google_cloud_receipts.py`
+- `tests/test_google_cloud_receipts.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Receipt candidates are still sorted newest-first before limiting.
+- Date range filtering still drops undated candidates.
+- `--count` still applies after date filtering.
+- Empty date-range selections still raise the same runtime error text.
+
+Boundary chosen:
+- `select_requested_receipt_candidates()` owns pure candidate selection policy.
+- `download_recent_receipts()` now keeps browser scanning, download execution, and manifest writing orchestration.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile agent_skills/google_cloud_receipts.py agent_skills/google_cloud_receipt_utils.py tests/test_google_cloud_receipts.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_google_cloud_receipts.py -q` passed (`19 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1833 passed`).
+
+Remaining follow-up slices:
+- Browser locator and download helpers are side-effect-heavy and should stay integration-oriented unless a pure contract emerges.
+- Receipt parsing and filename helpers are already isolated and directly tested.
+
+## 2026-07-04 - Gmail Cleanup Query Scope Helpers
+
+Goal/scope:
+- Extract shared Gmail cleanup query scope/exclusion terms from individual query builders.
+- Preserve exact query term order for sender, older-sender, calendar, and unread cleanup searches.
+
+Files/modules changed:
+- `agent_skills/gmail_cleanup_queries.py`
+- `tests/test_gmail_cleanup_queries.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- `include_trash=True` still prepends `in:anywhere` and omits `-in:trash`.
+- All cleanup queries still exclude spam.
+- Non-trash searches still append `-in:trash`.
+- Local-day sender queries still use the same wider after/before window.
+
+Boundary chosen:
+- `cleanup_query_parts()` owns Gmail search scope/exclusion terms.
+- `join_query_parts()` owns blank-term filtering and joining.
+- Specific query builders now supply only their domain-specific terms.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile agent_skills/gmail_cleanup_queries.py tests/test_gmail_cleanup_queries.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_gmail_cleanup_queries.py tests/test_nutricost_deal_utils.py -q` passed (`17 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1831 passed`).
+
+Remaining follow-up slices:
+- Prefix and Gmail date helpers are already small and directly tested.
+- Monitor wrappers preserve existing query APIs for cron code.
+
+## 2026-07-04 - Gmail Cleanup Trash Outcome Helper
+
+Goal/scope:
+- Extract dry-run/live trash outcome suffix construction from Gmail cleanup decisions.
+- Preserve sender cleanup, Google Calendar cleanup, and old-unread cleanup outcomes.
+
+Files/modules changed:
+- `agent_skills/gmail_cleanup_decisions.py`
+- `tests/test_gmail_cleanup_decisions.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Dry-run decisions still use the `_would_trash` suffix.
+- Live decisions still use the `_trashed` suffix.
+- Skip/too-recent/no-date outcomes are unchanged.
+- Nutricost cleanup count aggregation still sees the same outcome strings.
+
+Boundary chosen:
+- `trash_outcome()` owns the shared dry-run/live suffix rule.
+- Cleanup evaluators now focus on sender/label/subject/age/event checks.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile agent_skills/gmail_cleanup_decisions.py tests/test_gmail_cleanup_decisions.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_gmail_cleanup_decisions.py tests/test_nutricost_deal_utils.py -q` passed (`15 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1830 passed`).
+
+Remaining follow-up slices:
+- Sender, calendar, and unread decision gates are already compact and separately tested.
+- Gmail API mutation remains in monitor scripts, outside these pure decisions.
+
+## 2026-07-04 - Gmail New York Time Normalizer
+
+Goal/scope:
+- Extract New York timezone normalization used by Gmail cleanup date comparisons.
+- Preserve old-message and passed-calendar-event decisions.
+
+Files/modules changed:
+- `agent_skills/gmail_message_utils.py`
+- `tests/test_gmail_message_utils.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Gmail `internalDate` still converts through America/New_York.
+- Naive `now` values are still interpreted as New York local time.
+- Aware `now` values are still converted to New York before comparison.
+- Google Calendar subject/event end parsing remains unchanged, including overnight event adjustment.
+
+Boundary chosen:
+- `ny_aware_datetime()` owns optional/naive/aware `now` normalization.
+- Message age and calendar-expiry checks now share that helper.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile agent_skills/gmail_message_utils.py tests/test_gmail_message_utils.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_gmail_message_utils.py tests/test_gmail_cleanup_decisions.py -q` passed (`9 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1829 passed`).
+
+Remaining follow-up slices:
+- MIME walking and calendar-subject parsing are already split into focused helpers.
+- Gmail cleanup scripts still own live Gmail orchestration.
+
+## 2026-07-04 - Email Tool Sender Alias Helper
+
+Goal/scope:
+- Extract sender-account alias fallback from server-side email send argument preparation.
+- Preserve `from_email`, `from`, and `sender` precedence.
+
+Files/modules changed:
+- `jane_web/email_tool_results.py`
+- `tests/test_server_email_tools.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Missing recipient and missing body validation still return the same visible errors.
+- `from_email` still wins over `from`, which wins over `sender`.
+- Blank sender aliases still normalize to `None`.
+- Server-side send execution and sent-status formatting are unchanged.
+
+Boundary chosen:
+- `requested_sender_email()` owns sender alias normalization.
+- `prepare_send_email_args()` now coordinates required field validation and request object construction.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/email_tool_results.py tests/test_server_email_tools.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_server_email_tools.py -q` passed (`8 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1828 passed`).
+
+Remaining follow-up slices:
+- Inbox/search/readback formatting is already direct and covered.
+- Server-side executor dispatch remains table-driven and unchanged.
+
+## 2026-07-04 - Gmail MIME Message Builder
+
+Goal/scope:
+- Extract pure MIME email construction from Gmail send orchestration.
+- Preserve sender, recipient, subject, CC/BCC, and plain-text body shaping.
+
+Files/modules changed:
+- `agent_skills/email_tools.py`
+- `tests/test_email_message_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- `send_email()` still refreshes Gmail credentials and sends via the Gmail API.
+- `from` is still omitted when the resolved sender is empty.
+- `cc` and `bcc` headers are still included only when provided.
+- The raw message is still URL-safe base64 encoded before Gmail send.
+
+Boundary chosen:
+- `_build_mime_email()` owns MIMEText creation and header assignment.
+- `send_email()` now coordinates credential lookup, service construction, send execution, logging, and result shaping.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile agent_skills/email_tools.py tests/test_email_message_helpers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_email_message_helpers.py tests/test_server_email_tools.py -q` passed (`13 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1827 passed`).
+
+Remaining follow-up slices:
+- OAuth refresh and Gmail API calls remain live integration behavior and were intentionally untouched.
+- Inbox/read/delete helpers already delegate payload parsing to `email_message_helpers`.
+
+## 2026-07-04 - SMS Classification Keyword Predicate
+
+Goal/scope:
+- Extract repeated SMS keyword membership checks from synced-message classification.
+- Preserve category precedence for contact, reminder, spam, notification, and unknown messages.
+
+Files/modules changed:
+- `jane_web/sms_classification.py`
+- `tests/test_sms_classification.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Contact messages still classify as personal before body keyword checks.
+- Reminder keywords still beat spam and notification keywords.
+- Spam keywords still beat notification keywords.
+- Messages without matching keywords still classify as unknown.
+
+Boundary chosen:
+- `_contains_any_keyword()` owns substring keyword matching for a normalized text body.
+- `classify_synced_message()` now coordinates category precedence.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/sms_classification.py tests/test_sms_classification.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_sms_classification.py tests/test_sync_payloads.py -q` passed (`11 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1825 passed`).
+
+Remaining follow-up slices:
+- Keyword tuples are already short and explicit.
+- Sync payload insertion tests cover the downstream classification use.
+
+## 2026-07-04 - Short-Term Turn Message Cleaner
+
+Goal/scope:
+- Extract turn-message cleanup from structured short-term memory note building.
+- Preserve injected cleaner behavior and whitespace normalization.
+
+Files/modules changed:
+- `memory/v1/short_term_extractor.py`
+- `tests/test_short_term_structured.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- User and assistant messages still pass through the injected cleaner before extraction.
+- Empty or whitespace-only messages still produce a skipped general note.
+- Repeated whitespace still collapses to single spaces before turn-kind classification.
+- Structured extraction, skip gating, note flattening, search text, and metadata are unchanged.
+
+Boundary chosen:
+- `clean_turn_message()` owns per-message cleaner invocation and whitespace normalization.
+- `build_short_term_note()` now coordinates turn assembly, kind classification, structured extraction, and output shaping.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile memory/v1/short_term_extractor.py tests/test_short_term_structured.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_short_term_structured.py tests/test_turn_kind.py -q` passed (`12 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1824 passed`).
+
+Remaining follow-up slices:
+- Structured JSON parsing and flattening already live in `short_term_structured`.
+- LLM extraction remains dependency-injected and unchanged.
+
+## 2026-07-04 - Calendar Range Hint Normalizer
+
+Goal/scope:
+- Extract calendar range-hint normalization from range resolution.
+- Preserve aliases for spaced/cased hints such as `this week` and `next 90 days`.
+
+Files/modules changed:
+- `agent_skills/calendar_time_helpers.py`
+- `tests/test_calendar_time_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Missing range hints still resolve as `today`.
+- Whitespace and casing are still ignored.
+- Spaces still normalize to underscores before range matching.
+- Day, week, next-N-days, weekday, date, and fallback ranges are unchanged.
+
+Boundary chosen:
+- `normalized_range_hint()` owns string/default normalization.
+- `resolve_range_for_now()` now coordinates date arithmetic and fallback parsing.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile agent_skills/calendar_time_helpers.py tests/test_calendar_time_helpers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_calendar_time_helpers.py -q` passed (`6 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1823 passed`).
+
+Remaining follow-up slices:
+- Week and weekend arithmetic is readable and covered; no further split needed right now.
+- Reminder override validation remains compact and explicit.
+
+## 2026-07-04 - Recent Context Budget Helper
+
+Goal/scope:
+- Extract recent FIFO summary budget trimming from the live FIFO read wrapper.
+- Preserve newest-context priority and cloud redaction behavior.
+
+Files/modules changed:
+- `jane_web/jane_v2/recent_context.py`
+- `tests/test_recent_context_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Empty, non-string, and whitespace-only turn summaries are ignored.
+- Oldest valid summaries are dropped first when the character budget is exceeded.
+- The newest valid summary is still kept even when it alone exceeds the budget.
+- Local-only cloud redaction still emits a class-labeled private placeholder.
+
+Boundary chosen:
+- `_recent_context_lines_within_budget()` owns pure summary filtering and newest-preserving budget trimming.
+- `get_recent_context()` now coordinates FIFO import/read, token-to-character budget conversion, and joining.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v2/recent_context.py tests/test_recent_context_helpers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_recent_context_helpers.py tests/test_v3_pipeline_helpers.py -q` passed (`21 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1822 passed`).
+
+Remaining follow-up slices:
+- Stage 2 and Stage 3 state rendering already have compact helpers.
+- FIFO database access stays inside the wrapper to avoid adding fake persistence for this slice.
+
+## 2026-07-04 - RA Report Count Label Helper
+
+Goal/scope:
+- Extract RA report source-count label pluralization from the HTML wrapper.
+- Preserve generated report metadata pills and body rendering.
+
+Files/modules changed:
+- `agent_skills/ra_research_html.py`
+- `tests/test_ra_research_html.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- One new source still renders singular.
+- Multiple cached sources still render plural.
+- Report id and generated timestamp escaping are unchanged.
+- Markdown body rendering remains unchanged.
+
+Boundary chosen:
+- `count_label()` owns the singular/plural display rule.
+- `build_report_html()` now delegates count wording and focuses on document assembly.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile agent_skills/ra_research_html.py tests/test_ra_research_html.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_ra_research_html.py -q` passed (`5 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1820 passed`).
+
+Remaining follow-up slices:
+- The lightweight Markdown renderer is already decomposed into inline, paragraph, and list helpers.
+- Larger HTML template extraction would be mostly cosmetic unless the layout starts varying.
+
+## 2026-07-04 - Read Messages Instruction Text Helper
+
+Goal/scope:
+- Extract static read-messages interpretation guidance from synced-message database assembly.
+- Preserve SMS inbox readback, spam/contact triage, and TalkingPoints link guidance.
+
+Files/modules changed:
+- `jane_web/jane_v2/classes/read_messages/metadata.py`
+- `tests/test_read_messages_metadata.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Read messages still escalates with recent synced messages from the database.
+- The prompt still distinguishes SENT outgoing messages from RECEIVED incoming messages.
+- Contact/personal messages are still quoted more directly while spam/promo is summarized briefly.
+- Resolved linked-message bodies still take precedence when available, including TalkingPoints fallback wording.
+
+Boundary chosen:
+- `_read_messages_instruction_text()` owns the static Stage 3 interpretation guidance.
+- `_escalation_context()` now coordinates database import/query, row formatting, and final assembly.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v2/classes/read_messages/metadata.py tests/test_read_messages_metadata.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_read_messages_metadata.py tests/test_sms_metadata_helpers.py -q` passed (`4 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1820 passed`).
+
+Remaining follow-up slices:
+- Readback enrichment remains behind `message_readback.body_for_readback_prompt` and was not changed.
+- Deeper database query extraction would need a fake DB test harness.
+
+## 2026-07-04 - Delete Messages Escalation Instruction Helper
+
+Goal/scope:
+- Extract static SMS delete escalation instructions from live synced-message lookup.
+- Preserve Android client-tool contract and deletion confirmation policy.
+
+Files/modules changed:
+- `jane_web/jane_v2/classes/delete_messages/metadata.py`
+- `tests/test_delete_messages_metadata.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Delete messages still always escalates to Stage 3 with recent synced-message context.
+- The client tool remains `[[CLIENT_TOOL:messages.dismiss:{"addresses":[...]}]]` shape, with addresses preferred over senders.
+- Vague or non-obvious matches still require confirmation before deleting.
+- Contact messages still require explicit confirmation; promo/shortcode senders remain easier to dismiss on clear orders.
+
+Boundary chosen:
+- `_delete_messages_instruction_lines()` owns the static Opus-facing workflow and safety contract.
+- `_escalation_context()` now coordinates database access, empty inbox handling, message line formatting, and final assembly.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v2/classes/delete_messages/metadata.py tests/test_delete_messages_metadata.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_delete_messages_metadata.py tests/test_sms_metadata_helpers.py -q` passed (`4 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1819 passed`).
+
+Remaining follow-up slices:
+- Shared SMS row formatting already lives in `sms_metadata_helpers`.
+- Database lookup stays in the metadata context wrapper because tests would need a fake DB layer before deeper extraction.
+
+## 2026-07-04 - Calendar Metadata Timed Event Parser
+
+Goal/scope:
+- Extract timed Google Calendar event day/time parsing from escalation-context line formatting.
+- Preserve timed, malformed, all-day, and no-start event rendering.
+
+Files/modules changed:
+- `jane_web/jane_v2/classes/read_calendar/metadata.py`
+- `tests/test_read_calendar_metadata.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Timed events still render as weekday/month/day plus start-end range.
+- Invalid timed starts still surface the raw start text instead of failing the block.
+- Invalid or missing end times still render start time only.
+- All-day events still render the raw date with `(all day)`.
+
+Boundary chosen:
+- `_event_day_and_time_range()` owns ISO parsing and time range construction.
+- `_format_event_line()` now owns summary truncation and choosing timed, all-day, or summary-only output.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v2/classes/read_calendar/metadata.py tests/test_read_calendar_metadata.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_read_calendar_metadata.py -q` passed (`4 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1818 passed`).
+
+Remaining follow-up slices:
+- Calendar bucket fetching remains intentionally simple and side-effect-adjacent.
+- Handler resume flows are already split across response and formatting helpers.
+
+## 2026-07-04 - Timer Delete Label Predicate
+
+Goal/scope:
+- Extract timer delete-label stopword policy from delete target parsing.
+- Preserve id, index, ordinal, label, and all-timers handling.
+
+Files/modules changed:
+- `jane_web/jane_v2/classes/timer/parsing.py`
+- `tests/test_timer_parsing.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Delete prompts still ignore all-timers requests so cancel/list flows can handle them.
+- Numeric timer IDs and ordinal indexes still win before label parsing.
+- Generic labels such as `that`, `this`, `my`, and `the` still do not become delete labels.
+- Param `delete_target` parsing still rejects bare `timer` as a label.
+
+Boundary chosen:
+- `is_delete_label_candidate()` owns the shared delete-label validity rule.
+- `DELETE_VERBS` and `ALL_TIMER_DELETE_PHRASES` name the intent gates used by `extract_delete_target()`.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v2/classes/timer/parsing.py tests/test_timer_parsing.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_timer_parsing.py -q` passed (`14 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1817 passed`).
+
+Remaining follow-up slices:
+- Duration parsing is compact and table-driven enough; splitting the regex sequence would reduce readability.
+- Handler param dispatch is already covered by focused tests.
+
+## 2026-07-04 - Send Message Open Draft Field Helper
+
+Goal/scope:
+- Extract open SMS draft field parsing from the Stage 2 safety-net draft handler.
+- Preserve active FIFO draft confirm/cancel/edit behavior.
+
+Files/modules changed:
+- `jane_web/jane_v2/classes/send_message/handler.py`
+- `tests/test_send_message_parsing.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Open draft confirmation still sends the existing draft marker response.
+- Strong cancel still cancels the open draft.
+- Edit intent still escalates to Stage 3.
+- Draft display text still prefers `query`, then `display_name`, then `recipient`, then `them`.
+
+Boundary chosen:
+- `_open_draft_fields()` owns the FIFO pending-action data shape and fallback order.
+- `_check_open_draft()` now coordinates session lookup, active pending validation, and reply classification.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v2/classes/send_message/handler.py tests/test_send_message_parsing.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_send_message_parsing.py -q` passed (`28 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1817 passed`).
+
+Remaining follow-up slices:
+- Resume-draft and resolved-recipient decisions are already covered by separate helpers.
+- Contact alias writes remain side-effectful and should stay behind the current guarded helper.
+
+## 2026-07-04 - Delete Email Escalation Instruction Helper
+
+Goal/scope:
+- Extract the static delete-email escalation instruction preamble from live Gmail bucket fetching.
+- Preserve server-side email delete marker instructions and confirmation policy.
+
+Files/modules changed:
+- `jane_web/jane_v2/classes/delete_email/metadata.py`
+- `tests/test_delete_email_metadata.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Delete email still always escalates to Stage 3 with inbox/spam/promotions context when Gmail is available.
+- The client tool contract remains `[[CLIENT_TOOL:email.delete:{"message_id":"<id>"}]]`.
+- One marker per email and pre-delete confirmation rules remain unchanged.
+- Gmail setup and fetch failure handling still routes through the shared email metadata helpers.
+
+Boundary chosen:
+- `_delete_email_instruction_lines()` owns the static Opus-facing workflow and safety instructions.
+- `_escalation_context()` now coordinates import, bucket fetching, footer construction, and final assembly.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v2/classes/delete_email/metadata.py tests/test_delete_email_metadata.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_delete_email_metadata.py -q` passed (`5 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1816 passed`).
+
+Remaining follow-up slices:
+- `read_email` uses a shorter escalation context; extracting it would be lower value unless more policy is added.
+- Delete execution remains in `server_email_tools` and was intentionally untouched.
+
+## 2026-07-04 - USB Sync Restore Document Builders
+
+Goal/scope:
+- Extract USB sync restore manifest construction from the file-writing wrapper.
+- Extract RESTORE.md content construction so restore instructions can be tested without a USB mount or subprocess calls.
+
+Files/modules changed:
+- `startup_code/usb_sync.py`
+- `tests/test_usb_sync_docs.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- `write_restore_docs()` still writes `restore_manifest.json` and `RESTORE.md` under the USB root.
+- Crontab backup refresh still writes `manifest["crontab"]` to `configs/crontab_backup.txt` and ignores failures.
+- Restore instructions still include the existing rsync, venv, Claude Code, Ollama, crontab, and startup steps.
+- Snapshot names still render from `sync_state["snapshots"]`.
+
+Boundary chosen:
+- `build_restore_manifest()` owns command-driven manifest fields and accepts a command runner for deterministic tests.
+- `restore_docs_markdown()` owns Markdown rendering.
+- `write_restore_docs()` now coordinates persistence and crontab backup refresh.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile startup_code/usb_sync.py tests/test_usb_sync_docs.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_usb_sync_docs.py -q` passed (`2 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1815 passed`).
+
+Remaining follow-up slices:
+- Live rsync/snapshot behavior remains unchanged and should only be refactored with fake filesystem/process coverage.
+- The older `usb_rotation.py` restore document remains legacy code; `usb_sync.py` is the active incremental backup path.
+
+## 2026-07-04 - Todo Category List Label Helper
+
+Goal/scope:
+- Extract the TODO category list speech-label policy from `speak_category_list()`.
+- Preserve existing spoken category list phrasing and item-readback phrasing.
+
+Files/modules changed:
+- `jane_web/jane_v2/classes/todo_list/categories.py`
+- `tests/test_todo_list_categories.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Urgent categories still speak as "the urgent stuff" in category lists.
+- `For the`, `For our`, and `For my` prefixes still collapse to the existing spoken labels.
+- Empty and internal-only category lists still report an empty list.
+- Item readback still uses `friendly_category_name()` and is unchanged.
+
+Boundary chosen:
+- `category_list_label()` owns the compact label used only when listing available categories.
+- `speak_category_list()` now coordinates visible-category filtering, non-empty category selection, and list sentence construction.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v2/classes/todo_list/categories.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_todo_list_categories.py -q` passed (`8 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1813 passed`).
+
+Remaining follow-up slices:
+- Category matching remains compact enough; extracting each match tier would add churn without reducing much risk.
+- Edit orchestration remains in the handler where Google Docs side effects are already isolated behind focused helpers.
+
+## 2026-07-04 - Stage 3 Escalation Reason Suffix Helper
+
+Goal/scope:
+- Extract Stage 3 escalation reason suffix stripping from class protocol resolution.
+- Preserve class-name normalization, malformed-name rejection, and protocol loading behavior.
+
+Files/modules changed:
+- `jane_web/jane_v2/stage3_protocols.py`
+- `tests/test_stage3_protocols.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- `_fallback`, `_declined`, and `_decline` suffixes still strip from reason class names.
+- `others` still maps to no class protocol.
+- Unsafe class names still fail validation and return `None`.
+- Generated protocol plus optional `protocol.md` loading is unchanged.
+
+Boundary chosen:
+- `strip_escalation_reason_suffix()` owns suffix-policy normalization.
+- `reason_to_class()` now coordinates reason splitting, whitespace/case normalization, suffix stripping, and validation.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v2/stage3_protocols.py tests/test_stage3_protocols.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_stage3_protocols.py tests/test_stage3_escalate_helpers.py -q` passed (`15 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1813 passed`).
+
+Remaining follow-up slices:
+- Registry metadata synthesis is covered; keep lazy imports in place to avoid circular import changes.
+- Protocol file caching remains unchanged.
+
+## 2026-07-04 - Stage 2 Tool Result Marker Bounds Helper
+
+Goal/scope:
+- Extract leading `[TOOL_RESULT:{json}]` marker boundary scanning from Stage 2 tool result parsing.
+- Preserve nested JSON handling, malformed marker visibility, and multi-marker stripping.
+
+Files/modules changed:
+- `jane_web/jane_v2/tool_result_parser.py`
+- `tests/test_tool_result_parser.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Leading markers with whitespace around JSON still parse.
+- Nested JSON objects and marker-like strings inside JSON still use the shared balanced scanner.
+- Malformed markers still stop parsing and leave the original marker visible in cleaned text.
+- Multiple leading markers still strip in order.
+
+Boundary chosen:
+- `_leading_tool_result_marker_bounds()` owns marker opener, JSON start/end, closing bracket, and whitespace handling.
+- `extract_tool_results()` now coordinates JSON loading, dict validation, result accumulation, and text trimming.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/jane_v2/tool_result_parser.py tests/test_tool_result_parser.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_tool_result_parser.py -q` passed (`5 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1813 passed`).
+
+Remaining follow-up slices:
+- Shared JSON object scanning is already compact and covered; leave it unsplit.
+- Stage 2 classifier behavior was not changed.
+
+## 2026-07-04 - Session Summary Topic Keyword Table
+
+Goal/scope:
+- Lift session-summary topic keyword mapping out of `guess_topic_label()`.
+- Preserve fallback-summary topic guessing and keyword precedence.
+
+Files/modules changed:
+- `jane/session_summary_helpers.py`
+- `jane/session_summary.py`
+- `tests/test_session_summary_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Ambient migration still wins before more general Jane/memory labels.
+- Existing keyword-to-label mappings remain in the same order.
+- Fallback topic guessing still uses the first matching keyword before deriving a title from user words.
+- `jane.session_summary` exposes the table alongside existing helper/constants imports.
+
+Boundary chosen:
+- `SUMMARY_TOPIC_KEYWORDS` owns the ordered keyword-label policy.
+- `guess_topic_label()` now coordinates text normalization, ordered keyword matching, and derived-title fallback.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane/session_summary_helpers.py jane/session_summary.py tests/test_session_summary_helpers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_session_summary_helpers.py -q` passed (`11 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1812 passed`).
+
+Remaining follow-up slices:
+- Summary subprocess/update orchestration remains untouched; only pure topic-label policy changed.
+- Future keyword additions can now be made as table edits with direct precedence tests.
+
+## 2026-07-04 - Message Readback Cache TTL Helpers
+
+Goal/scope:
+- Extract TalkingPoints readback cache TTL selection and freshness checks.
+- Preserve readback cache hit/miss behavior for successful and failed resolutions.
+
+Files/modules changed:
+- `jane_web/message_readback_helpers.py`
+- `jane_web/message_readback.py`
+- `tests/test_message_readback_helpers.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Successful resolved cache entries still use the success TTL.
+- Failed/empty resolved cache entries still use the shorter failed TTL and return `None` while fresh.
+- Stale entries and invalid cache entry shapes still return the cache miss sentinel.
+- `message_readback` continues to expose helper aliases for tests and compatibility.
+
+Boundary chosen:
+- `readback_cache_ttl_seconds()` owns success-versus-failed TTL selection.
+- `readback_cache_entry_is_fresh()` owns checked-time freshness comparison.
+- `cache_entry_readback_value()` now coordinates cache entry shape, TTL policy, and returned value.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/message_readback_helpers.py jane_web/message_readback.py tests/test_message_readback_helpers.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_message_readback_helpers.py -q` passed (`8 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1811 passed`).
+
+Remaining follow-up slices:
+- TalkingPoints HTTP/browser resolution remains outside these pure helpers and should only change with integration fakes.
+- URL/code extraction and message sanitization are already direct helper tests.
+
+## 2026-07-04 - User Access Admin Capability Predicate
+
+Goal/scope:
+- Extract managed-user `user_admin` capability detection from admin authorization.
+- Preserve configured-admin matching, managed-user config lookup, failure logging, and false fallback behavior.
+
+Files/modules changed:
+- `jane_web/user_access.py`
+- `tests/test_user_access.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Configured admin identity variants still grant admin before loading user manager config.
+- Managed users still require `user_admin` in their capability list.
+- Missing configs, missing capability, and loader failures still return `False`.
+
+Boundary chosen:
+- `has_user_admin_capability()` owns config capability-list inspection.
+- `is_user_admin()` now coordinates configured variants, user-manager lookup, and failure logging.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/user_access.py tests/test_user_access.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_user_access.py -q` passed (`14 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1811 passed`).
+
+Remaining follow-up slices:
+- Vault-root/capability request helpers are already small and covered; leave route authorization behavior unchanged.
+
+## 2026-07-04 - User Identity Environment CSV Helper
+
+Goal/scope:
+- Extract repeated comma-separated environment parsing from user identity helpers.
+- Preserve default user fallback order and configured admin variant behavior.
+
+Files/modules changed:
+- `jane_web/user_identity.py`
+- `tests/test_user_identity.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- `default_user_id()` still prefers the first allowed Google email, then normalized `USER_NAME`, then `user`.
+- `configured_admin_variants()` still prefers explicit admin env vars over allowed Google emails, and allowed email over auth default.
+- Empty CSV entries are still ignored and non-empty entries are stripped.
+
+Boundary chosen:
+- `env_csv_values()` owns environment CSV splitting, trimming, and empty filtering.
+- Identity/default/admin helpers now consume that normalized list.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/user_identity.py tests/test_user_identity.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_user_identity.py -q` passed (`5 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1810 passed`).
+
+Remaining follow-up slices:
+- Email-to-user-id normalization remains delegated to `vault_web.auth`; do not duplicate that policy here.
+- Admin authorization policy lives in `user_access` and was not changed.
+
+## 2026-07-04 - Task Offloader Error Category Helper
+
+Goal/scope:
+- Extract background task error category detection from user-facing error message formatting.
+- Preserve visible announcement text and category precedence.
+
+Files/modules changed:
+- `jane_web/task_offloader_messages.py`
+- `tests/test_task_offloader_messages.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Timeout errors still take precedence over empty-response text.
+- Empty response, backend not found, exit code, and generic errors still map to the same user-facing messages.
+- Announcement messages still prepend the warning marker and reuse `automation_error_user_message()`.
+
+Boundary chosen:
+- `automation_error_category()` owns lowercased category detection and precedence.
+- `automation_error_user_message()` now owns category-to-copy formatting and error text truncation.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/task_offloader_messages.py tests/test_task_offloader_messages.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_task_offloader_messages.py -q` passed (`5 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1809 passed`).
+
+Remaining follow-up slices:
+- Progress/start/final messages are already simple and directly tested; leave copy unchanged unless UX text changes.
+
+## 2026-07-04 - Turn Dedupe Blocking Status Helper
+
+Goal/scope:
+- Extract the turn-dedupe state-machine rule for statuses that block a new begin.
+- Preserve TTL handling, malformed timestamp fallback, pending join, completed replay, and failed retry behavior.
+
+Files/modules changed:
+- `jane_web/turn_dedupe.py`
+- `tests/test_turn_dedupe_store.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- `pending` and `completed` rows still block a new begin while inside the TTL.
+- `failed` rows still allow a retry.
+- Bad timestamps still fall back to age `0.0`, preserving the existing block behavior for pending rows.
+
+Boundary chosen:
+- `_dedupe_status_blocks_begin()` owns the status-only part of the begin-blocking rule.
+- `_existing_row_blocks_begin()` now coordinates timestamp age and status policy.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/turn_dedupe.py tests/test_turn_dedupe_store.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_turn_dedupe_store.py tests/test_chat_stream_dedupe.py -q` passed (`16 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1809 passed`).
+
+Remaining follow-up slices:
+- SQLite mutation functions remain intentionally close to the store layer; split only with tmp-database integration tests.
+- Pending wait polling remains unchanged.
+
+## 2026-07-04 - Auth Local Internal Session Helper
+
+Goal/scope:
+- Extract localhost internal-session bypass policy from required-session resolution.
+- Preserve single-user mode, session-cookie validation, trusted-device cache, and trusted-cookie session creation behavior.
+
+Files/modules changed:
+- `jane_web/auth_sessions.py`
+- `tests/test_auth_sessions.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Localhost requests without `cf-connecting-ip` still use query `session_id` when present.
+- Localhost requests without a query session still fall back to `internal`.
+- Requests with `cf-connecting-ip` no longer qualify for the localhost bypass.
+- Non-local hosts still continue through normal session/trusted-device checks.
+
+Boundary chosen:
+- `_local_internal_session_id()` owns Cloudflare/local-host bypass detection and fallback session ID selection.
+- `required_session_id_for_request()` now coordinates no-auth mode, local bypass, session validation, and trusted-device fallback.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/auth_sessions.py tests/test_auth_sessions.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_auth_sessions.py -q` passed (`24 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1809 passed`).
+
+Remaining follow-up slices:
+- Bootstrap-session helpers are already split and covered; leave session creation/prewarm flow unchanged without route-level tests.
+- Share-path prefix semantics are intentionally legacy-compatible and should not be tightened under this refactor.
+
+## 2026-07-04 - Memory Recency Bucket Helper
+
+Goal/scope:
+- Extract deterministic seconds-to-recency-label bucketing from memory formatting.
+- Preserve timestamp parsing, unknown-age handling, and formatted memory line output.
+
+Files/modules changed:
+- `memory/v1/memory_text.py`
+- `tests/test_memory_text.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Future timestamps still label as `just now`.
+- Sub-hour ages still label as integer minutes.
+- Sub-day ages still label as integer hours.
+- Day-and-older ages still label as integer days.
+- Invalid or missing timestamps still return `unknown age` through `recency_label()`.
+
+Boundary chosen:
+- `recency_label_from_seconds()` owns deterministic age bucketing.
+- `recency_label()` now handles timestamp parsing/current-time delta and delegates bucket formatting.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile memory/v1/memory_text.py tests/test_memory_text.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_memory_text.py -q` passed (`6 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1808 passed`).
+
+Remaining follow-up slices:
+- `is_expired()` and `is_too_old()` still depend on live current time; inject clocks only if those policies need more deterministic tests.
+- Deduplication helpers are already small and directly covered.
+
+## 2026-07-04 - Conversation Memory Turn Filter Constants
+
+Goal/scope:
+- Lift short-term memory low-value exact turns and regex filters out of `should_store_short_term_turn()`.
+- Preserve which user/assistant chatter is skipped while avoiding per-call reconstruction of policy tables.
+
+Files/modules changed:
+- `memory/v1/conversation_text.py`
+- `tests/test_conversation_text.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Exact low-value turns such as `thanks` still skip storage.
+- Short user follow-up questions like `why?` still skip storage.
+- User greeting/test prompts and assistant filler replies still skip storage.
+- Durable user content and uppercase system-ish markers that fail the exact/regex filters still store as before.
+
+Boundary chosen:
+- `LOW_VALUE_EXACT_TURNS`, `USER_LOW_VALUE_PATTERNS`, and `ASSISTANT_FILLER_PATTERNS` now hold the filtering policy.
+- `matches_any_pattern()` owns regex-list matching.
+- `should_store_short_term_turn()` now coordinates normalization and policy checks without rebuilding constants.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile memory/v1/conversation_text.py tests/test_conversation_text.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_conversation_text.py -q` passed (`10 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1807 passed`).
+
+Remaining follow-up slices:
+- Keep thematic metadata stripping and prompt wording unchanged; they already have characterization tests.
+- New low-value filters can now be added as data changes with direct tests.
+
+## 2026-07-04 - Proxy Progress Finding Helper
+
+Goal/scope:
+- Extract context-loading finding detection from proxy progress snapshot formatting.
+- Preserve the user-visible progress message text and ordering.
+
+Files/modules changed:
+- `jane_web/proxy_text.py`
+- `tests/test_proxy_text.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- Empty context still reports `Context is ready.`
+- Loaded conversation summary, retrieved memory, task state, research brief, and file context still appear in the same order.
+- `progress_snapshot()` still formats findings as one comma-separated sentence.
+
+Boundary chosen:
+- `progress_context_findings()` owns detecting which context pieces were loaded.
+- `progress_snapshot()` now only formats the default or populated progress string.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile jane_web/proxy_text.py tests/test_proxy_text.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_proxy_text.py -q` passed (`7 passed`).
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests -q` passed (`1807 passed`).
+
+Remaining follow-up slices:
+- Phone-tool marker parsing already lives in `client_tool_markers`; leave it there unless the marker protocol changes.
+- Progress wording is intentionally unchanged and should remain stable unless UX copy is revised.
+
 ## 2026-07-04 - TTS Spoken Source Parsing Helper
 
 Goal/scope:

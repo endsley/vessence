@@ -53,7 +53,7 @@ from memory.v1.memory_text import (
 )
 from memory.v1.memory_sections import build_memory_sections_from_facts as _build_memory_sections_from_facts
 from memory.v1.nearest_memory import (
-    nearest_memory_candidate as _nearest_memory_candidate,
+    nearest_candidates_from_rows as _nearest_candidates_from_rows,
     nearest_query_terms as _nearest_query_terms,
     select_nearest_memory_lines as _select_nearest_memory_lines,
 )
@@ -427,18 +427,17 @@ def _nearest_candidates_from_query_specs(
             )
         except Exception:
             continue
-        for doc, meta, distance in zip(docs, metas, distances):
-            candidate = _nearest_memory_candidate(
+        candidates.extend(
+            _nearest_candidates_from_rows(
                 source,
-                doc,
-                meta,
-                distance,
+                docs,
+                metas,
+                distances,
                 query_terms=query_terms,
                 max_distance=max_distance,
                 min_lexical_overlap=min_lexical_overlap,
             )
-            if candidate is not None:
-                candidates.append(candidate)
+        )
     return candidates
 
 

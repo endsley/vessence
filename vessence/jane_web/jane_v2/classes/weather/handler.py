@@ -56,6 +56,19 @@ _FORCE_ESCALATE_PHRASES = (
 _MEDFORD_LOCATIONS = ("medford", "medford ma", "medford, ma")
 
 
+def _requires_online_weather_lookup(prompt: str) -> bool:
+    p_lower = (prompt or "").lower()
+    return any(phrase in p_lower for phrase in _FORCE_ESCALATE_PHRASES)
+
+
+def _normalize_weather_location(location: str) -> str:
+    return location.strip().lower()
+
+
+def _is_supported_weather_location(location: str) -> bool:
+    return not location or location in _MEDFORD_LOCATIONS
+
+
 def _abandon_to_stage3() -> dict:
     return {"abandon_pending": True, "force_stage3": True}
 
@@ -77,8 +90,8 @@ def _pending_weather_fields(pending: dict) -> tuple[str, str] | None:
     location = data.get("location") or ""
     if not isinstance(topic, str) or not isinstance(location, str):
         return None
-    location = location.strip().lower()
-    if location and location not in _MEDFORD_LOCATIONS:
+    location = _normalize_weather_location(location)
+    if not _is_supported_weather_location(location):
         return None
     return topic.strip().lower(), location
 
@@ -154,8 +167,7 @@ async def _handle_pending_weather(prompt: str, pending: dict) -> dict | None:
 
 async def handle(prompt: str, context: str = "", pending: dict | None = None,
                  params: dict | None = None) -> dict | None:
-    p_lower = (prompt or "").lower()
-    if any(phrase in p_lower for phrase in _FORCE_ESCALATE_PHRASES):
+    if _requires_online_weather_lookup(prompt):
         logger.info("weather handler: research/online phrase → escalate")
         return None
 
@@ -174,8 +186,8 @@ async def handle(prompt: str, context: str = "", pending: dict | None = None,
     if not isinstance(location, str) or not isinstance(topic, str):
         logger.info("weather handler: malformed params fields → escalate")
         return None
-    location = location.strip().lower()
-    if location and location not in _MEDFORD_LOCATIONS:
+    location = _normalize_weather_location(location)
+    if not _is_supported_weather_location(location):
         logger.info("weather handler: non-Medford location %r → escalate", location)
         return None
 

@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import datetime as _dt
 
+from agent_skills.private_handler_utils import pending_continuation_data
+
 from .categories import friendly_category_name, speak_category_list, speak_items, visible_categories
 
 TODO_INTENT = "todo list"
@@ -27,7 +29,7 @@ def build_todo_pending(
         "handler_class": "todo list",
         "status": "awaiting_user",
         "awaiting": awaiting,
-        "data": {**data, "awaiting": awaiting},
+        "data": pending_continuation_data(data, awaiting),
         "question": question,
         "expires_at": expires_at or todo_pending_expires_at(),
     }

@@ -13,6 +13,7 @@ from jane_web.jane_v2.classes.clinic_schedules_info.prompting import (
 from jane_web.jane_v2.classes.clinic_schedules_info.responses import (
     build_clinic_pending,
     build_clinic_response,
+    clinic_response_structured,
 )
 from jane_web.jane_v2.ollama_client import post_local_llm_response
 from jane_web.jane_v2.classes.clinic_schedules_info.schedule_helpers import (
@@ -60,6 +61,10 @@ def test_clinic_pending_uses_shared_continuation_shape() -> None:
 
 
 def test_clinic_response_preserves_pending_shape() -> None:
+    structured = clinic_response_structured()
+    assert structured["intent"] == "clinic schedules info"
+    assert structured["pending_action"]["awaiting"] == "clinic_followup"
+
     response = build_clinic_response("Grace is next.")
 
     assert response["text"] == "Grace is next."

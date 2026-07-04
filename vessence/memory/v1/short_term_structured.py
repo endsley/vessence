@@ -91,19 +91,20 @@ def flatten_to_search_text(extracted: dict[str, list[str]]) -> str:
     return "\n".join(parts).strip()
 
 
+def metadata_join_items(items: list[str], cap: int = 8) -> str:
+    return " | ".join(str(item).strip() for item in (items or [])[:cap] if str(item).strip())
+
+
 def flatten_to_metadata(kind: str, extracted: dict[str, list[str]]) -> dict[str, Any]:
     """Build Chroma-compatible primitive metadata for a structured note."""
-    def join_items(items: list[str], cap: int = 8) -> str:
-        return " | ".join(str(item).strip() for item in (items or [])[:cap] if str(item).strip())
-
     return {
         "turn_kind": kind,
         "has_open_loop": bool(extracted.get("open_loops")),
         "has_decision": bool(extracted.get("decisions")),
         "has_artifact": bool(extracted.get("artifacts")),
-        "artifact_paths": join_items(extracted.get("artifacts") or []),
-        "person_names": join_items(extracted.get("people") or []),
-        "time_refs": join_items(extracted.get("time_refs") or []),
+        "artifact_paths": metadata_join_items(extracted.get("artifacts") or []),
+        "person_names": metadata_join_items(extracted.get("people") or []),
+        "time_refs": metadata_join_items(extracted.get("time_refs") or []),
         "n_facts": len(extracted.get("facts") or []),
         "n_decisions": len(extracted.get("decisions") or []),
         "n_open_loops": len(extracted.get("open_loops") or []),

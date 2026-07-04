@@ -13,6 +13,8 @@ from jane_web.message_readback_helpers import (
     find_talkingpoints_url,
     looks_like_error_message,
     looks_like_wrapper,
+    readback_cache_entry_is_fresh,
+    readback_cache_ttl_seconds,
     sanitize_untrusted_text,
     talkingpoints_code_candidates_from_urls,
     talkingpoints_code_from_url,
@@ -35,6 +37,8 @@ def test_message_readback_uses_extracted_helpers() -> None:
     assert message_readback._clean_text is clean_text
     assert message_readback._looks_like_error_message is looks_like_error_message
     assert message_readback._talkingpoints_code_candidates_from_urls is talkingpoints_code_candidates_from_urls
+    assert message_readback._readback_cache_entry_is_fresh is readback_cache_entry_is_fresh
+    assert message_readback._readback_cache_ttl_seconds is readback_cache_ttl_seconds
 
 
 def test_talkingpoints_url_and_wrapper_detection() -> None:
@@ -95,6 +99,19 @@ def test_clean_text_and_error_detection() -> None:
 
 def test_cache_entry_readback_value_uses_success_and_failed_ttls():
     miss = object()
+
+    assert readback_cache_ttl_seconds(
+        resolved="Teacher: Hello",
+        success_ttl_seconds=20,
+        failed_ttl_seconds=5,
+    ) == 20
+    assert readback_cache_ttl_seconds(
+        resolved="",
+        success_ttl_seconds=20,
+        failed_ttl_seconds=5,
+    ) == 5
+    assert readback_cache_entry_is_fresh(checked_at=90, now=95, ttl_seconds=5)
+    assert not readback_cache_entry_is_fresh(checked_at=90, now=96, ttl_seconds=5)
 
     assert cache_entry_readback_value(
         {"checked_at": 90, "resolved": "Teacher: Hello"},

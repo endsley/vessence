@@ -26,6 +26,10 @@ async def _call_local_llm(prompt_text: str) -> str:
     return await _post_local_llm_response(prompt_text, _joke_llm_payload)
 
 
+def joke_success_response(reply: str, thought: str) -> dict:
+    return {"text": reply, "thought": thought}
+
+
 async def handle(prompt: str, context: str = "") -> dict | None:
     full_prompt = _build_joke_prompt(prompt, context)
 
@@ -45,4 +49,4 @@ async def handle(prompt: str, context: str = "") -> dict | None:
         "tell_joke: LLM %dms — thought=%r reply=%r",
         latency_ms, thought[:80], reply[:120],
     )
-    return {"text": reply, "thought": thought}
+    return joke_success_response(reply, thought)

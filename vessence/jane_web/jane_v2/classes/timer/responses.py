@@ -101,25 +101,23 @@ def build_set_response(duration_ms: int, label: str, *, from_followup: bool = Fa
     }
 
 
-def build_count_response() -> dict:
+def build_simple_action_response(spoken: str, marker: str, action: str) -> dict:
     return {
-        "text": f"Let me check. {_timer_list_marker()}",
-        "structured": {"intent": INTENT, "entities": {"action": "count"}},
+        "text": f"{spoken} {marker}",
+        "structured": {"intent": INTENT, "entities": {"action": action}},
     }
+
+
+def build_count_response() -> dict:
+    return build_simple_action_response("Let me check.", _timer_list_marker(), "count")
 
 
 def build_list_response() -> dict:
-    return {
-        "text": f"Checking your timers. {_timer_list_marker()}",
-        "structured": {"intent": INTENT, "entities": {"action": "list"}},
-    }
+    return build_simple_action_response("Checking your timers.", _timer_list_marker(), "list")
 
 
 def build_cancel_response() -> dict:
-    return {
-        "text": f"Cancelling your timer. {_timer_cancel_marker()}",
-        "structured": {"intent": INTENT, "entities": {"action": "cancel"}},
-    }
+    return build_simple_action_response("Cancelling your timer.", _timer_cancel_marker(), "cancel")
 
 
 def delete_target_description(target: dict) -> str:

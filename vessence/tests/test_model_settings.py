@@ -4,6 +4,7 @@ from jane_web.model_settings import (
     current_provider_payload,
     current_model_for_provider,
     default_models,
+    legacy_model_env_var,
     model_env_var,
     model_save_target,
     model_tiers,
@@ -26,6 +27,7 @@ def test_default_models_and_env_var_mapping():
     }
     assert model_env_var("gemini") == "JANE_MODEL_GEMINI"
     assert model_env_var("unknown") == "JANE_MODEL_CLAUDE"
+    assert legacy_model_env_var("gemini") == "BRAIN_HEAVY_GEMINI"
 
 
 def test_current_model_prefers_provider_env_then_legacy_then_default():

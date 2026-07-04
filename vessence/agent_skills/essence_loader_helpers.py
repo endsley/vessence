@@ -52,10 +52,15 @@ def available_essence_record(
     }
 
 
+def available_essence_sort_rank(name: str) -> int:
+    if name == "jane":
+        return 0
+    if name == "work log":
+        return 2
+    return 1
+
+
 def available_essence_sort_key(essence: dict[str, Any]) -> tuple[int, str]:
     name = essence.get("name", "").lower()
-    if name == "jane":
-        return (0, "")
-    if name == "work log":
-        return (2, "")
-    return (1, name)
+    rank = available_essence_sort_rank(name)
+    return (rank, "" if rank != 1 else name)

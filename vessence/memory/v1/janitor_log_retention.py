@@ -24,9 +24,13 @@ def is_protected_log(filename: str) -> bool:
     return any(pattern in filename for pattern in PROTECTED_LOG_PATTERNS)
 
 
+def retention_seconds(days: int) -> int:
+    return days * 86400
+
+
 def log_cutoff_timestamp(now_ts: float, *, max_age_days: int, filename: str) -> float:
     retention_days = PROTECTED_LOG_RETENTION_DAYS if is_protected_log(filename) else max_age_days
-    return now_ts - (retention_days * 86400)
+    return now_ts - retention_seconds(retention_days)
 
 
 def should_delete_log_file(filename: str, mtime: float, *, now_ts: float, max_age_days: int) -> bool:
@@ -46,4 +50,4 @@ def should_delete_self_improve_report(
     now_ts: float,
     max_age_days: int,
 ) -> bool:
-    return is_self_improve_report(filename) and mtime < now_ts - (max_age_days * 86400)
+    return is_self_improve_report(filename) and mtime < now_ts - retention_seconds(max_age_days)

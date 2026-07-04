@@ -2,6 +2,7 @@ from xml.etree import ElementTree as ET
 
 from agent_skills import ra_research_cron
 from agent_skills.ra_research_pubmed import (
+    parse_abstract_text,
     parse_article_ids,
     parse_authors,
     parse_pub_date,
@@ -87,6 +88,22 @@ def test_parse_article_ids_lowercases_id_types_and_skips_empty_values():
     )
 
     assert parse_article_ids(article) == {"doi": "10.1/example", "pmc": "PMC123"}
+
+
+def test_parse_abstract_text_preserves_labels_and_skips_empty_sections():
+    article = article_from_xml(
+        """
+        <PubmedArticle>
+          <Abstract>
+            <AbstractText Label="Background">First part.</AbstractText>
+            <AbstractText NlmCategory="RESULTS">Second part.</AbstractText>
+            <AbstractText></AbstractText>
+          </Abstract>
+        </PubmedArticle>
+        """
+    )
+
+    assert parse_abstract_text(article) == "Background: First part.\nRESULTS: Second part."
 
 
 def test_parse_pubmed_article_preserves_record_shape():

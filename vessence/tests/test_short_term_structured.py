@@ -6,6 +6,7 @@ from memory.v1.short_term_structured import (
     flatten_to_metadata,
     flatten_to_note,
     flatten_to_search_text,
+    metadata_join_items,
     parse_json_blob,
     should_skip,
     short_term_memory_metadata,
@@ -21,6 +22,13 @@ def test_short_term_extractor_uses_structured_helpers() -> None:
     assert short_term_extractor.flatten_to_note is flatten_to_note
     assert short_term_extractor.flatten_to_search_text is flatten_to_search_text
     assert short_term_extractor.flatten_to_metadata is flatten_to_metadata
+
+
+def test_clean_turn_message_applies_injected_cleaner_and_collapses_whitespace() -> None:
+    assert short_term_extractor.clean_turn_message(
+        "  user\n\n[metadata]   text ",
+        lambda text: text.replace("[metadata]", ""),
+    ) == "user text"
 
 
 def test_parse_json_blob_handles_fences_embedded_objects_strings_and_lists() -> None:
@@ -82,6 +90,11 @@ def test_flatten_to_note_and_search_text_preserve_label_order_and_trim_items() -
         "Chieh",
         "today",
     ])
+
+
+def test_metadata_join_items_trims_blanks_and_caps_values() -> None:
+    assert metadata_join_items([" one ", "", "two"]) == "one | two"
+    assert metadata_join_items([f"item-{i}" for i in range(5)], cap=3) == "item-0 | item-1 | item-2"
 
 
 def test_flatten_to_metadata_uses_primitive_flags_counts_and_capped_joined_lists() -> None:

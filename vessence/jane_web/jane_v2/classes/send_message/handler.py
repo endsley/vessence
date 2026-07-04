@@ -72,6 +72,15 @@ def _should_resume_send_message(pending: dict | None) -> bool:
     )
 
 
+def _open_draft_fields(pending: dict) -> tuple[str, str, str]:
+    data = pending.get("data") if isinstance(pending.get("data"), dict) else {}
+    return (
+        data.get("draft_id") or "",
+        data.get("query") or data.get("display_name") or data.get("recipient") or "them",
+        data.get("body") or "",
+    )
+
+
 def _check_open_draft(prompt: str) -> dict | None:
     """If there's an open SMS draft in the FIFO, handle confirm/cancel/edit
     here in Stage 2 instead of falling through to Stage 3 or re-extracting."""
@@ -101,10 +110,7 @@ def _check_open_draft(prompt: str) -> dict | None:
     if not pending or pending.get("type") != "SEND_MESSAGE_DRAFT_OPEN":
         return None
 
-    data = pending.get("data") or {}
-    draft_id = data.get("draft_id") or ""
-    query = data.get("query") or data.get("display_name") or data.get("recipient") or "them"
-    body = data.get("body") or ""
+    draft_id, query, body = _open_draft_fields(pending)
 
     if _is_confirm(prompt):
         logger.info("send_message handler: draft confirm (stage2 safety net) draft_id=%s", draft_id[:12])

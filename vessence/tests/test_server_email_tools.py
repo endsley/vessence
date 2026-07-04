@@ -7,6 +7,7 @@ from jane_web.email_tool_results import (
     format_inbox_emails,
     format_sent_email_status,
     prepare_send_email_args,
+    requested_sender_email,
 )
 from jane_web import server_email_tools
 from jane_web.server_email_tools import execute_email_tool_serverside
@@ -32,6 +33,17 @@ def _install_email_tools(monkeypatch, **funcs):
     for name, func in funcs.items():
         setattr(module, name, func)
     monkeypatch.setitem(sys.modules, "agent_skills.email_tools", module)
+
+
+def test_requested_sender_email_preserves_alias_precedence_and_blank_default():
+    assert requested_sender_email({
+        "from_email": " primary@example.com ",
+        "from": "fallback@example.com",
+        "sender": "sender@example.com",
+    }) == "primary@example.com"
+    assert requested_sender_email({"from": " fallback@example.com "}) == "fallback@example.com"
+    assert requested_sender_email({"sender": " sender@example.com "}) == "sender@example.com"
+    assert requested_sender_email({"from_email": "   "}) is None
 
 
 def test_read_inbox_formats_results(monkeypatch):

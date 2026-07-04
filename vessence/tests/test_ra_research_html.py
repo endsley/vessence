@@ -2,6 +2,7 @@ from pathlib import Path
 
 from agent_skills.ra_research_html import (
     build_report_html,
+    count_label,
     inline_report_markdown_html,
     markdown_to_report_html,
     report_id_from_path,
@@ -60,6 +61,8 @@ def test_markdown_to_report_html_escapes_raw_html():
 def test_report_id_from_path_removes_cron_prefix():
     assert report_id_from_path(Path("/tmp/ra_research_run_20260702_120000.md")) == "20260702_120000"
     assert report_id_from_path(Path("/tmp/manual_report.md")) == "manual_report"
+    assert count_label(1, "new source") == "1 new source"
+    assert count_label(2, "cached source") == "2 cached sources"
 
 
 def test_build_report_html_wraps_body_and_escapes_metadata():

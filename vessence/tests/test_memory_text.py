@@ -9,6 +9,7 @@ from memory.v1.memory_text import (
     is_too_old,
     parse_memory_datetime,
     recency_label,
+    recency_label_from_seconds,
 )
 
 
@@ -39,6 +40,16 @@ def test_is_too_old_and_recency_label():
     assert not is_too_old({"created_at": recent.isoformat()}, max_days=3)
     assert recency_label(recent.isoformat()).endswith("m ago")
     assert recency_label("Unknown Time") == "unknown age"
+
+
+def test_recency_label_from_seconds_preserves_age_buckets():
+    assert recency_label_from_seconds(-1) == "just now"
+    assert recency_label_from_seconds(59) == "0m ago"
+    assert recency_label_from_seconds(60) == "1m ago"
+    assert recency_label_from_seconds(3599) == "59m ago"
+    assert recency_label_from_seconds(3600) == "1h ago"
+    assert recency_label_from_seconds(86399) == "23h ago"
+    assert recency_label_from_seconds(86400) == "1d ago"
 
 
 def test_none_content_and_formatting():

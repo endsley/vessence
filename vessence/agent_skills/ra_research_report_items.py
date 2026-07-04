@@ -57,17 +57,36 @@ def summary_usefulness_score(summary: dict[str, Any]) -> int:
     return score
 
 
+def lacks_direct_remission_relevance(text: str) -> bool:
+    return (
+        "does not directly address" in text
+        or "did not directly address" in text
+        or "not directly address" in text
+    )
+
+
+def psoriatic_without_rheumatoid_focus(text: str) -> bool:
+    return (
+        "psoriatic arthritis" in text
+        and "rheumatoid arthritis" not in text.replace("psoriatic arthritis", "")
+    )
+
+
+def speculative_summary_text(text: str) -> bool:
+    return "scenario" in text or "speculative" in text
+
+
 def summary_noise_penalty(summary: dict[str, Any], text: str) -> int:
     score = 0
     if summary.get("needs_llm_review"):
         score -= 5
     if "needs manual/llm review" in text:
         score -= 5
-    if "does not directly address" in text or "did not directly address" in text or "not directly address" in text:
+    if lacks_direct_remission_relevance(text):
         score -= 3
-    if "psoriatic arthritis" in text and "rheumatoid arthritis" not in text.replace("psoriatic arthritis", ""):
+    if psoriatic_without_rheumatoid_focus(text):
         score -= 4
-    if "scenario" in text or "speculative" in text:
+    if speculative_summary_text(text):
         score -= 2
     return score
 
@@ -90,11 +109,11 @@ def low_value_reason(summary: dict[str, Any]) -> str:
         reasons.append("needs manual review before relying on it")
     if "abstract_only" in str(summary.get("evidence_scope") or "").lower():
         reasons.append("abstract-only")
-    if "does not directly address" in text or "did not directly address" in text or "not directly address" in text:
+    if lacks_direct_remission_relevance(text):
         reasons.append("does not directly answer remission/asymptomatic strategy")
-    if "psoriatic arthritis" in text and "rheumatoid arthritis" not in text.replace("psoriatic arthritis", ""):
+    if psoriatic_without_rheumatoid_focus(text):
         reasons.append("not actually RA-focused")
-    if "scenario" in text or "speculative" in text:
+    if speculative_summary_text(text):
         reasons.append("speculative/future-facing rather than actionable")
     return "; ".join(reasons)
 

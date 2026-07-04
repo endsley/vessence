@@ -1,5 +1,6 @@
 from agent_skills.ra_research_text import (
     clean_text,
+    compact_summary_record,
     compact_summary_payload,
     dedupe_summaries,
     list_values,
@@ -68,9 +69,11 @@ def test_compact_summary_payload_trims_and_maps_fields():
         "artifact_dir": "/tmp/artifact",
     }
 
+    record = compact_summary_record(summary)
     payload = compact_summary_payload([summary], limit=1)
 
-    assert payload[0]["source_id"] == "source-1"
-    assert payload[0]["title"].endswith("...")
-    assert payload[0]["findings"] == ["finding", "other"]
-    assert payload[0]["clinician_questions"] == ["ask"]
+    assert record["source_id"] == "source-1"
+    assert record["title"].endswith("...")
+    assert record["findings"] == ["finding", "other"]
+    assert record["clinician_questions"] == ["ask"]
+    assert payload == [record]

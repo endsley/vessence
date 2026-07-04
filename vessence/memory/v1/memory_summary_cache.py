@@ -54,6 +54,10 @@ def prune_cache_entries(entries: list[MemorySummaryCacheEntry]) -> list[MemorySu
     return fresh[:MEMORY_SUMMARY_CACHE_MAX_ENTRIES]
 
 
+def session_last_used_at(entries: list[MemorySummaryCacheEntry]) -> datetime.datetime:
+    return max((entry.created_at for entry in entries), default=utcnow())
+
+
 def lookup_cached_memory_summary(session_id: str, query_embedding: list[float]) -> str | None:
     with _cache_lock:
         entries = prune_cache_entries(_memory_summary_cache.get(session_id, []))
@@ -91,7 +95,7 @@ def store_cached_memory_summary(session_id: str, query: str, query_embedding: li
         if len(_memory_summary_cache) > _CACHE_MAX_SESSIONS:
             sorted_sessions = sorted(
                 _memory_summary_cache.keys(),
-                key=lambda sid: max((e.created_at for e in _memory_summary_cache[sid]), default=utcnow()),
+                key=lambda sid: session_last_used_at(_memory_summary_cache[sid]),
             )
             while len(_memory_summary_cache) > _CACHE_MAX_SESSIONS:
                 _memory_summary_cache.pop(sorted_sessions.pop(0), None)

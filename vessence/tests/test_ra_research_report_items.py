@@ -7,7 +7,10 @@ from agent_skills.ra_research_report_items import (
     is_low_value_summary,
     is_strong_evidence_type,
     is_usable_report_item,
+    lacks_direct_remission_relevance,
     low_value_reason,
+    psoriatic_without_rheumatoid_focus,
+    speculative_summary_text,
     summary_noise_penalty,
     summary_signal_score,
     summary_text_blob,
@@ -47,6 +50,15 @@ def test_summary_signal_score_components_preserve_strength_usefulness_and_noise_
     assert evidence_strength_score("guideline randomized systematic cohort review", "abstract_only") == 19
     assert summary_usefulness_score(summary) == 7
     assert summary_noise_penalty(summary, text) == -15
+
+
+def test_low_value_text_predicates_preserve_shared_noise_rules():
+    assert lacks_direct_remission_relevance("This did not directly address remission.")
+    assert lacks_direct_remission_relevance("This does not directly address remission.")
+    assert lacks_direct_remission_relevance("This is not directly address focused.")
+    assert psoriatic_without_rheumatoid_focus("psoriatic arthritis only")
+    assert not psoriatic_without_rheumatoid_focus("psoriatic arthritis and rheumatoid arthritis")
+    assert speculative_summary_text("speculative scenario planning")
 
 
 def test_low_value_reason_and_score_penalties_match_noisy_evidence_rules():

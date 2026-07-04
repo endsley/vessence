@@ -1,7 +1,7 @@
 from datetime import datetime
 
 from agent_skills import essence_scheduler
-from agent_skills.cron_schedule import matches_schedule
+from agent_skills.cron_schedule import cron_weekday, matches_schedule
 
 
 def test_essence_scheduler_uses_extracted_cron_matcher() -> None:
@@ -11,6 +11,8 @@ def test_essence_scheduler_uses_extracted_cron_matcher() -> None:
 def test_matches_schedule_supports_wildcard_exact_list_range_and_step_fields() -> None:
     now = datetime(2026, 7, 5, 8, 15)  # Sunday; cron weekday 0
 
+    assert cron_weekday(now) == 0
+    assert cron_weekday(datetime(2026, 7, 6, 8, 15)) == 1
     assert matches_schedule("* * * * *", now)
     assert matches_schedule("15 8 5 7 0", now)
     assert not matches_schedule("15 8 5 7 6", now)

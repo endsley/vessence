@@ -25,15 +25,16 @@ def section_display_name(index: int) -> str:
     return SECTION_DISPLAY_NAMES[index] if 0 <= index < len(SECTION_DISPLAY_NAMES) else f"Section {index}"
 
 
+def numbered_questions(questions: Iterable[str], start: int = 1) -> list[str]:
+    return [f"{i}. {question}" for i, question in enumerate(questions, start)]
+
+
 def format_questions(interview_questions: dict[int, dict], section_index: int, include_optional: bool = False) -> str:
     q = interview_questions[section_index]
-    lines = []
-    for i, question in enumerate(q["required_questions"], 1):
-        lines.append(f"{i}. {question}")
+    lines = numbered_questions(q["required_questions"])
     if include_optional and q["optional_questions"]:
         lines.append("\nOptional — answer these if relevant:")
-        for i, question in enumerate(q["optional_questions"], len(q["required_questions"]) + 1):
-            lines.append(f"{i}. {question}")
+        lines.extend(numbered_questions(q["optional_questions"], len(q["required_questions"]) + 1))
     return "\n".join(lines)
 
 

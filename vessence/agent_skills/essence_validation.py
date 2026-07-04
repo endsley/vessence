@@ -28,6 +28,10 @@ REQUIRED_PATHS = [
 ]
 
 
+def missing_nested_field_errors(section: str, values: dict, fields: list[str]) -> list[str]:
+    return [f"{section} missing field: '{field}'" for field in fields if field not in values]
+
+
 def validate_manifest(manifest: dict) -> list[str]:
     """Validate manifest.json content. Returns a list of error strings."""
     errors: list[str] = []
@@ -38,9 +42,7 @@ def validate_manifest(manifest: dict) -> list[str]:
 
     model = manifest.get("preferred_model")
     if isinstance(model, dict):
-        for field in REQUIRED_MODEL_FIELDS:
-            if field not in model:
-                errors.append(f"preferred_model missing field: '{field}'")
+        errors.extend(missing_nested_field_errors("preferred_model", model, REQUIRED_MODEL_FIELDS))
     elif model is not None:
         errors.append("'preferred_model' must be an object")
 
@@ -56,9 +58,7 @@ def validate_manifest(manifest: dict) -> list[str]:
 
     ui = manifest.get("ui")
     if isinstance(ui, dict):
-        for field in REQUIRED_UI_FIELDS:
-            if field not in ui:
-                errors.append(f"ui missing field: '{field}'")
+        errors.extend(missing_nested_field_errors("ui", ui, REQUIRED_UI_FIELDS))
     elif ui is not None:
         errors.append("'ui' must be an object")
 

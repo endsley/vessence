@@ -16,6 +16,10 @@ def custom_tools_stub(essence_name: str, custom_functions_answer: str) -> str:
     )
 
 
+def capped_output_note(text: str, max_chars: int = 500) -> str:
+    return text[:max_chars] if len(text) > max_chars else text
+
+
 def essence_layout_payload(ui_type: str, ui_answer: str) -> dict:
     return {
         "type": ui_type,
@@ -26,7 +30,7 @@ def essence_layout_payload(ui_type: str, ui_answer: str) -> dict:
                 "position": "main",
             }
         ],
-        "notes": ui_answer[:500] if len(ui_answer) > 500 else ui_answer,
+        "notes": capped_output_note(ui_answer),
     }
 
 
@@ -35,6 +39,6 @@ def onboarding_payload(starters: list[str], interaction_answer: str) -> dict:
         "onboarding": {
             "conversation_starters": starters,
             "steps": [],
-            "notes": interaction_answer[:500] if len(interaction_answer) > 500 else interaction_answer,
+            "notes": capped_output_note(interaction_answer),
         }
     }

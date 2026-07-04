@@ -1,6 +1,7 @@
 from jane import session_summary
 from jane.session_summary_helpers import (
     MAX_STATE_CHARS,
+    SUMMARY_TOPIC_KEYWORDS,
     build_session_summary_prompt,
     clean_field,
     coerce_summary_json_output,
@@ -27,6 +28,7 @@ def test_session_summary_keeps_legacy_helper_aliases():
     assert session_summary._fallback_summary is fallback_summary
     assert session_summary._guess_topic_label is guess_topic_label
     assert session_summary._summary_path_for_base is summary_path
+    assert session_summary.SUMMARY_TOPIC_KEYWORDS is SUMMARY_TOPIC_KEYWORDS
 
 
 def test_summary_path_sanitizes_session_id_and_uses_default_for_empty_safe_id(tmp_path):
@@ -152,3 +154,9 @@ def test_fallback_summary_prepends_candidate_and_preserves_non_duplicate_topics(
         "open_loop": "Next, run focused tests.",
     }
     assert summary["topics"][1] == {"topic": "Other", "state": "kept", "open_loop": ""}
+
+
+def test_summary_topic_keywords_preserve_guess_topic_precedence():
+    assert SUMMARY_TOPIC_KEYWORDS[0] == ("ambient migration", "Ambient Migration")
+    assert guess_topic_label("Jane work on memory", "ambient migration plan") == "Ambient Migration"
+    assert guess_topic_label("memory bug", "fixed it") == "Memory Retrieval"

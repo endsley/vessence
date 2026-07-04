@@ -8,6 +8,8 @@ from memory.v1.local_vector_memory_helpers import (
     is_forgettable_expired,
     librarian_system_instruction,
     librarian_user_prompt,
+    memory_fact_expiry_suffix,
+    memory_fact_timestamp,
     memory_tier_sections,
     owned_memory_ids,
     utcnow_naive,
@@ -31,6 +33,18 @@ def test_timestamp_helpers_preserve_naive_iso_shape_and_ttl_math():
 
 
 def test_format_memory_fact_preserves_timestamp_topic_and_expiry_shape():
+    assert memory_fact_timestamp({"timestamp": "2026-07-02T12:34:56.789"}) == (
+        "2026-07-02T12:34:56"
+    )
+    assert memory_fact_timestamp({"created_at": "2026-01-01T00:00:00"}) == (
+        "2026-01-01T00:00:00"
+    )
+    assert memory_fact_timestamp({}) == "Unknown Time"
+    assert memory_fact_expiry_suffix({"expires_at": "2026-07-09T00:00:00"}) == (
+        ", expires 2026-07-09"
+    )
+    assert memory_fact_expiry_suffix({}) == ""
+
     assert format_memory_fact(
         "Remember this",
         {

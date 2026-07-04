@@ -1,6 +1,7 @@
 from jane_web.jane_v2 import pending_action_resolver as resolver
 from jane_web.jane_v2.pending_action_phrases import (
     STAGE3_CANCEL_STRONG,
+    has_edit_prefix,
     is_cancel,
     is_confirm,
     is_edit_intent,
@@ -25,6 +26,9 @@ def test_confirm_cancel_and_edit_phrase_policy_preserves_precedence():
     assert is_confirm("send it please")
     assert is_cancel("don't send it")
 
+    assert has_edit_prefix("make it shorter")
+    assert has_edit_prefix("actually say i will be late")
+    assert not has_edit_prefix("send it please")
     assert not is_edit_intent("yes")
     assert not is_edit_intent("no")
     assert is_edit_intent("make it shorter")

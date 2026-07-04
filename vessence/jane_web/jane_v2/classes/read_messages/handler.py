@@ -13,9 +13,12 @@ from __future__ import annotations
 
 import logging
 
-logger = logging.getLogger(__name__)
+from jane_web.jane_v2.classes.message_guard_helpers import (
+    ARCHITECTURE_GUARD_WORDS as _ARCH_WORDS,
+    contains_architecture_phrase,
+)
 
-_ARCH_WORDS = ("architecture", "infrastructure", "pipeline", "handler", "classifier", "stage")
+logger = logging.getLogger(__name__)
 
 _META_PHRASES = (
     "your last message", "your last reply", "your previous message",
@@ -26,11 +29,19 @@ _META_PHRASES = (
 )
 
 
+def contains_meta_self_reference(prompt: str) -> bool:
+    p_lower = (prompt or "").lower()
+    return any(phrase in p_lower for phrase in _META_PHRASES)
+
+
+def should_reject_read_messages_prompt(prompt: str) -> bool:
+    return contains_architecture_phrase(prompt) or contains_meta_self_reference(prompt)
+
+
 async def handle(prompt: str, context: str = "", params: dict | None = None) -> dict | None:
-    p_lower = prompt.lower()
-    if any(w in p_lower for w in _ARCH_WORDS):
+    if contains_architecture_phrase(prompt):
         return {"wrong_class": True}
-    if any(p in p_lower for p in _META_PHRASES):
+    if contains_meta_self_reference(prompt):
         logger.info("read_messages handler: meta/self-reference phrase → wrong_class")
         return {"wrong_class": True}
 

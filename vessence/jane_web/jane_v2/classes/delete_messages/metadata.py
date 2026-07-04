@@ -27,27 +27,8 @@ if str(_VAULT_WEB_DIR) not in sys.path:
 _logger = logging.getLogger(__name__)
 
 
-def _escalation_context() -> str:
-    """Inject recent synced messages so Opus can match the user's
-    referent ("those spam texts", "the one from Kathia") against
-    actual inbox contents and pull the right addresses."""
-    try:
-        from database import get_db
-    except Exception as e:
-        return f"Message database unavailable: {e}"
-
-    try:
-        with get_db() as conn:
-            rows = conn.execute(
-                "SELECT sender, body, timestamp_ms, is_contact, msg_type "
-                "FROM synced_messages "
-                "ORDER BY timestamp_ms DESC LIMIT 20",
-                (),
-            ).fetchall()
-    except Exception as e:
-        return f"Message query failed: {e}"
-
-    lines = [
+def _delete_messages_instruction_lines() -> list[str]:
+    return [
         "[delete messages escalation context]",
         "",
         "Tool: [[CLIENT_TOOL:messages.dismiss:{\"addresses\":[\"<num1>\",\"<num2>\"]}]]",
@@ -77,6 +58,29 @@ def _escalation_context() -> str:
         "a clear order like \"delete the spam\".",
         "",
     ]
+
+
+def _escalation_context() -> str:
+    """Inject recent synced messages so Opus can match the user's
+    referent ("those spam texts", "the one from Kathia") against
+    actual inbox contents and pull the right addresses."""
+    try:
+        from database import get_db
+    except Exception as e:
+        return f"Message database unavailable: {e}"
+
+    try:
+        with get_db() as conn:
+            rows = conn.execute(
+                "SELECT sender, body, timestamp_ms, is_contact, msg_type "
+                "FROM synced_messages "
+                "ORDER BY timestamp_ms DESC LIMIT 20",
+                (),
+            ).fetchall()
+    except Exception as e:
+        return f"Message query failed: {e}"
+
+    lines = _delete_messages_instruction_lines()
 
     if not rows:
         lines.append("No synced messages in the database yet.")

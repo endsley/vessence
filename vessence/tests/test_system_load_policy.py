@@ -3,6 +3,7 @@ from agent_skills.system_load_policy import (
     defer_reason_for_load,
     format_load_summary,
     format_oneline,
+    gpu_vram_used_percent,
     has_ample_resources_for_load,
     is_nighttime_hour,
     recommended_parallelism_for_load,
@@ -141,6 +142,11 @@ def test_defer_reason_for_load_reports_first_stress_reason():
         gpu_threshold_high=70.0,
         vram_free_min_mb=1024,
     ) is None
+
+
+def test_gpu_vram_used_percent_preserves_zero_total_behavior():
+    assert gpu_vram_used_percent(_load(gpu_total=0, gpu_used=3000)) == 0.0
+    assert gpu_vram_used_percent(_load(gpu_total=4096, gpu_used=1024)) == 25.0
 
 
 def test_has_ample_resources_for_load_checks_cpu_memory_gpu_and_vram():

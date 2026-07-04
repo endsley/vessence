@@ -84,6 +84,13 @@ def build_app_report_payload(
     }
 
 
+def mark_report_sent_base(state: dict[str, Any], *, sent_at: str, source_count: int) -> None:
+    state["last_report_sent_at"] = sent_at
+    state["last_report_source_count"] = source_count
+    state["initial_report_sent"] = True
+    state["last_report_error"] = None
+
+
 def mark_app_report_sent(
     state: dict[str, Any],
     *,
@@ -91,10 +98,7 @@ def mark_app_report_sent(
     total_sources: int,
     html_report_path: Any,
 ) -> None:
-    state["last_report_sent_at"] = created_at
-    state["last_report_source_count"] = total_sources
-    state["initial_report_sent"] = True
-    state["last_report_error"] = None
+    mark_report_sent_base(state, sent_at=created_at, source_count=total_sources)
     state["last_report_channel"] = "app"
     state["last_html_report_path"] = str(html_report_path)
 
@@ -141,7 +145,4 @@ def build_email_report_body(
 
 
 def mark_email_report_sent(state: dict[str, Any], *, sent_at: str, processed_count: int) -> None:
-    state["last_report_sent_at"] = sent_at
-    state["last_report_source_count"] = processed_count
-    state["initial_report_sent"] = True
-    state["last_report_error"] = None
+    mark_report_sent_base(state, sent_at=sent_at, source_count=processed_count)

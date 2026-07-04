@@ -41,6 +41,10 @@ def model_env_var(provider: str) -> str:
     return ENV_VAR_FOR_MODEL.get(provider, ENV_VAR_FOR_MODEL["claude"])
 
 
+def legacy_model_env_var(provider: str) -> str:
+    return f"BRAIN_HEAVY_{provider.upper()}"
+
+
 def current_model_for_provider(
     provider: str,
     environ: Mapping[str, str] = os.environ,
@@ -49,7 +53,7 @@ def current_model_for_provider(
     defaults = default_models(provider_models)
     default = defaults.get(provider, defaults["claude"])
     env_var = model_env_var(provider)
-    legacy_var = f"BRAIN_HEAVY_{provider.upper()}"
+    legacy_var = legacy_model_env_var(provider)
     current = environ.get(env_var) or environ.get(legacy_var) or default
     return current, default, env_var
 

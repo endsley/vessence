@@ -1,4 +1,17 @@
-from jane_web.user_identity import configured_admin_variants, default_user_id, identity_variants
+from jane_web.user_identity import (
+    configured_admin_variants,
+    default_user_id,
+    env_csv_values,
+    identity_variants,
+)
+
+
+def test_env_csv_values_trims_and_filters_empty_values():
+    assert env_csv_values({"EMAILS": " first@example.com, ,second@example.com  ,"}, "EMAILS") == [
+        "first@example.com",
+        "second@example.com",
+    ]
+    assert env_csv_values({}, "EMAILS") == []
 
 
 def test_default_user_id_prefers_first_allowed_email_then_user_name_then_user():

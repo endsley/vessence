@@ -133,6 +133,19 @@ def extract_talkingpoints_message(data: Any) -> str | None:
     return None
 
 
+def readback_cache_ttl_seconds(
+    *,
+    resolved: Any,
+    success_ttl_seconds: int,
+    failed_ttl_seconds: int,
+) -> int:
+    return success_ttl_seconds if resolved else failed_ttl_seconds
+
+
+def readback_cache_entry_is_fresh(*, checked_at: float, now: float, ttl_seconds: int) -> bool:
+    return now - checked_at <= ttl_seconds
+
+
 def cache_entry_readback_value(
     entry: Any,
     *,
@@ -145,7 +158,11 @@ def cache_entry_readback_value(
         return cache_miss
     checked_at = float(entry.get("checked_at") or 0)
     resolved = entry.get("resolved")
-    ttl = success_ttl_seconds if resolved else failed_ttl_seconds
-    if now - checked_at > ttl:
+    ttl = readback_cache_ttl_seconds(
+        resolved=resolved,
+        success_ttl_seconds=success_ttl_seconds,
+        failed_ttl_seconds=failed_ttl_seconds,
+    )
+    if not readback_cache_entry_is_fresh(checked_at=checked_at, now=now, ttl_seconds=ttl):
         return cache_miss
     return resolved or None

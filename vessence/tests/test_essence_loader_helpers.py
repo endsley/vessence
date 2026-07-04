@@ -3,6 +3,7 @@ import os
 from agent_skills import essence_loader
 from agent_skills.essence_loader_helpers import (
     available_essence_record,
+    available_essence_sort_rank,
     available_essence_sort_key,
     essence_search_dirs,
     manifest_item_type,
@@ -58,6 +59,10 @@ def test_manifest_type_filter_and_available_record_defaults():
 
 
 def test_available_essence_sort_key_keeps_jane_first_work_log_last():
+    assert available_essence_sort_rank("jane") == 0
+    assert available_essence_sort_rank("alpha") == 1
+    assert available_essence_sort_rank("work log") == 2
+
     essences = [
         {"name": "Zeta"},
         {"name": "Work Log"},

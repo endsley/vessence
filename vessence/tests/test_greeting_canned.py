@@ -29,6 +29,10 @@ def test_handler_uses_extracted_greeting_helpers() -> None:
     assert handler._post_local_llm_response is post_local_llm_response
 
 
+def test_greeting_response_preserves_text_shape() -> None:
+    assert handler.greeting_response("Hey, what's up?") == {"text": "Hey, what's up?"}
+
+
 def test_canned_reply_matches_common_greeting_buckets_with_injected_choice() -> None:
     assert canned_reply("how's it going?", chooser=_first) == CANNED_REPLIES["check_in"][0]
     assert canned_reply("HEY!!!", chooser=_first) == CANNED_REPLIES["hello"][0]

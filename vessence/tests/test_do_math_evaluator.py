@@ -36,6 +36,13 @@ def test_handler_uses_extracted_math_helpers() -> None:
     assert handler.safe_eval is safe_eval
 
 
+def test_math_success_response_preserves_text_and_thought_shape() -> None:
+    assert handler.math_success_response("7 * 8", "56") == {
+        "text": "56.",
+        "thought": "computed 7 * 8 = 56",
+    }
+
+
 def test_safe_eval_handles_arithmetic_and_allowed_functions() -> None:
     assert safe_eval("2 + 3 * 4") == 14
     assert safe_eval("(2 + 3) * 4") == 20

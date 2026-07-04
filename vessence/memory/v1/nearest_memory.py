@@ -61,6 +61,26 @@ def _promotes_recent_short_term(source: str, age: float | None, overlap: float) 
     )
 
 
+def _blocks_user_memory_candidate(doc: str, meta: dict, memory_type: str) -> bool:
+    if is_file_index_record(doc, meta) or is_low_signal_shared_memory(doc, meta):
+        return True
+    if memory_type in {"forgettable", "short_term"}:
+        return is_low_signal_short_term_memory(doc, meta)
+    return meta.get("topic") == "prompt_queue"
+
+
+def _blocks_short_term_candidate(
+    doc: str,
+    meta: dict,
+    *,
+    promoted_recent_short_term: bool,
+) -> bool:
+    return (
+        (not promoted_recent_short_term and is_too_old(meta))
+        or is_low_signal_short_term_memory(doc, meta)
+    )
+
+
 def nearest_memory_candidate(
     source: str,
     doc: str,
@@ -89,21 +109,46 @@ def nearest_memory_candidate(
 
     memory_type = str(meta.get("memory_type", "long_term"))
     if source == "user_memories":
-        if is_file_index_record(doc, meta) or is_low_signal_shared_memory(doc, meta):
-            return None
-        if memory_type in {"forgettable", "short_term"}:
-            if is_low_signal_short_term_memory(doc, meta):
-                return None
-        elif meta.get("topic") == "prompt_queue":
+        if _blocks_user_memory_candidate(doc, meta, memory_type):
             return None
 
     if source == "short_term":
-        if (not promoted_recent_short_term and is_too_old(meta)) or is_low_signal_short_term_memory(doc, meta):
+        if _blocks_short_term_candidate(
+            doc,
+            meta,
+            promoted_recent_short_term=promoted_recent_short_term,
+        ):
             return None
 
     meta["distance"] = dist
     priority = 0 if promoted_recent_short_term else 1
     return (priority, dist, source, extract_content_key(doc), fmt_memory(doc, meta))
+
+
+def nearest_candidates_from_rows(
+    source: str,
+    docs: Iterable[str],
+    metas: Iterable[dict | None],
+    distances: Iterable[float | None],
+    *,
+    query_terms: set[str],
+    max_distance: float,
+    min_lexical_overlap: float,
+) -> list[NearestCandidate]:
+    candidates: list[NearestCandidate] = []
+    for doc, meta, distance in zip(docs, metas, distances):
+        candidate = nearest_memory_candidate(
+            source,
+            doc,
+            meta,
+            distance,
+            query_terms=query_terms,
+            max_distance=max_distance,
+            min_lexical_overlap=min_lexical_overlap,
+        )
+        if candidate is not None:
+            candidates.append(candidate)
+    return candidates
 
 
 def select_nearest_memory_lines(candidates: list[NearestCandidate], limit: int) -> list[str]:

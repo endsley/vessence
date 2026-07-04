@@ -137,6 +137,10 @@ def clean_seed_memories(seed_memories: Sequence[Any] | None) -> list[str]:
     return [memory.strip() for memory in (seed_memories or []) if str(memory or "").strip()]
 
 
+def has_user_admin_capability(config: Mapping[str, Any]) -> bool:
+    return "user_admin" in (config.get("capabilities") or [])
+
+
 def is_user_admin(
     user_id: str | None,
     *,
@@ -154,7 +158,7 @@ def is_user_admin(
         get_user_config, user_config_exists = admin_user_manager_loader()
         if user_config_exists(lookup_id):
             config = get_user_config(lookup_id)
-            return "user_admin" in (config.get("capabilities") or [])
+            return has_user_admin_capability(config)
     except Exception:
         if logger is not None:
             logger.exception("Failed checking user_admin capability for %s", user_id)

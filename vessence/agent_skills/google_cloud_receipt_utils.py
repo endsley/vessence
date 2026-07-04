@@ -243,6 +243,30 @@ def filter_receipt_candidates_by_date(
     return out
 
 
+def select_requested_receipt_candidates(
+    candidates: Iterable[ReceiptCandidate],
+    *,
+    count: int | None = None,
+    start_date: date | None = None,
+    end_date: date | None = None,
+) -> list[ReceiptCandidate]:
+    ranked = sort_receipt_candidates(candidates)
+    if start_date is not None or end_date is not None:
+        ranked = filter_receipt_candidates_by_date(
+            ranked,
+            start_date=start_date,
+            end_date=end_date,
+        )
+    if count is not None:
+        ranked = ranked[:count]
+    if ranked:
+        return ranked
+
+    start_label = start_date.isoformat() if start_date else "the beginning"
+    end_label = end_date.isoformat() if end_date else "today"
+    raise RuntimeError(f"No receipts matched the requested date range ({start_label} to {end_label}).")
+
+
 def unique_dest_path(out_dir: Path, filename: str) -> Path:
     base = out_dir / filename
     if not base.exists():

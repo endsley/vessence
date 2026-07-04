@@ -141,6 +141,27 @@ def read_email(message_id: str) -> dict[str, Any]:
     }
 
 
+def _build_mime_email(
+    *,
+    body: str,
+    sender: str,
+    to: str,
+    subject: str,
+    cc: str | None = None,
+    bcc: str | None = None,
+) -> MIMEText:
+    message = MIMEText(body)
+    if sender:
+        message["from"] = sender
+    message["to"] = to
+    message["subject"] = subject
+    if cc:
+        message["cc"] = cc
+    if bcc:
+        message["bcc"] = bcc
+    return message
+
+
 def send_email(
     to: str,
     subject: str,
@@ -176,15 +197,14 @@ def send_email(
     sender = token_data.get("user_id", from_email or "")
     service = get_gmail_service(token_data)
 
-    message = MIMEText(body)
-    if sender:
-        message["from"] = sender
-    message["to"] = to
-    message["subject"] = subject
-    if cc:
-        message["cc"] = cc
-    if bcc:
-        message["bcc"] = bcc
+    message = _build_mime_email(
+        body=body,
+        sender=sender,
+        to=to,
+        subject=subject,
+        cc=cc,
+        bcc=bcc,
+    )
 
     raw = base64.urlsafe_b64encode(message.as_bytes()).decode("ascii")
     sent = service.users().messages().send(

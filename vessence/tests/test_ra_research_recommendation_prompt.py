@@ -6,6 +6,7 @@ from agent_skills.ra_research_recommendation_prompt import (
     RECOMMENDATION_SYSTEM_PROMPT,
     SAFETY_NOTE,
     ensure_safety_note,
+    has_safety_guard_text,
     recommendation_user_prompt,
 )
 
@@ -34,6 +35,9 @@ def test_recommendation_user_prompt_preserves_payload_and_non_ascii_json():
 
 
 def test_ensure_safety_note_preserves_existing_guard_condition():
+    assert has_safety_guard_text("Already mentions medical advice.")
+    assert has_safety_guard_text("Already mentions rheumatologist.")
+    assert not has_safety_guard_text("No guard here.")
     assert ensure_safety_note("Already mentions medical advice.") == "Already mentions medical advice."
     assert ensure_safety_note("Already mentions rheumatologist.") == "Already mentions rheumatologist."
     assert ensure_safety_note("No guard here.") == SAFETY_NOTE + "No guard here."

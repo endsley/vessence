@@ -7,6 +7,10 @@ from memory.v1.retrieved_memory_facts import (
     collect_short_term_semantic_facts,
     collect_short_term_with_recency_boost,
     collect_user_memory_facts,
+    include_long_term_user_memory_fact,
+    is_usable_short_term_fact,
+    recent_short_term_rows,
+    user_memory_tier,
     within_distance,
 )
 
@@ -21,6 +25,45 @@ def test_within_distance_keeps_legacy_fail_open_behavior():
     assert within_distance("bad", 0.5)
     assert within_distance(0.4, 0.5)
     assert not within_distance(0.6, 0.5)
+
+
+def test_user_memory_tier_preserves_legacy_routing():
+    assert user_memory_tier("permanent") == "permanent"
+    assert user_memory_tier("forgettable") == "legacy_short_term"
+    assert user_memory_tier("short_term") == "legacy_short_term"
+    assert user_memory_tier("long_term") == "long_term"
+    assert user_memory_tier(None) == "long_term"
+
+
+def test_include_long_term_user_memory_fact_preserves_policy_filters():
+    assert include_long_term_user_memory_fact(
+        "Family long-term note",
+        {"topic": "family"},
+        0.3,
+        max_distance=0.5,
+        anchor_docs=set(),
+    )
+    assert not include_long_term_user_memory_fact(
+        "Too far note",
+        {"topic": "family"},
+        0.8,
+        max_distance=0.5,
+        anchor_docs=set(),
+    )
+    assert not include_long_term_user_memory_fact(
+        "Queued prompt",
+        {"topic": "prompt_queue"},
+        0.1,
+        max_distance=0.5,
+        anchor_docs=set(),
+    )
+    assert not include_long_term_user_memory_fact(
+        "DS3000 lecture anchor",
+        {"topic": "ds3000_lecture_notes"},
+        0.1,
+        max_distance=0.5,
+        anchor_docs={"DS3000 lecture anchor"},
+    )
 
 
 def test_collect_user_memory_facts_splits_tiers_and_filters_noise():
@@ -80,6 +123,29 @@ def test_collect_short_term_semantic_facts_filters_expired_stale_none_noise_and_
     )
 
     assert facts == ["[unknown age] (recent) (Dist: 0.2000): Recent useful note"]
+
+
+def test_is_usable_short_term_fact_reuses_noise_filters():
+    assert is_usable_short_term_fact("Useful note", {"topic": "recent"})
+    assert not is_usable_short_term_fact("Expired note", {"expires_at": _past_iso()})
+    assert not is_usable_short_term_fact("Old note", {"timestamp": _past_iso(days=10)})
+    assert not is_usable_short_term_fact("None", {})
+    assert not is_usable_short_term_fact("**Class Protocol:** timer", {"memory_type": "short_term"})
+
+
+def test_recent_short_term_rows_sorts_by_timestamp_and_limits_rows():
+    assert recent_short_term_rows(
+        ["old", "missing", "new"],
+        [
+            {"timestamp": "2026-07-03T09:00:00Z"},
+            None,
+            {"timestamp": "2026-07-04T09:00:00Z"},
+        ],
+        limit=2,
+    ) == [
+        ("new", {"timestamp": "2026-07-04T09:00:00Z"}),
+        ("old", {"timestamp": "2026-07-03T09:00:00Z"}),
+    ]
 
 
 def test_collect_short_term_with_recency_boost_sorts_filters_and_preserves_legacy_dedupe_key():

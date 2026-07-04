@@ -3,6 +3,23 @@
 from __future__ import annotations
 
 
+def compaction_token_target(
+    *,
+    current_tokens: int,
+    compaction_threshold: int,
+    max_tokens: int,
+) -> int:
+    return current_tokens - compaction_threshold + int(max_tokens * 0.25)
+
+
+def clamp_compaction_split_index(split_index: int, message_count: int) -> int | None:
+    if split_index >= message_count - 1:
+        split_index = message_count - 2
+    if split_index <= 0:
+        return None
+    return split_index
+
+
 def compaction_split_index(
     message_token_counts: list[int],
     *,
@@ -13,9 +30,10 @@ def compaction_split_index(
     if current_tokens <= compaction_threshold:
         return None
 
-    tokens_to_remove = (
-        current_tokens - compaction_threshold
-        + int(max_tokens * 0.25)
+    tokens_to_remove = compaction_token_target(
+        current_tokens=current_tokens,
+        compaction_threshold=compaction_threshold,
+        max_tokens=max_tokens,
     )
     split_index = 0
     tokens_so_far = 0
@@ -25,8 +43,4 @@ def compaction_split_index(
             split_index = index + 1
             break
 
-    if split_index >= len(message_token_counts) - 1:
-        split_index = len(message_token_counts) - 2
-    if split_index <= 0:
-        return None
-    return split_index
+    return clamp_compaction_split_index(split_index, len(message_token_counts))

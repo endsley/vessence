@@ -26,6 +26,33 @@ BAD_THEMATIC_PROTOCOL_PATTERNS = (
     r"\bnew turn.*class protocol metadata\b",
 )
 
+LOW_VALUE_EXACT_TURNS = frozenset({
+    "ok", "okay", "yes", "yeah", "yep", "no", "nope", "thanks", "thank you",
+    "got it", "sounds good", "cool", "nice", "done", "send", "sent",
+    "/new", "none",
+})
+LOW_VALUE_SHORT_QUESTIONS = frozenset({"why?", "how?", "which?", "where?", "when?"})
+
+USER_LOW_VALUE_PATTERNS = (
+    r"^hey\s*(jane)?\s*[,!.]?\s*(how.s it going|are you|you there|testing|can you say)?\s*[?!.]?\s*$",
+    r"^(hi|hello|yo)\s*(jane)?\s*[!.]?\s*$",
+    r"^you (working|there) now\??$",
+    r"^(hey )?jane did you crash\??$",
+    r"^let.s (run this test|see how long|test this)",
+    r"^can you respond to this message so i can test",
+    r"^what is \d+\+\d+\??\s*$",
+)
+
+ASSISTANT_FILLER_PATTERNS = (
+    r"^hey \w+[!.,]?\s*(i.m here|going well|what.s up|what do you)",
+    r"^(i.m here|here)\.\s*what do you",
+    r"^jane here\.\s*(what|i.ll)",
+    r"^doing well\.?\s*(in the workspace|ready)",
+    r"^fresh start\.?\s*what.s up",
+    r"^yeah\.?\s*what do you need",
+    r"^when you what\?",
+)
+
 
 def compact_whitespace(text: object) -> str:
     return re.sub(r"\s+", " ", str(text or "")).strip()
@@ -116,48 +143,36 @@ def prepare_thematic_turn(user_msg: str, assistant_msg: str) -> str:
     return "\n".join(lines).strip()
 
 
+def matches_any_pattern(text: str, patterns: tuple[str, ...]) -> bool:
+    return any(re.search(pattern, text) for pattern in patterns)
+
+
+def is_low_value_short_question(role: str, text: str) -> bool:
+    return (
+        role == "user"
+        and len(text) <= 12
+        and text.endswith("?")
+        and text in LOW_VALUE_SHORT_QUESTIONS
+    )
+
+
 def should_store_short_term_turn(role: str, content: str) -> bool:
     text = compact_whitespace(content).lower()
     if not text:
         return False
-    low_value_exact = {
-        "ok", "okay", "yes", "yeah", "yep", "no", "nope", "thanks", "thank you",
-        "got it", "sounds good", "cool", "nice", "done", "send", "sent",
-        "/new", "none",
-    }
-    if text in low_value_exact:
+    if text in LOW_VALUE_EXACT_TURNS:
         return False
-    if role == "user" and len(text) <= 12 and text.endswith("?") and text in {"why?", "how?", "which?", "where?", "when?"}:
+    if is_low_value_short_question(role, text):
         return False
     upper_text = text.upper()
     if upper_text == text and len(text) < 40 and re.match(r"^[A-Z_]+$", text.replace(" ", "")):
         return False
     if role == "user":
-        greeting_patterns = [
-            r"^hey\s*(jane)?\s*[,!.]?\s*(how.s it going|are you|you there|testing|can you say)?\s*[?!.]?\s*$",
-            r"^(hi|hello|yo)\s*(jane)?\s*[!.]?\s*$",
-            r"^you (working|there) now\??$",
-            r"^(hey )?jane did you crash\??$",
-            r"^let.s (run this test|see how long|test this)",
-            r"^can you respond to this message so i can test",
-            r"^what is \d+\+\d+\??\s*$",
-        ]
-        for pattern in greeting_patterns:
-            if re.search(pattern, text):
-                return False
+        if matches_any_pattern(text, USER_LOW_VALUE_PATTERNS):
+            return False
     if role == "assistant":
-        filler_patterns = [
-            r"^hey \w+[!.,]?\s*(i.m here|going well|what.s up|what do you)",
-            r"^(i.m here|here)\.\s*what do you",
-            r"^jane here\.\s*(what|i.ll)",
-            r"^doing well\.?\s*(in the workspace|ready)",
-            r"^fresh start\.?\s*what.s up",
-            r"^yeah\.?\s*what do you need",
-            r"^when you what\?",
-        ]
-        for pattern in filler_patterns:
-            if re.search(pattern, text):
-                return False
+        if matches_any_pattern(text, ASSISTANT_FILLER_PATTERNS):
+            return False
     return True
 
 
@@ -263,6 +278,17 @@ def build_short_term_summary_plan(role: str, content: str) -> ShortTermSummaryPl
     )
 
 
+def normalize_summary_bullet_line(raw_line: str) -> str:
+    line = compact_whitespace(raw_line)
+    if not line:
+        return ""
+    if re.match(r"^[-*]\s+", line):
+        return "- " + line[2:].strip()
+    if re.match(r"^\d+\.\s+", line):
+        return "- " + re.sub(r"^\d+\.\s+", "", line).strip()
+    return line
+
+
 def normalize_short_term_summary(text: str, preserve_bullets: bool) -> str:
     text = str(text or "").strip()
     if not text:
@@ -272,13 +298,9 @@ def normalize_short_term_summary(text: str, preserve_bullets: bool) -> str:
 
     lines = []
     for raw_line in text.splitlines():
-        line = compact_whitespace(raw_line)
+        line = normalize_summary_bullet_line(raw_line)
         if not line:
             continue
-        if re.match(r"^[-*]\s+", line):
-            line = "- " + line[2:].strip()
-        elif re.match(r"^\d+\.\s+", line):
-            line = "- " + re.sub(r"^\d+\.\s+", "", line).strip()
         lines.append(line)
 
     if not lines:

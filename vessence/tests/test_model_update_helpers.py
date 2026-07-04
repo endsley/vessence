@@ -3,6 +3,7 @@ from agent_skills.model_update_helpers import (
     MODEL_UPDATE_SEARCH_QUERY,
     discord_bot_headers,
     discord_channel_messages_url,
+    discord_message_payload,
     model_update_notification_message,
     model_update_prompt,
     should_persist_model_update,
@@ -15,6 +16,7 @@ def test_update_scripts_expose_helpers():
     assert check_for_updates._should_persist_model_update is should_persist_model_update
     assert notify_updates._discord_bot_headers is discord_bot_headers
     assert notify_updates._discord_channel_messages_url is discord_channel_messages_url
+    assert notify_updates._discord_message_payload is discord_message_payload
     assert notify_updates._model_update_notification_message is model_update_notification_message
 
 
@@ -50,3 +52,4 @@ def test_notification_message_and_discord_request_helpers_preserve_shapes():
         "Authorization": "Bot token",
         "Content-Type": "application/json",
     }
+    assert discord_message_payload("hello") == {"content": "hello"}

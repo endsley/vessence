@@ -4,10 +4,12 @@ from __future__ import annotations
 from datetime import datetime
 
 
+def cron_weekday(now: datetime) -> int:
+    return (now.weekday() + 1) % 7
+
+
 def _cron_fields(now: datetime) -> list[int]:
-    fields = [now.minute, now.hour, now.day, now.month, now.weekday()]
-    fields[4] = (fields[4] + 1) % 7
-    return fields
+    return [now.minute, now.hour, now.day, now.month, cron_weekday(now)]
 
 
 def _field_matches(field_val: int, pattern: str) -> bool:

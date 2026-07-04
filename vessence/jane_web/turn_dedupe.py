@@ -59,6 +59,10 @@ def _age_seconds_since(created_at: str, *, now: datetime.datetime | None = None)
     return ((now or _utcnow()) - dt).total_seconds()
 
 
+def _dedupe_status_blocks_begin(status: str) -> bool:
+    return status in ("pending", "completed")
+
+
 def _existing_row_blocks_begin(
     status: str,
     created_at: str,
@@ -70,7 +74,7 @@ def _existing_row_blocks_begin(
         age = _age_seconds_since(created_at, now=now)
     except Exception:
         age = 0.0
-    return age <= ttl_seconds and status in ("pending", "completed")
+    return age <= ttl_seconds and _dedupe_status_blocks_begin(status)
 
 
 def _conn() -> sqlite3.Connection:

@@ -1,5 +1,6 @@
 from agent_skills import essence_builder
 from agent_skills.essence_builder_outputs import (
+    capped_output_note,
     custom_tools_stub,
     essence_layout_payload,
     onboarding_payload,
@@ -36,6 +37,9 @@ def test_custom_tools_stub_preserves_existing_text_shape():
 
 
 def test_essence_layout_payload_preserves_component_shape_and_note_limit():
+    assert capped_output_note("x" * 501) == "x" * 500
+    assert capped_output_note("short") == "short"
+
     payload = essence_layout_payload("dashboard", "x" * 501)
 
     assert payload == {

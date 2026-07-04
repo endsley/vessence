@@ -9,6 +9,7 @@ from agent_skills.ra_research_artifacts import (
     raw_source_suffix,
     slugify,
     source_folder,
+    text_without_tags,
     web_source_folder,
     web_source_record,
 )
@@ -42,6 +43,14 @@ def test_html_to_text_removes_page_chrome_and_cleans_whitespace():
     """
 
     assert html_to_text(html) == "Title Useful text"
+
+
+def test_text_without_tags_removes_configured_tag_names():
+    assert text_without_tags(
+        "<root><drop>noise</drop><keep>Useful   text</keep></root>",
+        parser="html.parser",
+        tags=("drop",),
+    ) == "Useful text"
 
 
 def test_pmc_xml_to_text_removes_reference_table_and_permission_noise():

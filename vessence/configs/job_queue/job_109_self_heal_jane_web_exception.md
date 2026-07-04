@@ -1,5 +1,5 @@
 # Job: Self-heal jane_web: UnboundLocalError at /api/cli-login/code
-Status: pending
+Status: incomplete
 Priority: high
 Created: 2026-07-03
 Auto-generated: true
@@ -30,3 +30,6 @@ minimal, verified fix if the evidence supports one.
 - The failing route/action no longer throws the captured error.
 - A focused test, syntax check, or local smoke test covers the fixed path.
 - If no safe fix is possible, leave a clear report explaining the blocker and evidence checked.
+
+## Result
+Jane web is not running — skipping

@@ -27,25 +27,33 @@ CALENDAR_BUCKETS = (
 )
 
 
+def _event_day_and_time_range(start_raw: str, end_raw: str) -> tuple[str, str] | None:
+    if "T" not in start_raw:
+        return None
+    try:
+        dt = datetime.datetime.fromisoformat(start_raw)
+        day = dt.strftime("%a %b %-d")
+        start_t = dt.strftime("%-I:%M%p").lower()
+    except ValueError:
+        day, start_t = start_raw, ""
+    end_t = ""
+    if "T" in end_raw:
+        try:
+            end_dt = datetime.datetime.fromisoformat(end_raw)
+            end_t = end_dt.strftime("%-I:%M%p").lower()
+        except ValueError:
+            pass
+    time_range = f"{start_t}–{end_t}" if end_t else start_t
+    return day, time_range
+
+
 def _format_event_line(i: int, ev: dict) -> str:
     summary = (ev.get("summary") or "Untitled")[:120]
     start_raw = str(ev.get("start", "")).strip()
     end_raw = str(ev.get("end", "")).strip()
-    if "T" in start_raw:
-        try:
-            dt = datetime.datetime.fromisoformat(start_raw)
-            day = dt.strftime("%a %b %-d")
-            start_t = dt.strftime("%-I:%M%p").lower()
-        except ValueError:
-            day, start_t = start_raw, ""
-        end_t = ""
-        if "T" in end_raw:
-            try:
-                end_dt = datetime.datetime.fromisoformat(end_raw)
-                end_t = end_dt.strftime("%-I:%M%p").lower()
-            except ValueError:
-                pass
-        time_range = f"{start_t}–{end_t}" if end_t else start_t
+    day_and_time = _event_day_and_time_range(start_raw, end_raw)
+    if day_and_time is not None:
+        day, time_range = day_and_time
         return f"{i}. {summary} — {day}, {time_range}"
     if start_raw:
         return f"{i}. {summary} — {start_raw} (all day)"

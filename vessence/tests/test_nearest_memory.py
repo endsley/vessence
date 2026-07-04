@@ -2,9 +2,12 @@ import datetime as dt
 
 from memory.v1 import memory_retrieval
 from memory.v1.nearest_memory import (
+    _blocks_short_term_candidate,
+    _blocks_user_memory_candidate,
     _candidate_distance,
     _promotes_recent_short_term,
     lexical_overlap,
+    nearest_candidates_from_rows,
     nearest_memory_candidate,
     nearest_query_terms,
     select_nearest_memory_lines,
@@ -44,6 +47,52 @@ def test_recent_short_term_promotion_preserves_age_and_overlap_boundaries():
     assert not _promotes_recent_short_term("short_term", 14, 0.34)
     assert not _promotes_recent_short_term("user_memories", 1, 1.0)
     assert not _promotes_recent_short_term("short_term", None, 1.0)
+
+
+def test_nearest_user_memory_blocking_helper_preserves_source_policy():
+    assert _blocks_user_memory_candidate(
+        "Vault file: tax/return.pdf",
+        {},
+        "long_term",
+    )
+    assert _blocks_user_memory_candidate(
+        "prompt list verbatim from a UI prompt",
+        {},
+        "long_term",
+    )
+    assert _blocks_user_memory_candidate(
+        "Class protocol: stale handler instructions",
+        {"memory_type": "short_term"},
+        "short_term",
+    )
+    assert _blocks_user_memory_candidate(
+        "Queued prompt",
+        {"topic": "prompt_queue"},
+        "long_term",
+    )
+    assert not _blocks_user_memory_candidate(
+        "DS3000 homework grading rubric",
+        {"topic": "teaching"},
+        "long_term",
+    )
+
+
+def test_nearest_short_term_blocking_helper_preserves_staleness_and_noise_policy():
+    assert _blocks_short_term_candidate(
+        "DS3000 homework grading",
+        {"timestamp": _recent_iso(days_ago=20)},
+        promoted_recent_short_term=False,
+    )
+    assert not _blocks_short_term_candidate(
+        "DS3000 homework grading",
+        {"timestamp": _recent_iso(days_ago=20)},
+        promoted_recent_short_term=True,
+    )
+    assert _blocks_short_term_candidate(
+        "Class protocol: stale handler instructions",
+        {"timestamp": _recent_iso(days_ago=1)},
+        promoted_recent_short_term=True,
+    )
 
 
 def test_nearest_memory_candidate_accepts_valid_memory_and_formats_distance():
@@ -133,7 +182,24 @@ def test_nearest_memory_candidate_rejects_stale_short_term_and_file_index_record
     ) is None
 
 
+def test_nearest_candidates_from_rows_filters_and_collects_valid_rows():
+    candidates = nearest_candidates_from_rows(
+        "user_memories",
+        ["DS3000 homework grading", "unrelated text", "DS3000 file"],
+        [{"topic": "teaching"}, {"topic": "other"}, {"topic": "vault_file"}],
+        [0.25, 0.25, 0.25],
+        query_terms={"ds3000", "homework"},
+        max_distance=0.5,
+        min_lexical_overlap=0.34,
+    )
+
+    assert len(candidates) == 1
+    assert candidates[0][2] == "user_memories"
+    assert "(Dist: 0.2500): DS3000 homework grading" in candidates[0][4]
+
+
 def test_memory_retrieval_uses_nearest_memory_selector():
+    assert memory_retrieval._nearest_candidates_from_rows is nearest_candidates_from_rows
     assert memory_retrieval._select_nearest_memory_lines is select_nearest_memory_lines
 
 

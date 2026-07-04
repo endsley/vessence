@@ -37,12 +37,21 @@ def is_forgettable_expired(meta: dict, now_iso: str) -> bool:
         return False
 
 
-def format_memory_fact(doc: str, meta: dict) -> str:
-    timestamp = meta.get("timestamp", meta.get("created_at", "Unknown Time"))
-    topic = meta.get("topic", "General")
+def memory_fact_timestamp(meta: dict) -> str:
+    return str(meta.get("timestamp", meta.get("created_at", "Unknown Time")))[:19]
+
+
+def memory_fact_expiry_suffix(meta: dict) -> str:
     expires_at = meta.get("expires_at", "")
-    expiry_str = f", expires {str(expires_at)[:10]}" if expires_at else ""
-    return f"[{str(timestamp)[:19]}] ({topic}{expiry_str}): {doc}"
+    return f", expires {str(expires_at)[:10]}" if expires_at else ""
+
+
+def format_memory_fact(doc: str, meta: dict) -> str:
+    topic = meta.get("topic", "General")
+    return (
+        f"[{memory_fact_timestamp(meta)}] "
+        f"({topic}{memory_fact_expiry_suffix(meta)}): {doc}"
+    )
 
 
 def bucket_memory_facts(

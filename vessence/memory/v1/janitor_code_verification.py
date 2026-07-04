@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Callable
 from typing import Any
@@ -13,6 +14,7 @@ CODE_INDICATOR_RE = re.compile(
     r"configs/|\.env|keep_alive|VRAM|qwen|gemma|server|restart|service)",
     re.IGNORECASE,
 )
+JSON_OBJECT_RE = re.compile(r"\{[\s\S]*\}")
 
 
 def is_code_memory(doc: str) -> bool:
@@ -60,6 +62,16 @@ def split_reverification_candidates(
 def code_memory_verification_sort_key(memory: dict[str, Any]) -> str:
     value = (memory.get("metadata") or {}).get("code_verified_at")
     return value if value is not None else ""
+
+
+def json_object_from_text(raw: str) -> tuple[dict[str, Any] | None, str | None]:
+    json_match = JSON_OBJECT_RE.search(raw)
+    if not json_match:
+        return None, "parse_fail"
+    try:
+        return json.loads(json_match.group()), None
+    except json.JSONDecodeError:
+        return None, "json_decode"
 
 
 def code_verification_prompt(mem: dict) -> str:
@@ -128,20 +140,49 @@ def code_verification_result(
     }
 
 
+def code_verification_metadata(
+    metadata: dict[str, Any] | None,
+    *,
+    status: str,
+    verified_at: str,
+    explanation: str = "",
+) -> dict[str, Any]:
+    meta = dict(metadata or {})
+    meta["code_verified_at"] = verified_at
+    meta["code_verification_status"] = status
+    if explanation:
+        meta["code_verification_note"] = explanation[:240]
+    else:
+        meta.pop("code_verification_note", None)
+    return meta
+
+
+def code_verification_summary_line(result: dict[str, Any]) -> str:
+    return (
+        f"Checked: {result['checked']} | Stale: {result['stale']} "
+        f"| Fixed: {result['fixed']} | Deleted: {result['deleted']} "
+        f"| Errors: {result['errors']} | Skipped recent: {result['skipped_recent']}"
+    )
+
+
+def code_verification_detail_line(detail: dict[str, Any]) -> str:
+    return f"- **{detail['action'].upper()}** `{detail['id'][:12]}` — {detail['reason']}"
+
+
+def code_verification_detail_lines(details: list[dict[str, Any]]) -> list[str]:
+    return [
+        code_verification_detail_line(detail)
+        for detail in details
+        if detail["action"] != "accurate"
+    ]
+
+
 def code_verification_report_markdown(
     *,
     timestamp: str,
     result: dict[str, Any],
 ) -> str:
     lines = [f"# Memory Verification Report — {timestamp}\n"]
-    lines.append(
-        f"Checked: {result['checked']} | Stale: {result['stale']} "
-        f"| Fixed: {result['fixed']} | Deleted: {result['deleted']} "
-        f"| Errors: {result['errors']} | Skipped recent: {result['skipped_recent']}\n"
-    )
-    for detail in result.get("details", []):
-        if detail["action"] != "accurate":
-            lines.append(
-                f"- **{detail['action'].upper()}** `{detail['id'][:12]}` — {detail['reason']}"
-            )
+    lines.append(f"{code_verification_summary_line(result)}\n")
+    lines.extend(code_verification_detail_lines(result.get("details", [])))
     return "\n".join(lines) + "\n"

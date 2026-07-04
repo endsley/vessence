@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime
+from collections.abc import Iterable
 from typing import Any
 
 from memory.v1.conversation_text import compact_whitespace, looks_like_bad_thematic_output, strip_injected_metadata
@@ -26,15 +27,21 @@ def normalize_timestamp_for_sql(raw: str) -> str:
     return raw.replace("T", " ").split("+")[0].split(".")[0].strip()[:19]
 
 
+def first_metadata_timestamp(metadata: dict[str, Any] | None) -> str | None:
+    if not metadata:
+        return None
+    for key in ("archived_at", "timestamp", "created_at", "updated_at"):
+        if metadata.get(key):
+            return str(metadata[key])
+    return None
+
+
 def latest_metadata_timestamp(metadatas: list[dict[str, Any] | None]) -> str | None:
     stamps: list[str] = []
     for metadata in metadatas:
-        if not metadata:
-            continue
-        for key in ("archived_at", "timestamp", "created_at", "updated_at"):
-            if metadata.get(key):
-                stamps.append(str(metadata[key]))
-                break
+        timestamp = first_metadata_timestamp(metadata)
+        if timestamp:
+            stamps.append(timestamp)
     return max(stamps) if stamps else None
 
 
@@ -45,7 +52,7 @@ def transcript_line(role: Any, content: Any) -> str | None:
     return f"{(role or '').upper()}: {cleaned}"
 
 
-def build_session_transcript(rows: list[SessionTranscriptRow]) -> str:
+def build_role_content_transcript(rows: Iterable[tuple[Any, Any]]) -> str:
     lines = []
     for role, content in rows:
         line = transcript_line(role, content)
@@ -54,13 +61,27 @@ def build_session_transcript(rows: list[SessionTranscriptRow]) -> str:
     return "\n\n".join(lines)
 
 
+def build_session_transcript(rows: list[SessionTranscriptRow]) -> str:
+    return build_role_content_transcript(rows)
+
+
 def build_window_transcript(window: list[LedgerTurn]) -> str:
-    lines = []
-    for _tid, role, content, _ts in window:
-        line = transcript_line(role, content)
-        if line is not None:
-            lines.append(line)
-    return "\n\n".join(lines)
+    return build_role_content_transcript((role, content) for _tid, role, content, _ts in window)
+
+
+def should_start_new_ledger_window(
+    prev_ts: datetime.datetime | None,
+    ts: datetime.datetime | None,
+    current_size: int,
+    *,
+    idle_gap: datetime.timedelta,
+    max_turns: int,
+) -> bool:
+    if current_size <= 0:
+        return False
+    gap_break = prev_ts is not None and ts is not None and (ts - prev_ts) > idle_gap
+    size_break = current_size >= max_turns
+    return gap_break or size_break
 
 
 def group_ledger_turns(
@@ -75,11 +96,13 @@ def group_ledger_turns(
     prev_ts = None
     for turn_id, role, content, raw_ts in rows:
         ts = parse_ledger_ts(raw_ts)
-        gap_break = (
-            prev_ts is not None and ts is not None and (ts - prev_ts) > gap
-        )
-        size_break = len(current) >= max_turns
-        if current and (gap_break or size_break):
+        if should_start_new_ledger_window(
+            prev_ts,
+            ts,
+            len(current),
+            idle_gap=gap,
+            max_turns=max_turns,
+        ):
             windows.append(current)
             current = []
         current.append((turn_id, role, content, ts))

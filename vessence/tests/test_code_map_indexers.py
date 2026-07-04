@@ -1,3 +1,4 @@
+import ast
 import textwrap
 
 from agent_skills import generate_code_map
@@ -9,6 +10,7 @@ from agent_skills.code_map_indexers import (
     index_html_file,
     index_kotlin_file,
     index_python_file,
+    route_entry_from_decorator,
     should_skip,
 )
 
@@ -44,6 +46,16 @@ def test_index_python_file_extracts_routes_classes_functions_and_constants(tmp_p
     assert any(entry.startswith("  class Service → L") for entry in entries)
     assert any(entry.startswith("    run() → L") for entry in entries)
     assert count_lines(str(path)) == 12
+
+
+def test_route_entry_from_decorator_extracts_supported_http_routes():
+    tree = ast.parse('@app.patch("/items/{item_id}")\ndef update_item():\n    pass\n')
+    func = tree.body[0]
+
+    assert route_entry_from_decorator(func.decorator_list[0], func.lineno) == (
+        "  PATCH /items/{item_id} → L2"
+    )
+    assert route_entry_from_decorator(ast.Name(id="other", ctx=ast.Load()), func.lineno) == ""
 
 
 def test_index_html_file_extracts_methods_and_dedupes_events(tmp_path):

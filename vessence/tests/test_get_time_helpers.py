@@ -28,6 +28,14 @@ def test_handler_uses_extracted_get_time_helpers() -> None:
     assert handler._post_local_llm_response is post_local_llm_response
 
 
+def test_time_answer_response_preserves_conversation_end_shape() -> None:
+    assert handler.time_answer_response("It is one.", "checked clock") == {
+        "text": "It is one.",
+        "thought": "checked clock",
+        "conversation_end": True,
+    }
+
+
 def test_fast_time_reply_handles_plain_time_and_date_queries() -> None:
     now = _fixed_now()
 

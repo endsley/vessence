@@ -9,6 +9,7 @@ from jane.session_summary_helpers import (
     MAX_STATE_CHARS,
     MAX_TOPIC_CHARS,
     MAX_TOPICS,
+    SUMMARY_TOPIC_KEYWORDS,
     build_session_summary_prompt as _build_session_summary_prompt,
     clean_field as _clean_field,
     coerce_summary_json_output as _coerce_summary_json_output,

@@ -19,6 +19,7 @@ from agent_skills.google_cloud_receipt_utils import (
     parse_receipt_date,
     receipt_candidate_from_control,
     sanitize_filename_piece,
+    select_requested_receipt_candidates,
     select_open_billing_accounts,
     sort_receipt_candidates,
     unique_dest_path,
@@ -36,6 +37,7 @@ class GoogleCloudReceiptsTests(unittest.TestCase):
         self.assertIs(google_cloud_receipts.document_candidate_from_row, document_candidate_from_row)
         self.assertIs(google_cloud_receipts.downloaded_receipt_from_candidate, downloaded_receipt_from_candidate)
         self.assertIs(google_cloud_receipts.downloaded_receipts_json, downloaded_receipts_json)
+        self.assertIs(google_cloud_receipts.select_requested_receipt_candidates, select_requested_receipt_candidates)
         self.assertIs(google_cloud_receipts._manifest_path, manifest_path)
         self.assertIs(google_cloud_receipts._unique_dest_path, unique_dest_path)
         self.assertIs(google_cloud_receipts._final_download_path, final_download_path)
@@ -171,6 +173,74 @@ class GoogleCloudReceiptsTests(unittest.TestCase):
             end_date=date(2026, 5, 14),
         )
         self.assertEqual([c.account_id for c in filtered], ["B"])
+
+    def test_select_requested_receipt_candidates_sorts_filters_and_limits(self):
+        older = ReceiptCandidate(
+            account_id="A",
+            account_name="one",
+            source_kind="link",
+            source_index=0,
+            source_name="Receipt",
+            row_text="Payment receipt for February 28, 2026 amount $10.00",
+            discovered_at=1,
+            receipt_date="2026-02-28",
+            amount="10.00",
+            href=None,
+        )
+        in_range = ReceiptCandidate(
+            account_id="B",
+            account_name="two",
+            source_kind="link",
+            source_index=0,
+            source_name="Receipt",
+            row_text="Payment receipt for March 14, 2026 amount $11.00",
+            discovered_at=2,
+            receipt_date="2026-03-14",
+            amount="11.00",
+            href=None,
+        )
+        newer = ReceiptCandidate(
+            account_id="C",
+            account_name="three",
+            source_kind="link",
+            source_index=0,
+            source_name="Receipt",
+            row_text="Payment receipt for March 31, 2026 amount $12.00",
+            discovered_at=3,
+            receipt_date="2026-03-31",
+            amount="12.00",
+            href=None,
+        )
+
+        selected = select_requested_receipt_candidates(
+            [older, in_range, newer],
+            count=1,
+            start_date=date(2026, 3, 1),
+            end_date=date(2026, 3, 31),
+        )
+
+        self.assertEqual([c.account_id for c in selected], ["C"])
+
+    def test_select_requested_receipt_candidates_reports_empty_date_range(self):
+        candidate = ReceiptCandidate(
+            account_id="A",
+            account_name="one",
+            source_kind="link",
+            source_index=0,
+            source_name="Receipt",
+            row_text="Payment receipt for February 28, 2026 amount $10.00",
+            discovered_at=1,
+            receipt_date="2026-02-28",
+            amount="10.00",
+            href=None,
+        )
+
+        with self.assertRaisesRegex(RuntimeError, r"No receipts matched .*2026-03-01 to 2026-03-31"):
+            select_requested_receipt_candidates(
+                [candidate],
+                start_date=date(2026, 3, 1),
+                end_date=date(2026, 3, 31),
+            )
 
     def test_receipt_candidate_from_control_parses_date_amount_and_href(self):
         account = BillingAccount(account_id="acct-1", name="Primary", open=True)

@@ -2,6 +2,7 @@ from agent_skills import essence_builder
 from agent_skills.essence_builder import EssenceInterviewState, generate_manifest
 from agent_skills.essence_builder_manifest import manifest_from_answers
 from agent_skills.essence_builder_parsing import (
+    candidate_mentioned,
     credentials_from_answer,
     extract_list_from_answer,
     extract_model_id,
@@ -56,6 +57,9 @@ def test_extract_section_fragment_keeps_matching_lines_or_default():
 
 
 def test_manifest_parse_helpers_preserve_selection_rules():
+    assert candidate_mentioned("use screen control", "screen_control")
+    assert candidate_mentioned("use screen_control", "screen_control")
+    assert not candidate_mentioned("use clipboard", "screen_control")
     assert select_shared_skills("Use memory read write and web search") == [
         "memory_read_write",
         "web_search",

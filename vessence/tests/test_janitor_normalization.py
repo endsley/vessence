@@ -2,6 +2,7 @@ from memory.v1.janitor_normalization import (
     NORMALIZED_STYLE_V2,
     empty_normalization_result,
     long_term_normalization_candidates,
+    raw_doc_chars,
     rewrite_normalization_prompt,
     rewritten_normalized_metadata,
     split_plan_memories,
@@ -90,6 +91,10 @@ def test_split_plan_memories_preserves_llm_plan_cleanup_behavior():
 
 def test_split_normalized_metadatas_preserve_split_shape():
     source = row("source", "original long memory", subtopic="root")
+    assert raw_doc_chars(row("source", " original long memory ", subtopic="root")) == len(
+        "original long memory"
+    )
+    assert raw_doc_chars({"id": "missing"}) == 0
 
     metadatas = split_normalized_metadatas(
         source,

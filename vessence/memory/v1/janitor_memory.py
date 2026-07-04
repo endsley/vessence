@@ -40,11 +40,13 @@ from memory.v1.janitor_consolidation import (
 from memory.v1.janitor_code_verification import (
     code_memory_records_from_collection,
     code_memory_verification_sort_key,
+    code_verification_metadata,
     code_verification_report_markdown,
     code_verification_prompt,
     code_verification_result,
     frontier_fix_prompt,
     is_code_memory as _is_code_memory,
+    json_object_from_text,
     split_reverification_candidates,
 )
 from memory.v1.janitor_duplicates import (
@@ -899,7 +901,6 @@ def run_janitor(max_sessions: int = 2, max_topics: int = 3):
 # before editing ChromaDB.
 
 import subprocess as _sp
-import re as _re
 
 _CODEX_BIN = "codex"
 _VESSENCE_HOME = str(Path(__file__).resolve().parents[2])
@@ -928,13 +929,12 @@ def _stamp_code_verification(
     corrected_text: str | None = None,
 ) -> dict:
     """Persist verification metadata so nightly runs can skip fresh checks."""
-    meta = dict(mem.get("metadata") or {})
-    meta["code_verified_at"] = _utcnow_iso()
-    meta["code_verification_status"] = status
-    if explanation:
-        meta["code_verification_note"] = explanation[:240]
-    else:
-        meta.pop("code_verification_note", None)
+    meta = code_verification_metadata(
+        mem.get("metadata"),
+        status=status,
+        verified_at=_utcnow_iso(),
+        explanation=explanation,
+    )
     try:
         update_kwargs = {"ids": [mem["id"]], "metadatas": [meta]}
         if corrected_text is not None:
@@ -967,13 +967,10 @@ def _verify_one_memory(mem: dict, codex_timeout: int = 7200) -> dict:
     except FileNotFoundError:
         return {"verdict": "ERROR", "explanation": "codex_not_found"}
 
-    json_match = _re.search(r'\{[\s\S]*\}', raw)
-    if not json_match:
-        return {"verdict": "ERROR", "explanation": f"parse_fail: {raw[:200]}"}
-    try:
-        return json.loads(json_match.group())
-    except json.JSONDecodeError:
-        return {"verdict": "ERROR", "explanation": f"json_decode: {raw[:200]}"}
+    parsed, parse_error = json_object_from_text(raw)
+    if parse_error:
+        return {"verdict": "ERROR", "explanation": f"{parse_error}: {raw[:200]}"}
+    return parsed
 
 
 def _apply_fix_via_frontier(mem: dict, codex_finding: dict, col,
@@ -996,13 +993,9 @@ def _apply_fix_via_frontier(mem: dict, codex_finding: dict, col,
     except Exception as e:
         return {"action": "error", "reason": f"frontier_failed: {e}"}
 
-    json_match = _re.search(r'\{[\s\S]*\}', raw)
-    if not json_match:
-        return {"action": "error", "reason": f"parse_fail: {raw[:200]}"}
-    try:
-        action = json.loads(json_match.group())
-    except json.JSONDecodeError:
-        return {"action": "error", "reason": f"json_decode: {raw[:200]}"}
+    action, parse_error = json_object_from_text(raw)
+    if parse_error:
+        return {"action": "error", "reason": f"{parse_error}: {raw[:200]}"}
 
     act = action.get("action", "keep").lower()
     reason = action.get("reason", "")

@@ -11,6 +11,7 @@ from agent_skills.ra_research_codex_prompt import (
     codex_synthesis_payload,
     codex_synthesis_prompt,
     non_json_codex_result,
+    source_ids_from_summaries,
 )
 
 
@@ -46,6 +47,14 @@ def test_codex_synthesis_payload_preserves_contract_shape():
     assert payload["all_cached_source_summaries"][0]["source_id"] == "s1"
     assert payload["required_output"]["format"] == "strict JSON object only"
     assert "useful_report_markdown" in payload["required_output"]["keys"]
+
+
+def test_source_ids_from_summaries_preserves_missing_source_slots():
+    assert source_ids_from_summaries([{"source_id": "new1"}, {}, {"source_id": "new3"}]) == [
+        "new1",
+        "",
+        "new3",
+    ]
 
 
 def test_codex_payload_contract_helpers_preserve_safety_policy_and_required_keys():

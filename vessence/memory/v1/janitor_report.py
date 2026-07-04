@@ -9,6 +9,10 @@ def forgettable_purged_count(expired_purged: int, old_forgettable_purged: int) -
     return expired_purged + old_forgettable_purged
 
 
+def merge_count(merge_log: list[dict[str, Any]]) -> int:
+    return len(merge_log)
+
+
 def topics_processed_payload(
     *,
     user_collection_name: str,
@@ -50,8 +54,11 @@ def janitor_report_payload(
     return {
         "last_run": run_timestamp,
         "vectors_reduced": total_reduced,
-        "merges_performed": len(merge_log),
-        "forgettable_memories_purged": forgettable_purged_count(expired_purged, old_forgettable_purged),
+        "merges_performed": merge_count(merge_log),
+        "forgettable_memories_purged": forgettable_purged_count(
+            expired_purged,
+            old_forgettable_purged,
+        ),
         "forgettable_expired_by_ttl": expired_purged,
         "forgettable_expired_by_age": old_forgettable_purged,
         "permanent_memories_protected": permanent_count,
@@ -88,7 +95,7 @@ def janitor_history_entry(
     return {
         "timestamp": run_timestamp,
         "vectors_reduced": total_reduced,
-        "merges_performed": len(merge_log),
+        "merges_performed": merge_count(merge_log),
         "forgettable_purged": forgettable_purged_count(expired_purged, old_forgettable_purged),
         "topics_with_merges": topics_with_merges(merge_log),
         "conversation_archival": conversation_archival,

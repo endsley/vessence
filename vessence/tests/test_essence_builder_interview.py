@@ -3,6 +3,7 @@ from agent_skills.essence_builder import EssenceInterviewState
 from agent_skills.essence_builder_interview import (
     extract_essence_name,
     format_questions,
+    numbered_questions,
     progress_summary,
     section_display_name,
     section_intro,
@@ -33,6 +34,7 @@ def test_format_questions_and_section_intro_preserve_optional_layout():
         }
     }
 
+    assert numbered_questions(["One?", "Two?"], start=3) == ["3. One?", "4. Two?"]
     assert format_questions(questions, 0, include_optional=False) == "1. Required one?\n2. Required two?"
     assert format_questions(questions, 0, include_optional=True) == (
         "1. Required one?\n"

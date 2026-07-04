@@ -23,6 +23,9 @@ _NUM_UNIT_RE = re.compile(
     r"ninety|half)\b)\s*(hours?|hrs?|minutes?|mins?|seconds?|secs?|h|m|s)\b",
     re.I,
 )
+DELETE_VERBS = ("delete", "remove", "drop", "get rid of", "scrap")
+ALL_TIMER_DELETE_PHRASES = ("all my timers", "all the timers", "every timer", "all timers")
+DELETE_LABEL_STOPWORDS = {"a", "an", "that", "this", "my", "the"}
 
 
 def unit_to_ms(value: float, unit: str) -> int:
@@ -132,14 +135,18 @@ def ordinal_timer_index(prompt: str, *, timer_required: bool) -> int | None:
     return None
 
 
+def is_delete_label_candidate(label: str, *, allow_timer_label: bool = True) -> bool:
+    blocked = DELETE_LABEL_STOPWORDS if allow_timer_label else DELETE_LABEL_STOPWORDS | {"timer"}
+    return bool(label) and label not in blocked
+
+
 def extract_delete_target(prompt_lower: str) -> dict | None:
     """Detect delete-specific intent and extract which timer to delete."""
     if "timer" not in prompt_lower:
         return None
-    verbs = ("delete", "remove", "drop", "get rid of", "scrap")
-    if not any(verb in prompt_lower for verb in verbs):
+    if not any(verb in prompt_lower for verb in DELETE_VERBS):
         return None
-    if any(word in prompt_lower for word in ("all my timers", "all the timers", "every timer", "all timers")):
+    if any(phrase in prompt_lower for phrase in ALL_TIMER_DELETE_PHRASES):
         return None
     match = re.search(r"\b(?:the\s+)?(\d+)(?:st|nd|rd|th)?\s*timer\b", prompt_lower)
     if match:
@@ -156,7 +163,7 @@ def extract_delete_target(prompt_lower: str) -> dict | None:
     )
     if match:
         label = match.group(1).strip()
-        if label and label not in ("a", "an", "that", "this", "my", "the"):
+        if is_delete_label_candidate(label):
             return {"label": label}
     return None
 
@@ -181,7 +188,7 @@ def parse_delete_phrase(phrase: str) -> dict | None:
     )
     if match:
         label = match.group(1).strip()
-        if label and label not in ("a", "an", "that", "this", "my", "the", "timer"):
+        if is_delete_label_candidate(label, allow_timer_label=False):
             return {"label": label}
     return None
 

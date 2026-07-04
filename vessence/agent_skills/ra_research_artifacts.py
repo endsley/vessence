@@ -12,23 +12,29 @@ from bs4 import BeautifulSoup
 from agent_skills.ra_research_text import clean_text
 
 
+HTML_NOISE_TAGS = ("script", "style", "nav", "footer", "header", "aside")
+PMC_XML_NOISE_TAGS = ("ref-list", "table-wrap", "fig", "permissions")
+
+
 def slugify(value: str, max_len: int = 80) -> str:
     value = re.sub(r"[^A-Za-z0-9_.-]+", "-", value.strip()).strip("-").lower()
     return (value or "source")[:max_len]
 
 
-def html_to_text(raw_html: str) -> str:
-    soup = BeautifulSoup(raw_html, "html.parser")
-    for tag in soup(["script", "style", "nav", "footer", "header", "aside"]):
+def text_without_tags(raw_text: str, *, parser: str, tags: tuple[str, ...]) -> str:
+    soup = BeautifulSoup(raw_text, parser)
+    for tag in soup(tags):
         tag.decompose()
     return clean_text(soup.get_text(" "))
+
+
+def html_to_text(raw_html: str) -> str:
+    return text_without_tags(raw_html, parser="html.parser", tags=HTML_NOISE_TAGS)
 
 
 def pmc_xml_to_text(xml_text: str) -> str:
-    soup = BeautifulSoup(xml_text, "xml")
-    for tag in soup(["ref-list", "table-wrap", "fig", "permissions"]):
-        tag.decompose()
-    return clean_text(soup.get_text(" "))
+    return text_without_tags(xml_text, parser="xml", tags=PMC_XML_NOISE_TAGS)
+
 
 
 def is_jats_article_xml(xml_text: str) -> bool:

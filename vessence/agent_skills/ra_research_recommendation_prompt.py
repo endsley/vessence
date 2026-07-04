@@ -47,7 +47,12 @@ def recommendation_user_prompt(
     )
 
 
+def has_safety_guard_text(generated: str) -> bool:
+    text = generated.lower()
+    return "medical advice" in text or "rheumatologist" in text
+
+
 def ensure_safety_note(generated: str) -> str:
-    if "medical advice" not in generated.lower() and "rheumatologist" not in generated.lower():
+    if not has_safety_guard_text(generated):
         return SAFETY_NOTE + generated
     return generated

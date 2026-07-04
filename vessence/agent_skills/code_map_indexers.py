@@ -10,6 +10,7 @@ SKIP_FILES = {"__init__.py"}
 
 MAX_ENTRIES_PRIORITY = 50
 MAX_ENTRIES_SECONDARY = 20
+ROUTE_METHODS = {"get", "post", "put", "delete", "patch"}
 
 
 def count_lines(filepath: str) -> int:
@@ -18,6 +19,17 @@ def count_lines(filepath: str) -> int:
             return sum(1 for _ in handle)
     except Exception:
         return 0
+
+
+def route_entry_from_decorator(decorator: ast.expr, lineno: int) -> str:
+    if not isinstance(decorator, ast.Call) or not isinstance(decorator.func, ast.Attribute):
+        return ""
+    method = decorator.func.attr
+    if method not in ROUTE_METHODS:
+        return ""
+    if not decorator.args or not isinstance(decorator.args[0], ast.Constant):
+        return ""
+    return f"  {method.upper()} {decorator.args[0].value} → L{lineno}"
 
 
 def index_python_file(filepath: str) -> list[str]:
@@ -42,12 +54,9 @@ def index_python_file(filepath: str) -> list[str]:
             end = getattr(node, "end_lineno", node.lineno)
             route = ""
             for dec in node.decorator_list:
-                if isinstance(dec, ast.Call) and isinstance(dec.func, ast.Attribute):
-                    attr = dec.func.attr
-                    if attr in ("get", "post", "put", "delete", "patch"):
-                        if dec.args and isinstance(dec.args[0], ast.Constant):
-                            route = f"  {attr.upper()} {dec.args[0].value} → L{node.lineno}"
-                            break
+                route = route_entry_from_decorator(dec, node.lineno)
+                if route:
+                    break
             if route:
                 entries.append(route)
             else:

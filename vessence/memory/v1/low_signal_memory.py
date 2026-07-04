@@ -35,10 +35,30 @@ LOW_SIGNAL_SHORT_TERM_PROTOCOL_PATTERNS = (
     r"\bclass protocol you provided\b",
     r"\bnew turn.*class protocol metadata\b",
 )
+LOW_SIGNAL_SHORT_TERM_INLINE_MARKERS = (
+    "<class_protocol",
+    "[extracted params]",
+    "[current conversation state]",
+    "[standing brain mode]",
+)
+CLASS_PROTOCOL_HEADER_RE = r"^\*{0,2}\s*class protocol:"
 
 
 def _matches_any(patterns: tuple[str, ...], text: str) -> bool:
     return any(re.search(pattern, text, re.IGNORECASE) for pattern in patterns)
+
+
+def has_inline_protocol_marker(text: str) -> bool:
+    lowered = text.lower()
+    return any(marker in lowered for marker in LOW_SIGNAL_SHORT_TERM_INLINE_MARKERS)
+
+
+def is_low_signal_short_term_protocol_text(text: str) -> bool:
+    if not _matches_any(LOW_SIGNAL_SHORT_TERM_PROTOCOL_PATTERNS, text):
+        return False
+    if re.search(CLASS_PROTOCOL_HEADER_RE, text, re.IGNORECASE):
+        return True
+    return _matches_any(LOW_SIGNAL_SHORT_TERM_META_PREFIX_PATTERNS, text) or has_inline_protocol_marker(text)
 
 
 def is_low_signal_shared_memory(doc: str, meta: dict | None) -> bool:
@@ -61,17 +81,4 @@ def is_low_signal_short_term_memory(doc: str, meta: dict | None) -> bool:
         return True
     if topic == "context_snapshot":
         return True
-    protocol_hit = _matches_any(LOW_SIGNAL_SHORT_TERM_PROTOCOL_PATTERNS, text)
-    if not protocol_hit:
-        return False
-    if re.search(r"^\*{0,2}\s*class protocol:", text, re.IGNORECASE):
-        return True
-    return _matches_any(LOW_SIGNAL_SHORT_TERM_META_PREFIX_PATTERNS, text) or any(
-        marker in text.lower()
-        for marker in (
-            "<class_protocol",
-            "[extracted params]",
-            "[current conversation state]",
-            "[standing brain mode]",
-        )
-    )
+    return is_low_signal_short_term_protocol_text(text)

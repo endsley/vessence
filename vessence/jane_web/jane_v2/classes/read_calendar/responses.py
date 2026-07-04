@@ -25,6 +25,14 @@ def serialize_events_for_pending(events: list[dict]) -> list[dict]:
     return [{key: event.get(key, "") for key in EVENT_PENDING_KEYS} for event in events]
 
 
+def last_range_pending_data(last_range: str) -> dict:
+    return {"last_range": last_range}
+
+
+def range_events_pending_data(last_range: str, events: list[dict]) -> dict:
+    return {"last_range": last_range, "events": events}
+
+
 def build_range_followup_response(
     spoken: str,
     range_hint: str,
@@ -34,14 +42,11 @@ def build_range_followup_response(
     if events:
         question = DETAIL_FOLLOWUP
         awaiting = "event_detail_or_stop"
-        data = {
-            "last_range": range_hint,
-            "events": serialize_events_for_pending(events),
-        }
+        data = range_events_pending_data(range_hint, serialize_events_for_pending(events))
     else:
         question = ANOTHER_DAY_QUESTION
         awaiting = "another_day_or_stop"
-        data = {"last_range": range_hint}
+        data = last_range_pending_data(range_hint)
 
     return {
         "text": f"{spoken} {question}",
@@ -62,7 +67,7 @@ def build_event_detail_response(text: str, event: dict, last_range: str) -> dict
             "pending_action": build_calendar_pending(
                 "another_day_or_stop",
                 ANOTHER_DAY_QUESTION,
-                {"last_range": last_range},
+                last_range_pending_data(last_range),
             ),
         },
     }
@@ -76,7 +81,7 @@ def build_another_day_response(last_range: str) -> dict:
             "pending_action": build_calendar_pending(
                 "another_day_or_stop",
                 ANOTHER_DAY_QUESTION,
-                {"last_range": last_range},
+                last_range_pending_data(last_range),
             ),
         },
     }
@@ -90,7 +95,7 @@ def build_event_choice_response(last_range: str, events: list[dict]) -> dict:
             "pending_action": build_calendar_pending(
                 "awaiting_event_choice",
                 EVENT_CHOICE_QUESTION,
-                {"last_range": last_range, "events": events},
+                range_events_pending_data(last_range, events),
             ),
         },
     }

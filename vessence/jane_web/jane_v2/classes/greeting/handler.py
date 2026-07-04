@@ -27,6 +27,10 @@ from .canned import (
 logger = logging.getLogger(__name__)
 
 
+def greeting_response(text: str) -> dict:
+    return {"text": text}
+
+
 async def handle(prompt: str, context: str = "") -> dict | None:
     """Generate a quick greeting reply.
 
@@ -38,7 +42,7 @@ async def handle(prompt: str, context: str = "") -> dict | None:
     canned = _canned_reply(prompt)
     if canned:
         logger.info("greeting handler: canned → %r", canned[:60])
-        return {"text": canned}
+        return greeting_response(canned)
 
     full_prompt = _build_greeting_prompt(prompt, context)
 
@@ -59,4 +63,4 @@ async def handle(prompt: str, context: str = "") -> dict | None:
     text = _clean_greeting_text(text)
 
     logger.info("greeting handler: %r → %r", prompt[:40], text[:80])
-    return {"text": text}
+    return greeting_response(text)

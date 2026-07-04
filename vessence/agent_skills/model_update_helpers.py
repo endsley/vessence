@@ -47,3 +47,7 @@ def discord_bot_headers(discord_token: str) -> dict:
         "Authorization": f"Bot {discord_token}",
         "Content-Type": "application/json",
     }
+
+
+def discord_message_payload(message: str) -> dict:
+    return {"content": message}

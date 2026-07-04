@@ -183,6 +183,10 @@ def extract_structured(kind: str, turn_text: str,
 # 6. Top-level entry point
 # ---------------------------------------------------------------------------
 
+def clean_turn_message(message: str, cleaner) -> str:
+    return re.sub(r"\s+", " ", cleaner(message or "")).strip()
+
+
 def build_short_term_note(
     user_msg: str,
     assistant_msg: str,
@@ -207,8 +211,8 @@ def build_short_term_note(
     to take ``search_text`` as the second element, or use indexing.
     """
     cleaner = cleaner or (lambda s: s)
-    user_clean = re.sub(r"\s+", " ", cleaner(user_msg or "")).strip()
-    asst_clean = re.sub(r"\s+", " ", cleaner(assistant_msg or "")).strip()
+    user_clean = clean_turn_message(user_msg, cleaner)
+    asst_clean = clean_turn_message(assistant_msg, cleaner)
 
     if not user_clean and not asst_clean:
         return "", "", {"turn_kind": "general"}, True

@@ -12,14 +12,16 @@ from __future__ import annotations
 
 import logging
 
-logger = logging.getLogger(__name__)
+from jane_web.jane_v2.classes.message_guard_helpers import (
+    ARCHITECTURE_GUARD_WORDS as _ARCH_WORDS,
+    contains_architecture_phrase,
+)
 
-_ARCH_WORDS = ("architecture", "infrastructure", "pipeline", "handler", "classifier", "stage")
+logger = logging.getLogger(__name__)
 
 
 async def handle(prompt: str, context: str = "", params: dict | None = None) -> dict | None:
-    p_lower = prompt.lower()
-    if any(w in p_lower for w in _ARCH_WORDS):
+    if contains_architecture_phrase(prompt):
         return {"wrong_class": True}
 
     logger.info("delete_messages handler: escalating to Stage 3 by design")

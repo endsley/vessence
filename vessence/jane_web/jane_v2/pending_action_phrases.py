@@ -101,11 +101,12 @@ def is_cancel(text: str) -> bool:
     return normalize_reply(text) in CANCEL_PHRASES
 
 
+def has_edit_prefix(normalized: str) -> bool:
+    return any(normalized.startswith(prefix.rstrip().lower()) for prefix in EDIT_PREFIXES)
+
+
 def is_edit_intent(text: str) -> bool:
     normalized = normalize_reply(text)
     if not normalized or normalized in CONFIRM_PHRASES or normalized in CANCEL_PHRASES:
         return False
-    for prefix in EDIT_PREFIXES:
-        if normalized.startswith(prefix.rstrip().lower()):
-            return True
-    return False
+    return has_edit_prefix(normalized)

@@ -71,6 +71,10 @@ def split_plan_memories(
     ][:max_items]
 
 
+def raw_doc_chars(row: dict[str, Any]) -> int:
+    return len(str(row.get("doc") or "").strip())
+
+
 def rewrite_normalization_prompt(row: dict[str, Any], doc: str, *, max_chars: int) -> str:
     return (
         "Rewrite this long-term memory into one compact durable memory.\n"
@@ -88,7 +92,7 @@ def split_normalized_metadatas(
     *,
     now_iso: str,
 ) -> list[dict[str, Any]]:
-    raw_chars = len(str(row.get("doc") or "").strip())
+    raw_chars = raw_doc_chars(row)
     total = len(memories)
     return [
         {
@@ -113,7 +117,7 @@ def rewritten_normalized_metadata(
 ) -> dict[str, Any]:
     return {
         **(row.get("meta") or {}),
-        "raw_chars": len(str(row.get("doc") or "").strip()),
+        "raw_chars": raw_doc_chars(row),
         "summary_chars": len(rewritten),
         "normalized_style": NORMALIZED_STYLE_V2,
         "timestamp": now_iso,

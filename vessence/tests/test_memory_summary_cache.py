@@ -42,6 +42,19 @@ def test_prune_cache_entries_removes_expired_and_sorts_newest_first():
     assert [item.summary for item in pruned] == ["newer", "older"]
 
 
+def test_session_last_used_at_reports_newest_entry_or_now():
+    older = entry("older", 20)
+    newer = entry("newer", 5)
+
+    assert cache.session_last_used_at([older, newer]) == newer.created_at
+
+    before = cache.utcnow()
+    empty_used_at = cache.session_last_used_at([])
+    after = cache.utcnow()
+
+    assert before <= empty_used_at <= after
+
+
 def test_store_and_lookup_cached_memory_summary_uses_best_similarity():
     cache.store_cached_memory_summary("session", "Query One", [1.0, 0.0], "first")
     cache.store_cached_memory_summary("session", "Query Two", [0.9, 0.1], "second")

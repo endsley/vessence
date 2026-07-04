@@ -6,6 +6,7 @@ import pytest
 from agent_skills import calendar_tools
 from agent_skills.calendar_time_helpers import (
     dt_to_iso_utc,
+    normalized_range_hint,
     reminder_overrides_body,
     resolve_range_for_now,
     to_local_naive_iso,
@@ -20,6 +21,12 @@ def test_calendar_tools_uses_extracted_time_helpers():
     assert calendar_tools._to_local_naive_iso is to_local_naive_iso
     assert calendar_tools._resolve_range_for_now is resolve_range_for_now
     assert calendar_tools._reminder_overrides_body is reminder_overrides_body
+
+
+def test_normalized_range_hint_preserves_calendar_alias_rules() -> None:
+    assert normalized_range_hint(None) == "today"
+    assert normalized_range_hint(" This Week ") == "this_week"
+    assert normalized_range_hint("next 90 days") == "next_90_days"
 
 
 def test_resolve_range_for_now_preserves_day_week_and_next_ranges():

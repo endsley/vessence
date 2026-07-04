@@ -18,9 +18,11 @@ from jane_web.jane_v2.classes.send_message.responses import (
     build_confirmation_response,
     build_open_draft_cancel_response,
     build_open_draft_send_response,
+    build_pending_message_response,
     build_revision_request_response,
     build_send_marker,
     build_sent_response,
+    draft_pending_data,
 )
 from jane_web.jane_v2.ollama_client import post_local_llm_response
 
@@ -46,6 +48,51 @@ def test_send_message_resume_predicate_accepts_handler_or_awaiting_data() -> Non
     assert handler._should_resume_send_message({"data": {"awaiting": "revised_body"}})
     assert not handler._should_resume_send_message({"handler_class": "timer"})
     assert not handler._should_resume_send_message(None)
+
+
+def test_send_message_pending_response_helpers_preserve_draft_shapes() -> None:
+    assert draft_pending_data("+1555", "Mia") == {
+        "draft": {"phone": "+1555", "display": "Mia"}
+    }
+    assert draft_pending_data("+1555", "Mia", "Running late") == {
+        "draft": {"phone": "+1555", "display": "Mia", "body": "Running late"}
+    }
+
+    response = build_pending_message_response(
+        "Question?",
+        "send_confirmation",
+        draft_pending_data("+1555", "Mia", "Running late"),
+    )
+    assert response["text"] == "Question?"
+    pending = response["structured"]["pending_action"]
+    assert pending["handler_class"] == "send message"
+    assert pending["awaiting"] == "send_confirmation"
+    assert pending["data"]["draft"]["body"] == "Running late"
+
+
+def test_send_message_open_draft_fields_preserve_fifo_fallbacks() -> None:
+    assert handler._open_draft_fields(
+        {
+            "data": {
+                "draft_id": "draft-1",
+                "query": "Mia",
+                "display_name": "Mia W",
+                "recipient": "wife",
+                "body": "Running late",
+            }
+        }
+    ) == ("draft-1", "Mia", "Running late")
+    assert handler._open_draft_fields({"data": {"display_name": "Mia W"}}) == (
+        "",
+        "Mia W",
+        "",
+    )
+    assert handler._open_draft_fields({"data": {"recipient": "wife"}}) == (
+        "",
+        "wife",
+        "",
+    )
+    assert handler._open_draft_fields({"data": "bad"}) == ("", "them", "")
 
 
 def test_send_message_resume_draft_fields_accept_nested_and_legacy_shapes() -> None:
