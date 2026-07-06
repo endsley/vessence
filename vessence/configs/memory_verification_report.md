@@ -1,16 +1,17 @@
-# Memory Verification Report — 2026-07-05 02:42
+# Memory Verification Report — 2026-07-06 02:55
 
-Checked: 20 | Stale: 12 | Fixed: 12 | Deleted: 0 | Errors: 0 | Skipped recent: 249
+Checked: 20 | Stale: 13 | Fixed: 12 | Deleted: 0 | Errors: 0 | Skipped recent: 250
 
-- **UPDATED** `0b71af24-159` — Confirmed the service unit and direct backend.* import failure from the backend cwd; Codex was right that the old crash implication is stale because the current wrappers fall back to top-level imports.
-- **UPDATED** `2b8e17ab-9cc` — The path, symlink, and manifest metadata are current. Codex was right that the 8 AM/6 PM manifest schedule is stale/ambiguous and that news_fetcher.py defaults to qwen2.5:7b, but it overstated essence_scheduler as the active scheduler: current crontab runs Daily Briefing directly at 2:10 AM.
-- **UPDATED** `15937b95-ab3` — Codex was right: the current code confirms the substantive claims, but the existing memory is truncated at the end and should be repaired.
-- **UPDATED** `47b260f4-153` — Confirmed against setup.sh, startup_code/first_run_setup.py, startup_code/install_codex_skills.py, codex_skills, and ~/.codex/skills. Codex was right; the architecture is current and the stored memory is stale only because its final sentence is truncated.
-- **UPDATED** `655b0dea-7d0` — Codex was right: the code-backed claims still match jane_web/attachment_context.py, jane_v2/jane_v3 pipelines, ChatViewModel.kt, ChatRepository.kt, and ChatRequest; only the original memory's final Android sentence was truncated.
-- **UPDATED** `33f29c3b-dc8` — Confirmed from code and filesystem: Codex was right that the core split is still true, but the memory needed caveats for missing manifest type defaults, MCP-style skill folders, and legacy TOOLS_DIR users.
-- **UPDATED** `78c35991-0ca` — Confirmed in actual code: Gradle and changelog behavior still match, bump_android_version.py still handles versioning/build/deploy/marketing links, but the main.py fallback-literal update claim is stale because main.py now reads through ReleaseDownloads and the helper regex no longer matches.
-- **UPDATED** `80d5763d-bd7` — Verified against jane/config.py, jane_web/jane_v2/models.py, jane_web/model_settings.py, jane_web/main.py, jane_web/env_settings.py, and llm_brain/v1/standing_brain.py. Codex was right that the old memory is truncated/incomplete and needs the current env vars plus the local-model source-of-truth note.
-- **UPDATED** `3e6256d1-d80` — Source review confirms Codex was mostly right, but live crontab is readable here and the cron drift details needed updating.
-- **UPDATED** `2f463691-64e` — Codex was right: the behavior still matches, but provider resolution and the persistence predicate now live in `jane_web/proxy_brain.py` and are imported by `jane_web/jane_proxy.py`.
-- **UPDATED** `1f69f5e7-dac` — Current code confirms the original StandingBrainManager facts but the memory is incomplete because Codex now has a separate standing_codex app-server path enabled by default for web/Android, with persistent/direct fallbacks.
-- **UPDATED** `deffa535-8a1` — Actual code confirms Codex's verdict overall; the old memory is truncated at `--set` and omits the shared helper and non-Claude command shapes.
+- **UPDATED** `00b6964f-f83` — Confirmed against /home/chieh/code/waterlily code. Codex was right: the reconciliation_context pieces exist, but the cached error-check route disables both AcuBliss source-link backfill and reconciliation_context refresh, so the old cached-display claim was stale/truncated.
+- **UPDATED** `8233574a-5be` — Codex was right that the old memory's line numbers were stale and the wait_until_safe() call-site list was incomplete; code also shows an additional should_defer() resource gate in essence_scheduler.py.
+- **UPDATED** `072972dd-578` — Code confirms the policy and behavior; the stale part is the guidance filename, which is CLAUDE.md, not CLAUDE.
+- **KEPT** `27c44480-2e6` — Codex was wrong to mark this partial here: I read `agent_skills/nightly_self_improve.py`, `configs/crontab_backup.txt`, live `crontab -l`, and the orchestrator log. The live crontab and backup each have exactly one uncommented exact entry, the code still uses the stated Python path/log, and the log shows the 2026-07-06 01:00:01 run.
+- **UPDATED** `90ed78a5-a4d` — Codex was right: the old memory is truncated and missing caveats; code confirms the active Stage 3 path and skip/filter behavior.
+- **UPDATED** `cbba9406-4a9` — Confirmed against AGENTS.md, jane_web/jane_v2/models.py, and jane/config.py. Codex was right: the substantive claims are current; only the dangling trailing fragment `Wit` should be removed.
+- **UPDATED** `e75d7ba1-c90` — Verified against `configs/MCP_SPEC.md`, `jane/tool_loader.py`, and `/home/chieh/ambient/skills`; Codex was right that the stored memory is truncated/incomplete.
+- **UPDATED** `160c0bce-9ec` — Verified against the actual loader, context builder, proxy, model code, Daily Briefing fetcher, live crontab, and cron docs. Codex was mostly right, but the crontab is now readable and the loader's current skipped folders should be captured.
+- **UPDATED** `ac06e647-af7` — Codex was right: the stored memory is truncated, and the current code confirms mcp.json is required while prompt.md and server hooks are optional/lenient.
+- **UPDATED** `0845b572-f6a` — Verified the repo root, hook config, pre-commit kernel list, tracked symlink/ignored skills state, tool_loader default path, hygiene script failures, and LOCAL_LLM default from the actual checkout; Codex's correction is substantively right.
+- **UPDATED** `0e79d2ac-b55` — Code confirms the original memory's substantive claims, but it is truncated. I verified the route selection in `jane_web/main.py`, live process env, model source in `jane_web/jane_v2/models.py`, v3 ChromaDB+qwen classifier code, and multi-user/session scoping files.
+- **UPDATED** `df317381-9eb` — Confirmed in source, manifest, Gradle, generated tool sources, and the external phone tool source; Codex was right substantively, but the stored memory is truncated.
+- **UPDATED** `02864895-c62` — Confirmed against current code. The old memory's main claims are still correct, but it is truncated and omits ArticleReaderV2Activity as another HybridTtsManager instantiation.
