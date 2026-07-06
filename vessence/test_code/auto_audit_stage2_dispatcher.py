@@ -208,11 +208,6 @@ async def test_dispatch_rejects_dict_without_text_key(registry_patch, gate_pass)
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(
-    reason="Dispatcher calls result.get('wrong_class') before checking that result is a dict.",
-    raises=AttributeError,
-    strict=True,
-)
 async def test_dispatch_rejects_non_dict_handler_return_without_crashing(
     registry_patch,
     gate_pass,
