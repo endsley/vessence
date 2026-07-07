@@ -190,3 +190,6 @@ test_code/auto_audit_handler.py::test_research_or_online_phrases_escalate_before
 test_code/auto_audit_handler.py::test_r
 ```
 
+## 2026-07-07 01:00 — jane_web/jane_v2/recent_context.py
+Auditor crashed: Command '['git', 'commit', '-m', 'auto-audit: add tests for jane_web/jane_v2/recent_context.py', '--no-verify']' returned non-zero exit status 1.
+

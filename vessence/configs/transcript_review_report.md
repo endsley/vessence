@@ -1,144 +1,129 @@
-# Transcript Quality Review — 2026-07-05
+# Transcript Quality Review — 2026-07-06
 
-Generated: 2026-07-06 01:41:36
+Generated: 2026-07-07 01:39:08
 
 ## Issue 1 [LOW]
 
-**Turn:** 2026-07-05 01:20:03
-**User said:** right now, you are using the same codex process for each prompt instead of spawning
+**Turn:** 2026-07-06 01:19:08
+**User said:** right now, you are using the same codex process for each prompt instead of spawning a
 
-**Problem:** Stage 1 emitted an unsupported class before falling back to others.
+**Problem:** Classifier emitted an unsupported intent label before falling back to others.
 
-**Root cause:** The classifier returned `force stage3`, which is outside the accepted class set. The wrapper coerced it to `others:Low`, so routing was acceptable but the classifier schema contract is loose.
+**Root cause:** The Stage 1 model returned `force stage3`, which is not in the allowed taxonomy. The pipeline safely mapped it to `others:Low` and escalated, so the user-facing routing was acceptable, but the classifier contract is too loose.
 
-**Suggested fix:** Constrain Stage 1 to the allowed enum with structured decoding, or explicitly normalize stage3-forcing aliases before logging and metrics.
+**Suggested fix:** Constrain Stage 1 output to the configured intent enum, or add explicit normalization for known meta labels like `force stage3` before logging them as unknown.
 
 **Log evidence:**
 ```
-2026-07-05 01:20:00 WARNING [intent_classifier.v3.classifier] v3: qwen returned unknown class 'force stage3' → others
+2026-07-06 01:19:06 WARNING [intent_classifier.v3.classifier] v3: qwen returned unknown class 'force stage3' → others
 ```
 ```
-2026-07-05 01:20:00 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (1207ms) params={}
-```
-```
-2026-07-05 01:20:02 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=132 sid_override=True class_protocol=n/a
+2026-07-06 01:19:06 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (1090ms) params={}
 ```
 
 ---
 
 ## Issue 2 [MEDIUM]
 
-**Turn:** 2026-07-05 01:20:27
-**User said:** use the source code as your guide
+**Turn:** 2026-07-06 01:22:39
+**User said:** please familiarize yourself with the waterlily project
 
-**Problem:** The follow-up was sent to Stage 3 without prior conversation or source context.
+**Problem:** Stage 1 classification was extremely slow for a request that only needed Stage 3 escalation.
 
-**Root cause:** The same audit session invoked Stage 3 with `history=0` and `file_ctx=False`, so this contextual follow-up was handled as an isolated prompt instead of being tied to the prior architecture question and grounded in source code.
+**Root cause:** The classifier took 37446ms before routing to `others:Low`. Nearby logs show local CLI LLM timeout and fallback/auth failures, suggesting the same overloaded or failing local model stack was delaying auxiliary processing.
 
-**Suggested fix:** Persist and pass conversation history for `sid_override` sessions, and attach repo/source context or route to a code-aware Stage 3 path when the user asks to use source code.
+**Suggested fix:** Add a short classifier timeout and fail-open to `others:Low` for complex/freeform requests, then run memory extraction asynchronously so Stage 1 latency is not tied to slow local LLM calls.
 
 **Log evidence:**
 ```
-2026-07-05 01:20:25 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (1612ms) params={}
+2026-07-06 01:20:12 WARNING [agent_skills.claude_cli_llm] Primary LLM failed: CLI timed out after 45s... Attempting fallback.
 ```
 ```
-2026-07-05 01:20:26 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=33 sid_override=True class_protocol=n/a
+2026-07-06 01:20:57 WARNING [agent_skills.claude_cli_llm] Fallback to gemini failed: CLI timed out after 45s...
 ```
 ```
-2026-07-05 01:20:27 INFO [jane.proxy] [audit-178322] stream_message brain=OpenAI history=0 msg_len=33 file_ctx=False
+2026-07-06 01:21:34 WARNING [memory.v1.short_term_extractor] short_term_extractor: LLM call failed: CLI (claude) failed (exit 1): Failed to authenticate. API Error: 401 Invalid authentication credentials
+```
+```
+2026-07-06 01:22:37 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (37446ms) params={}
 ```
 
 ---
 
-## Issue 3 [MEDIUM]
+## Issue 3 [LOW]
 
-**Turn:** 2026-07-05 01:22:17
-**User said:** please familiarize yourself with the waterlily project
+**Turn:** 2026-07-06 01:24:57
+**User said:** currently, the waterlily site is web only meant for browsers on laptops and computers,
 
-**Problem:** Stage 1 classification latency was extremely high.
+**Problem:** Classifier emitted another unsupported intent label before falling back to others.
 
-**Root cause:** The Stage 1 classifier took 65072ms before falling back to `others:Low`, which is far beyond a fast-path classifier budget.
+**Root cause:** Stage 1 returned `web automation`, which is not a configured class. The fallback to `others:Low` correctly escalated the complex coding request, but the classifier is still producing labels outside the allowed protocol.
 
-**Suggested fix:** Add a hard timeout around Stage 1, fall back to `others:Low` within a small latency budget, and investigate the classifier backend stall.
+**Suggested fix:** Update the Stage 1 prompt/schema to reject non-enum labels, or map `web automation` to `others` without warning when the request is a coding/project task.
 
 **Log evidence:**
 ```
-2026-07-05 01:21:25 WARNING [jane.web] heartbeat ping failed (1 in a row):
+2026-07-06 01:24:55 WARNING [intent_classifier.v3.classifier] v3: qwen returned unknown class 'web automation' → others
 ```
 ```
-2026-07-05 01:22:16 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (65072ms) params={}
+2026-07-06 01:24:55 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (1688ms) params={}
 ```
 
 ---
 
 ## Issue 4 [MEDIUM]
 
-**Turn:** 2026-07-05 01:22:17
-**User said:** please familiarize yourself with the waterlily project
+**Turn:** 2026-07-06 01:24:57
+**User said:** currently, the waterlily site is web only meant for browsers on laptops and computers,
 
-**Problem:** Project familiarization was invoked without visible project/source context.
+**Problem:** Stage 3 took over nine minutes to complete a coding request.
 
-**Root cause:** Stage 3 was called with `history=0` and `file_ctx=False` for a project-specific request. The logs do not show code context being attached before the OpenAI brain was streamed.
+**Root cause:** The Stage 3 stream ran from 01:24:56 to 01:34:13. During that window, the auxiliary local LLM stack timed out twice and then failed Claude auth, and heartbeat warnings appeared. The request eventually finished but with degraded UX.
 
-**Suggested fix:** For project-specific requests, route Stage 3 through the local code-agent path or attach indexed repo context before generation.
+**Suggested fix:** Separate Stage 3 execution from memory extraction/fallback LLM work, enforce per-subtask timeouts, and surface progress heartbeats so long coding tasks do not appear stalled.
 
 **Log evidence:**
 ```
-2026-07-05 01:22:17 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=54 sid_override=True class_protocol=n/a
+2026-07-06 01:24:56 INFO [jane.proxy] [audit-178331] stream_message brain=OpenAI history=0 msg_len=750 file_ctx=False
 ```
 ```
-2026-07-05 01:22:17 INFO [jane.proxy] [audit-178322] stream_message brain=OpenAI history=0 msg_len=54 file_ctx=False
+2026-07-06 01:25:39 WARNING [agent_skills.claude_cli_llm] Primary LLM failed: CLI timed out after 45s... Attempting fallback.
 ```
 ```
-2026-07-05 01:24:33 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage3 end-to-end (136529ms)
+2026-07-06 01:26:24 WARNING [agent_skills.claude_cli_llm] Fallback to gemini failed: CLI timed out after 45s...
+```
+```
+2026-07-06 01:26:30 WARNING [memory.v1.short_term_extractor] short_term_extractor: LLM call failed: CLI (claude) failed (exit 1): Failed to authenticate. API Error: 401 Invalid authentication credentials
+```
+```
+2026-07-06 01:34:13 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage3 end-to-end (557104ms)
 ```
 
 ---
 
-## Issue 5 [LOW]
+## Issue 5 [CRITICAL]
 
-**Turn:** 2026-07-05 01:24:39
-**User said:** currently, the waterlily site is web only meant for browsers on laptops and computers
+**Turn:** 2026-07-06 01:34:45
+**User said:** # Task: Self-heal android_crash_report: === VESSENCE CRASH REPORT ===
 
-**Problem:** Stage 1 emitted another unsupported class before falling back to others.
+**Problem:** Stage 3 execution was cancelled after the client disconnected or timed out.
 
-**Root cause:** The classifier returned `web automation`, which is not in the accepted taxonomy. It was coerced to `others:Low` and escalated.
+**Root cause:** The self-heal request was routed to Stage 3 correctly, but after about 261 seconds the proxy logged client disconnect and cancelled the brain stream. No final result reached the user.
 
-**Suggested fix:** Either add a first-class code/project-work category or teach the classifier to map implementation requests directly to the valid Stage 3 escalation label.
-
-**Log evidence:**
-```
-2026-07-05 01:24:37 WARNING [intent_classifier.v3.classifier] v3: qwen returned unknown class 'web automation' → others
-```
-```
-2026-07-05 01:24:37 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (1448ms) params={}
-```
-
----
-
-## Issue 6 [CRITICAL]
-
-**Turn:** 2026-07-05 01:24:39
-**User said:** currently, the waterlily site is web only meant for browsers on laptops and computers
-
-**Problem:** Stage 3 failed to complete the user request and was cancelled after about 15 minutes.
-
-**Root cause:** The Stage 3 stream stayed active for 922217ms, the client disconnected, and the brain execution was cancelled. The logs show no successful Stage 3 completion for the requested site-wide mobile UI work.
-
-**Suggested fix:** Move long code tasks to a background job with progress events and resumable client state, enforce Stage 3 execution budgets, and avoid cancelling useful work solely because the streaming client disconnects.
+**Suggested fix:** For long-running self-heal/code tasks, run Stage 3 as a resumable background job with persistent task state and stream reconnection instead of cancelling brain execution on client disconnect.
 
 **Log evidence:**
 ```
-2026-07-05 01:24:39 INFO [jane.proxy] [audit-178322] stream_message brain=OpenAI history=0 msg_len=750 file_ctx=False
+2026-07-06 01:34:44 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=1622 sid_override=True class_protocol=n/a
 ```
 ```
-2026-07-05 01:40:00 INFO [jane.proxy] [audit-178322] Client disconnected — waiting for adapter task to finish (brain still working)
+2026-07-06 01:39:06 INFO [jane.proxy] [audit-178331] Client disconnected — waiting for adapter task to finish (brain still working)
 ```
 ```
-2026-07-05 01:40:00 WARNING [jane.proxy] [audit-178322] Brain execution cancelled (stream) after 921061ms — likely client disconnect or timeout. Stack:
+2026-07-06 01:39:06 WARNING [jane.proxy] [audit-178331] Brain execution cancelled (stream) after 260874ms — likely client disconnect or timeout. Stack:
 ```
 ```
-2026-07-05 01:40:00 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage3 end-to-end (922217ms)
+2026-07-06 01:39:06 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage3 end-to-end (261230ms)
 ```
 
 ---
