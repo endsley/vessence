@@ -105,6 +105,8 @@ def test_build_session_summary_prompt_preserves_qwen_contract():
     assert "Latest user message:\nclean user" in prompt
     assert "Latest Jane response:\nclean assistant" in prompt
     assert "Keep max 3 topics" in prompt
+    assert "point, scope, and outcome/current status" in prompt
+    assert "state reflect the newer truth" in prompt
     assert prompt.endswith('```json\n{"topics":[')
 
 

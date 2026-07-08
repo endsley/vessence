@@ -40,6 +40,10 @@ def test_parse_json_blob_handles_fences_embedded_objects_strings_and_lists() -> 
     )
 
     assert parsed == {
+        "purpose": [],
+        "scope": [],
+        "outcome": [],
+        "current_status": [],
         "facts": ["one fact with { braces } in text"],
         "decisions": ["decided", "42"],
         "open_loops": [],
@@ -59,6 +63,8 @@ def test_parse_json_blob_returns_none_for_missing_unbalanced_or_non_object_json(
 def test_should_skip_requires_decision_open_loop_or_artifact() -> None:
     assert should_skip({})
     assert should_skip({**empty_extracted(), "facts": ["interesting but not actionable"]})
+    assert not should_skip({**empty_extracted(), "purpose": ["track what changed"]})
+    assert not should_skip({**empty_extracted(), "current_status": ["new path is canonical"]})
     assert not should_skip({**empty_extracted(), "decisions": ["changed setting"]})
     assert not should_skip({**empty_extracted(), "open_loops": ["run tests"]})
     assert not should_skip({**empty_extracted(), "artifacts": ["file.py"]})
@@ -66,6 +72,10 @@ def test_should_skip_requires_decision_open_loop_or_artifact() -> None:
 
 def test_flatten_to_note_and_search_text_preserve_label_order_and_trim_items() -> None:
     extracted = {
+        "purpose": [" remember work "],
+        "scope": [" memory/v1 "],
+        "outcome": [" richer notes "],
+        "current_status": ["30-day retention"],
         "facts": [" fact "],
         "decisions": ["changed code", ""],
         "open_loops": ["run tests"],
@@ -75,6 +85,10 @@ def test_flatten_to_note_and_search_text_preserve_label_order_and_trim_items() -
     }
 
     assert flatten_to_note(extracted) == "\n".join([
+        "Point: remember work",
+        "Scope: memory/v1",
+        "Outcome: richer notes",
+        "Current status: 30-day retention",
         "Decisions: changed code",
         "Open loops: run tests",
         "Artifacts: file.py",
@@ -83,6 +97,10 @@ def test_flatten_to_note_and_search_text_preserve_label_order_and_trim_items() -
         "Time: today",
     ])
     assert flatten_to_search_text(extracted) == "\n".join([
+        "remember work",
+        "memory/v1",
+        "richer notes",
+        "30-day retention",
         "changed code",
         "run tests",
         "file.py",
@@ -99,6 +117,10 @@ def test_metadata_join_items_trims_blanks_and_caps_values() -> None:
 
 def test_flatten_to_metadata_uses_primitive_flags_counts_and_capped_joined_lists() -> None:
     extracted = {
+        "purpose": ["make work memory useful"],
+        "scope": ["short-term extraction"],
+        "outcome": ["more detail"],
+        "current_status": ["enabled"],
         "facts": ["f1", "f2"],
         "decisions": ["d1"],
         "open_loops": [],
@@ -112,9 +134,18 @@ def test_flatten_to_metadata_uses_primitive_flags_counts_and_capped_joined_lists
         "has_open_loop": False,
         "has_decision": True,
         "has_artifact": True,
+        "has_work_detail": True,
+        "work_purpose": "make work memory useful",
+        "work_scope": "short-term extraction",
+        "work_outcome": "more detail",
+        "current_status": "enabled",
         "artifact_paths": " | ".join(f"file_{i}.py" for i in range(8)),
         "person_names": "Chieh | Jane",
         "time_refs": "today",
+        "n_purpose": 1,
+        "n_scope": 1,
+        "n_outcome": 1,
+        "n_current_status": 1,
         "n_facts": 2,
         "n_decisions": 1,
         "n_open_loops": 0,

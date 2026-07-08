@@ -3,7 +3,7 @@
 
 Writes to ChromaDB automatically:
   - Long-term: explicit user facts detected via patterns (permanent)
-  - Short-term: 1-sentence Ollama activity summary (expires in 14 days)
+  - Short-term: 1-sentence Ollama activity summary (expires in 30 days)
 
 Hook input (stdin): {"session_id": "...", "stop_hook_active": bool}
 """
@@ -102,7 +102,7 @@ def _write_long_term(fact: str, topic: str, subtopic: str = "") -> None:
         pass
 
 
-def _write_short_term(fact: str, days: int = 14) -> None:
+def _write_short_term(fact: str, days: int = 30) -> None:
     cmd = [VENV_PYTHON, f"{VESSENCE_HOME}/memory/v1/add_forgettable_memory.py",
            fact, "--topic", "session_activity", "--days", str(days),
            "--author", "stop_hook"]

@@ -15,7 +15,7 @@ Audit all ChromaDB entries and separate universal Jane behavioral habits (ship w
 - Debugging habits: "If stuck after 2-3 attempts, search online"
 - Communication style templates: "warm, friendly, efficient, no flattery"
 - Operational policies: "after implementing changes, update relevant configs"
-- Memory management: "short-term memories expire after 14 days"
+- Memory management: "short-term memories expire after 30 days"
 - Working patterns: proven good habits that improve user experience
 
 ### User-Specific (never ship)

@@ -211,9 +211,9 @@ IDLE_THRESHOLD_SECS    = 5 * 60   # 5 min — stop queue if user is active
 IDLE_TIMEOUT_SECS      = 60       # inactivity before triggering archival in ConvManager
 
 # ── Memory TTLs ───────────────────────────────────────────────────────────────
-SHORT_TERM_TTL_DAYS    = 14   # short-term memories expire after this many days
+SHORT_TERM_TTL_DAYS    = 30   # recent work memories expire after roughly one month
 SHORT_TERM_MAX_THEMES  = 20   # rolling theme slots per session in short-term memory
-FORGETTABLE_MAX_AGE_DAYS = 14 # hard age cap enforced by nightly janitor
+FORGETTABLE_MAX_AGE_DAYS = 30 # hard age cap enforced by nightly janitor
 
 # ── HTTP timeouts (seconds) ───────────────────────────────────────────────────
 HTTP_TIMEOUT_DEFAULT   = 30

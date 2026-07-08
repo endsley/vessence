@@ -30,7 +30,7 @@ This is the most fundamental decision in the memory system. Every piece of infor
 When processing a prompt, context is assembled from four tiers:
 
 1.  **Active Context Window:** The immediate, live conversation history, including summaries of older parts of the conversation.
-2.  **Short-Term Memory DB:** Shared, persistent ChromaDB at `$VESSENCE_DATA_HOME/memory/v1/vector_db/short_term_memory/`. Stores compact retrieval-oriented summaries of recent conversation turns AND explicitly added time-limited facts. All entries carry a `timestamp` and `expires_at` (default 14-day TTL). Replaces both the old per-session `session_memory` and the separate `forgettable_knowledge` DB. Purged nightly by the Janitor through `nightly_self_improve.py`.
+2.  **Short-Term Memory DB:** Shared, persistent ChromaDB at `$VESSENCE_DATA_HOME/memory/v1/vector_db/short_term_memory/`. Stores compact retrieval-oriented summaries of recent conversation turns AND explicitly added time-limited facts. All entries carry a `timestamp` and `expires_at` (default 30-day TTL). Replaces both the old per-session `session_memory` and the separate `forgettable_knowledge` DB. Purged nightly by the Janitor through `nightly_self_improve.py`.
 3.  **Long-Term Memory DB:** Curated, permanent facts. Two stores: `user_memories` (Jane's shared long-term store, `memory_type: "long_term"` or `"permanent"`) and `long_term_knowledge` (Jane's conversation archivist output at `memory/v1/vector_db/long_term_memory/`). No TTL — janitor may consolidate/deduplicate but never auto-expires.
 4.  **File Index Memory DB:** Dedicated ChromaDB collection at `$VESSENCE_DATA_HOME/memory/v1/vector_db/file_index_memory/` named `file_index_memories`. Stores file path, MIME/type, and concise descriptions of vault files. For formats the agent can read, the description must be based on the file contents rather than filename/path only. Queried only for file/vault lookup prompts.
 4.  **Permanent Memory (Startup):** Foundational knowledge loaded at the start of a session from architecture files, identity essays, and registries.
@@ -46,7 +46,7 @@ When processing a prompt, context is assembled from four tiers:
 | `user_memories` | `$VESSENCE_DATA_HOME/memory/v1/vector_db/` | Permanent + long-term facts for Jane (`memory_type: "permanent"` or `"long_term"`) | None |
 | `user_memories` | `$VESSENCE_DATA_HOME/users/<user_id>/memory/vector_db/` | Managed-user private permanent + long-term facts seeded at user creation and retrieved only for that user | None |
 | `long_term_knowledge` | `$VESSENCE_DATA_HOME/memory/v1/vector_db/long_term_memory/` | Jane's conversation archivist output (curated, high-signal facts promoted from short-term) | None |
-| `short_term_memory` | `$VESSENCE_DATA_HOME/memory/v1/vector_db/short_term_memory/` | Compact summaries of conversation turns + explicitly added time-limited facts. Shared/persistent across sessions. | 14 days |
+| `short_term_memory` | `$VESSENCE_DATA_HOME/memory/v1/vector_db/short_term_memory/` | Compact summaries of conversation turns + explicitly added time-limited facts. Shared/persistent across sessions. | 30 days |
 | `file_index_memories` | `$VESSENCE_DATA_HOME/memory/v1/vector_db/file_index_memory/` | Vault file index records: path, file name, MIME/type, content-derived description when readable, tags | None |
 
 ### 2.1.2. File Index Memory — Design
@@ -105,18 +105,27 @@ summary_style  : "structured_short_term_v1" (active) | "concise_turn_memory_v1" 
 
 # Structured-extraction fields (added by Job #86, 2026-04-29)
 turn_kind      : "code" | "debugging" | "calendar" | "messages" | "todo" | "general"
+has_work_detail: bool   (any point/scope/outcome/current-status field)
 has_open_loop  : bool   (any pending next action / awaiting confirmation)
 has_decision   : bool   (any concrete decision or state change)
 has_artifact   : bool   (any file path, function/class, ID, URL, tool)
+work_purpose   : str    (top N point/purpose items joined with " | ")
+work_scope     : str    (top N scope/component items joined with " | ")
+work_outcome   : str    (top N outcome items joined with " | ")
+current_status : str    (top N current-state/supersession items joined with " | ")
 artifact_paths : str    (top N artifacts joined with " | ")
 person_names   : str    (top N people joined with " | ")
 time_refs      : str    (top N time references joined with " | ")
+n_purpose      : int
+n_scope        : int
+n_outcome      : int
+n_current_status : int
 n_facts        : int
 n_decisions    : int
 n_open_loops   : int
 ```
 
-**Default TTL:** 14 days. Override per entry with `--days N`.
+**Default TTL:** 30 days. Override per entry with `--days N`.
 
 **Stage 3 short-term writer (active design — see `memory/v1/short_term_extractor.py`):**
 
@@ -127,6 +136,10 @@ than freeform summarization.
    returns one of `code | debugging | calendar | messages | todo | general`.
 2. **Extract structured fields** with a per-kind prompt to the Utility (Haiku)
    tier. Output is a JSON dict with EXACTLY these keys:
+   - `purpose` — the point/reason for the work
+   - `scope` — projects, components, files, services, or data touched
+   - `outcome` — what changed, was learned, or was completed
+   - `current_status` — where the work stands now, especially superseded/replaced behavior
    - `facts` — concrete factual statements
    - `decisions` — confirmed state changes / actions taken
    - `open_loops` — unresolved next actions / awaiting confirmation
@@ -175,7 +188,7 @@ doesn't see protocol chatter as part of the turn.
 
 **Expiry & purge:** The nightly Memory Janitor calls `purge_expired_short_term()` which deletes entries where `expires_at < utcnow()` from `short_term_memory`.
 
-**Cron log convention:** After every cron job execution, log a short-term entry with `--topic cron_logs` recording what ran, when, and the outcome (default 14-day TTL).
+**Cron log convention:** After every cron job execution, log a short-term entry with `--topic cron_logs` recording what ran, when, and the outcome (default 30-day TTL).
 
 **Enforcement:** The git pre-commit hook at `.git/hooks/pre-commit` blocks any commit that stages memory-system source files without also staging this architecture doc. To update and unblock: `git add configs/memory_manage_architecture.md`.
 
@@ -345,7 +358,7 @@ Note: `system_load.get_system_load()` samples CPU with `psutil.cpu_percent(inter
 
 1.5. **Purge Expired Short-Term Entries**: Before any consolidation, the janitor calls `purge_expired_short_term()`, which:
     - Deletes all entries in `short_term_memory` whose `expires_at` has passed.
-    - Also enforces a hard age cap via `purge_old_forgettable_memories()`, deleting short-term entries older than 14 days by creation timestamp regardless of `expires_at`.
+    - Also enforces a hard age cap via `purge_old_forgettable_memories()`, deleting short-term entries older than 30 days by creation timestamp regardless of `expires_at`.
     - Both Unix int and ISO string formats of `expires_at` are handled.
 
 2.  **Protect Permanent and Short-Term Entries**: It iterates through every memory and sets aside entries that must not be consolidated. An entry is excluded if it meets **any** of the following criteria:

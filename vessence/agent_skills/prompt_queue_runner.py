@@ -287,7 +287,7 @@ def log_to_memory(prompt_index: int, prompt_text: str, result: str, success: boo
     date_str = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
     fact = _completion_fact(prompt_index, prompt_text, result, date_str)
     try:
-        # Short-term: expires in 14 days
+        # Short-term: expires using the configured recent-memory TTL
         subprocess.run(
             [ADD_MEMORY, fact, "--topic", "prompt_queue", "--author", "jane"],
             capture_output=True, timeout=30

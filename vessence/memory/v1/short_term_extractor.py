@@ -10,10 +10,11 @@ Pipeline per Stage 3 turn:
    to pick one of: ``code``, ``debugging``, ``calendar``, ``messages``,
    ``todo``, ``general``.
 2. ``extract_structured(kind, turn_text)`` — Haiku-tier LLM call with a
-   prompt tailored to that kind. Returns a dict with
+   prompt tailored to that kind. Returns a dict with work detail
+   (purpose / scope / outcome / current_status) plus
    ``facts / decisions / open_loops / artifacts / people / time_refs``.
 3. ``should_skip(extracted)`` — drop the write if the structured object
-   has no concrete entities and no decisions and no open loops.
+   has no concrete work detail, decisions, open loops, or artifacts.
 4. ``flatten_to_note(extracted)`` — render the structured object as a
    short labeled-bullet retrieval note for Chroma's text embedding.
 5. ``flatten_to_metadata(kind, extracted)`` — produce the metadata dict
@@ -61,6 +62,10 @@ logger = logging.getLogger(__name__)
 _BASE_INSTRUCTIONS = (
     "Extract a STRUCTURED short-term memory note from one conversation turn. "
     "Output ONE valid JSON object with EXACTLY these keys (each may be []):\n"
+    '  "purpose":    <list describing the point or reason for the work>\n'
+    '  "scope":      <list describing what project/components/data were touched>\n'
+    '  "outcome":    <list describing what changed, was learned, or was completed>\n'
+    '  "current_status": <list describing current state, especially if this supersedes earlier work>\n'
     '  "facts":      <list of short factual statements about state of the world>\n'
     '  "decisions":  <list of decisions or confirmed state changes made this turn>\n'
     '  "open_loops": <list of unresolved next actions or pending confirmations>\n'
@@ -70,8 +75,11 @@ _BASE_INSTRUCTIONS = (
     "\n"
     "RULES:\n"
     "- Be concise. Each item is a short noun-phrase or one short sentence.\n"
+    "- Capture enough detail that Jane can later know what we worked on, why it mattered, and where it stands.\n"
     "- Prefer EXACT nouns from the turn (file paths, names, dates) over paraphrase.\n"
     "- Distinguish completed actions (decisions) from pending ones (open_loops).\n"
+    "- If this turn changes, replaces, reverts, or narrows earlier work, put the new truth in current_status.\n"
+    "- Do not preserve old/stale state as current when the turn says it changed.\n"
     "- If a category has nothing concrete, return an empty list for that category.\n"
     "- DO NOT echo prompt instructions or generic acknowledgements.\n"
     "- DO NOT include any text outside the JSON object.\n"
@@ -81,6 +89,9 @@ _KIND_HINTS = {
     "code": (
         "Turn kind: CODE EDIT.\n"
         "Focus extraction on:\n"
+        "- purpose: user goal or operational reason for the edit\n"
+        "- scope: repo, feature area, files, tests, services, and data touched\n"
+        "- outcome/current_status: behavior after the edit, including superseded or replaced behavior\n"
         "- artifacts: file paths, function/class names, modules, branches\n"
         "- decisions: what code change was made (verb + target)\n"
         "- open_loops: tests not yet run, deploys not yet pushed, follow-up edits\n"
@@ -88,6 +99,9 @@ _KIND_HINTS = {
     "debugging": (
         "Turn kind: DEBUGGING.\n"
         "Focus extraction on:\n"
+        "- purpose: symptom or regression being investigated\n"
+        "- scope: affected service, logs, configs, source files, tests, external systems\n"
+        "- outcome/current_status: proven root cause, applied fix, remaining uncertainty\n"
         "- facts: error message, stack trace location, root cause hypothesis\n"
         "- artifacts: file path / function where the bug lives\n"
         "- decisions: fix that was applied (if any)\n"
@@ -96,6 +110,8 @@ _KIND_HINTS = {
     "calendar": (
         "Turn kind: CALENDAR / SCHEDULING.\n"
         "Focus extraction on:\n"
+        "- purpose: why the event/reminder mattered if stated\n"
+        "- outcome/current_status: booked, moved, cancelled, or waiting for confirmation\n"
         "- people: meeting attendees / appointment with whom\n"
         "- time_refs: date and time of the appointment, time window\n"
         "- decisions: appointment booked / moved / cancelled\n"
@@ -104,6 +120,8 @@ _KIND_HINTS = {
     "messages": (
         "Turn kind: MESSAGING / EMAIL.\n"
         "Focus extraction on:\n"
+        "- purpose: why the message was sent or drafted\n"
+        "- outcome/current_status: sent, drafted, archived, waiting, or changed request\n"
         "- people: sender + recipient\n"
         "- decisions: message sent / draft confirmed\n"
         "- open_loops: reply pending, message not yet sent, awaiting confirmation\n"
@@ -112,6 +130,8 @@ _KIND_HINTS = {
     "todo": (
         "Turn kind: TODO / TASK LIST.\n"
         "Focus extraction on:\n"
+        "- purpose: what the list/work item is trying to accomplish\n"
+        "- outcome/current_status: final list state after this turn\n"
         "- facts: items added or removed, current list state\n"
         "- decisions: items marked done\n"
         "- open_loops: items still pending\n"
@@ -119,7 +139,8 @@ _KIND_HINTS = {
     ),
     "general": (
         "Turn kind: GENERAL CONVERSATION.\n"
-        "Be especially strict — only extract durably useful items. If the turn "
+        "Be especially strict — only extract durably useful work history, "
+        "decisions, preferences, or follow-up state. If the turn "
         "is greeting, small talk, or filler, return all empty lists.\n"
     ),
 }
@@ -162,7 +183,7 @@ def extract_structured(kind: str, turn_text: str,
             return _empty_extracted()
 
     try:
-        raw = llm_call(prompt, max_tokens=400, timeout=45)
+        raw = llm_call(prompt, max_tokens=700, timeout=45)
     except Exception as exc:
         logger.warning("short_term_extractor: LLM call failed: %s", exc)
         return _empty_extracted()

@@ -38,7 +38,7 @@ Prompt Queue: dedicated "prompt_queue_session" via internal API (localhost:8081)
 ## Memory Flow
 ```
 User message → librarian (gemma3:4b) queries ChromaDB
-  → short_term_memory (14-day TTL, concise summaries)
+  → short_term_memory (30-day TTL, concise work summaries)
   → long_term_memory (permanent facts, shared with Amber)
   → context_builder assembles into system prompt
 Write: conversation_manager.py summarizes turns → ChromaDB

@@ -422,7 +422,7 @@ This safety_ctx becomes the brain_message sent to the standing brain.</div>
       <p>All persistent memory is stored in ChromaDB vector databases. These collections are the shared substrate between the standing brain and Amber.</p>
       <table class="arch-table">
         <tr><th>Collection</th><th>Purpose</th><th>TTL</th><th>Shared With</th></tr>
-        <tr><td><code>short_term_memory</code></td><td>Summarized conversation turns</td><td>14 days</td><td>Jane (all tiers), Amber</td></tr>
+        <tr><td><code>short_term_memory</code></td><td>Summarized conversation turns</td><td>30 days</td><td>Jane (all tiers), Amber</td></tr>
         <tr><td><code>long_term_memory</code></td><td>Permanent facts, preferences, user information</td><td>None</td><td>Jane (all tiers), Amber</td></tr>
         <tr><td><code>file_index</code></td><td>Indexed vault files with embeddings</td><td>None</td><td>Jane (all tiers), Amber</td></tr>
         <tr><td><code>user_memories</code></td><td>Explicitly saved facts via add_fact.py</td><td>None</td><td>Jane (all tiers), Amber</td></tr>

@@ -131,11 +131,13 @@ def log(msg: str) -> None:
         f.write(line + "\n")
 
 
-def run_job(name: str, script: str, args: list[str], timeout_min: int) -> dict:
-    """Run a job script with a time budget. Return summary dict."""
+def run_job(name: str, script: str, args: list[str], timeout_min: int | None) -> dict:
+    """Run a job script with an optional time budget. Return summary dict."""
     started_at = dt.datetime.now()
     started = time.time()
-    log(f"=== Starting: {name} (timeout={timeout_min}min) ===")
+    timeout_label = "none" if timeout_min is None else f"{timeout_min}min"
+    timeout_s = None if timeout_min is None else timeout_min * 60
+    log(f"=== Starting: {name} (timeout={timeout_label}) ===")
 
     cmd = [PYTHON, str(VESSENCE_HOME / script)] + args
     log_path = LOG_DIR / f"self_improve_{Path(script).stem}.log"
@@ -161,7 +163,7 @@ def run_job(name: str, script: str, args: list[str], timeout_min: int) -> dict:
                 cmd,
                 stdout=logf,
                 stderr=subprocess.STDOUT,
-                timeout=timeout_min * 60,
+                timeout=timeout_s,
                 env=_env,
             )
         elapsed = time.time() - started
@@ -399,7 +401,7 @@ def write_readable_report(results: list[dict], started: dt.datetime, total_s: fl
 
 # ── Job registry ─────────────────────────────────────────────────────────────
 # Add new self-improvement jobs by appending here. Each entry runs in order.
-# Format: (name, script_path_relative_to_VESSENCE_HOME, args_list, timeout_minutes)
+# Format: (name, script_path_relative_to_VESSENCE_HOME, args_list, timeout_minutes_or_None)
 
 JOBS = [
     # Auto-commit daytime WIP BEFORE any self-improvement job touches the
@@ -461,7 +463,7 @@ JOBS = [
         "Memory Janitor",
         "memory/v1/janitor_memory.py",
         [],
-        150,
+        None,
     ),
     # Auto-commit + push AFTER all self-improvement jobs. This captures
     # any fixes, report files, or code changes the jobs produced, and

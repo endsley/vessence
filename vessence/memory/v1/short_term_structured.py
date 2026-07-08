@@ -8,8 +8,23 @@ import re
 from jane.json_scanner import find_json_object_end
 
 
-EXTRACT_KEYS = ("facts", "decisions", "open_loops", "artifacts", "people", "time_refs")
+EXTRACT_KEYS = (
+    "purpose",
+    "scope",
+    "outcome",
+    "current_status",
+    "facts",
+    "decisions",
+    "open_loops",
+    "artifacts",
+    "people",
+    "time_refs",
+)
 LABEL_ORDER = [
+    ("purpose", "Point"),
+    ("scope", "Scope"),
+    ("outcome", "Outcome"),
+    ("current_status", "Current status"),
     ("decisions", "Decisions"),
     ("open_loops", "Open loops"),
     ("artifacts", "Artifacts"),
@@ -58,11 +73,15 @@ def parse_json_blob(blob: str) -> dict[str, list[str]] | None:
 
 
 def should_skip(extracted: dict[str, list[str]]) -> bool:
-    """Keep only notes with decisions, open loops, or artifacts."""
+    """Keep only notes with concrete work detail, decisions, open loops, or artifacts."""
     if not extracted:
         return True
     return not (
-        bool(extracted.get("decisions"))
+        bool(extracted.get("purpose"))
+        or bool(extracted.get("scope"))
+        or bool(extracted.get("outcome"))
+        or bool(extracted.get("current_status"))
+        or bool(extracted.get("decisions"))
         or bool(extracted.get("open_loops"))
         or bool(extracted.get("artifacts"))
     )
@@ -102,9 +121,23 @@ def flatten_to_metadata(kind: str, extracted: dict[str, list[str]]) -> dict[str,
         "has_open_loop": bool(extracted.get("open_loops")),
         "has_decision": bool(extracted.get("decisions")),
         "has_artifact": bool(extracted.get("artifacts")),
+        "has_work_detail": bool(
+            extracted.get("purpose")
+            or extracted.get("scope")
+            or extracted.get("outcome")
+            or extracted.get("current_status")
+        ),
+        "work_purpose": metadata_join_items(extracted.get("purpose") or [], cap=4),
+        "work_scope": metadata_join_items(extracted.get("scope") or [], cap=4),
+        "work_outcome": metadata_join_items(extracted.get("outcome") or [], cap=4),
+        "current_status": metadata_join_items(extracted.get("current_status") or [], cap=4),
         "artifact_paths": metadata_join_items(extracted.get("artifacts") or []),
         "person_names": metadata_join_items(extracted.get("people") or []),
         "time_refs": metadata_join_items(extracted.get("time_refs") or []),
+        "n_purpose": len(extracted.get("purpose") or []),
+        "n_scope": len(extracted.get("scope") or []),
+        "n_outcome": len(extracted.get("outcome") or []),
+        "n_current_status": len(extracted.get("current_status") or []),
         "n_facts": len(extracted.get("facts") or []),
         "n_decisions": len(extracted.get("decisions") or []),
         "n_open_loops": len(extracted.get("open_loops") or []),

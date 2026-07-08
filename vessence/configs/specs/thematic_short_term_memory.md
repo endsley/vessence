@@ -53,7 +53,7 @@ On each new turn (user + assistant pair):
 4. **If genuinely new theme** (less common):
    - If < 20 themes: `add()` a new slot
    - If = 20 themes: drop the oldest theme (by `last_updated_at`) and reuse its slot via `update()`
-5. **No TTL management needed per-turn** — themes expire based on `last_updated_at + 14 days`
+5. **No TTL management needed per-turn** — themes expire based on `last_updated_at + 30 days`
 
 ### Key principle
 The short-term memory size is **bounded and mostly static**. The normal operation is `update()`, not `add()`. New entries are rare — only when the conversation genuinely shifts to a new topic. A typical 50-turn conversation might create 3-5 themes, with the rest of the turns enriching those existing themes.

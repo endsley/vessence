@@ -88,9 +88,11 @@ def test_theme_summary_prompt_preserves_new_and_update_shapes():
     update_prompt = theme_summary_prompt("current summary", "turn " + ("x" * 900))
 
     assert "Summarize this conversation turn" in new_prompt
+    assert "outcome/current status" in new_prompt
     assert "Return ONLY the summary." in new_prompt
     assert "Here is the current summary" in update_prompt
     assert "current summary" in update_prompt
+    assert "current state is clear" in update_prompt
     assert "turn " + ("x" * 795) in update_prompt
     assert "turn " + ("x" * 796) not in update_prompt
     assert "Return ONLY the updated summary." in update_prompt

@@ -2,7 +2,7 @@
 """
 Utility to add a time-limited "forgettable" memory to ChromaDB.
 
-These memories expire after --days (default 14) and are auto-purged by the
+These memories expire after --days (default 30) and are auto-purged by the
 nightly Memory Janitor. Use them for:
   - Recent changes / things just implemented
   - Progress made on a project

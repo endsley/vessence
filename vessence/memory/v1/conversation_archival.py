@@ -39,7 +39,7 @@ def archivist_triage_prompt(memory_content: str) -> str:
         "architecture changes, project goals, fixed root causes, and hard-won implementation "
         "knowledge. If it's something the user explicitly wants me to remember, classify it as Keep.\n"
         "- Forgettable: temporary context — current session progress, recent code changes, "
-        "bugs just fixed, test results. These will expire after 14 days.\n"
+        "bugs just fixed, test results. These will expire after about one month.\n"
         "- Discard: noise, greetings, trivial state updates (e.g., 'system ready', 'login successful'), "
         "filler, and redundant repetition of things I already know.\n\n"
         "BE RUTHLESS. When in doubt, Discard or Forgettable. Only Keep durable, high-value knowledge.\n\n"

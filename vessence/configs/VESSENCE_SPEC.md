@@ -331,7 +331,7 @@ The user's universal memory persists forever and spans all essences.
 |---|---|---|
 | `user_memories` | Permanent + long-term facts shared across all agents | None |
 | `long_term_knowledge` | Curated facts promoted from short-term by the Archivist | None |
-| `short_term_memory` | Recent conversation turns, temporary context | 14 days |
+| `short_term_memory` | Recent conversation turns, temporary context | 30 days |
 
 ### 7.2 Essence Memory (Per-Essence Isolation)
 

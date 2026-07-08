@@ -554,8 +554,8 @@
   - **Test:** Add 5 short-term memories to an essence. Trigger the Archivist. Verify: important entries move to long-term, trivial ones are discarded. Check Archivist logs — they reference the essence name. User memory Archivist runs separately and is unaffected.
 - [ ] Janitor consolidates essence long-term memory nightly
   - **Test:** Add 20 long-term memories to an essence, including 5 near-duplicates. Trigger the Janitor. Verify: duplicates are consolidated (count drops to ~17), content is preserved. Janitor logs mention the essence. User memory Janitor runs separately.
-- [ ] Essence memory expiry rules follow the same 14-day TTL for short-term
-  - **Test:** Add a short-term memory to an essence with a timestamp 15 days ago. Run cleanup — the memory is deleted (expired). Add one with timestamp 10 days ago — still exists. Verify TTL is exactly 14 days, same as user memory.
+- [ ] Essence memory expiry rules follow the same 30-day TTL for short-term
+  - **Test:** Add a short-term memory to an essence with a timestamp 31 days ago. Run cleanup — the memory is deleted (expired). Add one with timestamp 10 days ago — still exists. Verify TTL is exactly 30 days, same as user memory.
 
 ### 6.3 Data Backup & Export
 - [ ] USB backup script includes all essence folders

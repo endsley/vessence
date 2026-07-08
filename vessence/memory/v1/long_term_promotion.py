@@ -46,7 +46,9 @@ def memory_merge_prompt(category: str, content: str, matches: list[dict[str, Any
     prompt += (
         "Decision Criteria:\n"
         "- MERGE: If the new memory is a continuation, update, or near-duplicate of an existing one. "
-        "Provide a single comprehensive summary that includes ALL unique details from both.\n"
+        "Provide a single comprehensive summary that includes ALL unique still-current details from both. "
+        "If the new memory supersedes, reverses, or narrows older details, make the corrected current "
+        "state explicit and keep the old state only as brief historical rationale when useful.\n"
         "- NEW: If the new memory represents a distinct event, different architectural component, or unrelated fact.\n\n"
         "Respond ONLY with a JSON object:\n"
         "{ \"decision\": \"MERGE\" | \"NEW\", \"target_id\": \"id_to_overwrite\", \"merged_content\": \"new_summary_if_merge\" }"

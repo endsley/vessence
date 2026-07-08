@@ -96,7 +96,7 @@ VAULT_IMAGES_DIR = os.path.join(VAULT_DIR, "images")
 
 MEMORY_JANITOR_MODEL = JANITOR_LLM_MODEL  # Uses configured frontier provider/model.
 MAX_DEDUP_THEMES_PER_RUN = 150
-MAX_CODE_MEMORIES_PER_RUN = 20  # Limit per night to avoid orchestrator timeout
+MAX_CODE_MEMORIES_PER_RUN = 40  # Bound nightly scope without imposing a hard timeout.
 CODE_MEMORY_REVERIFY_DAYS = 14
 MAX_LONG_TERM_NORMALIZE_PER_RUN = 25
 LONG_TERM_REVIEW_THRESHOLD = 500
@@ -945,7 +945,7 @@ def _stamp_code_verification(
         return {"ok": False, "reason": f"stamp_failed: {e}"}
 
 
-def _verify_one_memory(mem: dict, codex_timeout: int = 7200) -> dict:
+def _verify_one_memory(mem: dict, codex_timeout: int | None = None) -> dict:
     """Verify a single memory against the codebase via Codex.
 
     Returns {"verdict": "ACCURATE|STALE|PARTIAL", "explanation": ...,
@@ -974,7 +974,7 @@ def _verify_one_memory(mem: dict, codex_timeout: int = 7200) -> dict:
 
 
 def _apply_fix_via_frontier(mem: dict, codex_finding: dict, col,
-                            frontier_timeout: int = 7200) -> dict:
+                            frontier_timeout: int | None = None) -> dict:
     """Send one Codex finding to the frontier provider and apply confirmed fixes.
 
     Returns {"action": "updated|deleted|kept|error", "reason": ...}.
@@ -1048,8 +1048,8 @@ def _apply_fix_via_frontier(mem: dict, codex_finding: dict, col,
 
 
 def verify_code_memories(
-    codex_timeout: int = 7200,
-    frontier_timeout: int = 7200,
+    codex_timeout: int | None = None,
+    frontier_timeout: int | None = None,
     max_memories_per_run: int | None = MAX_CODE_MEMORIES_PER_RUN,
 ) -> dict:
     """Verify code-referencing memories one at a time against the real codebase.

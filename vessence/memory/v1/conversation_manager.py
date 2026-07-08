@@ -241,7 +241,7 @@ class ConversationManager:
             logger.warning("Failed to initialize SQLite ledger: %s", e)
             self.db_conn = None
 
-        # 2. Initialize short-term memory (shared persistent ChromaDB, 14-day TTL)
+        # 2. Initialize short-term memory (shared persistent ChromaDB, 30-day TTL)
         os.makedirs(SHORT_TERM_MEMORY_PATH, exist_ok=True)
         with silence_stderr_fd():
             self.short_term_db_client = get_chroma_client(path=SHORT_TERM_MEMORY_PATH)
@@ -768,7 +768,7 @@ class ConversationManager:
                 verdict = self._triage_memory(doc, archivist_model)
                 
                 # Special rule: raw turns never go to long-term if thematic is active
-                # but we keep them in short-term for 14 days if they aren't noise.
+                # but we keep them in short-term for the configured TTL if they aren't noise.
                 if verdict == "Keep" or verdict == "Forgettable":
                     now = _utcnow()
                     expires_at = (now + datetime.timedelta(days=SHORT_TERM_TTL_DAYS)).isoformat()

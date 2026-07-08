@@ -50,7 +50,7 @@ Official terminology for the Vessence platform. When we refer to these terms, th
 | Term | Definition |
 |---|---|
 | **Long-term Memory** | Persistent facts in ChromaDB with no expiration. User preferences, project decisions, relationship facts. Shared across all agents and sessions. |
-| **Short-term Memory** | Recent conversation context in ChromaDB with 14-day TTL. Auto-deleted by the memory janitor. |
+| **Short-term Memory** | Recent conversation context in ChromaDB with 30-day TTL. Auto-deleted by the memory janitor. |
 | **Forgettable Memory** | Operational logs (cron executions, queue results) stored with short TTL. Useful for debugging but not permanent. |
 | **Permanent Memory** | Core identity facts that never expire. User's name, family, profession, key preferences. |
 | **Librarian** | The memory retrieval pipeline. Queries ChromaDB, ranks results by relevance, injects into the system prompt via hooks (CLI) or context_builder (web/Android). |

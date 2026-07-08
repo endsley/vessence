@@ -319,7 +319,7 @@ This separation is intentional: provider-specific handlers are isolated so chang
 | `user_memories` | `$VESSENCE_DATA_HOME/vector_db/` | Permanent + long-term Jane memories. `memory_type: "permanent"` or `"long_term"` | None |
 | `user_memories` | `$VESSENCE_DATA_HOME/users/<user_id>/memory/vector_db/` | Managed-user private long-term memory, seeded at user creation | None |
 | `long_term_knowledge` | `$VESSENCE_DATA_HOME/vector_db/long_term_memory/` | Archivist output: curated high-signal facts promoted from short-term | None |
-| `short_term_memory` | `$VESSENCE_DATA_HOME/vector_db/short_term_memory/` | Compact turn summaries + time-limited facts | 14 days |
+| `short_term_memory` | `$VESSENCE_DATA_HOME/vector_db/short_term_memory/` | Compact turn summaries + time-limited facts | 30 days |
 | `file_index_memories` | `$VESSENCE_DATA_HOME/vector_db/file_index_memory/` | Vault file paths, MIME types, content-derived descriptions | None |
 
 **Routing rule:** Is it a *file* or a *fact*? File → Vault. Fact → ChromaDB.

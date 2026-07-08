@@ -36,7 +36,7 @@ def test_archivist_triage_prompt_preserves_decision_contract():
     prompt = archivist_triage_prompt("Remember the edit lock before source changes.")
 
     assert "Respond with ONLY one word: 'Keep', 'Forgettable', or 'Discard'." in prompt
-    assert "These will expire after 14 days." in prompt
+    assert "These will expire after about one month." in prompt
     assert prompt.endswith("Memory: Remember the edit lock before source changes.")
     assert TRIAGE_DECISIONS == {"Keep", "Forgettable", "Discard"}
 

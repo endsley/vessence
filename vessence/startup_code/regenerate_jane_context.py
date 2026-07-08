@@ -135,7 +135,7 @@ Generated: {now} | Auto-updated nightly by startup_code/regenerate_jane_context.
 === MEMORY SYSTEM ===
 - Memory injection: automatic via UserPromptSubmit hooks (claude_smart_context.py + memory_hook.sh)
 - Long-term DB: ChromaDB persistent collection (user_memories)
-- Short-term DB: Persistent shared ChromaDB at $VESSENCE_DATA_HOME/vector_db/short_term_memory/ (14-day TTL, purged nightly)
+- Short-term DB: Persistent shared ChromaDB at $VESSENCE_DATA_HOME/vector_db/short_term_memory/ (30-day TTL, purged nightly)
 - Nightly janitor: agent_skills/janitor_memory.py (3:00 AM) — LLM-powered dedup/merge
 - End-of-session archival: agent_skills/conversation_manager.py → ConversationManager._run_archival()
 
