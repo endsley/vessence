@@ -237,3 +237,29 @@ Verification:
 Recording blocker:
 - Canonical incident JSON is not writable from this sandbox: `/home/chieh/ambient/vessence-data/self_healing/incidents/20260626T104225.698556+0000_android_crash_report_a731dc48de8845ad416a3fb3.json`.
 - Canonical repair report is not writable from this sandbox: `/home/chieh/ambient/vessence-data/self_healing/reports/20260626T104225.821409+0000_android_crash_report_a731dc48de8845ad416a3fb3.md`.
+
+## Recheck 2026-07-08
+
+Evidence reviewed again:
+- Incident JSON: `/home/chieh/ambient/vessence-data/self_healing/incidents/20260626T104225.698556+0000_android_crash_report_a731dc48de8845ad416a3fb3.json`
+- Existing repair report: `/home/chieh/ambient/vessence-data/self_healing/reports/20260626T104225.821409+0000_android_crash_report_a731dc48de8845ad416a3fb3.md`
+- Android diagnostic log: `/home/chieh/ambient/vessence-data/logs/android_diagnostics.jsonl`
+- Retained Jane web logs and self-healing state/report files searched for `ForegroundServiceDidNotStartInTime` and fingerprint `a731dc48de8845ad416a3fb3`
+- Source: `android/app/src/main/java/com/vessences/android/voice/AlwaysListeningService.kt`, `android/app/src/main/java/com/vessences/android/CrashReporter.kt`, `jane_web/main.py`
+- Android call-site search for direct `startForegroundService()` / `startService()` / `stopService()` bypasses.
+
+Outcome:
+- No new source patch was justified.
+- The incident remains `repair_finished`, and the current source still contains the foreground-service lifecycle repair for the captured Android 13 crash.
+- Diagnostic evidence at `2026-06-25T09:44:28Z` still shows `AlwaysListening` started, stopped milliseconds later, then continued through model load and mic startup; current code guards this path with immediate foreground promotion in `onCreate()`, shared start/foreground/stop atomics, deferred stop while start is in flight, restart-after-stop preservation, and late mic-start checks.
+- Current Android call sites still route through `AlwaysListeningService.start()` / `AlwaysListeningService.stop()`; no direct bypass was found.
+- Newer retained diagnostics through `2026-07-08T04:44:57Z` are SMS sync entries, not a recurrence of this foreground-service timeout. Retained exact-exception matches outside this incident are in old rotated `jane_web.log.3` entries predating the June repair.
+
+Verification:
+- Temp-data-root smoke test of `POST /api/crash-report` passed using `/home/chieh/google-adk-env/adk-venv/bin/python`: the route returned `{"status": "received"}`, wrote `android_crashes.log`, and dispatched `android_crash_report` / `android_crash` metadata with self-healing stubbed.
+- `GRADLE_USER_HOME=/tmp/codex-gradle-home nice -n 19 ionice -c 3 ./gradlew --no-daemon :app:compileDebugKotlin` passed: `BUILD SUCCESSFUL in 1m 2s`.
+
+Recording:
+- Canonical incident JSON update failed because `/home/chieh/ambient/vessence-data/self_healing/incidents/20260626T104225.698556+0000_android_crash_report_a731dc48de8845ad416a3fb3.json` is on a read-only filesystem in this sandbox.
+- Canonical repair report update was therefore not written; `/home/chieh/ambient/vessence-data/self_healing/reports/20260626T104225.821409+0000_android_crash_report_a731dc48de8845ad416a3fb3.md` is also on the same read-only runtime data mount.
+- Work Log helper write failed because `/home/chieh/ambient/skills/work_log/user_data/activity_log.json` is on a read-only filesystem in this sandbox, so this completed job log remains the repository-side work log record.
