@@ -1,20 +1,20 @@
 # Most Recent Nightly Self-Improvement
 
-- Run started: 2026-07-07 01:00:01
-- Report generated: 2026-07-07 03:02:40
-- Total runtime: 7358s
+- Run started: 2026-07-08 01:00:01
+- Report generated: 2026-07-08 03:34:31
+- Total runtime: 9268s
 - Jobs: 8 total, 5 ok, 2 timeout, 1 failed
 - Stable latest report path: `/home/chieh/ambient/vessence/configs/self_improvement_latest.md`
-- Archived copy: `/home/chieh/ambient/vessence-data/reports/self_improvement/self_improvement_20260707_010001.md`
+- Archived copy: `/home/chieh/ambient/vessence-data/reports/self_improvement/self_improvement_20260708_010001.md`
 
 ## TL;DR
 
 - 1. ✓ Auto-Commit WIP (pre) (0.0m)
-  - Fixes:
-    - 2026-07-07 01:00:03,871 INFO Committed 2 file(s).
-- 2. ✗ Code Auditor (3.3m)
+  - Problems: none detected
+  - Fixes: none applied
+- 2. ✗ Code Auditor (1.4m)
   - Problems:
-    - 2026-07-07 01:03:21,993 [ERROR] Auditor crashed: Command '['git', 'commit', '-m', 'auto-audit: add tests for jane_web/jane_v2/recent_context.py', '--no-verif...
+    - 2026-07-08 01:01:23,420 [ERROR] Auditor crashed: Command '['git', 'commit', '-m', 'auto-audit: add tests for jane_web/jane_v2/recent_context.py', '--no-verif...
 - 3. ⏱ Dead Code Auditor (15.0m)
   - Problems:
     - Possibly-dead functions: 1.
@@ -27,40 +27,39 @@
 - 5. ✓ Doc Drift Auditor (0.0m)
   - Problems:
     - CRON_JOBS.md claims iterative_refactor_scheduler.py is active but no matching cron entry exists
-- 6. ✓ Transcript Quality Review (0.8m)
+- 6. ✓ Transcript Quality Review (0.9m)
   - Problems:
-    - Transcript review found 5 issues: 1 critical, 2 low, 2 medium.
-    - Classifier emitted an unsupported intent label before falling back to others.
-    - Stage 1 classification was extremely slow for a request that only needed Stage 3 escalation.
+    - Transcript review found 6 issues: 2 critical, 1 low, 3 medium.
+    - Stage 3 follow-up lost the prior conversational context.
+    - Stage 3 took 147 seconds for a project-familiarization request.
   - Fixes:
-    - 2026-07-07 01:39:08,089 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (5 issues)
-    - 2026-07-07 01:39:08,098 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 1 critical, 2 medium, 2...
-- 7. ✓ Memory Janitor (83.5m)
+    - 2026-07-08 01:37:18,330 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (6 issues)
+    - 2026-07-08 01:37:18,337 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 2 critical, 3 medium, 1...
+- 7. ✓ Memory Janitor (117.2m)
   - Problems:
-    - [0;93m2026-07-07 02:38:35.600551302 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-07-07 06:38:35 WARNING] ModelImporter.cpp:739: Make...
-    - [0;93m2026-07-07 02:38:35.600595745 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-07-07 06:38:35 WARNING] ModelImporter.cpp:739: Make...
-    - [0;93m2026-07-07 02:38:35.600607211 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-07-07 06:38:35 WARNING] ModelImporter.cpp:739: Make...
+    - er.h:92 log] [2026-07-08 07:00:54 WARNING] ModelImporter.cpp:739: Make sure input input_ids has Int64 binding.[m
+    - [0;93m2026-07-08 03:00:54.614176640 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-07-08 07:00:54 WARNING] ModelImporter.cpp:739: Make...
+    - [0;93m2026-07-08 03:00:54.614193307 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-07-08 07:00:54 WARNING] ModelImporter.cpp:739: Make...
   - Fixes:
-    - INFO:agent_skills.self_improve_log:self_improve_log: recorded [medium] Memory Verification — Found 15 stale memories out of 20 checked. Stale memories make J...
+    - INFO:agent_skills.self_improve_log:self_improve_log: recorded [medium] Memory Verification — Found 16 stale memories out of 28 checked. Stale memories make J...
 - 8. ✓ Auto-Commit + Push (post) (0.0m)
   - Fixes:
-    - 2026-07-07 03:02:38,251 INFO Committed 5 file(s).
-    - 2026-07-07 03:02:40,404 INFO Pushed successfully.
+    - 2026-07-08 03:34:30,213 INFO Pushed successfully.
 
 **Top follow-ups:**
 
-- Constrain Stage 1 output to the configured intent enum, or add explicit normalization for known meta labels like `force stage3` before logging them as unknown.
-- Add a short classifier timeout and fail-open to `others:Low` for complex/freeform requests, then run memory extraction asynchronously so Stage 1 latency is not tied to slow local LLM calls.
+- Ensure stage3_escalate passes the session conversation history for the sid, or preserve a pending contextual follow-up when the prior Stage 3 response asks or implies continuation.
+- Add progress streaming or a bounded codebase-summary path for project-familiarization requests, and avoid blocking the full response on expensive exploratory work.
 
 ## Executive Summary
 
 - 3 stage(s) need attention because they timed out or exited non-zero.
-- 6 concrete improvement/fix signals were found in logs or reports.
+- 4 concrete improvement/fix signals were found in logs or reports.
 
 ## Stage 1: Auto-Commit WIP (pre)
 
 - Status: `ok`
-- Duration: 2s (0.0 min)
+- Duration: 0s (0.0 min)
 
 ### What It Did
 
@@ -72,7 +71,7 @@
 
 ### Improvements It Made
 
-- 2026-07-07 01:00:03,871 INFO Committed 2 file(s).
+- No concrete improvement was recorded in the available logs/reports.
 
 ### Evidence Files
 
@@ -81,7 +80,7 @@
 ## Stage 2: Code Auditor
 
 - Status: `exit-2`
-- Duration: 198s (3.3 min)
+- Duration: 81s (1.4 min)
 
 ### What It Did
 
@@ -90,7 +89,7 @@
 ### Problems It Found
 
 - Job ended with status `exit-2`.
-- 2026-07-07 01:03:21,993 [ERROR] Auditor crashed: Command '['git', 'commit', '-m', 'auto-audit: add tests for jane_web/jane_v2/recent_context.py', '--no-verify']' returned non-zero exit status 1.
+- 2026-07-08 01:01:23,420 [ERROR] Auditor crashed: Command '['git', 'commit', '-m', 'auto-audit: add tests for jane_web/jane_v2/recent_context.py', '--no-verify']' returned non-zero exit status 1.
 
 ### Improvements It Made
 
@@ -180,7 +179,7 @@
 ## Stage 6: Transcript Quality Review
 
 - Status: `ok`
-- Duration: 45s (0.8 min)
+- Duration: 54s (0.9 min)
 
 ### What It Did
 
@@ -188,23 +187,23 @@
 
 ### Problems It Found
 
-- Transcript review found 5 issues: 1 critical, 2 low, 2 medium.
-- Classifier emitted an unsupported intent label before falling back to others.
-- Stage 1 classification was extremely slow for a request that only needed Stage 3 escalation.
-- Classifier emitted another unsupported intent label before falling back to others.
-- Stage 3 took over nine minutes to complete a coding request.
+- Transcript review found 6 issues: 2 critical, 1 low, 3 medium.
+- Stage 3 follow-up lost the prior conversational context.
+- Stage 3 took 147 seconds for a project-familiarization request.
+- Stage 1 classifier produced an unsupported label.
+- Stage 3 ran for nearly seven minutes on a coding task before finishing.
 
 ### Improvements It Made
 
-- 2026-07-07 01:39:08,089 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (5 issues)
-- 2026-07-07 01:39:08,098 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 1 critical, 2 medium, 2 minor issues. The most urgent
+- 2026-07-08 01:37:18,330 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (6 issues)
+- 2026-07-08 01:37:18,337 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 2 critical, 3 medium, 1 minor issues. The most urgent
 
 ### Follow-Up Fixes Recommended
 
-- Constrain Stage 1 output to the configured intent enum, or add explicit normalization for known meta labels like `force stage3` before logging them as unknown.
-- Add a short classifier timeout and fail-open to `others:Low` for complex/freeform requests, then run memory extraction asynchronously so Stage 1 latency is not tied to slow local LLM calls.
-- Update the Stage 1 prompt/schema to reject non-enum labels, or map `web automation` to `others` without warning when the request is a coding/project task.
-- Separate Stage 3 execution from memory extraction/fallback LLM work, enforce per-subtask timeouts, and surface progress heartbeats so long coding tasks do not appear stalled.
+- Ensure stage3_escalate passes the session conversation history for the sid, or preserve a pending contextual follow-up when the prior Stage 3 response asks or implies continuation.
+- Add progress streaming or a bounded codebase-summary path for project-familiarization requests, and avoid blocking the full response on expensive exploratory work.
+- Constrain classifier output to the canonical enum with schema validation or map 'web automation' to the appropriate supported category before logging it as unknown.
+- Separate nonessential memory extraction from the response critical path, add progress events for long coding tasks, and set clearer task execution timeouts or continuation behavior.
 
 ### Evidence Files
 
@@ -214,7 +213,7 @@
 ## Stage 7: Memory Janitor
 
 - Status: `ok`
-- Duration: 5009s (83.5 min)
+- Duration: 7029s (117.2 min)
 
 ### What It Did
 
@@ -222,15 +221,15 @@
 
 ### Problems It Found
 
-- [0;93m2026-07-07 02:38:35.600551302 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-07-07 06:38:35 WARNING] ModelImporter.cpp:739: Make sure input input_ids has Int64 binding.[m
-- [0;93m2026-07-07 02:38:35.600595745 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-07-07 06:38:35 WARNING] ModelImporter.cpp:739: Make sure input attention_mask has Int64 binding.[m
-- [0;93m2026-07-07 02:38:35.600607211 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-07-07 06:38:35 WARNING] ModelImporter.cpp:739: Make sure input token_type_ids has Int64 binding.[m
-- [0;93m2026-07-07 02:38:35.769077215 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-07-07 06:38:35 WARNING] ModelImporter.cpp:739: Make sure input input_ids has Int64 binding.[m
-- [0;93m2026-07-07 02:38:35.769117177 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-07-07 06:38:35 WARNING] ModelImporter.cpp:739: Make sure input attention_mask has Int64 binding.[m
+- er.h:92 log] [2026-07-08 07:00:54 WARNING] ModelImporter.cpp:739: Make sure input input_ids has Int64 binding.[m
+- [0;93m2026-07-08 03:00:54.614176640 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-07-08 07:00:54 WARNING] ModelImporter.cpp:739: Make sure input attention_mask has Int64 binding.[m
+- [0;93m2026-07-08 03:00:54.614193307 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-07-08 07:00:54 WARNING] ModelImporter.cpp:739: Make sure input token_type_ids has Int64 binding.[m
+- [0;93m2026-07-08 03:00:54.793170354 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-07-08 07:00:54 WARNING] ModelImporter.cpp:739: Make sure input input_ids has Int64 binding.[m
+- [0;93m2026-07-08 03:00:54.793210911 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-07-08 07:00:54 WARNING] ModelImporter.cpp:739: Make sure input attention_mask has Int64 binding.[m
 
 ### Improvements It Made
 
-- INFO:agent_skills.self_improve_log:self_improve_log: recorded [medium] Memory Verification — Found 15 stale memories out of 20 checked. Stale memories make Jane give wrong answers about her own
+- INFO:agent_skills.self_improve_log:self_improve_log: recorded [medium] Memory Verification — Found 16 stale memories out of 28 checked. Stale memories make Jane give wrong answers about her own
 
 ### Evidence Files
 
@@ -239,7 +238,7 @@
 ## Stage 8: Auto-Commit + Push (post)
 
 - Status: `ok`
-- Duration: 2s (0.0 min)
+- Duration: 1s (0.0 min)
 
 ### What It Did
 
@@ -251,8 +250,7 @@
 
 ### Improvements It Made
 
-- 2026-07-07 03:02:38,251 INFO Committed 5 file(s).
-- 2026-07-07 03:02:40,404 INFO Pushed successfully.
+- 2026-07-08 03:34:30,213 INFO Pushed successfully.
 
 ### Evidence Files
 
