@@ -1,5 +1,5 @@
 # Job: Vessence iterative refactor 3/5
-Status: pending
+Status: incomplete
 Priority: medium
 Created: 2026-06-30
 Tags: scheduled-refactor, vessence, iteration-3
@@ -39,3 +39,6 @@ This is iteration 3 of 5 for `vessence`. The goal is to build on whatever previo
 - `/home/chieh/ambient/vessence`
 - Project refactor journal, usually `/home/chieh/ambient/vessence/REFACTORING.md`
 - Vessence job queue file `job_102_vessence_refactor_iter_03.md`
+
+## Result
+Jane web is not running — skipping

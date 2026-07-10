@@ -280,7 +280,109 @@ def _prune_stale_sessions(now: float | None = None) -> None:
         end_session(expiration.user_id, expiration.session_id)
 
 
+# Providers that run through the Codex CLI (normalized name is "openai").
+_CODEX_BRAINS = {"openai", "codex"}
+
+# When the live Codex brain is exhausted, Jane fails over to this provider.
+_CODEX_FAILOVER_PROVIDER = "claude"
+
+
+def _is_provider_exhausted_error(exc: Exception) -> bool:
+    """True when an error looks like Codex usage/quota exhaustion (vs. a normal
+    failure we should just surface). Kept broad on purpose: a false positive only
+    costs one extra provider attempt, a false negative leaves Jane dead."""
+    text = str(exc).lower()
+    signals = (
+        "usage limit", "hit your usage", "ran out", "out of usage",
+        "quota", "insufficient_quota", "rate limit", "rate_limit",
+        "429", "resource_exhausted", "too many requests", "billing",
+    )
+    return any(s in text for s in signals)
+
+
+def _persist_brain_provider(provider: str) -> None:
+    """Switch Jane's active brain to ``provider`` in-process and in the .env so it
+    survives restarts. ``brain_name()`` reads JANE_BRAIN from the .env on every
+    turn, so the file is authoritative — os.environ is set too as a safety net."""
+    os.environ["JANE_BRAIN"] = provider
+    try:
+        path = Path(ENV_FILE_PATH)
+        lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+        out: list[str] = []
+        found = False
+        for line in lines:
+            if line.strip().replace(" ", "").startswith("JANE_BRAIN="):
+                out.append(f"JANE_BRAIN={provider}")
+                found = True
+            else:
+                out.append(line)
+        if not found:
+            out.append(f"JANE_BRAIN={provider}")
+        path.write_text("\n".join(out) + "\n", encoding="utf-8")
+    except Exception as exc:  # noqa: BLE001 — persistence is best-effort
+        logger.warning("Could not persist JANE_BRAIN=%s to .env: %s", provider, exc)
+
+
+async def _shutdown_codex_sessions(user_id: str, session_id: str) -> None:
+    """Tear down any live Codex session for this user so the exhausted CLI is
+    disconnected before we spin up the failover brain."""
+    try:
+        from llm_brain.v1.standing_codex import get_codex_app_server_manager
+        await get_codex_app_server_manager().end(user_id, session_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("standing_codex end during failover: %s", exc)
+    try:
+        from llm_brain.v1.persistent_codex import get_codex_persistent_manager
+        await get_codex_persistent_manager().end(user_id, session_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("persistent_codex end during failover: %s", exc)
+
+
+async def _failover_codex_to_claude(user_id: str, session_id: str, exc: Exception) -> None:
+    """Disconnect Codex and make Claude Jane's brain (in-process + persisted)."""
+    logger.warning(
+        "[%s] Codex brain exhausted (%s) — disconnecting Codex and switching Jane to %s",
+        session_id[:12], str(exc)[:150], _CODEX_FAILOVER_PROVIDER,
+    )
+    await _shutdown_codex_sessions(user_id, session_id)
+    _persist_brain_provider(_CODEX_FAILOVER_PROVIDER)
+    try:
+        from agent_skills.work_log_tools import log_activity
+        log_activity(
+            f"Live brain auto-failover: Codex out of usage → switched Jane's brain to "
+            f"{_CODEX_FAILOVER_PROVIDER}. Trigger: {str(exc)[:200]}",
+            category="system",
+        )
+    except Exception:  # noqa: BLE001 — logging must never break the turn
+        pass
+
+
 async def _execute_brain_sync(user_id: str, session_id: str, brain_name: str, adapter, request_ctx) -> str:
+    try:
+        return await _dispatch_brain_sync(user_id, session_id, brain_name, adapter, request_ctx)
+    except Exception as exc:  # noqa: BLE001
+        if brain_name not in _CODEX_BRAINS or not _is_provider_exhausted_error(exc):
+            raise
+        await _failover_codex_to_claude(user_id, session_id, exc)
+        return await _dispatch_brain_sync(
+            user_id, session_id, _CODEX_FAILOVER_PROVIDER, adapter, request_ctx
+        )
+
+
+async def _execute_brain_stream(user_id: str, session_id: str, brain_name: str, adapter, request_ctx, emit) -> str:
+    try:
+        return await _dispatch_brain_stream(user_id, session_id, brain_name, adapter, request_ctx, emit)
+    except Exception as exc:  # noqa: BLE001
+        if brain_name not in _CODEX_BRAINS or not _is_provider_exhausted_error(exc):
+            raise
+        emit("status", "Codex is out of usage — switching Jane's brain to Claude…")
+        await _failover_codex_to_claude(user_id, session_id, exc)
+        return await _dispatch_brain_stream(
+            user_id, session_id, _CODEX_FAILOVER_PROVIDER, adapter, request_ctx, emit
+        )
+
+
+async def _dispatch_brain_sync(user_id: str, session_id: str, brain_name: str, adapter, request_ctx) -> str:
     if _use_gemini_api(brain_name):
         from llm_brain.v1.gemini_api_brain import get_gemini_api_brain
         brain = get_gemini_api_brain()
@@ -365,7 +467,7 @@ async def _execute_brain_sync(user_id: str, session_id: str, brain_name: str, ad
     return await asyncio.to_thread(adapter.execute, request_ctx.system_prompt, request_ctx.transcript)
 
 
-async def _execute_brain_stream(user_id: str, session_id: str, brain_name: str, adapter, request_ctx, emit) -> str:
+async def _dispatch_brain_stream(user_id: str, session_id: str, brain_name: str, adapter, request_ctx, emit) -> str:
     if _use_gemini_api(brain_name):
         from llm_brain.v1.gemini_api_brain import get_gemini_api_brain
         brain = get_gemini_api_brain()

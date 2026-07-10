@@ -34,6 +34,7 @@ def test_should_try_fallback_matches_existing_error_policy():
     assert should_try_fallback("quota exhausted")
     assert should_try_fallback("CLI timed out after 60s")
     assert should_try_fallback("CLI (codex) failed (exit 1): bad")
+    assert should_try_fallback("CLI (codex) returned empty response")
     assert not should_try_fallback("CLI not found: claude")
 
 
@@ -54,3 +55,32 @@ def test_extract_json_text_strips_json_and_generic_fences():
     assert extract_json_text('```json\n{"ok": true}\n```') == '{"ok": true}'
     assert extract_json_text('```\n{"ok": true}\n```') == '{"ok": true}'
     assert extract_json_text('{"ok": true}') == '{"ok": true}'
+
+
+def test_completion_raises_fallback_eligible_error_on_empty_stdout(monkeypatch):
+    class FakeResult:
+        returncode = 0
+        stdout = "  \n"
+        stderr = "credits balance=0"
+
+    monkeypatch.setattr(
+        claude_cli_llm,
+        "_build_command",
+        lambda *args, **kwargs: ["codex", "exec", "prompt"],
+    )
+    monkeypatch.setattr(
+        claude_cli_llm.subprocess,
+        "run",
+        lambda *args, **kwargs: FakeResult(),
+    )
+
+    try:
+        claude_cli_llm.completion("prompt")
+    except RuntimeError as exc:
+        message = str(exc)
+    else:
+        raise AssertionError("expected empty-response RuntimeError")
+
+    assert "returned empty response" in message
+    assert "credits balance=0" in message
+    assert should_try_fallback(message)

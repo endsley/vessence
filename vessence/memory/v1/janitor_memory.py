@@ -895,14 +895,12 @@ def run_janitor(max_sessions: int = 2, max_topics: int = 3):
 #
 # Memories about Vessence's own code (file paths, model names, cron schedules,
 # architecture claims) drift fast because we change the code daily. This step
-# loops through code-referencing memories ONE AT A TIME, sending each to Codex
-# individually to keep token cost low per call. Stale findings go to the
+# loops through code-referencing memories ONE AT A TIME through the shared
+# automation runner. That keeps per-call token cost low while preserving
+# cross-provider fallback when one CLI is exhausted. Stale findings go to the
 # configured frontier provider (JANE_BRAIN: opus/codex/gemini) for validation
 # before editing ChromaDB.
 
-import subprocess as _sp
-
-_CODEX_BIN = "codex"
 _VESSENCE_HOME = str(Path(__file__).resolve().parents[2])
 
 
@@ -945,8 +943,20 @@ def _stamp_code_verification(
         return {"ok": False, "reason": f"stamp_failed: {e}"}
 
 
+def _run_code_verification_prompt(prompt: str, *, timeout_seconds: int | None = None) -> str:
+    """Run code-memory verification through the shared automation runner."""
+    from jane.automation_runner import run_automation_prompt
+
+    return run_automation_prompt(
+        prompt,
+        system_prompt="Return only the requested JSON object.",
+        timeout_seconds=timeout_seconds,
+        workdir=_VESSENCE_HOME,
+    )
+
+
 def _verify_one_memory(mem: dict, codex_timeout: int | None = None) -> dict:
-    """Verify a single memory against the codebase via Codex.
+    """Verify a single memory against the codebase via the automation provider.
 
     Returns {"verdict": "ACCURATE|STALE|PARTIAL", "explanation": ...,
              "corrected_text": ... or None}.
@@ -954,18 +964,12 @@ def _verify_one_memory(mem: dict, codex_timeout: int | None = None) -> dict:
     """
     codex_prompt = code_verification_prompt(mem)
     try:
-        result = _sp.run(
-            [_CODEX_BIN, "exec", "-"],
-            input=codex_prompt,
-            capture_output=True, text=True,
-            timeout=codex_timeout,
-            cwd=_VESSENCE_HOME,
-        )
-        raw = result.stdout.strip()
-    except _sp.TimeoutExpired:
-        return {"verdict": "ERROR", "explanation": "codex_timeout"}
-    except FileNotFoundError:
-        return {"verdict": "ERROR", "explanation": "codex_not_found"}
+        raw = _run_code_verification_prompt(
+            codex_prompt,
+            timeout_seconds=codex_timeout,
+        ).strip()
+    except Exception as e:
+        return {"verdict": "ERROR", "explanation": f"automation_failed: {str(e)[:240]}"}
 
     parsed, parse_error = json_object_from_text(raw)
     if parse_error:
@@ -1055,8 +1059,8 @@ def verify_code_memories(
     """Verify code-referencing memories one at a time against the real codebase.
 
     Loops through ALL code-referencing memories in user_memories, verifying
-    each individually via Codex. Only memories flagged STALE or PARTIAL get
-    sent to the configured frontier provider for validation and correction.
+    each individually via the automation provider. Only memories flagged STALE
+    or PARTIAL get sent to the configured frontier provider for validation and correction.
     This keeps per-call token cost low while achieving full coverage.
     """
     chroma_client = get_chroma_client(path=DB_PATH)
@@ -1149,7 +1153,7 @@ def verify_code_memories(
 
         stale_count += 1
         logger.info(
-            "verify_code_memories: [%d/%d] Codex says %s — sending to frontier provider %s",
+            "verify_code_memories: [%d/%d] code verifier says %s — sending to frontier provider %s",
             i + 1,
             len(code_mems),
             verdict,

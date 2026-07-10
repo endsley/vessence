@@ -2,13 +2,13 @@
 
 Two-stage self-improvement job:
 
-  Stage A (Codex):
+  Stage A (automation provider — Codex by default, falls back to Claude/Gemini):
     1. Collects today's conversation turns from jane_prompt_dump.jsonl
     2. Collects corresponding pipeline events from jane_web.log
     3. Collects client-side events from android_diagnostics.jsonl
-    4. Feeds a condensed turn-by-turn summary to Codex CLI
-    5. Codex identifies turns where Jane's answer seems odd, off, or wrong
-    6. Codex traces logs to explain the root cause of each issue
+    4. Feeds a condensed turn-by-turn summary to the automation provider
+    5. The model identifies turns where Jane's answer seems odd, off, or wrong
+    6. The model traces logs to explain the root cause of each issue
     7. Writes a structured report to configs/transcript_review_report.md
 
   Stage B (configured frontier provider, manual only with --apply-fixes):
@@ -32,7 +32,6 @@ import datetime as dt
 import json
 import logging
 import os
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -69,7 +68,6 @@ VESSENCE_DATA_HOME = Path(os.environ.get(
 ))
 LOG_DIR = VESSENCE_DATA_HOME / "logs"
 REPORT_PATH = VESSENCE_HOME / "configs" / "transcript_review_report.md"
-CODEX_BIN = "codex"
 PYTHON = "/home/chieh/google-adk-env/adk-venv/bin/python"
 
 logging.basicConfig(
@@ -105,48 +103,48 @@ def _load_android_events(date_str: str) -> list[str]:
 
 
 def run_codex_review(context: str, timeout: int = 300) -> list[dict]:
-    """Invoke Codex CLI to review transcripts. Returns parsed issues list."""
+    """Run the transcript review prompt through the shared automation runner.
+
+    Defaults to Codex (the automation-runner default) but automatically falls back
+    to Claude/Gemini if the primary provider is exhausted or unavailable — see
+    ``jane.automation_runner.run_automation_prompt``. Returns parsed issues list;
+    returns [] if all providers fail or output can't be parsed.
+    """
+    from jane.automation_runner import AutomationError, run_automation_prompt
+
     prompt = build_codex_review_prompt(context)
 
-    log.info("Invoking Codex for transcript review (%d chars context)...",
+    log.info("Invoking automation provider for transcript review (%d chars context)...",
              len(context))
     try:
-        result = subprocess.run(
-            [CODEX_BIN, "exec", "-"],
-            input=prompt,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            cwd=str(VESSENCE_HOME),
-        )
-    except subprocess.TimeoutExpired:
-        log.error("Codex timed out after %ds", timeout)
-        return []
-    except FileNotFoundError:
-        log.error("Codex binary not found at %s", CODEX_BIN)
+        output = run_automation_prompt(
+            prompt,
+            timeout_seconds=timeout,
+            workdir=str(VESSENCE_HOME),
+        ).strip()
+    except AutomationError as exc:
+        log.error("Transcript review LLM failed (all providers): %s", exc)
         return []
 
-    output = result.stdout.strip()
     if not output:
-        log.warning("Codex returned empty output (stderr: %s)",
-                    result.stderr[:500] if result.stderr else "none")
+        log.warning("Transcript review returned empty output")
         return []
 
-    # Extract JSON array from output (Codex may wrap in markdown fences)
+    # Extract JSON array from output (providers may wrap in markdown fences)
     json_text = _extract_json_array_text(output)
     if json_text is None:
-        log.warning("Could not extract JSON array from Codex output: %s",
+        log.warning("Could not extract JSON array from review output: %s",
                     output[:500])
         return []
 
     try:
         issues = json.loads(json_text)
     except json.JSONDecodeError as e:
-        log.warning("Failed to parse Codex JSON: %s — raw: %s",
+        log.warning("Failed to parse review JSON: %s — raw: %s",
                     e, output[:500])
         return []
 
-    log.info("Codex found %d issues", len(issues))
+    log.info("Transcript review found %d issues", len(issues))
     return issues
 
 

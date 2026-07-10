@@ -52,10 +52,10 @@ def _build_command(
             cmd.extend(["-C", cwd])
         return cmd + [prompt]
 
-    elif "gemini" in cli or cli == "gemini":
-        # Gemini CLI
-        # Use --prompt for non-interactive
-        return [cli, "--prompt", prompt]
+    elif "agy" in cli or "gemini" in cli or cli in ("agy", "gemini"):
+        # Antigravity (agy) — Google's successor to the gemini CLI.
+        # Flags must precede -p or -p swallows the next flag as its prompt.
+        return [cli, "--dangerously-skip-permissions", "--print-timeout", "60m", "-p", prompt]
 
     else:
         # Fallback: treat as claude-compatible
@@ -86,10 +86,18 @@ def completion(prompt: str, *, model: str | None = None,
     model = model or CHEAP_MODEL
     cmd = _build_command(prompt, model, max_tokens, cli=cli, cwd=cwd)
 
+    subprocess_env = os.environ.copy()
+    is_agy = "agy" in cmd[0]
+    if is_agy:
+        # Run agy under a minimal HOME so it skips the interactive Jane persona
+        # bootstrap and returns clean output.
+        from jane.agy_env import agy_headless_home
+        subprocess_env["HOME"] = agy_headless_home()
+
     try:
         result = subprocess.run(
             cmd, capture_output=True, text=True,
-            timeout=timeout, env=os.environ.copy(),
+            timeout=timeout, env=subprocess_env,
             cwd=cwd if not ("codex" in cmd[0] or cmd[0] == "codex") else None,
         )
     except FileNotFoundError:
@@ -101,7 +109,12 @@ def completion(prompt: str, *, model: str | None = None,
         err = (result.stderr or result.stdout or "Unknown error").strip()[:500]
         raise RuntimeError(f"CLI ({cmd[0]}) failed (exit {result.returncode}): {err}")
 
-    return result.stdout.strip()
+    output = result.stdout.strip()
+    if not output:
+        err = (result.stderr or "no stderr").strip()[:500]
+        raise RuntimeError(f"CLI ({cmd[0]}) returned empty response: {err}")
+
+    return output
 
 
 def completion_with_fallback(prompt: str, *, tier: str = "utility", 

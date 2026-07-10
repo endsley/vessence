@@ -31,6 +31,12 @@ Source of truth: mirrored from the personal Google Doc TODO list.
 
 ---
 
+## Follow-ups
+
+- **Port interactive Jane-brain to Antigravity (`agy`)** (deferred 2026-07-09): automation fallback, the consult panel, and utility completion helpers now use `agy` instead of the legacy `gemini` CLI. Three interactive-brain paths still call the legacy `gemini` binary and were intentionally left: `llm_brain/v1/persistent_gemini.py`, `jane/jane_session_wrapper.py`, `llm_brain/v1/standing_brain.py`. Only active when `JANE_BRAIN=gemini`. Porting requires handling agy's different session-resume/streaming model and keeping the persona `GEMINI.md` (unlike the headless paths, which strip it via `jane/agy_env.py`).
+
+---
+
 ## Completed Projects
 
 ### ✅ Secure Git Backup System (completed 2026-04)

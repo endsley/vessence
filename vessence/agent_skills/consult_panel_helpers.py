@@ -37,10 +37,13 @@ def should_use_stdin(prompt: str, threshold: int = STDIN_PROMPT_THRESHOLD) -> bo
 
 def cli_invocation(name: str, binary: str, full_prompt: str) -> CliInvocation | None:
     use_stdin = should_use_stdin(full_prompt)
-    if name == "gemini":
+    if name in ("agy", "gemini"):
+        # Antigravity (agy) — Google's successor to the gemini CLI. Flags must
+        # precede -p or -p swallows the next flag as its prompt value.
+        base = [binary, "--dangerously-skip-permissions", "--print-timeout", "60m", "-p"]
         if use_stdin:
-            return CliInvocation([binary], full_prompt)
-        return CliInvocation([binary, "-p", full_prompt])
+            return CliInvocation(base + ["-"], full_prompt)
+        return CliInvocation(base + [full_prompt])
     if name == "codex":
         if use_stdin:
             return CliInvocation([binary, "exec", "-"], full_prompt)

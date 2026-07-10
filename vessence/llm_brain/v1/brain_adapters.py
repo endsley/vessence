@@ -143,27 +143,35 @@ class BrainAdapter:
 
 
 class GeminiBrainAdapter(BrainAdapter):
+    # Canonical id stays "gemini" so the fallback chain / registry are unchanged,
+    # but the backing CLI is now Antigravity (`agy`), Google's successor to the
+    # standalone gemini CLI. agy is a full agentic CLI: it self-authenticates
+    # (no GOOGLE_API_KEY needed), runs an agentic bootstrap on each call (slow),
+    # and narrates its steps — so callers should tolerate a conversational
+    # preamble around the answer rather than expecting clean single-shot text.
     name = "gemini"
-    label = "Gemini"
-    # GOOGLE_API_KEY is NOT required when using OAuth (credentials in ~/.gemini/oauth_creds.json)
-    required_env = ()
+    label = "Antigravity"
+    required_env = ()  # agy uses its own Antigravity auth, no API key needed
 
     def _missing_env(self) -> list[str]:
-        """Gemini can authenticate via API key OR OAuth credentials."""
-        _load_runtime_env_keys(("GOOGLE_API_KEY", "GEMINI_API_KEY"))
-        if os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY"):
-            return []
-        # Check for OAuth credentials file
-        oauth_creds = Path.home() / ".gemini" / "oauth_creds.json"
-        if oauth_creds.exists():
-            return []
-        return ["GOOGLE_API_KEY (or OAuth login via Connect Account)"]
+        """agy manages its own auth (Antigravity login); no env keys required."""
+        return []
+
+    @property
+    def env_override(self) -> dict:
+        """Run agy under a minimal HOME so it skips the interactive Jane
+        persona/memory bootstrap and returns clean, fast output."""
+        from jane.agy_env import agy_headless_home
+        return {"HOME": agy_headless_home()}
 
     def build_command(self, system_prompt: str, transcript: str) -> list[str]:
-        cmd = [os.environ.get("GEMINI_BIN", "/usr/local/bin/gemini")]
-        if self.execution_profile.mode == "yolo":
-            cmd.append("--approval-mode=yolo")
-        cmd.extend(["-p", f"{system_prompt}\n\n{transcript}"])
+        from jane.config import AGY_BIN
+        # --dangerously-skip-permissions is required for non-interactive runs
+        # (no TTY to approve tool use). --print-timeout is set generously; the
+        # outer subprocess timeout is the real bound. Flags MUST precede -p, or
+        # -p swallows the next flag as its prompt value.
+        cmd = [os.environ.get("AGY_BIN", AGY_BIN), "--dangerously-skip-permissions",
+               "--print-timeout", "60m", "-p", f"{system_prompt}\n\n{transcript}"]
         return cmd
 
     def execute_stream(self, system_prompt: str, transcript: str, on_delta: Callable[[str], None]) -> str:
@@ -393,6 +401,8 @@ def _execute_subprocess_streaming(
 
     cmd = adapter.build_command(system_prompt, transcript)
     cwd = getattr(adapter, "cwd_override", None)
+    subprocess_env = os.environ.copy()
+    subprocess_env.update(getattr(adapter, "env_override", None) or {})
 
     idle_timeout = adapter.execution_profile.idle_timeout_seconds
     wall_deadline = time.monotonic() + adapter.execution_profile.max_wall_seconds
@@ -405,7 +415,7 @@ def _execute_subprocess_streaming(
             text=False,
             bufsize=0,
             cwd=cwd,
-            env=os.environ.copy(),
+            env=subprocess_env,
             start_new_session=True,  # own process group for clean shutdown
         )
     except FileNotFoundError as exc:

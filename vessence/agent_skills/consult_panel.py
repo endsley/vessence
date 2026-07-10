@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """consult_panel.py — Multi-model AI consultation tool.
 
-Queries available frontier CLI models (gemini, codex, claude) in parallel
+Queries available frontier CLI models (agy, codex, claude) in parallel
 for second opinions on architecture decisions, code review, or debugging.
 
 Usage:
@@ -31,9 +31,10 @@ from agent_skills.consult_panel_helpers import (
     synthesize_results as _synthesize_results,
 )
 
-# Frontier CLIs to consider (name → binary)
+# Frontier CLIs to consider (name → binary).
+# "agy" is Antigravity, Google's successor to the standalone gemini CLI.
 FRONTIER_CLIS = {
-    "gemini": "gemini",
+    "agy": "agy",
     "codex": "codex",
     "claude": "claude",
 }
@@ -68,6 +69,11 @@ def query_cli(cli: dict, prompt: str, context: str = "") -> dict:
 
     try:
         env = {**os.environ, "TERM": "dumb"}
+        if name in ("agy", "gemini"):
+            # Run agy under a minimal HOME so it skips the interactive Jane
+            # persona bootstrap and returns a clean opinion (no memory dump).
+            from jane.agy_env import agy_headless_home
+            env["HOME"] = agy_headless_home()
         invocation = _cli_invocation(name, binary, full_prompt)
         if invocation is None:
             return {"name": name, "error": f"Unknown CLI: {name}", "elapsed": 0}

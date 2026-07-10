@@ -176,6 +176,10 @@ VAULT_TUNNEL_LOG     = f"{LOGS_DIR}/vault_tunnel.log"
 ADK_VENV_PYTHON  = os.environ.get("ADK_VENV_PYTHON", os.path.join(HOME_DIR, "google-adk-env", "adk-venv", "bin", "python"))
 CLAUDE_BIN       = os.environ.get("CLAUDE_BIN", os.path.join(HOME_DIR, ".local", "bin", "claude"))
 CODEX_BIN        = os.environ.get("CODEX_BIN", "codex")
+# Antigravity (agy) is Google's successor to the standalone `gemini` CLI. The
+# "gemini" provider now invokes `agy`. Note: agy is a full agentic CLI (slow
+# agentic bootstrap, ignores shell cwd, narrated output) — see GeminiBrainAdapter.
+AGY_BIN          = os.environ.get("AGY_BIN", os.path.join(HOME_DIR, ".local", "bin", "agy"))
 JANE_BRIDGE_ENV  = os.environ.get("JANE_BRIDGE_ENV", os.path.join(HOME_DIR, "gemini_cli_bridge", ".env"))
 
 FALLBACK_SCRIPT       = f"{VESSENCE_HOME}/agent_skills/fallback_query.py"
@@ -262,7 +266,7 @@ QUEUE_PAUSE_BETWEEN_SECS = 5      # pause between consecutive prompt runs
 # ------------|---------------------------|---------------------------|----------
 # claude/opus | claude-opus-4-6           | claude-haiku-4-5-20251001 | claude
 # openai/codex| gpt-5.4                  | gpt-5.4-mini              | codex
-# gemini      | gemini-2.5-pro           | gemini-2.5-flash          | gemini
+# gemini/agy  | gemini-2.5-pro           | gemini-2.5-flash          | agy (Antigravity)
 #
 _PROVIDER_ALIASES = {
     "anthropic": "claude",
@@ -273,6 +277,9 @@ _PROVIDER_ALIASES = {
     "gpt": "openai",
     "google": "gemini",
     "gemini": "gemini",
+    # Antigravity is the successor to the gemini CLI; canonical id stays "gemini".
+    "agy": "gemini",
+    "antigravity": "gemini",
 }
 
 
@@ -292,7 +299,7 @@ _PROVIDER = normalize_frontier_provider(os.getenv("JANE_BRAIN", "claude"))
 PROVIDER_MODELS = {
     "claude":  {"smart": "claude-opus-4-6",     "cheap": "claude-haiku-4-5-20251001",  "cli": "claude"},
     "openai":  {"smart": "gpt-5.4",             "cheap": "gpt-5.4-mini",               "cli": "codex"},
-    "gemini":  {"smart": "gemini-2.5-pro",      "cheap": "gemini-2.5-flash",           "cli": "gemini"},
+    "gemini":  {"smart": "gemini-2.5-pro",      "cheap": "gemini-2.5-flash",           "cli": "agy"},
 }
 
 _models = PROVIDER_MODELS.get(_PROVIDER, PROVIDER_MODELS["claude"])

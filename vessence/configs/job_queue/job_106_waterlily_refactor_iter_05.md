@@ -1,5 +1,5 @@
 # Job: Waterlily iterative refactor 5/5
-Status: pending
+Status: incomplete
 Priority: medium
 Created: 2026-06-30
 Tags: scheduled-refactor, waterlily, iteration-5
@@ -39,3 +39,6 @@ This is iteration 5 of 5 for `waterlily`. The goal is to build on whatever previ
 - `/home/chieh/code/waterlily`
 - Project refactor journal, usually `/home/chieh/code/waterlily/REFACTORING.md`
 - Vessence job queue file `job_106_waterlily_refactor_iter_05.md`
+
+## Result
+Jane web is not running — skipping

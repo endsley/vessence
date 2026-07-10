@@ -191,6 +191,37 @@ def test_code_verification_metadata_preserves_stamp_policy():
     }
 
 
+def test_verify_one_memory_uses_automation_runner_and_parses_json(monkeypatch):
+    calls = []
+
+    def fake_run(prompt, *, timeout_seconds=None):
+        calls.append((prompt, timeout_seconds))
+        return '{"verdict": "ACCURATE", "explanation": "matches code", "corrected_text": null}'
+
+    monkeypatch.setattr(janitor_memory, "_run_code_verification_prompt", fake_run)
+
+    result = janitor_memory._verify_one_memory(_memory(), codex_timeout=12)
+
+    assert result == {
+        "verdict": "ACCURATE",
+        "explanation": "matches code",
+        "corrected_text": None,
+    }
+    assert calls == [(code_verification_prompt(_memory()), 12)]
+
+
+def test_verify_one_memory_reports_automation_provider_error(monkeypatch):
+    def fake_run(prompt, *, timeout_seconds=None):
+        raise RuntimeError("Codex CLI failed: credits balance=0")
+
+    monkeypatch.setattr(janitor_memory, "_run_code_verification_prompt", fake_run)
+
+    result = janitor_memory._verify_one_memory(_memory(), codex_timeout=12)
+
+    assert result["verdict"] == "ERROR"
+    assert result["explanation"] == "automation_failed: Codex CLI failed: credits balance=0"
+
+
 def test_verify_code_memories_uses_split_candidates_without_undefined_name(tmp_path, monkeypatch):
     class FakeCollection:
         def get(self, include):

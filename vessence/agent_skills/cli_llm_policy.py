@@ -24,6 +24,7 @@ def should_try_fallback(error_message: str) -> bool:
         or "quota" in lowered
         or "timed out" in lowered
         or "failed" in lowered
+        or "empty response" in lowered
     )
 
 

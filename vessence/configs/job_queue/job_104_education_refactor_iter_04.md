@@ -1,5 +1,5 @@
 # Job: Education / teaching app iterative refactor 4/5
-Status: pending
+Status: incomplete
 Priority: medium
 Created: 2026-06-30
 Tags: scheduled-refactor, education, iteration-4
@@ -39,3 +39,6 @@ This is iteration 4 of 5 for `education`. The goal is to build on whatever previ
 - `/home/chieh/code/chieh_class_v2`
 - Project refactor journal, usually `/home/chieh/code/chieh_class_v2/REFACTORING.md`
 - Vessence job queue file `job_104_education_refactor_iter_04.md`
+
+## Result
+Jane web is not running — skipping
