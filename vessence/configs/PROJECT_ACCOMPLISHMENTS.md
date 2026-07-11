@@ -1,3 +1,17 @@
+### 2026-07-10: Anthropic / Claude Receipt Downloader
+
+- **New Anthropic receipt skill:** added `agent_skills/anthropic_receipts.py`, a Playwright-based downloader for Claude billing receipts.
+- **Receipt extraction:** the skill opens Claude Settings > Billing, extracts invoice controls / Stripe invoice links, filters by count or date range, saves selected invoices as PDFs, and writes a `manifest.json`.
+- **Login blocker documented:** created `$VESSENCE_DATA_HOME/data/browser_profiles/anthropic_claude/`, but the first login capture was blocked by Claude/Google automation detection before cookies were saved. The skill now reports that blocker explicitly and avoids endless retries.
+- **Docs/tests:** registered the skill in `SKILLS_REGISTRY.md` and `Jane_architecture.md`; added focused parser/selection/blocker tests in `tests/test_anthropic_receipts.py`.
+
+### 2026-07-10: OpenAI / ChatGPT Receipt Downloader
+
+- **New OpenAI receipt skill:** added `agent_skills/openai_receipts.py`, a Playwright-based downloader for ChatGPT billing receipts.
+- **Login profile:** captured reusable ChatGPT auth state in `$VESSENCE_DATA_HOME/data/browser_profiles/openai_chatgpt/` via Google sign-in and 2-step verification.
+- **Receipt extraction:** the skill opens ChatGPT Settings > Billing, expands Billing history, extracts Stripe invoice links, filters by count or date range, saves invoices as PDFs, and writes a `manifest.json`.
+- **Docs/tests:** registered the skill in `SKILLS_REGISTRY.md` and `Jane_architecture.md`; added focused parser/selection tests in `tests/test_openai_receipts.py`.
+
 ### 2026-06-30: RA Remission Research Cron
 
 - **New RA research loop:** added `agent_skills/ra_research_cron.py`, a 2-hour cron researcher for Kathia's rheumatoid arthritis remission/asymptomatic-state goal.

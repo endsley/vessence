@@ -17,6 +17,7 @@ import json
 import shutil
 import subprocess
 import argparse
+import stat
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -81,6 +82,19 @@ STALE_TOP_LEVEL_ENTRIES = [
 
 ADK_PYTHON = os.path.join(HOME, 'google-adk-env', 'adk-venv', 'bin', 'python')
 ADK_PIP    = os.path.join(HOME, 'google-adk-env', 'adk-venv', 'bin', 'pip')
+
+
+def _retry_remove_readonly(func, path, exc_info):
+    """Let snapshot rotation delete read-only directories copied from sources."""
+    try:
+        os.chmod(path, stat.S_IRWXU)
+        func(path)
+    except Exception:
+        raise exc_info[1]
+
+
+def rmtree_snapshot(path: str):
+    shutil.rmtree(path, onerror=_retry_remove_readonly)
 
 # ─── USB Detection ────────────────────────────────────────────────────────────
 
@@ -192,7 +206,7 @@ def rotate_snapshots(snapshots_dir: str, dry_run: bool):
                 if dry_run:
                     print(f"  [dry-run] Would remove old snapshot: {name}")
                 else:
-                    shutil.rmtree(snap)
+                    rmtree_snapshot(snap)
                     print(f"  Removed old snapshot: {name}")
         except ValueError:
             pass
@@ -208,7 +222,7 @@ def remove_stale_layout_entries(current_dir: str, dry_run: bool):
             print(f"  [dry-run] Would remove stale entry: {name}")
             continue
         if os.path.isdir(path) and not os.path.islink(path):
-            shutil.rmtree(path)
+            rmtree_snapshot(path)
         else:
             os.remove(path)
         print(f"  Removed stale entry: {name}")

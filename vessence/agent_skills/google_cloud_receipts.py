@@ -301,7 +301,11 @@ async def _wait_for_frame_url(page: Any, url_fragment: str, *, timeout_ms: int =
 
 
 async def _discover_document_candidates(page: Any, account: BillingAccount) -> list[ReceiptCandidate]:
-    frame = await _wait_for_frame_url(page, "/documentcenter")
+    try:
+        frame = await _wait_for_frame_url(page, "/documentcenter")
+    except RuntimeError as exc:
+        print(f"Skipping Documents scan for {account.account_id}: {exc}", file=sys.stderr, flush=True)
+        return []
     rows = frame.locator("[data-data-token]")
     try:
         count = await rows.count()
@@ -585,8 +589,15 @@ async def download_recent_receipts(
             await _open_history_page(page, account.account_id, meta.profile_id)
             await _maybe_expand_date_range(page)
             all_candidates.extend(await _discover_receipt_candidates(page, account))
-            await _open_documents_page(page, account.account_id, meta.profile_id)
-            all_candidates.extend(await _discover_document_candidates(page, account))
+            try:
+                await _open_documents_page(page, account.account_id, meta.profile_id)
+                all_candidates.extend(await _discover_document_candidates(page, account))
+            except Exception as exc:
+                print(
+                    f"Skipping Documents scan for {account.account_id}: {exc}",
+                    file=sys.stderr,
+                    flush=True,
+                )
 
         if not all_candidates:
             raise RuntimeError(

@@ -246,6 +246,31 @@ A **WebSequence** is a named, reusable Playwright browser automation script. Eac
     -   **Filename convention:** `google_<month>_<day>_<year>_<amount>.pdf` when the page exposes both a receipt date and amount
     -   **Storage:** browser auth state in `$VESSENCE_DATA_HOME/data/browser_profiles/google_cloud_billing/`; downloads in `~/Downloads/google_cloud_receipts_<timestamp>/`
 
+-   **Skill: OpenAI / ChatGPT Receipt Downloader**
+    -   **File:** `agent_skills/openai_receipts.py`
+    -   **What it does:** Captures a reusable Playwright browser profile for `chatgpt.com`, opens ChatGPT Settings > Billing, expands Billing history, extracts Stripe invoice links, and saves selected paid ChatGPT receipts as PDFs.
+    -   **CLI:**
+        -   `python agent_skills/openai_receipts.py capture-profile`
+        -   `python agent_skills/openai_receipts.py verify-profile`
+        -   `python agent_skills/openai_receipts.py list`
+        -   `python agent_skills/openai_receipts.py download --count 10 [--out-dir DIR]`
+        -   `python agent_skills/openai_receipts.py download --start-date 2026-04-01 --end-date 2026-07-10`
+    -   **Filename convention:** `openai_<month>_<day>_<year>_<amount>.pdf` when ChatGPT exposes both date and amount
+    -   **Storage:** browser auth state in `$VESSENCE_DATA_HOME/data/browser_profiles/openai_chatgpt/`; downloads in `~/Downloads/openai_receipts_<timestamp>/`
+
+-   **Skill: Anthropic / Claude Receipt Downloader**
+    -   **File:** `agent_skills/anthropic_receipts.py`
+    -   **What it does:** Captures a reusable Playwright browser profile for `claude.ai`, opens Claude Settings > Billing, extracts visible invoice controls and Stripe invoice links, and saves selected Claude receipts as PDFs.
+    -   **CLI:**
+        -   `python agent_skills/anthropic_receipts.py capture-profile`
+        -   `python agent_skills/anthropic_receipts.py verify-profile`
+        -   `python agent_skills/anthropic_receipts.py list`
+        -   `python agent_skills/anthropic_receipts.py download --count 10 [--out-dir DIR]`
+        -   `python agent_skills/anthropic_receipts.py download --start-date 2026-04-01 --end-date 2026-07-10`
+    -   **Filename convention:** `anthropic_<month>_<day>_<year>_<amount>.pdf` when Claude exposes both date and amount
+    -   **Storage:** browser auth state in `$VESSENCE_DATA_HOME/data/browser_profiles/anthropic_claude/`; downloads in `~/Downloads/anthropic_receipts_<timestamp>/`
+    -   **Known auth state:** profile directory exists, but the first Claude login capture on 2026-07-10 was blocked by Claude/Google automation detection before any cookies were saved. The skill reports this explicitly instead of retry-looping.
+
 -   **Skill: Rheumatoid Arthritis Remission Research Loop**
     -   **File:** `agent_skills/ra_research_cron.py`
     -   **What it does:** Runs every 2 hours as a dedicated RA literature researcher for Kathia's remission/asymptomatic-state goal. Searches PubMed/PMC plus core guideline sources, saves every processed source/paper to `$VAULT_HOME/research/rheumatoid_arthritis_remission/papers/`, caches per-source summaries in `$VAULT_HOME/research/rheumatoid_arthritis_remission/summaries/`, stores raw run caches in `$VESSENCE_DATA_HOME/research/rheumatoid_arthritis_remission/cache/`, and regenerates both `$VAULT_HOME/research/rheumatoid_arthritis_remission/recommendations/recommendation_plan.md` and `$VAULT_HOME/research/rheumatoid_arthritis_remission/ra_remission_recommendation_scheme.md`.

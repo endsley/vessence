@@ -196,3 +196,29 @@ Auditor crashed: Command '['git', 'commit', '-m', 'auto-audit: add tests for jan
 ## 2026-07-08 01:00 — jane_web/jane_v2/recent_context.py
 Auditor crashed: Command '['git', 'commit', '-m', 'auto-audit: add tests for jane_web/jane_v2/recent_context.py', '--no-verify']' returned non-zero exit status 1.
 
+## 2026-07-10 01:00 — intent_classifier/v2/classifier.py
+Tests failing after 3 fix attempts. Reverted.
+
+Last test output:
+```
+============================= test session starts ==============================
+platform linux -- Python 3.13.7, pytest-9.0.2, pluggy-1.6.0 -- /home/chieh/google-adk-env/adk-venv/bin/python
+cachedir: .pytest_cache
+rootdir: /home/chieh/ambient/vessence
+plugins: asyncio-1.3.0, anyio-4.12.1, typeguard-4.5.1
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 27 items
+
+test_code/auto_audit_classifier.py::test_classify_returns_documented_result_shape PASSED [  3%]
+test_code/auto_audit_classifier.py::test_unanimous_vote_returns_winning_class_high_confidence PASSED [  7%]
+test_code/auto_audit_classifier.py::test_low_confidence_falls_back_to_delegate_opus PASSED [ 11%]
+test_code/auto_audit_classifier.py::test_max_distance_gate_delegates_even_on_unanimous_vote PASSED [ 14%]
+test_code/auto_audit_classifier.py::test_word_count_gate_skips_vector_lookup_entirely PASSED [ 18%]
+test_code/auto_audit_classifier.py::test_word_count_gate_boundary_is_strictly_greater_than PASSED [ 22%]
+test_code/auto_audit_classifier.py::test_stage1_classify_async_wrapper_delegates_to_classify PASSED [ 25%]
+test_code/auto_audit_classifier.py::test_empty_string_input_does_not_crash PASSED [ 29%]
+test_code/auto_audit_classifier.py::test_whitespace_only_input_does_not_crash PASSED [ 33%]
+test_code/auto_audit_classifier.py::test_none_input_raises_rather_than_silently_misclassifying PASSED [ 37%]
+test_code/auto_audit_class
+```
+

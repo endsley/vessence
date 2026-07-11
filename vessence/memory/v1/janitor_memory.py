@@ -105,6 +105,9 @@ LONG_TERM_SPLIT_THRESHOLD = 1500
 MAX_REWRITTEN_CHARS = 500
 MAX_SPLIT_ITEMS = 6
 JANITOR_DELETE_QUARANTINE = os.path.join(LOGS_DIR, "janitor_deleted_memories.jsonl")
+JANITOR_MIN_AVAILABLE_GB = float(os.environ.get("JANITOR_MIN_AVAILABLE_GB", "4.0"))
+JANITOR_MAX_SWAP_PERCENT = float(os.environ.get("JANITOR_MAX_SWAP_PERCENT", "10.0"))
+JANITOR_MAX_LOAD_FACTOR = float(os.environ.get("JANITOR_MAX_LOAD_FACTOR", "1.25"))
 
 # "Theme" topics — long-term entries whose whole point is to accumulate detail
 # under one anchor over time. The normalizer must NOT split or compact these,
@@ -127,6 +130,33 @@ def _utcnow() -> datetime.datetime:
 
 def _utcnow_iso() -> str:
     return _utcnow().isoformat()
+
+
+def _janitor_stress_reason() -> str | None:
+    """Return a concrete reason to skip janitor work on a stressed machine."""
+    cpu_count = os.cpu_count() or 1
+    try:
+        load_1m, load_5m, _ = os.getloadavg()
+        max_load = max(8.0, cpu_count * JANITOR_MAX_LOAD_FACTOR)
+        if load_1m > max_load or load_5m > max_load:
+            return f"load too high: 1m={load_1m:.1f}, 5m={load_5m:.1f}, limit={max_load:.1f}"
+    except Exception:
+        pass
+
+    try:
+        import psutil
+        mem = psutil.virtual_memory()
+        available_gb = mem.available / (1024 ** 3)
+        if available_gb < JANITOR_MIN_AVAILABLE_GB:
+            return f"available memory too low: {available_gb:.1f}GB < {JANITOR_MIN_AVAILABLE_GB:.1f}GB"
+
+        swap = psutil.swap_memory()
+        if swap.total and swap.percent > JANITOR_MAX_SWAP_PERCENT:
+            return f"swap already active: {swap.percent:.1f}% > {JANITOR_MAX_SWAP_PERCENT:.1f}%"
+    except Exception as e:
+        logger.warning("Could not read janitor stress metrics: %s", e)
+
+    return None
 
 
 def _codex_skill_exists(skill_name: str) -> bool:
@@ -706,16 +736,17 @@ def refresh_dynamic_query_markers() -> dict:
 
 
 def run_janitor(max_sessions: int = 2, max_topics: int = 3):
-    # Load gate: wait until CPU/memory is acceptable.
-    # Bypassed entirely during the night window — the gate exists to keep
-    # the web/Android UI responsive while Chieh is awake. At night nobody
-    # is waiting on the UI, and deferring just means the janitor (the last
-    # nightly job) never runs at all.
+    stress_reason = _janitor_stress_reason()
+    if stress_reason:
+        logger.warning("System stressed — skipping janitor this cycle: %s", stress_reason)
+        return
+
+    # Load gate: wait until CPU/memory/GPU is acceptable. Night runs still
+    # need the gate because the janitor can spawn multiple LLM CLIs while
+    # overnight backup jobs are doing heavy I/O.
     try:
-        from agent_skills.system_load import wait_until_safe, _is_nighttime
-        if _is_nighttime():
-            logger.info("Nighttime — bypassing load gate, running janitor.")
-        elif not wait_until_safe(max_wait_minutes=5):
+        from agent_skills.system_load import wait_until_safe
+        if not wait_until_safe(max_wait_minutes=5):
             logger.info("System busy — skipping janitor this cycle.")
             return
     except Exception:

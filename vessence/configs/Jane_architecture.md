@@ -1144,3 +1144,30 @@ A tool/essence is NOT complete without a valid MCP. The essence builder intervie
   - `python agent_skills/google_cloud_receipts.py list-accounts`
 - **Filename convention:** `google_<month>_<day>_<year>_<amount>.pdf` when both values are available from the receipt row/page
 - **Reused plumbing:** `agent_skills/web_automation/browser_session.py` and `agent_skills/web_automation/profiles.py`
+
+### 19.2 OpenAI / ChatGPT Receipt Downloader
+
+- **File:** `agent_skills/openai_receipts.py`
+- **Purpose:** lets Codex/Jane capture a reusable ChatGPT browser profile and download paid ChatGPT billing receipts for work/tax reporting. The downloader opens ChatGPT Settings > Billing, expands Billing history, extracts Stripe invoice links, and saves the selected invoice pages as PDFs.
+- **Commands:**
+  - `python agent_skills/openai_receipts.py capture-profile`
+  - `python agent_skills/openai_receipts.py verify-profile`
+  - `python agent_skills/openai_receipts.py list`
+  - `python agent_skills/openai_receipts.py download --count <n>`
+  - `python agent_skills/openai_receipts.py download --start-date YYYY-MM-DD --end-date YYYY-MM-DD`
+- **Filename convention:** `openai_<month>_<day>_<year>_<amount>.pdf` when both values are available from the ChatGPT billing row
+- **Reused plumbing:** `agent_skills/web_automation/browser_session.py` and `agent_skills/web_automation/profiles.py`
+
+### 19.3 Anthropic / Claude Receipt Downloader
+
+- **File:** `agent_skills/anthropic_receipts.py`
+- **Purpose:** lets Codex/Jane capture a reusable Claude browser profile and download paid Claude receipts for work/tax reporting. The downloader opens Claude Settings > Billing, expands invoice history when possible, extracts invoice controls / Stripe invoice links, and saves selected invoice pages as PDFs.
+- **Commands:**
+  - `python agent_skills/anthropic_receipts.py capture-profile`
+  - `python agent_skills/anthropic_receipts.py verify-profile`
+  - `python agent_skills/anthropic_receipts.py list`
+  - `python agent_skills/anthropic_receipts.py download --count <n>`
+  - `python agent_skills/anthropic_receipts.py download --start-date YYYY-MM-DD --end-date YYYY-MM-DD`
+- **Filename convention:** `anthropic_<month>_<day>_<year>_<amount>.pdf` when both values are available from the Claude billing row
+- **Reused plumbing:** `agent_skills/web_automation/browser_session.py` and `agent_skills/web_automation/profiles.py`
+- **Known auth state:** `$VESSENCE_DATA_HOME/data/browser_profiles/anthropic_claude/` currently exists but has no captured cookies because Claude/Google blocked the automated-browser login attempt on 2026-07-10.
