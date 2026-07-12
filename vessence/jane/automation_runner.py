@@ -1,10 +1,12 @@
 import logging
 import os
 import tempfile
+import time
 from pathlib import Path
 
 from jane.brain_adapters import BrainAdapterError, build_execution_profile, get_brain_adapter, resolve_timeout_seconds
 from jane.config import CODEX_BIN, VESSENCE_HOME
+from agent_skills.cron_token_meter import log_llm_call as _log_llm_call
 
 logger = logging.getLogger(__name__)
 
@@ -77,19 +79,42 @@ def _dispatch_single(
 ) -> str:
     """Run the prompt against exactly one provider. Raises AutomationError on failure."""
     resolved_timeout = resolve_timeout_seconds(provider_name, timeout_seconds)
-
-    if provider_name == "codex":
-        return _run_codex(prompt, timeout_seconds=resolved_timeout, workdir=workdir)
+    start = time.perf_counter()
+    error = None
+    response = ""
 
     try:
-        from jane.brain_adapters import _execute_subprocess_streaming
-        adapter = get_brain_adapter(provider_name, build_execution_profile(provider_name, timeout_seconds=resolved_timeout))
-        return _execute_subprocess_streaming(
-            adapter, system_prompt, prompt,
-            on_delta=on_progress or (lambda _: None),
-        )
+        if provider_name == "codex":
+            response = _run_codex(prompt, timeout_seconds=resolved_timeout, workdir=workdir)
+        else:
+            from jane.brain_adapters import _execute_subprocess_streaming
+            adapter = get_brain_adapter(provider_name, build_execution_profile(provider_name, timeout_seconds=resolved_timeout))
+            response = _execute_subprocess_streaming(
+                adapter, system_prompt, prompt,
+                on_delta=on_progress or (lambda _: None),
+            )
+        return response
+    except AutomationError as exc:
+        error = str(exc)
+        raise
     except BrainAdapterError as exc:
-        raise AutomationError(str(exc)) from exc
+        error = str(exc)
+        raise AutomationError(error) from exc
+    except Exception as exc:
+        error = str(exc)
+        raise AutomationError(error) from exc
+    finally:
+        _log_llm_call(
+            provider=provider_name,
+            model="",
+            prompt_chars=len(prompt),
+            response_chars=len(response),
+            elapsed_ms=int((time.perf_counter() - start) * 1000),
+            success=error is None,
+            phase="automation_runner._dispatch_single",
+            job=os.environ.get("CRON_JOB"),
+            error=error,
+        )
 
 
 def run_automation_prompt(

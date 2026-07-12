@@ -18,9 +18,11 @@ import logging
 import os
 import re
 import signal
+import subprocess
 import tempfile
 import time
 import wave
+from collections import deque
 
 import numpy as np
 import sounddevice as sd
@@ -35,6 +37,11 @@ TTS_VOICE = "en-US-AriaNeural"
 TTS_RATE = "+0%"
 TTS_VOLUME = "+0%"
 TTS_MAX_CHARS = 2000
+DEFAULT_CONVERSATION_MODE = os.environ.get("JANE_VOICE_CONVERSATION_MODE", "legacy")
+BARGE_IN_THRESHOLD = float(os.environ.get("JANE_VOICE_BARGE_IN_THRESHOLD", "0.025"))
+BARGE_IN_START_CHUNKS = int(os.environ.get("JANE_VOICE_BARGE_IN_START_CHUNKS", "3"))
+BARGE_IN_SILENCE_DURATION = float(os.environ.get("JANE_VOICE_BARGE_IN_SILENCE_SECS", "1.0"))
+BARGE_IN_MAX_CAPTURE = float(os.environ.get("JANE_VOICE_BARGE_IN_MAX_CAPTURE_SECS", "20.0"))
 
 # ── Logging ────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -140,6 +147,126 @@ async def speak_text(text: str):
         )
         await proc.wait()
     finally:
+        if os.path.exists(tmp_path):
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+
+
+def _terminate_process(proc):
+    if proc.poll() is not None:
+        return
+    try:
+        proc.terminate()
+    except ProcessLookupError:
+        return
+    except Exception as e:
+        log.debug("Failed to terminate TTS process: %s", e)
+
+
+def _monitor_playback_for_barge_in(
+    proc,
+    *,
+    threshold: float = BARGE_IN_THRESHOLD,
+    start_chunks: int = BARGE_IN_START_CHUNKS,
+    silence_duration: float = BARGE_IN_SILENCE_DURATION,
+    max_capture: float = BARGE_IN_MAX_CAPTURE,
+) -> np.ndarray | None:
+    """Monitor mic during TTS playback.
+
+    Returns captured interruption audio if speech is detected, otherwise None.
+    This is a pragmatic local barge-in path: it preserves the legacy TTS path
+    and adds cancellable playback without requiring Pipecat/LiveKit upfront.
+    """
+    chunk_ms = 50
+    chunk_samples = int(SAMPLE_RATE * chunk_ms / 1000)
+    silence_needed = max(1, int(silence_duration * 1000 / chunk_ms))
+    max_chunks = max(1, int(max_capture * 1000 / chunk_ms))
+    preroll = deque(maxlen=8)
+    chunks = []
+    speech_chunks = 0
+    silence_chunks = 0
+    capturing = False
+
+    try:
+        with sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype=np.float32,
+                            blocksize=chunk_samples) as stream:
+            while proc.poll() is None:
+                audio, _ = stream.read(chunk_samples)
+                audio = audio.flatten()
+                rms = float(np.sqrt(np.mean(audio ** 2)))
+
+                if not capturing:
+                    preroll.append(audio)
+                    if rms > threshold:
+                        speech_chunks += 1
+                    else:
+                        speech_chunks = 0
+                    if speech_chunks >= start_chunks:
+                        capturing = True
+                        chunks.extend(preroll)
+                        preroll.clear()
+                        _terminate_process(proc)
+                        log.info("Barge-in detected during TTS (rms=%.4f)", rms)
+                    continue
+
+                chunks.append(audio)
+                if rms > threshold:
+                    silence_chunks = 0
+                else:
+                    silence_chunks += 1
+                    if silence_chunks >= silence_needed:
+                        break
+                if len(chunks) >= max_chunks:
+                    break
+    except sd.PortAudioError as e:
+        log.warning("Barge-in monitor audio error: %s", e)
+        return None
+
+    if not chunks:
+        return None
+    return np.concatenate(chunks)
+
+
+async def speak_text_interruptible(text: str) -> np.ndarray | None:
+    """Speak text and return captured user interruption audio, if any."""
+    clean = clean_for_speech(text)
+    if len(clean) < 3:
+        return None
+
+    import edge_tts
+
+    tmp_fd, tmp_path = tempfile.mkstemp(suffix=".mp3", prefix="jane_voice_")
+    os.close(tmp_fd)
+    proc = None
+    try:
+        communicate = edge_tts.Communicate(clean, TTS_VOICE, rate=TTS_RATE, volume=TTS_VOLUME)
+        await communicate.save(tmp_path)
+        proc = subprocess.Popen(
+            ["ffplay", "-nodisp", "-autoexit", "-loglevel", "error", tmp_path],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        interrupted_audio = await asyncio.to_thread(_monitor_playback_for_barge_in, proc)
+        if proc.poll() is None:
+            try:
+                await asyncio.to_thread(proc.wait, timeout=2.0)
+            except subprocess.TimeoutExpired:
+                _terminate_process(proc)
+                await asyncio.to_thread(proc.wait)
+        return interrupted_audio
+    finally:
+        if proc is not None and proc.poll() is None:
+            _terminate_process(proc)
+            try:
+                await asyncio.to_thread(proc.wait, timeout=1.0)
+            except subprocess.TimeoutExpired:
+                try:
+                    proc.kill()
+                except ProcessLookupError:
+                    pass
+                await asyncio.to_thread(proc.wait)
         if os.path.exists(tmp_path):
             try:
                 os.unlink(tmp_path)
@@ -274,6 +401,46 @@ async def voice_conversation(stt: STTEngine):
     log.info("=== Voice conversation ended ===")
 
 
+async def voice_conversation_interruptible(stt: STTEngine):
+    await play_chime()
+    log.info("=== Interruptible voice conversation started ===")
+
+    turn = 0
+    pending_audio = None
+    while True:
+        audio = pending_audio
+        pending_audio = None
+        if audio is None:
+            audio = record_until_silence()
+        if audio is None:
+            log.info("Silence — ending conversation." if turn else "No speech after wake word.")
+            break
+
+        text = stt.transcribe(audio)
+        log.info("You: %s", text)
+
+        if not text or len(text.strip()) < 2:
+            log.info("Empty transcription, trying again...")
+            continue
+
+        if is_exit(text):
+            await speak_text("Goodbye!")
+            break
+
+        log.info("Sending to Jane...")
+        response = await send_to_jane(text)
+        log.info("Jane: %s", response[:200])
+
+        interrupted_audio = await speak_text_interruptible(response)
+        turn += 1
+        if interrupted_audio is not None:
+            pending_audio = interrupted_audio
+            log.info("Captured barge-in audio; processing as next turn.")
+            continue
+
+    log.info("=== Interruptible voice conversation ended ===")
+
+
 # ── Main daemon loop ──────────────────────────────────────────────────
 async def main_loop(args):
     # Wake word
@@ -308,7 +475,10 @@ async def main_loop(args):
 
         # Conversation
         try:
-            await voice_conversation(stt)
+            if args.conversation_mode == "interruptible":
+                await voice_conversation_interruptible(stt)
+            else:
+                await voice_conversation(stt)
         except Exception as e:
             log.error("Conversation error: %s", e, exc_info=True)
 
@@ -327,6 +497,9 @@ def main():
                         help="Wake word detection threshold (default: 0.5)")
     parser.add_argument("--whisper-model", default="base",
                         help="Whisper model size: tiny/base/small/medium")
+    parser.add_argument("--conversation-mode", choices=("legacy", "interruptible"),
+                        default=DEFAULT_CONVERSATION_MODE,
+                        help="Voice loop mode (default: env JANE_VOICE_CONVERSATION_MODE or legacy)")
     args = parser.parse_args()
 
     loop = asyncio.new_event_loop()

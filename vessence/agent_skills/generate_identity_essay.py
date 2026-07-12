@@ -5,6 +5,7 @@ from pathlib import Path
 import chromadb
 from google.genai import Client
 from dotenv import load_dotenv
+import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -15,6 +16,7 @@ from agent_skills.identity_essay_prompts import (
     memories_text_from_documents as _memories_text_from_documents,
     user_identity_prompt as _user_identity_prompt,
 )
+from agent_skills.cron_token_meter import log_llm_call as _log_llm_call
 
 DB_PATH = VECTOR_DB_USER_MEMORIES
 _USER_NAME = os.environ.get("USER_NAME", "user")
@@ -23,6 +25,35 @@ JANE_ESSAY_PATH = os.path.join(VAULT_DIR, "documents", "jane_identity_essay.txt"
 AMBER_ESSAY_PATH = os.path.join(VAULT_DIR, "documents", "amber_identity_essay.txt")
 
 load_dotenv(ENV_FILE_PATH)
+
+
+def _generate_with_meter(
+    client: Client,
+    *, model: str, prompt: str, label: str
+):
+    start = time.perf_counter()
+    output_text = ""
+    error = None
+    try:
+        response = client.models.generate_content(model=model, contents=prompt)
+        output_text = response.text or ""
+        return response
+    except Exception as exc:
+        error = str(exc)
+        raise
+    finally:
+        _log_llm_call(
+            provider="gemini",
+            model=model,
+            prompt_chars=len(prompt),
+            response_chars=len(output_text),
+            elapsed_ms=int((time.perf_counter() - start) * 1000),
+            success=error is None,
+            phase=f"generate_identity_essay.{label}",
+            job=os.environ.get("CRON_JOB"),
+            error=error,
+        )
+
 
 def update_essay():
     client = get_chroma_client(path=DB_PATH)
@@ -59,7 +90,12 @@ def update_essay():
 
     print("Generating user identity essay...")
     try:
-        response_chieh = genai_client.models.generate_content(model="gemini-2.5-pro", contents=prompt_chieh)
+        response_chieh = _generate_with_meter(
+            genai_client,
+            model="gemini-2.5-pro",
+            prompt=prompt_chieh,
+            label="user",
+        )
         if response_chieh.text:
             os.makedirs(os.path.dirname(ESSAY_PATH), exist_ok=True)
             with open(ESSAY_PATH, "w") as f:
@@ -75,7 +111,12 @@ def update_essay():
 
     print("Generating Jane's identity essay...")
     try:
-        response_jane = genai_client.models.generate_content(model="gemini-2.5-pro", contents=prompt_jane)
+        response_jane = _generate_with_meter(
+            genai_client,
+            model="gemini-2.5-pro",
+            prompt=prompt_jane,
+            label="jane",
+        )
         if response_jane.text:
             with open(JANE_ESSAY_PATH, "w") as f:
                 f.write(response_jane.text)
@@ -90,7 +131,12 @@ def update_essay():
 
     print("Generating Amber's identity essay...")
     try:
-        response_amber = genai_client.models.generate_content(model="gemini-2.5-pro", contents=prompt_amber)
+        response_amber = _generate_with_meter(
+            genai_client,
+            model="gemini-2.5-pro",
+            prompt=prompt_amber,
+            label="amber",
+        )
         if response_amber.text:
             with open(AMBER_ESSAY_PATH, "w") as f:
                 f.write(response_amber.text)

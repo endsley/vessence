@@ -9,10 +9,10 @@ if [[ "${FB_MARKETPLACE_MESSAGE_HEADFUL_DEBUG:-}" != "1" ]]; then
   unset DISPLAY WAYLAND_DISPLAY
 fi
 
-VESSENCE_HOME="${VESSENCE_HOME:-$HOME/ambient/vessence}"
-VESSENCE_DATA_HOME="${VESSENCE_DATA_HOME:-$HOME/ambient/vessence-data}"
-VAULT_HOME="${VAULT_HOME:-$HOME/ambient/vault}"
-PYTHON="${PYTHON_BIN:-/home/chieh/google-adk-env/adk-venv/bin/python}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/startup_env.sh"
+startup_bootstrap_env
+PYTHON="$PYTHON_BIN"
 MAX_DELETE="${FB_MARKETPLACE_MESSAGE_MAX_DELETE:-25}"
 STALE_DAYS="${FB_MARKETPLACE_MESSAGE_STALE_DAYS:-3}"
 

@@ -338,7 +338,7 @@ crontab $HOME/ambient/vessence/configs/crontab_backup.txt
 
 ## Step 7 — Start the System
 ```bash
-bash $HOME/ambient/vessence/startup_code/reliable_start.sh
+bash $VESSENCE_HOME/startup_code/reliable_start.sh
 ```
 
 ---

@@ -44,6 +44,13 @@ class ChatPreferences(context: Context) {
         prefs.edit().putBoolean("auto_listen_after_tts", enabled).apply()
     }
 
+    fun isInterruptibleVoiceEnabled(): Boolean =
+        prefs.getBoolean("interruptible_voice_mode", false)
+
+    fun setInterruptibleVoiceEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean("interruptible_voice_mode", enabled).apply()
+    }
+
     /**
      * When a new messaging-app notification arrives, should Android Jane
      * speak a short event-driven announcement ("New text from <sender>.")?

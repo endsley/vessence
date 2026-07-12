@@ -5,6 +5,7 @@ import logging
 from pathlib import Path
 from google.genai import Client
 from dotenv import load_dotenv
+import time
 
 import sys
 
@@ -16,6 +17,8 @@ from agent_skills.model_update_helpers import (
     should_persist_model_update as _should_persist_model_update,
 )
 from jane.config import ENV_FILE_PATH, PENDING_UPDATES_PATH
+
+from agent_skills.cron_token_meter import log_llm_call as _log_llm_call
 
 NOTIFY_FILE = PENDING_UPDATES_PATH
 load_dotenv(ENV_FILE_PATH)
@@ -34,8 +37,10 @@ def check_for_new_models():
     
     # We use Gemini to perform the search and analysis in one go
     prompt = _model_update_prompt(CURRENT_MODEL)
+    start = time.perf_counter()
 
     try:
+        response = None
         # Use AFC to get search results and analyze
         response = genai_client.models.generate_content(
             model="gemini-2.5-flash",
@@ -52,8 +57,29 @@ def check_for_new_models():
                 json.dump(data, f)
         else:
             logger.info("No new models found.")
-            
+
+        _log_llm_call(
+            provider="gemini",
+            model="gemini-2.5-flash",
+            prompt_chars=len(prompt),
+            response_chars=len(response.text or ""),
+            elapsed_ms=int((time.perf_counter() - start) * 1000),
+            success=True,
+            phase="check_for_updates",
+            job=os.environ.get("CRON_JOB"),
+        )
     except Exception as e:
+        _log_llm_call(
+            provider="gemini",
+            model="gemini-2.5-flash",
+            prompt_chars=len(prompt),
+            response_chars=0,
+            elapsed_ms=int((time.perf_counter() - start) * 1000),
+            success=False,
+            phase="check_for_updates",
+            job=os.environ.get("CRON_JOB"),
+            error=str(e),
+        )
         logger.error(f"Failed to check for updates: {e}")
 
 if __name__ == "__main__":

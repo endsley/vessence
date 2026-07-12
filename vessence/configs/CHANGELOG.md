@@ -1,5 +1,8 @@
 # Vessence Changelog
 
+## v0.2.100 (2026-07-11)
+- Version bump.
+
 ## v0.2.99 (2026-07-01)
 - Add RA research report notifications that open styled HTML reports in the Android app.
 - Add background report polling and a dedicated authenticated report reader.

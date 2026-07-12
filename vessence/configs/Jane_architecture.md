@@ -665,7 +665,7 @@ Current active families:
 Paused/disabled jobs:
 
 - `startup_code/run_kathia_schedule.py` is documented but commented out in crontab since 2026-06-23.
-- `startup_code/bot_watchdog.sh` is disabled because Discord is disconnected.
+ - `startup_code/bot_watchdog.sh` is disabled because Discord is disconnected. Startup/watchdog command conventions are consolidated in [Startup Operations Reference](STARTUP_REFERENCE.md).
 - Old standalone `janitor_memory.py`, `nightly_audit.py`, `audit_auto_fixer.py`, `ambient_heartbeat.py`, and `essence_scheduler.py` cron paths are not active; their responsibilities were removed or folded into the newer orchestrators.
 
 ### 9.2 Automation Runner (`jane/automation_runner.py`)
@@ -740,6 +740,8 @@ Conversation turns flow through a triage pipeline:
 3. `WakeWordBridge.sttActive = true` keeps service stopped for entire conversation
 4. User speaks → `SpeechRecognizer.onResults` → `sendMessage(fromVoice=true)` → Jane streams response → TTS → auto-listen → repeat
 5. Conversation ends (STT timeout / no speech) → `sttActive = false` → service restarts wake word detection
+
+**Interruptible voice mode (swappable path):** `ChatPreferences.interruptible_voice_mode` gates the new barge-in behavior and defaults off, preserving the legacy queue-based voice path. When enabled, a mic capture or new voice/text send during Jane output calls `ChatViewModel.prepareForInterruptibleVoiceCapture()` / `interruptCurrentOutputForReplacement()`, cancels active streaming/TTS, marks any streaming assistant bubble as interrupted, clears the legacy pending queue, and sends the new utterance immediately. The local daemon mirrors this as an opt-in mode via `wake_word/voice_daemon.py --conversation-mode interruptible` or `JANE_VOICE_CONVERSATION_MODE=interruptible`; `legacy` remains the default.
 
 #### Wake Word Model Provenance: `hey_jane.onnx` v8-era Model
 
@@ -831,6 +833,7 @@ Single source of truth: `version.json` at repo root (`version_code` + `version_n
 
 - **Shared Jane session:** `ChatPreferences.getJaneSessionId()` returns a persistent session ID stored in SharedPreferences. Same session used by wake word and manual chat.
 - **Auto-listen after TTS:** When enabled, `onSendComplete()` speaks Jane's reply via TTS, then auto-starts SpeechRecognizer for the next user utterance.
+- **Interruptible voice mode:** Disabled by default. When enabled in Settings or the chat options sheet, new speech/input interrupts the current stream/TTS and replaces the pending queue with the new request.
 - **Screen wake:** Wake word detection from screen-off uses `FULL_WAKE_LOCK + ACQUIRE_CAUSES_WAKEUP`, `setShowWhenLocked(true)`, `setTurnScreenOn(true)`, and keyguard dismissal.
 - **Battery optimization:** Requests `ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` when always-listening is enabled.
 

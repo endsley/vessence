@@ -69,7 +69,7 @@ The lock auto-releases when the holding agent's process exits.
 ## Essence Post-Build Verification (MANDATORY)
 
 After building or modifying ANY essence, run this checklist before reporting done:
-1. Restart the web server if code changed: `bash $VESSENCE_HOME/startup_code/graceful_restart.sh` (zero-downtime; see Server Restart Policy)
+1. Restart the web server if code changed using the Server Restart Policy (zero-downtime; see below).
 2. Verify essence appears in list: `curl -s http://localhost:8081/api/essences | python3 -m json.tool | grep -i <essence_name>`
 3. Verify the essence page/route returns 200 (use a session cookie or check with auth)
 4. Verify API endpoints return valid JSON
@@ -243,10 +243,8 @@ The version lives in `startup_code/build_docker_bundle.py` as `VERSION = "X.Y.Z"
 ```
 This script handles everything atomically: bumps `version.json`, updates `main.py`, builds the APK, and deploys it to `marketing_site/downloads/`. Never bump the version without building the APK — this caused broken downloads in the past.
 
-After the script completes, restart the web server so the update endpoint serves the new version:
-```bash
-bash $VESSENCE_HOME/startup_code/graceful_restart.sh
-```
+After the script completes, restart the web server so the update endpoint serves
+the new version (same command in Server Restart Policy).
 
 ## Server Restart Policy
 
@@ -257,9 +255,7 @@ Do NOT restart after every code change. Batch changes and only restart when:
 Track your change count mentally within the session. When you hit 10, restart and reset the count.
 
 **ALWAYS use the graceful restart script** — never use `systemctl --user restart jane-web.service` directly:
-```bash
-bash $VESSENCE_HOME/startup_code/graceful_restart.sh
-```
+Use `bash $VESSENCE_HOME/startup_code/graceful_restart.sh` (documented in [Startup Operations Reference](configs/STARTUP_REFERENCE.md)).
 
 This performs a **zero-downtime restart**: starts a new server on an alternate port, warms up the CLI brain, switches the reverse proxy, drains in-flight requests, then stops the old server. Jane stays online the entire time.
 

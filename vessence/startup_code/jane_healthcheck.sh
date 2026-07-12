@@ -4,9 +4,10 @@
 # Checks all critical subsystems — not just "is the server alive."
 # Alerts via Android notification when something is wrong.
 
-PYTHON="/home/chieh/google-adk-env/adk-venv/bin/python"
-VESSENCE_HOME="/home/chieh/ambient/vessence"
-VESSENCE_DATA_HOME="/home/chieh/ambient/vessence-data"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/startup_env.sh"
+startup_bootstrap_env
+PYTHON="$PYTHON_BIN"
 LOG="$VESSENCE_DATA_HOME/logs/healthcheck.log"
 LOCKFILE="/tmp/jane-web-restarting.lock"
 COOLDOWN=180  # seconds between restart attempts

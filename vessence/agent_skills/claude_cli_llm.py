@@ -11,6 +11,7 @@ import os
 import subprocess
 import json
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -21,6 +22,7 @@ from agent_skills.cli_llm_policy import (
     should_try_fallback as _should_try_fallback,
     truncate_prompt_for_cli as _truncate_prompt_for_cli,
 )
+from agent_skills.cron_token_meter import log_llm_call as _log_llm_call
 from jane.config import PROVIDER_CLI, CHEAP_MODEL, SMART_MODEL, FRONTIER_MODEL, _PROVIDER, PROVIDER_MODELS
 
 # Tiered Model Mapping (as of 2026-03-27)
@@ -63,6 +65,17 @@ def _build_command(
                 "--model", model]
 
 
+def _provider_for_command(command: str) -> str:
+    command = (command or "").lower()
+    if "agy" in command or "gemini" in command:
+        return "gemini"
+    if "codex" in command:
+        return "codex"
+    if "claude" in command:
+        return "claude"
+    return "unknown"
+
+
 def completion(prompt: str, *, model: str | None = None,
                max_tokens: int = 1024, timeout: int = 60,
                cli: str | None = None,
@@ -82,9 +95,15 @@ def completion(prompt: str, *, model: str | None = None,
     # Safety truncation to avoid "Argument list too long" errors
     # 32,000 characters is a safe limit for most CLI arguments.
     prompt = _truncate_prompt_for_cli(prompt)
-        
+
     model = model or CHEAP_MODEL
     cmd = _build_command(prompt, model, max_tokens, cli=cli, cwd=cwd)
+    provider = _provider_for_command(cmd[0])
+    prompt_chars = len(prompt)
+    response_chars = 0
+    start = time.perf_counter()
+    error = None
+    result = None
 
     subprocess_env = os.environ.copy()
     is_agy = "agy" in cmd[0]
@@ -100,21 +119,36 @@ def completion(prompt: str, *, model: str | None = None,
             timeout=timeout, env=subprocess_env,
             cwd=cwd if not ("codex" in cmd[0] or cmd[0] == "codex") else None,
         )
-    except FileNotFoundError:
-        raise RuntimeError(f"CLI not found: {cmd[0]}")
-    except subprocess.TimeoutExpired:
-        raise RuntimeError(f"CLI timed out after {timeout}s")
 
-    if result.returncode != 0:
-        err = (result.stderr or result.stdout or "Unknown error").strip()[:500]
-        raise RuntimeError(f"CLI ({cmd[0]}) failed (exit {result.returncode}): {err}")
+        if result.returncode != 0:
+            err = (result.stderr or result.stdout or "Unknown error").strip()[:500]
+            error = f"CLI ({cmd[0]}) failed (exit {result.returncode}): {err}"
+            raise RuntimeError(error)
 
-    output = result.stdout.strip()
-    if not output:
-        err = (result.stderr or "no stderr").strip()[:500]
-        raise RuntimeError(f"CLI ({cmd[0]}) returned empty response: {err}")
+        output = result.stdout.strip()
+        response_chars = len(output)
+        if not output:
+            err = (result.stderr or "no stderr").strip()[:500]
+            error = f"CLI ({cmd[0]}) returned empty response: {err}"
+            raise RuntimeError(error)
 
-    return output
+        return output
+    except Exception as exc:
+        if error is None:
+            error = str(exc)
+        raise
+    finally:
+        _log_llm_call(
+            provider=provider,
+            model=model or "",
+            prompt_chars=prompt_chars,
+            response_chars=response_chars,
+            elapsed_ms=int((time.perf_counter() - start) * 1000),
+            success=error is None,
+            phase="claude_cli_llm.completion",
+            job=os.environ.get("CRON_JOB"),
+            error=error,
+        )
 
 
 def completion_with_fallback(prompt: str, *, tier: str = "utility", 

@@ -30,6 +30,7 @@ from agent_skills.consult_panel_helpers import (
     should_consider_cli as _should_consider_cli,
     synthesize_results as _synthesize_results,
 )
+from agent_skills.cron_token_meter import log_llm_call as _log_llm_call
 
 # Frontier CLIs to consider (name → binary).
 # "agy" is Antigravity, Google's successor to the standalone gemini CLI.
@@ -63,7 +64,10 @@ def query_cli(cli: dict, prompt: str, context: str = "") -> dict:
     """Query a single CLI and return its response."""
     name = cli["name"]
     binary = cli["binary"]
-    start = time.time()
+    start = time.perf_counter()
+    output = ""
+    elapsed = 0.0
+    error = None
 
     full_prompt = _prompt_with_context(prompt, context)
 
@@ -76,6 +80,7 @@ def query_cli(cli: dict, prompt: str, context: str = "") -> dict:
             env["HOME"] = agy_headless_home()
         invocation = _cli_invocation(name, binary, full_prompt)
         if invocation is None:
+            error = f"Unknown CLI: {name}"
             return {"name": name, "error": f"Unknown CLI: {name}", "elapsed": 0}
         result = subprocess.run(
             invocation.argv,
@@ -86,18 +91,33 @@ def query_cli(cli: dict, prompt: str, context: str = "") -> dict:
             env=env,
         )
 
-        elapsed = round(time.time() - start, 1)
+        elapsed = round(time.perf_counter() - start, 1)
         output = result.stdout.strip()
         if result.returncode != 0 and not output:
             output = result.stderr.strip() or f"Exit code {result.returncode}"
+            error = output
             return {"name": name, "error": output, "elapsed": elapsed}
 
         return {"name": name, "response": output, "elapsed": elapsed}
 
     except subprocess.TimeoutExpired:
+        error = f"Timed out after {CLI_TIMEOUT}s"
         return {"name": name, "error": f"Timed out after {CLI_TIMEOUT}s", "elapsed": CLI_TIMEOUT}
     except Exception as e:
-        return {"name": name, "error": str(e), "elapsed": round(time.time() - start, 1)}
+        error = str(e)
+        return {"name": name, "error": str(e), "elapsed": round(time.perf_counter() - start, 1)}
+    finally:
+        _log_llm_call(
+            provider=name,
+            model="",
+            prompt_chars=len(full_prompt),
+            response_chars=len(output),
+            elapsed_ms=int((time.perf_counter() - start) * 1000),
+            success=error is None,
+            phase="consult_panel.query_cli",
+            job=os.environ.get("CRON_JOB"),
+            error=error,
+        )
 
 
 def synthesize(results: list[dict], caller: str) -> str:

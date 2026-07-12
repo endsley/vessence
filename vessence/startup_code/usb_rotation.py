@@ -17,6 +17,15 @@ import json
 from datetime import datetime
 from pathlib import Path
 
+# ─── Paths and Runtime Roots ────────────────────────────────────────────────
+HOME_DIR = Path.home()
+AMBIENT_BASE = Path(os.environ.get("AMBIENT_BASE", str(HOME_DIR / "ambient")))
+VESSENCE_HOME = Path(os.environ.get("VESSENCE_HOME", str(AMBIENT_BASE / "vessence")))
+VESSENCE_DATA_HOME = Path(os.environ.get("VESSENCE_DATA_HOME", str(AMBIENT_BASE / "vessence-data")))
+VAULT_HOME = Path(os.environ.get("VAULT_HOME", str(AMBIENT_BASE / "vault")))
+GOOGLE_ADK_VENV = Path(os.environ.get("HOME", str(HOME_DIR))) / "google-adk-env" / "adk-venv"
+CLAUDE_BINARY = Path(os.environ.get("HOME", str(HOME_DIR))) / ".local" / "bin" / "claude"
+
 # ─── USB Detection ────────────────────────────────────────────────────────────
 _USER = os.environ.get("USER", os.environ.get("LOGNAME", "user"))
 _DEFAULT_USB = f'/media/{_USER}/USB DISK'
@@ -32,16 +41,16 @@ USB_MOUNT_POINT = find_usb_mount()
 
 # ─── What to back up ──────────────────────────────────────────────────────────
 SOURCES = [
-    '/home/chieh/vessence',
-    '/home/chieh/gemini_cli_bridge',
-    '/home/chieh/.claude',          # Jane's memory, hooks, settings.json — CRITICAL
-    '/home/chieh/CLAUDE.md',        # Jane's identity & protocol document — CRITICAL
-    '/home/chieh/.gemini',          # Gemini/Amber config
-    '/home/chieh/.ssh',
-    '/home/chieh/.bashrc',
-    '/home/chieh/.profile',
-    '/home/chieh/.vimrc',
-    '/home/chieh/litellm_config.yaml',
+    str(VESSENCE_HOME),
+    str(HOME_DIR / 'gemini_cli_bridge'),
+    str(HOME_DIR / '.claude'),
+    str(HOME_DIR / 'CLAUDE.md'),
+    str(HOME_DIR / '.gemini'),
+    str(HOME_DIR / '.ssh'),
+    str(HOME_DIR / '.bashrc'),
+    str(HOME_DIR / '.profile'),
+    str(HOME_DIR / '.vimrc'),
+    str(HOME_DIR / 'litellm_config.yaml'),
 ]
 
 EXCLUDES = [
@@ -59,8 +68,8 @@ EXCLUDES = [
     '--exclude=.git',
 ]
 
-ADK_PYTHON = '/home/chieh/google-adk-env/adk-venv/bin/python'
-ADK_PIP    = '/home/chieh/google-adk-env/adk-venv/bin/pip'
+ADK_PYTHON = str(GOOGLE_ADK_VENV / 'bin' / 'python')
+ADK_PIP    = str(GOOGLE_ADK_VENV / 'bin' / 'pip')
 
 
 # ─── Manifest Generation ──────────────────────────────────────────────────────
@@ -84,8 +93,8 @@ def generate_manifest(backup_dir: str):
             'python_adk_venv': run([ADK_PYTHON, '--version']),
         },
         'claude_code': {
-            'binary': run(['readlink', '-f', '/home/chieh/.local/bin/claude']),
-            'version': run(['/home/chieh/.local/bin/claude', '--version']),
+            'binary': run(['readlink', '-f', str(CLAUDE_BINARY)]),
+            'version': run([str(CLAUDE_BINARY), '--version']),
         },
         'ollama_models': run(['ollama', 'list']),
         'crontab': run(['crontab', '-l']),
@@ -105,7 +114,7 @@ def generate_manifest(backup_dir: str):
         json.dump(manifest, f, indent=2)
 
     # Update the crontab_backup.txt in the repo source
-    crontab_txt = '/home/chieh/vessence/configs/crontab_backup.txt'
+    crontab_txt = str(VESSENCE_HOME / 'configs' / 'crontab_backup.txt')
     try:
         live_cron = run(['crontab', '-l'])
         Path(crontab_txt).write_text(live_cron + '\n')
@@ -137,16 +146,23 @@ sudo apt-get update && sudo apt-get install -y \\
 
 ```bash
 # From the USB backup directory, rsync everything back:
-rsync -av backup_YYYYMMDD/my_agent/          /home/chieh/vessence/
-rsync -av backup_YYYYMMDD/gemini_cli_bridge/ /home/chieh/gemini_cli_bridge/
-rsync -av backup_YYYYMMDD/.claude/           /home/chieh/.claude/
-cp    backup_YYYYMMDD/CLAUDE.md              /home/chieh/CLAUDE.md
-rsync -av backup_YYYYMMDD/.gemini/           /home/chieh/.gemini/
-rsync -av backup_YYYYMMDD/.ssh/              /home/chieh/.ssh/ && chmod 700 /home/chieh/.ssh && chmod 600 /home/chieh/.ssh/*
-cp    backup_YYYYMMDD/.bashrc                /home/chieh/.bashrc
-cp    backup_YYYYMMDD/.profile               /home/chieh/.profile
-cp    backup_YYYYMMDD/.vimrc                 /home/chieh/.vimrc
-cp    backup_YYYYMMDD/litellm_config.yaml    /home/chieh/litellm_config.yaml
+# Legacy backups (older schema):
+rsync -av backup_YYYYMMDD/my_agent/      $HOME/ambient/vessence/
+# Current schema:
+if [ -d backup_YYYYMMDD/ambient ]; then
+  rsync -av backup_YYYYMMDD/ambient/vessence/     $HOME/ambient/vessence/
+  rsync -av backup_YYYYMMDD/ambient/vessence-data/ $HOME/ambient/vessence-data/
+  rsync -av backup_YYYYMMDD/ambient/vault/        $HOME/ambient/vault/
+fi
+rsync -av backup_YYYYMMDD/gemini_cli_bridge/ $HOME/gemini_cli_bridge/
+rsync -av backup_YYYYMMDD/.claude/           $HOME/.claude/
+cp    backup_YYYYMMDD/CLAUDE.md              $HOME/CLAUDE.md
+rsync -av backup_YYYYMMDD/.gemini/           $HOME/.gemini/
+rsync -av backup_YYYYMMDD/.ssh/              $HOME/.ssh/ && chmod 700 $HOME/.ssh && chmod 600 $HOME/.ssh/*
+cp    backup_YYYYMMDD/.bashrc                $HOME/.bashrc
+cp    backup_YYYYMMDD/.profile               $HOME/.profile
+cp    backup_YYYYMMDD/.vimrc                 $HOME/.vimrc
+cp    backup_YYYYMMDD/litellm_config.yaml    $HOME/litellm_config.yaml
 ```
 
 ---
@@ -154,9 +170,9 @@ cp    backup_YYYYMMDD/litellm_config.yaml    /home/chieh/litellm_config.yaml
 ## Step 3 — Recreate Python Venv (Google ADK)
 
 ```bash
-mkdir -p /home/chieh/google-adk-env
-python3 -m venv /home/chieh/google-adk-env/adk-venv
-source /home/chieh/google-adk-env/adk-venv/bin/activate
+mkdir -p "$HOME/google-adk-env"
+python3 -m venv "$HOME/google-adk-env/adk-venv"
+source "$HOME/google-adk-env/adk-venv/bin/activate"
 
 # Install from the exact frozen requirements in this backup:
 pip install $(cat restore_manifest.json | python3 -c "
@@ -209,7 +225,7 @@ import json,sys; m=json.load(sys.stdin); print(m['crontab'])
 " | crontab -
 
 # Or directly from the text file:
-crontab /home/chieh/vessence/configs/crontab_backup.txt
+crontab "$VESSENCE_HOME/configs/crontab_backup.txt"
 ```
 
 ---
@@ -217,11 +233,11 @@ crontab /home/chieh/vessence/configs/crontab_backup.txt
 ## Step 7 — Start the System
 
 ```bash
-# Start Amber ADK server + Discord bridges:
-bash /home/chieh/vessence/startup_code/start_all_bots.sh
+# Start the system launcher from the canonical startup entry point:
+bash "$VESSENCE_HOME/startup_code/start_all_bots.sh"
 
-# Or use the reliable start with watchdog:
-bash /home/chieh/vessence/startup_code/reliable_start.sh
+# Or use the reliable start entry point (with stale lock cleanup):
+bash "$VESSENCE_HOME/startup_code/reliable_start.sh"
 ```
 
 ---
@@ -233,10 +249,10 @@ bash /home/chieh/vessence/startup_code/reliable_start.sh
 curl http://localhost:8000/health
 
 # Check memories are intact (ChromaDB):
-/home/chieh/google-adk-env/adk-venv/bin/python /home/chieh/vessence/agent_skills/search_memory.py "session start"
+"$HOME/google-adk-env/adk-venv/bin/python" "$VESSENCE_HOME/agent_skills/search_memory.py" "session start"
 
 # Check Jane's memory is intact:
-ls /home/chieh/.claude/projects/-home-chieh/memory/
+ls "$HOME/.claude/projects/-home-$USER/memory/"
 ```
 
 ---
@@ -245,15 +261,15 @@ ls /home/chieh/.claude/projects/-home-chieh/memory/
 
 | Item | Path | Notes |
 |---|---|---|
-| Agent code + skills | `my_agent/` | All Python scripts |
-| Amber ADK agent | `my_agent/amber/` | Full agent code |
-| ChromaDB memories | `my_agent/vector_db/` | All permanent + long-term memories |
-| Vault files | `my_agent/vault/` | Images, docs, audio, PDFs |
+| Agent code + skills | `vessence/` | All Python scripts |
+| Amber ADK agent | `vessence/amber/` | Full agent code |
+| ChromaDB memories | `vessence/vector_db/` | All permanent + long-term memories |
+| Vault files | `vault/` | Images, docs, audio, PDFs |
 | Jane auto-memory | `.claude/projects/.../memory/` | Feedback, user, project memories |
 | Jane hooks + settings | `.claude/` | UserPromptSubmit hook, settings.json |
 | Jane identity | `CLAUDE.md` | Full system prompt |
 | Discord bridge | `gemini_cli_bridge/` | Bridge code + .env with tokens |
-| API keys | `my_agent/.env` + `gemini_cli_bridge/.env` | All tokens |
+| API keys | `vessence/.env` + `gemini_cli_bridge/.env` | All tokens |
 | SSH keys | `.ssh/` | For git, remote access |
 | Shell config | `.bashrc`, `.profile` | PATH, aliases |
 | Crontab | `restore_manifest.json` → crontab | All scheduled jobs |

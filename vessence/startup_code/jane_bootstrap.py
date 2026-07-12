@@ -2,7 +2,6 @@
 """Build a compact Jane startup digest from docs plus live Vessence memory."""
 from __future__ import annotations
 
-import json
 import os
 import sys
 from dataclasses import dataclass
@@ -22,6 +21,8 @@ DATA_ROOT = Path(os.environ.get("JANE_DATA_ROOT", os.environ.get("JANE_AMBIENT_R
 VESSENCE_ROOT = Path(VESSENCE_HOME)
 DOCS_DIR = Path(VAULT_DIR) / "documents"
 VECTOR_ROOT = Path(VECTOR_DB_DIR)
+BOOTSTRAP_TTL_SECONDS = 20 * 60
+CACHE_FILE = Path(VESSENCE_DATA_HOME) / "startup_cache" / "jane_bootstrap_digest.md"
 
 USER_MEMORIES = ("user_memories", VECTOR_ROOT, "user_memories")
 SHORT_TERM = ("short_term_memory", VECTOR_ROOT / "short_term_memory", "short_term_memory")
@@ -33,6 +34,7 @@ QUERY_SET = [
     "family wife daughter important personal facts relationships preferences",
     "technical priorities architecture memory system jane wrapper prompt queue adk ollama chromadb",
 ]
+CACHE_HEADER = "## JANE_BOOTSTRAP_GENERATED_UTC="
 
 
 @dataclass
@@ -142,57 +144,129 @@ def query_entries(stores: list[MemoryStore], query: str, limit: int = 3) -> list
     return lines or ["- no matches"]
 
 
-def main() -> None:
+def _resolve_ttl() -> int:
+    raw = os.environ.get("JANE_BOOTSTRAP_TTL_SECONDS", str(BOOTSTRAP_TTL_SECONDS))
+    try:
+        return max(0, int(raw))
+    except Exception:
+        return BOOTSTRAP_TTL_SECONDS
+
+
+def _resolve_cache_file() -> Path:
+    return Path(os.environ.get("JANE_BOOTSTRAP_CACHE", str(CACHE_FILE)))
+
+
+def _parse_cached(lines: list[str], ttl: int) -> str | None:
+    if ttl <= 0 or not lines:
+        return None
+
+    if not lines[0].startswith(CACHE_HEADER):
+        return None
+
+    stamp = lines[0].replace(CACHE_HEADER, "").strip()
+    try:
+        generated = datetime.fromisoformat(stamp)
+    except Exception:
+        return None
+
+    if generated.tzinfo is None:
+        generated = generated.replace(tzinfo=timezone.utc)
+
+    age = datetime.now(timezone.utc) - generated
+    if age.total_seconds() > ttl:
+        return None
+
+    return "\n".join(lines[1:])
+
+
+def _read_cache(path: Path, ttl: int) -> str | None:
+    if not path.exists() or ttl <= 0:
+        return None
+    try:
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except Exception:
+        return None
+    return _parse_cached(lines, ttl)
+
+
+def _write_cache(path: Path, content: str) -> None:
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = f"{CACHE_HEADER}{datetime.now(timezone.utc).isoformat()}\n{content}\n"
+        path.write_text(payload, encoding="utf-8")
+    except Exception:
+        return
+
+
+def build_bootstrap_digest(ttl: int) -> str:
     stores = [
         MemoryStore(*USER_MEMORIES),
         MemoryStore(*SHORT_TERM),
         MemoryStore(*LONG_TERM),
     ]
 
-    print("# Jane Startup Digest")
-    print()
-    print(f"- Data root: `{DATA_ROOT}`")
-    print(f"- Vessence root: `{VESSENCE_ROOT}`")
-    print(f"- Vault root: `{Path(VAULT_DIR)}`")
-    print(f"- Generated: `{datetime.now().astimezone().isoformat(timespec='seconds')}`")
-    print()
+    lines: list[str] = []
+    lines.append("# Jane Startup Digest")
+    lines.append("")
+    lines.append(f"- Data root: `{DATA_ROOT}`")
+    lines.append(f"- Vessence root: `{VESSENCE_ROOT}`")
+    lines.append(f"- Vault root: `{Path(VAULT_DIR)}`")
+    lines.append(f"- Generated: `{datetime.now().astimezone().isoformat(timespec='seconds')}`")
+    lines.append("")
 
-    print("## Identity")
-    print(f"- User: {first_paragraph(read_text(DOCS_DIR / 'user_identity_essay.txt'))}")
-    print(f"- Jane: {first_paragraph(read_text(DOCS_DIR / 'jane_identity_essay.txt'))}")
+    lines.append("## Identity")
+    lines.append(f"- User: {first_paragraph(read_text(DOCS_DIR / 'user_identity_essay.txt'))}")
+    lines.append(f"- Jane: {first_paragraph(read_text(DOCS_DIR / 'jane_identity_essay.txt'))}")
     user_profile = DATA_ROOT / "user_profile.md"
     if user_profile.exists():
-        print(f"- user_profile.md: {first_paragraph(read_text(user_profile, 1200), 500)}")
-    print()
+        lines.append(f"- user_profile.md: {first_paragraph(read_text(user_profile, 1200), 500)}")
+    lines.append("")
 
-    print("## Priority Docs")
-    print(f"- TODO_PROJECTS.md: {first_paragraph(read_text(VESSENCE_ROOT / 'configs' / 'TODO_PROJECTS.md', 1600), 500)}")
-    print(f"- active_spec.md: {first_paragraph(read_text(VESSENCE_ROOT / 'configs' / 'project_specs' / 'active_spec.md', 1200), 500)}")
-    print(f"- current_task_state.json: {read_text(VESSENCE_ROOT / 'configs' / 'project_specs' / 'current_task_state.json', 400)}")
-    print()
+    lines.append("## Priority Docs")
+    lines.append(f"- TODO_PROJECTS.md: {first_paragraph(read_text(VESSENCE_ROOT / 'configs' / 'TODO_PROJECTS.md', 1600), 500)}")
+    lines.append(f"- active_spec.md: {first_paragraph(read_text(VESSENCE_ROOT / 'configs' / 'project_specs' / 'active_spec.md', 1200), 500)}")
+    lines.append(f"- current_task_state.json: {read_text(VESSENCE_ROOT / 'configs' / 'project_specs' / 'current_task_state.json', 400)}")
+    lines.append("")
 
-    print("## Prompt Queue")
-    print(read_text(DOCS_DIR / "prompt_list.md", 1800))
-    print()
+    lines.append("## Prompt Queue")
+    lines.append(read_text(DOCS_DIR / "prompt_list.md", 1800))
+    lines.append("")
 
-    print("## Memory Store Counts")
+    lines.append("## Memory Store Counts")
     for store in stores:
-        print(f"- {store.label}: `{store.path}` -> {collection_count(store)}")
-    print()
+        lines.append(f"- {store.label}: `{store.path}` -> {collection_count(store)}")
+    lines.append("")
 
-    print("## Most Recent Memory Entries")
+    lines.append("## Most Recent Memory Entries")
     for store in stores:
-        print(f"### {store.label}")
+        lines.append(f"### {store.label}")
         for line in recent_entries(store):
-            print(line)
-    print()
+            lines.append(line)
+    lines.append("")
 
-    print("## Query-Based Recall")
+    lines.append("## Query-Based Recall")
     for query in QUERY_SET:
-        print(f"### {query}")
+        lines.append(f"### {query}")
         for line in query_entries(stores, query):
-            print(line)
-        print()
+            lines.append(line)
+        lines.append("")
+
+    lines.append(f"TTL policy: cached for {ttl}s unless `JANE_BOOTSTRAP_TTL_SECONDS` overrides.")
+    return "\n".join(lines)
+
+
+def main() -> None:
+    ttl = _resolve_ttl()
+    cache_path = _resolve_cache_file()
+    cached = _read_cache(cache_path, ttl)
+    if cached:
+        print(cached.rstrip("\n"))
+        return
+
+    digest = build_bootstrap_digest(ttl)
+    print(digest)
+    if ttl > 0:
+        _write_cache(cache_path, digest)
 
 
 if __name__ == "__main__":

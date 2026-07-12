@@ -14,10 +14,12 @@
 
 set -u
 
-AMBIENT_BASE="/home/chieh/ambient"
-VENV_PY="/home/chieh/google-adk-env/adk-venv/bin/python"
-VENV_PIP="/home/chieh/google-adk-env/adk-venv/bin/pip"
-LOG_DIR="/home/chieh/ambient/vessence-data/logs"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/startup_env.sh"
+
+VENV_PY="$VENV_BIN/python"
+VENV_PIP="$VENV_BIN/pip"
+LOG_DIR="$VESSENCE_DATA_HOME/logs"
 LOG_FILE="$LOG_DIR/auto_pull.log"
 
 mkdir -p "$LOG_DIR"
@@ -81,7 +83,7 @@ fi
 # Restart the service if any code under vessence/ changed. Markdown / config
 # text edits don't need a restart.
 if echo "$CHANGED" | grep -qE '^vessence/.*\.(py|html|css|js)$'; then
-    GRACEFUL="$AMBIENT_BASE/vessence/startup_code/graceful_restart.sh"
+    GRACEFUL="$VESSENCE_HOME/startup_code/graceful_restart.sh"
     if [ -x "$GRACEFUL" ]; then
         log "code changed — running graceful_restart.sh"
         bash "$GRACEFUL" >>"$LOG_FILE" 2>&1 || log "WARN: graceful_restart exited non-zero"

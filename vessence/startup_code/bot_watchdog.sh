@@ -6,17 +6,9 @@ set -u
 # Ensure systemctl --user can connect when invoked from cron.
 export DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u)/bus"
 
-HOME_DIR="${HOME:-$(getent passwd "$(id -u)" | cut -d: -f6)}"
-AMBIENT_BASE="${AMBIENT_BASE:-$HOME_DIR/ambient}"
-
-VESSENCE_HOME="${VESSENCE_HOME:-$AMBIENT_BASE/vessence}"
-VESSENCE_DATA_HOME="${VESSENCE_DATA_HOME:-$AMBIENT_BASE/vessence-data}"
-VAULT_HOME="${VAULT_HOME:-$AMBIENT_BASE/vault}"
-
-export VESSENCE_HOME VESSENCE_DATA_HOME VAULT_HOME
-export AMBIENT_HOME="${AMBIENT_HOME:-$VESSENCE_DATA_HOME}"
-
-VENV_BIN="${VENV_BIN:-$HOME_DIR/google-adk-env/adk-venv/bin}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/startup_env.sh"
+startup_bootstrap_env
 
 LOG_DIR="$VESSENCE_DATA_HOME/logs/System_log"
 STATE_DIR="$VESSENCE_DATA_HOME/state/watchdog"

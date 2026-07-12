@@ -47,6 +47,8 @@ fun AttachmentSheet(
     aiColor: Color,
     ttsEnabled: MutableState<Boolean>,
     autoListenEnabled: MutableState<Boolean>,
+    interruptibleVoiceEnabled: Boolean = false,
+    onInterruptibleVoiceChange: ((Boolean) -> Unit)? = null,
     attachedFileUri: MutableState<Uri?>,
     attachedFileName: MutableState<String?>,
     cameraPhotoUri: MutableState<Uri?>,
@@ -225,6 +227,34 @@ fun AttachmentSheet(
                             Spacer(modifier = Modifier.width(12.dp))
                             Text(
                                 text = if (autoListenEnabled.value) "Auto-listen after speaking (on)" else "Auto-listen after speaking (off)",
+                                color = Color.White,
+                                fontSize = 16.sp,
+                            )
+                        }
+                    }
+                }
+
+                if (onInterruptibleVoiceChange != null) {
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                onInterruptibleVoiceChange(!interruptibleVoiceEnabled)
+                            },
+                        color = Color.Transparent,
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(
+                                Icons.Default.Mic,
+                                contentDescription = null,
+                                tint = if (interruptibleVoiceEnabled) Color(0xFF22C55E) else SlateMuted,
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text(
+                                text = if (interruptibleVoiceEnabled) "Interruptible voice mode (on)" else "Interruptible voice mode (off)",
                                 color = Color.White,
                                 fontSize = 16.sp,
                             )

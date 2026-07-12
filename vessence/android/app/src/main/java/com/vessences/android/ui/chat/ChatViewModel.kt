@@ -32,6 +32,7 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.launch
 import android.os.PowerManager
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.ConcurrentLinkedQueue
 
 data class PendingMessage(
@@ -53,6 +54,7 @@ data class ChatUiState(
     val availableUpdate: com.vessences.android.data.api.AppVersion? = null,
     val updateDismissed: Boolean = false,
     val ttsEnabled: Boolean = false,
+    val interruptibleVoiceMode: Boolean = false,
     val isSpeaking: Boolean = false,
     val progressBubble: String = "",
     val wakeWordTriggered: Boolean = false,
@@ -71,6 +73,7 @@ class ChatViewModel(
                             else "${backendKey}_android_${UUID.randomUUID().toString().take(8)}"
     private val pendingQueue = ConcurrentLinkedQueue<PendingMessage>()
     private var currentStreamJob: Job? = null
+    private val outputGeneration = AtomicLong(0)
 
     /**
      * Explicit "user tapped Stop" flag. Replaces the prior heuristic of using
@@ -129,6 +132,7 @@ class ChatViewModel(
         ChatUiState(
             messages = try { chatPersistence.loadMessages(backendKey) } catch (_: Exception) { emptyList() },
             ttsEnabled = chatPrefs.isTtsEnabled(backendKey),
+            interruptibleVoiceMode = chatPrefs.isInterruptibleVoiceEnabled(),
         )
     )
     val state: StateFlow<ChatUiState> = _state
@@ -353,6 +357,14 @@ class ChatViewModel(
         )
         if (text.isBlank() && fileUri == null) return
 
+        if (chatPrefs.isInterruptibleVoiceEnabled() && (_state.value.isSending || _state.value.isSpeaking)) {
+            interruptCurrentOutputForReplacement(
+                reason = if (fromVoice) "voice_input" else "text_input",
+            )
+            executeSend(text, fileContext, fileUri, fromVoice)
+            return
+        }
+
         // If already sending, queue the message for later
         if (_state.value.isSending) {
             pendingQueue.add(PendingMessage(text = text, fileUri = fileUri, fromVoice = fromVoice))
@@ -369,6 +381,7 @@ class ChatViewModel(
     }
 
     fun cancelCurrentResponse() {
+        outputGeneration.incrementAndGet()
         currentStreamJob?.cancel()
         currentStreamJob = null
         stopSentenceTtsQueues()
@@ -388,6 +401,49 @@ class ChatViewModel(
         // Drain the queue — don't auto-send after cancel
         pendingQueue.clear()
         _state.value = _state.value.copy(queuedCount = 0)
+    }
+
+    fun prepareForInterruptibleVoiceCapture() {
+        if (chatPrefs.isInterruptibleVoiceEnabled() && (_state.value.isSending || _state.value.isSpeaking)) {
+            interruptCurrentOutputForReplacement(reason = "voice_capture")
+        }
+    }
+
+    fun setInterruptibleVoiceMode(enabled: Boolean) {
+        chatPrefs.setInterruptibleVoiceEnabled(enabled)
+        _state.value = _state.value.copy(interruptibleVoiceMode = enabled)
+    }
+
+    private fun interruptCurrentOutputForReplacement(reason: String) {
+        outputGeneration.incrementAndGet()
+        stopSpeakingInvoked = true
+        currentStreamJob?.cancel()
+        currentStreamJob = null
+        runCatching { stopSentenceTtsQueues() }
+            .onFailure { reportStopSpeakingFailure("interrupt_sentence_queues_stop", it) }
+        runCatching { tts.stop() }
+            .onFailure { reportStopSpeakingFailure("interrupt_hybrid_tts_stop", it) }
+        runCatching { voiceController?.stopTts() }
+            .onFailure { reportStopSpeakingFailure("interrupt_voice_controller_stop", it) }
+        releaseStreamWakeLock()
+        pendingQueue.clear()
+
+        val updatedMsgs = _state.value.messages.map { msg ->
+            if (msg.isStreaming) msg.copy(
+                text = if (msg.text.isNotBlank()) msg.text + "\n\n*(interrupted)*" else "*(interrupted)*",
+                isStreaming = false,
+            ) else msg
+        }
+        _state.value = _state.value.copy(
+            messages = updatedMsgs,
+            isSending = false,
+            isSpeaking = false,
+            queuedCount = 0,
+        )
+        com.vessences.android.DiagnosticReporter.voiceFlow(
+            "interruptible_voice_interrupted",
+            mapOf("reason" to reason),
+        )
     }
 
     private fun executeSend(
@@ -419,6 +475,7 @@ class ChatViewModel(
         // non-sentence-TTS relaunch path reads this (not isSpeaking) so an
         // unrelated isSpeaking=false flip doesn't suppress auto-relaunch.
         stopSpeakingInvoked = false
+        val sendGeneration = outputGeneration.incrementAndGet()
 
         acquireStreamWakeLock()
         currentStreamJob = viewModelScope.launch(Dispatchers.IO) {
@@ -810,6 +867,7 @@ class ChatViewModel(
                                 android.util.Log.w("ChatVM", "Tool result wait timed out — completing normally")
                             }
                             if (sentenceTtsActive && (sentenceQueue != null || androidSentenceQueue != null)) {
+                                val completionGeneration = sendGeneration
                                 // Safety net: server contract says every reply opens with
                                 // <spoken>, so sentenceSpeechFedChars > 0 by done time. If
                                 // it's still 0, the brain or Stage 2 emitter forgot the tag —
@@ -834,6 +892,10 @@ class ChatViewModel(
                                 androidSentenceQueue?.finishSubmitting()
                                 sentenceQueue?.awaitCompletion()
                                 androidSentenceQueue?.awaitCompletion()
+                                if (completionGeneration != outputGeneration.get()) {
+                                    android.util.Log.i("ChatVM", "Skipping interrupted sentence-TTS completion")
+                                    return@collect
+                                }
                                 sentenceTtsActive = false
                                 activeServerSentenceQueue = null
                                 activeAndroidSentenceQueue = null
@@ -949,13 +1011,28 @@ class ChatViewModel(
                 }
                 // If the stream ended without a done/error event, finalize the message
                 if (!gotDone) {
+                    if (sendGeneration != outputGeneration.get()) {
+                        android.util.Log.i("ChatVM", "Skipping stale stream finalization")
+                        return@launch
+                    }
                     stopSentenceTtsQueues()
                     sentenceTtsActive = false
                     val finalText = if (accumulated.isNotBlank()) accumulated else "No response received."
                     updateAiMessage(currentMsgId, finalText, isStreaming = false)
                     onSendComplete(fromVoice, finalText)
                 }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                if (sendGeneration == outputGeneration.get()) {
+                    stopSentenceTtsQueues()
+                    sentenceTtsActive = false
+                }
+                android.util.Log.i("ChatVM", "Stream job cancelled")
+                return@launch
             } catch (e: Exception) {
+                if (sendGeneration != outputGeneration.get()) {
+                    android.util.Log.i("ChatVM", "Skipping stale stream error handling")
+                    return@launch
+                }
                 stopSentenceTtsQueues()
                 sentenceTtsActive = false
                 val msg = e.message ?: ""
@@ -1066,9 +1143,14 @@ class ChatViewModel(
             // to let the tool's speech finish.
             if (textToSpeak.isBlank()) {
                 if (skipBubbleTts) {
+                    val completionGeneration = outputGeneration.get()
                     viewModelScope.launch {
                         // Give the tool's TTS (~2–3 short sentences) time to play.
                         kotlinx.coroutines.delay(3_500)
+                        if (completionGeneration != outputGeneration.get()) {
+                            android.util.Log.i("ChatVM", "Skipping interrupted tool-handled TTS completion")
+                            return@launch
+                        }
                         _state.value = _state.value.copy(isSpeaking = false, isSending = false)
                         val autoListen = chatPrefs.isAutoListenEnabled()
                         if (!conversationOver && !musicPlaying && autoListen) {
@@ -1111,10 +1193,15 @@ class ChatViewModel(
                 voiceController.onAssistantReply(textToSpeak, chatPrefs.isAutoListenEnabled() && !conversationOver && !musicPlaying)
             } else {
                 // Voice came from Android SpeechRecognizer (mic button / wake word), not VoiceController
+                val completionGeneration = outputGeneration.get()
                 viewModelScope.launch {
                     _state.value = _state.value.copy(isSpeaking = true)
                     android.util.Log.i("ttsdbg", "onSendComplete -> tts.speak chars=${textToSpeak.length}")
                     tts.speak(textToSpeak)
+                    if (completionGeneration != outputGeneration.get()) {
+                        android.util.Log.i("ChatVM", "Skipping interrupted TTS completion")
+                        return@launch
+                    }
                     // Previously checked !_state.value.isSpeaking as a proxy for
                     // "user tapped Stop" — but that flag was getting flipped to
                     // false by unrelated state-update races during tts.speak's

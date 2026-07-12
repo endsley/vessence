@@ -72,6 +72,7 @@ from agent_skills.ra_research_codex_outputs import (
     selected_codex_markdown as _selected_codex_markdown,
 )
 from agent_skills.ra_research_html import build_report_html, markdown_to_report_html, report_id_from_path
+from agent_skills.cron_token_meter import log_llm_call as _log_llm_call
 from agent_skills.ra_research_ollama import (
     normalize_ollama_base_url as _normalize_ollama_base_url,
     ollama_chat_payload as _ollama_chat_payload,
@@ -515,6 +516,10 @@ def ollama_chat_json(system_prompt: str, user_prompt: str, *, timeout: int = 120
         os.environ.get("OLLAMA_BASE_URL") or os.environ.get("OLLAMA_HOST") or "http://localhost:11434"
     )
     model = os.environ.get("RA_RESEARCH_MODEL", LOCAL_LLM)
+    start = time.perf_counter()
+    response_text = ""
+    prompt_chars = len(system_prompt or "") + len(user_prompt or "")
+    error = None
     try:
         response = requests.post(
             f"{base}/api/chat",
@@ -522,11 +527,24 @@ def ollama_chat_json(system_prompt: str, user_prompt: str, *, timeout: int = 120
             timeout=timeout,
         )
         response.raise_for_status()
-        text = response.json().get("message", {}).get("content", "")
-        return parse_json_from_text(text)
+        response_text = response.json().get("message", {}).get("content", "")
+        return parse_json_from_text(response_text)
     except Exception as exc:
+        error = str(exc)
         LOGGER.warning("Local LLM JSON call failed: %s", exc)
         return None
+    finally:
+        _log_llm_call(
+            provider="ollama",
+            model=os.environ.get("RA_RESEARCH_MODEL", LOCAL_LLM),
+            prompt_chars=prompt_chars,
+            response_chars=len(response_text),
+            elapsed_ms=int((time.perf_counter() - start) * 1000),
+            success=error is None,
+            phase="ra_research_cron.ollama_chat_json",
+            job=os.environ.get("CRON_JOB"),
+            error=error,
+        )
 
 
 def ollama_chat_text(system_prompt: str, user_prompt: str, *, timeout: int = 180) -> str | None:
@@ -534,6 +552,10 @@ def ollama_chat_text(system_prompt: str, user_prompt: str, *, timeout: int = 180
         os.environ.get("OLLAMA_BASE_URL") or os.environ.get("OLLAMA_HOST") or "http://localhost:11434"
     )
     model = os.environ.get("RA_RESEARCH_MODEL", LOCAL_LLM)
+    start = time.perf_counter()
+    response_text = ""
+    prompt_chars = len(system_prompt or "") + len(user_prompt or "")
+    error = None
     try:
         response = requests.post(
             f"{base}/api/chat",
@@ -541,10 +563,24 @@ def ollama_chat_text(system_prompt: str, user_prompt: str, *, timeout: int = 180
             timeout=timeout,
         )
         response.raise_for_status()
-        return response.json().get("message", {}).get("content", "").strip()
+        response_text = response.json().get("message", {}).get("content", "").strip()
+        return response_text
     except Exception as exc:
+        error = str(exc)
         LOGGER.warning("Local LLM text call failed: %s", exc)
         return None
+    finally:
+        _log_llm_call(
+            provider="ollama",
+            model=os.environ.get("RA_RESEARCH_MODEL", LOCAL_LLM),
+            prompt_chars=prompt_chars,
+            response_chars=len(response_text),
+            elapsed_ms=int((time.perf_counter() - start) * 1000),
+            success=error is None,
+            phase="ra_research_cron.ollama_chat_text",
+            job=os.environ.get("CRON_JOB"),
+            error=error,
+        )
 
 
 def fallback_summary(record: dict[str, Any], evidence_scope: str, artifact_dir: Path, text: str) -> dict[str, Any]:

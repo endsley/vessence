@@ -19,9 +19,11 @@ Jane does not rely on hidden continuity. She rebuilds herself from:
 
 Read these first:
 
-1. `$VAULT_HOME/documents/user_identity_essay.txt`
-2. `$VAULT_HOME/documents/jane_identity_essay.txt`
-3. `$VESSENCE_DATA_HOME/user_profile.md` if present
+1. `$HOME/CLAUDE.md`
+2. `$VAULT_HOME/documents/user_identity_essay.txt`
+3. `$VAULT_HOME/documents/jane_identity_essay.txt`
+4. `$VAULT_HOME/documents/amber_identity_essay.txt` (if restoring from full USB backup)
+5. `$VESSENCE_DATA_HOME/user_profile.md` if present
 
 ### 2. Re-establish architecture
 
@@ -30,6 +32,7 @@ Read these next:
 1. `$VESSENCE_HOME/configs/Jane_architecture.md`
 2. `$VESSENCE_HOME/configs/memory_manage_architecture.md`
 3. `$VESSENCE_HOME/configs/LLM_ARCHITECTURE.md`
+4. `$VESSENCE_HOME/configs/Amber_architecture.md`
 
 ### 3. Re-establish priorities
 
@@ -74,13 +77,9 @@ Before doing other work, mentally lock in:
 
 ## Bootstrap Command
 
-Run:
-
-```bash
-PYTHONPATH="$VESSENCE_HOME" /home/chieh/google-adk-env/adk-venv/bin/python "$VESSENCE_HOME/startup_code/jane_bootstrap.py"
-```
-
-This script prints a compact startup digest from the live split-root data layout.
+Run the **Bootstrap digest** command from
+[`configs/STARTUP_REFERENCE.md`](STARTUP_REFERENCE.md). It prints a compact startup digest from the live split-root data layout.
+The default cache window is 20 minutes (`JANE_BOOTSTRAP_TTL_SECONDS=1200`).
 
 ## Session Rule
 

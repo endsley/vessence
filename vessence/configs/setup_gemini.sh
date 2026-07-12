@@ -1,5 +1,9 @@
 #!/bin/bash
 
+HOME_DIR="${HOME_DIR:-${HOME:-$(getent passwd "$(id -u)" | cut -d: -f6 || true}}"
+HOME_DIR="${HOME_DIR:-/home/$(id -un)}"
+ADK_DIR="$HOME_DIR/google-adk-env/adk-venv"
+
 # --- 1. System Updates & Dependencies ---
 echo "Updating system and installing base dependencies..."
 if [[ "$OSTYPE" == "darwin"* ]]; then
@@ -20,9 +24,9 @@ sudo npm install -g @google/gemini-cli
 # --- 3. Install Google ADK ---
 # The ADK (Agent Development Kit) is a Python-based framework.
 echo "Setting up Google ADK in a virtual environment..."
-mkdir -p ~/google-adk-env
-python3 -m venv ~/google-adk-env/adk-venv
-source ~/google-adk-env/adk-venv/bin/activate
+mkdir -p "$HOME_DIR/google-adk-env"
+python3 -m venv "$ADK_DIR"
+source "$ADK_DIR/bin/activate"
 
 # Install the core ADK package
 pip install --upgrade pip
@@ -42,7 +46,7 @@ if [[ ":$PATH:" != *":$NPM_BIN:"* ]]; then
 fi
 
 # Add the ADK virtual env bin to PATH so you can call 'adk' directly
-ADK_BIN="$HOME/google-adk-env/adk-venv/bin"
+ADK_BIN="$HOME_DIR/google-adk-env/adk-venv/bin"
 if [[ ":$PATH:" != *":$ADK_BIN:"* ]]; then
     echo "export PATH=\"\$PATH:$ADK_BIN\"" >> "$SHELL_PROFILE"
 fi

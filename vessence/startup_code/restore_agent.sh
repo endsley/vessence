@@ -3,6 +3,20 @@
 # Run this after restoring from USB backup to fully rebuild the system.
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/startup_env.sh"
+startup_bootstrap_env
+
+MINICONDA_HOME="${HOME_DIR}/miniconda3"
+KOKORO_ENV_YML="$VESSENCE_HOME/configs/kokoro_env.yml"
+SYSTEM_DEPS_FILE="$VESSENCE_HOME/configs/system_deps.txt"
+ADK_HOME="${HOME_DIR}/google-adk-env/adk-venv"
+OMNI_VENV="$VESSENCE_HOME/omniparser_venv"
+REQ_ADK="$VESSENCE_HOME/configs/requirements_adk.txt"
+REQ_OMNI="$VESSENCE_HOME/configs/requirements_omniparser.txt"
+GEMINI_BRIDGE_HOME="${HOME_DIR}/gemini_cli_bridge"
+GEMINI_BRIDGE_ENV="$GEMINI_BRIDGE_HOME/.env"
+
 echo "-------------------------------------------------------"
 echo "STARTING FULL AGENT PROVISIONING..."
 echo "-------------------------------------------------------"
@@ -30,7 +44,7 @@ ollama pull qwen2.5-coder:14b || echo "WARNING: qwen2.5-coder:14b pull failed â€
 
 # 1. System Dependency Check
 echo "[1/7] Checking System dependencies..."
-DEPS=$(cat /home/chieh/vessence/configs/system_deps.txt)
+DEPS=$(cat "$SYSTEM_DEPS_FILE")
 MISSING_DEPS=""
 
 for dep in $DEPS; do
@@ -49,17 +63,17 @@ fi
 
 # 2. Miniconda and Kokoro Check
 echo "[2/7] Verifying Miniconda and Kokoro Env..."
-if [ ! -d "/home/chieh/miniconda3" ]; then
+if [ ! -d "$MINICONDA_HOME" ]; then
     echo "Miniconda not found. Installing locally..."
     wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh
-    bash miniconda.sh -b -p /home/chieh/miniconda3
+    bash miniconda.sh -b -p "$MINICONDA_HOME"
     rm miniconda.sh
 fi
 
-source /home/chieh/miniconda3/bin/activate
+source "$MINICONDA_HOME/bin/activate"
 if ! conda info --envs | grep -q "kokoro"; then
     echo "Creating 'kokoro' environment from snapshot..."
-    conda env create -f /home/chieh/vessence/configs/kokoro_env.yml
+    conda env create -f "$KOKORO_ENV_YML"
 else
     echo "Kokoro environment is healthy."
 fi
@@ -67,25 +81,26 @@ conda deactivate
 
 # 3. Rebuild ADK Virtual Environment
 echo "[3/7] Rebuilding ADK Python Environment..."
-rm -rf /home/chieh/google-adk-env/adk-venv
-python3 -m venv /home/chieh/google-adk-env/adk-venv
-source /home/chieh/google-adk-env/adk-venv/bin/activate
+rm -rf "$HOME_DIR/google-adk-env/adk-venv"
+mkdir -p "$HOME_DIR/google-adk-env"
+python3 -m venv "$HOME_DIR/google-adk-env/adk-venv"
+source "$ADK_HOME/bin/activate"
 pip install --upgrade pip
-pip install -r /home/chieh/vessence/configs/requirements_adk.txt
+pip install -r "$REQ_ADK"
 deactivate
 
 # 4. Rebuild OmniParser Virtual Environment
 echo "[4/7] Rebuilding OmniParser Python Environment..."
-rm -rf /home/chieh/vessence/omniparser_venv
-python3 -m venv /home/chieh/vessence/omniparser_venv
-source /home/chieh/vessence/omniparser_venv/bin/activate
+rm -rf "$OMNI_VENV"
+python3 -m venv "$OMNI_VENV"
+source "$OMNI_VENV/bin/activate"
 pip install --upgrade pip
-pip install -r /home/chieh/vessence/configs/requirements_omniparser.txt
+pip install -r "$REQ_OMNI"
 deactivate
 
 # 5. Model Weights Verification
 echo "[5/7] Verifying Model Weights..."
-OMNI_WEIGHTS="/home/chieh/vessence/omniparser/weights"
+OMNI_WEIGHTS="$VESSENCE_HOME/omniparser/weights"
 if [ -d "$OMNI_WEIGHTS" ]; then
     echo "OmniParser weights present."
 else
@@ -93,7 +108,7 @@ else
     echo "  Download manually from HuggingFace: microsoft/OmniParser"
 fi
 
-KOKORO_WEIGHTS="$(find /home/chieh/miniconda3/envs/kokoro -name '*.pt' 2>/dev/null | head -1)"
+KOKORO_WEIGHTS="$(find "$MINICONDA_HOME/envs/kokoro" -name '*.pt' 2>/dev/null | head -1)"
 if [ -n "$KOKORO_WEIGHTS" ]; then
     echo "Kokoro model weights present."
 else
@@ -102,21 +117,21 @@ fi
 
 # 6. Restore .env files from backup (secrets not auto-copied â€” requires manual step)
 echo "[6/7] Environment secrets check..."
-if [ ! -f "/home/chieh/vessence/.env" ]; then
-    echo "WARNING: /home/chieh/vessence/.env is missing!"
+if [ ! -f "$VESSENCE_HOME/.env" ]; then
+    echo "WARNING: $VESSENCE_HOME/.env is missing!"
     echo "  Copy from backup or create fresh from .env.example:"
-    echo "  cp /home/chieh/vessence/.env.example /home/chieh/vessence/.env"
+    echo "  cp $VESSENCE_HOME/.env.example $VESSENCE_HOME/.env"
     echo "  Then fill in: GOOGLE_API_KEY, OPENAI_API_KEY, DISCORD_TOKEN, DISCORD_CHANNEL_ID"
 fi
-if [ ! -f "/home/chieh/gemini_cli_bridge/.env" ]; then
-    echo "WARNING: /home/chieh/gemini_cli_bridge/.env is missing!"
+if [ ! -f "$GEMINI_BRIDGE_ENV" ]; then
+    echo "WARNING: $GEMINI_BRIDGE_ENV is missing!"
     echo "  Fill in: DISCORD_TOKEN (Jane's bot token), DISCORD_CHANNEL_ID"
 fi
 
 # 7. Final Health Check
 echo "[7/7] Running System Diagnostics..."
-source /home/chieh/google-adk-env/adk-venv/bin/activate
-cd /home/chieh/vessence
+source "$ADK_HOME/bin/activate"
+cd "$VESSENCE_HOME"
 python3 -c "import google.adk; import discord; import chromadb; print('Core Libraries: OK')"
 deactivate
 
@@ -125,6 +140,6 @@ echo "PROVISIONING COMPLETE!"
 echo ""
 echo "Next steps:"
 echo "  1. Fill in .env files with API keys (see step 6 warnings above)"
-echo "  2. Run: bash /home/chieh/vessence/startup_code/start_all_bots.sh"
+echo "  2. Run: bash $VESSENCE_HOME/startup_code/start_all_bots.sh"
 echo "  3. Restore complete. Ready to resume."
 echo "-------------------------------------------------------"

@@ -23,11 +23,12 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/startup_env.sh"
+startup_bootstrap_env
+
 PROXY_PORT=8080
-PYTHON="/home/chieh/google-adk-env/adk-venv/bin/python"
-VESSENCE_HOME="/home/chieh/ambient/vessence"
-VESSENCE_DATA_HOME="/home/chieh/ambient/vessence-data"
-VAULT_HOME="/home/chieh/ambient/vault"
+PYTHON="$PYTHON_BIN"
 ENV_FILE="$VESSENCE_DATA_HOME/.env"
 
 HEALTH_TIMEOUT=90    # seconds to wait for new server health

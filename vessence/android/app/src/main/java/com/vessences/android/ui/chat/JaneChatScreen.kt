@@ -413,6 +413,7 @@ private fun ChatInputBar(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
         if (granted) {
+            chatViewModel.prepareForInterruptibleVoiceCapture()
             isListeningForSpeech = true
             val speechIntent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
@@ -430,6 +431,7 @@ private fun ChatInputBar(
             context, Manifest.permission.RECORD_AUDIO
         ) == PackageManager.PERMISSION_GRANTED
         if (hasMicPerm) {
+            chatViewModel.prepareForInterruptibleVoiceCapture()
             isListeningForSpeech = true
             lastSttLaunchTime = System.currentTimeMillis()
             // Mark STT as active so onResume doesn't restart always-listen
@@ -548,6 +550,32 @@ private fun ChatInputBar(
                         Spacer(modifier = Modifier.width(12.dp))
                         Text(
                             text = if (autoListenEnabled) "Auto-listen after speaking (on)" else "Auto-listen after speaking (off)",
+                            color = Color.White,
+                            fontSize = 16.sp,
+                        )
+                    }
+                }
+
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            chatViewModel.setInterruptibleVoiceMode(!chatState.interruptibleVoiceMode)
+                        },
+                    color = Color.Transparent,
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            Icons.Default.Mic,
+                            contentDescription = null,
+                            tint = if (chatState.interruptibleVoiceMode) Color(0xFF22C55E) else SlateMuted,
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text(
+                            text = if (chatState.interruptibleVoiceMode) "Interruptible voice mode (on)" else "Interruptible voice mode (off)",
                             color = Color.White,
                             fontSize = 16.sp,
                         )
@@ -720,6 +748,7 @@ private fun ChatInputBar(
                             context, Manifest.permission.RECORD_AUDIO
                         ) == PackageManager.PERMISSION_GRANTED
                         if (hasMicPerm) {
+                            chatViewModel.prepareForInterruptibleVoiceCapture()
                             com.vessences.android.MainActivity.instance?.launchStt()
                         } else {
                             micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)

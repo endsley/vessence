@@ -1,54 +1,48 @@
 # Most Recent Nightly Self-Improvement
 
-- Run started: 2026-07-09 01:00:01
-- Report generated: 2026-07-09 01:35:14
-- Total runtime: 2111s
-- Jobs: 8 total, 7 ok, 1 timeout, 0 failed
+- Run started: 2026-07-10 23:30:01
+- Report generated: 2026-07-11 00:16:02
+- Total runtime: 2757s
+- Jobs: 8 total, 6 ok, 2 timeout, 0 failed
 - Stable latest report path: `/home/chieh/ambient/vessence/configs/self_improvement_latest.md`
-- Archived copy: `/home/chieh/ambient/vessence-data/reports/self_improvement/self_improvement_20260709_010001.md`
+- Archived copy: `/home/chieh/ambient/vessence-data/reports/self_improvement/self_improvement_20260710_233001.md`
 
 ## TL;DR
 
 - 1. ✓ Auto-Commit WIP (pre) (0.0m)
   - Fixes:
-    - 2026-07-09 01:00:03,049 INFO Committed 2 file(s).
-- 2. ✓ Code Auditor (5.4m)
-  - Problems:
-    - 2026-07-09 01:00:08,739 [WARNING] Primary LLM failed: CLI (codex) failed (exit 1): Reading additional input from stdin...
-    - 2026-07-09 01:00:20,549 [WARNING] Fallback to gemini failed: CLI (gemini) failed (exit 1): Keychain initialization encountered an error: Cannot autolaunch D-...
+    - 2026-07-10 23:30:01,717 INFO Committed 13 file(s).
+- 2. ✓ Code Auditor (0.0m)
+  - Problems: none detected
+  - Fixes: none applied
 - 3. ⏱ Dead Code Auditor (15.0m)
   - Problems:
     - Possibly-dead functions: 1.
     - Duplicate function bodies: 11 groups.
-- 4. ✓ Pipeline Audit (30 prompts) (1.5m)
+- 4. ⏱ Pipeline Audit (30 prompts) (20.0m)
   - Problems:
     - Prompts audited: 5.
     - Classification failures: 1.
     - Response failures: 5.
-- 5. ✓ Doc Drift Auditor (0.0m)
+- 5. ✓ Doc Drift Auditor (0.1m)
   - Problems:
     - CRON_JOBS.md claims iterative_refactor_scheduler.py is active but no matching cron entry exists
-- 6. ✓ Transcript Quality Review (0.1m)
+- 6. ✓ Transcript Quality Review (10.1m)
   - Fixes:
-    - 2026-07-09 01:22:06,782 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (0 issues)
-    - 2026-07-09 01:22:06,787 INFO self_improve_log: recorded [info] Transcript Review — I reviewed yesterday's conversations and nothing looked off — all turns ha...
-- 7. ✓ Memory Janitor (13.0m)
+    - 2026-07-11 00:15:21,409 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (0 issues)
+    - 2026-07-11 00:15:21,410 INFO self_improve_log: recorded [info] Transcript Review — I reviewed yesterday's conversations and nothing looked off — all turns ha...
+- 7. ✓ Memory Janitor (0.1m)
   - Problems:
-    - WARNING:agent_skills.claude_cli_llm:Primary LLM failed: CLI (codex) failed (exit 1): Reading additional input from stdin...
-    - WARNING:agent_skills.claude_cli_llm:Fallback to gemini failed: CLI (gemini) failed (exit 1): Keychain initialization encountered an error: Cannot autolaunch...
-    - WARNING:agent_skills.claude_cli_llm:Primary LLM failed: CLI (codex) failed (exit 1): Reading additional input from stdin...
+    - WARNING:memory_janitor:System stressed — skipping janitor this cycle: load too high: 1m=29.0, 5m=25.5, limit=20.0
+- 8. ✓ Auto-Commit + Push (post) (0.6m)
   - Fixes:
-    - INFO:memory.v1.conversation_manager:Session 'janitor-window-archival' closed and cleaned up.
-    - INFO:agent_skills.self_improve_log:self_improve_log: recorded [info] Memory Verification — Verified 20 code-related memories one at a time. Skipped 259 recen...
-- 8. ✓ Auto-Commit + Push (post) (0.1m)
-  - Fixes:
-    - 2026-07-09 01:35:10,806 INFO Committed 5 file(s).
-    - 2026-07-09 01:35:12,790 INFO Pushed successfully.
+    - 2026-07-11 00:15:35,011 INFO Committed 3 file(s).
+    - 2026-07-11 00:15:58,639 INFO Pushed successfully.
 
 ## Executive Summary
 
-- 1 stage(s) need attention because they timed out or exited non-zero.
-- 7 concrete improvement/fix signals were found in logs or reports.
+- 2 stage(s) need attention because they timed out or exited non-zero.
+- 5 concrete improvement/fix signals were found in logs or reports.
 
 ## Stage 1: Auto-Commit WIP (pre)
 
@@ -65,7 +59,7 @@
 
 ### Improvements It Made
 
-- 2026-07-09 01:00:03,049 INFO Committed 2 file(s).
+- 2026-07-10 23:30:01,717 INFO Committed 13 file(s).
 
 ### Evidence Files
 
@@ -74,7 +68,7 @@
 ## Stage 2: Code Auditor
 
 - Status: `ok`
-- Duration: 326s (5.4 min)
+- Duration: 0s (0.0 min)
 
 ### What It Did
 
@@ -82,8 +76,7 @@
 
 ### Problems It Found
 
-- 2026-07-09 01:00:08,739 [WARNING] Primary LLM failed: CLI (codex) failed (exit 1): Reading additional input from stdin...
-- 2026-07-09 01:00:20,549 [WARNING] Fallback to gemini failed: CLI (gemini) failed (exit 1): Keychain initialization encountered an error: Cannot autolaunch D-Bus ...
+- No problems were detected in the available logs/reports.
 
 ### Improvements It Made
 
@@ -121,8 +114,8 @@
 
 ## Stage 4: Pipeline Audit (30 prompts)
 
-- Status: `ok`
-- Duration: 91s (1.5 min)
+- Status: `timeout`
+- Duration: 1200s (20.0 min)
 
 ### What It Did
 
@@ -130,6 +123,7 @@
 
 ### Problems It Found
 
+- Job ended with status `timeout`.
 - Prompts audited: 5.
 - Classification failures: 1.
 - Response failures: 5.
@@ -150,7 +144,7 @@
 ## Stage 5: Doc Drift Auditor
 
 - Status: `ok`
-- Duration: 0s (0.0 min)
+- Duration: 5s (0.1 min)
 
 ### What It Did
 
@@ -172,7 +166,7 @@
 ## Stage 6: Transcript Quality Review
 
 - Status: `ok`
-- Duration: 5s (0.1 min)
+- Duration: 604s (10.1 min)
 
 ### What It Did
 
@@ -184,8 +178,8 @@
 
 ### Improvements It Made
 
-- 2026-07-09 01:22:06,782 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (0 issues)
-- 2026-07-09 01:22:06,787 INFO self_improve_log: recorded [info] Transcript Review — I reviewed yesterday's conversations and nothing looked off — all turns handled cleanly.
+- 2026-07-11 00:15:21,409 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (0 issues)
+- 2026-07-11 00:15:21,410 INFO self_improve_log: recorded [info] Transcript Review — I reviewed yesterday's conversations and nothing looked off — all turns handled cleanly.
 
 ### Evidence Files
 
@@ -195,7 +189,7 @@
 ## Stage 7: Memory Janitor
 
 - Status: `ok`
-- Duration: 782s (13.0 min)
+- Duration: 3s (0.1 min)
 
 ### What It Did
 
@@ -203,16 +197,11 @@
 
 ### Problems It Found
 
-- WARNING:agent_skills.claude_cli_llm:Primary LLM failed: CLI (codex) failed (exit 1): Reading additional input from stdin...
-- WARNING:agent_skills.claude_cli_llm:Fallback to gemini failed: CLI (gemini) failed (exit 1): Keychain initialization encountered an error: Cannot autolaunch D-Bus ...
-- WARNING:agent_skills.claude_cli_llm:Primary LLM failed: CLI (codex) failed (exit 1): Reading additional input from stdin...
-- WARNING:agent_skills.claude_cli_llm:Fallback to gemini failed: CLI (gemini) failed (exit 1): Keychain initialization encountered an error: Cannot autolaunch D-Bus ...
-- WARNING:memory_janitor:Configured frontier janitor call failed provider=openai model=gpt-5.5: Expecting value: line 1 column 1 (char 0); trying Gemini fallback...
+- WARNING:memory_janitor:System stressed — skipping janitor this cycle: load too high: 1m=29.0, 5m=25.5, limit=20.0
 
 ### Improvements It Made
 
-- INFO:memory.v1.conversation_manager:Session 'janitor-window-archival' closed and cleaned up.
-- INFO:agent_skills.self_improve_log:self_improve_log: recorded [info] Memory Verification — Verified 20 code-related memories one at a time. Skipped 259 recently verified entries. All checked
+- No concrete improvement was recorded in the available logs/reports.
 
 ### Evidence Files
 
@@ -221,7 +210,7 @@
 ## Stage 8: Auto-Commit + Push (post)
 
 - Status: `ok`
-- Duration: 3s (0.1 min)
+- Duration: 33s (0.6 min)
 
 ### What It Did
 
@@ -233,8 +222,8 @@
 
 ### Improvements It Made
 
-- 2026-07-09 01:35:10,806 INFO Committed 5 file(s).
-- 2026-07-09 01:35:12,790 INFO Pushed successfully.
+- 2026-07-11 00:15:35,011 INFO Committed 3 file(s).
+- 2026-07-11 00:15:58,639 INFO Pushed successfully.
 
 ### Evidence Files
 

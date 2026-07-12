@@ -143,6 +143,7 @@ fun ChatInputRow(
     aiColor: Color,
     onShowAttachmentSheet: () -> Unit,
     onCancel: (() -> Unit)? = null,
+    onVoiceCaptureStart: () -> Unit = {},
     queuedCount: Int = 0,
     triggerSpeech: Boolean = false,
     onSpeechTriggered: () -> Unit = {},
@@ -190,6 +191,7 @@ fun ChatInputRow(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
         if (granted) {
+            onVoiceCaptureStart()
             isListeningForSpeech = true
             val speechIntent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
@@ -210,6 +212,7 @@ fun ChatInputRow(
         ) == PackageManager.PERMISSION_GRANTED
         android.util.Log.i("ChatInputRow", "launchSpeechToText: hasPerm=$hasPerm")
         if (hasPerm) {
+            onVoiceCaptureStart()
             isListeningForSpeech = true
             val speechIntent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)

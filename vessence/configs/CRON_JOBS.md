@@ -111,6 +111,7 @@ This document logs all scheduled tasks (cron jobs) for the system. It must be up
 - **Schedule:** `*/3 * * * *` (COMMENTED OUT)
 - **Script Path:** `$VESSENCE_HOME/startup_code/bot_watchdog.sh`
 - **Description:** Formerly monitored Amber Brain, Discord bridges, and Jane Web.
+- **Reference:** [Startup Operations Reference](STARTUP_REFERENCE.md)
 
 ---
 

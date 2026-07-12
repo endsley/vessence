@@ -271,6 +271,38 @@ fun SettingsScreen(
                         )
                     }
 
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Divider(color = Color(0xFF334155))
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            Icons.Default.Mic,
+                            contentDescription = null,
+                            tint = Violet500,
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                "Interruptible voice mode",
+                                color = Color.White,
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 14.sp,
+                            )
+                            Text(
+                                "New speech stops Jane and sends immediately",
+                                color = SlateText,
+                                fontSize = 12.sp,
+                            )
+                        }
+                        Switch(
+                            checked = state.interruptibleVoiceMode,
+                            onCheckedChange = { viewModel.setInterruptibleVoiceMode(it) },
+                        )
+                    }
+
                     // Show trigger phrase and controls when enabled or trained
                     if (state.triggerTrained || state.alwaysListeningEnabled) {
                         Spacer(modifier = Modifier.height(8.dp))

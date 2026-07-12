@@ -12,9 +12,10 @@ set -euo pipefail
 # Force headless regardless of the parent env.
 unset DISPLAY WAYLAND_DISPLAY
 
-VESSENCE_HOME="${VESSENCE_HOME:-$HOME/ambient/vessence}"
-VESSENCE_DATA_HOME="${VESSENCE_DATA_HOME:-$HOME/ambient/vessence-data}"
-PYTHON="${PYTHON_BIN:-/home/chieh/google-adk-env/adk-venv/bin/python}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/startup_env.sh"
+startup_bootstrap_env
+PYTHON="$PYTHON_BIN"
 
 LOG_DIR="$VESSENCE_DATA_HOME/logs"
 mkdir -p "$LOG_DIR"

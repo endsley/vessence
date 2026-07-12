@@ -20,6 +20,7 @@ data class SettingsUiState(
     val modelTiers: List<com.vessences.android.data.model.ModelTier> = emptyList(),
     val alwaysListeningEnabled: Boolean = false,
     val autoListenAfterTts: Boolean = true,
+    val interruptibleVoiceMode: Boolean = false,
     val triggerPhrase: String = "hey jane",
     val triggerTrained: Boolean = false,
     val wakeWordThreshold: Float = com.vessences.android.util.Constants.DEFAULT_WAKE_WORD_THRESHOLD,
@@ -41,6 +42,7 @@ class SettingsViewModel(private val context: Context) : ViewModel() {
         SettingsUiState(
             alwaysListeningEnabled = voiceSettings.isAlwaysListeningEnabled(),
             autoListenAfterTts = chatPrefs.isAutoListenEnabled(),
+            interruptibleVoiceMode = chatPrefs.isInterruptibleVoiceEnabled(),
             triggerPhrase = voiceSettings.getTriggerPhrase(),
             triggerTrained = voiceSettings.isTriggerTrained(),
             wakeWordThreshold = voiceSettings.getWakeWordThreshold(),
@@ -70,6 +72,7 @@ class SettingsViewModel(private val context: Context) : ViewModel() {
                 modelTiers = modelTiers,
                 alwaysListeningEnabled = voiceSettings.isAlwaysListeningEnabled(),
                 autoListenAfterTts = chatPrefs.isAutoListenEnabled(),
+                interruptibleVoiceMode = chatPrefs.isInterruptibleVoiceEnabled(),
                 triggerPhrase = voiceSettings.getTriggerPhrase(),
                 triggerTrained = voiceSettings.isTriggerTrained(),
                 wakeWordThreshold = voiceSettings.getWakeWordThreshold(),
@@ -119,6 +122,11 @@ class SettingsViewModel(private val context: Context) : ViewModel() {
     fun setAutoListenAfterTts(enabled: Boolean) {
         chatPrefs.setAutoListenEnabled(enabled)
         _state.value = _state.value.copy(autoListenAfterTts = enabled)
+    }
+
+    fun setInterruptibleVoiceMode(enabled: Boolean) {
+        chatPrefs.setInterruptibleVoiceEnabled(enabled)
+        _state.value = _state.value.copy(interruptibleVoiceMode = enabled)
     }
 
     fun sendDiagnosticPing() {
