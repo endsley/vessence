@@ -1,5 +1,5 @@
 # Job: Interruptible (barge-in) voice conversation for Jane
-Status: pending
+Status: in_progress
 Priority: medium
 Created: 2026-07-11
 Tags: voice, wake-word, android, pipecat, livekit, architecture
@@ -22,6 +22,122 @@ Replace the current strict turn-based voice loops with a full-duplex conversatio
   - **OpenAI Realtime / Agents SDK** is the fastest path to GPT-like behavior. Realtime VAD cancels the active response, starts a new one, and handles truncation automatically for WebRTC/SIP. Tradeoff: more of Jane's voice session and turn-taking moves into OpenAI's realtime stack.
   - **Vocode** supports streaming conversation interruption sensitivity, but current public release activity looks older; use as reference, not the foundation.
 - Both frameworks are free/open source; only paid components would be hosted STT/TTS APIs if swapped in later (not needed here).
+- 2026-07-12 follow-up design decision:
+  - Android already has a Jane wake word. Reuse it as the passive entry point; do not rebuild wake-word detection.
+  - The new system starts after wake-word activation. The wake word should wake Jane from passive mode, then the active conversation should support natural barge-in without requiring Chieh to say "Jane" before every interruption.
+  - Once audio has been converted to text, feed that text into Jane's existing three-stage model path. Do not replace Jane's reasoning architecture with a realtime voice vendor.
+  - Codex remains the frontier reasoning brain when the live backend is configured for Codex. The realtime voice shell passes text into Jane/Codex; Codex does not receive raw audio.
+  - No separate OpenAI Realtime API is required for this open-source/local version. OpenAI Realtime can remain an optional future transport/provider if Chieh later chooses to pay for it.
+  - Target feel: GPT-style flow, meaning fast hands-free wake, natural pause detection, immediate TTS stop on interruption, no waiting for Jane to finish before speaking, and seamless continuation of the same conversation.
+
+## End-to-End Design
+
+### 1. Passive wake-word mode
+- `AlwaysListeningService` continues to own passive wake-word detection.
+- In passive mode Jane listens only for the wake word and avoids running full STT/conversation capture.
+- When the wake word fires, the current code path already navigates to Jane and calls `ChatViewModel.triggerWakeWord()`.
+- Legacy mode keeps the existing behavior: `triggerWakeWord() -> MainActivity.launchStt() -> Android SpeechRecognizer`.
+- New mode changes only the handoff: `triggerWakeWord() -> RealtimeVoiceSession.start()`.
+
+### 2. Active realtime voice session
+- After wake-word activation, Jane enters an active conversation session.
+- Inside this active session, Chieh should not need to repeat the wake word.
+- The active session continuously manages:
+  - microphone capture
+  - VAD / speech-start detection
+  - endpointing / speech-stop detection
+  - partial transcript display
+  - stable transcript commit
+  - Jane response playback
+  - interruption while Jane is speaking
+- This layer owns voice timing and turn-taking only. It must not duplicate Stage 1/2/3 Jane reasoning.
+
+### 3. Audio capture and VAD
+- Prefer a streaming capture path over one-shot Android `SpeechRecognizer`.
+- Use local/open-source components where practical:
+  - VAD: Silero VAD, WebRTC VAD, or framework-native VAD from Pipecat/LiveKit.
+  - STT: faster-whisper/whisper.cpp/local STT service, or Android STT as a temporary compatibility fallback.
+  - Transport/framework: Pipecat or LiveKit-style session abstractions are acceptable foundations.
+- VAD must run during Jane's TTS playback so Chieh can interrupt.
+- The system must distinguish user speech from Jane's own output. Use echo cancellation, playback ducking, audio focus, or framework-native AEC where available.
+
+### 4. Speech-to-text commit
+- Streaming STT may produce partial transcripts, but only stable committed text should enter Jane's brain.
+- Commit conditions:
+  - user speech has ended according to VAD/endpointing
+  - transcript is non-empty after cleanup
+  - text is not just wake-word residue or obvious self-echo
+- The committed user utterance becomes a normal Jane user message with `fromVoice=true`.
+
+### 5. Existing Jane three-stage text pipeline
+- After STT commit, pass text into the existing Jane request path.
+- Preserve the current three-stage architecture:
+  1. Stage 1 classifier: fast intent routing and confidence.
+  2. Stage 2 deterministic handler: known structured behavior such as timers, music, app commands, pending actions, and simple tool routes.
+  3. Stage 3 frontier brain: Jane's main reasoning path, currently Codex-backed when `JANE_BRAIN=codex`.
+- The realtime voice work must not bypass Stage 1/2. Local deterministic actions should stay fast and not unnecessarily invoke Codex.
+- Stage 3 receives text and context, not audio.
+
+### 6. Response streaming and TTS
+- Jane's response text returns through the existing chat stream.
+- TTS should speak sentence chunks or stable response chunks as soon as they are safe to speak.
+- The TTS layer must be cancellable:
+  - stop current audio output immediately on interruption
+  - clear queued sentence chunks
+  - prevent stale audio from resuming after cancellation
+- The first implementation may reuse existing Android/server TTS queues if they can be stopped reliably. A local daemon path may use Kokoro or another cancellable local TTS engine.
+
+### 7. Barge-in interruption semantics
+- If Chieh starts speaking while Jane is talking:
+  - stop Jane's TTS immediately
+  - mark the current assistant message as interrupted
+  - cancel or ignore the current active response stream
+  - clear queued TTS chunks and pending follow-up voice sends
+  - capture Chieh's new speech
+  - commit the new transcript as the next active user turn
+  - send that text through the same Stage 1 -> Stage 2 -> Stage 3 pipeline
+- The old assistant response must not race with the new response. Late deltas/audio from the interrupted turn must be discarded by turn id.
+
+### 8. Conversation state
+- Introduce explicit voice session states:
+  - `PassiveWakeWord`
+  - `Listening`
+  - `UserSpeaking`
+  - `Thinking`
+  - `Speaking`
+  - `Interrupted`
+  - `Ending`
+- Wake word transitions `PassiveWakeWord -> Listening`.
+- User speech transitions `Listening -> UserSpeaking -> Thinking`.
+- Jane text/TTS transitions `Thinking -> Speaking`.
+- Barge-in transitions `Speaking -> Interrupted -> UserSpeaking`.
+- Goodbye, music handoff, explicit cancel, or timeout transitions back to `PassiveWakeWord`.
+
+### 9. Swappability and fallback
+- Keep the old turn-based path intact.
+- Add a preference/flag, conceptually:
+  - `voice_conversation_mode = legacy_turn_based | interruptible_realtime`
+- Legacy mode should continue to use the current `launchStt()` and auto-relaunch-after-TTS behavior.
+- New mode should route wake-word activation and mic button voice capture through `RealtimeVoiceSession`.
+- Chieh must be able to switch back without reinstalling the app or reverting code.
+
+### 10. Expected user experience
+- Chieh says: "Jane."
+- Jane wakes and starts the active session.
+- Chieh says a request naturally.
+- Jane starts responding by voice.
+- Chieh interrupts mid-sentence with a correction or follow-up.
+- Jane stops speaking quickly and listens.
+- Jane answers the new turn in the same conversation context.
+- For simple local/deterministic actions, this should feel nearly immediate.
+- For Codex-level reasoning, Jane may still pause while Codex thinks, but the voice shell should remain fluid and interruptible.
+
+### 11. Non-goals for the first working version
+- Do not require OpenAI Realtime.
+- Do not replace Codex/Jane reasoning.
+- Do not remove Android wake word.
+- Do not remove legacy SpeechRecognizer mode.
+- Do not require a locally hosted Jane-level reasoning model. Local/open-source is for voice I/O first; Jane-level reasoning remains the existing frontier brain path unless a future job changes that.
 
 ## Steps
 1. Read `wake_word/voice_daemon.py`, Android `ChatViewModel.kt`, `JaneChatScreen.kt`, `ChatInputRow.kt`, and `VoiceController.kt` in full and confirm current STT/TTS/wake-word wiring before changing anything.
@@ -45,6 +161,7 @@ Replace the current strict turn-based voice loops with a full-duplex conversatio
 
 ## Files Involved
 - `/home/chieh/ambient/vessence/android/app/src/main/java/com/vessences/android/ui/chat/ChatViewModel.kt`
+- `/home/chieh/ambient/vessence/android/app/src/main/java/com/vessences/android/voice/BargeInMonitor.kt`
 - `/home/chieh/ambient/vessence/android/app/src/main/java/com/vessences/android/ui/chat/JaneChatScreen.kt`
 - `/home/chieh/ambient/vessence/android/app/src/main/java/com/vessences/android/ui/chat/ChatInputRow.kt`
 - `/home/chieh/ambient/vessence/android/app/src/main/java/com/vessences/android/util/ChatPreferences.kt`
@@ -54,4 +171,16 @@ Replace the current strict turn-based voice loops with a full-duplex conversatio
 - `/home/chieh/ambient/vessence/configs/Jane_architecture.md`
 
 ## Result
-(pending)
+2026-07-12 implementation pass:
+- Added Android `BargeInMonitor`, a low-latency `AudioRecord` speech-energy monitor that runs only while interruptible voice mode is enabled and Jane is speaking. It uses Android `VOICE_COMMUNICATION` audio source plus echo/noise suppression when available.
+- Wired `ChatViewModel` to arm barge-in monitoring during voice playback paths (`ack`, sentence-level streaming TTS, non-sentence TTS, and transient-error notices).
+- On detected barge-in, `ChatViewModel` now stops active TTS, cancels the current response stream, marks the partial assistant message interrupted, clears queued follow-ups, shows the listening state, and launches the existing headless `MainActivity.launchStt()` path. The resulting transcript still goes through Jane's existing Stage 1 -> Stage 2 -> Stage 3 pipeline.
+- Existing interruptible mode toggle remains the swappable fallback boundary. With the toggle off, the legacy turn-based voice path remains intact.
+- Updated `configs/Jane_architecture.md`.
+- Verified:
+  - `./gradlew :app:compileDebugKotlin` passed.
+  - `./gradlew :app:testDebugUnitTest` passed with `NO-SOURCE` unit tests.
+  - `python -m py_compile wake_word/voice_daemon.py` passed.
+  - Android bump/build script produced and deployed v0.2.101, versionCode 332.
+- Not verified from this Codex session:
+  - Physical Android barge-in behavior, because `adb devices` showed no attached devices.

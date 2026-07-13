@@ -1,5 +1,9 @@
 # Vessence Changelog
 
+## v0.2.101 (2026-07-12)
+- Add interruptible Android Jane voice barge-in detection while Jane is speaking.
+- Preserve the legacy turn-based voice path behind the existing interruptible voice toggle.
+
 ## v0.2.100 (2026-07-11)
 - Version bump.
 

@@ -10,6 +10,8 @@ import com.vessences.android.data.repository.ChatRepository
 import com.vessences.android.data.repository.AnnouncementPoller
 import com.vessences.android.data.repository.LiveBroadcastListener
 import com.vessences.android.voice.AndroidSentenceTtsQueue
+import com.vessences.android.voice.BargeInEvent
+import com.vessences.android.voice.BargeInMonitor
 import com.vessences.android.voice.HybridTtsManager
 import com.vessences.android.voice.SentenceTtsQueue
 import com.vessences.android.data.repository.VoiceSettingsRepository
@@ -74,6 +76,8 @@ class ChatViewModel(
     private val pendingQueue = ConcurrentLinkedQueue<PendingMessage>()
     private var currentStreamJob: Job? = null
     private val outputGeneration = AtomicLong(0)
+    @Volatile
+    private var bargeInCaptureLaunchPending: Boolean = false
 
     /**
      * Explicit "user tapped Stop" flag. Replaces the prior heuristic of using
@@ -92,6 +96,9 @@ class ChatViewModel(
     private val tts = HybridTtsManager(appContext)
     private var activeServerSentenceQueue: SentenceTtsQueue? = null
     private var activeAndroidSentenceQueue: AndroidSentenceTtsQueue? = null
+    private val bargeInMonitor = BargeInMonitor(appContext, viewModelScope) { event ->
+        handleBargeInDetected(event)
+    }
 
     // Jane Phone Tools (Phase 1 scaffolding): dispatcher + action queue.
     // The dispatcher's handler registry is empty in Phase 1; Phase 2 populates
@@ -249,6 +256,9 @@ class ChatViewModel(
             }
             // Headless STT bridge: listen/partial/result callbacks for in-app voice UI
             com.vessences.android.SttResultBus.onListening = { active ->
+                if (!active) {
+                    bargeInCaptureLaunchPending = false
+                }
                 val newVoice = _state.value.voice.copy(
                     isCapturingCommand = active,
                     transcriptPreview = if (!active) "" else _state.value.voice.transcriptPreview,
@@ -273,6 +283,7 @@ class ChatViewModel(
                 }
             }
             com.vessences.android.SttResultBus.onResult = { spoken ->
+                bargeInCaptureLaunchPending = false
                 // Clear listening UI immediately
                 _state.value = _state.value.copy(
                     voice = _state.value.voice.copy(
@@ -384,6 +395,7 @@ class ChatViewModel(
         outputGeneration.incrementAndGet()
         currentStreamJob?.cancel()
         currentStreamJob = null
+        stopBargeInMonitor()
         stopSentenceTtsQueues()
         releaseStreamWakeLock()
         // Finalize any streaming AI message
@@ -411,7 +423,82 @@ class ChatViewModel(
 
     fun setInterruptibleVoiceMode(enabled: Boolean) {
         chatPrefs.setInterruptibleVoiceEnabled(enabled)
+        if (!enabled) {
+            bargeInMonitor.stop()
+            bargeInCaptureLaunchPending = false
+        }
         _state.value = _state.value.copy(interruptibleVoiceMode = enabled)
+    }
+
+    private fun shouldArmBargeIn(): Boolean =
+        backend == ChatBackend.JANE && chatPrefs.isInterruptibleVoiceEnabled()
+
+    private fun startBargeInMonitor(source: String) {
+        if (!shouldArmBargeIn()) return
+        bargeInMonitor.start(source)
+    }
+
+    private fun stopBargeInMonitor() {
+        bargeInMonitor.stop()
+    }
+
+    private fun stopBargeInMonitor(source: String) {
+        bargeInMonitor.stop(source)
+    }
+
+    private suspend fun speakWithOptionalBargeIn(text: String, source: String) {
+        if (!shouldArmBargeIn() || text.isBlank()) {
+            tts.speak(text)
+            return
+        }
+        startBargeInMonitor(source)
+        try {
+            tts.speak(text)
+        } finally {
+            stopBargeInMonitor(source)
+        }
+    }
+
+    private fun handleBargeInDetected(event: BargeInEvent) {
+        viewModelScope.launch(Dispatchers.Main) {
+            if (!shouldArmBargeIn()) return@launch
+            if (bargeInCaptureLaunchPending) return@launch
+            if (!_state.value.isSpeaking && !_state.value.isSending) return@launch
+
+            bargeInCaptureLaunchPending = true
+            com.vessences.android.DiagnosticReporter.voiceFlow(
+                "barge_in_detected",
+                mapOf(
+                    "source" to event.source,
+                    "rms" to event.rms,
+                    "threshold" to event.threshold,
+                    "elapsed_ms" to event.elapsedMs,
+                ),
+            )
+            interruptCurrentOutputForReplacement(reason = "barge_in:${event.source}")
+
+            _state.value = _state.value.copy(
+                voice = _state.value.voice.copy(
+                    isCapturingCommand = true,
+                    transcriptPreview = "",
+                    inputLevel = 0f,
+                    status = "Listening...",
+                ),
+            )
+            kotlinx.coroutines.delay(180)
+            val activity = com.vessences.android.MainActivity.instance
+            if (activity != null) {
+                activity.launchStt()
+            } else {
+                com.vessences.android.DiagnosticReporter.voiceFlow(
+                    "barge_in_stt_skipped",
+                    mapOf("reason" to "no_main_activity"),
+                )
+                endVoiceConversation()
+            }
+            kotlinx.coroutines.delay(800)
+            bargeInCaptureLaunchPending = false
+        }
     }
 
     private fun interruptCurrentOutputForReplacement(reason: String) {
@@ -419,6 +506,7 @@ class ChatViewModel(
         stopSpeakingInvoked = true
         currentStreamJob?.cancel()
         currentStreamJob = null
+        stopBargeInMonitor()
         runCatching { stopSentenceTtsQueues() }
             .onFailure { reportStopSpeakingFailure("interrupt_sentence_queues_stop", it) }
         runCatching { tts.stop() }
@@ -643,13 +731,15 @@ class ChatViewModel(
                         }
                         "ack" -> {
                             // Quick ack from the local LLM — speak it for immediate feedback.
-                            // Uses raw tts.speak() which does NOT trigger auto-listen.
-                            // Auto-listen only fires after the "done" event via onSendComplete.
+                            // Does NOT trigger auto-listen; auto-listen only fires
+                            // after the "done" event via onSendComplete.
+                            // In interruptible mode, this short speech still arms
+                            // barge-in so Chieh can cut off an unnecessary ack.
                             val ackText = event.data.trim()
                             if (ackText.isNotBlank() && !ackSpoken) {
                                 ackSpoken = true
                                 if (fromVoice) {
-                                    viewModelScope.launch { tts.speak(ackText) }
+                                    viewModelScope.launch { speakWithOptionalBargeIn(ackText, "ack") }
                                 }
                                 statusLog.add(ackText)
                                 updateAiMessage(currentMsgId, accumulated, isStreaming = true, status = ackText, statusLog = statusLog.toList())
@@ -681,7 +771,7 @@ class ChatViewModel(
                                         if (ackContent.isNotBlank() && !ackSpoken) {
                                             ackSpoken = true
                                             if (fromVoice) {
-                                                viewModelScope.launch { tts.speak(ackContent) }
+                                                viewModelScope.launch { speakWithOptionalBargeIn(ackContent, "ack_block") }
                                             }
                                             statusLog.add(ackContent)
                                         }
@@ -723,6 +813,7 @@ class ChatViewModel(
                                     }
                                     sentenceTtsActive = true
                                     _state.value = _state.value.copy(isSpeaking = true)
+                                    startBargeInMonitor("sentence_tts")
                                 }
                                 // Server contract: every reply opens with <spoken>...</spoken>
                                 // (brain prompt + Stage 2 dispatcher both enforce this). We only
@@ -837,6 +928,7 @@ class ChatViewModel(
                                 val toolResults = allToolResults.filter { it.tool !in FIRE_AND_FORGET }
                                 if (toolResults.isNotEmpty()) {
                                     android.util.Log.i("ChatVM", "Got ${toolResults.size} tool result(s) — auto-sending follow-up")
+                                    stopBargeInMonitor("sentence_tts")
                                     sentenceQueue?.stop()
                                     androidSentenceQueue?.stop()
                                     sentenceTtsActive = false
@@ -892,6 +984,7 @@ class ChatViewModel(
                                 androidSentenceQueue?.finishSubmitting()
                                 sentenceQueue?.awaitCompletion()
                                 androidSentenceQueue?.awaitCompletion()
+                                stopBargeInMonitor("sentence_tts")
                                 if (completionGeneration != outputGeneration.get()) {
                                     android.util.Log.i("ChatVM", "Skipping interrupted sentence-TTS completion")
                                     return@collect
@@ -980,11 +1073,11 @@ class ChatViewModel(
                                 updateAiMessage(currentMsgId, friendlyMsg, isStreaming = false)
                                 if (fromVoice) {
                                     viewModelScope.launch {
-                                        tts.speak(friendlyMsg)
+                                        speakWithOptionalBargeIn(friendlyMsg, "server_busy_notice")
                                         // Wait 30 seconds then auto-retry
                                         kotlinx.coroutines.delay(30_000)
                                         val retryMsg = "I'm back. Let me try that again."
-                                        viewModelScope.launch { tts.speak(retryMsg) }
+                                        viewModelScope.launch { speakWithOptionalBargeIn(retryMsg, "server_busy_retry") }
                                         // Re-launch always-listen so user can speak again
                                         _state.value = _state.value.copy(isSending = false)
                                         if (chatPrefs.isAutoListenEnabled()) {
@@ -1069,10 +1162,10 @@ class ChatViewModel(
                     updateAiMessage(aiMsg.id, friendlyMsg, isStreaming = false)
                     if (fromVoice) {
                         viewModelScope.launch {
-                            tts.speak(friendlyMsg)
+                            speakWithOptionalBargeIn(friendlyMsg, "transient_error_notice")
                             kotlinx.coroutines.delay(30_000)
                             val retryMsg = "I'm back. Let me try that again."
-                            viewModelScope.launch { tts.speak(retryMsg) }
+                            viewModelScope.launch { speakWithOptionalBargeIn(retryMsg, "transient_error_retry") }
                             _state.value = _state.value.copy(isSending = false)
                             if (chatPrefs.isAutoListenEnabled()) {
                                 com.vessences.android.MainActivity.instance?.launchStt()
@@ -1197,7 +1290,7 @@ class ChatViewModel(
                 viewModelScope.launch {
                     _state.value = _state.value.copy(isSpeaking = true)
                     android.util.Log.i("ttsdbg", "onSendComplete -> tts.speak chars=${textToSpeak.length}")
-                    tts.speak(textToSpeak)
+                    speakWithOptionalBargeIn(textToSpeak, "non_sentence_tts")
                     if (completionGeneration != outputGeneration.get()) {
                         android.util.Log.i("ChatVM", "Skipping interrupted TTS completion")
                         return@launch
@@ -1324,6 +1417,7 @@ class ChatViewModel(
     }
 
     private fun stopSentenceTtsQueues() {
+        stopBargeInMonitor()
         runCatching { activeServerSentenceQueue?.stop() }
             .onFailure { reportStopSpeakingFailure("server_sentence_queue_stop", it) }
         activeServerSentenceQueue = null
@@ -1434,6 +1528,8 @@ class ChatViewModel(
     var cameFromWakeWord: Boolean = false
 
     private fun endVoiceConversation() {
+        stopBargeInMonitor()
+        bargeInCaptureLaunchPending = false
         // Audio cue: short two-pip "ack" tone signals to the user that the
         // voice conversation has ended (STT will stop, app falls back to
         // wake-word passive mode). TONE_PROP_ACK is a distinct two-beep
@@ -1567,6 +1663,8 @@ class ChatViewModel(
 
     /** Stop listening immediately and return to always-listen (wake word) mode. */
     fun stopListeningAndReturnToWakeWord() {
+        stopBargeInMonitor()
+        bargeInCaptureLaunchPending = false
         voiceController?.cancelListening()
         com.vessences.android.voice.WakeWordBridge.sttActive = false
         if (voiceSettings?.isAlwaysListeningEnabled() == true) {
@@ -1704,6 +1802,7 @@ class ChatViewModel(
         }
         try { appContext.unregisterReceiver(sharedSummaryReceiver) } catch (_: Exception) {}
         super.onCleared()
+        stopBargeInMonitor()
         stopSentenceTtsQueues()
         voiceController?.release()
         tts.shutdown()
