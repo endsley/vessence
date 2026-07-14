@@ -1,144 +1,135 @@
-# Transcript Quality Review — 2026-07-11
+# Transcript Quality Review — 2026-07-12
 
-Generated: 2026-07-12 23:49:25
+Generated: 2026-07-13 23:51:19
 
-## Issue 1 [CRITICAL]
+## Issue 1 [MEDIUM]
 
-**Turn:** 2026-07-11 00:03:03
+**Turn:** 2026-07-12 23:45:44
+**User said:** use the source code as your guide
+
+**Problem:** Stage 3 did not attach or inspect source context after an explicit source-code instruction.
+
+**Root cause:** The turn routed to generic Stage 3 as others:Low, but the proxy logged file_ctx=False and the standing brain used only recent history. No code map/source-injection log appeared.
+
+**Suggested fix:** Update the Stage 3 code-intent detector to treat phrases like "use the source code" and follow-ups to code-architecture questions as code-context requests, then inject the code map or route to the code-capable brain.
+
+**Log evidence:**
+```
+2026-07-12 23:45:39 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (1790ms) params={}
+```
+```
+2026-07-12 23:45:43 INFO [jane.proxy] [audit-178391] stream_message brain=Claude history=0 msg_len=33 file_ctx=False
+```
+```
+2026-07-12 23:45:44 INFO [jane.proxy] [audit-178391] Standing brain turn 6 — injected recent history only
+```
+
+---
+
+## Issue 2 [MEDIUM]
+
+**Turn:** 2026-07-12 23:46:03
 **User said:** please familiarize yourself with the waterlily project
 
-**Problem:** Stage 3 did not complete the requested project-familiarization turn.
+**Problem:** Project familiarization was handled as a short generic chat response instead of a source-inspection task.
 
-**Root cause:** The classifier backend had already failed with Ollama/Qwen 500s and ack generation also failed, then the escalated brain stream ran for about 132s before the client disconnected and the server cancelled brain execution.
+**Root cause:** The turn escalated to Stage 3 with no file context, no code-map injection, and a 99-character result after about 2.3 seconds, which is not enough evidence of repository inspection.
 
-**Suggested fix:** Add a bounded Stage 3 execution timeout with a resumable background-task path: return an immediate status response, keep the Codex/brain task running server-side when appropriate, and expose completion/progress instead of cancelling on client stream disconnect.
+**Suggested fix:** Route explicit project-familiarization requests to a code/repo inspection path that reads project files and reports what was inspected before claiming familiarity.
 
 **Log evidence:**
 ```
-2026-07-11 00:02:54 WARNING [intent_classifier.v3.classifier] v3: qwen call failed (Server error '500 Internal Server Error' for url 'http://localhost:11434/api/generate'
+2026-07-12 23:46:01 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (1140ms) params={}
 ```
 ```
-2026-07-11 00:02:58 WARNING [jane_web.jane_v2.pipeline] ack generation failed (Server error '500 Internal Server Error' for url 'http://localhost:11434/api/generate'
+2026-07-12 23:46:03 INFO [jane.proxy] [audit-178391] stream_message brain=Claude history=0 msg_len=54 file_ctx=False
 ```
 ```
-2026-07-11 00:05:10 INFO [jane.proxy] [audit-178374] Client disconnected — waiting for adapter task to finish (brain still working)
+2026-07-12 23:46:03 INFO [jane.proxy] [audit-178391] Standing brain turn 7 — injected recent history only
 ```
 ```
-2026-07-11 00:05:10 WARNING [jane.proxy] [audit-178374] Brain execution cancelled (stream) after 126733ms — likely client disconnect or timeout. Stack:
-```
-```
-2026-07-11 00:05:10 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage3 end-to-end (132054ms)
+2026-07-12 23:46:05 INFO [jane.standing_brain] Brain [claude-sonnet-5] turn 8 complete in 2302ms (99 chars, 1 raw events)
 ```
 
 ---
 
-## Issue 2 [LOW]
+## Issue 3 [MEDIUM]
 
-**Turn:** 2026-07-11 23:45:12
-**User said:** right now, you are using the same codex process for each prompt instead of spawning
-
-**Problem:** Stage 1 reported an unknown class from the classifier.
-
-**Root cause:** Qwen returned 'force stage3', which is not in the allowed intent taxonomy, so the pipeline coerced it to others:Low. The fallback routing to Stage 3 was acceptable for this complex source-code question, but the classifier prompt/schema allowed an invalid label.
-
-**Suggested fix:** Constrain classifier output to the canonical enum with strict JSON/schema validation, and add a classifier normalization/test case for source-code inspection requests so invalid labels like 'force stage3' cannot be emitted.
-
-**Log evidence:**
-```
-2026-07-11 23:45:10 WARNING [intent_classifier.v3.classifier] v3: qwen returned unknown class 'force stage3' → others
-```
-```
-2026-07-11 23:45:10 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (4696ms) params={}
-```
-```
-2026-07-11 23:45:11 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=132 sid_override=True class_protocol=n/a
-```
-
----
-
-## Issue 3 [CRITICAL]
-
-**Turn:** 2026-07-11 23:47:34
+**Turn:** 2026-07-12 23:46:10
 **User said:** currently, the waterlily site is web only meant for browsers on laptops and computers
 
-**Problem:** Stage 3 returned an implausibly short response for a large code-modification request.
+**Problem:** Stage 1 rejected a valid web_automation classification because qwen returned the label with a space.
 
-**Root cause:** The request was escalated to Stage 3, but the brain result was only 99 characters after about 1.8s. Nearby logs show the primary Claude CLI was failing due to the org monthly spend limit, while the standing brain still emitted a tiny canned result instead of performing source inspection or implementation.
+**Root cause:** The classifier warned that qwen returned unknown class 'web automation'. Source inspection shows the registered class is web_automation, while parsed labels are only lowercased before allowed-class validation, so the space/underscore variant was dropped to others and Stage 3 received no web_automation class protocol.
 
-**Suggested fix:** Treat provider spend-limit errors as a hard degraded-state signal for Stage 3 coding tasks; do not return a generic 99-character completion. Route to a configured working fallback brain with tools, or return a clear failure/status response.
+**Suggested fix:** Canonicalize parsed classifier labels before validation: normalize spaces and underscores against the class registry, then return the registry key such as web_automation. Also constrain qwen output to the runtime class enum.
 
 **Log evidence:**
 ```
-2026-07-11 23:47:32 WARNING [intent_classifier.v3.classifier] v3: qwen returned unknown class 'web automation' → others
+2026-07-12 23:46:09 WARNING [intent_classifier.v3.classifier] v3: qwen returned unknown class 'web automation' → others
 ```
 ```
-2026-07-11 23:47:33 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=750 sid_override=True class_protocol=n/a
+2026-07-12 23:46:09 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (1800ms) params={}
 ```
 ```
-2026-07-11 23:47:34 WARNING [agent_skills.claude_cli_llm] Primary LLM failed: CLI (claude) failed (exit 1): You've hit your org's monthly spend limit · run /usage-credits to ask ... Attempting fallback.
-```
-```
-2026-07-11 23:47:36 INFO [jane.standing_brain] Brain [claude-sonnet-5] result event: result_len=99, accumulated=99, lines_read=3
-```
-```
-2026-07-11 23:47:36 INFO [jane.standing_brain] Brain [claude-sonnet-5] turn 4 complete in 1821ms (99 chars, 1 raw events)
+2026-07-12 23:46:10 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=750 sid_override=True class_protocol=n/a
 ```
 
 ---
 
 ## Issue 4 [CRITICAL]
 
-**Turn:** 2026-07-11 23:47:47
+**Turn:** 2026-07-12 23:48:13
 **User said:** # Task: Self-heal android_crash_report: === VESSENCE CRASH REPORT ===
 
-**Problem:** Stage 3 did not actually self-heal the Android crash report.
+**Problem:** Foreground handling was delayed by failing LLM fallback attempts before Stage 3 began.
 
-**Root cause:** The crash-report task was correctly escalated as a complex request, but the standing brain again returned only 99 characters in about 2.4s. Subsequent logs show Claude spend-limit failures and OpenAI fallback failure, so the configured frontier brain path was not capable of completing the requested diagnosis/fix.
+**Root cause:** Stage 1 completed at 23:46:28, but Stage 3 escalation did not start until 23:48:13. In between, the primary Claude CLI hit the monthly spend limit, OpenAI/Codex fallback failed repeatedly, and the web heartbeat failed.
 
-**Suggested fix:** Add health checks before accepting self-heal/coding tasks: verify the configured Stage 3 provider and fallback can run with tools. If unavailable, fail fast with an actionable error instead of producing a tiny generic answer.
+**Suggested fix:** Add a provider circuit breaker and time-box fallback attempts. Do not block the foreground pipeline on self-healing or audit LLM subprocesses; move them to a background worker or return an explicit provider-unavailable error.
 
 **Log evidence:**
 ```
-2026-07-11 23:47:46 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (7668ms) params={}
+2026-07-12 23:46:28 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 others:Low (5873ms) params={}
 ```
 ```
-2026-07-11 23:47:47 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=1622 sid_override=True class_protocol=n/a
+2026-07-12 23:46:37 WARNING [agent_skills.claude_cli_llm] Fallback to openai failed: Command '['codex', 'exec', '--dangerously-bypass-approvals-and-sandbox', '-m', 'gpt-5.4-mini', 'Extr...
 ```
 ```
-2026-07-11 23:47:50 INFO [jane.standing_brain] Brain [claude-sonnet-5] result event: result_len=99, accumulated=99, lines_read=3
+2026-07-12 23:47:14 WARNING [agent_skills.claude_cli_llm] Fallback to openai failed: Command '['codex', 'exec', '--dangerously-bypass-approvals-and-sandbox', '-m', 'gpt-5.4-mini', 'Extr...
 ```
 ```
-2026-07-11 23:47:50 INFO [jane.standing_brain] Brain [claude-sonnet-5] turn 5 complete in 2376ms (99 chars, 1 raw events)
+2026-07-12 23:47:44 WARNING [jane.web] heartbeat ping failed (1 in a row):
 ```
 ```
-2026-07-11 23:47:54 WARNING [agent_skills.claude_cli_llm] Primary LLM failed: CLI (claude) failed (exit 1): You've hit your org's monthly spend limit · run /usage-credits to ask ... Attempting fallback.
-```
-```
-2026-07-11 23:48:26 WARNING [agent_skills.claude_cli_llm] Fallback to openai failed: Command '['codex', 'exec', '--dangerously-bypass-approvals-and-sandbox', '-m', 'gpt-5.4-mini', 'Extr...
+2026-07-12 23:48:13 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=1622 sid_override=True class_protocol=n/a
 ```
 
 ---
 
-## Issue 5 [MEDIUM]
+## Issue 5 [CRITICAL]
 
-**Turn:** 2026-07-11 23:47:52
-**User said:** unknown short follow-up after crash-report prompt
+**Turn:** 2026-07-12 23:48:13
+**User said:** # Task: Self-heal android_crash_report: === VESSENCE CRASH REPORT ===
 
-**Problem:** Stage 1 short-circuited a likely continuation as unclear instead of preserving the active complex-task flow.
+**Problem:** Self-heal crash report was routed to generic Stage 3 chat with no evidence of repair execution.
 
-**Root cause:** Immediately after the crash-report task, the classifier produced unclear:Very High and the pipeline short-circuited at Stage 2. No pending_action resolver entry appears in the logs, so the follow-up was not routed back to the active Stage 3/task context.
+**Root cause:** The crash report was classified as others:Low and escalated with class_protocol=n/a and file_ctx=False. The standing brain returned only a 99-character response in 2.6 seconds; no code-lock, file-read, patch, build, or verification logs appear.
 
-**Suggested fix:** For active Stage 3 coding/self-heal sessions, create a pending action or session continuation token so short follow-ups route back to Stage 3 unless explicitly unrelated.
+**Suggested fix:** Detect android_crash_report/self-heal payloads and route them to the self-healing repair executor or Codex job path with source access, code lock acquisition, patching, and verification. If repair cannot run, say so explicitly.
 
 **Log evidence:**
 ```
-2026-07-11 23:47:52 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage1 unclear:Very High (1166ms) params={}
+2026-07-12 23:48:13 INFO [jane_web.jane_v2.stage3_escalate] stage3_escalate: reason=others:Low voice=False prompt_len=1622 sid_override=True class_protocol=n/a
 ```
 ```
-2026-07-11 23:47:53 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: unclear short-circuit (classifier verdict)
+2026-07-12 23:48:13 INFO [jane.proxy] [audit-178391] stream_message brain=Claude history=0 msg_len=1622 file_ctx=False
 ```
 ```
-2026-07-11 23:47:53 INFO [jane.proxy] [audit-178382] Persistence worker started stage=stage2 cls=unclear user_chars=39 assistant_chars=82
+2026-07-12 23:48:16 INFO [jane.standing_brain] Brain [claude-sonnet-5] turn 10 complete in 2643ms (99 chars, 1 raw events)
+```
+```
+2026-07-12 23:48:16 INFO [jane_web.jane_v3.pipeline] jane_v3 pipeline: stage3 end-to-end (3409ms)
 ```
 
 ---
