@@ -286,18 +286,118 @@ _CODEX_BRAINS = {"openai", "codex"}
 # When the live Codex brain is exhausted, Jane fails over to this provider.
 _CODEX_FAILOVER_PROVIDER = "claude"
 
+# When live Claude is exhausted, Jane fails over to Codex/OpenAI.
+_CLAUDE_FAILOVER_PROVIDER = "openai"
+
+_LIVE_FAILOVER_TARGETS = {
+    "claude": _CLAUDE_FAILOVER_PROVIDER,
+    "openai": _CODEX_FAILOVER_PROVIDER,
+    "codex": _CODEX_FAILOVER_PROVIDER,
+}
+
+
+def _provider_display_name(provider: str) -> str:
+    provider = (provider or "").lower()
+    if provider in _CODEX_BRAINS:
+        return "Codex"
+    if provider == "claude":
+        return "Claude"
+    if provider == "gemini":
+        return "Gemini"
+    return provider or "unknown"
+
+
+def _live_failover_target(provider: str) -> str | None:
+    return _LIVE_FAILOVER_TARGETS.get((provider or "").lower())
+
 
 def _is_provider_exhausted_error(exc: Exception) -> bool:
-    """True when an error looks like Codex usage/quota exhaustion (vs. a normal
+    """True when an error looks like provider usage/quota exhaustion (vs. a normal
     failure we should just surface). Kept broad on purpose: a false positive only
     costs one extra provider attempt, a false negative leaves Jane dead."""
     text = str(exc).lower()
     signals = (
-        "usage limit", "hit your usage", "ran out", "out of usage",
+        "usage limit", "hit your usage", "hit your limit", "you've hit your",
+        "you have hit your", "monthly spend limit", "monthly spending limit",
+        "spend limit", "spending limit", "usage-credits",
+        "ran out", "out of usage",
         "quota", "insufficient_quota", "rate limit", "rate_limit",
         "429", "resource_exhausted", "too many requests", "billing",
     )
     return any(s in text for s in signals)
+
+
+def _is_provider_exhausted_response(provider: str, text: str | None) -> bool:
+    """Detect provider-limit text that was returned as a normal model response.
+
+    Claude Code can emit the monthly spend-limit message as a successful
+    stream-json result, so exception-only failover misses the Android failure
+    Chieh saw. Keep this detector narrower than exception detection to avoid
+    switching providers merely because Jane discusses "rate limits" in prose.
+    """
+    if not _live_failover_target(provider):
+        return False
+    lowered = (text or "").lower()
+    signals = (
+        "you've hit your org",
+        "you've hit your limit",
+        "you have hit your limit",
+        "monthly spend limit",
+        "monthly spending limit",
+        "usage-credits",
+        "insufficient_quota",
+        "resource_exhausted",
+        "quota exceeded",
+        "too many requests",
+        "rate_limit",
+        "429",
+    )
+    return any(s in lowered for s in signals)
+
+
+class _InitialDeltaBuffer:
+    """Hold the first response bytes until we know they are not quota text."""
+
+    _MAX_HELD_CHARS = 512
+
+    def __init__(self, provider: str, emit):
+        self.provider = provider
+        self._emit = emit
+        self._held: list[str] = []
+        self._passthrough = False
+        self.exhausted = False
+
+    def emit(self, event_type: str, chunk: str) -> None:
+        if event_type != "delta":
+            self._emit(event_type, chunk)
+            return
+        if self.exhausted:
+            self._held.append(chunk)
+            return
+        if self._passthrough:
+            self._emit("delta", chunk)
+            return
+
+        self._held.append(chunk)
+        held_text = "".join(self._held)
+        if _is_provider_exhausted_response(self.provider, held_text):
+            self.exhausted = True
+            return
+        if len(held_text) >= self._MAX_HELD_CHARS:
+            self.flush()
+
+    def flush(self) -> None:
+        if self.exhausted or not self._held:
+            return
+        held_text = "".join(self._held)
+        self._held.clear()
+        self._passthrough = True
+        if held_text:
+            self._emit("delta", held_text)
+
+    def discard(self) -> None:
+        self._held.clear()
+        self.exhausted = True
 
 
 def _persist_brain_provider(provider: str) -> None:
@@ -338,19 +438,51 @@ async def _shutdown_codex_sessions(user_id: str, session_id: str) -> None:
         logger.debug("persistent_codex end during failover: %s", exc)
 
 
-async def _failover_codex_to_claude(user_id: str, session_id: str, exc: Exception) -> None:
-    """Disconnect Codex and make Claude Jane's brain (in-process + persisted)."""
+async def _shutdown_claude_sessions(user_id: str, session_id: str) -> None:
+    """Tear down live Claude state before retrying the turn on another brain."""
+    try:
+        from llm_brain.v1.persistent_claude import get_claude_persistent_manager
+        await get_claude_persistent_manager().end(user_id, session_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("persistent_claude end during failover: %s", exc)
+    try:
+        from llm_brain.v1.standing_brain import get_standing_brain_manager
+        manager = get_standing_brain_manager()
+        if getattr(manager, "_started", False):
+            await manager.shutdown()
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("standing_brain shutdown during failover: %s", exc)
+
+
+async def _shutdown_provider_sessions(provider: str, user_id: str, session_id: str) -> None:
+    provider = (provider or "").lower()
+    if provider in _CODEX_BRAINS:
+        await _shutdown_codex_sessions(user_id, session_id)
+    elif provider == "claude":
+        await _shutdown_claude_sessions(user_id, session_id)
+
+
+async def _failover_live_brain(
+    user_id: str,
+    session_id: str,
+    from_provider: str,
+    to_provider: str,
+    trigger: Exception | str,
+) -> None:
+    """Disconnect the exhausted provider and persist the replacement brain."""
+    from_label = _provider_display_name(from_provider)
+    to_label = _provider_display_name(to_provider)
     logger.warning(
-        "[%s] Codex brain exhausted (%s) — disconnecting Codex and switching Jane to %s",
-        session_id[:12], str(exc)[:150], _CODEX_FAILOVER_PROVIDER,
+        "[%s] %s brain exhausted (%s) - disconnecting %s and switching Jane to %s",
+        session_id[:12], from_label, str(trigger)[:150], from_label, to_label,
     )
-    await _shutdown_codex_sessions(user_id, session_id)
-    _persist_brain_provider(_CODEX_FAILOVER_PROVIDER)
+    await _shutdown_provider_sessions(from_provider, user_id, session_id)
+    _persist_brain_provider(to_provider)
     try:
         from agent_skills.work_log_tools import log_activity
         log_activity(
-            f"Live brain auto-failover: Codex out of usage → switched Jane's brain to "
-            f"{_CODEX_FAILOVER_PROVIDER}. Trigger: {str(exc)[:200]}",
+            f"Live brain auto-failover: {from_label} out of usage -> switched Jane's brain to "
+            f"{to_label}. Trigger: {str(trigger)[:200]}",
             category="system",
         )
     except Exception:  # noqa: BLE001 — logging must never break the turn
@@ -359,27 +491,62 @@ async def _failover_codex_to_claude(user_id: str, session_id: str, exc: Exceptio
 
 async def _execute_brain_sync(user_id: str, session_id: str, brain_name: str, adapter, request_ctx) -> str:
     try:
-        return await _dispatch_brain_sync(user_id, session_id, brain_name, adapter, request_ctx)
+        response = await _dispatch_brain_sync(user_id, session_id, brain_name, adapter, request_ctx)
     except Exception as exc:  # noqa: BLE001
-        if brain_name not in _CODEX_BRAINS or not _is_provider_exhausted_error(exc):
+        target = _live_failover_target(brain_name)
+        if not target or not _is_provider_exhausted_error(exc):
             raise
-        await _failover_codex_to_claude(user_id, session_id, exc)
+        await _failover_live_brain(user_id, session_id, brain_name, target, exc)
+        target_adapter = get_brain_adapter(target, _get_execution_profile(target))
         return await _dispatch_brain_sync(
-            user_id, session_id, _CODEX_FAILOVER_PROVIDER, adapter, request_ctx
+            user_id, session_id, target, target_adapter, request_ctx
         )
+    if not _is_provider_exhausted_response(brain_name, response):
+        return response
+    target = _live_failover_target(brain_name)
+    if not target:
+        return response
+    await _failover_live_brain(user_id, session_id, brain_name, target, response)
+    target_adapter = get_brain_adapter(target, _get_execution_profile(target))
+    return await _dispatch_brain_sync(
+        user_id, session_id, target, target_adapter, request_ctx
+    )
 
 
 async def _execute_brain_stream(user_id: str, session_id: str, brain_name: str, adapter, request_ctx, emit) -> str:
+    delta_buffer = _InitialDeltaBuffer(brain_name, emit)
     try:
-        return await _dispatch_brain_stream(user_id, session_id, brain_name, adapter, request_ctx, emit)
-    except Exception as exc:  # noqa: BLE001
-        if brain_name not in _CODEX_BRAINS or not _is_provider_exhausted_error(exc):
-            raise
-        emit("status", "Codex is out of usage — switching Jane's brain to Claude…")
-        await _failover_codex_to_claude(user_id, session_id, exc)
-        return await _dispatch_brain_stream(
-            user_id, session_id, _CODEX_FAILOVER_PROVIDER, adapter, request_ctx, emit
+        response = await _dispatch_brain_stream(
+            user_id, session_id, brain_name, adapter, request_ctx, delta_buffer.emit
         )
+    except Exception as exc:  # noqa: BLE001
+        target = _live_failover_target(brain_name)
+        if not target or not _is_provider_exhausted_error(exc):
+            raise
+        delta_buffer.discard()
+        emit("status", f"{_provider_display_name(brain_name)} is out of usage - switching Jane's brain to {_provider_display_name(target)}.")
+        await _failover_live_brain(user_id, session_id, brain_name, target, exc)
+        target_adapter = get_brain_adapter(target, _get_execution_profile(target))
+        return await _dispatch_brain_stream(
+            user_id, session_id, target, target_adapter, request_ctx, emit
+        )
+    exhausted = (
+        delta_buffer.exhausted
+        or _is_provider_exhausted_response(brain_name, response)
+    )
+    if not exhausted:
+        delta_buffer.flush()
+        return response
+    delta_buffer.discard()
+    target = _live_failover_target(brain_name)
+    if not target:
+        return response
+    emit("status", f"{_provider_display_name(brain_name)} is out of usage - switching Jane's brain to {_provider_display_name(target)}.")
+    await _failover_live_brain(user_id, session_id, brain_name, target, response)
+    target_adapter = get_brain_adapter(target, _get_execution_profile(target))
+    return await _dispatch_brain_stream(
+        user_id, session_id, target, target_adapter, request_ctx, emit
+    )
 
 
 async def _dispatch_brain_sync(user_id: str, session_id: str, brain_name: str, adapter, request_ctx) -> str:
@@ -2044,6 +2211,8 @@ async def stream_message(
                 emit("model", model_name)
                 emit("status", f"Jane is thinking ({model_name})...")
                 response_parts = []
+                delta_buffer = _InitialDeltaBuffer(brain_name, emit)
+                standing_provider_exhausted = False
                 brain_message = request_ctx.transcript if _skip_context and request_ctx.transcript else message
 
                 _permission_broker.register_emitter("standing_brain", emit)
@@ -2053,15 +2222,42 @@ async def stream_message(
                         system_prompt=request_ctx.system_prompt,
                     ):
                         if event_type == "provider_error":
-                            emit("provider_error", chunk)
+                            if _is_provider_exhausted_error(Exception(chunk)):
+                                standing_provider_exhausted = True
+                            else:
+                                emit("provider_error", chunk)
                         elif event_type in ("thought", "tool_use", "tool_result"):
                             emit(event_type, chunk)
                         else:
                             response_parts.append(chunk)
-                            emit("delta", chunk)
+                            delta_buffer.emit("delta", chunk)
                 finally:
                     _permission_broker.unregister_emitter("standing_brain")
                 response = "".join(response_parts)
+                standing_provider_exhausted = (
+                    standing_provider_exhausted
+                    or delta_buffer.exhausted
+                    or _is_provider_exhausted_response(brain_name, response)
+                )
+                if standing_provider_exhausted:
+                    delta_buffer.discard()
+                    target = _live_failover_target(brain_name)
+                    if target:
+                        emit("status", f"{_provider_display_name(brain_name)} is out of usage - switching Jane's brain to {_provider_display_name(target)}.")
+                        await _failover_live_brain(user_id, session_id, brain_name, target, response)
+                        target_adapter = get_brain_adapter(target, _get_execution_profile(target))
+                        response = await _execute_brain_stream(
+                            user_id,
+                            session_id,
+                            target,
+                            target_adapter,
+                            request_ctx,
+                            emit,
+                        )
+                    else:
+                        delta_buffer.flush()
+                else:
+                    delta_buffer.flush()
             else:
                 # ── Provider-specific direct execution path ───────────────────
                 if _use_gemini_api(brain_name):

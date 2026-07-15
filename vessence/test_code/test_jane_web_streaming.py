@@ -276,6 +276,108 @@ def test_stream_message_emits_error_when_brain_returns_empty_response(monkeypatc
     assert "empty response" in body.lower()
 
 
+def test_execute_brain_stream_fails_over_from_claude_limit_to_codex(monkeypatch):
+    request_ctx = JaneRequestContext(
+        system_prompt="system",
+        transcript="User: hi\nJane:",
+        retrieved_memory_summary="",
+    )
+    calls = []
+    failovers = []
+    events = []
+    limit_text = "You've hit your org's monthly spend limit - run /usage-credits to ask your admin for a higher limit"
+
+    async def fake_dispatch(user_id, session_id, brain_name, adapter, ctx, emit):
+        del user_id, session_id, adapter, ctx
+        calls.append(brain_name)
+        if brain_name == "claude":
+            emit("delta", limit_text)
+            return limit_text
+        emit("delta", "codex ok")
+        return "codex ok"
+
+    async def fake_failover(user_id, session_id, from_provider, to_provider, trigger):
+        failovers.append((user_id, session_id, from_provider, to_provider, str(trigger)))
+
+    monkeypatch.setattr(jane_proxy, "_dispatch_brain_stream", fake_dispatch)
+    monkeypatch.setattr(jane_proxy, "_failover_live_brain", fake_failover)
+    monkeypatch.setattr(
+        jane_proxy,
+        "get_brain_adapter",
+        lambda provider, profile: types.SimpleNamespace(label=provider),
+    )
+    monkeypatch.setattr(
+        jane_proxy,
+        "_get_execution_profile",
+        lambda provider: types.SimpleNamespace(mode="safe"),
+    )
+
+    result = asyncio.run(
+        jane_proxy._execute_brain_stream(
+            "user",
+            "session-1",
+            "claude",
+            types.SimpleNamespace(label="Claude"),
+            request_ctx,
+            lambda event_type, data: events.append((event_type, data)),
+        )
+    )
+
+    assert result == "codex ok"
+    assert calls == ["claude", "openai"]
+    assert failovers[0][:4] == ("user", "session-1", "claude", "openai")
+    assert ("delta", limit_text) not in events
+    assert ("delta", "codex ok") in events
+    assert any(event == "status" and "switching Jane's brain to Codex" in data for event, data in events)
+
+
+def test_execute_brain_sync_fails_over_from_claude_limit_to_codex(monkeypatch):
+    request_ctx = JaneRequestContext(
+        system_prompt="system",
+        transcript="User: hi\nJane:",
+        retrieved_memory_summary="",
+    )
+    calls = []
+    failovers = []
+
+    async def fake_dispatch(user_id, session_id, brain_name, adapter, ctx):
+        del user_id, session_id, adapter, ctx
+        calls.append(brain_name)
+        if brain_name == "claude":
+            raise RuntimeError("You've hit your org's monthly spend limit")
+        return "codex ok"
+
+    async def fake_failover(user_id, session_id, from_provider, to_provider, trigger):
+        failovers.append((user_id, session_id, from_provider, to_provider, str(trigger)))
+
+    monkeypatch.setattr(jane_proxy, "_dispatch_brain_sync", fake_dispatch)
+    monkeypatch.setattr(jane_proxy, "_failover_live_brain", fake_failover)
+    monkeypatch.setattr(
+        jane_proxy,
+        "get_brain_adapter",
+        lambda provider, profile: types.SimpleNamespace(label=provider),
+    )
+    monkeypatch.setattr(
+        jane_proxy,
+        "_get_execution_profile",
+        lambda provider: types.SimpleNamespace(mode="safe"),
+    )
+
+    result = asyncio.run(
+        jane_proxy._execute_brain_sync(
+            "user",
+            "session-1",
+            "claude",
+            types.SimpleNamespace(label="Claude"),
+            request_ctx,
+        )
+    )
+
+    assert result == "codex ok"
+    assert calls == ["claude", "openai"]
+    assert failovers[0][:4] == ("user", "session-1", "claude", "openai")
+
+
 def test_get_execution_profile_uses_provider_defaults(monkeypatch):
     monkeypatch.delenv("JANE_TIMEOUT_SECONDS", raising=False)
     monkeypatch.delenv("JANE_TIMEOUT_SECONDS_CODEX", raising=False)

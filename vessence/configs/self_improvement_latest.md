@@ -1,17 +1,17 @@
 # Most Recent Nightly Self-Improvement
 
-- Run started: 2026-07-12 23:30:01
-- Report generated: 2026-07-12 23:49:28
-- Total runtime: 1166s
+- Run started: 2026-07-13 23:30:01
+- Report generated: 2026-07-13 23:51:23
+- Total runtime: 1280s
 - Jobs: 8 total, 7 ok, 1 timeout, 0 failed
 - Stable latest report path: `/home/chieh/ambient/vessence/configs/self_improvement_latest.md`
-- Archived copy: `/home/chieh/ambient/vessence-data/reports/self_improvement/self_improvement_20260712_233001.md`
+- Archived copy: `/home/chieh/ambient/vessence-data/reports/self_improvement/self_improvement_20260713_233001.md`
 
 ## TL;DR
 
 - 1. ✓ Auto-Commit WIP (pre) (0.0m)
   - Fixes:
-    - 2026-07-12 23:30:01,694 INFO Committed 10 file(s).
+    - 2026-07-13 23:30:02,199 INFO Committed 2 file(s).
 - 2. ✓ Code Auditor (0.0m)
   - Problems: none detected
   - Fixes: none applied
@@ -19,35 +19,35 @@
   - Problems:
     - Possibly-dead functions: 1.
     - Duplicate function bodies: 11 groups.
-- 4. ✓ Pipeline Audit (30 prompts) (3.5m)
+- 4. ✓ Pipeline Audit (30 prompts) (2.7m)
   - Problems:
     - Prompts audited: 6.
     - Classification failures: 4.
-    - Response failures: 6.
+    - Response failures: 5.
 - 5. ✓ Doc Drift Auditor (0.0m)
   - Problems:
     - CRON_JOBS.md claims check_for_updates.py is active but no matching cron entry exists
     - CRON_JOBS.md claims generate_code_map.py is active but no matching cron entry exists
     - CRON_JOBS.md claims iterative_refactor_scheduler.py is active but no matching cron entry exists
-- 6. ✓ Transcript Quality Review (0.9m)
+- 6. ✓ Transcript Quality Review (3.6m)
   - Problems:
-    - Transcript review found 5 issues: 3 critical, 1 low, 1 medium.
-    - Stage 3 did not complete the requested project-familiarization turn.
-    - Stage 1 reported an unknown class from the classifier.
+    - Transcript review found 5 issues: 2 critical, 3 medium.
+    - Stage 3 did not attach or inspect source context after an explicit source-code instruction.
+    - Project familiarization was handled as a short generic chat response instead of a source-inspection task.
   - Fixes:
-    - 2026-07-12 23:49:25,000 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (5 issues)
-    - 2026-07-12 23:49:25,001 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 3 critical, 1 medium, 1...
+    - 2026-07-13 23:51:19,392 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (5 issues)
+    - 2026-07-13 23:51:19,393 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 2 critical, 3 medium iss...
 - 7. ✓ Memory Janitor (0.0m)
   - Problems:
-    - WARNING:memory_janitor:System stressed — skipping janitor this cycle: swap already active: 37.2% > 10.0%
+    - WARNING:memory_janitor:System stressed — skipping janitor this cycle: swap already active: 36.5% > 10.0%
 - 8. ✓ Auto-Commit + Push (post) (0.0m)
   - Fixes:
-    - 2026-07-12 23:49:27,882 INFO Pushed successfully.
+    - 2026-07-13 23:51:22,181 INFO Pushed successfully.
 
 **Top follow-ups:**
 
-- Add a bounded Stage 3 execution timeout with a resumable background-task path: return an immediate status response, keep the Codex/brain task running server-side when appropriate, and expose completion/progress instead of cancelling on client stream disconnect.
-- Constrain classifier output to the canonical enum with strict JSON/schema validation, and add a classifier normalization/test case for source-code inspection requests so invalid labels like 'force stage3' cannot be emitted.
+- Update the Stage 3 code-intent detector to treat phrases like "use the source code" and follow-ups to code-architecture questions as code-context requests, then inject the code map or route to the code-capable brain.
+- Route explicit project-familiarization requests to a code/repo inspection path that reads project files and reports what was inspected before claiming familiarity.
 
 ## Executive Summary
 
@@ -69,7 +69,7 @@
 
 ### Improvements It Made
 
-- 2026-07-12 23:30:01,694 INFO Committed 10 file(s).
+- 2026-07-13 23:30:02,199 INFO Committed 2 file(s).
 
 ### Evidence Files
 
@@ -125,7 +125,7 @@
 ## Stage 4: Pipeline Audit (30 prompts)
 
 - Status: `ok`
-- Duration: 207s (3.5 min)
+- Duration: 160s (2.7 min)
 
 ### What It Did
 
@@ -135,11 +135,11 @@
 
 - Prompts audited: 6.
 - Classification failures: 4.
-- Response failures: 6.
+- Response failures: 5.
 - **right now, you are using the same codex process for each prompt instead of spawn** (others/stage3): You've hit your org's monthly spend limit · run /usage-credits to ask your admin for a higher limit
 - **use the source code as your guide** (todo list/stage3): You've hit your org's monthly spend limit · run /usage-credits to ask your admin for a higher limit
-- **please familiarize yourself with the waterlily project** (others/stage3): You've hit your org's monthly spend limit · run /usage-credits to ask your admin for a higher limit
 - **currently, the waterlily site is web only meant for browsers on laptops and comp** (others/stage3): You've hit your org's monthly spend limit · run /usage-credits to ask your admin for a higher limit
+- **# Task: Self-heal android_crash_report: === VESSENCE CRASH REPORT ===
 
 ### Improvements It Made
 
@@ -179,7 +179,7 @@
 ## Stage 6: Transcript Quality Review
 
 - Status: `ok`
-- Duration: 56s (0.9 min)
+- Duration: 215s (3.6 min)
 
 ### What It Did
 
@@ -187,23 +187,23 @@
 
 ### Problems It Found
 
-- Transcript review found 5 issues: 3 critical, 1 low, 1 medium.
-- Stage 3 did not complete the requested project-familiarization turn.
-- Stage 1 reported an unknown class from the classifier.
-- Stage 3 returned an implausibly short response for a large code-modification request.
-- Stage 3 did not actually self-heal the Android crash report.
+- Transcript review found 5 issues: 2 critical, 3 medium.
+- Stage 3 did not attach or inspect source context after an explicit source-code instruction.
+- Project familiarization was handled as a short generic chat response instead of a source-inspection task.
+- Stage 1 rejected a valid web_automation classification because qwen returned the label with a space.
+- Foreground handling was delayed by failing LLM fallback attempts before Stage 3 began.
 
 ### Improvements It Made
 
-- 2026-07-12 23:49:25,000 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (5 issues)
-- 2026-07-12 23:49:25,001 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 3 critical, 1 medium, 1 minor issues. The most urgent
+- 2026-07-13 23:51:19,392 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (5 issues)
+- 2026-07-13 23:51:19,393 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 2 critical, 3 medium issues. The most urgent was: Fore
 
 ### Follow-Up Fixes Recommended
 
-- Add a bounded Stage 3 execution timeout with a resumable background-task path: return an immediate status response, keep the Codex/brain task running server-side when appropriate, and expose completion/progress instead of cancelling on client stream disconnect.
-- Constrain classifier output to the canonical enum with strict JSON/schema validation, and add a classifier normalization/test case for source-code inspection requests so invalid labels like 'force stage3' cannot be emitted.
-- Treat provider spend-limit errors as a hard degraded-state signal for Stage 3 coding tasks; do not return a generic 99-character completion. Route to a configured working fallback brain with tools, or return a clear failure/status response.
-- Add health checks before accepting self-heal/coding tasks: verify the configured Stage 3 provider and fallback can run with tools. If unavailable, fail fast with an actionable error instead of producing a tiny generic answer.
+- Update the Stage 3 code-intent detector to treat phrases like "use the source code" and follow-ups to code-architecture questions as code-context requests, then inject the code map or route to the code-capable brain.
+- Route explicit project-familiarization requests to a code/repo inspection path that reads project files and reports what was inspected before claiming familiarity.
+- Canonicalize parsed classifier labels before validation: normalize spaces and underscores against the class registry, then return the registry key such as web_automation. Also constrain qwen output to the runtime class enum.
+- Add a provider circuit breaker and time-box fallback attempts. Do not block the foreground pipeline on self-healing or audit LLM subprocesses; move them to a background worker or return an explicit provider-unavailable error.
 
 ### Evidence Files
 
@@ -221,7 +221,7 @@
 
 ### Problems It Found
 
-- WARNING:memory_janitor:System stressed — skipping janitor this cycle: swap already active: 37.2% > 10.0%
+- WARNING:memory_janitor:System stressed — skipping janitor this cycle: swap already active: 36.5% > 10.0%
 
 ### Improvements It Made
 
@@ -246,7 +246,7 @@
 
 ### Improvements It Made
 
-- 2026-07-12 23:49:27,882 INFO Pushed successfully.
+- 2026-07-13 23:51:22,181 INFO Pushed successfully.
 
 ### Evidence Files
 
