@@ -130,17 +130,19 @@ cd ~/ambient/vessence
 ../venv/bin/python startup_code/first_run_setup.py
 ```
 
-To rerun only the standalone Codex memory integration:
+To rerun only the standalone Codex Jane runtime integration:
 
 ```bash
 cd ~/ambient/vessence
 ../venv/bin/python startup_code/install_codex_memory.py
 ```
 
-This writes `~/.codex/hooks/jane_memory_hook.py`, the persistent Jane memory
-instructions file, and the `jane-memory` MCP registration in
-`~/.codex/config.toml`. The first interactive Codex boot may ask to trust the
-hook via `/hooks`.
+This writes `~/.codex/hooks/jane_memory_hook.py`, persistent Jane runtime
+instructions, and the `jane-memory` plus `jane-coordination` MCP registrations
+in `~/.codex/config.toml`. Session and prompt hooks inject live coordination
+context, post-tool hooks heartbeat active scoped claims, and the main Stop hook
+releases any claims left open at session completion. The first interactive
+Codex boot may ask to trust the hook via `/hooks`.
 
 To rerun only the repo-backed Codex skill installation:
 

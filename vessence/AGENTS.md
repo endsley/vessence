@@ -141,31 +141,44 @@ Always query memory first for prompts that ask "do you remember", "recently",
 context, or prior debugging/architecture rationale. Then verify against code or
 logs when the answer concerns current runtime behavior.
 
-## Code Edit Lock (MANDATORY)
+## Code Coordination Board (MANDATORY)
 
-Before editing any source code file, acquire the project-scoped code edit lock.
-This prevents two agents from editing the same codebase simultaneously without
-blocking unrelated projects.
-
-```python
-from agent_skills.code_lock import code_edit_lock
-
-with code_edit_lock("jane-codex", project="vessence"):
-    # ... edit files ...
-```
-
-Or check who holds it:
+Multiple Codex sessions may edit one repository concurrently. Before source
+edits, read the shared board, post the task, and claim only the files or
+directory trees this session expects to modify:
 
 ```bash
-python agent_skills/code_lock.py status
-python agent_skills/code_lock.py status --project vessence
+python agent_skills/code_coordination.py board --project vessence
+python agent_skills/code_coordination.py start \
+  --project vessence --task "Add scoped agent coordination" \
+  --file agent_skills/code_coordination.py \
+  --file tests/test_code_coordination.py
 ```
 
-Known project aliases include `vessence`, `education`, and `waterlily`. If
-`project` is omitted, the lock code infers the project from the current working
-directory. Use an explicit `project=` when the process is launched from another
-directory. If the target project's lock is held, **wait** - do not bypass it.
-The lock auto-releases when the holding agent's process exits.
+Project aliases include `vessence`, `education`, and `waterlily`. Claims may be
+files or directory trees (`startup_code/**`) and resolve from the project root.
+Claim newly discovered files before editing. If a claim conflicts, do not edit
+through it and do not wait idly: inspect the board, message the owning session,
+or choose a non-overlapping task slice. Different files may be edited
+concurrently without an arbitrary agent limit.
+
+Use `claim`, `release`, `heartbeat`, `message`, and `finish` subcommands as work
+evolves. Before the final response, always run:
+
+```bash
+python agent_skills/code_coordination.py finish \
+  --project vessence --result "Concise completion summary"
+```
+
+New Codex sessions receive the board automatically through Jane's hooks and can
+use the `jane-coordination` MCP tools: `code_coordination_board`,
+`post_code_task`, `claim_code_files`, `release_code_files`,
+`heartbeat_code_task`, `message_code_agents`, and `finish_code_task`.
+
+Use the legacy `agent_skills.code_lock.code_edit_lock` only for a merge/rebase,
+schema migration, generated global artifact, version bump, or
+deployment/restart that truly requires repository-wide exclusivity. It waits
+for scoped claims to clear and appears on the board.
 
 ## Android Version Bumping
 

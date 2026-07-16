@@ -59,6 +59,13 @@ def test_announcement_since_filter_uses_created_at_then_timestamp_and_inclusive_
     assert AnnouncementsLog._created_at_value({"timestamp": "fallback"}) == "fallback"
 
 
+def test_announcement_since_filter_tolerates_mixed_timezone_awareness():
+    since_dt = datetime.fromisoformat("2026-01-01T10:00:00+00:00")
+
+    assert not AnnouncementsLog._is_after_since({"created_at": "2026-01-01T09:59:59"}, since_dt)
+    assert AnnouncementsLog._is_after_since({"created_at": "2026-01-01T10:00:01"}, since_dt)
+
+
 def test_large_log_is_truncated_to_recent_lines_before_reading(tmp_path):
     path = tmp_path / "announcements.jsonl"
     write_lines(
@@ -76,3 +83,62 @@ def test_large_log_is_truncated_to_recent_lines_before_reading(tmp_path):
 
     assert [row["id"] for row in rows] == ["three", "four"]
     assert [json.loads(line)["id"] for line in path.read_text(encoding="utf-8").splitlines()] == ["three", "four"]
+
+
+def test_read_announcements_collapses_historical_ra_reports_to_latest(tmp_path):
+    path = tmp_path / "announcements.jsonl"
+    write_lines(
+        path,
+        [
+            json.dumps({"id": "regular-old", "type": "queue_progress", "created_at": "2026-07-01T09:00:00+00:00"}),
+            json.dumps({
+                "id": "ra_report_20260701",
+                "type": "report_ready",
+                "report_kind": "ra_research",
+                "created_at": "2026-07-01T10:00:00+00:00",
+            }),
+            json.dumps({"id": "regular-new", "type": "queue_progress", "created_at": "2026-07-02T09:00:00+00:00"}),
+            json.dumps({
+                "id": "ra_report_20260702",
+                "type": "report_ready",
+                "report_kind": "ra_research",
+                "created_at": "2026-07-02T10:00:00+00:00",
+            }),
+            json.dumps({
+                "id": "ra_report_20260701_duplicate_late_row",
+                "type": "report_ready",
+                "report_kind": "ra_research",
+                "created_at": "2026-07-01T10:00:00+00:00",
+            }),
+        ],
+    )
+    log = AnnouncementsLog(path)
+
+    rows = log.read(None)
+
+    assert [row["id"] for row in rows] == ["regular-old", "regular-new", "ra_report_20260702"]
+
+
+def test_ra_report_collapse_runs_after_since_filter(tmp_path):
+    path = tmp_path / "announcements.jsonl"
+    write_lines(
+        path,
+        [
+            json.dumps({
+                "id": "ra_report_old",
+                "type": "report_ready",
+                "report_kind": "ra_research",
+                "created_at": "2026-07-01T10:00:00+00:00",
+            }),
+            json.dumps({
+                "id": "ra_report_new",
+                "type": "report_ready",
+                "report_kind": "ra_research",
+                "created_at": "2026-07-03T10:00:00+00:00",
+            }),
+        ],
+    )
+    log = AnnouncementsLog(path)
+
+    assert [row["id"] for row in log.read("2026-07-02T00:00:00+00:00")] == ["ra_report_new"]
+    assert log.read("2026-07-04T00:00:00+00:00") == []

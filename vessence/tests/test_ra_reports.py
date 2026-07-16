@@ -4,7 +4,7 @@ import pytest
 from fastapi import HTTPException
 from starlette.requests import Request
 
-from jane_web.ra_reports import RA_REPORT_TOKEN_SECONDS, RaReportAccess
+from jane_web.ra_reports import RA_REPORT_SHARE_TOKEN_HEX, RA_REPORT_TOKEN_SECONDS, RaReportAccess
 
 
 def _request(headers: dict[str, str] | None = None, host: str = "10.0.0.8") -> Request:
@@ -87,17 +87,24 @@ def test_metadata_and_tokenized_announcement_grant_temporary_access(tmp_path):
     metadata = access.metadata(report_path, request)
     assert metadata["id"] == "ra_report_20260702_010203_signed"
     assert metadata["report_url"].startswith("/api/research/ra/reports/20260702_010203.html?rt=")
+    assert metadata["share_url"].startswith("/share/research/ra/reports/20260702_010203/")
     assert metadata["access_expires_in_seconds"] == RA_REPORT_TOKEN_SECONDS
     assert access.require_access(request, "20260702_010203", None) == "temporary_report_access"
 
     token = metadata["report_url"].split("rt=", 1)[1]
     assert access.valid_token("20260702_010203", token)
+    share_token = metadata["share_url"].rsplit("/", 1)[1]
+    assert len(share_token) == RA_REPORT_SHARE_TOKEN_HEX
+    assert access.valid_share_token("20260702_010203", share_token)
+    assert not access.valid_share_token("20260702_010203", "bad-token")
+    assert not access.valid_share_token("bad-id", share_token)
 
     item = {"type": "report_ready", "report_id": "20260702_010203", "message": "ready"}
     tokenized = access.tokenize_report_item(item, request)
     assert tokenized is not item
     assert tokenized["id"] == "ra_report_20260702_010203_signed"
     assert tokenized["report_url"].startswith("/api/research/ra/reports/20260702_010203.html?rt=")
+    assert tokenized["share_url"] == metadata["share_url"]
 
 
 def test_require_access_prefers_authenticated_session(tmp_path):

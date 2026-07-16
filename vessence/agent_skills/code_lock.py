@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Project-scoped code edit locks.
+"""Project-scoped exclusive locks for repository-wide operations.
 
-Prevents two agents from editing the same codebase simultaneously without
-blocking unrelated projects such as Vessence, the education app, and Waterlily.
+Ordinary concurrent edits use ``agent_skills.code_coordination`` scoped file
+claims. This legacy lock is reserved for operations such as merge/rebase,
+schema migration, global generated artifacts, version bumps, and deployment.
 
 Usage:
     from agent_skills.code_lock import acquire_lock, release_lock
@@ -26,10 +27,14 @@ import fcntl
 import json
 import os
 import re
+import sys
 import time
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterable
+
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 VESSENCE_DATA_HOME = Path(os.environ.get("VESSENCE_DATA_HOME", os.path.expanduser("~/ambient/vessence-data")))
 LOCK_DIR = VESSENCE_DATA_HOME / "locks"
@@ -82,6 +87,11 @@ def _known_project_roots() -> dict[str, Path]:
     vessence_home = os.environ.get("VESSENCE_HOME") or str(home / "ambient" / "vessence")
     roots["vessence"] = Path(vessence_home).expanduser()
     return {name: root.resolve() for name, root in roots.items()}
+
+
+def known_project_roots() -> dict[str, Path]:
+    """Return the configured project aliases for coordination clients."""
+    return dict(_known_project_roots())
 
 
 def _nearest_git_root(path: Path) -> Path | None:
@@ -159,21 +169,7 @@ def acquire_lock(
     while True:
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            # Got the lock — write our info
-            os.ftruncate(fd, 0)
-            os.lseek(fd, 0, os.SEEK_SET)
-            info = json.dumps({
-                "agent": agent_name,
-                "pid": os.getpid(),
-                "project": scope.name,
-                "root": scope.root,
-                "lock_file": str(scope.lock_file),
-                "acquired": time.strftime("%Y-%m-%dT%H:%M:%S"),
-            })
-            os.write(fd, info.encode())
-            return fd
         except (IOError, OSError):
-            # Lock held by another agent
             elapsed = time.time() - start
             if elapsed > timeout:
                 os.close(fd)
@@ -187,6 +183,52 @@ def acquire_lock(
                     f"{elapsed:.0f}s by {holder}. Agent '{agent_name}' timed out waiting."
                 )
             time.sleep(1)
+            continue
+
+        try:
+            from agent_skills.code_coordination import (
+                active_claims_for_project,
+                current_session_id,
+            )
+
+            claims = active_claims_for_project(
+                project or scope.name,
+                exclude_session_id=current_session_id(),
+            )
+        except ImportError:
+            claims = []
+        except Exception:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            os.close(fd)
+            raise
+        if claims:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            elapsed = time.time() - start
+            if elapsed > timeout:
+                os.close(fd)
+                owners = "; ".join(
+                    f"{claim['path']} by {claim['agent']} ({claim['task']})"
+                    for claim in claims[:8]
+                )
+                raise TimeoutError(
+                    f"Project-wide lock for '{scope.name}' cannot start while "
+                    f"scoped claims are active: {owners}"
+                )
+            time.sleep(1)
+            continue
+
+        os.ftruncate(fd, 0)
+        os.lseek(fd, 0, os.SEEK_SET)
+        info = json.dumps({
+            "agent": agent_name,
+            "pid": os.getpid(),
+            "project": scope.name,
+            "root": scope.root,
+            "lock_file": str(scope.lock_file),
+            "acquired": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        })
+        os.write(fd, info.encode())
+        return fd
 
 
 def release_lock(fd: int) -> None:
@@ -252,13 +294,27 @@ def held_locks() -> list[dict]:
     return holders
 
 
+def _coordination_board_text(project: str | os.PathLike[str]) -> str:
+    try:
+        from agent_skills.code_coordination import (
+            board_snapshot,
+            current_session_id,
+            format_board,
+        )
+
+        snapshot = board_snapshot(project=project, session_id=current_session_id())
+        return format_board(snapshot, current_session=current_session_id())
+    except Exception as exc:
+        return f"Code coordination board unavailable: {type(exc).__name__}: {exc}"
+
+
 @contextmanager
 def code_edit_lock(
     agent_name: str,
     timeout: float = LOCK_TIMEOUT,
     project: str | os.PathLike[str] | None = None,
 ):
-    """Context manager for project-scoped code edit locking."""
+    """Context manager for project-wide exclusive operations."""
     fd = acquire_lock(agent_name, timeout, project)
     try:
         yield
@@ -284,6 +340,7 @@ if __name__ == "__main__":
                 print(f"Lock held for {scope.name}: {json.dumps(holder)}")
             else:
                 print(f"Lock is free for {scope.name}")
+            print(_coordination_board_text(project_arg))
         else:
             holders = held_locks()
             if holders:

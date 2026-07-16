@@ -505,21 +505,40 @@ For Jane web UI sessions (`JANE_WEB_PERMISSIONS=1`):
 - Flow: CLI tool call → hook fires → HTTP POST to `permission_broker.py` → SSE event → web UI dialog → user approve/deny → hook unblocks
 - 5-minute timeout → auto-deny. Fail-open if web server unreachable.
 
-### 7.5 OpenAI Codex CLI Memory Bridge
+### 7.5 OpenAI Codex CLI Runtime Bridge
 
 OpenAI Codex CLI is configured separately from Claude Code's hook stack. To keep
-Codex Jane connected to live memory, Vessence installs both a Codex
-`UserPromptSubmit` hook and a local stdio MCP server:
+Codex Jane connected to live memory and other active coding agents, Vessence
+installs Codex lifecycle hooks and two local stdio MCP servers:
 
-- **Server name:** `jane-memory`
-- **File:** `startup_code/codex_memory_mcp.py`
+- **Memory server:** `jane-memory` via `startup_code/codex_memory_mcp.py`
+- **Coordination server:** `jane-coordination` via
+  `startup_code/codex_coordination_mcp.py`
 - **Installer:** `startup_code/install_codex_memory.py`
 - **Hook:** `~/.codex/hooks/jane_memory_hook.py`
-- **Tools:** `query_jane_memory(query, max_chars=12000)`,
+- **Memory tools:** `query_jane_memory(query, max_chars=12000)`,
   `query_nearest_jane_memories(query, limit=2, max_distance=0.50)`,
   `jane_memory_paths()`
+- **Coordination tools:** `code_coordination_board`, `post_code_task`,
+  `claim_code_files`, `release_code_files`, `heartbeat_code_task`,
+  `message_code_agents`, `finish_code_task`
 - **Retrieval backend:** `memory.v1.memory_retrieval.build_memory_sections()`
   against `$VESSENCE_DATA_HOME/vector_db`
+- **Coordination backend:** SQLite WAL board at
+  `$VESSENCE_DATA_HOME/coordination/code_board.db`, managed by
+  `agent_skills/code_coordination.py`
+
+`SessionStart`, `SubagentStart`, and `UserPromptSubmit` inject the live board
+and scoped-claim protocol. `UserPromptSubmit` also injects nearest memories.
+`PostToolUse` heartbeats the current session's claims, and the main `Stop` hook
+releases claims left open at session completion. Agents post a task and claim
+only the files or directory trees they intend to edit; non-overlapping claims
+proceed concurrently with no configured agent-count ceiling. Conflicting claims
+identify the owning session. Graceful Stop cleanup handles normal exits, while
+stale leases default to four hours so a three-hour task or long-running command
+does not lose ownership. The legacy whole-project lock remains only for truly
+global operations and waits for scoped claims to clear; scoped claims also
+honor the pre-migration global lock file.
 
 For Jane web / Vessence persistent Codex sessions, `persistent_codex.py`
 prepends a compact `[Jane Auto Memory]` block before `codex exec`: nearest 2
@@ -536,9 +555,10 @@ local project roots. `codex exec resume` does not accept new `--add-dir`
 values, so writable roots must be present on the first turn of a persistent
 Codex session; restarting `jane-web.service` clears stale Codex sessions.
 
-Standalone Codex CLI sessions get the same nearest-memory preflight from the
-installed hook when Codex trusts it. `~/.codex/jane-memory-instructions.md`
-provides the fallback rule: if `[Jane Auto Memory]` is absent, call
+Standalone Codex CLI sessions get the same nearest-memory and coordination
+preflight from the installed hook when Codex trusts it.
+`~/.codex/jane-memory-instructions.md` provides the fallback rule: if
+`[Jane Auto Memory]` is absent, call
 `query_nearest_jane_memories(query, limit=2, max_distance=0.50)` or
 `startup_code/codex_auto_memory.py`; broader memory-sensitive prompts should
 still call `query_jane_memory` when the nearest-2 prelude is insufficient.
@@ -660,7 +680,7 @@ Current active families:
 - daily briefing: `run_briefing.py`, `prune_articles.py`
 - backups and external projects: `usb_sync.py`, Waterlily history backup, Waterlily cache health, Waterlily current-month accounting reports
 - marketplace/deal monitoring: `run_marketplace_cron.sh`, `nutricost_deal_monitor.py`
-- medical-literature research support: `ra_research_cron.py` runs every 2 hours, caches RA remission/asymptomatic-state papers and summaries, uses Codex as the high-judgment synthesis pass, keeps a compressed context for the next run, regenerates an explicit action plan covering at-home actions, tracking, tests to discuss, food/diet, lifestyle, medical strategy questions, and neuromodulation/technology leads, then emails Chieh an initial report after 4 runs and every 72 hours after that. It is research support only; clinician decisions remain with Kathia's rheumatologist.
+- medical-literature research support: `ra_research_cron.py` runs daily at 2 PM ET, caches RA remission/asymptomatic-state papers and summaries, uses Codex as the high-judgment synthesis pass, keeps a compressed context for the next run, regenerates an explicit action plan covering at-home actions, tracking, tests to discuss, food/diet, lifestyle, medical strategy questions, and neuromodulation/technology leads, then sends Chieh an app/email report after the initial 4-run threshold and every 72 hours after that. Delivered reports are also patient-friendly shareable HTML pages with a plain-English bottom line, action checklist, vocabulary/concept explainer, evidence cards, clinician brief, and unguessable public share link that can be pasted into ChatGPT for discussion. The cron must not pass `--send-report-now`; that flag is for manual one-off delivery. It is research support only; clinician decisions remain with Kathia's rheumatologist.
 
 Paused/disabled jobs:
 

@@ -1029,6 +1029,27 @@ def send_email_report(
 def append_jane_announcement(payload: dict[str, Any]) -> None:
     ANNOUNCEMENTS_PATH = Path(VESSENCE_DATA_HOME) / "data" / "jane_announcements.jsonl"
     ANNOUNCEMENTS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    if payload.get("type") == "report_ready" and payload.get("report_kind") == "ra_research":
+        existing_lines: list[str] = []
+        if ANNOUNCEMENTS_PATH.exists():
+            for raw in ANNOUNCEMENTS_PATH.read_text(encoding="utf-8", errors="replace").splitlines():
+                try:
+                    existing = json.loads(raw)
+                except Exception:
+                    existing_lines.append(raw)
+                    continue
+                existing_is_ra_report = (
+                    existing.get("type") == "report_ready"
+                    and (
+                        existing.get("report_kind") == "ra_research"
+                        or str(existing.get("id", "")).startswith("ra_report")
+                    )
+                )
+                if not existing_is_ra_report:
+                    existing_lines.append(raw)
+        existing_lines.append(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+        atomic_write_text(ANNOUNCEMENTS_PATH, "\n".join(existing_lines) + "\n")
+        return
     with ANNOUNCEMENTS_PATH.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n")
 

@@ -67,7 +67,7 @@ def test_report_id_from_path_removes_cron_prefix():
 
 def test_build_report_html_wraps_body_and_escapes_metadata():
     html = build_report_html(
-        "## Bottom Line\n\n- Keep clinician-led plan.",
+        "## Plain-English Bottom Line\n\n- Keep clinician-led plan.",
         "run<&>",
         source_count=2,
         new_count=1,
@@ -80,5 +80,23 @@ def test_build_report_html_wraps_body_and_escapes_metadata():
     assert '<span class="pill">2 cached sources</span>' in html
     assert "<span>July 2, 2026 at 9:00 AM EDT</span>" in html
     assert "<span>Report run&lt;&amp;&gt;</span>" in html
-    assert "<h2>Bottom Line</h2>" in html
+    assert "Copy share link" in html
+    assert 'data-share-url=""' in html
+    assert "<h2>How to read this report</h2>" in html
+    assert "<dt>Treat-to-target</dt>" in html
+    assert "<h2>Plain-English Bottom Line</h2>" in html
     assert "<li>Keep clinician-led plan.</li>" in html
+
+
+def test_build_report_html_does_not_duplicate_glossary_when_markdown_has_it():
+    html = build_report_html(
+        "## Vocabulary And Concepts\n\n- **Treat-to-target:** explained in body.",
+        "20260702_120000",
+        source_count=1,
+        new_count=0,
+        generated="July 2, 2026 at 9:00 AM EDT",
+    )
+
+    assert "<h2>How to read this report</h2>" in html
+    assert "<h3>Key vocabulary</h3>" not in html
+    assert "<strong>Treat-to-target:</strong> explained in body." in html

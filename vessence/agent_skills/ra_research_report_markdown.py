@@ -324,6 +324,52 @@ def usable_summary_items(
     return filter_report_items(list_values(summary.get(field), max_items=max_items, max_chars=max_chars))
 
 
+def evidence_grade(summary: dict[str, Any]) -> str:
+    if is_low_value_summary(summary):
+        return "Needs review"
+    study_type = str(summary.get("study_type") or "").lower()
+    scope = str(summary.get("evidence_scope") or "").lower()
+    if any(term in study_type or term in scope for term in ("guideline", "randomized", "randomised", "rct", "systematic", "meta")):
+        return "Strong"
+    if any(term in study_type for term in ("cohort", "trial", "review")) or "open_access_full_text" in scope:
+        return "Medium"
+    return "Background"
+
+
+def patient_friendly_glossary_lines() -> list[str]:
+    return [
+        "",
+        "## Vocabulary And Concepts",
+        "- **Treat-to-target:** a rheumatology strategy where the doctor names a measurable target, checks disease activity regularly, and adjusts the plan if the target is not reached.",
+        "- **Remission:** very low or absent measurable RA activity. Feeling better is important, but formal remission usually uses a score or criteria.",
+        "- **Low disease activity:** RA is improved and relatively controlled, but not necessarily in full remission.",
+        "- **DAS28 / CDAI / SDAI / RAPID3:** different scoring tools for RA activity. They combine symptoms, joint exam findings, labs, and/or patient questionnaires in different ways.",
+        "- **ESR / CRP:** blood markers that can rise with inflammation. Normal values do not always prove RA is quiet, and high values can come from other causes.",
+        "- **RF / anti-CCP / ACPA:** blood antibody tests that can help characterize RA risk and prognosis. Anti-CCP and ACPA refer to closely related concepts.",
+        "- **DMARD:** disease-modifying anti-rheumatic drug. These aim to control the disease process, not just pain.",
+        "- **csDMARD / bDMARD:** conventional synthetic DMARDs such as methotrexate versus biologic DMARDs such as injectable/infused immune-targeting drugs.",
+        "- **Biologic / anti-TNF / JAK inhibitor:** advanced immune-targeting medications. Anti-TNF drugs block TNF; JAK inhibitors are oral targeted synthetic drugs.",
+        "- **Tapering:** reducing medication dose or frequency after sustained control. This should only be clinician-supervised because flares can happen.",
+        "- **Drug-free remission:** sustained remission after stopping RA disease-control medication. This is possible for some people but not the default assumption.",
+        "- **Flare:** a period when symptoms or inflammation worsen.",
+        "- **Radiographic progression:** joint damage visible on imaging over time; preventing it is one reason objective monitoring matters.",
+    ]
+
+
+def action_checklist_lines(*, questions: list[str], tracking: list[str]) -> list[str]:
+    lines = ["", "## Action Checklist", "### Track At Home"]
+    lines.extend(f"- {item}" for item in tracking[:5])
+    lines.append("### Ask The Rheumatologist")
+    lines.extend(f"- {item}" for item in questions[:5])
+    lines.extend(
+        [
+            "### Do Not Change Without The Doctor",
+            "- Do not start, stop, taper, or change DMARDs, biologics, JAK inhibitors, steroids, NSAIDs, supplements, or devices from this report alone.",
+        ]
+    )
+    return lines
+
+
 def useful_finding_lines(summary: dict[str, Any]) -> list[str]:
     findings = list_values(summary.get("main_findings"), max_items=2, max_chars=260)
     actions = usable_summary_items(summary, "actionable_implications", max_items=2, max_chars=240)
@@ -332,13 +378,13 @@ def useful_finding_lines(summary: dict[str, Any]) -> list[str]:
     safety = usable_summary_items(summary, "safety_concerns", max_items=1, max_chars=240)
     lines = [
         f"### {source_heading(summary)}",
-        f"- Evidence: {evidence_label(summary)}.",
-        f"- Why it matters: {text_value(summary.get('remission_relevance'), 340) or 'No remission relevance captured.'}",
+        f"- Evidence strength: **{evidence_grade(summary)}** ({evidence_label(summary)}).",
+        f"- Plain-English takeaway: {text_value(summary.get('remission_relevance'), 340) or 'Use as background evidence only.'}",
     ]
     for finding in findings:
         lines.append(f"- Finding: {finding}")
     for action in actions:
-        lines.append(f"- Useful next step: {action}")
+        lines.append(f"- How to use it: {action}")
     for question in questions:
         lines.append(f"- Clinician question: {question}")
     for caveat in caveats:
@@ -361,7 +407,7 @@ def useful_report_bottom_line_lines(
     high_signal: list[dict[str, Any]],
 ) -> list[str]:
     lines = [
-        "## Bottom Line",
+        "## Plain-English Bottom Line",
         f"- This run processed {len(unique_new)} unique new or upgraded source summar{'y' if len(unique_new) == 1 else 'ies'}; the cache now has {source_count} sources.",
     ]
     if themes:
@@ -433,7 +479,7 @@ def useful_report_file_lines(
 ) -> list[str]:
     return [
         "",
-        "## Full Files",
+        "## Technical Appendix: Local Files",
         f"- Living recommendation scheme: `{recommendation_path}`",
         f"- Action plan: `{action_plan_path}`",
         f"- Compressed context for future runs: `{compressed_context_path}`",
@@ -442,7 +488,7 @@ def useful_report_file_lines(
 
 
 def useful_report_source_trace_lines(unique_new: list[dict[str, Any]]) -> list[str]:
-    lines = ["", "## Source Trace"]
+    lines = ["", "## Source Links"]
     if unique_new:
         lines.extend(source_trace_line(summary) for summary in unique_new)
     else:
@@ -466,7 +512,7 @@ def run_report_source_detail_lines(summary: dict[str, Any]) -> list[str]:
 
 
 def run_report_source_details_lines(unique_new: list[dict[str, Any]]) -> list[str]:
-    lines = ["## New Source Details"]
+    lines = ["## Technical Appendix: New Source Details"]
     if not unique_new:
         lines.append("- No new sources processed this run; cached recommendation scheme was refreshed.")
     for summary in unique_new:
@@ -505,25 +551,30 @@ def build_useful_report_markdown(
 
     lines.extend(useful_report_changed_lines(discoveries, high_signal))
 
-    lines.extend(["", "## Most Useful Findings"])
-    if not high_signal:
-        lines.append("- None this run. The report is flagging this explicitly instead of burying the signal in a source list.")
-    for summary in high_signal:
-        lines.extend(useful_finding_lines(summary))
-
     questions = collect_report_items(
         useful_for_questions,
         ("clinician_discussion_points", "actionable_implications"),
         max_items=6,
     ) or default_clinician_questions()
-    lines.extend(["", "## Questions For Rheumatologist"])
-    lines.extend(f"- {item}" for item in questions)
-
     tracking = collect_report_items(
         useful_for_questions,
         ("tests_or_monitoring", "lifestyle_implications", "food_diet_implications"),
         max_items=6,
     ) or default_tracking_items()
+
+    lines.extend(action_checklist_lines(questions=questions, tracking=tracking))
+    lines.extend(patient_friendly_glossary_lines())
+
+    lines.extend(["", "## Evidence Cards"])
+    if not high_signal:
+        lines.append("- None this run. The report is flagging this explicitly instead of burying the signal in a source list.")
+    for summary in high_signal:
+        lines.extend(useful_finding_lines(summary))
+
+    lines.extend(["", "## Clinician Brief"])
+    lines.append("- Use this section as a compact visit-prep list, not as a treatment plan.")
+    lines.extend(f"- {item}" for item in questions)
+
     lines.extend(["", "## What To Track"])
     lines.extend(f"- {item}" for item in tracking)
 

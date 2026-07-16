@@ -97,9 +97,11 @@ Rules:
 - Query Jane memory if the project instructions require it or if project history matters.
 - Diagnose from evidence: read relevant source, logs, configs, and runtime state before explaining a cause.
 - Do not revert unrelated dirty work. Preserve user changes.
-- Before editing source code, acquire the shared code edit lock:
-  `/home/chieh/google-adk-env/adk-venv/bin/python /home/chieh/ambient/vessence/agent_skills/code_lock.py status`
-  to inspect it, then use `agent_skills.code_lock.code_edit_lock(...)` around edits.
+- Before editing source code, inspect the shared coordination board and post
+  this repair with file-scoped claims using
+  `/home/chieh/ambient/vessence/agent_skills/code_coordination.py`. Do not edit
+  through another task's claim; choose non-overlapping work or report the
+  conflict. Close the board task after verification.
 - Prefer the smallest fix that addresses the captured failure.
 - Add or run focused tests when feasible. If tests are blocked, explain exactly why.
 - Do not deploy, restart production services, delete data, rotate secrets, or run destructive commands.

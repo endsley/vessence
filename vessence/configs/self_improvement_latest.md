@@ -1,17 +1,17 @@
 # Most Recent Nightly Self-Improvement
 
-- Run started: 2026-07-13 23:30:01
-- Report generated: 2026-07-13 23:51:23
-- Total runtime: 1280s
-- Jobs: 8 total, 7 ok, 1 timeout, 0 failed
+- Run started: 2026-07-14 23:30:01
+- Report generated: 2026-07-15 00:06:36
+- Total runtime: 2195s
+- Jobs: 8 total, 6 ok, 2 timeout, 0 failed
 - Stable latest report path: `/home/chieh/ambient/vessence/configs/self_improvement_latest.md`
-- Archived copy: `/home/chieh/ambient/vessence-data/reports/self_improvement/self_improvement_20260713_233001.md`
+- Archived copy: `/home/chieh/ambient/vessence-data/reports/self_improvement/self_improvement_20260714_233001.md`
 
 ## TL;DR
 
 - 1. ✓ Auto-Commit WIP (pre) (0.0m)
   - Fixes:
-    - 2026-07-13 23:30:02,199 INFO Committed 2 file(s).
+    - 2026-07-14 23:30:02,270 INFO Committed 4 file(s).
 - 2. ✓ Code Auditor (0.0m)
   - Problems: none detected
   - Fixes: none applied
@@ -19,7 +19,7 @@
   - Problems:
     - Possibly-dead functions: 1.
     - Duplicate function bodies: 11 groups.
-- 4. ✓ Pipeline Audit (30 prompts) (2.7m)
+- 4. ⏱ Pipeline Audit (30 prompts) (20.0m)
   - Problems:
     - Prompts audited: 6.
     - Classification failures: 4.
@@ -29,29 +29,29 @@
     - CRON_JOBS.md claims check_for_updates.py is active but no matching cron entry exists
     - CRON_JOBS.md claims generate_code_map.py is active but no matching cron entry exists
     - CRON_JOBS.md claims iterative_refactor_scheduler.py is active but no matching cron entry exists
-- 6. ✓ Transcript Quality Review (3.6m)
+- 6. ✓ Transcript Quality Review (1.5m)
   - Problems:
-    - Transcript review found 5 issues: 2 critical, 3 medium.
-    - Stage 3 did not attach or inspect source context after an explicit source-code instruction.
-    - Project familiarization was handled as a short generic chat response instead of a source-inspection task.
+    - Transcript review found 6 issues: 3 critical, 2 low, 1 medium.
+    - The voice response was delayed by a mid-turn brain-provider failure and failover.
+    - A straightforward configuration question took roughly 134 seconds from client submission to response playback.
   - Fixes:
-    - 2026-07-13 23:51:19,392 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (5 issues)
-    - 2026-07-13 23:51:19,393 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 2 critical, 3 medium iss...
+    - 2026-07-15 00:06:33,587 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (6 issues)
+    - 2026-07-15 00:06:33,589 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 3 critical, 1 medium, 2...
 - 7. ✓ Memory Janitor (0.0m)
   - Problems:
-    - WARNING:memory_janitor:System stressed — skipping janitor this cycle: swap already active: 36.5% > 10.0%
+    - WARNING:memory_janitor:System stressed — skipping janitor this cycle: swap already active: 32.1% > 10.0%
 - 8. ✓ Auto-Commit + Push (post) (0.0m)
   - Fixes:
-    - 2026-07-13 23:51:22,181 INFO Pushed successfully.
+    - 2026-07-15 00:06:36,815 INFO Pushed successfully.
 
 **Top follow-ups:**
 
-- Update the Stage 3 code-intent detector to treat phrases like "use the source code" and follow-ups to code-architecture questions as code-context requests, then inject the code map or route to the code-capable brain.
-- Route explicit project-familiarization requests to a code/repo inspection path that reads project files and reports what was inspected before claiming familiarity.
+- Run a provider-health or quota check before accepting a Stage 3 turn, immediately route to the known-working fallback when Claude is quota-exhausted, and avoid starting a doomed Claude request.
+- Add a short Stage 1 timeout with immediate fallback to others, enforce Stage 3 first-token and total-response deadlines, and surface a brief progress acknowledgement when a source-code lookup exceeds the voice latency budget.
 
 ## Executive Summary
 
-- 1 stage(s) need attention because they timed out or exited non-zero.
+- 2 stage(s) need attention because they timed out or exited non-zero.
 - 4 concrete improvement/fix signals were found in logs or reports.
 
 ## Stage 1: Auto-Commit WIP (pre)
@@ -69,7 +69,7 @@
 
 ### Improvements It Made
 
-- 2026-07-13 23:30:02,199 INFO Committed 2 file(s).
+- 2026-07-14 23:30:02,270 INFO Committed 4 file(s).
 
 ### Evidence Files
 
@@ -124,8 +124,8 @@
 
 ## Stage 4: Pipeline Audit (30 prompts)
 
-- Status: `ok`
-- Duration: 160s (2.7 min)
+- Status: `timeout`
+- Duration: 1200s (20.0 min)
 
 ### What It Did
 
@@ -133,6 +133,7 @@
 
 ### Problems It Found
 
+- Job ended with status `timeout`.
 - Prompts audited: 6.
 - Classification failures: 4.
 - Response failures: 5.
@@ -179,7 +180,7 @@
 ## Stage 6: Transcript Quality Review
 
 - Status: `ok`
-- Duration: 215s (3.6 min)
+- Duration: 90s (1.5 min)
 
 ### What It Did
 
@@ -187,23 +188,23 @@
 
 ### Problems It Found
 
-- Transcript review found 5 issues: 2 critical, 3 medium.
-- Stage 3 did not attach or inspect source context after an explicit source-code instruction.
-- Project familiarization was handled as a short generic chat response instead of a source-inspection task.
-- Stage 1 rejected a valid web_automation classification because qwen returned the label with a space.
-- Foreground handling was delayed by failing LLM fallback attempts before Stage 3 began.
+- Transcript review found 6 issues: 3 critical, 2 low, 1 medium.
+- The voice response was delayed by a mid-turn brain-provider failure and failover.
+- A straightforward configuration question took roughly 134 seconds from client submission to response playback.
+- Stage 1 emitted an invalid intent label.
+- The answer required about 129 seconds of server processing.
 
 ### Improvements It Made
 
-- 2026-07-13 23:51:19,392 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (5 issues)
-- 2026-07-13 23:51:19,393 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 2 critical, 3 medium issues. The most urgent was: Fore
+- 2026-07-15 00:06:33,587 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (6 issues)
+- 2026-07-15 00:06:33,589 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 3 critical, 1 medium, 2 minor issues. The most urgent
 
 ### Follow-Up Fixes Recommended
 
-- Update the Stage 3 code-intent detector to treat phrases like "use the source code" and follow-ups to code-architecture questions as code-context requests, then inject the code map or route to the code-capable brain.
-- Route explicit project-familiarization requests to a code/repo inspection path that reads project files and reports what was inspected before claiming familiarity.
-- Canonicalize parsed classifier labels before validation: normalize spaces and underscores against the class registry, then return the registry key such as web_automation. Also constrain qwen output to the runtime class enum.
-- Add a provider circuit breaker and time-box fallback attempts. Do not block the foreground pipeline on self-healing or audit LLM subprocesses; move them to a background worker or return an explicit provider-unavailable error.
+- Run a provider-health or quota check before accepting a Stage 3 turn, immediately route to the known-working fallback when Claude is quota-exhausted, and avoid starting a doomed Claude request.
+- Add a short Stage 1 timeout with immediate fallback to others, enforce Stage 3 first-token and total-response deadlines, and surface a brief progress acknowledgement when a source-code lookup exceeds the voice latency budget.
+- Constrain classifier decoding to the registered intent enum or explicitly register an internal force-stage3 routing token and normalize it without logging it as an unknown class.
+- Apply a classifier timeout and cache the fallback-to-others decision; add first-token and overall deadlines to the OpenAI standing-brain request and emit a progress response for long source inspection.
 
 ### Evidence Files
 
@@ -221,7 +222,7 @@
 
 ### Problems It Found
 
-- WARNING:memory_janitor:System stressed — skipping janitor this cycle: swap already active: 36.5% > 10.0%
+- WARNING:memory_janitor:System stressed — skipping janitor this cycle: swap already active: 32.1% > 10.0%
 
 ### Improvements It Made
 
@@ -246,7 +247,7 @@
 
 ### Improvements It Made
 
-- 2026-07-13 23:51:22,181 INFO Pushed successfully.
+- 2026-07-15 00:06:36,815 INFO Pushed successfully.
 
 ### Evidence Files
 

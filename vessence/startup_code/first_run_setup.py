@@ -142,7 +142,7 @@ def open_browser(url: str) -> None:
 
 
 def install_codex_memory_integration() -> None:
-    """Install Codex's Jane memory hook/MCP bridge when Codex is available."""
+    """Install Codex's Jane memory and coordination bridge when available."""
     if not shutil.which("codex"):
         return
 
@@ -150,7 +150,7 @@ def install_codex_memory_integration() -> None:
     if not installer.exists():
         return
 
-    print("Step 8: Codex Chroma memory integration")
+    print("Step 8: Codex Jane runtime integration")
     try:
         result = subprocess.run(
             [sys.executable, str(installer)],
@@ -166,13 +166,13 @@ def install_codex_memory_integration() -> None:
             },
         )
     except Exception as exc:
-        print(f"  ⚠ Could not install Codex memory integration: {type(exc).__name__}: {exc}")
+        print(f"  ⚠ Could not install Codex runtime integration: {type(exc).__name__}: {exc}")
         return
 
     for line in result.stdout.splitlines():
         print(f"  {line}")
     if result.returncode != 0:
-        print("  ⚠ Codex memory integration installer failed.")
+        print("  ⚠ Codex runtime integration installer failed.")
         for line in result.stderr.splitlines()[-6:]:
             print(f"    {line}")
     print()

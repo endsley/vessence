@@ -16,6 +16,7 @@ from fastapi import HTTPException, Request
 RA_REPORT_ID_RE = re.compile(r"^\d{8}_\d{6}$")
 RA_REPORT_GRANT_SECONDS = 45 * 60
 RA_REPORT_TOKEN_SECONDS = 7 * 24 * 60 * 60
+RA_REPORT_SHARE_TOKEN_HEX = 32
 
 
 class RaReportAccess:
@@ -85,6 +86,19 @@ class RaReportAccess:
         expires_at = int(self._now() + RA_REPORT_TOKEN_SECONDS)
         return f"{expires_at}.{self.sign_token(report_id, expires_at)}"
 
+    def share_token(self, report_id: str) -> str:
+        secret = self._session_secret_provider()
+        message = f"share:{report_id}".encode("utf-8")
+        return hmac.new(secret.encode("utf-8"), message, hashlib.sha256).hexdigest()[:RA_REPORT_SHARE_TOKEN_HEX]
+
+    def valid_share_token(self, report_id: str, token: Optional[str]) -> bool:
+        if not token or not RA_REPORT_ID_RE.match(report_id):
+            return False
+        return hmac.compare_digest(token, self.share_token(report_id))
+
+    def share_path(self, report_id: str) -> str:
+        return f"/share/research/ra/reports/{report_id}/{self.share_token(report_id)}"
+
     def valid_token(self, report_id: str, token: Optional[str]) -> bool:
         if not token or "." not in token:
             return False
@@ -121,6 +135,7 @@ class RaReportAccess:
         updated = dict(item)
         updated["id"] = f"ra_report_{report_id}_signed"
         updated["report_url"] = f"/api/research/ra/reports/{report_id}.html?rt={token}"
+        updated["share_url"] = self.share_path(report_id)
         updated["access_expires_in_seconds"] = RA_REPORT_TOKEN_SECONDS
         return updated
 
@@ -144,5 +159,6 @@ class RaReportAccess:
             "timestamp": created,
             "report_url": report_url,
             "web_url": f"/research/ra/reports/{report_id}",
+            "share_url": self.share_path(report_id),
             "access_expires_in_seconds": RA_REPORT_TOKEN_SECONDS,
         }

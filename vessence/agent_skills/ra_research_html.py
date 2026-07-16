@@ -86,6 +86,35 @@ def markdown_to_report_html(markdown: str) -> str:
     return "\n".join(blocks)
 
 
+def reader_guide_html(include_glossary: bool) -> str:
+    glossary = ""
+    if include_glossary:
+        glossary = """
+      <h3>Key vocabulary</h3>
+      <dl class="glossary-grid">
+        <div><dt>Treat-to-target</dt><dd>A plan where the rheumatologist defines a measurable goal and adjusts care until the goal is reached.</dd></div>
+        <div><dt>Remission</dt><dd>Very low or absent measurable RA activity; usually judged by formal criteria, not symptoms alone.</dd></div>
+        <div><dt>DAS28 / CDAI / SDAI / RAPID3</dt><dd>Different RA activity scores using combinations of joint exams, labs, and patient-reported symptoms.</dd></div>
+        <div><dt>ESR / CRP</dt><dd>Blood inflammation markers. Useful context, but not perfect proof that RA is active or quiet.</dd></div>
+        <div><dt>RF / anti-CCP / ACPA</dt><dd>RA antibody tests that can help characterize risk and prognosis.</dd></div>
+        <div><dt>DMARD / biologic / JAK inhibitor</dt><dd>Disease-control medicines. These decisions belong with the rheumatologist.</dd></div>
+        <div><dt>Tapering</dt><dd>Reducing medication after stable control; clinician-supervised because flares can happen.</dd></div>
+        <div><dt>Radiographic progression</dt><dd>Joint damage visible on imaging over time.</dd></div>
+      </dl>
+        """
+    return f"""
+    <section class="reader-guide" aria-label="How to read this report">
+      <h2>How to read this report</h2>
+      <div class="guide-grid">
+        <div><strong>Start here:</strong> read the bottom line and action checklist first.</div>
+        <div><strong>For the doctor:</strong> use the clinician brief as visit-prep questions, not a treatment plan.</div>
+        <div><strong>For ChatGPT:</strong> paste this page or link and ask it to summarize, turn it into questions, or compare findings.</div>
+      </div>
+      {glossary}
+    </section>
+    """
+
+
 def report_id_from_path(report_path: Path) -> str:
     return report_path.stem.removeprefix("ra_research_run_")
 
@@ -105,6 +134,7 @@ def build_report_html(
     generated = generated or dt.datetime.now(TZ).strftime("%B %-d, %Y at %-I:%M %p %Z")
     title = "RA remission research update"
     body_html = markdown_to_report_html(report_markdown)
+    guide_html = reader_guide_html(include_glossary="## Vocabulary And Concepts" not in report_markdown)
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -123,6 +153,8 @@ def build_report_html(
       --accent-soft: #dff4f1;
       --warn: #8a4b00;
       --warn-soft: #fff0d9;
+      --soft-blue: #eaf2ff;
+      --soft-green: #ebf8f0;
     }}
     * {{ box-sizing: border-box; }}
     body {{
@@ -137,7 +169,19 @@ def build_report_html(
     h1 {{ font-size: clamp(30px, 7vw, 52px); line-height: 1.04; margin: 0 0 14px; letter-spacing: 0; }}
     .meta {{ display: flex; flex-wrap: wrap; gap: 10px; color: var(--muted); font-size: 14px; }}
     .pill {{ background: var(--accent-soft); color: #07534f; border: 1px solid #b9e4df; border-radius: 999px; padding: 5px 10px; font-weight: 650; }}
+    .actions {{ display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }}
+    .copy-button {{ appearance: none; border: 1px solid #9ed8d3; background: #fff; color: #07534f; font-weight: 700; border-radius: 999px; padding: 9px 14px; cursor: pointer; }}
+    .copy-button:hover {{ background: var(--accent-soft); }}
     .safety {{ background: var(--warn-soft); border: 1px solid #ffd79c; color: var(--warn); padding: 14px 16px; border-radius: 8px; margin: 0 0 24px; font-weight: 600; }}
+    .reader-guide {{ background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: clamp(16px, 3vw, 24px); margin: 0 0 22px; box-shadow: 0 8px 26px rgba(15, 35, 55, .05); }}
+    .reader-guide h2 {{ margin: 0 0 12px; border: 0; padding: 0; }}
+    .reader-guide h3 {{ margin-top: 20px; }}
+    .guide-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }}
+    .guide-grid div {{ background: var(--soft-blue); border: 1px solid #cfe0fb; border-radius: 8px; padding: 12px; }}
+    .glossary-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin: 0; }}
+    .glossary-grid div {{ background: var(--soft-green); border: 1px solid #cdebd8; border-radius: 8px; padding: 12px; }}
+    .glossary-grid dt {{ font-weight: 800; margin-bottom: 4px; }}
+    .glossary-grid dd {{ margin: 0; color: var(--muted); }}
     article {{ background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: clamp(18px, 4vw, 34px); box-shadow: 0 12px 40px rgba(15, 35, 55, .07); }}
     h1, h2, h3, h4 {{ color: var(--ink); }}
     article h1:first-child {{ display: none; }}
@@ -148,6 +192,9 @@ def build_report_html(
     li {{ margin: 6px 0; }}
     code {{ background: #edf2f7; border: 1px solid #d8e2ef; border-radius: 5px; padding: 1px 5px; font-size: .92em; overflow-wrap: anywhere; }}
     a {{ color: var(--accent); }}
+    article h2:nth-of-type(1),
+    article h2:nth-of-type(2),
+    article h2:nth-of-type(3) {{ background: #fbfdff; border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; }}
     @media (max-width: 640px) {{
       main {{ padding: 18px 12px 42px; }}
       header {{ padding-top: 20px; }}
@@ -166,8 +213,12 @@ def build_report_html(
         <span>{html.escape(generated)}</span>
         <span>Report {html.escape(report_id)}</span>
       </div>
+      <div class="actions">
+        <button class="copy-button" type="button" data-share-url="" onclick="navigator.clipboard?.writeText(this.dataset.shareUrl || window.location.href).then(() => this.textContent='Copied link')">Copy share link</button>
+      </div>
     </header>
     <div class="safety">Research support only. Use this to prepare discussion with Kathia and her rheumatologist; do not change medication, supplements, or treatment from this report alone.</div>
+    {guide_html}
     <article>
       {body_html}
     </article>

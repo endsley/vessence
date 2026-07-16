@@ -1,3 +1,12 @@
+### 2026-07-15: Multi-Codex Scoped Coordination Board
+
+- **Concurrent work board:** added `agent_skills/code_coordination.py`, a SQLite WAL task/message/lease board where agents claim only intended files or directory trees instead of locking an entire repository.
+- **Atomic collision prevention:** overlapping claims are rejected with owner details, while non-overlapping work can proceed concurrently without a configured agent-count ceiling; old global locks remain honored during migration.
+- **Codex awareness:** added the `jane-coordination` MCP server and lifecycle hooks that inject live board context, heartbeat active claims after tool use, and release lingering claims when the main session stops.
+- **Safe global operations:** retained `code_edit_lock` only for repository-wide operations; exclusive acquisition now waits for active scoped claims, and its state appears on the shared board.
+- **Hardened lifecycle:** task reposts replace old claims, finish/stale paths stamp claim releases, board text is bounded untrusted data, user instruction files are preserved, and four-hour stale leases safely cover three-hour work sessions.
+- **Instructions and tests:** updated Jane/Codex/refactoring automation instructions and added focused coverage for concurrent 25-agent operation, conflicts, lifecycle cleanup, legacy-lock interoperability, context injection, and installer idempotence.
+
 ### 2026-07-10: Anthropic / Claude Receipt Downloader
 
 - **New Anthropic receipt skill:** added `agent_skills/anthropic_receipts.py`, a Playwright-based downloader for Claude billing receipts.

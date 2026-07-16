@@ -49,6 +49,7 @@ import re
 import subprocess
 import tempfile
 import time
+import html
 try:
     import chromadb
 except ImportError:
@@ -1410,9 +1411,12 @@ _has_recent_ra_report_grant = _ra_reports.has_recent_grant
 _sign_ra_report_token = _ra_reports.sign_token
 _issue_ra_report_token = _ra_reports.issue_token
 _valid_ra_report_token = _ra_reports.valid_token
+_valid_ra_report_share_token = _ra_reports.valid_share_token
 _require_ra_report_access = _ra_reports.require_access
 _tokenize_ra_report_item = _ra_reports.tokenize_report_item
 _ra_report_metadata = _ra_reports.metadata
+_ra_report_share_path = _ra_reports.share_path
+_ra_report_id_from_html_path = _ra_reports.report_id_from_html_path
 
 
 def _is_user_admin(user_id: str | None) -> bool:
@@ -2375,6 +2379,17 @@ async def get_announcements(request: Request, since: Optional[str] = None, _=Dep
     return result
 
 
+def _ra_report_html_response(path: Path, request: Request, report_id: str) -> HTMLResponse:
+    page = path.read_text(encoding="utf-8", errors="replace")
+    share_url = build_external_url(request, _ra_report_share_path(report_id), "JANE_PUBLIC_BASE_URL")
+    page = page.replace(
+        'data-share-url=""',
+        f'data-share-url="{html.escape(share_url, quote=True)}"',
+        1,
+    )
+    return HTMLResponse(page)
+
+
 @app.get("/api/research/ra/reports/latest")
 async def get_latest_ra_report(request: Request, _=Depends(require_auth)):
     path = _latest_ra_report_html_path()
@@ -2385,21 +2400,29 @@ async def get_latest_ra_report(request: Request, _=Depends(require_auth)):
 async def get_ra_report_html(report_id: str, request: Request, rt: Optional[str] = None):
     path = _ra_report_html_path(report_id)
     _require_ra_report_access(request, report_id, rt)
-    return FileResponse(str(path), media_type="text/html; charset=utf-8")
+    return _ra_report_html_response(path, request, report_id)
 
 
 @app.get("/research/ra/reports/latest", response_class=HTMLResponse)
 async def latest_ra_report_page(request: Request, _=Depends(require_auth)):
     path = _latest_ra_report_html_path()
     _ra_report_metadata(path, request)
-    return HTMLResponse(path.read_text(encoding="utf-8", errors="replace"))
+    return _ra_report_html_response(path, request, _ra_report_id_from_html_path(path))
 
 
 @app.get("/research/ra/reports/{report_id}", response_class=HTMLResponse)
 async def ra_report_page(report_id: str, request: Request, rt: Optional[str] = None):
     path = _ra_report_html_path(report_id)
     _require_ra_report_access(request, report_id, rt)
-    return HTMLResponse(path.read_text(encoding="utf-8", errors="replace"))
+    return _ra_report_html_response(path, request, report_id)
+
+
+@app.get("/share/research/ra/reports/{report_id}/{share_token}", response_class=HTMLResponse)
+async def public_ra_report_page(report_id: str, share_token: str, request: Request):
+    path = _ra_report_html_path(report_id)
+    if not _valid_ra_report_share_token(report_id, share_token):
+        raise HTTPException(status_code=404, detail="Report not found")
+    return _ra_report_html_response(path, request, report_id)
 
 
 # ─── Device command queue (server → Android) ─────────────────────────────────

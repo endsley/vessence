@@ -150,7 +150,10 @@ This is iteration {iteration} of {MAX_ITERATIONS} for `{project["slug"]}`. The g
 - Chieh requested an hourly, bounded, iterative refactor loop across Waterlily, the education project, and Vessence.
 - Read the project's local instructions and `REFACTORING.md` first when present.
 - Check `git status --short` before editing. Treat existing unrelated dirty files as Chieh's work; do not revert or stage them.
-- Before source edits, acquire the project's code edit lock with `agent_skills.code_lock`.
+- Before source edits, read the shared code coordination board, post this
+  refactor slice, and claim only its intended files with
+  `agent_skills/code_coordination.py`. If claims overlap, choose another safe
+  slice rather than waiting for the whole repository.
 - Prefer one coherent slice that improves speed, page/load time, developer reading speed, or module boundaries.
 - Preserve behavior, public routes, data formats, report output, cache schemas, and UI text unless a proven bug requires a narrow fix.
 - If no safe slice exists, document the blocker in the project refactor journal and stop cleanly.
@@ -162,7 +165,11 @@ This is iteration {iteration} of {MAX_ITERATIONS} for `{project["slug"]}`. The g
 4. Implement the slice behind compatibility wrappers when needed.
 5. Run focused tests plus the strongest practical broader test command.
 6. Update the project refactor journal with scope, files changed, behavior preserved, verification, and remaining follow-up.
-7. If edits were made and tests passed, commit only the intended project changes locally. Do not push unless credentials and project policy make that explicitly safe.
+7. If edits were made and tests passed, acquire the legacy exclusive project
+   lock only for the shared-index commit step, commit only the intended project
+   changes locally, then release it. Do not push unless credentials and project
+   policy make that explicitly safe.
+8. Close the coordination task so its claims are released.
 
 ## Verification
 - Report the exact tests or checks run.

@@ -82,9 +82,11 @@ Codex after reviewing today's conversation transcripts. For each issue:
    {report_path} summarizing what you changed.
 
 IMPORTANT:
-- Acquire the code edit lock before modifying files:
-  python agent_skills/code_lock.py status  (check first)
-  Then use the lock context manager in your edits.
+- Before modifying files, read the code coordination board, post this repair
+  task, and claim only the files it will edit with
+  `python agent_skills/code_coordination.py start --project vessence --task "..." --file "..."`.
+  If a claim overlaps another task, choose non-overlapping work or message the
+  owner instead of editing through it. Finish the board task after verification.
 - Only fix issues rated CRITICAL or MEDIUM. Log LOW issues but skip fixing.
 - Do NOT restart the server — the nightly job runner handles that.
 - If you can't fix an issue, document why in the report.

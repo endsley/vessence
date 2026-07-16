@@ -10,12 +10,15 @@ from agent_skills.ra_research_report_markdown import (
     deterministic_action_plan_header,
     deterministic_recommendation_scheme_footer,
     deterministic_recommendation_scheme_header,
+    evidence_grade,
     list_to_markdown,
+    patient_friendly_glossary_lines,
     run_report_source_detail_lines,
     run_report_source_details_lines,
     source_heading,
     source_trace_line,
     usable_summary_items,
+    action_checklist_lines,
     useful_finding_lines,
     useful_report_bottom_line_lines,
     useful_report_changed_lines,
@@ -39,6 +42,32 @@ def test_list_to_markdown_and_source_heading_clean_values():
     assert list_to_markdown(" one\nitem ") == "- one item"
     assert list_to_markdown([]) == "- None captured."
     assert source_heading({"source_id": "pmid-1", "title": "Long " * 40}, max_chars=20).startswith("`pmid-1` Long Long")
+
+
+def test_patient_friendly_helpers_explain_vocabulary_and_grade_evidence():
+    assert evidence_grade({"study_type": "systematic review", "evidence_scope": "abstract"}) == "Strong"
+    assert evidence_grade({"study_type": "cohort", "evidence_scope": "abstract"}) == "Medium"
+    assert evidence_grade({"needs_llm_review": True}) == "Needs review"
+
+    glossary = "\n".join(patient_friendly_glossary_lines())
+    assert "## Vocabulary And Concepts" in glossary
+    assert "**Treat-to-target:**" in glossary
+    assert "**ESR / CRP:**" in glossary
+
+    checklist = action_checklist_lines(
+        questions=["Which remission score is being used?"],
+        tracking=["Track swollen joints."],
+    )
+    assert checklist == [
+        "",
+        "## Action Checklist",
+        "### Track At Home",
+        "- Track swollen joints.",
+        "### Ask The Rheumatologist",
+        "- Which remission score is being used?",
+        "### Do Not Change Without The Doctor",
+        "- Do not start, stop, taper, or change DMARDs, biologics, JAK inhibitors, steroids, NSAIDs, supplements, or devices from this report alone.",
+    ]
 
 
 def test_ra_report_table_helpers_preserve_truncation_and_escaping():
@@ -122,9 +151,13 @@ def test_build_useful_report_markdown_includes_high_signal_sections_and_paths():
     assert "- This run processed 2 unique new or upgraded source summaries; the cache now has 9 sources." in report
     assert "- Main themes this run: treat-to-target and remission scoring, tests and biomarkers, safety and comorbidities." in report
     assert "- CDAI target choice matters this run." in report
+    assert "## Action Checklist" in report
+    assert "## Vocabulary And Concepts" in report
+    assert "## Evidence Cards" in report
+    assert "## Clinician Brief" in report
     assert "### `pmid-1` Treat to target CDAI remission guidance" in report
-    assert "- Evidence: guideline, open_access_full_text." in report
-    assert "- Useful next step: Ask whether CDAI is the active target." in report
+    assert "- Evidence strength: **Strong** (guideline, open_access_full_text)." in report
+    assert "- How to use it: Ask whether CDAI is the active target." in report
     assert "- Safety note: Discuss infection risk before medication changes." in report
     assert "`pmid-2` Speculative scenario outside RA remission: needs manual review before relying on it" in report
     assert "- Find monitoring intervals with better evidence." in report
@@ -191,10 +224,10 @@ def test_useful_report_source_render_helpers_preserve_high_signal_shapes():
 
     assert useful_finding_lines(summary) == [
         "### `pmid-1` Treat to target CDAI remission guidance",
-        "- Evidence: guideline, open_access_full_text.",
-        "- Why it matters: CDAI target selection changes what Kathia should ask about.",
+        "- Evidence strength: **Strong** (guideline, open_access_full_text).",
+        "- Plain-English takeaway: CDAI target selection changes what Kathia should ask about.",
         "- Finding: CDAI treat-to-target care improves remission monitoring.",
-        "- Useful next step: Ask whether CDAI is the active target.",
+        "- How to use it: Ask whether CDAI is the active target.",
         "- Clinician question: Which remission score is being used?",
         "- Caveat: Monitor ESR, CRP, infection risk, and medication safety.",
         "- Safety note: Discuss infection risk before medication changes.",
@@ -221,7 +254,7 @@ def test_useful_report_section_builders_preserve_fallbacks_and_paths():
         themes=["treat-to-target"],
         high_signal=[summary],
     ) == [
-        "## Bottom Line",
+        "## Plain-English Bottom Line",
         "- This run processed 1 unique new or upgraded source summary; the cache now has 3 sources.",
         "- Main themes this run: treat-to-target.",
         (
@@ -261,7 +294,7 @@ def test_useful_report_section_builders_preserve_fallbacks_and_paths():
         discoveries_path="/vault/discoveries.md",
     ) == [
         "",
-        "## Full Files",
+        "## Technical Appendix: Local Files",
         "- Living recommendation scheme: `/vault/scheme.md`",
         "- Action plan: `/vault/action.md`",
         "- Compressed context for future runs: `/vault/context.md`",
@@ -269,12 +302,12 @@ def test_useful_report_section_builders_preserve_fallbacks_and_paths():
     ]
     assert useful_report_source_trace_lines([summary]) == [
         "",
-        "## Source Trace",
+        "## Source Links",
         "- `pmid-1` Treat to target CDAI remission guidance | guideline, open_access_full_text | https://example.test/high",
     ]
     assert useful_report_source_trace_lines([]) == [
         "",
-        "## Source Trace",
+        "## Source Links",
         "- No new source trace for this run.",
     ]
 
@@ -375,8 +408,8 @@ def test_build_run_report_markdown_wraps_useful_report_and_source_details():
     assert report.startswith("# RA Research Run 2026-07-02 12:00 EDT\n")
     assert "Recommendation file: `/vault/scheme.md`" in report
     assert "Latest Codex synthesis: `/vault/codex.md`" in report
-    assert "## Most Useful Findings" in report
-    assert "## New Source Details" in report
+    assert "## Evidence Cards" in report
+    assert "## Technical Appendix: New Source Details" in report
     assert "### RA remission monitoring review" in report
     assert "- Source ID: `pmid-3`" in report
     assert "- Saved artifact: `/vault/papers/pmid-3`" in report
@@ -412,10 +445,10 @@ def test_run_report_source_detail_helpers_preserve_detail_block_and_empty_fallba
     ]
     assert detail[-1] == ""
     assert run_report_source_details_lines([summary])[:2] == [
-        "## New Source Details",
+        "## Technical Appendix: New Source Details",
         "### RA remission monitoring review",
     ]
     assert run_report_source_details_lines([]) == [
-        "## New Source Details",
+        "## Technical Appendix: New Source Details",
         "- No new sources processed this run; cached recommendation scheme was refreshed.",
     ]
