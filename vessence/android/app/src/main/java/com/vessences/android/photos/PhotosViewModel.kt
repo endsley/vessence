@@ -14,6 +14,8 @@ data class PhotosUiState(
     val photos: List<GalleryPhoto> = emptyList(),
     val searchQuery: String = "",
     val isLoading: Boolean = false,
+    val isLoadingMore: Boolean = false,
+    val hasMorePhotos: Boolean = false,
     val isSyncing: Boolean = false,
     val syncEnabled: Boolean = true,
     val wifiOnly: Boolean = true,
@@ -36,10 +38,17 @@ data class PhotosUiState(
 }
 
 class PhotosViewModel(application: Application) : AndroidViewModel(application) {
+    private companion object {
+        const val PHOTO_PAGE_SIZE = 60
+    }
+
     private val settings = CameraSyncSettings(application)
     private val gallery = PhotoGalleryRepository()
     private val _state = MutableStateFlow(PhotosUiState())
     val state: StateFlow<PhotosUiState> = _state
+    private var photoFolders: List<CameraPhotoFolder> = emptyList()
+    private var nextFolderIndex: Int = 0
+    private var nextFolderOffset: Int = 0
 
     init {
         refreshPermissionState()
@@ -78,18 +87,54 @@ class PhotosViewModel(application: Application) : AndroidViewModel(application) 
 
     fun refreshPhotos() {
         viewModelScope.launch {
-            _state.value = _state.value.copy(isLoading = true, error = null)
-            runCatching { gallery.loadCameraPhotos() }
+            _state.value = _state.value.copy(
+                photos = emptyList(),
+                isLoading = true,
+                isLoadingMore = false,
+                hasMorePhotos = false,
+                error = null,
+            )
+            runCatching {
+                photoFolders = gallery.loadPhotoFolders()
+                nextFolderIndex = 0
+                nextFolderOffset = 0
+                loadNextPhotoBatch()
+            }
                 .onSuccess { photos ->
                     _state.value = _state.value.copy(
                         photos = photos,
                         isLoading = false,
+                        hasMorePhotos = hasMorePhotos(),
                     )
                 }
                 .onFailure { error ->
                     _state.value = _state.value.copy(
                         isLoading = false,
                         error = error.message,
+                    )
+                }
+        }
+    }
+
+    fun loadMorePhotos() {
+        val current = _state.value
+        if (current.isLoading || current.isLoadingMore || !current.hasMorePhotos) return
+
+        viewModelScope.launch {
+            _state.value = _state.value.copy(isLoadingMore = true)
+            runCatching { loadNextPhotoBatch() }
+                .onSuccess { photos ->
+                    _state.value = _state.value.copy(
+                        photos = _state.value.photos + photos,
+                        isLoadingMore = false,
+                        hasMorePhotos = hasMorePhotos(),
+                    )
+                }
+                .onFailure { error ->
+                    val message = error.message ?: error.javaClass.simpleName
+                    _state.value = _state.value.copy(
+                        isLoadingMore = false,
+                        error = if (_state.value.photos.isEmpty()) message else null,
                     )
                 }
         }
@@ -124,4 +169,27 @@ class PhotosViewModel(application: Application) : AndroidViewModel(application) 
         if (millis <= 0L) return "Never"
         return SimpleDateFormat("MMM d, h:mm a", Locale.US).format(Date(millis))
     }
+
+    private suspend fun loadNextPhotoBatch(): List<GalleryPhoto> {
+        val batch = mutableListOf<GalleryPhoto>()
+        while (nextFolderIndex < photoFolders.size && batch.isEmpty()) {
+            val folder = photoFolders[nextFolderIndex]
+            val previousOffset = nextFolderOffset
+            val page = gallery.loadPhotoPage(
+                folder = folder,
+                offset = nextFolderOffset,
+                limit = PHOTO_PAGE_SIZE,
+            )
+            nextFolderOffset = page.nextOffset
+            batch += page.photos
+
+            if (!page.hasMoreInFolder || nextFolderOffset <= previousOffset) {
+                nextFolderIndex += 1
+                nextFolderOffset = 0
+            }
+        }
+        return batch
+    }
+
+    private fun hasMorePhotos(): Boolean = nextFolderIndex < photoFolders.size
 }

@@ -18,8 +18,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -50,6 +52,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -67,6 +70,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.vessences.android.data.api.ApiClient
+import kotlinx.coroutines.flow.distinctUntilChanged
 
 private val SlateBg = Color(0xFF0F172A)
 private val SlateCard = Color(0xFF1E293B)
@@ -173,10 +177,17 @@ fun PhotosScreen(
             when {
                 state.isLoading -> LoadingBody()
                 state.error != null -> ErrorBody(state.error!!)
-                state.filteredPhotos.isEmpty() -> EmptyBody(state.hasPhotoAccess)
+                state.filteredPhotos.isEmpty() -> EmptyBody(
+                    hasPhotoAccess = state.hasPhotoAccess,
+                    hasLoadedPhotos = state.photos.isNotEmpty(),
+                    searchQuery = state.searchQuery,
+                )
                 else -> PhotoGrid(
                     photos = state.filteredPhotos,
                     imageLoader = imageLoader,
+                    hasMorePhotos = state.hasMorePhotos,
+                    isLoadingMore = state.isLoadingMore,
+                    onLoadMore = viewModel::loadMorePhotos,
                     onOpenPhoto = { selectedPhoto = it },
                 )
             }
@@ -319,11 +330,25 @@ private fun SearchRow(query: String, onQueryChange: (String) -> Unit) {
 private fun PhotoGrid(
     photos: List<GalleryPhoto>,
     imageLoader: coil.ImageLoader,
+    hasMorePhotos: Boolean,
+    isLoadingMore: Boolean,
+    onLoadMore: () -> Unit,
     onOpenPhoto: (GalleryPhoto) -> Unit,
 ) {
+    val gridState = rememberLazyGridState()
+
+    LaunchedEffect(gridState, photos.size, hasMorePhotos, isLoadingMore) {
+        snapshotFlow { gridState.isNearEnd() && hasMorePhotos && !isLoadingMore }
+            .distinctUntilChanged()
+            .collect { shouldLoad ->
+                if (shouldLoad) onLoadMore()
+            }
+    }
+
     val grouped = photos.groupBy { it.monthLabel }
     LazyVerticalGrid(
         columns = GridCells.Adaptive(minSize = 112.dp),
+        state = gridState,
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = 8.dp, end = 8.dp, top = 4.dp, bottom = 96.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -347,7 +372,29 @@ private fun PhotoGrid(
                 )
             }
         }
+        if (isLoadingMore) {
+            item(span = { GridItemSpan(maxLineSpan) }) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(22.dp),
+                        strokeWidth = 2.dp,
+                        color = Violet500,
+                    )
+                }
+            }
+        }
     }
+}
+
+private fun LazyGridState.isNearEnd(): Boolean {
+    val lastVisible = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: return false
+    val total = layoutInfo.totalItemsCount
+    return total > 0 && lastVisible >= total - 6
 }
 
 @Composable
@@ -433,13 +480,21 @@ private fun LoadingBody() {
 }
 
 @Composable
-private fun EmptyBody(hasPhotoAccess: Boolean) {
+private fun EmptyBody(
+    hasPhotoAccess: Boolean,
+    hasLoadedPhotos: Boolean,
+    searchQuery: String,
+) {
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Icon(Icons.Default.Image, null, tint = SlateText, modifier = Modifier.size(44.dp))
             Spacer(modifier = Modifier.height(8.dp))
             Text(
-                if (hasPhotoAccess) "No synced photos yet" else "Photo access needed",
+                when {
+                    !hasPhotoAccess -> "Photo access needed"
+                    searchQuery.isNotBlank() && hasLoadedPhotos -> "No loaded photos match"
+                    else -> "No synced photos yet"
+                },
                 color = SlateText,
             )
         }

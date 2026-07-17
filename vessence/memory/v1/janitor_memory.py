@@ -9,6 +9,7 @@ import sys
 import json
 import logging
 import datetime
+import time
 import shutil
 import requests
 from pathlib import Path
@@ -107,6 +108,9 @@ MAX_SPLIT_ITEMS = 6
 JANITOR_DELETE_QUARANTINE = os.path.join(LOGS_DIR, "janitor_deleted_memories.jsonl")
 JANITOR_MIN_AVAILABLE_GB = float(os.environ.get("JANITOR_MIN_AVAILABLE_GB", "4.0"))
 JANITOR_MAX_SWAP_PERCENT = float(os.environ.get("JANITOR_MAX_SWAP_PERCENT", "10.0"))
+JANITOR_MAX_SWAP_IO_PAGES_PER_SEC = float(
+    os.environ.get("JANITOR_MAX_SWAP_IO_PAGES_PER_SEC", "20.0")
+)
 JANITOR_MAX_LOAD_FACTOR = float(os.environ.get("JANITOR_MAX_LOAD_FACTOR", "1.25"))
 
 # "Theme" topics — long-term entries whose whole point is to accumulate detail
@@ -132,6 +136,83 @@ def _utcnow_iso() -> str:
     return _utcnow().isoformat()
 
 
+def _read_swap_vmstat_pages() -> tuple[int, int] | None:
+    """Return cumulative (pswpin, pswpout) page counters from /proc/vmstat."""
+    try:
+        values: dict[str, int] = {}
+        with open("/proc/vmstat") as f:
+            for line in f:
+                key, value = line.split()[:2]
+                if key in {"pswpin", "pswpout"}:
+                    values[key] = int(value)
+                    if len(values) == 2:
+                        break
+        if "pswpin" not in values or "pswpout" not in values:
+            return None
+        return values["pswpin"], values["pswpout"]
+    except Exception:
+        return None
+
+
+def _sample_swap_io_pages_per_second(sample_seconds: float = 1.0) -> tuple[float, float] | None:
+    """Return active swap I/O rates as (pages-in/sec, pages-out/sec).
+
+    Swap *used* can remain high after pressure is gone because Linux leaves
+    cold pages in swap. Active swap I/O is the signal that the machine is
+    still under memory pressure or recovering from it.
+    """
+    before = _read_swap_vmstat_pages()
+    if before is None:
+        return None
+    time.sleep(max(sample_seconds, 0.0))
+    after = _read_swap_vmstat_pages()
+    if after is None:
+        return None
+    elapsed = max(sample_seconds, 0.001)
+    return (
+        max(0, after[0] - before[0]) / elapsed,
+        max(0, after[1] - before[1]) / elapsed,
+    )
+
+
+def _swap_pressure_reason(
+    *,
+    swap_total_bytes: int,
+    swap_percent: float,
+    available_gb: float,
+    swap_io_rates: tuple[float, float] | None,
+) -> str | None:
+    """Return a skip reason for active swap pressure, not stale swap usage."""
+    if not swap_total_bytes or swap_percent <= JANITOR_MAX_SWAP_PERCENT:
+        return None
+    if available_gb < JANITOR_MIN_AVAILABLE_GB:
+        return (
+            f"available memory too low with swap used: {available_gb:.1f}GB < "
+            f"{JANITOR_MIN_AVAILABLE_GB:.1f}GB, swap={swap_percent:.1f}%"
+        )
+    if swap_io_rates is None:
+        return None
+    pages_in_s, pages_out_s = swap_io_rates
+    if (
+        pages_in_s > JANITOR_MAX_SWAP_IO_PAGES_PER_SEC
+        or pages_out_s > JANITOR_MAX_SWAP_IO_PAGES_PER_SEC
+    ):
+        return (
+            f"active swap I/O: in={pages_in_s:.1f}/s, out={pages_out_s:.1f}/s, "
+            f"limit={JANITOR_MAX_SWAP_IO_PAGES_PER_SEC:.1f}/s, "
+            f"swap={swap_percent:.1f}%"
+        )
+    logger.info(
+        "Swap usage is high but idle; treating as stale swap: "
+        "swap=%.1f%%, available=%.1fGB, in=%.1f/s, out=%.1f/s",
+        swap_percent,
+        available_gb,
+        pages_in_s,
+        pages_out_s,
+    )
+    return None
+
+
 def _janitor_stress_reason() -> str | None:
     """Return a concrete reason to skip janitor work on a stressed machine."""
     cpu_count = os.cpu_count() or 1
@@ -151,8 +232,14 @@ def _janitor_stress_reason() -> str | None:
             return f"available memory too low: {available_gb:.1f}GB < {JANITOR_MIN_AVAILABLE_GB:.1f}GB"
 
         swap = psutil.swap_memory()
-        if swap.total and swap.percent > JANITOR_MAX_SWAP_PERCENT:
-            return f"swap already active: {swap.percent:.1f}% > {JANITOR_MAX_SWAP_PERCENT:.1f}%"
+        swap_reason = _swap_pressure_reason(
+            swap_total_bytes=swap.total,
+            swap_percent=swap.percent,
+            available_gb=available_gb,
+            swap_io_rates=_sample_swap_io_pages_per_second(),
+        )
+        if swap_reason:
+            return swap_reason
     except Exception as e:
         logger.warning("Could not read janitor stress metrics: %s", e)
 

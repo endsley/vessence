@@ -1,5 +1,9 @@
 # Vessence Changelog
 
+## v0.2.102 (2026-07-16)
+- Fix the Android Photos screen so synced camera photos load from month folders instead of silently showing an empty gallery.
+- Add lazy paged photo loading while scrolling so the gallery no longer waits for every synced image before showing the first batch.
+
 ## v0.2.101 (2026-07-12)
 - Add interruptible Android Jane voice barge-in detection while Jane is speaking.
 - Preserve the legacy turn-based voice path behind the existing interruptible voice toggle.

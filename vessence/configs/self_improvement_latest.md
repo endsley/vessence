@@ -1,17 +1,17 @@
 # Most Recent Nightly Self-Improvement
 
-- Run started: 2026-07-14 23:30:01
-- Report generated: 2026-07-15 00:06:36
-- Total runtime: 2195s
+- Run started: 2026-07-15 23:30:01
+- Report generated: 2026-07-16 00:07:24
+- Total runtime: 2241s
 - Jobs: 8 total, 6 ok, 2 timeout, 0 failed
 - Stable latest report path: `/home/chieh/ambient/vessence/configs/self_improvement_latest.md`
-- Archived copy: `/home/chieh/ambient/vessence-data/reports/self_improvement/self_improvement_20260714_233001.md`
+- Archived copy: `/home/chieh/ambient/vessence-data/reports/self_improvement/self_improvement_20260715_233001.md`
 
 ## TL;DR
 
 - 1. ✓ Auto-Commit WIP (pre) (0.0m)
   - Fixes:
-    - 2026-07-14 23:30:02,270 INFO Committed 4 file(s).
+    - 2026-07-15 23:30:02,939 INFO Committed 31 file(s).
 - 2. ✓ Code Auditor (0.0m)
   - Problems: none detected
   - Fixes: none applied
@@ -29,25 +29,25 @@
     - CRON_JOBS.md claims check_for_updates.py is active but no matching cron entry exists
     - CRON_JOBS.md claims generate_code_map.py is active but no matching cron entry exists
     - CRON_JOBS.md claims iterative_refactor_scheduler.py is active but no matching cron entry exists
-- 6. ✓ Transcript Quality Review (1.5m)
+- 6. ✓ Transcript Quality Review (2.3m)
   - Problems:
-    - Transcript review found 6 issues: 3 critical, 2 low, 1 medium.
-    - The voice response was delayed by a mid-turn brain-provider failure and failover.
-    - A straightforward configuration question took roughly 134 seconds from client submission to response playback.
+    - Transcript review found 4 issues: 2 critical, 1 low, 1 medium.
+    - Stage 3 failed to complete the crash-report self-heal request; the client disconnected after fallback failures.
+    - Stage 1 emitted an unsupported intent label before falling back to others.
   - Fixes:
-    - 2026-07-15 00:06:33,587 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (6 issues)
-    - 2026-07-15 00:06:33,589 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 3 critical, 1 medium, 2...
+    - 2026-07-16 00:07:19,852 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (4 issues)
+    - 2026-07-16 00:07:19,853 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 2 critical, 1 medium, 1...
 - 7. ✓ Memory Janitor (0.0m)
   - Problems:
-    - WARNING:memory_janitor:System stressed — skipping janitor this cycle: swap already active: 32.1% > 10.0%
+    - WARNING:memory_janitor:System stressed — skipping janitor this cycle: swap already active: 47.1% > 10.0%
 - 8. ✓ Auto-Commit + Push (post) (0.0m)
   - Fixes:
-    - 2026-07-15 00:06:36,815 INFO Pushed successfully.
+    - 2026-07-16 00:07:22,845 INFO Pushed successfully.
 
 **Top follow-ups:**
 
-- Run a provider-health or quota check before accepting a Stage 3 turn, immediately route to the known-working fallback when Claude is quota-exhausted, and avoid starting a doomed Claude request.
-- Add a short Stage 1 timeout with immediate fallback to others, enforce Stage 3 first-token and total-response deadlines, and surface a brief progress acknowledgement when a source-code lookup exceeds the voice latency budget.
+- Add provider health checks/circuit breakers before routing, skip exhausted providers, validate fallback model names, and return a queued/deferred-task ACK instead of streaming until timeout for long code-repair work.
+- Constrain classifier output to the canonical enum and map any internal force-stage3 sentinel before logging; add a regression test for meta/code questions.
 
 ## Executive Summary
 
@@ -57,7 +57,7 @@
 ## Stage 1: Auto-Commit WIP (pre)
 
 - Status: `ok`
-- Duration: 0s (0.0 min)
+- Duration: 1s (0.0 min)
 
 ### What It Did
 
@@ -69,7 +69,7 @@
 
 ### Improvements It Made
 
-- 2026-07-14 23:30:02,270 INFO Committed 4 file(s).
+- 2026-07-15 23:30:02,939 INFO Committed 31 file(s).
 
 ### Evidence Files
 
@@ -180,7 +180,7 @@
 ## Stage 6: Transcript Quality Review
 
 - Status: `ok`
-- Duration: 90s (1.5 min)
+- Duration: 136s (2.3 min)
 
 ### What It Did
 
@@ -188,23 +188,23 @@
 
 ### Problems It Found
 
-- Transcript review found 6 issues: 3 critical, 2 low, 1 medium.
-- The voice response was delayed by a mid-turn brain-provider failure and failover.
-- A straightforward configuration question took roughly 134 seconds from client submission to response playback.
-- Stage 1 emitted an invalid intent label.
-- The answer required about 129 seconds of server processing.
+- Transcript review found 4 issues: 2 critical, 1 low, 1 medium.
+- Stage 3 failed to complete the crash-report self-heal request; the client disconnected after fallback failures.
+- Stage 1 emitted an unsupported intent label before falling back to others.
+- Follow-up context was lost before Stage 3.
+- Stage 1 took almost a minute before escalating.
 
 ### Improvements It Made
 
-- 2026-07-15 00:06:33,587 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (6 issues)
-- 2026-07-15 00:06:33,589 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 3 critical, 1 medium, 2 minor issues. The most urgent
+- 2026-07-16 00:07:19,852 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (4 issues)
+- 2026-07-16 00:07:19,853 INFO self_improve_log: recorded [critical] Transcript Review — Reviewing yesterday's conversations I spotted 2 critical, 1 medium, 1 minor issues. The most urgent
 
 ### Follow-Up Fixes Recommended
 
-- Run a provider-health or quota check before accepting a Stage 3 turn, immediately route to the known-working fallback when Claude is quota-exhausted, and avoid starting a doomed Claude request.
-- Add a short Stage 1 timeout with immediate fallback to others, enforce Stage 3 first-token and total-response deadlines, and surface a brief progress acknowledgement when a source-code lookup exceeds the voice latency budget.
-- Constrain classifier decoding to the registered intent enum or explicitly register an internal force-stage3 routing token and normalize it without logging it as an unknown class.
-- Apply a classifier timeout and cache the fallback-to-others decision; add first-token and overall deadlines to the OpenAI standing-brain request and emit a progress response for long source inspection.
+- Add provider health checks/circuit breakers before routing, skip exhausted providers, validate fallback model names, and return a queued/deferred-task ACK instead of streaming until timeout for long code-repair work.
+- Constrain classifier output to the canonical enum and map any internal force-stage3 sentinel before logging; add a regression test for meta/code questions.
+- Persist and pass per-session conversation history into Stage 3 for sid_override sessions; if history is unavailable and the prompt is anaphoric, combine it with the previous turn or ask for clarification. For code-grounded prompts, trigger repo/source inspection before answering.
+- Put a hard timeout around Stage 1 and default timeout/unknown to others:Low Stage 3; warm or restart the classifier backend when latency spikes.
 
 ### Evidence Files
 
@@ -222,7 +222,7 @@
 
 ### Problems It Found
 
-- WARNING:memory_janitor:System stressed — skipping janitor this cycle: swap already active: 32.1% > 10.0%
+- WARNING:memory_janitor:System stressed — skipping janitor this cycle: swap already active: 47.1% > 10.0%
 
 ### Improvements It Made
 
@@ -247,7 +247,7 @@
 
 ### Improvements It Made
 
-- 2026-07-15 00:06:36,815 INFO Pushed successfully.
+- 2026-07-16 00:07:22,845 INFO Pushed successfully.
 
 ### Evidence Files
 

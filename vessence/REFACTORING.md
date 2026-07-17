@@ -22758,3 +22758,61 @@ Remaining follow-up slices:
 - Extract Android stream-turn processing out of `ChatViewModel` into a small state reducer after adding characterization tests for `delta`/`done`/tool-result flows.
 - Split `vault_web/templates/jane.html` into static helper assets or smaller template partials once a template-aware frontend check exists.
 - Audit `ShareReceiverActivity.kt`, `ArticleReaderV2Activity.kt`, and `MainActivity.kt` for similar pure helper/service extractions.
+
+## 2026-07-16 - Memory Janitor Health Fast Path
+
+Goal/scope:
+- Make Jane able to answer "how did the memory janitor perform over the last several days?" quickly without importing ChromaDB or manually reading multiple logs.
+- Add a lightweight report path that distinguishes true completed janitor runs from orchestrator `ok` rows where the janitor exited cleanly after skipping due load/swap.
+
+Files/modules changed:
+- `memory/v1/janitor_health.py`
+- `tests/test_janitor_health.py`
+- `REFACTORING.md`
+
+Behavior intentionally preserved:
+- The memory janitor, nightly orchestrator, report JSON schema, and ChromaDB stores are unchanged.
+- Existing `configs/self_improve_log.md`, `self_improve_janitor_memory.log`, and `janitor_report.json` remain the source artifacts; the new command only reads them.
+- No service restart or janitor execution behavior changed.
+
+Boundary chosen:
+- A separate pure parser/CLI keeps the fast health path independent from `memory/v1/janitor_memory.py`, which imports ChromaDB and provider tooling.
+- Matching summary rows to janitor log blocks by the post-orchestrator time window lets the report catch skipped runs even when the orchestrator status is `ok`.
+
+Verification:
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m py_compile memory/v1/janitor_health.py tests/test_janitor_health.py` passed.
+- `/home/chieh/google-adk-env/adk-venv/bin/python -m pytest tests/test_janitor_health.py -q` passed (`4 passed`).
+- `time /home/chieh/google-adk-env/adk-venv/bin/python -m memory.v1.janitor_health --runs 7` completed in about `0.095s` and reported 1 completed run plus 6 skipped runs over the latest 7 orchestrated janitor rows.
+
+Remaining follow-up slices:
+- If Chieh wants this surfaced in the nightly readable report automatically, add a small cached `memory_janitor_health_latest.json` write after the orchestrator completes.
+- Separately investigate the persistent swap/load pressure causing recent skipped janitor runs; this pass only made diagnosis fast.
+
+## 2026-07-16 - Android Photos Lazy Gallery Loading
+
+Goal/scope:
+- Fix the Android Photos screen empty-gallery behavior for synced camera photos and reduce startup latency by loading photo files in pages.
+
+Files/modules changed:
+- `android/app/src/main/java/com/vessences/android/photos/PhotoGalleryRepository.kt`
+- `android/app/src/main/java/com/vessences/android/photos/PhotosViewModel.kt`
+- `android/app/src/main/java/com/vessences/android/photos/PhotosScreen.kt`
+- `configs/CHANGELOG.md`, `version.json`, `jane_web/main.py`, and marketing APK/download links via the Android bump script.
+
+Behavior intentionally preserved:
+- The gallery still reads synced camera photos from `images/camera` and still uses existing authenticated thumbnail/serve URLs.
+- Camera sync upload destinations, photo descriptions, and server file-listing routes are unchanged.
+- Existing direct root/year photo fallback behavior is preserved while month folders now load lazily.
+
+Boundary chosen:
+- `PhotoGalleryRepository` now separates folder discovery from file-page loading, keeping server API details in the repository.
+- `PhotosViewModel` owns paging state so Compose only reacts to loaded `GalleryPhoto` rows.
+- `PhotosScreen` only detects near-end scroll and renders the load-more spinner.
+
+Verification:
+- `./gradlew :app:compileDebugKotlin` from `android/` passed.
+- `curl http://127.0.0.1:8081/api/files/list/images/camera/2026/07?offset=0&limit=3` returned paginated photo rows with `total_files`, `offset`, and `limit`.
+- `/home/chieh/google-adk-env/adk-venv/bin/python startup_code/bump_android_version.py` built, verified, and deployed Android v0.2.102 / versionCode 333.
+
+Remaining follow-up slices:
+- If search needs to cover unloaded photos, add server-side filename/description search for `images/camera` rather than forcing the mobile app to load every folder.
