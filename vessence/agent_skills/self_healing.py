@@ -31,6 +31,7 @@ from agent_skills.self_healing_helpers import (
     incident_json_path as _incident_json_path,
     incident_title_text as _incident_title_text,
     jsonable as _jsonable,
+    incident_requests_critical_auto_repair as _incident_requests_critical_auto_repair,
     incident_dedupe_result as _incident_dedupe_result,
     new_incident_fingerprint_record as _new_incident_fingerprint_record,
     redacted_request_headers as _redacted_request_headers,
@@ -243,23 +244,31 @@ def incident_title(incident: dict[str, Any]) -> str:
 def _maybe_launch_auto_repair(incident_path: Path) -> None:
     if not incident_path.exists():
         return
-    with _locked_state() as state:
-        now = dt.datetime.now(dt.timezone.utc)
-        decision = _auto_repair_launch_decision(
-            state,
-            now=now,
-            max_per_day=DEFAULT_MAX_AUTO_REPAIRS_PER_DAY,
-            cooldown_sec=DEFAULT_REPAIR_COOLDOWN_SEC,
-        )
-        if decision == "daily_cap":
-            logger.warning(
-                "self-healing auto repair daily cap reached (%s)",
-                int(state.get("auto_repair_count") or 0),
+    try:
+        incident = json.loads(incident_path.read_text(encoding="utf-8"))
+    except Exception:
+        incident = {}
+    critical = _incident_requests_critical_auto_repair(incident)
+    if not critical:
+        with _locked_state() as state:
+            now = dt.datetime.now(dt.timezone.utc)
+            decision = _auto_repair_launch_decision(
+                state,
+                now=now,
+                max_per_day=DEFAULT_MAX_AUTO_REPAIRS_PER_DAY,
+                cooldown_sec=DEFAULT_REPAIR_COOLDOWN_SEC,
             )
-            return
-        if decision == "cooldown":
-            logger.info("self-healing auto repair cooldown active")
-            return
+            if decision == "daily_cap":
+                logger.warning(
+                    "self-healing auto repair daily cap reached (%s)",
+                    int(state.get("auto_repair_count") or 0),
+                )
+                return
+            if decision == "cooldown":
+                logger.info("self-healing auto repair cooldown active")
+                return
+    else:
+        logger.warning("self-healing critical auto repair bypassing cooldown for %s", incident_path)
 
     log_path = LOG_DIR / "self_healing_repair.log"
     env = {

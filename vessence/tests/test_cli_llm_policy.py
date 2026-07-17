@@ -39,9 +39,9 @@ def test_should_try_fallback_matches_existing_error_policy():
 
 
 def test_fallback_provider_sequence_excludes_current_provider():
-    assert fallback_provider_sequence("openai") == ["gemini", "claude"]
+    assert fallback_provider_sequence("openai") == ["claude", "gemini"]
     assert fallback_provider_sequence("gemini") == ["openai", "claude"]
-    assert fallback_provider_sequence("other") == ["openai", "gemini", "claude"]
+    assert fallback_provider_sequence("other") == ["openai", "claude", "gemini"]
 
 
 def test_model_for_tier_uses_smart_for_agent_or_orchestrator_and_cheap_otherwise():

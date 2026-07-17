@@ -62,6 +62,14 @@ def auto_repair_launch_decision(
     return "launch"
 
 
+def incident_requests_critical_auto_repair(incident: Mapping[str, Any]) -> bool:
+    payload = incident.get("payload") if isinstance(incident.get("payload"), Mapping) else {}
+    tags = incident.get("tags") if isinstance(incident.get("tags"), list) else []
+    priority = str(payload.get("auto_repair_priority") or incident.get("auto_repair_priority") or "").strip().lower()
+    normalized_tags = {str(tag).strip().lower() for tag in tags}
+    return priority == "critical" or "critical-auto-repair" in normalized_tags
+
+
 def redacted_request_headers(headers: Mapping[str, Any]) -> dict[str, str]:
     redacted = {}
     for key, value in headers.items():
@@ -198,6 +206,14 @@ def self_heal_job_steps_section(incident_path: Path) -> str:
 7. Record the outcome in the incident report and work log."""
 
 
+def self_heal_job_llm_fallback_section() -> str:
+    return """## LLM fallback policy
+- Try Codex/OpenAI first.
+- If Codex is unavailable, token-full, quota-limited, timed out, or otherwise fails, try Claude Code next.
+- If Claude Code is unavailable or fails, try Google's Antigravity CLI (`agy`) next.
+- Record which runner handled the repair, or all runner failures if none can complete it."""
+
+
 def self_heal_job_verification_section() -> str:
     return """## Verification
 - The failing route/action no longer throws the captured error.
@@ -232,6 +248,8 @@ minimal, verified fix if the evidence supports one.
 {context}
 
 {self_heal_job_steps_section(incident_path)}
+
+{self_heal_job_llm_fallback_section()}
 
 {self_heal_job_verification_section()}
 """

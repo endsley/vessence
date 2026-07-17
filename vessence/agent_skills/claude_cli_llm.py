@@ -175,7 +175,7 @@ def completion_with_fallback(prompt: str, *, tier: str = "utility",
         
         logger.warning(f"Primary LLM failed: {err_msg[:100]}... Attempting fallback.")
 
-    # 2. Try Fallbacks (Codex then Gemini)
+    # 2. Try fallback providers in policy order (OpenAI/Codex, Claude, then agy/Gemini by default).
     fallbacks = _fallback_provider_sequence(_PROVIDER)
     
     last_err = None

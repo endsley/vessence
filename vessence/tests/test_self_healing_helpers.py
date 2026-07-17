@@ -9,6 +9,7 @@ from agent_skills.self_healing_helpers import (
     env_flag_enabled,
     fingerprint,
     first_stack_frame,
+    incident_requests_critical_auto_repair,
     incident_dedupe_result,
     incident_id,
     incident_json_path,
@@ -17,6 +18,7 @@ from agent_skills.self_healing_helpers import (
     new_incident_fingerprint_record,
     redacted_request_headers,
     self_heal_job_context_lines,
+    self_heal_job_llm_fallback_section,
     self_heal_job_path,
     self_heal_job_steps_section,
     self_heal_job_title,
@@ -31,6 +33,7 @@ def test_self_healing_uses_extracted_helpers():
     assert self_healing._fingerprint is fingerprint
     assert self_healing._first_stack_frame is first_stack_frame
     assert self_healing._incident_id is incident_id
+    assert self_healing._incident_requests_critical_auto_repair is incident_requests_critical_auto_repair
     assert self_healing._slugify is slugify
     assert self_healing._jsonable is jsonable
     assert self_healing._build_self_heal_job_markdown is build_self_heal_job_markdown
@@ -92,6 +95,21 @@ def test_auto_repair_launch_decision_updates_state_and_preserves_limits() -> Non
     ) == "launch"
     assert state["auto_repair_day"] == "2026-07-03"
     assert state["auto_repair_count"] == 1
+
+
+def test_incident_requests_critical_auto_repair_from_payload_or_tag() -> None:
+    assert incident_requests_critical_auto_repair({
+        "payload": {"auto_repair_priority": "critical"},
+        "tags": [],
+    })
+    assert incident_requests_critical_auto_repair({
+        "payload": {},
+        "tags": ["waterlily", "Critical-Auto-Repair"],
+    })
+    assert not incident_requests_critical_auto_repair({
+        "payload": {"auto_repair_priority": "normal"},
+        "tags": ["waterlily"],
+    })
 
 
 def test_redacted_request_headers_keeps_visible_headers_and_secrets_redacted():
@@ -266,6 +284,9 @@ def test_self_heal_job_section_helpers_preserve_markdown_contract():
     assert "Do not speculate from the stack trace alone." in self_heal_job_steps_section(
         Path("/data/incidents/incident.json")
     )
+    assert "Codex/OpenAI first" in self_heal_job_llm_fallback_section()
+    assert "Claude Code next" in self_heal_job_llm_fallback_section()
+    assert "Antigravity CLI (`agy`) next" in self_heal_job_llm_fallback_section()
     assert self_heal_job_verification_section().endswith(
         "leave a clear report explaining the blocker and evidence checked."
     )
@@ -294,4 +315,7 @@ def test_build_self_heal_job_markdown_preserves_job_contract():
     assert "- Project root: `/repo`" in body
     assert "- Fingerprint: `abc123`" in body
     assert "Do not speculate from the stack trace alone." in body
+    assert "Codex/OpenAI first" in body
+    assert "Claude Code next" in body
+    assert "Antigravity CLI (`agy`) next" in body
     assert body.endswith("leave a clear report explaining the blocker and evidence checked.\n")

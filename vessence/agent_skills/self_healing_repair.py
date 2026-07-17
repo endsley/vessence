@@ -107,6 +107,10 @@ Rules:
 - Do not deploy, restart production services, delete data, rotate secrets, or run destructive commands.
 - If the issue is transient, external, credential-related, CAPTCHA/MFA-related, or otherwise unsafe to patch automatically, write a clear report and stop.
 - If this is a web/UI automation failure, inspect the page, DOM, screenshots, logs, or downloaded artifacts and adapt the flow rather than stopping at a stale selector.
+- LLM runner fallback policy: use Codex/OpenAI first; if Codex is unavailable,
+  token-full, quota-limited, timed out, or otherwise fails, use Claude Code next;
+  if Claude Code also fails, use Google's Antigravity CLI (`agy`) next. Record
+  which runner handled the repair, or all runner failures if none can complete it.
 
 Incident JSON:
 ```json

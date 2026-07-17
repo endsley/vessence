@@ -28,7 +28,7 @@ def should_try_fallback(error_message: str) -> bool:
     )
 
 
-def fallback_provider_sequence(current_provider: str, sequence: tuple[str, ...] = ("openai", "gemini", "claude")) -> list[str]:
+def fallback_provider_sequence(current_provider: str, sequence: tuple[str, ...] = ("openai", "claude", "gemini")) -> list[str]:
     return [provider for provider in sequence if provider != current_provider]
 
 
