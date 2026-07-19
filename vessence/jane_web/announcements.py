@@ -3,9 +3,15 @@
 from __future__ import annotations
 
 import json
+import fcntl
+import os
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
+
+
+_CRITICAL_SELF_HEALING_PROVIDER_FAILURE_ID_PREFIX = "self-healing-provider-failure-"
 
 
 class AnnouncementsLog:
@@ -35,12 +41,71 @@ class AnnouncementsLog:
         return self._collapse_ra_report_history(rows)
 
     def _truncate_if_large(self) -> None:
+        """Trim under the same lock used by durable announcement appends.
+
+        Repair-provider exhaustion notices are appended with an exclusive
+        ``.lock`` file.  Rewriting JSONL without that lock could race a writer
+        and erase a just-persisted alert.  Re-check size only after taking the
+        shared lock, then atomically replace the complete retained file.
+        """
         try:
-            if self.path.stat().st_size > self.max_bytes:
-                lines = self.path.read_text(encoding="utf-8", errors="replace").splitlines()
-                self.path.write_text("\n".join(lines[-self.keep_lines:]) + "\n", encoding="utf-8")
+            if self.path.stat().st_size <= self.max_bytes:
+                return
+            lock_path = self.path.with_suffix(self.path.suffix + ".lock")
+            lock_path.parent.mkdir(parents=True, exist_ok=True)
+            with lock_path.open("a+") as lock_handle:
+                try:
+                    lock_path.chmod(0o600)
+                except OSError:
+                    pass
+                fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
+                try:
+                    # An appender may have completed while this reader waited.
+                    if not self.path.exists() or self.path.stat().st_size <= self.max_bytes:
+                        return
+                    lines = self.path.read_text(encoding="utf-8", errors="replace").splitlines()
+                    recent_start = len(lines) - len(lines[-self.keep_lines:])
+                    retained_lines = [
+                        raw
+                        for index, raw in enumerate(lines)
+                        if index >= recent_start or self._is_critical_self_healing_provider_failure(raw)
+                    ]
+                    descriptor, temporary_name = tempfile.mkstemp(
+                        prefix=f".{self.path.name}.",
+                        suffix=".tmp",
+                        dir=self.path.parent,
+                    )
+                    temporary = Path(temporary_name)
+                    try:
+                        os.fchmod(descriptor, 0o600)
+                        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                            handle.write("\n".join(retained_lines) + "\n")
+                            handle.flush()
+                            os.fsync(handle.fileno())
+                        os.replace(temporary, self.path)
+                    finally:
+                        temporary.unlink(missing_ok=True)
+                finally:
+                    fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
         except Exception:
             pass
+
+    @staticmethod
+    def _is_critical_self_healing_provider_failure(raw: str) -> bool:
+        """Keep provider-exhaustion alerts during JSONL size trimming.
+
+        The regular tail remains bounded by ``keep_lines``.  These alerts are
+        deliberately retained even when older because they are the durable
+        signal that both repair providers were exhausted and Chieh must be
+        notified.
+        """
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError:
+            return False
+        return isinstance(payload, dict) and str(payload.get("id", "")).startswith(
+            _CRITICAL_SELF_HEALING_PROVIDER_FAILURE_ID_PREFIX
+        )
 
     @staticmethod
     def _parse_datetime(value: str | None) -> datetime | None:

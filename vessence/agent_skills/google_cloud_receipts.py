@@ -68,6 +68,7 @@ from agent_skills.google_cloud_receipt_utils import (
     unique_dest_path as _unique_dest_path,
     validate_receipt_request,
 )
+from agent_skills.web_ui_change import recover_website_ui_change
 
 
 GOOGLE_CLOUD_DOMAIN = "console.cloud.google.com"
@@ -698,6 +699,14 @@ def main(argv: list[str] | None = None) -> int:
         print("Interrupted.", file=sys.stderr)
         return 130
     except Exception as e:
+        recover_website_ui_change(
+            skill="google-cloud-receipts",
+            intent="Open Google Cloud Billing and extract or download the requested payment receipts without changing billing settings.",
+            operation=args.cmd,
+            exc=e,
+            project_root=Path(__file__).resolve().parents[1],
+            retry_safe=args.cmd in {"list-accounts", "download"},
+        )
         print(str(e), file=sys.stderr)
         return 1
 

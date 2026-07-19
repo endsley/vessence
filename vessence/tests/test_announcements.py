@@ -1,5 +1,6 @@
 import json
 from datetime import datetime
+import fcntl
 
 from jane_web.announcements import AnnouncementsLog
 
@@ -83,6 +84,50 @@ def test_large_log_is_truncated_to_recent_lines_before_reading(tmp_path):
 
     assert [row["id"] for row in rows] == ["three", "four"]
     assert [json.loads(line)["id"] for line in path.read_text(encoding="utf-8").splitlines()] == ["three", "four"]
+
+
+def test_large_log_retains_old_critical_provider_exhaustion_alert(tmp_path):
+    path = tmp_path / "announcements.jsonl"
+    write_lines(
+        path,
+        [
+            json.dumps({"id": "self-healing-provider-failure-older-incident"}),
+            *[json.dumps({"id": f"normal-{index}"}) for index in range(6)],
+        ],
+    )
+    log = AnnouncementsLog(path, max_bytes=1, keep_lines=2)
+
+    rows = log.read(None)
+
+    assert [row["id"] for row in rows] == [
+        "self-healing-provider-failure-older-incident",
+        "normal-4",
+        "normal-5",
+    ]
+    assert [json.loads(line)["id"] for line in path.read_text(encoding="utf-8").splitlines()] == [
+        "self-healing-provider-failure-older-incident",
+        "normal-4",
+        "normal-5",
+    ]
+
+
+def test_large_log_trimming_uses_the_durable_append_lock_and_private_atomic_replace(monkeypatch, tmp_path):
+    path = tmp_path / "announcements.jsonl"
+    write_lines(path, [json.dumps({"id": f"normal-{index}"}) for index in range(4)])
+    calls = []
+    original_flock = fcntl.flock
+
+    def tracked_flock(fd, operation):
+        calls.append(operation)
+        return original_flock(fd, operation)
+
+    monkeypatch.setattr("jane_web.announcements.fcntl.flock", tracked_flock)
+    log = AnnouncementsLog(path, max_bytes=1, keep_lines=1)
+
+    assert [row["id"] for row in log.read(None)] == ["normal-3"]
+    assert fcntl.LOCK_EX in calls
+    assert path.stat().st_mode & 0o777 == 0o600
+    assert path.with_suffix(path.suffix + ".lock").exists()
 
 
 def test_read_announcements_collapses_historical_ra_reports_to_latest(tmp_path):

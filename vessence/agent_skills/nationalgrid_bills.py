@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -29,6 +30,11 @@ from agent_skills.nationalgrid_bill_helpers import (
     slug as _slug,
     split_months as _split_months,
     summarize_account as _summarize_account,
+)
+from agent_skills.web_ui_change import (
+    ExtractionContractError,
+    recover_website_ui_change,
+    require_extraction_values,
 )
 
 
@@ -189,7 +195,7 @@ def fetch_bills(
 
     totals = _aggregate_fetch_totals(account_summaries, warnings)
 
-    return {
+    result = {
         "meta": {
             "status": totals["status"],
             "started_at": datetime.now(timezone.utc).isoformat(),
@@ -207,6 +213,10 @@ def fetch_bills(
         "total_amount": totals["total_amount"],
         "total_amount_text": totals["total_amount_text"],
     }
+    if result["meta"]["status"] == "missing":
+        raise ExtractionContractError(["accounts.monthly_amounts"])
+    require_extraction_values(result, ["meta.final_url", "accounts"])
+    return result
 
 
 def format_answer(result: dict[str, Any]) -> str:
@@ -241,15 +251,27 @@ def main() -> int:
     prompt = " ".join(args.prompt).strip()
     target_months = _split_months(args.target_month)
     year = args.year if args.year is not None else infer_year(prompt)
-    result = fetch_bills(
-        prompt=prompt,
-        account=args.account,
-        utility=args.utility,
-        year=year,
-        target_months=target_months,
-        include_future_months=args.include_future_months,
-        headful=args.headful,
-    )
+    try:
+        result = fetch_bills(
+            prompt=prompt,
+            account=args.account,
+            utility=args.utility,
+            year=year,
+            target_months=target_months,
+            include_future_months=args.include_future_months,
+            headful=args.headful,
+        )
+    except Exception as exc:  # noqa: BLE001
+        recover_website_ui_change(
+            skill="waterlily-nationalgrid-bills",
+            intent="Read the requested National Grid bill-history amounts and bill PDFs for the selected known utility account without changing the account.",
+            operation="National Grid bill-history extraction",
+            exc=exc,
+            project_root=Path(__file__).resolve().parents[1],
+            retry_safe=True,
+        )
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
     text = json.dumps(result, indent=2)
     print(text)
     if args.output:

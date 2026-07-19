@@ -20,6 +20,11 @@ import traceback
 from pathlib import Path
 from typing import Any
 
+from agent_skills.self_healing_storage import (
+    PrivateJsonLockUnavailable,
+    atomic_write_private_json,
+)
+
 from agent_skills.self_healing_helpers import (
     SENSITIVE_HEADER_NAMES,
     auto_repair_launch_decision as _auto_repair_launch_decision,
@@ -52,6 +57,7 @@ STATE_PATH = SELF_HEAL_DIR / "state.json"
 LOG_DIR = VESSENCE_DATA_HOME / "logs"
 JSONL_LOG = LOG_DIR / "self_healing.jsonl"
 JOB_QUEUE_DIR = VESSENCE_HOME / "configs" / "job_queue"
+DEFERRED_CAPTURE_DIR = SELF_HEAL_DIR / "deferred_captures"
 
 DEFAULT_RATE_LIMIT_SEC = int(os.environ.get("JANE_SELF_HEAL_RATE_LIMIT_SEC", "900"))
 DEFAULT_REPAIR_COOLDOWN_SEC = int(os.environ.get("JANE_SELF_HEAL_REPAIR_COOLDOWN_SEC", "1800"))
@@ -107,7 +113,11 @@ def capture_exception(
         "context": _jsonable(context or {}),
         "tags": tags or [],
     }
-    return _record_incident(incident, auto_repair=auto_repair)
+    try:
+        return _record_incident(incident, auto_repair=auto_repair)
+    except Exception as capture_exc:
+        logger.warning("self-healing exception capture deferred: %s", type(capture_exc).__name__)
+        return _defer_incident_capture(incident, auto_repair=auto_repair)
 
 
 def capture_report(
@@ -158,7 +168,11 @@ def capture_report(
         "payload": payload,
         "tags": tags or [],
     }
-    return _record_incident(incident, auto_repair=auto_repair)
+    try:
+        return _record_incident(incident, auto_repair=auto_repair)
+    except Exception as capture_exc:
+        logger.warning("self-healing report capture deferred: %s", type(capture_exc).__name__)
+        return _defer_incident_capture(incident, auto_repair=auto_repair)
 
 
 def request_info_from_request(request: Any | None) -> dict[str, Any]:
@@ -196,6 +210,38 @@ def _record_incident(incident: dict[str, Any], *, auto_repair: bool | None) -> d
             now_ts=now_ts,
             rate_limit_sec=DEFAULT_RATE_LIMIT_SEC,
         )
+        # A failure that returns after a repair reached a terminal outcome is
+        # a new repair event, not merely a duplicate log line.  Keeping it
+        # deduped would leave the watchdog looking only at the prior finished
+        # incident and suppress Codex/Claude handoff for up to the sliding
+        # rate-limit window.
+        if dedupe["deduped"] and _dedupe_record_has_terminal_incident(record):
+            dedupe = {"deduped": False, "count": dedupe["count"]}
+        # A critical Waterlily repair deliberately retries until a verified
+        # nightly report succeeds.  It is therefore one continuing recovery
+        # event, not a new Codex/Claude worker every time the same UI failure
+        # recurs after the ordinary log-rate window.  Otherwise a persistent
+        # vendor outage can create overlapping incident files and eventually
+        # strand a live report behind an unrelated repair-project lease.
+        if not dedupe["deduped"] and _dedupe_record_has_active_critical_incident(record):
+            count = int(dedupe["count"])
+            continued_record = dict(record)
+            continued_record.update({
+                "last_seen_at": incident["created_at"],
+                "last_seen_ts": now_ts,
+                "count": count,
+            })
+            dedupe = {
+                "deduped": True,
+                "count": count,
+                "record": continued_record,
+                "incident_updates": {
+                    "deduped": True,
+                    "occurrence_count": count,
+                    "incident_path": record.get("incident_path"),
+                    "job_path": record.get("job_path"),
+                },
+            }
         if dedupe["deduped"]:
             deduped = True
             fingerprints[incident["fingerprint"]] = dedupe["record"]
@@ -209,7 +255,7 @@ def _record_incident(incident: dict[str, Any], *, auto_repair: bool | None) -> d
                 "incident_path": str(incident_path),
                 "job_path": str(job_path),
             })
-            incident_path.write_text(json.dumps(incident, indent=2, sort_keys=True), encoding="utf-8")
+            atomic_write_private_json(incident_path, incident)
             fingerprints[incident["fingerprint"]] = _new_incident_fingerprint_record(
                 record,
                 incident,
@@ -222,6 +268,130 @@ def _record_incident(incident: dict[str, Any], *, auto_repair: bool | None) -> d
     if not deduped and _should_auto_repair(auto_repair):
         _maybe_launch_auto_repair(Path(incident["incident_path"]))
     return incident
+
+
+def _dedupe_record_has_terminal_incident(record: dict[str, Any]) -> bool:
+    """Return true only for a safely-local terminal incident record."""
+    raw_path = str(record.get("incident_path") or "").strip()
+    if not raw_path:
+        return False
+    try:
+        incident_path = Path(raw_path).expanduser().resolve()
+        incident_root = INCIDENT_DIR.resolve()
+    except Exception:
+        return False
+    if incident_path.parent != incident_root:
+        return False
+    try:
+        payload = json.loads(incident_path.read_text(encoding="utf-8"))
+    except Exception:
+        return False
+    if not isinstance(payload, dict):
+        return False
+    return str(payload.get("status") or "").strip() in {
+        "repair_finished",
+        "repair_failed",
+        "repaired",
+    }
+
+
+def _dedupe_record_has_active_critical_incident(record: dict[str, Any]) -> bool:
+    """Return true only for an unresolved critical incident at its safe path.
+
+    This intentionally does not dedupe ordinary errors indefinitely: only the
+    no-timeout critical recovery loop has a durable guarantee that the same
+    incident will be retried until report verification.  Path containment and
+    JSON validation prevent a state record from suppressing unrelated work.
+    """
+    raw_path = str(record.get("incident_path") or "").strip()
+    if not raw_path:
+        return False
+    try:
+        incident_path = Path(raw_path).expanduser().resolve()
+        incident_root = INCIDENT_DIR.resolve()
+    except Exception:
+        return False
+    if incident_path.parent != incident_root:
+        return False
+    try:
+        payload = json.loads(incident_path.read_text(encoding="utf-8"))
+    except Exception:
+        return False
+    if not isinstance(payload, dict) or not _incident_requests_critical_auto_repair(payload):
+        return False
+    return str(payload.get("status") or "").strip() in {
+        "captured",
+        "repair_started",
+        "repair_attempting",
+        "repair_retrying",
+    }
+
+
+def _deferred_capture_path(incident: dict[str, Any]) -> Path:
+    """Return a private unique spool path without using source error text."""
+    stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    incident_id = _slugify(str(incident.get("id") or "incident"), 48)
+    return DEFERRED_CAPTURE_DIR / f"{stamp}-{os.getpid()}-{incident_id}.json"
+
+
+def _defer_incident_capture(
+    incident: dict[str, Any],
+    *,
+    auto_repair: bool | None,
+) -> dict[str, Any] | None:
+    """Durably preserve a failed capture for the five-minute watchdog.
+
+    This is intentionally disabled inside an active repair worker to avoid a
+    broken capture backend recursively creating repair incidents about itself.
+    The payload is the already-built private incident object that would have
+    been written normally; no new request/source text is added here.
+    """
+    if os.environ.get("JANE_SELF_HEAL_ACTIVE") == "1":
+        return None
+    try:
+        path = _deferred_capture_path(incident)
+        atomic_write_private_json(
+            path,
+            {
+                "version": 1,
+                "incident": _jsonable(incident),
+                "auto_repair": auto_repair if isinstance(auto_repair, bool) else None,
+                "deferred_at": _now_iso(),
+            },
+        )
+    except Exception as spool_exc:
+        logger.warning("self-healing deferred-capture spool failed: %s", type(spool_exc).__name__)
+        return None
+    return {
+        "id": str(incident.get("id") or ""),
+        "status": "deferred",
+        "deduped": False,
+        "occurrence_count": 0,
+    }
+
+
+def drain_deferred_captures() -> int:
+    """Replay private capture spools; keep failures for the next watchdog."""
+    if os.environ.get("JANE_SELF_HEAL_ACTIVE") == "1" or not DEFERRED_CAPTURE_DIR.is_dir():
+        return 0
+    drained = 0
+    for path in sorted(DEFERRED_CAPTURE_DIR.glob("*.json")):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            incident = payload.get("incident") if isinstance(payload, dict) else None
+            auto_repair = payload.get("auto_repair") if isinstance(payload, dict) else None
+            if not isinstance(incident, dict) or not isinstance(auto_repair, (bool, type(None))):
+                continue
+            _record_incident(incident, auto_repair=auto_repair)
+        except Exception as exc:
+            logger.warning("self-healing deferred capture remains queued: %s", type(exc).__name__)
+            continue
+        try:
+            path.unlink()
+        except OSError:
+            continue
+        drained += 1
+    return drained
 
 
 def _create_job_for_incident(incident: dict[str, Any], incident_path: Path) -> Path:
@@ -250,23 +420,31 @@ def _maybe_launch_auto_repair(incident_path: Path) -> None:
         incident = {}
     critical = _incident_requests_critical_auto_repair(incident)
     if not critical:
-        with _locked_state() as state:
-            now = dt.datetime.now(dt.timezone.utc)
-            decision = _auto_repair_launch_decision(
-                state,
-                now=now,
-                max_per_day=DEFAULT_MAX_AUTO_REPAIRS_PER_DAY,
-                cooldown_sec=DEFAULT_REPAIR_COOLDOWN_SEC,
-            )
-            if decision == "daily_cap":
-                logger.warning(
-                    "self-healing auto repair daily cap reached (%s)",
-                    int(state.get("auto_repair_count") or 0),
+        try:
+            with _locked_state() as state:
+                now = dt.datetime.now(dt.timezone.utc)
+                decision = _auto_repair_launch_decision(
+                    state,
+                    now=now,
+                    max_per_day=DEFAULT_MAX_AUTO_REPAIRS_PER_DAY,
+                    cooldown_sec=DEFAULT_REPAIR_COOLDOWN_SEC,
                 )
-                return
-            if decision == "cooldown":
-                logger.info("self-healing auto repair cooldown active")
-                return
+                if decision == "daily_cap":
+                    logger.warning(
+                        "self-healing auto repair daily cap reached (%s)",
+                        int(state.get("auto_repair_count") or 0),
+                    )
+                    return
+                if decision == "cooldown":
+                    logger.info("self-healing auto repair cooldown active")
+                    return
+        except PrivateJsonLockUnavailable:
+            # The incident is already durable.  Do not make an incoming
+            # request wait behind a stale state lock or spool it a second
+            # time; the watchdog/job queue can launch it after the lease is
+            # available.
+            logger.warning("self-healing auto repair launch deferred: state lock unavailable")
+            return
     else:
         logger.warning("self-healing critical auto repair bypassing cooldown for %s", incident_path)
 
@@ -282,7 +460,18 @@ def _maybe_launch_auto_repair(incident_path: Path) -> None:
     try:
         with log_path.open("a", encoding="utf-8") as logf:
             logf.write(f"\n===== self-healing launch {dt.datetime.now().isoformat()} incident={incident_path} =====\n")
-            subprocess.Popen(cmd, cwd=str(VESSENCE_HOME), env=env, stdout=logf, stderr=subprocess.STDOUT)
+            # Keep the durable repair worker independent of the failed request
+            # or scheduled child that launched it.  Its own per-incident lock
+            # prevents duplicate watchdog/manual launches.
+            subprocess.Popen(
+                cmd,
+                cwd=str(VESSENCE_HOME),
+                env=env,
+                stdout=logf,
+                stderr=subprocess.STDOUT,
+                stdin=subprocess.DEVNULL,
+                start_new_session=True,
+            )
         logger.info("self-healing auto repair launched for %s", incident_path)
     except Exception as exc:
         logger.warning("self-healing auto repair launch failed: %s", exc)
@@ -299,15 +488,28 @@ def _enabled() -> bool:
 @contextlib.contextmanager
 def _locked_state():
     SELF_HEAL_DIR.mkdir(parents=True, exist_ok=True)
+    try:
+        SELF_HEAL_DIR.chmod(0o700)
+    except OSError:
+        pass
     lock_path = SELF_HEAL_DIR / "state.lock"
     with lock_path.open("a+") as lock_fh:
-        fcntl.flock(lock_fh.fileno(), fcntl.LOCK_EX)
-        state = _read_state()
         try:
+            lock_path.chmod(0o600)
+        except OSError:
+            pass
+        try:
+            fcntl.flock(lock_fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise PrivateJsonLockUnavailable("self-healing state lock unavailable") from exc
+        try:
+            state = _read_state()
             yield state
         finally:
-            STATE_PATH.write_text(json.dumps(state, indent=2, sort_keys=True), encoding="utf-8")
-            fcntl.flock(lock_fh.fileno(), fcntl.LOCK_UN)
+            try:
+                atomic_write_private_json(STATE_PATH, state)
+            finally:
+                fcntl.flock(lock_fh.fileno(), fcntl.LOCK_UN)
 
 
 def _read_state() -> dict[str, Any]:

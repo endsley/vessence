@@ -49,8 +49,10 @@ VESSENCE_HOME=/home/chieh/ambient/vessence
 # Waterlily cache load health check: fail only for persistent slow cached income reports after retry
 0 0 * * * flock -n /tmp/waterlily-cache-load-health.lock nice -n 19 ionice -c 3 /home/chieh/code/waterlily/scripts/check_income_cache_load_times.py --threshold 1.5 >> /home/chieh/ambient/vessence-data/logs/waterlily_cache_load_health.log 2>&1
 
-# Waterlily current-month accounting report update: rolling daily source sync + local cache rebuild; Sunday does a full current-month refresh
-30 1 * * * flock -n /tmp/waterlily-nightly-current-month-reports.lock timeout 90m nice -n 19 ionice -c 3 /home/chieh/code/waterlily/scripts/nightly_update_current_month_reports.py >> /home/chieh/ambient/vessence-data/logs/waterlily_nightly_reports.log 2>&1
+# Waterlily current-month accounting report update: resilient wrapper owns retries/self-healing; no wall-clock kill.
+30 1 * * * nice -n 19 ionice -c 3 /home/chieh/google-adk-env/adk-venv/bin/python /home/chieh/code/waterlily/scripts/run_nightly_current_month_reports.py >> /home/chieh/ambient/vessence-data/logs/waterlily_nightly_reports.log 2>&1
+# Durable Waterlily critical-repair watchdog: resumes only persisted self-healing incidents.
+*/5 * * * * nice -n 19 ionice -c 3 /home/chieh/google-adk-env/adk-venv/bin/python /home/chieh/ambient/vessence/agent_skills/self_healing_repair.py --resume-critical >> /home/chieh/ambient/vessence-data/logs/self_healing_repair_watchdog.log 2>&1
 
 # Nutricost deal monitor: delete sub-30% marketing emails; alert 30%+ deals from juliaprocess
 0 5 * * * VESSENCE_HOME=/home/chieh/ambient/vessence VESSENCE_DATA_HOME=/home/chieh/ambient/vessence-data VAULT_HOME=/home/chieh/ambient/vault PYTHONPATH=/home/chieh/ambient/vessence flock -n /tmp/nutricost-deal-monitor.lock timeout 45m nice -n 19 ionice -c 3 /home/chieh/google-adk-env/adk-venv/bin/python /home/chieh/ambient/vessence/agent_skills/nutricost_deal_monitor.py >> /home/chieh/ambient/vessence-data/logs/System_log/nutricost_deal_monitor.log 2>&1

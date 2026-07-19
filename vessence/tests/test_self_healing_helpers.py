@@ -286,7 +286,8 @@ def test_self_heal_job_section_helpers_preserve_markdown_contract():
     )
     assert "Codex/OpenAI first" in self_heal_job_llm_fallback_section()
     assert "Claude Code next" in self_heal_job_llm_fallback_section()
-    assert "Antigravity CLI (`agy`) next" in self_heal_job_llm_fallback_section()
+    assert "Vessence repair-failure notice" in self_heal_job_llm_fallback_section()
+    assert "Antigravity CLI" not in self_heal_job_llm_fallback_section()
     assert self_heal_job_verification_section().endswith(
         "leave a clear report explaining the blocker and evidence checked."
     )
@@ -317,5 +318,6 @@ def test_build_self_heal_job_markdown_preserves_job_contract():
     assert "Do not speculate from the stack trace alone." in body
     assert "Codex/OpenAI first" in body
     assert "Claude Code next" in body
-    assert "Antigravity CLI (`agy`) next" in body
+    assert "Vessence repair-failure notice" in body
+    assert "Antigravity CLI" not in body
     assert body.endswith("leave a clear report explaining the blocker and evidence checked.\n")

@@ -48,3 +48,30 @@ def test_nationalgrid_handler_wraps_success_and_fetch_errors(monkeypatch) -> Non
         "text": "I could not fetch the National Grid bills yet: network down",
         "error": "network down",
     }
+
+
+def test_nationalgrid_handler_retries_readonly_fetch_after_ui_repair(monkeypatch) -> None:
+    monkeypatch.setattr(handler, "infer_year", lambda prompt: 2026)
+    monkeypatch.setattr(handler, "format_answer", lambda result: "repaired answer")
+    calls = []
+
+    def fetch(**kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            raise RuntimeError("Could not locate bill history button")
+        return {"year": kwargs["year"]}
+
+    repaired = []
+    monkeypatch.setattr(handler, "fetch_bills", fetch)
+    monkeypatch.setattr(
+        handler,
+        "recover_website_ui_change",
+        lambda **kwargs: repaired.append(kwargs) or object(),
+    )
+
+    assert run(handler.handle("show my 2026 bills")) == {
+        "text": "repaired answer",
+        "data": {"year": 2026},
+    }
+    assert len(calls) == 2
+    assert repaired[0]["retry_safe"] is False

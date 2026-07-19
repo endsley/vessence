@@ -57,6 +57,7 @@ from agent_skills.web_automation.profiles import (
     storage_state_path,
     touch_last_used,
 )
+from agent_skills.web_ui_change import recover_website_ui_change
 
 
 CHATGPT_DOMAIN = "chatgpt.com"
@@ -514,6 +515,14 @@ def main(argv: list[str] | None = None) -> int:
         print("Interrupted.", file=sys.stderr)
         return 130
     except Exception as e:
+        recover_website_ui_change(
+            skill="openai-receipts",
+            intent="Open ChatGPT Billing and extract or download the requested invoice receipts without changing billing settings.",
+            operation=args.cmd,
+            exc=e,
+            project_root=Path(__file__).resolve().parents[1],
+            retry_safe=args.cmd in {"list", "download", "verify-profile"},
+        )
         print(str(e), file=sys.stderr)
         return 1
 

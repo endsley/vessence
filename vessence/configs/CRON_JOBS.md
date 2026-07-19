@@ -32,10 +32,16 @@ This document logs all scheduled tasks (cron jobs) for the system. It must be up
 
 ## 2c. Waterlily Current-Month Accounting Report Update
 - **Schedule:** `30 1 * * *` (Runs daily at 1:30 AM)
-- **Script Path:** `/home/chieh/code/waterlily/scripts/nightly_update_current_month_reports.py`
+- **Script Path:** `/home/chieh/code/waterlily/scripts/run_nightly_current_month_reports.py`
 - **Log:** `$VESSENCE_DATA_HOME/logs/waterlily_nightly_reports.log`
-- **Wrapper:** `flock -n /tmp/waterlily-nightly-current-month-reports.lock nice -n 19 ionice -c 3`
-- **Description:** Runs rolling daily Waterlily source sync and local cache rebuild for the current month. Sunday runs a full current-month refresh.
+- **Wrapper:** `nice -n 19 ionice -c 3` (the Python runner owns the report-run handoff)
+- **Description:** Runs rolling daily Waterlily source sync and local cache rebuild for the current month. Sunday runs a full current-month refresh. It has no cron wall-clock kill: a captured provider/UI failure is handed to durable self-healing and must finish with a verified fresh report summary.
+
+## 2d. Waterlily Critical Self-Healing Watchdog
+- **Schedule:** `*/5 * * * *` (Runs every five minutes)
+- **Script Path:** `$VESSENCE_HOME/agent_skills/self_healing_repair.py --resume-critical`
+- **Log:** `$VESSENCE_DATA_HOME/logs/self_healing_repair_watchdog.log`
+- **Description:** Replays deferred captures and resumes persisted critical Waterlily repair incidents after a process restart or failed launch. It does not impose a report-regeneration wall-clock timeout; repair completion requires a fresh, verified nightly summary.
 
 ## 3. Daily Briefing Fetch
 - **Schedule:** `10 2 * * *` (Daily at 2:10 AM)

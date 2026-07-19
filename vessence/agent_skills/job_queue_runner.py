@@ -19,6 +19,7 @@ import time
 import argparse
 import datetime
 import logging
+import re
 import requests
 from pathlib import Path
 
@@ -81,6 +82,21 @@ logging.basicConfig(
 logger = logging.getLogger("job_queue_runner")
 
 
+# Self-healing incident jobs are durable repair records, not ordinary queue
+# work.  ``self_healing_repair.py`` owns their Codex -> Claude handoff and
+# retry/notification state; sending one through the generic Jane web queue
+# would bypass that protocol and could race the dedicated repair worker.
+_SELF_HEALING_SOURCE_RE = re.compile(
+    r"^Source:\s*jane_self_healing\s*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+def _is_dedicated_self_healing_job(content: str) -> bool:
+    """Return whether Markdown belongs exclusively to the repair runner."""
+    return bool(_SELF_HEALING_SOURCE_RE.search(content))
+
+
 # ── Idle check ─────────────────────────────────────────────────────────────────
 def is_idle() -> bool:
     now = time.time()
@@ -119,7 +135,10 @@ def load_pending_jobs() -> list[dict]:
             continue
         try:
             job = _parse_job(fpath)
-            if job["status"] == "pending":
+            if (
+                job["status"] == "pending"
+                and not _is_dedicated_self_healing_job(job["content"])
+            ):
                 jobs.append(job)
         except Exception:
             continue

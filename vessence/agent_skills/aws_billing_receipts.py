@@ -42,6 +42,7 @@ from agent_skills.web_automation.profiles import (
     storage_state_path,
     touch_last_used,
 )
+from agent_skills.web_ui_change import recover_website_ui_change
 
 AWS_PROFILE_ID = "aws_billing"
 AWS_PROFILE_NAME = "AWS Billing"
@@ -443,6 +444,14 @@ def main(argv: list[str] | None = None) -> int:
     except KeyboardInterrupt:
         return 130
     except Exception as e:
+        recover_website_ui_change(
+            skill="aws-billing-receipts",
+            intent="Read and download the requested AWS Billing invoice PDFs for the specified billing periods without changing the AWS account.",
+            operation=args.cmd,
+            exc=e,
+            project_root=Path(__file__).resolve().parents[1],
+            retry_safe=args.cmd in {"download", "verify-profile"},
+        )
         print(f"ERROR: {e}", file=sys.stderr)
         return 1
 

@@ -8,10 +8,14 @@ Supports: claude, codex (OpenAI), gemini CLIs.
 """
 
 import os
+import signal
 import subprocess
 import json
+import re
 import sys
 import time
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -29,6 +33,114 @@ from jane.config import PROVIDER_CLI, CHEAP_MODEL, SMART_MODEL, FRONTIER_MODEL, 
 # Orchestrator: Primary Reasoning (Opus/Sonnet)
 # Agent: Specialist (Sonnet/Pro)
 # Utility: Background Worker (Haiku/Flash)
+
+
+class RepairProvidersExhausted(RuntimeError):
+    """Both approved unattended-repair providers failed safely.
+
+    Critical Waterlily repair intentionally has a narrower policy than normal
+    background work: Codex is tried first and Claude second.  Keep only the
+    provider name and exception class so an incident/report never receives a
+    CLI command, prompt, provider stderr, or other untrusted response text.
+    """
+
+    def __init__(self, attempts: list[dict[str, str]]):
+        self.attempts = tuple(
+            {
+                "provider": str(attempt.get("provider") or "unknown"),
+                "error_type": str(attempt.get("error_type") or "RuntimeError"),
+            }
+            for attempt in attempts
+        )
+        super().__init__("Codex and Claude repair providers were exhausted")
+
+
+class ProviderCapacityResponse(RuntimeError):
+    """A zero-exit CLI response that explicitly says it cannot continue."""
+
+
+class ProviderLeaseUnavailable(RuntimeError):
+    """A critical-repair provider could not be durably associated with its parent.
+
+    Codex and Claude are launched in their own process groups.  If the repair
+    worker crashes while one is editing a checkout, another worker must not
+    start a second editor beside it.  The caller therefore gets one narrow
+    synchronous chance to persist the exact child lease immediately after
+    ``Popen``.  A rejected lease stops only that just-created process group.
+    """
+
+
+@dataclass(frozen=True)
+class CriticalRepairCompletion:
+    """Ephemeral result of one approved critical-repair provider handoff.
+
+    ``output`` is intentionally never persisted by the repair runner.  The
+    provider name is structural metadata that lets a failed end-to-end repair
+    rotate to the other approved provider on its next durable retry.
+    """
+
+    output: str
+    provider: str
+    failed_attempts: tuple[dict[str, str], ...] = ()
+
+
+def _looks_like_provider_capacity_response(output: str) -> bool:
+    """Recognize terminal token/quota responses returned with exit code zero.
+
+    Some CLIs print a usage/token-limit notice as ordinary stdout instead of a
+    non-zero exit.  This detector is deliberately used only by the dedicated
+    unattended-repair policy below; normal assistant prose remains untouched.
+    """
+
+    text = " ".join(str(output or "").lower().split())
+    if not text:
+        return False
+    limit_terms = (
+        "usage limit",
+        "token limit",
+        "rate limit",
+        "quota limit",
+        "quota exceeded",
+        "context window",
+        "context length",
+        "ran out of tokens",
+        "token budget",
+    )
+    unable_terms = (
+        "limit reached",
+        "has reached",
+        "have reached",
+        "hit your",
+        "try again later",
+        "cannot continue",
+        "can't continue",
+        "unable to continue",
+        "exhausted",
+        "ran out",
+        "exceeded",
+        "please wait",
+        "will reset",
+        "resets at",
+        "too many requests",
+    )
+    explicit_capacity_phrases = (
+        "usage limit reached",
+        "token limit reached",
+        "rate limit exceeded",
+        "quota exceeded",
+        "context window exceeded",
+        "context length exceeded",
+        "ran out of tokens",
+        "too many requests",
+        "you've hit your",
+        "you have hit your",
+        "you've reached your",
+        "you have reached your",
+    )
+    return (
+        any(phrase in text for phrase in explicit_capacity_phrases)
+        or (any(term in text for term in limit_terms) and any(term in text for term in unable_terms))
+    )
 
 
 def _build_command(
@@ -76,10 +188,82 @@ def _provider_for_command(command: str) -> str:
     return "unknown"
 
 
+def _terminate_provider_process_group(process: subprocess.Popen[str]) -> None:
+    """Stop a timed-out provider and any descendants before fallback starts.
+
+    Critical repair can hand off from Codex to Claude after a provider timeout.
+    Leaving the first CLI's children alive would let two autonomous agents edit
+    the same checkout concurrently.  The process is launched in its own
+    session below, so group signals cannot reach Jane's parent process.
+    """
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except (ProcessLookupError, PermissionError, OSError):
+        # A fast-exiting child may already be gone.  ``communicate`` below
+        # still reaps it; do not surface process-management noise to prompts.
+        pass
+    try:
+        process.communicate(timeout=5)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError, OSError):
+        pass
+    try:
+        process.communicate()
+    except Exception:
+        # The original provider timeout remains the caller-visible result.
+        pass
+
+
+def _run_provider_command(
+    cmd: list[str],
+    *,
+    timeout: int,
+    env: dict[str, str],
+    cwd: str | None,
+    on_process_started: Callable[[int], bool] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    """Run one provider in an isolated process group and collect its output.
+
+    ``on_process_started`` is used only by the critical self-healing runner to
+    persist a PID/start-tick lease before the provider can make edits.  It
+    receives no command, prompt, or output.  If the durable lease cannot be
+    recorded, terminate this newly created group before any fallback can run.
+    """
+    process = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=env,
+        cwd=cwd,
+        start_new_session=True,
+    )
+    if on_process_started is not None:
+        try:
+            leased = on_process_started(int(process.pid))
+        except Exception:
+            leased = False
+        if leased is not True:
+            _terminate_provider_process_group(process)
+            raise ProviderLeaseUnavailable("critical repair provider lease unavailable")
+    try:
+        stdout, stderr = process.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        _terminate_provider_process_group(process)
+        raise
+    return subprocess.CompletedProcess(cmd, int(process.returncode or 0), stdout, stderr)
+
+
 def completion(prompt: str, *, model: str | None = None,
                max_tokens: int = 1024, timeout: int = 60,
                cli: str | None = None,
-               cwd: str | None = None) -> str:
+               cwd: str | None = None,
+               on_process_started: Callable[[int], bool] | None = None,
+               detect_capacity_response: bool = False) -> str:
     """Send a single prompt to the active CLI and return the text response.
 
     Args:
@@ -114,10 +298,12 @@ def completion(prompt: str, *, model: str | None = None,
         subprocess_env["HOME"] = agy_headless_home()
 
     try:
-        result = subprocess.run(
-            cmd, capture_output=True, text=True,
-            timeout=timeout, env=subprocess_env,
+        result = _run_provider_command(
+            cmd,
+            timeout=timeout,
+            env=subprocess_env,
             cwd=cwd if not ("codex" in cmd[0] or cmd[0] == "codex") else None,
+            on_process_started=on_process_started,
         )
 
         if result.returncode != 0:
@@ -132,7 +318,24 @@ def completion(prompt: str, *, model: str | None = None,
             error = f"CLI ({cmd[0]}) returned empty response: {err}"
             raise RuntimeError(error)
 
+        # Critical repair must hand off immediately when a provider returns a
+        # zero-exit quota/token message.  Inspect stderr too: some CLI
+        # versions put a short normal-looking stdout banner beside the actual
+        # capacity notice on stderr.  This remains opt-in so ordinary prose
+        # completion is never reclassified by a broad heuristic.
+        if detect_capacity_response and _looks_like_provider_capacity_response(
+            "\n".join((output, str(result.stderr or "")))
+        ):
+            raise ProviderCapacityResponse("provider reported an exhausted token or usage limit")
+
         return output
+    except subprocess.TimeoutExpired as exc:
+        # ``TimeoutExpired.__str__`` includes the complete command, which for
+        # these CLIs contains the prompt.  Keep both token-meter logs and the
+        # fallback path privacy-safe while making timeout a normal retryable
+        # provider failure.
+        error = f"CLI ({cmd[0]}) timed out after {timeout}s"
+        raise RuntimeError(error) from exc
     except Exception as exc:
         if error is None:
             error = str(exc)
@@ -166,12 +369,22 @@ def completion_with_fallback(prompt: str, *, tier: str = "utility",
             return completion_agent(prompt, max_tokens=max_tokens, timeout=timeout, use_fallback=False, cwd=cwd)
         else:
             return completion_utility(prompt, max_tokens=max_tokens, timeout=timeout, use_fallback=False, cwd=cwd)
-    except RuntimeError as e:
-        err_msg = str(e)
+    except Exception as e:
+        # A raw TimeoutExpired can contain the whole CLI command (and thus the
+        # prompt).  Completion() normalizes it, but preserve that guarantee for
+        # injected/alternate callers too.
+        err_msg = (
+            f"CLI timed out after {timeout}s"
+            if isinstance(e, subprocess.TimeoutExpired)
+            else str(e)
+        )
         # If it's a hard error like "CLI not found" AND not a limit error, raise it.
         # But if it's a limit, quota, timeout, or general failure, try fallback.
-        if not _should_try_fallback(err_msg):
-            raise e
+        if not _should_try_fallback(err_msg) and not isinstance(
+            e,
+            (OSError, subprocess.TimeoutExpired),
+        ):
+            raise
         
         logger.warning(f"Primary LLM failed: {err_msg[:100]}... Attempting fallback.")
 
@@ -196,6 +409,97 @@ def completion_with_fallback(prompt: str, *, tier: str = "utility",
             last_err = fe
             
     raise last_err or RuntimeError("Primary LLM and all fallbacks failed.")
+
+
+def completion_for_critical_repair_result(
+    prompt: str,
+    *,
+    max_tokens: int = 8192,
+    timeout: int = 1800,
+    cwd: str | None = None,
+    provider_order: tuple[str, ...] | list[str] | None = None,
+    on_provider_started: Callable[[str, int], bool] | None = None,
+) -> CriticalRepairCompletion:
+    """Run an explicitly constrained Codex/Claude critical-repair policy.
+
+    This must not inherit the generic provider sequence: a critical repair
+    failure is actionable for Chieh after Codex and Claude have both failed,
+    and the caller then sends one Vessence alert while durable retries remain
+    active.  In particular, do not silently route this policy through Gemini.
+    """
+
+    configured_order = provider_order or ("codex", "claude")
+    provider_keys = {"codex": "openai", "claude": "claude"}
+    normalized_order: list[str] = []
+    for raw_provider in configured_order:
+        provider = str(raw_provider or "").strip().lower()
+        if provider not in provider_keys:
+            raise ValueError("critical repair provider order contains an unsupported provider")
+        if provider not in normalized_order:
+            normalized_order.append(provider)
+    if not normalized_order:
+        raise ValueError("critical repair provider order is empty")
+
+    attempts: list[dict[str, str]] = []
+    for display_name in normalized_order:
+        provider = provider_keys[display_name]
+        config = PROVIDER_MODELS.get(provider)
+        if not isinstance(config, dict):
+            attempts.append({"provider": display_name, "error_type": "ProviderUnavailable"})
+            continue
+        cli = str(config.get("cli") or "").strip()
+        model = str(config.get("smart") or config.get("cheap") or "").strip()
+        if not cli or not model:
+            attempts.append({"provider": display_name, "error_type": "ProviderUnavailable"})
+            continue
+        try:
+            output = completion(
+                prompt,
+                model=model,
+                cli=cli,
+                max_tokens=max_tokens,
+                timeout=timeout,
+                cwd=cwd,
+                detect_capacity_response=True,
+                on_process_started=(
+                    (lambda pid, name=display_name: on_provider_started(name, pid))
+                    if on_provider_started is not None
+                    else None
+                ),
+            )
+            if _looks_like_provider_capacity_response(output):
+                raise ProviderCapacityResponse("provider reported an exhausted token or usage limit")
+            return CriticalRepairCompletion(
+                output=output,
+                provider=display_name,
+                failed_attempts=tuple(attempts),
+            )
+        except Exception as exc:
+            # Do not persist ``str(exc)``: timeout/CLI exceptions can contain
+            # the complete command, including the private repair prompt.
+            attempts.append({"provider": display_name, "error_type": type(exc).__name__})
+
+    raise RepairProvidersExhausted(attempts)
+
+
+def completion_for_critical_repair(
+    prompt: str,
+    *,
+    max_tokens: int = 8192,
+    timeout: int = 1800,
+    cwd: str | None = None,
+    provider_order: tuple[str, ...] | list[str] | None = None,
+    on_provider_started: Callable[[str, int], bool] | None = None,
+) -> str:
+    """Compatibility wrapper returning only the private repair output."""
+    return completion_for_critical_repair_result(
+        prompt,
+        max_tokens=max_tokens,
+        timeout=timeout,
+        cwd=cwd,
+        provider_order=provider_order,
+        on_provider_started=on_provider_started,
+    ).output
 
 
 def completion_orchestrator(

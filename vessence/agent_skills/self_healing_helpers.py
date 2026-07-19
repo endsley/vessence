@@ -210,8 +210,9 @@ def self_heal_job_llm_fallback_section() -> str:
     return """## LLM fallback policy
 - Try Codex/OpenAI first.
 - If Codex is unavailable, token-full, quota-limited, timed out, or otherwise fails, try Claude Code next.
-- If Claude Code is unavailable or fails, try Google's Antigravity CLI (`agy`) next.
-- Record which runner handled the repair, or all runner failures if none can complete it."""
+- If both Codex and Claude Code fail for a critical repair, queue a Vessence repair-failure notice and keep the durable retry active.
+- Do not fall back to another model family for a critical repair without an explicit review.
+- Record only the runner/provider outcome needed to continue the safe repair flow."""
 
 
 def self_heal_job_verification_section() -> str:

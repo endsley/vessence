@@ -50,6 +50,7 @@ from agent_skills.web_automation.profiles import (
     storage_state_path,
     touch_last_used,
 )
+from agent_skills.web_ui_change import recover_website_ui_change
 
 CONCUR_PROFILE_ID = "northeastern_concur"
 CONCUR_PROFILE_NAME = "Northeastern Concur"
@@ -517,6 +518,14 @@ def main(argv: list[str] | None = None) -> int:
     except KeyboardInterrupt:
         return 130
     except Exception as e:
+        recover_website_ui_change(
+            skill="northeastern-concur-expense-report",
+            intent="Open the named Concur expense report and extract its visible expense rows; attachment changes must never be replayed automatically.",
+            operation=args.cmd,
+            exc=e,
+            project_root=Path(__file__).resolve().parents[1],
+            retry_safe=args.cmd == "inspect-report",
+        )
         print(f"ERROR: {e}", file=sys.stderr)
         return 1
 
