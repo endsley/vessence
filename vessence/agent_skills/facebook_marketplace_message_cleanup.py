@@ -116,12 +116,25 @@ async def click_marketplace_folder(page) -> None:
     await page.wait_for_timeout(8_000)
 
 
+async def reset_marketplace_conversation_scroll(page) -> None:
+    """Return the virtualized Marketplace thread list to its first row.
+
+    A full scan leaves the list hundreds of rows down.  Eight small wheel
+    events (the previous implementation) cannot return from that position, so
+    every early candidate was subsequently reported as ``delete_failed`` even
+    though Facebook's Delete chat menu was available.  The list is scrollable
+    only through the pointer, so use enough upward wheel distance to reset it
+    before locating a specific row.
+    """
+    await page.mouse.move(170, 600)
+    for _ in range(30):
+        await page.mouse.wheel(0, -2_000)
+        await page.wait_for_timeout(100)
+
+
 async def scan_conversations(page, *, max_scrolls: int) -> list[Conversation]:
     await click_marketplace_folder(page)
-    await page.mouse.move(170, 600)
-    for _ in range(8):
-        await page.mouse.wheel(0, -1000)
-        await page.wait_for_timeout(150)
+    await reset_marketplace_conversation_scroll(page)
 
     conversations: list[Conversation] = []
     seen_hrefs: set[str] = set()
@@ -166,15 +179,48 @@ async def click_delete_menu_item(page, *, allow_bare_delete: bool = False) -> bo
 
 
 async def confirm_delete(page) -> bool:
+    """Confirm only the visible destructive action in Facebook's dialog.
+
+    Facebook currently exposes an extra, empty accessibility button with the
+    same ``Delete chat`` name as the real confirmation.  Selecting the first
+    matching button is therefore unsafe and does not reliably remove a chat.
+    Scope the search to the dialog and require the button's visible label.
+    """
     for pattern in (r"^Delete chat$", r"^Delete conversation$", r"^Delete$"):
-        button = page.get_by_role("button", name=re.compile(pattern, re.I)).first
+        dialog = page.get_by_role("dialog", name=re.compile(pattern, re.I)).last
         try:
-            if await button.count():
+            if not await dialog.count():
+                continue
+            buttons = dialog.get_by_role("button", name=re.compile(pattern, re.I))
+            for index in range(await buttons.count() - 1, -1, -1):
+                button = buttons.nth(index)
+                if (await button.inner_text()).strip().lower() not in {
+                    "delete chat",
+                    "delete conversation",
+                    "delete",
+                }:
+                    continue
                 await button.click(timeout=5_000)
                 await page.wait_for_timeout(2_000)
                 return True
         except Exception as exc:  # pragma: no cover - live UI fallback
             LOGGER.debug("confirm delete failed for %s: %s", pattern, exc)
+    return False
+
+
+async def wait_for_conversation_removal(page, conversation: Conversation) -> bool:
+    """Verify Facebook removed the just-confirmed row before continuing.
+
+    A click on Facebook's confirmation dialog is not proof of deletion: it can
+    be ignored while the menu is animating.  The row was visible immediately
+    before opening that dialog, so wait for that exact thread URL to disappear
+    from the still-open Marketplace list before processing the next thread.
+    """
+    row = page.locator(f'a[href="{conversation.href}"]').first
+    for _ in range(10):
+        if not await row.count():
+            return True
+        await page.wait_for_timeout(750)
     return False
 
 
@@ -243,10 +289,7 @@ async def try_delete_from_open_chat(page, conversation: Conversation) -> bool:
 
 async def scroll_to_visible_conversation(page, href: str, *, max_scrolls: int = 80) -> bool:
     await click_marketplace_folder(page)
-    await page.mouse.move(170, 600)
-    for _ in range(8):
-        await page.mouse.wheel(0, -1000)
-        await page.wait_for_timeout(150)
+    await reset_marketplace_conversation_scroll(page)
 
     for _ in range(max_scrolls):
         rows = await page.evaluate(VISIBLE_CONVERSATIONS_JS)
@@ -260,6 +303,7 @@ async def scroll_to_visible_conversation(page, href: str, *, max_scrolls: int = 
 
 async def try_delete_from_visible_row(page, conversation: Conversation) -> bool:
     if not await scroll_to_visible_conversation(page, conversation.href):
+        LOGGER.info("row not found for deletion: %s", conversation.title)
         return False
 
     link = page.locator(f'a[href="{conversation.href}"]').first
@@ -269,27 +313,51 @@ async def try_delete_from_visible_row(page, conversation: Conversation) -> bool:
     except Exception as exc:  # pragma: no cover - live UI fallback
         LOGGER.debug("hover failed for %s: %s", conversation.title, exc)
 
-    menu_button = page.get_by_role(
-        "button",
-        name=re.compile(rf"^More options for {re.escape(conversation.title)}$", re.I),
-    ).first
+    # Do not pass a title-derived regular expression to Playwright's role
+    # selector: Marketplace titles can contain '/', which becomes an invalid
+    # selector literal (for example, "13 1/4 by 13 1/4").  Match the aria
+    # label directly instead.
+    menu_name = f"More options for {conversation.title}"
+    menu_button = None
+    buttons = page.locator('[role="button"]')
+    for index in range(await buttons.count()):
+        candidate = buttons.nth(index)
+        if (await candidate.get_attribute("aria-label")) == menu_name:
+            menu_button = candidate
+            break
     try:
-        if await menu_button.count():
-            await menu_button.click(timeout=5_000)
+        if menu_button is not None:
+            # Facebook renders the title cell above this hover-only control.
+            # Dispatch on the confirmed control itself, bypassing that overlay.
+            await menu_button.evaluate("element => element.click()")
             await page.wait_for_timeout(1_000)
             if await click_delete_menu_item(page):
-                return await confirm_delete(page)
+                confirmed = await confirm_delete(page)
+                if not confirmed:
+                    LOGGER.info("delete dialog was not confirmed: %s", conversation.title)
+                    return False
+                deleted = await wait_for_conversation_removal(page, conversation)
+                if not deleted:
+                    LOGGER.info("conversation remained after delete confirmation: %s", conversation.title)
+                return deleted
+            LOGGER.info("Delete chat action was absent from row menu: %s", conversation.title)
+        else:
+            LOGGER.info("row menu was not found: %s", conversation.title)
     except Exception as exc:  # pragma: no cover - live UI fallback
-        LOGGER.debug("row menu delete failed for %s: %s", conversation.title, exc)
+        LOGGER.info("row menu deletion failed for %s: %s", conversation.title, exc)
     return False
 
 
 async def delete_conversation(page, conversation: Conversation) -> bool:
-    if await try_delete_from_open_chat(page, conversation):
+    # Marketplace row menus contain Facebook's supported Delete chat action.
+    # The open-chat information panel has no delete action for these group
+    # chats and its state is persisted, so trying it first can toggle the
+    # panel closed and make the reliable row path fail intermittently.
+    if await try_delete_from_visible_row(page, conversation):
         return True
     await page.keyboard.press("Escape")
     await page.wait_for_timeout(500)
-    return await try_delete_from_visible_row(page, conversation)
+    return await try_delete_from_open_chat(page, conversation)
 
 
 def append_audit(path: Path, record: dict) -> None:
@@ -301,7 +369,7 @@ def append_audit(path: Path, record: dict) -> None:
 async def run_cleanup(args: argparse.Namespace) -> int:
     from playwright.async_api import async_playwright
 
-    keep_titles = tuple(DEFAULT_KEEP_TITLES) + tuple(args.keep_title or ())
+    keep_titles = () if args.include_protected else tuple(DEFAULT_KEEP_TITLES) + tuple(args.keep_title or ())
     audit_path = Path(args.audit_log)
     profile_dir = Path(args.profile_dir)
     effective_delete = bool(args.delete and not args.dry_run)
@@ -385,6 +453,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-scrolls", type=int, default=80)
     parser.add_argument("--max-delete", type=int, default=25)
     parser.add_argument("--stale-days", type=int, default=3)
+    parser.add_argument(
+        "--include-protected",
+        action="store_true",
+        help="Apply the age rule to conversations normally retained as protected.",
+    )
     parser.add_argument("--keep-title", action="append", default=[])
     parser.add_argument(
         "--profile-dir",

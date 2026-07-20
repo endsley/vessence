@@ -1686,6 +1686,139 @@ def test_critical_repair_finishes_when_a_fresh_report_already_recovered_the_inci
     assert "already verified" in report_path.read_text(encoding="utf-8")
 
 
+def test_critical_repair_stops_on_acubliss_baseline_version_review_blocker(monkeypatch, tmp_path):
+    _vessence_home, data_home, waterlily_root, queue = _configure_paths(monkeypatch, tmp_path)
+    incident_path, job_path = _critical_incident(tmp_path, waterlily_root, queue)
+    backend_dir = waterlily_root / "backend"
+    backend_dir.mkdir(parents=True)
+    (backend_dir / "accounting_acubliss_exports.py").write_text(
+        "ACUBLISS_UI_FORMAT_CONTRACT_VERSION = 3\n"
+        "ACUBLISS_PATIENT_NOTES_UI_FORMAT_CONTRACT_VERSION = 2\n",
+        encoding="utf-8",
+    )
+    nightly_dir = data_home / "logs" / "waterlily_nightly_reports"
+    nightly_dir.mkdir(parents=True)
+    (nightly_dir / "latest.json").write_text(
+        json.dumps(
+            {
+                "status": "failed",
+                "mode": "full",
+                "failure_stage": "checking AcuBliss UI format",
+                "acubliss_ui_canary": {"status": "failed", "profile_version": 3},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (nightly_dir / "acubliss-ui-format-baseline.json").write_text(
+        json.dumps({"version": 2}),
+        encoding="utf-8",
+    )
+    (nightly_dir / "acubliss-patient-notes-ui-format-baseline.json").write_text(
+        json.dumps({"version": 1}),
+        encoding="utf-8",
+    )
+
+    report_path = Path(
+        repair.run_repair(
+            incident_path,
+            completion_fn=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                AssertionError("LLM should not run when reviewed baseline metadata is unsupported")
+            ),
+        )
+    )
+
+    stored = json.loads(incident_path.read_text(encoding="utf-8"))
+    assert stored["status"] == "repair_failed"
+    assert stored["repair_last_outcome"] == {
+        "attempt": 0,
+        "kind": "safety_stop",
+        "verification_reason": "manual_review_required",
+        "review_requirement": "acubliss_ui_baseline_version_unsupported",
+        "expected_report_controls_version": 3,
+        "actual_report_controls_version": 2,
+        "expected_patient_notes_version": 2,
+        "actual_patient_notes_version": 1,
+    }
+    assert "Status: blocked" in job_path.read_text(encoding="utf-8")
+    report_text = report_path.read_text(encoding="utf-8")
+    assert "manual_review_required" in report_text
+    assert "acubliss_ui_baseline_version_unsupported" in report_text
+
+
+def test_critical_repair_finishes_when_ui_incident_is_resolved_but_later_full_run_fails_elsewhere(
+    monkeypatch,
+    tmp_path,
+):
+    _vessence_home, data_home, waterlily_root, queue = _configure_paths(monkeypatch, tmp_path)
+    incident_path, job_path = _critical_incident(tmp_path, waterlily_root, queue)
+    incident = json.loads(incident_path.read_text(encoding="utf-8"))
+    incident["created_at"] = "2026-07-18T15:06:13Z"
+    incident["payload"]["stage"] = "refreshing AcuBliss UI format baseline"
+    incident["payload"]["extra"] = {"mode": "acubliss_ui_format_baseline_refresh"}
+    incident_path.write_text(json.dumps(incident), encoding="utf-8")
+
+    backend_dir = waterlily_root / "backend"
+    backend_dir.mkdir(parents=True)
+    (backend_dir / "accounting_acubliss_exports.py").write_text(
+        "ACUBLISS_UI_FORMAT_CONTRACT_VERSION = 3\n"
+        "ACUBLISS_PATIENT_NOTES_UI_FORMAT_CONTRACT_VERSION = 2\n",
+        encoding="utf-8",
+    )
+    nightly_dir = data_home / "logs" / "waterlily_nightly_reports"
+    nightly_dir.mkdir(parents=True)
+    (nightly_dir / "acubliss-ui-format-baseline.json").write_text(
+        json.dumps({"version": 3}),
+        encoding="utf-8",
+    )
+    (nightly_dir / "acubliss-patient-notes-ui-format-baseline.json").write_text(
+        json.dumps({"version": 2}),
+        encoding="utf-8",
+    )
+    (nightly_dir / "latest.json").write_text(
+        json.dumps(
+            {
+                "status": "failed",
+                "mode": "full",
+                "year": 2026,
+                "month": 7,
+                "started_at": "2026-07-20T00:42:52Z",
+                "acubliss_ui_canary": {"status": "passed", "profile_version": 3},
+                "acubliss_patient_notes_ui_canary": {"status": "passed", "profile_version": 2},
+                "acubliss_package_detail_ui_canary": {"status": "passed", "profile_version": 3},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report_path = Path(
+        repair.run_repair(
+            incident_path,
+            completion_fn=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                AssertionError("LLM should not run after the captured UI issue is already resolved")
+            ),
+            regeneration_fn=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                AssertionError("regeneration should not run after the captured UI issue is already resolved")
+            ),
+        )
+    )
+
+    stored = json.loads(incident_path.read_text(encoding="utf-8"))
+    assert stored["status"] == "repair_finished"
+    assert stored["repair_last_outcome"] == {
+        "attempt": 0,
+        "kind": "resolution",
+        "summary_mode": "full",
+        "summary_month": 7,
+        "summary_status": "failed",
+        "summary_year": 2026,
+        "verification_reason": "later_full_run_failed_after_ui_recovery",
+    }
+    assert "Status: completed" in job_path.read_text(encoding="utf-8")
+    report_text = report_path.read_text(encoding="utf-8")
+    assert "later_full_run_failed_after_ui_recovery" in report_text
+    assert "separate incident" in report_text
+
+
 def test_critical_repair_notifies_vessence_once_after_codex_and_claude_exhaustion(monkeypatch, tmp_path):
     _vessence_home, data_home, waterlily_root, queue = _configure_paths(monkeypatch, tmp_path)
     incident_path, _job_path = _critical_incident(tmp_path, waterlily_root, queue)

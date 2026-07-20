@@ -13,8 +13,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/startup_env.sh"
 startup_bootstrap_env
 PYTHON="$PYTHON_BIN"
-MAX_DELETE="${FB_MARKETPLACE_MESSAGE_MAX_DELETE:-25}"
-STALE_DAYS="${FB_MARKETPLACE_MESSAGE_STALE_DAYS:-3}"
+MAX_DELETE="${FB_MARKETPLACE_MESSAGE_MAX_DELETE:-1000}"
+STALE_DAYS="${FB_MARKETPLACE_MESSAGE_STALE_DAYS:-21}"
 
 LOG_DIR="$VESSENCE_DATA_HOME/logs"
 mkdir -p "$LOG_DIR"
@@ -27,6 +27,7 @@ export PYTHONPATH="$VESSENCE_HOME:${PYTHONPATH:-}"
 echo "=== $(date -Iseconds) facebook marketplace message cleanup start ===" >>"$LOG"
 "$PYTHON" "$VESSENCE_HOME/agent_skills/facebook_marketplace_message_cleanup.py" \
   --delete \
+  --include-protected \
   --max-delete "$MAX_DELETE" \
   --stale-days "$STALE_DAYS" \
   >>"$LOG" 2>&1

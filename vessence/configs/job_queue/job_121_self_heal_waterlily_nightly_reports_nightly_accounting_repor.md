@@ -1,5 +1,5 @@
 # Job: Self-heal waterlily_nightly_reports: waterlily_nightly_regeneration_contract
-Status: in_progress
+Status: completed
 Priority: high
 Created: 2026-07-18
 Auto-generated: true
@@ -38,4 +38,4 @@ minimal, verified fix if the evidence supports one.
 - If no safe fix is possible, leave a clear report explaining the blocker and evidence checked.
 
 ## Result
-Automatic critical repair is retrying until a fresh Waterlily nightly report verifies successfully.
+Automatic repair completed for the captured Waterlily AcuBliss UI issue; a later full nightly run passed the AcuBliss preflight and any remaining failure should continue under a separate incident.

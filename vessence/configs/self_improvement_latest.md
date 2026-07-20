@@ -1,17 +1,17 @@
 # Most Recent Nightly Self-Improvement
 
-- Run started: 2026-07-17 23:30:02
-- Report generated: 2026-07-18 01:24:06
-- Total runtime: 6843s
+- Run started: 2026-07-18 23:30:01
+- Report generated: 2026-07-19 01:51:13
+- Total runtime: 8468s
 - Jobs: 8 total, 6 ok, 2 timeout, 0 failed
 - Stable latest report path: `/home/chieh/ambient/vessence/configs/self_improvement_latest.md`
-- Archived copy: `/home/chieh/ambient/vessence-data/reports/self_improvement/self_improvement_20260717_233002.md`
+- Archived copy: `/home/chieh/ambient/vessence-data/reports/self_improvement/self_improvement_20260718_233001.md`
 
 ## TL;DR
 
 - 1. ✓ Auto-Commit WIP (pre) (0.0m)
   - Fixes:
-    - 2026-07-17 23:30:02,435 INFO Committed 5 file(s).
+    - 2026-07-18 23:30:03,920 INFO Committed 42 file(s).
 - 2. ✓ Code Auditor (0.0m)
   - Problems: none detected
   - Fixes: none applied
@@ -19,30 +19,38 @@
   - Problems:
     - Possibly-dead functions: 1.
     - Duplicate function bodies: 11 groups.
-- 4. ⏱ Pipeline Audit (30 prompts) (20.0m)
+- 4. ✓ Pipeline Audit (30 prompts) (5.3m)
   - Problems:
-    - Prompts audited: 6.
-    - Classification failures: 4.
-    - Response failures: 5.
+    - Prompts audited: 5.
+    - Classification failures: 2.
+    - Response failures: 4.
 - 5. ✓ Doc Drift Auditor (0.0m)
   - Problems:
-    - CRON_JOBS.md missing entry for active cron script: run_nightly_current_month_reports.py
+    - CRON_JOBS.md missing entry for active cron script: self_healing_repair.py
     - CRON_JOBS.md claims check_for_updates.py is active but no matching cron entry exists
     - CRON_JOBS.md claims generate_code_map.py is active but no matching cron entry exists
-- 6. ✓ Transcript Quality Review (0.8m)
-  - Fixes:
-    - 2026-07-18 00:05:49,175 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (0 issues)
-    - 2026-07-18 00:05:49,176 INFO self_improve_log: recorded [info] Transcript Review — I reviewed yesterday's conversations and nothing looked off — all turns ha...
-- 7. ✓ Memory Janitor (78.2m)
+- 6. ✓ Transcript Quality Review (0.7m)
   - Problems:
-    - [0;93m2026-07-18 00:53:12.256638771 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-07-18 04:53:12 WARNING] ModelImporter.cpp:739: Make s...
-    - [0;93m2026-07-18 00:56:21.133326880 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-07-18 04:56:21 WARNING] ModelImporter.cpp:739: Make...
-    - [0;93m2026-07-18 00:56:21.133380569 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-07-18 04:56:21 WARNING] ModelImporter.cpp:739: Make...
+    - Transcript review found 2 issues: 2 medium.
+    - Stage 1 classifier returned unknown intent class 'web automation' and fell back to 'others'.
+    - Memory daemon timed out during context building, causing fallback to slow path context retrieval.
   - Fixes:
-    - INFO:agent_skills.self_improve_log:self_improve_log: recorded [medium] Memory Verification — Found 19 stale memories out of 40 checked. Stale memories make J...
-- 8. ✓ Auto-Commit + Push (post) (0.0m)
+    - 2026-07-18 23:51:05,307 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (2 issues)
+    - 2026-07-18 23:51:05,393 INFO self_improve_log: recorded [medium] Transcript Review — Reviewing yesterday's conversations I spotted 2 medium issues. The most...
+- 7. ⏱ Memory Janitor (120.0m)
+  - Problems:
+    - ex' failed (Codex CLI failed (exit code 1): OpenAI Codex v0.144.4
+    - WARNING:jane.automation_runner:Automation provider 'claude' failed (Claude CLI failed (exit code 1): You've hit your org's monthly spend limit · run /usage-c...
+    - WARNING:jane.automation_runner:Automation provider 'codex' failed (Codex CLI failed (exit code 1): OpenAI Codex v0.144.4
+- 8. ✓ Auto-Commit + Push (post) (0.1m)
   - Fixes:
-    - 2026-07-18 01:24:05,754 INFO Pushed successfully.
+    - 2026-07-19 01:51:08,618 INFO Committed 6 file(s).
+    - 2026-07-19 01:51:10,764 INFO Pushed successfully.
+
+**Top follow-ups:**
+
+- Add 'web automation' to the supported intent taxonomy or constrain the Qwen model prompt/schema to only return valid intent categories.
+- Investigate memory daemon service availability, add health checks/retry policies, and optimize memory index query latency.
 
 ## Executive Summary
 
@@ -52,7 +60,7 @@
 ## Stage 1: Auto-Commit WIP (pre)
 
 - Status: `ok`
-- Duration: 0s (0.0 min)
+- Duration: 2s (0.0 min)
 
 ### What It Did
 
@@ -64,7 +72,7 @@
 
 ### Improvements It Made
 
-- 2026-07-17 23:30:02,435 INFO Committed 5 file(s).
+- 2026-07-18 23:30:03,920 INFO Committed 42 file(s).
 
 ### Evidence Files
 
@@ -119,8 +127,8 @@
 
 ## Stage 4: Pipeline Audit (30 prompts)
 
-- Status: `timeout`
-- Duration: 1200s (20.0 min)
+- Status: `ok`
+- Duration: 321s (5.3 min)
 
 ### What It Did
 
@@ -128,12 +136,9 @@
 
 ### Problems It Found
 
-- Job ended with status `timeout`.
-- Prompts audited: 6.
-- Classification failures: 4.
-- Response failures: 5.
-- **right now, you are using the same codex process for each prompt instead of spawn** (others/stage3): You've hit your org's monthly spend limit · run /usage-credits to ask your admin for a higher limit
-- **use the source code as your guide** (todo list/stage3): You've hit your org's monthly spend limit · run /usage-credits to ask your admin for a higher limit
+- Prompts audited: 5.
+- Classification failures: 2.
+- Response failures: 4.
 - **currently, the waterlily site is web only meant for browsers on laptops and comp** (others/stage3): You've hit your org's monthly spend limit · run /usage-credits to ask your admin for a higher limit
 - **# Task: Self-heal android_crash_report: === VESSENCE CRASH REPORT ===
 
@@ -157,11 +162,10 @@
 
 ### Problems It Found
 
-- CRON_JOBS.md missing entry for active cron script: run_nightly_current_month_reports.py
+- CRON_JOBS.md missing entry for active cron script: self_healing_repair.py
 - CRON_JOBS.md claims check_for_updates.py is active but no matching cron entry exists
 - CRON_JOBS.md claims generate_code_map.py is active but no matching cron entry exists
 - CRON_JOBS.md claims iterative_refactor_scheduler.py is active but no matching cron entry exists
-- CRON_JOBS.md claims nightly_update_current_month_reports.py is active but no matching cron entry exists
 - CRON_JOBS.md claims notify_updates.py is active but no matching cron entry exists
 - CRON_JOBS.md claims usb_sync.py is active but no matching cron entry exists
 
@@ -177,7 +181,7 @@
 ## Stage 6: Transcript Quality Review
 
 - Status: `ok`
-- Duration: 46s (0.8 min)
+- Duration: 39s (0.7 min)
 
 ### What It Did
 
@@ -185,12 +189,19 @@
 
 ### Problems It Found
 
-- No problems were detected in the available logs/reports.
+- Transcript review found 2 issues: 2 medium.
+- Stage 1 classifier returned unknown intent class 'web automation' and fell back to 'others'.
+- Memory daemon timed out during context building, causing fallback to slow path context retrieval.
 
 ### Improvements It Made
 
-- 2026-07-18 00:05:49,175 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (0 issues)
-- 2026-07-18 00:05:49,176 INFO self_improve_log: recorded [info] Transcript Review — I reviewed yesterday's conversations and nothing looked off — all turns handled cleanly.
+- 2026-07-18 23:51:05,307 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (2 issues)
+- 2026-07-18 23:51:05,393 INFO self_improve_log: recorded [medium] Transcript Review — Reviewing yesterday's conversations I spotted 2 medium issues. The most urgent was: Stage 1 classifi
+
+### Follow-Up Fixes Recommended
+
+- Add 'web automation' to the supported intent taxonomy or constrain the Qwen model prompt/schema to only return valid intent categories.
+- Investigate memory daemon service availability, add health checks/retry policies, and optimize memory index query latency.
 
 ### Evidence Files
 
@@ -199,8 +210,8 @@
 
 ## Stage 7: Memory Janitor
 
-- Status: `ok`
-- Duration: 4694s (78.2 min)
+- Status: `timeout`
+- Duration: 7200s (120.0 min)
 
 ### What It Did
 
@@ -208,15 +219,16 @@
 
 ### Problems It Found
 
-- [0;93m2026-07-18 00:53:12.256638771 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-07-18 04:53:12 WARNING] ModelImporter.cpp:739: Make sure input token_type_ids has Int64 binding.[m
-- [0;93m2026-07-18 00:56:21.133326880 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-07-18 04:56:21 WARNING] ModelImporter.cpp:739: Make sure input input_ids has Int64 binding.[m
-- [0;93m2026-07-18 00:56:21.133380569 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-07-18 04:56:21 WARNING] ModelImporter.cpp:739: Make sure input attention_mask has Int64 binding.[m
-- [0;93m2026-07-18 00:56:21.133396063 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-07-18 04:56:21 WARNING] ModelImporter.cpp:739: Make sure input token_type_ids has Int64 binding.[m
-- [0;93m2026-07-18 00:56:21.347466175 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-07-18 04:56:21 WARNING] ModelImporter.cpp:739: Make sure input input_ids has Int64 binding.[m
+- Job ended with status `timeout`.
+- ex' failed (Codex CLI failed (exit code 1): OpenAI Codex v0.144.4
+- WARNING:jane.automation_runner:Automation provider 'claude' failed (Claude CLI failed (exit code 1): You've hit your org's monthly spend limit · run /usage-credits to ask your admin for a higher limit); falling back to 'gemini'.
+- WARNING:jane.automation_runner:Automation provider 'codex' failed (Codex CLI failed (exit code 1): OpenAI Codex v0.144.4
+- WARNING:jane.automation_runner:Automation provider 'claude' failed (Claude CLI failed (exit code 1): You've hit your org's monthly spend limit · run /usage-credits to ask your admin for a higher limit); falling back to 'gemini'.
+- WARNING:jane.automation_runner:Automation provider 'codex' failed (Codex CLI failed (exit code 1): OpenAI Codex v0.144.4
 
 ### Improvements It Made
 
-- INFO:agent_skills.self_improve_log:self_improve_log: recorded [medium] Memory Verification — Found 19 stale memories out of 40 checked. Stale memories make Jane give wrong answers about her own
+- No concrete improvement was recorded in the available logs/reports.
 
 ### Evidence Files
 
@@ -225,7 +237,7 @@
 ## Stage 8: Auto-Commit + Push (post)
 
 - Status: `ok`
-- Duration: 2s (0.0 min)
+- Duration: 3s (0.1 min)
 
 ### What It Did
 
@@ -237,7 +249,8 @@
 
 ### Improvements It Made
 
-- 2026-07-18 01:24:05,754 INFO Pushed successfully.
+- 2026-07-19 01:51:08,618 INFO Committed 6 file(s).
+- 2026-07-19 01:51:10,764 INFO Pushed successfully.
 
 ### Evidence Files
 

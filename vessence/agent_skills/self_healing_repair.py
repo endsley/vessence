@@ -1342,6 +1342,11 @@ def _safe_retry_context(outcome: dict[str, Any] | None) -> dict[str, Any]:
         "recovery_preflight",
         "summary_fresh",
         "verification_reason",
+        "review_requirement",
+        "expected_report_controls_version",
+        "actual_report_controls_version",
+        "expected_patient_notes_version",
+        "actual_patient_notes_version",
     }
     safe = {key: outcome[key] for key in allowed if key in outcome}
     provider = str(outcome.get("provider") or "").strip().lower()
@@ -1638,6 +1643,18 @@ _SAFE_NIGHTLY_CANARY_FIELDS = (
     "dasys_payment_ui_canary",
     "dasys_files_ui_canary",
 )
+_WATERLILY_ACUBLISS_UI_STRUCTURAL_STAGES = frozenset({
+    "refreshing AcuBliss UI format baseline",
+    "checking AcuBliss UI format",
+    "checking AcuBliss patient Notes UI format",
+    "inspecting AcuBliss UI format baseline",
+    "approving reviewed AcuBliss UI format baseline",
+})
+_WATERLILY_ACUBLISS_UI_STRUCTURAL_MODES = frozenset({
+    "acubliss_ui_format_baseline_refresh",
+    "acubliss_ui_format_baseline_inspection",
+    "acubliss_ui_format_baseline_approval",
+})
 
 
 def _verify_waterlily_report_rebuild_evidence(
@@ -2060,6 +2077,156 @@ def _existing_verified_waterlily_recovery(incident: dict[str, Any]) -> dict[str,
         require_full=True,
     )
     return outcome if outcome.get("verification_reason") == "verified" else None
+
+
+def _waterlily_expected_acubliss_baseline_versions(project_root: Path) -> tuple[int, int] | None:
+    source_path = project_root / "backend" / "accounting_acubliss_exports.py"
+    try:
+        text = source_path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    ui_match = re.search(r"^ACUBLISS_UI_FORMAT_CONTRACT_VERSION\s*=\s*(\d+)\s*$", text, flags=re.MULTILINE)
+    notes_match = re.search(
+        r"^ACUBLISS_PATIENT_NOTES_UI_FORMAT_CONTRACT_VERSION\s*=\s*(\d+)\s*$",
+        text,
+        flags=re.MULTILINE,
+    )
+    if ui_match is None or notes_match is None:
+        return None
+    return int(ui_match.group(1)), int(notes_match.group(1))
+
+
+def _waterlily_baseline_version(path: Path) -> int | None:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    value = payload.get("version") if isinstance(payload, dict) else None
+    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else None
+
+
+def _waterlily_summary_or_incident_points_to_acubliss_ui_review(incident: dict[str, Any]) -> bool:
+    payload = incident.get("payload") if isinstance(incident.get("payload"), dict) else {}
+    extra = payload.get("extra") if isinstance(payload.get("extra"), dict) else {}
+    if str(extra.get("mode") or "") in _WATERLILY_ACUBLISS_UI_STRUCTURAL_MODES:
+        return True
+    if str(payload.get("stage") or "") in _WATERLILY_ACUBLISS_UI_STRUCTURAL_STAGES:
+        return True
+    summary_path = VESSENCE_DATA_HOME / WATERLILY_NIGHTLY_SUMMARY
+    try:
+        summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    except Exception:
+        return False
+    if not isinstance(summary, dict):
+        return False
+    if str(summary.get("mode") or "") in _WATERLILY_ACUBLISS_UI_STRUCTURAL_MODES:
+        return True
+    if str(summary.get("failure_stage") or "") in _WATERLILY_ACUBLISS_UI_STRUCTURAL_STAGES:
+        return True
+    for key in ("acubliss_ui_canary", "acubliss_patient_notes_ui_canary"):
+        value = summary.get(key)
+        if isinstance(value, dict) and str(value.get("status") or "") == "failed":
+            return True
+    return False
+
+
+def _waterlily_manual_review_blocker(
+    incident: dict[str, Any],
+    project_root: Path,
+) -> dict[str, Any] | None:
+    """Return a safe terminal blocker when reviewed baseline metadata is stale."""
+    if project_root != _waterlily_project_root():
+        return None
+    if not _waterlily_summary_or_incident_points_to_acubliss_ui_review(incident):
+        return None
+    expected = _waterlily_expected_acubliss_baseline_versions(project_root)
+    if expected is None:
+        return None
+    expected_ui_version, expected_notes_version = expected
+    baseline_dir = (VESSENCE_DATA_HOME / WATERLILY_NIGHTLY_SUMMARY).parent
+    actual_ui_version = _waterlily_baseline_version(baseline_dir / "acubliss-ui-format-baseline.json")
+    actual_notes_version = _waterlily_baseline_version(
+        baseline_dir / "acubliss-patient-notes-ui-format-baseline.json"
+    )
+    if actual_ui_version is None or actual_notes_version is None:
+        return None
+    if actual_ui_version == expected_ui_version and actual_notes_version == expected_notes_version:
+        return None
+    return {
+        "kind": "safety_stop",
+        "verification_reason": "manual_review_required",
+        "review_requirement": "acubliss_ui_baseline_version_unsupported",
+        "expected_report_controls_version": expected_ui_version,
+        "actual_report_controls_version": actual_ui_version,
+        "expected_patient_notes_version": expected_notes_version,
+        "actual_patient_notes_version": actual_notes_version,
+    }
+
+
+def _waterlily_ui_issue_resolved_but_later_run_failed(
+    incident: dict[str, Any],
+    project_root: Path,
+) -> dict[str, Any] | None:
+    """Stop a resolved AcuBliss UI incident from monopolizing later retries.
+
+    Once the approved AcuBliss baselines match the checked-in contract
+    versions, a later full nightly run that passes the AcuBliss preflight has
+    already moved beyond the original UI-format failure.  If that later run
+    still fails, this incident should release the project repair lease and let
+    the remaining failure surface through the ordinary current-period capture
+    path instead of repeatedly retrying the now-resolved UI incident.
+    """
+    if project_root != _waterlily_project_root():
+        return None
+    if not _waterlily_summary_or_incident_points_to_acubliss_ui_review(incident):
+        return None
+    expected = _waterlily_expected_acubliss_baseline_versions(project_root)
+    if expected is None:
+        return None
+    expected_ui_version, expected_notes_version = expected
+    baseline_dir = (VESSENCE_DATA_HOME / WATERLILY_NIGHTLY_SUMMARY).parent
+    actual_ui_version = _waterlily_baseline_version(baseline_dir / "acubliss-ui-format-baseline.json")
+    actual_notes_version = _waterlily_baseline_version(
+        baseline_dir / "acubliss-patient-notes-ui-format-baseline.json"
+    )
+    if actual_ui_version != expected_ui_version or actual_notes_version != expected_notes_version:
+        return None
+    reference = _parse_iso(incident.get("repair_started_at")) or _parse_iso(incident.get("created_at"))
+    if reference is None:
+        return None
+    try:
+        summary = json.loads((VESSENCE_DATA_HOME / WATERLILY_NIGHTLY_SUMMARY).read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    if not isinstance(summary, dict) or str(summary.get("status") or "") != "failed":
+        return None
+    if str(summary.get("mode") or "") != "full":
+        return None
+    started_at = _parse_iso(summary.get("started_at"))
+    if started_at is None or started_at < reference:
+        return None
+    expected_year, expected_month = _expected_period(incident)
+    if expected_year is not None and summary.get("year") != expected_year:
+        return None
+    if expected_month is not None and summary.get("month") != expected_month:
+        return None
+    required_canaries = (
+        "acubliss_ui_canary",
+        "acubliss_patient_notes_ui_canary",
+        "acubliss_package_detail_ui_canary",
+    )
+    for key in required_canaries:
+        value = summary.get(key)
+        if not isinstance(value, dict) or str(value.get("status") or "") != "passed":
+            return None
+    return {
+        "kind": "resolution",
+        "summary_status": "failed",
+        "summary_mode": "full",
+        "summary_year": summary.get("year") if isinstance(summary.get("year"), int) else None,
+        "summary_month": summary.get("month") if isinstance(summary.get("month"), int) else None,
+        "verification_reason": "later_full_run_failed_after_ui_recovery",
+    }
 
 
 def _waterlily_nightly_freshness_grace_seconds() -> int:
@@ -2790,6 +2957,62 @@ def run_repair(
                 incident,
                 "completed",
                 "Automatic repair completed after a fresh Waterlily nightly report was verified.",
+            )
+            return finish()
+        blocker = _waterlily_manual_review_blocker(incident, project_root)
+        if blocker is not None:
+            blocker["attempt"] = attempt
+            _append_safe_attempt_report(report_path, blocker)
+            _append_private_text(
+                report_path,
+                "\n- Status: `repair_failed` (manual review required; autonomous baseline approval is forbidden)\n",
+            )
+            _write_incident_update(
+                incident_path,
+                status="repair_failed",
+                repair_finished_at=_iso(),
+                repair_attempts=attempt,
+                repair_last_outcome=_safe_retry_context(blocker),
+                repair_report_path=str(report_path),
+                repair_output_chars=0,
+            )
+            _set_job_status(
+                incident,
+                "blocked",
+                (
+                    "Automatic repair stopped: Waterlily AcuBliss UI baseline metadata "
+                    "is unsupported by the current code and requires reviewed approval."
+                ),
+            )
+            return finish()
+        resolved = _waterlily_ui_issue_resolved_but_later_run_failed(incident, project_root)
+        if resolved is not None:
+            resolved["attempt"] = attempt
+            _append_safe_attempt_report(report_path, resolved)
+            _append_private_text(
+                report_path,
+                (
+                    "\n- Status: `repair_finished` (the AcuBliss UI failure for this incident no longer reproduces; "
+                    "a later full run failed elsewhere and should proceed as a separate incident)\n"
+                ),
+            )
+            _write_incident_update(
+                incident_path,
+                status="repair_finished",
+                repair_finished_at=_iso(),
+                repair_attempts=attempt,
+                repair_last_outcome=_safe_retry_context(resolved),
+                repair_report_path=str(report_path),
+                repair_output_chars=0,
+            )
+            _set_job_status(
+                incident,
+                "completed",
+                (
+                    "Automatic repair completed for the captured Waterlily AcuBliss UI issue; "
+                    "a later full nightly run passed the AcuBliss preflight and any remaining "
+                    "failure should continue under a separate incident."
+                ),
             )
             return finish()
     while True:
