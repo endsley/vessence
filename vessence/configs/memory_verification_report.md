@@ -1,23 +1,22 @@
-# Memory Verification Report — 2026-07-18 01:23
+# Memory Verification Report — 2026-07-21 01:35
 
-Checked: 40 | Stale: 19 | Fixed: 19 | Deleted: 0 | Errors: 0 | Skipped recent: 130
+Checked: 40 | Stale: 18 | Fixed: 18 | Deleted: 0 | Errors: 0 | Skipped recent: 138
 
-- **UPDATED** `5001554f-1cc` — Confirmed from actual repository files and live crontab: Codex was right that the old memory's 02:00/live-crontab claim is stale, while the wrapper and harvest-then-summarize pipeline remain correct.
-- **UPDATED** `1ec8aa82-4b3` — Actual files confirm the stack, absent legacy directory, no README legacy reference, and production service teaching-app-v2; Codex was essentially right, with the nuance that CLAUDE.md uses the tilde path.
-- **UPDATED** `eef09673-adb` — Verified actual code and environment; Codex was right that the stored memory is truncated at the final path.
-- **UPDATED** `a04927a6-a64` — Confirmed from git status/log, .gitignore, tracked/ignored file checks, and the backend/frontend source; the old memory had stale HEAD/main details and was truncated.
-- **UPDATED** `52389d73-e52` — Verified in code: the schema and UI details are still true, but teacher.py no longer strips/stores directly; it delegates to create_professor_section.
-- **UPDATED** `acacc0e7-035` — Read the actual files: all path/class claims still hold, but q2.py’s docstring says “HW2 A2 — Chemistry Mixing,” not “Chemistry Mixin.”
-- **UPDATED** `cd2e63a1-51a` — Confirmed in code: accounting.py has save/load helpers, accounting_fsb_bank.py saves uploads after a successful FSB run, nightly_update_current_month_reports.py reloads them and calls use_cache=False, and crontab runs the wrapper daily at 01:30. Git history/blame attributes the original implementation to 2026-06-25, not 2026-06-24; the restart note is stale.
-- **UPDATED** `95db60cc-111` — Confirmed from the completed job doc, local systemd service files, live Cloudflare zone/DNS/tunnel configuration, and local/live HTTP probes; the old memory had the stale job path and omitted the current backend routing.
-- **UPDATED** `d17c2f11-9aa` — Confirmed from the actual systemd unit files and backend/main.py; Codex was right that only the waterlily-auth.service WorkingDirectory/ExecStart detail was stale.
-- **UPDATED** `aaf029b2-47f` — Confirmed in README.md and agent_skills/edu_homework_audit.py that Vessence teaching-app DB access is via local Cloud SQL Auth Proxy on 127.0.0.1:3307; repo search found no ipify or public-IP Cloud SQL allowlist logic. Original memory was truncated and needed the Vessence exception clarified.
-- **UPDATED** `8490fd20-135` — Confirmed in actual code: events.py/schema/route exist, but /events/index.html only loads auth.js and public.js and contains static event markup, with no /api/events fetch or eventlist.js load.
-- **UPDATED** `7e71fb40-863` — Verified backend/main.py has active /admin, /admin/accounting, /admin/events, /studio, and /api/space-requests routes; /admin/jane only appears in ARCHITECTURE.md as a removed route surface.
-- **UPDATED** `80372137-8b7` — Verified the actual repository files; Codex was right that the architecture claims hold and the stale part was the truncated GCP project id.
-- **UPDATED** `7373c511-53a` — Confirmed from the actual model, migrations, form parser, runtime renderer, and sandbox code; the old memory had the parser location partially wrong and omitted script mode/new variable kinds.
-- **UPDATED** `426c9797-dcf` — Codex was right: the extractor still exists, but EXTRACT_KEYS moved to short_term_structured.py and now includes purpose/scope/outcome/current_status; should_skip now permits those work-detail fields.
-- **UPDATED** `2bca4180-d4d` — Read the Waterlily templates/scripts: the paid appointment disclosure rows and listed fields remain, but the section heading is now set to Appointments of the selected month, not Paid Appointments.
-- **UPDATED** `c35535a3-eb0` — Codex was right: the function and hint table moved, the Terro/pest hints are absent, deterministic fallback is Other expenses with blank subcategory, and Gemma can later override fallback categories.
-- **UPDATED** `b7c370b1-fce` — Confirmed from startup_code/auto_pull.sh, startup_code/startup_env.sh, live crontab, and configs/crontab_backup.txt; the old memory's explicit AMBIENT_BASE/Python path claims are stale.
-- **UPDATED** `89e50333-91d` — Stale. Code confirms the migration/model still exist, but parse_variables_form/build_problem_attrs moved to custom_problem_forms.py, runtime/previews/sandbox code is split out, rows are module_id-scoped, and script-mode exists.
+- **UPDATED** `acccce19-73d` — Confirmed in migrations 0032/0033/0034/0048, app/db/models.py, app/problems/base.py, and app/services/prompts.py; the original DB-only/current-runtime wording is stale.
+- **UPDATED** `ce382ed9-746` — Actual code confirms the architecture; only the UI template path was stale: _modules_pane is absent and _modules_panel.html is current.
+- **UPDATED** `fd478e39-b62` — Verified against agent_skills/google_cloud_receipts.py and agent_skills/google_cloud_receipt_utils.py; Codex was right that the existing memory is accurate but truncated/incomplete.
+- **UPDATED** `136c24ff-98c` — Code confirms the workflow and Codex's stale verdict: the stored memory is truncated at the default output detail, and validate_receipt_request requires either count or at least one date bound.
+- **UPDATED** `da8286ca-8ab` — Confirmed from jane/config.py, /home/chieh/ambient/vessence-data/.env, memory/v1/janitor_memory.py, jane/automation_runner.py, and agent_skills/claude_cli_llm.py. The stale part was JANE_BRAIN=codex; live .env now has JANE_BRAIN=openai.
+- **UPDATED** `ef1bd7ff-8bd` — Confirmed from actual q1.py–q10.py: Q1–Q9 are two-entry vectors, but q10.py returns answer_type="number" with scalar solution=derivative.
+- **UPDATED** `fa8de932-f4d` — Confirmed from q6.py through q10.py: Q6–Q9 still match, but Q10 is now a chain-rule-along-a-parameterized-path numeric derivative, not constrained maximization.
+- **UPDATED** `dca272e8-326` — Confirmed from actual code: attempts.py imports REGISTRY only, not problem_sort_key; the old memory was truncated and partially wrong.
+- **UPDATED** `e3bd58d1-099` — Verified the actual q1.py-q16.py code; Codex was right and the existing memory is truncated after CommonProbDi.
+- **UPDATED** `314ba95a-836` — Verified current code: deep-link logic is in app/static/admin-home.js with consumedHash/hashchange handling; app/templates/admin/home.html only loads that script, and module cards still use id="module-{{ m.id }}".
+- **UPDATED** `8f16fbf6-501` — Confirmed run_dev_local.sh and the systemd unit match the memory except the enabled symlink path; the actual symlink includes the -dev.service suffix.
+- **UPDATED** `310bdda4-225` — Codex was right: README and cloud scaling scripts match the infrastructure claims, and app/routers/student.py plus app/services/student_attempt_flow.py implement owned unfinished assignment-attempt deletion while rejecting finished attempts.
+- **UPDATED** `migrated-lon` — Codex was broadly right after code inspection; I corrected route attribution and public asset wiring details.
+- **UPDATED** `migrated-lon` — Codex was right: `/admin/jane/*` is gone, but current watchdog/self-healing code still invokes Codex/Claude in constrained failure paths, while Gemma receipt enrichment uses local Ollama.
+- **UPDATED** `migrated-lon` — Confirmed in actual code: load_secret_key is in backend/app_config.py; backend/main.py has no WL_SECRET_KEY/load_secret_key refs; .auth/wl_secret_key and .auth/secrets.env exist. Update needed because the old memory was truncated.
+- **UPDATED** `241a6b12-78d` — Confirmed by fetching origin/master and grepping templates/index3.html; production and App Engine routing also match Codex's verdict.
+- **UPDATED** `52643b31-fd0` — Verified the repo, README/config constants, Alembic files plus `alembic heads`, and app/routers/health.py; Codex was right that the original memory was only partially wrong because it was truncated.
+- **UPDATED** `63af9718-f11` — Read the actual .env and code paths; Codex was right on the visible claims, but the stored memory is truncated after “litera”, so it should be replaced with the complete corrected version.
