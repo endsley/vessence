@@ -9,11 +9,14 @@ from agent_skills.nutricost_deal_utils import (
     best_detected_discount,
     build_deal_alert_content,
     clean_url,
+    deal_alerted_within,
+    deal_key,
     default_monitor_state,
     extract_deal_links,
     extract_discounts,
     is_marketing_message,
     nutricost_message_text,
+    record_deal_alert,
     record_alerted_message,
 )
 
@@ -103,12 +106,13 @@ def test_nutricost_helpers_are_reexported_from_monitor():
     assert nutricost_deal_monitor.extract_deal_links is extract_deal_links
     assert nutricost_deal_monitor.default_monitor_state is default_monitor_state
     assert nutricost_deal_monitor.alerted_message_ids is alerted_message_ids
+    assert nutricost_deal_monitor.record_deal_alert is record_deal_alert
     assert nutricost_deal_monitor.record_alerted_message is record_alerted_message
 
 
 def test_alert_state_helpers_preserve_default_and_sorted_alerted_ids():
     state = default_monitor_state()
-    assert state == {"alerted_message_ids": []}
+    assert state == {"alerted_message_ids": [], "recent_deal_alerts": []}
     assert alerted_message_ids(state) == set()
 
     record_alerted_message(state, "msg-b")
@@ -116,7 +120,22 @@ def test_alert_state_helpers_preserve_default_and_sorted_alerted_ids():
     record_alerted_message(state, "msg-b")
 
     assert alerted_message_ids(state) == {"msg-a", "msg-b"}
-    assert state == {"alerted_message_ids": ["msg-a", "msg-b"]}
+    assert state == {"alerted_message_ids": ["msg-a", "msg-b"], "recent_deal_alerts": []}
+
+
+def test_deal_alert_deduplication_uses_promo_code_and_three_day_window():
+    now = dt.datetime(2026, 7, 20, 9, 0, tzinfo=NY)
+    state = default_monitor_state()
+    summer_key = deal_key(35, "Use code SUMMER35 for 35% off")
+
+    assert summer_key == "discount:35;code:SUMMER35"
+    assert deal_key(35, "35% off sitewide") == "discount:35"
+    record_deal_alert(state, message_id="summer", key=summer_key, alerted_at=now)
+
+    assert deal_alerted_within(state, summer_key, now=now + dt.timedelta(days=3))
+    assert not deal_alerted_within(state, summer_key, now=now + dt.timedelta(days=3, seconds=1))
+    assert not deal_alerted_within(state, deal_key(35, "Use code FALL35 for 35% off"), now=now)
+    assert state["alerted_message_ids"] == ["summer"]
 
 
 def test_is_marketing_message_requires_nutricost_sender_and_bulk_signal():
@@ -244,6 +263,46 @@ def test_process_message_dry_run_alert_does_not_mutate_state_or_trash():
     assert outcome == "would_alert"
     assert service.trashed == []
     assert state == {"alerted_message_ids": []}
+
+
+def test_process_message_suppresses_same_deal_alerted_within_three_days(monkeypatch):
+    day = dt.date(2026, 6, 29)
+    now = dt.datetime(2026, 6, 30, 9, 0, tzinfo=NY)
+    state = default_monitor_state()
+    record_deal_alert(
+        state,
+        message_id="prior-deal",
+        key=deal_key(40, "40% off"),
+        alerted_at=now - dt.timedelta(days=2, hours=23),
+    )
+    service = _Service({
+        "same-deal": _nutricost_message(
+            dt.datetime(2026, 6, 29, 9, 0, tzinfo=NY),
+            "40% off",
+            snippet="40% off https://www.nutricost.com/products/creatine",
+        )
+    })
+    monkeypatch.setattr(nutricost_deal_monitor, "send_deal_alert", lambda **kwargs: None)
+
+    outcome = nutricost_deal_monitor.process_message(
+        service,
+        "same-deal",
+        day,
+        threshold=35,
+        dry_run=False,
+        state=state,
+        now=now,
+    )
+
+    assert outcome == "duplicate_deal"
+    assert service.trashed == []
+    assert state["alerted_message_ids"] == ["prior-deal"]
+
+
+def test_parse_args_defaults_nutricost_alert_threshold_to_35(monkeypatch):
+    monkeypatch.setattr("sys.argv", ["nutricost_deal_monitor.py"])
+
+    assert nutricost_deal_monitor.parse_args().threshold == 35
 
 
 def test_count_nutricost_messages_uses_threshold_state_and_failure_outcome():

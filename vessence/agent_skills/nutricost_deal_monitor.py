@@ -2,8 +2,9 @@
 """Daily Nutricost marketing deal monitor.
 
 At 5 AM, scan yesterday's Nutricost marketing emails. Trash messages whose
-largest advertised discount is below the threshold. For qualifying messages,
-send Chieh a link from the juliaprocess Gmail account. Also trash any
+largest advertised discount is below 35%. For qualifying messages, send Chieh
+a link from the juliaprocess Gmail account, unless the same deal was alerted
+within the prior three days. Also trash any
 CrunchLabs messages from the same local-day window, older Amazon, Google Maps,
 LinkedIn, Redfin, or approved low-priority newsletter/promotion messages after
 their retention window, and Google Calendar messages whose event date/time has
@@ -75,11 +76,14 @@ from agent_skills.nutricost_deal_utils import (
     best_detected_discount,
     build_deal_alert_content,
     clean_url,
+    deal_alerted_within,
+    deal_key,
     default_monitor_state,
     extract_deal_links,
     extract_discounts,
     is_marketing_message,
     nutricost_message_text,
+    record_deal_alert,
     record_alerted_message,
 )
 
@@ -296,7 +300,16 @@ def send_deal_alert(
     LOGGER.info("Sent alert from %s: %s", result.get("from_email", ALERT_SENDER), result.get("message_id"))
 
 
-def process_message(service, message_id: str, day: dt.date, threshold: int, dry_run: bool, state: dict) -> str:
+def process_message(
+    service,
+    message_id: str,
+    day: dt.date,
+    threshold: int,
+    dry_run: bool,
+    state: dict,
+    *,
+    now: dt.datetime | None = None,
+) -> str:
     message = read_message(service, message_id)
     local_date = message_local_date(message)
     if local_date != day:
@@ -322,6 +335,12 @@ def process_message(service, message_id: str, day: dt.date, threshold: int, dry_
         LOGGER.info("Already alerted for qualifying message %s", message_id)
         return "already_alerted"
 
+    alert_time = now or dt.datetime.now(dt.timezone.utc)
+    key = deal_key(best_discount, text)
+    if deal_alerted_within(state, key, now=alert_time):
+        LOGGER.info("Skipped duplicate Nutricost deal %s for message %s", key, message_id)
+        return "duplicate_deal"
+
     send_deal_alert(
         subject=subject,
         message_date=parsed_message_date(headers),
@@ -331,7 +350,12 @@ def process_message(service, message_id: str, day: dt.date, threshold: int, dry_
         dry_run=dry_run,
     )
     if not dry_run:
-        record_alerted_message(state, message_id)
+        record_deal_alert(
+            state,
+            message_id=message_id,
+            key=key,
+            alerted_at=alert_time,
+        )
     return "alerted" if not dry_run else "would_alert"
 
 
@@ -615,7 +639,7 @@ def build_unread_cleanup_query(older_than_days: int, include_trash: bool) -> str
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--date", help="Local date to scan, YYYY-MM-DD. Defaults to yesterday.")
-    parser.add_argument("--threshold", type=int, default=30, help="Minimum percent discount to alert on.")
+    parser.add_argument("--threshold", type=int, default=35, help="Minimum percent discount to alert on.")
     parser.add_argument("--dry-run", action="store_true", help="Log actions without deleting or sending.")
     parser.add_argument("--include-trash", action="store_true", help="Include Trash in the search. Useful for tests.")
     return parser.parse_args()

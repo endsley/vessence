@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import datetime as dt
 import html
 import re
 
@@ -9,6 +10,7 @@ from agent_skills.gmail_message_utils import header_map, message_text
 
 
 NUTRICOST_FROM = "support@nutricost.com"
+DEAL_ALERT_DEDUPLICATION_WINDOW = dt.timedelta(days=3)
 
 
 @dataclass(frozen=True)
@@ -18,7 +20,7 @@ class DealAlertContent:
 
 
 def default_monitor_state() -> dict:
-    return {"alerted_message_ids": []}
+    return {"alerted_message_ids": [], "recent_deal_alerts": []}
 
 
 def alerted_message_ids(state: dict) -> set:
@@ -29,6 +31,82 @@ def record_alerted_message(state: dict, message_id: str) -> None:
     alerted = alerted_message_ids(state)
     alerted.add(message_id)
     state["alerted_message_ids"] = sorted(alerted)
+
+
+def deal_key(discount: int, text: str) -> str:
+    """Return a stable identity for an advertised deal.
+
+    A promo code distinguishes separate offers with the same percentage. When
+    no code is advertised, the percentage is the only reliable deal identity
+    available in a marketing message.
+    """
+    normalized = " ".join(text.lower().split())
+    code_patterns = (
+        r"\b(?:use|with|enter)\s+(?:promo(?:tional)?\s+)?code\s*[:#-]?\s*[\"']?([a-z0-9]{4,24})\b",
+        r"\b(?:promo(?:tional)?\s+)?code\s*[:#-]\s*[\"']?([a-z0-9]{4,24})\b",
+    )
+    for pattern in code_patterns:
+        match = re.search(pattern, normalized, flags=re.IGNORECASE)
+        if match:
+            return f"discount:{discount};code:{match.group(1).upper()}"
+    return f"discount:{discount}"
+
+
+def _as_utc(value: dt.datetime) -> dt.datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=dt.timezone.utc)
+    return value.astimezone(dt.timezone.utc)
+
+
+def _alerted_at(entry: object) -> dt.datetime | None:
+    if not isinstance(entry, dict):
+        return None
+    value = entry.get("alerted_at")
+    if not isinstance(value, str):
+        return None
+    try:
+        return _as_utc(dt.datetime.fromisoformat(value))
+    except ValueError:
+        return None
+
+
+def deal_alerted_within(
+    state: dict,
+    key: str,
+    *,
+    now: dt.datetime,
+    window: dt.timedelta = DEAL_ALERT_DEDUPLICATION_WINDOW,
+) -> bool:
+    """Whether the same deal was emailed during the deduplication window."""
+    cutoff = _as_utc(now) - window
+    for entry in (state or {}).get("recent_deal_alerts", []):
+        if not isinstance(entry, dict) or entry.get("deal_key") != key:
+            continue
+        alerted_at = _alerted_at(entry)
+        if alerted_at is not None and alerted_at >= cutoff:
+            return True
+    return False
+
+
+def record_deal_alert(
+    state: dict,
+    *,
+    message_id: str,
+    key: str,
+    alerted_at: dt.datetime,
+    window: dt.timedelta = DEAL_ALERT_DEDUPLICATION_WINDOW,
+) -> None:
+    """Record an alert and retain only history relevant to duplicate checks."""
+    record_alerted_message(state, message_id)
+    recorded_at = _as_utc(alerted_at)
+    cutoff = recorded_at - window
+    history = []
+    for entry in state.get("recent_deal_alerts", []):
+        existing_at = _alerted_at(entry)
+        if existing_at is not None and existing_at >= cutoff:
+            history.append(entry)
+    history.append({"deal_key": key, "alerted_at": recorded_at.isoformat()})
+    state["recent_deal_alerts"] = history
 
 
 def is_marketing_message(message: dict, text: str) -> bool:
