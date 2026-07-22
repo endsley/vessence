@@ -1,22 +1,18 @@
-# Memory Verification Report — 2026-07-21 01:35
+# Memory Verification Report — 2026-07-22 01:26
 
-Checked: 40 | Stale: 18 | Fixed: 18 | Deleted: 0 | Errors: 0 | Skipped recent: 138
+Checked: 40 | Stale: 14 | Fixed: 14 | Deleted: 0 | Errors: 0 | Skipped recent: 158
 
-- **UPDATED** `acccce19-73d` — Confirmed in migrations 0032/0033/0034/0048, app/db/models.py, app/problems/base.py, and app/services/prompts.py; the original DB-only/current-runtime wording is stale.
-- **UPDATED** `ce382ed9-746` — Actual code confirms the architecture; only the UI template path was stale: _modules_pane is absent and _modules_panel.html is current.
-- **UPDATED** `fd478e39-b62` — Verified against agent_skills/google_cloud_receipts.py and agent_skills/google_cloud_receipt_utils.py; Codex was right that the existing memory is accurate but truncated/incomplete.
-- **UPDATED** `136c24ff-98c` — Code confirms the workflow and Codex's stale verdict: the stored memory is truncated at the default output detail, and validate_receipt_request requires either count or at least one date bound.
-- **UPDATED** `da8286ca-8ab` — Confirmed from jane/config.py, /home/chieh/ambient/vessence-data/.env, memory/v1/janitor_memory.py, jane/automation_runner.py, and agent_skills/claude_cli_llm.py. The stale part was JANE_BRAIN=codex; live .env now has JANE_BRAIN=openai.
-- **UPDATED** `ef1bd7ff-8bd` — Confirmed from actual q1.py–q10.py: Q1–Q9 are two-entry vectors, but q10.py returns answer_type="number" with scalar solution=derivative.
-- **UPDATED** `fa8de932-f4d` — Confirmed from q6.py through q10.py: Q6–Q9 still match, but Q10 is now a chain-rule-along-a-parameterized-path numeric derivative, not constrained maximization.
-- **UPDATED** `dca272e8-326` — Confirmed from actual code: attempts.py imports REGISTRY only, not problem_sort_key; the old memory was truncated and partially wrong.
-- **UPDATED** `e3bd58d1-099` — Verified the actual q1.py-q16.py code; Codex was right and the existing memory is truncated after CommonProbDi.
-- **UPDATED** `314ba95a-836` — Verified current code: deep-link logic is in app/static/admin-home.js with consumedHash/hashchange handling; app/templates/admin/home.html only loads that script, and module cards still use id="module-{{ m.id }}".
-- **UPDATED** `8f16fbf6-501` — Confirmed run_dev_local.sh and the systemd unit match the memory except the enabled symlink path; the actual symlink includes the -dev.service suffix.
-- **UPDATED** `310bdda4-225` — Codex was right: README and cloud scaling scripts match the infrastructure claims, and app/routers/student.py plus app/services/student_attempt_flow.py implement owned unfinished assignment-attempt deletion while rejecting finished attempts.
-- **UPDATED** `migrated-lon` — Codex was broadly right after code inspection; I corrected route attribution and public asset wiring details.
-- **UPDATED** `migrated-lon` — Codex was right: `/admin/jane/*` is gone, but current watchdog/self-healing code still invokes Codex/Claude in constrained failure paths, while Gemma receipt enrichment uses local Ollama.
-- **UPDATED** `migrated-lon` — Confirmed in actual code: load_secret_key is in backend/app_config.py; backend/main.py has no WL_SECRET_KEY/load_secret_key refs; .auth/wl_secret_key and .auth/secrets.env exist. Update needed because the old memory was truncated.
-- **UPDATED** `241a6b12-78d` — Confirmed by fetching origin/master and grepping templates/index3.html; production and App Engine routing also match Codex's verdict.
-- **UPDATED** `52643b31-fd0` — Verified the repo, README/config constants, Alembic files plus `alembic heads`, and app/routers/health.py; Codex was right that the original memory was only partially wrong because it was truncated.
-- **UPDATED** `63af9718-f11` — Read the actual .env and code paths; Codex was right on the visible claims, but the stored memory is truncated after “litera”, so it should be replaced with the complete corrected version.
+- **UPDATED** `0cbb3096-6c5` — Repo search found no Northeastern classroom-routing code; only unrelated Northeastern Concur and education audit references. Official pages confirm the old Registrar URL is truncated/404, the Classroom Management URL is current, Class Section Updates live under Class Information, and classroom technology/Dashboard support routes through ITS/Tech Service Portal and Academic Technologies.
+- **UPDATED** `8977a372-aa4` — Confirmed in code: main.py delegates to instant_command_response, and instant_commands.py contains the cron phrase matching and raw code-block formatting.
+- **UPDATED** `c73143f4-e15` — Confirmed from actual code: Codex was right that the old memory omitted current package, product, invoice-audit, DASYS payment/claim, patient-note, and pending-insurance processing.
+- **UPDATED** `53d9824a-2f1` — Verified the script, configs/CRON_JOBS.md, and live crontab. Codex was right: the only stale part was the cadence, which is daily at 2 PM ET, not every two hours.
+- **UPDATED** `7c59ae31-e33` — Confirmed in code and active crontab: agent_skills/ra_research_cron.py regenerates the plan, but crontab has 0 14 * * *, not every 2 hours.
+- **UPDATED** `86f8e8fb-ca6` — Actual code confirms the scheduler, project roots, MAX_ITERATIONS=5, and self-disable logic; persisted state and crontab confirm the runs, but the original memory cites logs that are absent and ends mid-phrase.
+- **UPDATED** `e0f336e1-0db` — Confirmed against crontab, agent_skills/nutricost_deal_monitor.py, gmail_cleanup_decisions.py, and gmail_cleanup_queries.py; Codex was right that the medical/financial exclusion is not implemented and old-unread cleanup is broad.
+- **UPDATED** `46d29735-929` — Confirmed in actual code: the wrapper now sets max-delete=1000, stale-days=21, and passes --include-protected; the Python code disables keep_titles when that flag is present. Cron still runs at 5:10 AM and commit 0a57ed4 is on origin/master.
+- **UPDATED** `ce89971f-01c` — Checked the script, Gradle config, main.py, and release_downloads.py. Codex was right that main.py no longer has literal Android fallback constants; release handling moved to release_downloads.py.
+- **UPDATED** `bd704a5d-98b` — models.py, v3 classifier, warmup/heartbeat code, $VESSENCE_DATA_HOME/.env, and the live jane_web process env confirm Codex’s partial verdict; the old memory was truncated/stale about runtime env.
+- **UPDATED** `71f0adca-e72` — Confirmed in code and token metadata; original had an incomplete unverifiable tail fragment and used plural scopes though the token key is singular scope.
+- **UPDATED** `4363c5ec-28f` — Code confirms the RA cron, app-default delivery, announcement behavior, endpoint, polling worker, and ReportReaderActivity integration; only the Android version was stale: version.json is 0.2.102, code 333.
+- **UPDATED** `f1754f9f-0b7` — Verified the script defaults and should_send_report logic, active crontab line, system timezone, and configs/CRON_JOBS.md; Codex was right that the memory was partially stale.
+- **UPDATED** `47709484-70b` — Current code confirms the helper modules/import aliases; git history shows the main helper commit on 2026-07-02 and invoice grouping on 2026-07-04. The test/review details are corroborated by REFACTORING.md, not by code.
