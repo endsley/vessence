@@ -3942,6 +3942,11 @@ async def summarize_article_now(request: Request, _=Depends(require_auth)):
     if not url or not is_http_url(url):
         raise HTTPException(status_code=400, detail="A valid URL starting with http(s):// is required")
 
+    # Keep the original shared URL in the server log.  Unlike queued articles,
+    # this synchronous path does not persist an article record, so request logs
+    # are the only way to identify a page that later proves unextractable.
+    _logger.info("Immediate shared-article summary requested url=%s", url)
+
     if _BRIEFING_FUNCTIONS_DIR not in sys.path:
         sys.path.insert(0, _BRIEFING_FUNCTIONS_DIR)
 
@@ -3955,13 +3960,31 @@ async def summarize_article_now(request: Request, _=Depends(require_auth)):
             None, lambda: extract_article(url)
         )
     except Exception as e:
+        _logger.exception("Immediate shared-article extraction failed url=%s", url)
         raise HTTPException(status_code=502, detail=f"Failed to fetch article: {e}")
 
     title = extracted.get("title") or ""
     text = extracted.get("text") or ""
 
     if not text and not title:
+        _logger.warning(
+            "Immediate shared-article extraction returned no content "
+            "url=%s blocked=%s source_type=%s",
+            url,
+            bool(extracted.get("blocked")),
+            extracted.get("source_type") or "unknown",
+        )
         raise HTTPException(status_code=422, detail="Could not extract article content from that URL")
+
+    _logger.info(
+        "Immediate shared-article extraction succeeded url=%s blocked=%s "
+        "source_type=%s title_chars=%d text_chars=%d",
+        url,
+        bool(extracted.get("blocked")),
+        extracted.get("source_type") or "unknown",
+        len(title),
+        len(text),
+    )
 
     if extracted.get("source_type") == "x_post":
         summary = text

@@ -1,17 +1,17 @@
 # Most Recent Nightly Self-Improvement
 
-- Run started: 2026-07-20 23:30:01
-- Report generated: 2026-07-21 01:35:27
-- Total runtime: 7524s
+- Run started: 2026-07-21 23:30:01
+- Report generated: 2026-07-22 01:26:32
+- Total runtime: 6990s
 - Jobs: 8 total, 6 ok, 2 timeout, 0 failed
 - Stable latest report path: `/home/chieh/ambient/vessence/configs/self_improvement_latest.md`
-- Archived copy: `/home/chieh/ambient/vessence-data/reports/self_improvement/self_improvement_20260720_233001.md`
+- Archived copy: `/home/chieh/ambient/vessence-data/reports/self_improvement/self_improvement_20260721_233001.md`
 
 ## TL;DR
 
 - 1. ✓ Auto-Commit WIP (pre) (0.0m)
   - Fixes:
-    - 2026-07-20 23:30:01,715 INFO Committed 10 file(s).
+    - 2026-07-21 23:30:01,877 INFO Committed 4 file(s).
 - 2. ✓ Code Auditor (0.0m)
   - Problems: none detected
   - Fixes: none applied
@@ -31,19 +31,19 @@
     - CRON_JOBS.md claims generate_code_map.py is active but no matching cron entry exists
 - 6. ✓ Transcript Quality Review (0.4m)
   - Fixes:
-    - 2026-07-21 00:05:26,664 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (0 issues)
-    - 2026-07-21 00:05:26,665 INFO self_improve_log: recorded [info] Transcript Review — I reviewed yesterday's conversations and nothing looked off — all turns ha...
-- 7. ✓ Memory Janitor (89.9m)
+    - 2026-07-22 00:05:27,839 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (0 issues)
+    - 2026-07-22 00:05:27,840 INFO self_improve_log: recorded [info] Transcript Review — I reviewed yesterday's conversations and nothing looked off — all turns ha...
+- 7. ✓ Memory Janitor (81.0m)
   - Problems:
-    - [0;93m2026-07-21 00:54:56.834856849 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-07-21 04:54:56 WARNING] ModelImporter.cpp:739: Make...
-    - [0;93m2026-07-21 00:54:56.834870330 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-07-21 04:54:56 WARNING] ModelImporter.cpp:739: Make...
-    - [0;93m2026-07-21 01:10:07.886571374 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-07-21 05:10:07 WARNING] ModelImporter.cpp:739: Make...
+    - [0;93m2026-07-22 00:52:32.862130938 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-07-22 04:52:32 WARNING] ModelImporter.cpp:739: Make...
+    - [0;93m2026-07-22 00:52:32.862181623 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-07-22 04:52:32 WARNING] ModelImporter.cpp:739: Make...
+    - [0;93m2026-07-22 00:52:32.862196571 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-07-22 04:52:32 WARNING] ModelImporter.cpp:739: Make...
   - Fixes:
-    - INFO:agent_skills.self_improve_log:self_improve_log: recorded [medium] Memory Verification — Found 18 stale memories out of 40 checked. Stale memories make J...
+    - INFO:agent_skills.self_improve_log:self_improve_log: recorded [medium] Memory Verification — Found 14 stale memories out of 40 checked. Stale memories make J...
 - 8. ✓ Auto-Commit + Push (post) (0.0m)
   - Fixes:
-    - 2026-07-21 01:35:24,130 INFO Committed 3 file(s).
-    - 2026-07-21 01:35:26,077 INFO Pushed successfully.
+    - 2026-07-22 01:26:30,153 INFO Committed 3 file(s).
+    - 2026-07-22 01:26:32,110 INFO Pushed successfully.
 
 ## Executive Summary
 
@@ -65,7 +65,7 @@
 
 ### Improvements It Made
 
-- 2026-07-20 23:30:01,715 INFO Committed 10 file(s).
+- 2026-07-21 23:30:01,877 INFO Committed 4 file(s).
 
 ### Evidence Files
 
@@ -175,7 +175,7 @@
 ## Stage 6: Transcript Quality Review
 
 - Status: `ok`
-- Duration: 24s (0.4 min)
+- Duration: 25s (0.4 min)
 
 ### What It Did
 
@@ -187,8 +187,8 @@
 
 ### Improvements It Made
 
-- 2026-07-21 00:05:26,664 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (0 issues)
-- 2026-07-21 00:05:26,665 INFO self_improve_log: recorded [info] Transcript Review — I reviewed yesterday's conversations and nothing looked off — all turns handled cleanly.
+- 2026-07-22 00:05:27,839 INFO Report written to /home/chieh/ambient/vessence/configs/transcript_review_report.md (0 issues)
+- 2026-07-22 00:05:27,840 INFO self_improve_log: recorded [info] Transcript Review — I reviewed yesterday's conversations and nothing looked off — all turns handled cleanly.
 
 ### Evidence Files
 
@@ -198,7 +198,7 @@
 ## Stage 7: Memory Janitor
 
 - Status: `ok`
-- Duration: 5396s (89.9 min)
+- Duration: 4861s (81.0 min)
 
 ### What It Did
 
@@ -206,15 +206,15 @@
 
 ### Problems It Found
 
-- [0;93m2026-07-21 00:54:56.834856849 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-07-21 04:54:56 WARNING] ModelImporter.cpp:739: Make sure input attention_mask has Int64 binding.[m
-- [0;93m2026-07-21 00:54:56.834870330 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-07-21 04:54:56 WARNING] ModelImporter.cpp:739: Make sure input token_type_ids has Int64 binding.[m
-- [0;93m2026-07-21 01:10:07.886571374 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-07-21 05:10:07 WARNING] ModelImporter.cpp:739: Make sure input input_ids has Int64 binding.[m
-- [0;93m2026-07-21 01:10:07.886656912 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-07-21 05:10:07 WARNING] ModelImporter.cpp:739: Make sure input attention_mask has Int64 binding.[m
-- [0;93m2026-07-21 01:10:07.886693624 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-07-21 05:10:07 WARNING] ModelImporter.cpp:739: Make sure input token_type_ids has Int64 binding.[m
+- [0;93m2026-07-22 00:52:32.862130938 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-07-22 04:52:32 WARNING] ModelImporter.cpp:739: Make sure input input_ids has Int64 binding.[m
+- [0;93m2026-07-22 00:52:32.862181623 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-07-22 04:52:32 WARNING] ModelImporter.cpp:739: Make sure input attention_mask has Int64 binding.[m
+- [0;93m2026-07-22 00:52:32.862196571 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-07-22 04:52:32 WARNING] ModelImporter.cpp:739: Make sure input token_type_ids has Int64 binding.[m
+- [0;93m2026-07-22 00:52:33.083863781 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-07-22 04:52:33 WARNING] ModelImporter.cpp:739: Make sure input input_ids has Int64 binding.[m
+- [0;93m2026-07-22 00:52:33.083900814 [W:onnxruntime:Default, tensorrt_execution_provider.h:92 log] [2026-07-22 04:52:33 WARNING] ModelImporter.cpp:739: Make sure input attention_mask has Int64 binding.[m
 
 ### Improvements It Made
 
-- INFO:agent_skills.self_improve_log:self_improve_log: recorded [medium] Memory Verification — Found 18 stale memories out of 40 checked. Stale memories make Jane give wrong answers about her own
+- INFO:agent_skills.self_improve_log:self_improve_log: recorded [medium] Memory Verification — Found 14 stale memories out of 40 checked. Stale memories make Jane give wrong answers about her own
 
 ### Evidence Files
 
@@ -235,8 +235,8 @@
 
 ### Improvements It Made
 
-- 2026-07-21 01:35:24,130 INFO Committed 3 file(s).
-- 2026-07-21 01:35:26,077 INFO Pushed successfully.
+- 2026-07-22 01:26:30,153 INFO Committed 3 file(s).
+- 2026-07-22 01:26:32,110 INFO Pushed successfully.
 
 ### Evidence Files
 

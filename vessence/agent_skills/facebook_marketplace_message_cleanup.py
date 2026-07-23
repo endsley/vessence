@@ -264,7 +264,13 @@ async def try_delete_from_open_chat(page, conversation: Conversation) -> bool:
     await page.wait_for_timeout(7_000)
 
     if await click_delete_menu_item(page):
-        return await confirm_delete(page)
+        if not await confirm_delete(page):
+            return False
+        # The fallback operates from the open-chat view, where the deleted
+        # thread is no longer a list row.  Return to Marketplace and verify
+        # that its exact URL has disappeared before another thread can run.
+        await click_marketplace_folder(page)
+        return await wait_for_conversation_removal(page, conversation)
 
     info = page.get_by_role(
         "button",
@@ -280,7 +286,10 @@ async def try_delete_from_open_chat(page, conversation: Conversation) -> bool:
     for panel_label in (r"^More options$", r"^Privacy (&|and) support$"):
         if await click_right_panel_button_text(page, panel_label):
             if await click_delete_menu_item(page, allow_bare_delete=False):
-                return await confirm_delete(page)
+                if not await confirm_delete(page):
+                    return False
+                await click_marketplace_folder(page)
+                return await wait_for_conversation_removal(page, conversation)
             await page.keyboard.press("Escape")
             await page.wait_for_timeout(400)
 
@@ -306,6 +315,17 @@ async def try_delete_from_visible_row(page, conversation: Conversation) -> bool:
         LOGGER.info("row not found for deletion: %s", conversation.title)
         return False
 
+    return await try_delete_current_visible_row(page, conversation)
+
+
+async def try_delete_current_visible_row(page, conversation: Conversation) -> bool:
+    """Delete a row that is already visible in the Marketplace list.
+
+    This is deliberately separate from ``try_delete_from_visible_row``.  A
+    delete-all pass always works from the top currently-visible row, avoiding
+    a full list reset and re-scroll between consecutive, verified deletions.
+    """
+
     link = page.locator(f'a[href="{conversation.href}"]').first
     try:
         await link.hover(timeout=5_000)
@@ -317,12 +337,15 @@ async def try_delete_from_visible_row(page, conversation: Conversation) -> bool:
     # selector: Marketplace titles can contain '/', which becomes an invalid
     # selector literal (for example, "13 1/4 by 13 1/4").  Match the aria
     # label directly instead.
-    menu_name = f"More options for {conversation.title}"
     menu_button = None
     buttons = page.locator('[role="button"]')
     for index in range(await buttons.count()):
         candidate = buttons.nth(index)
-        if (await candidate.get_attribute("aria-label")) == menu_name:
+        aria_label = (await candidate.get_attribute("aria-label")) or ""
+        prefix = "more options for "
+        if aria_label.casefold().startswith(prefix) and normalize_title(
+            aria_label[len(prefix):]
+        ) == normalize_title(conversation.title):
             menu_button = candidate
             break
     try:
@@ -360,6 +383,46 @@ async def delete_conversation(page, conversation: Conversation) -> bool:
     return await try_delete_from_open_chat(page, conversation)
 
 
+async def delete_all_conversations(page, args: argparse.Namespace, audit_path: Path) -> None:
+    """Delete every visible Marketplace thread, one confirmed removal at a time."""
+    await click_marketplace_folder(page)
+    await reset_marketplace_conversation_scroll(page)
+
+    deleted_count = 0
+    while deleted_count < args.max_delete:
+        rows = await page.evaluate(VISIBLE_CONVERSATIONS_JS)
+        if not rows:
+            LOGGER.info("Marketplace folder is empty after %d confirmed deletions", deleted_count)
+            return
+
+        conversation = conversation_from_row(rows[0])
+        if conversation is None:
+            LOGGER.error("Stopping cleanup: the first visible Marketplace row could not be identified")
+            return
+
+        decision = Decision("delete", "delete_all_requested")
+        LOGGER.info("deleting %s (%s)", conversation.title, decision.reason)
+        status = "deleted" if await try_delete_current_visible_row(page, conversation) else "delete_failed"
+        append_audit(
+            audit_path,
+            {
+                "ts": dt.datetime.now(dt.UTC).isoformat(),
+                "mode": "delete_all",
+                "status": status,
+                "decision": asdict(decision),
+                "conversation": asdict(conversation),
+            },
+        )
+        LOGGER.info("%s: %s (%s)", status, conversation.title, decision.reason)
+        if status != "deleted":
+            LOGGER.error("Stopping cleanup after unverified deletion: %s", conversation.title)
+            return
+        deleted_count += 1
+        await page.wait_for_timeout(400)
+
+    LOGGER.info("Reached the requested delete limit of %d", args.max_delete)
+
+
 def append_audit(path: Path, record: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as handle:
@@ -390,6 +453,12 @@ async def run_cleanup(args: argparse.Namespace) -> int:
         )
         page = context.pages[0] if context.pages else await context.new_page()
         try:
+            if args.delete_all:
+                if not effective_delete:
+                    raise ValueError("--delete-all requires --delete and cannot be used with --dry-run")
+                await delete_all_conversations(page, args, audit_path)
+                return 0
+
             conversations = await scan_conversations(page, max_scrolls=args.max_scrolls)
             LOGGER.info("scanned %d Marketplace conversations", len(conversations))
 
@@ -437,6 +506,15 @@ async def run_cleanup(args: argparse.Namespace) -> int:
                     },
                 )
                 LOGGER.info("%s: %s (%s)", status, conversation.title, decision.reason)
+                # Do not advance after an unverified destructive action.  A
+                # confirmation click is not proof that Facebook removed the
+                # chat, and the caller requested sequential verification.
+                if effective_delete and status != "deleted":
+                    LOGGER.error(
+                        "Stopping cleanup after unverified deletion: %s",
+                        conversation.title,
+                    )
+                    break
         finally:
             await context.close()
 
@@ -448,6 +526,11 @@ def build_parser() -> argparse.ArgumentParser:
         description="Clean sold/gone/stale Facebook Marketplace Messenger chats."
     )
     parser.add_argument("--delete", action="store_true", help="Actually delete matching chats.")
+    parser.add_argument(
+        "--delete-all",
+        action="store_true",
+        help="Delete every Marketplace thread, including current/protected conversations.",
+    )
     parser.add_argument("--dry-run", action="store_true", help="Scan and log without deleting.")
     parser.add_argument("--headed", action="store_true", help="Show Chromium for debugging.")
     parser.add_argument("--max-scrolls", type=int, default=80)
