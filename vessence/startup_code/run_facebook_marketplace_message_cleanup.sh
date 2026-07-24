@@ -2,7 +2,8 @@
 # Daily Facebook Marketplace Messenger cleanup.
 #
 # Uses Chieh's persistent Playwright Chromium profile and deletes only chats
-# classified as sold/gone or stale after the configured retention window.
+# classified as sold/gone or stale after the configured retention window. Each
+# row is confirmed gone before the next one is considered.
 set -euo pipefail
 
 if [[ "${FB_MARKETPLACE_MESSAGE_HEADFUL_DEBUG:-}" != "1" ]]; then
@@ -27,7 +28,7 @@ export PYTHONPATH="$VESSENCE_HOME:${PYTHONPATH:-}"
 echo "=== $(date -Iseconds) facebook marketplace message cleanup start ===" >>"$LOG"
 "$PYTHON" "$VESSENCE_HOME/agent_skills/facebook_marketplace_message_cleanup.py" \
   --delete \
-  --include-protected \
+  --sequential \
   --max-delete "$MAX_DELETE" \
   --stale-days "$STALE_DAYS" \
   >>"$LOG" 2>&1

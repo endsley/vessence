@@ -423,6 +423,69 @@ async def delete_all_conversations(page, args: argparse.Namespace, audit_path: P
     LOGGER.info("Reached the requested delete limit of %d", args.max_delete)
 
 
+async def delete_matching_conversations_sequentially(
+    page, args: argparse.Namespace, audit_path: Path, *, keep_titles: tuple[str, ...]
+) -> None:
+    """Delete stale/sold Marketplace chats directly from visible rows.
+
+    Do not build a full-list snapshot and then try to find each saved target:
+    each deletion changes Facebook's virtualized list.  Instead, evaluate the
+    currently visible rows, delete one matching row, verify its disappearance,
+    and only then continue.
+    """
+    await click_marketplace_folder(page)
+    await reset_marketplace_conversation_scroll(page)
+
+    seen_hrefs: set[str] = set()
+    idle_scrolls = 0
+    deleted_count = 0
+    while deleted_count < args.max_delete and idle_scrolls < 6:
+        rows = await page.evaluate(VISIBLE_CONVERSATIONS_JS)
+        visible = [
+            conversation_from_row(row)
+            for row in rows
+            if row.get("href") not in seen_hrefs
+        ]
+        visible = [conversation for conversation in visible if conversation is not None]
+        candidate = next(
+            (
+                (conversation, classify_conversation(
+                    conversation, keep_titles=keep_titles, stale_days=args.stale_days
+                ))
+                for conversation in visible
+                if classify_conversation(
+                    conversation, keep_titles=keep_titles, stale_days=args.stale_days
+                ).action == "delete"
+            ),
+            None,
+        )
+        if candidate is not None:
+            conversation, decision = candidate
+            LOGGER.info("deleting %s (%s)", conversation.title, decision.reason)
+            status = "deleted" if await try_delete_current_visible_row(page, conversation) else "delete_failed"
+            append_audit(audit_path, {
+                "ts": dt.datetime.now(dt.UTC).isoformat(), "mode": "sequential_delete",
+                "status": status, "decision": asdict(decision), "conversation": asdict(conversation),
+            })
+            LOGGER.info("%s: %s (%s)", status, conversation.title, decision.reason)
+            if status != "deleted":
+                LOGGER.error("Stopping cleanup after unverified deletion: %s", conversation.title)
+                return
+            deleted_count += 1
+            idle_scrolls = 0
+            await page.wait_for_timeout(400)
+            continue
+
+        new_count = len(visible)
+        seen_hrefs.update(conversation.href for conversation in visible)
+        idle_scrolls = idle_scrolls + 1 if new_count == 0 else 0
+        await page.mouse.move(170, 600)
+        await page.mouse.wheel(0, 760)
+        await page.wait_for_timeout(900)
+
+    LOGGER.info("Sequential cleanup finished after %d confirmed deletions", deleted_count)
+
+
 def append_audit(path: Path, record: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as handle:
@@ -457,6 +520,13 @@ async def run_cleanup(args: argparse.Namespace) -> int:
                 if not effective_delete:
                     raise ValueError("--delete-all requires --delete and cannot be used with --dry-run")
                 await delete_all_conversations(page, args, audit_path)
+                return 0
+            if args.sequential:
+                if not effective_delete:
+                    raise ValueError("--sequential requires --delete and cannot be used with --dry-run")
+                await delete_matching_conversations_sequentially(
+                    page, args, audit_path, keep_titles=keep_titles
+                )
                 return 0
 
             conversations = await scan_conversations(page, max_scrolls=args.max_scrolls)
@@ -530,6 +600,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--delete-all",
         action="store_true",
         help="Delete every Marketplace thread, including current/protected conversations.",
+    )
+    parser.add_argument(
+        "--sequential",
+        action="store_true",
+        help="Delete matching stale/sold chats from visible rows with per-row verification.",
     )
     parser.add_argument("--dry-run", action="store_true", help="Scan and log without deleting.")
     parser.add_argument("--headed", action="store_true", help="Show Chromium for debugging.")
