@@ -1,10 +1,10 @@
 # Job: Self-heal waterlily_nightly_reports: Waterlily nightly report freshness sentinel detected missing verified output
 Status: completed
 Priority: high
-Created: 2026-07-23
+Created: 2026-07-24
 Auto-generated: true
 Source: jane_self_healing
-Incident: /home/chieh/ambient/vessence-data/self_healing/incidents/20260724T033501.404061+0000_waterlily_nightly_reports_78876a298d77079793495c98.json
+Incident: /home/chieh/ambient/vessence-data/self_healing/incidents/20260724T074001.774961+0000_waterlily_nightly_reports_78876a298d77079793495c98.json
 
 ## Objective
 Jane should inspect the incident evidence, diagnose the root cause, and apply a
@@ -18,7 +18,7 @@ minimal, verified fix if the evidence supports one.
 - Request path: ``
 
 ## Steps
-1. Read the incident JSON at `/home/chieh/ambient/vessence-data/self_healing/incidents/20260724T033501.404061+0000_waterlily_nightly_reports_78876a298d77079793495c98.json` and the relevant service logs.
+1. Read the incident JSON at `/home/chieh/ambient/vessence-data/self_healing/incidents/20260724T074001.774961+0000_waterlily_nightly_reports_78876a298d77079793495c98.json` and the relevant service logs.
 2. Inspect source code before explaining the cause. Do not speculate from the stack trace alone.
 3. Reproduce with a focused test or command when feasible.
 4. If the root cause is clear, patch the smallest relevant surface.
